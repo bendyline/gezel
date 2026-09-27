@@ -414,6 +414,35 @@ const cases: ContractCase[] = [
     path: '/api/libreoffice-setup',
     invoke: (c) => c.officeIntegrations.removeLibreOfficeSetup(),
   },
+  {
+    name: 'retrieval preview',
+    method: 'POST',
+    path: '/api/projects/project%2Fone/retrieval/preview',
+    body: { surface: 'turn', query: 'refund policy' },
+    invoke: (c) =>
+      c.retrieval.previewRetrieval('project/one', { surface: 'turn', query: 'refund policy' }),
+  },
+  {
+    name: 'relevance model status',
+    method: 'GET',
+    path: '/api/relevance-model',
+    invoke: (c) => c.retrieval.relevanceModelStatus(),
+  },
+  {
+    name: 'relevance model install',
+    method: 'POST',
+    path: '/api/relevance-model/install',
+    body: { modelId: 'minilm' },
+    invoke: (c) => c.retrieval.installRelevanceModel('minilm'),
+  },
+  {
+    name: 'relevance score',
+    method: 'POST',
+    path: '/api/relevance-model/score',
+    body: { query: 'refunds', passages: ['Refunds within 30 days.'] },
+    invoke: (c) =>
+      c.retrieval.scoreRelevance({ query: 'refunds', passages: ['Refunds within 30 days.'] }),
+  },
 ];
 
 describe('GezelClient HTTP contract', () => {

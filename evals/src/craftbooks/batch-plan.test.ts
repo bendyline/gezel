@@ -4,8 +4,8 @@ import { buildCraftbookBatchPlan } from './batch-plan.ts';
 import { findBoilerplateEvalSpecs } from './boilerplate.ts';
 import { loadCraftbookTemplates } from './catalog.ts';
 import { auditDeliverableReachability } from './deliverable-reachability.ts';
-import { CRAFTBOOK_EVAL_SPECS } from './specs.ts';
 import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
+import { CRAFTBOOK_EVAL_SPECS } from './specs.ts';
 
 async function corpusPlan(
   mode?: 'workflow' | 'artifact-task',
@@ -64,7 +64,9 @@ describe('craftbook batch plan', () => {
     );
     expect(runnable.has('character-sheet')).toBe(true);
     expect(runnable.has('audio-ad-spot')).toBe(false);
-    expect(excluded.get('audio-ad-spot')?.some((reason) => reason.code === 'boilerplate')).toBe(true);
+    expect(excluded.get('audio-ad-spot')?.some((reason) => reason.code === 'boilerplate')).toBe(
+      true,
+    );
     expect(plan.scenarioCsv.split(',')).toEqual(plan.runnableNow.map((item) => item.scenarioId));
   });
 

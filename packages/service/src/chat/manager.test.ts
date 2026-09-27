@@ -5596,7 +5596,13 @@ describe('ChatManager — per-turn shared-library recall', () => {
     const calls: string[] = [];
     manager.setContentIndex(
       libraryIndex(
-        [{ path: 'policies/refunds.md', snippet: 'Refunds are issued within 30 days.', score: 0.82 }],
+        [
+          {
+            path: 'policies/refunds.md',
+            snippet: 'Refunds are issued within 30 days.',
+            score: 0.82,
+          },
+        ],
         calls,
       ),
     );

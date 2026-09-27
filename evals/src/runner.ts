@@ -1450,19 +1450,19 @@ async function prepareRelevanceModel(
   modelId: string,
   log: (line: string) => void,
 ): Promise<void> {
-  const started = await client.installRelevanceModel(modelId);
+  const started = await client.retrieval.installRelevanceModel(modelId);
   if (!started.installed && !started.started) {
     throw new Error(`relevance model ${modelId} did not start installing: ${started.reason ?? ''}`);
   }
   const deadline = Date.now() + 15 * 60_000;
   for (;;) {
-    const status = await client.relevanceModelStatus();
+    const status = await client.retrieval.relevanceModelStatus();
     if (status.models.find((model) => model.id === modelId)?.installed) break;
     if (status.error) throw new Error(`relevance model ${modelId} install failed: ${status.error}`);
     if (Date.now() > deadline) throw new Error(`relevance model ${modelId} install timed out`);
     await wait(2_000);
   }
-  const probe = await client.scoreRelevance({
+  const probe = await client.retrieval.scoreRelevance({
     modelId,
     query: 'warm up',
     passages: ['warm up'],

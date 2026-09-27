@@ -4587,6 +4587,7 @@ function MemorySection({
             <button
               key={mode}
               type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
               role="radio"
               aria-checked={retrievalMode === mode}
               className={`gz-key${retrievalMode === mode ? ' gz-key-active' : ''}`}

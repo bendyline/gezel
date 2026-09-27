@@ -128,10 +128,7 @@ function escapeRegExp(value: string): string {
 function documentNamesPathTemplate(document: string, path: string): boolean {
   const filename = basename(path);
   if (!document.includes(filename)) return false;
-  const candidatePattern = new RegExp(
-    `(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`,
-    'g',
-  );
+  const candidatePattern = new RegExp(`(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`, 'g');
   for (const match of document.matchAll(candidatePattern)) {
     const candidate = match[0];
     if (!candidate.includes('<')) continue;

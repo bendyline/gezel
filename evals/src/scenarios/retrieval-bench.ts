@@ -84,13 +84,13 @@ async function ensureRelevanceModel(
   modelId: string,
   log: (line: string) => void,
 ): Promise<void> {
-  const started = await client.installRelevanceModel(modelId);
+  const started = await client.retrieval.installRelevanceModel(modelId);
   if (!started.installed && !started.started) {
     throw new Error(`relevance model ${modelId} did not start installing: ${started.reason ?? ''}`);
   }
   const deadline = Date.now() + 15 * 60_000;
   while (Date.now() < deadline) {
-    const status = await client.relevanceModelStatus();
+    const status = await client.retrieval.relevanceModelStatus();
     if (status.models.find((model) => model.id === modelId)?.installed) return;
     if (status.error) throw new Error(`relevance model ${modelId} install failed: ${status.error}`);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -122,7 +122,7 @@ async function setup(ctx: EvalContext): Promise<void> {
   // Load the embedding (and relevance) models before measuring, so latency
   // is the warm path. A relevance model that fails its load-time self-check
   // shows here, not as an arm that quietly scored nothing.
-  const warmed = await client.previewRetrieval(project.id, {
+  const warmed = await client.retrieval.previewRetrieval(project.id, {
     surface: 'search',
     query: 'warm up',
     warm: true,

@@ -3,8 +3,8 @@ import {
   assertKnownFlags,
   parseArgs,
   resolveGeneralistFlag,
-  resolveRetrievalFlags,
   resolveRepairPolicyFlag,
+  resolveRetrievalFlags,
 } from './args.ts';
 
 function capture(run: () => void): { errors: string[]; exited: number | null } {

@@ -1,3 +1,5 @@
+import type { CraftbookBoilerplateFinding } from './boilerplate.ts';
+import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
 import type {
   CraftbookAuditResult,
   CraftbookEvalMode,
@@ -5,8 +7,6 @@ import type {
   CraftbookEvalValidationScope,
   CraftbookTemplateSummary,
 } from './types.ts';
-import type { CraftbookBoilerplateFinding } from './boilerplate.ts';
-import type { DeliverableReachabilityFinding } from './deliverable-reachability.ts';
 
 export type CraftbookHarnessKind =
   | 'generic-file-gate'

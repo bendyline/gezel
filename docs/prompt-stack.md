@@ -170,7 +170,12 @@ text protocol accepts a reply that is *only* a fenced envelope
 A fenced envelope inside prose is still an example, never a call. A reply that ended on
 its own with the call's last one or two `}`/`]` missing is closed and run; the same
 reply cut off by the token limit never is. The S20 FE computed a correct answer twice
-and lost it first to the fence rule, then to a missing final brace. Reasoning blocks
+and lost it first to the fence rule, then to a missing final brace. A reply that is exactly
+one Python-style call, `[read_file(path='brief.md')]`, also runs
+([tools/pythonic-call.ts](../packages/core/src/tools/pythonic-call.ts)): LFM2 models
+call tools that way whatever the prompt says, and none of LFM2.5's calls ran on a
+Galaxy S26+ until it was accepted. Keyword arguments and Python literals only;
+prose around the call, or a second call, is still not a call. Reasoning blocks
 (`<think>…</think>`) are stripped before the envelope is parsed, and are held off screen
 while they stream.
 

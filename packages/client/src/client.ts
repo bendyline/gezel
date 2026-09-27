@@ -321,8 +321,6 @@ import type {
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
   ReferencePreviewResponse,
-  RelevanceModelStatusResponse,
-  RelevanceScoreRequest,
   RemoveAiAppResponse,
   RenameGezelRequest,
   RenderImageRequest,
@@ -342,8 +340,6 @@ import type {
   RestoreReview,
   RestoreScanRequest,
   RetrievalPolicy,
-  RetrievalPreviewRequest,
-  RetrievalPreviewResponse,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -476,6 +472,7 @@ import type {
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
+import { RetrievalClient } from './retrieval.js';
 import {
   type ConsumeSseJsonOptions,
   SseResponseError,
@@ -2202,6 +2199,7 @@ export class GezelClient {
   private readonly fetchImpl: typeof fetch;
   readonly taskInputs: TaskInputsClient;
   readonly officeIntegrations: OfficeIntegrationsClient;
+  readonly retrieval: RetrievalClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2213,9 +2211,9 @@ export class GezelClient {
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
     this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
-    this.officeIntegrations = new OfficeIntegrationsClient(<T>(m: string, p: string, b?: unknown) =>
-      this.request<T>(m, p, b),
-    );
+    const json = <T>(m: string, p: string, b?: unknown) => this.request<T>(m, p, b);
+    this.officeIntegrations = new OfficeIntegrationsClient(json);
+    this.retrieval = new RetrievalClient(json);
   }
 
   private async request<T>(
@@ -6663,38 +6661,6 @@ export class GezelClient {
   /** Unified indexed search across project content, artifacts, memory, and shared documents. */
   toolSearch(id: string, body: ProjectSearchRequest): Promise<ProjectSearchResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search`, body);
-  }
-
-  /**
-   * Run a retrieval surface's real decision code without side effects and
-   * get back what it would keep, with one decision per candidate. First-party
-   * clients only (session tokens are refused).
-   */
-  previewRetrieval(id: string, body: RetrievalPreviewRequest): Promise<RetrievalPreviewResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/retrieval/preview`, body);
-  }
-
-  /** The relevance check: selected model, install state, and the catalog. */
-  relevanceModelStatus(): Promise<RelevanceModelStatusResponse> {
-    return this.request('GET', '/api/relevance-model');
-  }
-
-  /** Download a relevance model in the background; poll `relevanceModelStatus` for progress. */
-  installRelevanceModel(
-    modelId?: string,
-  ): Promise<{ started: boolean; installed?: boolean; reason?: string }> {
-    return this.request('POST', '/api/relevance-model/install', modelId ? { modelId } : {});
-  }
-
-  /** Raw relevance-model scores for (query, passage) pairs — the calibration path. */
-  scoreRelevance(body: RelevanceScoreRequest): Promise<{
-    modelId: string;
-    status: string;
-    ms: number;
-    scores: Array<number | null>;
-    relevances: Array<number | null>;
-  }> {
-    return this.request('POST', '/api/relevance-model/score', body);
   }
 
   toolSecurityScan(id: string, body: SecurityScanRequest = {}): Promise<SecurityScanResponse> {

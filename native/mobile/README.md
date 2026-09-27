@@ -59,11 +59,27 @@ required to build these libraries. The final application still needs ordinary
 Apple signing/provisioning.
 
 **Android:** `jniLibs/<abi>/` contains `libllama.so`, `libggml.so`,
-`libggml-base.so`, `libggml-cpu.so`, `libgezel-llama.so`, and the matching NDK's `libc++_shared.so`;
-public headers are in `include/`. The initial baseline is API 28, arm64-v8a, CPU.
+`libggml-base.so`, `libgezel-llama.so`, the matching NDK's `libc++_shared.so`, and
+the CPU backend. On arm64-v8a that backend is four libraries,
+`libggml-cpu-android_armv8.0_1.so`, `_armv8.2_1`, `_armv8.2_2` and `_armv8.6_1`,
+one per instruction-set level; x86_64 keeps a single `libggml-cpu.so`. Public
+headers are in `include/`. The initial baseline is API 28, CPU.
+
+At first use the bridge opens each arm64 CPU library by name, asks it for
+ggml's CPU score, and registers the highest; an ARMv8.0 phone gets the baseline
+and a newer one gets dot-product or i8mm code. ggml's SVE/SME variants are not
+shipped: on a Galaxy S26+ they scored highest and ran slowest (Gemma 4 E2B
+replied at 2.9 tok/s on armv9.2 against 41 on armv8.6), so a device that has
+them still gets the armv8.6 build. The app keeps its
+native libraries inside the APK, so this cannot be ggml's directory scan. A
+single ARMv8.0 build read prompts 6x slower on a Galaxy S20 FE and 8x slower on
+a Galaxy S26+ (2026-09-26). The JNI binding also uses one thread per
+performance core (cores within 70% of the fastest clock, 2 to 6) instead of the
+bridge default of 2.
+
 The mobile app must package every library and use the same C++ runtime for its
-JNI bridge. GPU backends, OpenMP, network dependencies, runtime backend loading,
-and host-specific instruction selection are disabled. The NDK and every packaged
+JNI bridge. GPU backends, OpenMP, network dependencies, and host-specific
+instruction selection are disabled. The NDK and every packaged
 ELF library are checked for 16 KB page compatibility. APK/AAB zip alignment and
 device startup remain application-level checks; these library checks do not
 establish that the eventual APK supports 16 KB devices.

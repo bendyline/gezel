@@ -124,7 +124,9 @@ async function main(): Promise<void> {
     const parsed = CraftbookDocSchema.parse(raw);
     const runtime = craftbookFromDoc(parsed, { now: RELEASED_AT });
     if (!runtime.ok) {
-      throw new Error(`${id}: repaired doc is invalid:\n${formatCraftbookDocErrors(runtime.errors)}`);
+      throw new Error(
+        `${id}: repaired doc is invalid:\n${formatCraftbookDocErrors(runtime.errors)}`,
+      );
     }
     const testPath = join(sourceDir, 'test.json');
     planned.push({

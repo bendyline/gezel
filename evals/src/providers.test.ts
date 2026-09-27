@@ -21,6 +21,7 @@ describe('CHAT_PROVIDERS allowlist', () => {
       [
         'anthropic',
         'anthropic-cli',
+        'apple-foundation-models',
         'codex-cli',
         'copilot',
         'ds4',

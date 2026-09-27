@@ -68,7 +68,7 @@ export async function driveRetrievalBench(
       for (let round = 0; round < opts.rounds; round++) {
         let response: RetrievalPreviewResponse;
         try {
-          response = await client.previewRetrieval(opts.projectId, {
+          response = await client.retrieval.previewRetrieval(opts.projectId, {
             surface,
             query: query.text,
             messageOrigin: query.messageOrigin,

@@ -29,7 +29,9 @@ interface HfSibling {
 }
 
 async function modelInfo(repo: string, revision: string) {
-  const res = await fetch(`https://huggingface.co/api/models/${repo}/revision/${revision}?blobs=true`);
+  const res = await fetch(
+    `https://huggingface.co/api/models/${repo}/revision/${revision}?blobs=true`,
+  );
   if (!res.ok) throw new Error(`${repo}@${revision}: HTTP ${res.status}`);
   return (await res.json()) as {
     sha: string;
@@ -56,9 +58,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const info = await modelInfo(repo, revision);
-  const license = (upstream ? (await modelInfo(upstream, 'main')).cardData?.license : info.cardData?.license) ?? '';
+  const license =
+    (upstream ? (await modelInfo(upstream, 'main')).cardData?.license : info.cardData?.license) ??
+    '';
   if (!LICENSE_ALLOWLIST.has(license.toLowerCase())) {
-    throw new Error(`license "${license || 'none'}" is not on the allowlist (${[...LICENSE_ALLOWLIST].join(', ')})`);
+    throw new Error(
+      `license "${license || 'none'}" is not on the allowlist (${[...LICENSE_ALLOWLIST].join(', ')})`,
+    );
   }
   const config = JSON.parse((await download(repo, revision, 'config.json')).toString('utf8')) as {
     model_type?: string;
@@ -81,7 +87,11 @@ async function main(): Promise<void> {
       files.push({ path, sha256: sibling.lfs.sha256, bytes: sibling.lfs.size });
     } else {
       const bytes = await download(repo, revision, path);
-      files.push({ path, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length });
+      files.push({
+        path,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        bytes: bytes.length,
+      });
     }
   }
   const entry = {

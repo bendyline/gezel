@@ -112,7 +112,7 @@ async function seedCatalog(ctx: EvalContext, documents: CatalogDocument[]): Prom
 
 /** Load the daemon's embedder so the launch and the first turn take the semantic path. */
 async function warmEmbeddings(ctx: EvalContext, projectId = 'default'): Promise<void> {
-  await ctx.client.previewRetrieval(projectId, {
+  await ctx.client.retrieval.previewRetrieval(projectId, {
     surface: 'search',
     query: 'warm up',
     warm: true,

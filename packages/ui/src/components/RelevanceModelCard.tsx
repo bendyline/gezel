@@ -16,7 +16,7 @@ export function RelevanceModelCard() {
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await api.relevanceModelStatus());
+      setStatus(await api.retrieval.relevanceModelStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -87,6 +87,7 @@ export function RelevanceModelCard() {
                 <button
                   key={model.id}
                   type="button"
+                  // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                   role="radio"
                   aria-checked={active}
                   className={`gz-key gz-key--stacked${active ? ' gz-key-active' : ''}`}

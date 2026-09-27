@@ -19,6 +19,14 @@
 #include <unistd.h>
 #include <vector>
 
+#ifdef GEZEL_CPU_VARIANTS
+#include <dlfcn.h>
+#include "ggml-backend.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+#endif
+
 using clock_type = std::chrono::steady_clock;
 constexpr uint64_t cancelled_bit = uint64_t{1} << 63;
 constexpr size_t max_prompt_bytes = 1024 * 1024;
@@ -114,6 +122,43 @@ int32_t stop_error(gezel_llama_engine & engine, gezel_llama_error * error) {
     return fail(error, status, status == GEZEL_LLAMA_CANCELLED ? "Request cancelled" : "Request timed out");
 }
 
+/**
+ * Android ships one ggml CPU library per instruction-set level and loads the
+ * best one this CPU supports. A single ARMv8.0 build left a phone's dot-product
+ * units idle: 11 tok/s prompt reading on a Galaxy S20 FE against 68 for the
+ * dot-product build, and 27 against 218 on a Galaxy S26+ (2026-09-26). The
+ * libraries stay inside the APK (extractNativeLibs=false), where ggml's own
+ * directory scan cannot see them, so each is opened by name through the app's
+ * linker namespace and asked for its score, as ggml_backend_load_best does.
+ */
+void load_cpu_variant() {
+#ifdef GEZEL_CPU_VARIANTS
+    // build-llama.py's ANDROID_CPU_VARIANTS: no SVE/SME, which scored highest
+    // and ran slowest on a Galaxy S26+.
+    static const char * const variants[] = {
+        "libggml-cpu-android_armv8.6_1.so", "libggml-cpu-android_armv8.2_2.so",
+        "libggml-cpu-android_armv8.2_1.so", "libggml-cpu-android_armv8.0_1.so",
+    };
+    const char * best = nullptr;
+    int best_score = 0;
+    for (const char * name : variants) {
+        void * handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+        if (!handle) continue;
+        const auto score = reinterpret_cast<int (*)()>(dlsym(handle, "ggml_backend_score"));
+        const int value = score ? score() : 0;
+        if (value > best_score) { best_score = value; best = name; }
+        dlclose(handle);
+    }
+    const bool loaded = best && ggml_backend_load(best);
+#ifdef __ANDROID__
+    __android_log_print(loaded ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "GezelLlama", "CPU backend %s (score %d)",
+                        loaded ? best : "unavailable", best_score);
+#else
+    (void) loaded;
+#endif
+#endif
+}
+
 int32_t load_impl(gezel_llama_engine & engine, const char * path,
                  const gezel_llama_load_options & options, gezel_llama_error * error) {
     engine.unload();
@@ -147,6 +192,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     metadata.reset();
     std::rewind(engine.model_file);
     if (engine.stopped()) return stop_error(engine, error);
+    if (ggml_backend_dev_count() == 0)
+        return fail(error, GEZEL_LLAMA_UNSUPPORTED, "No inference library in this app supports this device's processor");
     if (options.gpu_layers != 0 && !llama_supports_gpu_offload())
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "This library has no GPU backend; use gpu_layers=0");
 
@@ -379,7 +426,10 @@ gezel_llama_engine * gezel_llama_create(void) {
         // The global backend registry outlives individual engine handles. Freeing
         // it when one handle closes could invalidate another handle's inference.
         static std::once_flag initialized;
-        std::call_once(initialized, [] { llama_backend_init(); });
+        std::call_once(initialized, [] {
+            load_cpu_variant();
+            llama_backend_init();
+        });
         return new gezel_llama_engine;
     } catch (...) { return nullptr; }
 }
