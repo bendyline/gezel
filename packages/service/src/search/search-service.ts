@@ -9,7 +9,9 @@ import {
 
 export { MERGE_WEIGHTS, ftsRankRelevance, scoreResult };
 import type {
+  RelevanceModelOverride,
   RetrievalSource,
+  RetrievalTraceSurface,
   UnifiedSearchResult,
   UnifiedSearchResultKind,
 } from '@bendyline/gezel';
@@ -20,6 +22,15 @@ import type { GlobalIndex } from '../index-store/global-index.js';
 import { embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
+import {
+  type ActiveRelevance,
+  RELEVANCE_WINDOW,
+  type RelevanceStageProvider,
+  type RelevanceStageReport,
+  type RelevanceStageRequest,
+  applyRelevanceModel,
+  relevancePassage,
+} from './relevance-stage.js';
 
 /**
  * Cross-project unified search backing the titlebar search box.
@@ -197,6 +208,7 @@ export class SearchService {
 
   private extraCatalogs: ExtraSearchCatalogs = {};
   private knowledgeSearch: KnowledgeSearchProvider | null = null;
+  private relevance: RelevanceStageProvider | null = null;
 
   constructor(
     private readonly store: Store,
@@ -215,6 +227,33 @@ export class SearchService {
   /** Wire the knowledge-catalog arm (late-boot, like the extra catalogs). */
   setKnowledgeSearch(provider: KnowledgeSearchProvider | null): void {
     this.knowledgeSearch = provider;
+  }
+
+  /** Wire the relevance model (late-boot, like the knowledge arm). */
+  setRelevanceProvider(provider: RelevanceStageProvider | null): void {
+    this.relevance = provider;
+  }
+
+  /**
+   * The relevance model a surface would score with right now — the resolved
+   * setting, or a preview's override. Null when it is off or not installed.
+   */
+  async relevanceFor(
+    surface: RetrievalTraceSurface,
+    override?: RelevanceModelOverride,
+  ): Promise<ActiveRelevance | null> {
+    if (!this.relevance) return null;
+    return this.relevance.forSurface(surface, override).catch(() => null);
+  }
+
+  /** Loaded and answering — the only state in which a surface over-fetches for it. */
+  relevanceReady(active: ActiveRelevance): boolean {
+    return this.relevance?.scorer.status(active.model.id) === 'ready';
+  }
+
+  /** Load a surface's model now (a preview's `warm`). */
+  async warmRelevance(active: ActiveRelevance): Promise<boolean> {
+    return (await this.relevance?.scorer.warm(active.model)) ?? false;
   }
 
   /** Drop the cached catalog — called when projects/gezels/documents change. */
@@ -279,6 +318,8 @@ export class SearchService {
       pathPrefix?: string;
       /** Answer from the keyword arms rather than wait for a cold embedder. */
       skipColdEmbedder?: boolean;
+      /** Re-judge the fused order with the relevance model, when one is on. */
+      relevance?: RelevanceStageRequest;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -286,12 +327,20 @@ export class SearchService {
     sourcesIncomplete?: boolean;
     /** Per-arm timing/outcome telemetry from the fan-out (non-content). */
     arms?: RetrievalArmTiming[];
+    /** What the relevance model did. Internal — never serialized as is. */
+    relevance?: RelevanceStageReport;
   }> {
     const q = query.trim();
     if (!q || opts.projectIds.length === 0) return { results: [], truncated: false };
     const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
     const offset = opts.offset ?? 0;
     const fetchDepth = offset + maxResults;
+    const active =
+      opts.relevance === undefined
+        ? null
+        : opts.relevance.active !== undefined
+          ? opts.relevance.active
+          : await this.relevanceFor(opts.relevance.surface);
     const found = await this.contentFanOut(q, fetchDepth, {
       projectIds: new Set(opts.projectIds),
       ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
@@ -313,14 +362,100 @@ export class SearchService {
         })
       : found.results;
     // Merge one past the page boundary so "more exists" is a fact, not a guess.
-    const merged = this.merge(pool, fetchDepth + 1);
+    // The relevance stage re-ranks the whole pool, so it merges all of it.
+    let merged = this.merge(pool, active ? Math.max(fetchDepth + 1, pool.length) : fetchDepth + 1);
+    let report: RelevanceStageReport | undefined;
+    if (active && opts.relevance) {
+      const staged = await applyRelevanceModel({
+        results: merged,
+        query: opts.relevance.query?.trim() || q,
+        active,
+        scorer: this.relevance!.scorer,
+        mode: opts.relevance.mode,
+        window: opts.relevance.window ?? RELEVANCE_WINDOW[opts.relevance.surface],
+        passages: (window) => this.relevancePassages(window),
+        ...(opts.relevance.waitForLoad ? { waitForLoad: true } : {}),
+      });
+      merged = staged.results;
+      report = staged.report;
+      if (report.applied || report.status !== 'cold') {
+        found.arms.push({
+          arm: 'relevance-model',
+          ms: report.ms,
+          hits: report.scores.size,
+          timedOut: report.status === 'timeout' || report.status === 'partial',
+          failed: report.status === 'unavailable',
+        });
+      }
+    }
     const results = merged.slice(offset, fetchDepth);
     return {
       results,
       truncated: found.sourcesIncomplete || merged.length > fetchDepth,
       sourcesIncomplete: found.sourcesIncomplete,
       arms: found.arms,
+      ...(report ? { relevance: report } : {}),
     };
+  }
+
+  /**
+   * The text the relevance model judges each candidate on. A keyword hit's
+   * snippet is twelve tokens around the match, so indexed hits are judged on
+   * their whole chunk — read here, for the scored window only, rather than
+   * carried on every search result.
+   */
+  private async relevancePassages(window: UnifiedSearchResult[]): Promise<string[]> {
+    type Group = {
+      projectId: string;
+      corpus: 'workspace' | 'artifacts';
+      refs: Array<{ path: string; lineStart: number }>;
+    };
+    const groups = new Map<string, Group>();
+    const keys: Array<string | null> = [];
+    let libraryId: string | null | undefined;
+    for (const result of window) {
+      let projectId: string | undefined;
+      let corpus: Group['corpus'] = 'workspace';
+      if (result.path && result.line) {
+        if (result.kind === 'content' && result.projectId) {
+          if (result.retrievalSource === 'workspace') projectId = result.projectId;
+          else if (result.retrievalSource === 'artifacts') {
+            projectId = result.projectId;
+            corpus = 'artifacts';
+          }
+        } else if (result.kind === 'document' && result.retrievalSource === 'shared') {
+          if (libraryId === undefined) {
+            libraryId = await this.store.sharedProjectId().catch(() => null);
+          }
+          projectId = libraryId ?? undefined;
+        }
+      }
+      if (!projectId || !result.path || !result.line) {
+        keys.push(null);
+        continue;
+      }
+      const groupKey = `${projectId}|${corpus}`;
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = { projectId, corpus, refs: [] };
+        groups.set(groupKey, group);
+      }
+      group.refs.push({ path: result.path, lineStart: result.line });
+      keys.push(`${groupKey}|${result.path}:${result.line}`);
+    }
+    const chunks = new Map<string, string>();
+    await Promise.all(
+      [...groups.entries()].map(async ([groupKey, group]) => {
+        const texts = await this.contentIndex
+          .chunkTextsAt(group.projectId, group.corpus, group.refs)
+          .catch(() => new Map<string, string>());
+        for (const [ref, text] of texts) chunks.set(`${groupKey}|${ref}`, text);
+      }),
+    );
+    return window.map((result, i) => {
+      const key = keys[i];
+      return relevancePassage(result, key ? chunks.get(key) : undefined);
+    });
   }
 
   // ── catalog ────────────────────────────────────────────────────────────

@@ -7,6 +7,12 @@ builds collect the corresponding license and notice texts into the installed
 application's `resources/licenses/` directory; the generated manifest maps
 each production package to the exact text shipped for it.
 
+Links to files in this document are relative to the root of the
+[Gezel repository](https://github.com/bendyline/gezel). In the
+`@bendyline/gezel-service` npm package this file is `dist/NOTICE.md`, the
+font license texts are in `dist/licenses/fonts/`, and harper.js's license is
+in `dist/ui/harper/`.
+
 ---
 
 ## Runtime dependencies
@@ -19,6 +25,7 @@ CLI can be used instead. See **Downloaded on first boot or on demand** below.
 
 | Package | License | Homepage |
 |---|---|---|
+| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | MIT | anthropics/anthropic-sdk-typescript |
 | [@hono/node-server](https://github.com/honojs/node-server) | MIT | honojs/node-server |
 | [@modelcontextprotocol/sdk](https://modelcontextprotocol.io) | MIT | modelcontextprotocol.io |
 | [@napi-rs/keyring](https://github.com/napi-rs/node-keyring) | MIT | napi-rs/node-keyring |
@@ -32,17 +39,22 @@ CLI can be used instead. See **Downloaded on first boot or on demand** below.
 | [@radix-ui/react-tooltip](https://radix-ui.com/primitives) | MIT | radix-ui.com |
 | [@huggingface/transformers](https://github.com/huggingface/transformers.js) | Apache-2.0 | huggingface/transformers.js |
 | [@pdf-lib/upng](https://github.com/Hopding/upng) | MIT | Hopding/upng |
+| [@vscode/ripgrep](https://github.com/microsoft/vscode-ripgrep) | MIT; the `rg` binary it installs is MIT OR Unlicense | microsoft/vscode-ripgrep |
 | [commander](https://github.com/tj/commander.js) | MIT | tj/commander.js |
+| [harper.js](https://writewithharper.com) | Apache-2.0 (WASM spell/grammar engine, shipped in the web UI with its LICENSE) | Automattic/harper |
 | [hono](https://hono.dev) | MIT | hono.dev |
+| [imapflow](https://imapflow.com) | MIT | postalsys/imapflow |
 | [jpeg-js](https://github.com/jpeg-js/jpeg-js) | BSD-3-Clause | jpeg-js/jpeg-js |
 | [kokoro-js](https://github.com/hexgrad/kokoro) | Apache-2.0 | hexgrad/kokoro |
+| [mailparser](https://github.com/nodemailer/mailparser) | MIT | nodemailer/mailparser |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | MIT | microsoft/monaco-editor |
+| [nodemailer](https://nodemailer.com) | MIT-0 | nodemailer/nodemailer |
 | [onnxruntime-node](https://github.com/microsoft/onnxruntime) | MIT | microsoft/onnxruntime |
 | [openai](https://github.com/openai/openai-node) | Apache-2.0 | openai/openai-node |
 | [pino](https://getpino.io) | MIT | getpino.io |
 | [react](https://react.dev) | MIT | react.dev |
 | [react-dom](https://react.dev) | MIT | react.dev |
-| [vectra](https://github.com/Stevenic/vectra) | MIT | Stevenic/vectra |
+| [sqlite-vec](https://github.com/asg017/sqlite-vec) | MIT OR Apache-2.0 | asg017/sqlite-vec |
 | [yaml](https://github.com/eemeli/yaml) | ISC | eemeli/yaml |
 | [zod](https://zod.dev) | MIT | zod.dev |
 

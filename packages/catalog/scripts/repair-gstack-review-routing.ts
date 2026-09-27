@@ -26,6 +26,16 @@ interface ContainsCheck {
   pattern?: string;
 }
 
+interface InvestigateEvalSpec {
+  prompt?: unknown;
+  setup?: { files?: FixtureFile[] };
+  success: {
+    deliverables?: Array<{ path?: string; checks?: ContainsCheck[] }>;
+    taskNotes?: { checks?: ContainsCheck[] };
+    history?: Array<Record<string, unknown>>;
+  };
+}
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
   const checkout = requireGildeCheckout();
@@ -37,8 +47,8 @@ async function main(): Promise<void> {
     throw new Error(`expected gstack wave ${SOURCE_VERSION}, found ${String(wave.version)}`);
   }
 
-  const spec = JSON.parse(await readFile(evalPath, 'utf8')) as Record<string, any>;
-  const files = spec.setup?.files as FixtureFile[] | undefined;
+  const spec = JSON.parse(await readFile(evalPath, 'utf8')) as InvestigateEvalSpec;
+  const files = spec.setup?.files;
   const packageFile = files?.find((file) => file.path === 'package.json');
   if (!packageFile || !packageFile.content.includes('cart-total-fixture')) {
     throw new Error('investigate eval package.json fixture is missing or unexpected');
@@ -64,9 +74,9 @@ async function main(): Promise<void> {
   }
 
   const deliverable = spec.success?.deliverables?.find(
-    (item: Record<string, unknown>) => item.path === 'tasks/eval/reports/root-cause-investigation.md',
+    (item) => item.path === 'tasks/eval/reports/root-cause-investigation.md',
   );
-  const verification = (deliverable?.checks as ContainsCheck[] | undefined)?.find(
+  const verification = deliverable?.checks?.find(
     (check) => check.label === 'verification command and result',
   );
   if (!verification || verification.kind !== 'contains') {
@@ -76,8 +86,8 @@ async function main(): Promise<void> {
     '(?:npm\\s+(?:run\\s+)?test|node\\s+(?:--test\\s+)?tests/cart-total\\.test\\.mjs)[\\s\\S]*(?:pass|2\\s+tests?|exit(?:ed)?\\s+0)';
 
   const taskNoteCheck = spec.success?.taskNotes?.checks?.find(
-    (check: ContainsCheck) => check.label === 'terminal note records proof and report',
-  ) as ContainsCheck | undefined;
+    (check) => check.label === 'terminal note records proof and report',
+  );
   if (!taskNoteCheck || taskNoteCheck.kind !== 'contains') {
     throw new Error('investigate eval task-note proof check is missing or unexpected');
   }

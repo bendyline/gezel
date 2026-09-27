@@ -817,6 +817,23 @@ describe('consolidated MCP tools', () => {
     expect(result.structuredContent).toMatchObject({ count: 0, truncationReason: 'incomplete' });
   });
 
+  it('says weak matches were hidden rather than that nothing is indexed', async () => {
+    handler = () => ({
+      results: [],
+      truncated: false,
+      hiddenBelowRelevanceFloor: 3,
+      craftbooks: [],
+    });
+
+    const result = await client.callTool({ name: 'search', arguments: { query: 'quiche' } });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(text).toContain('No closely relevant results (3 weak matches hidden)');
+    expect(text).not.toContain('No indexed project knowledge matched');
+  });
+
   it('calls grep_files with the hardened search contract and renders grep-style context', async () => {
     let requestBody: Record<string, unknown> | undefined;
     handler = (url, method, body) => {

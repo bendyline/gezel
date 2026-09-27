@@ -3,6 +3,8 @@ import {
   type ChatSession,
   type GezelConfig,
   type GezelDetail,
+  type RelevanceModelOverride,
+  type RetrievalDecisionTrace,
   type RetrievalMode,
   type RetrievalPolicy,
   type RetrievalSource,
@@ -14,6 +16,7 @@ import {
   isInsideFolder,
   mainContentParamKey,
   parseTaskRef,
+  retrievalDocKey,
   taskDeclaredFolders,
 } from '@bendyline/gezel';
 import { looksBinaryText } from '../fs/binary-text.js';
@@ -24,6 +27,8 @@ import {
   queryTerms,
   textMatchesAnyTerm,
 } from '../index-store/query-terms.js';
+import { RELEVANCE_WINDOW, relevanceSummary } from './relevance-stage.js';
+import { RetrievalTraceBuilder } from './retrieval-trace.js';
 import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
 
 const MODE_BUDGET: Record<RetrievalMode, number> = {
@@ -76,10 +81,22 @@ export interface ResolvedRetrievalPolicy {
   mode: RetrievalMode;
   maxTokens: number;
   sources: readonly RetrievalSource[];
-  inheritedFrom: 'craftbook-step' | 'gezel' | 'install' | 'default' | 'legacy-off';
+  inheritedFrom: 'override' | 'craftbook-step' | 'gezel' | 'install' | 'default' | 'legacy-off';
 }
 
+/** The session fields retrieval reads: scope, owner, and task-step identity. */
+export type RetrievalSessionRef = Pick<
+  ChatSession,
+  'id' | 'projectId' | 'gezelId' | 'taskRef' | 'stepId'
+>;
+
 export interface ProjectRetrievalHit {
+  /** The search result id — joins the hit to its decision-trace row. */
+  id: string;
+  /** Stable per-document key (`retrievalDocKey`). */
+  docKey: string;
+  kind: UnifiedSearchResult['kind'];
+  arm?: string;
   source: RetrievalSource;
   projectId?: string;
   path?: string;
@@ -88,6 +105,8 @@ export interface ProjectRetrievalHit {
   score: number;
   /** Calibrated 0–1 within-corpus relevance, when the search layer provides it. */
   relevance?: number;
+  /** The relevance model's activated score, when it judged this hit. */
+  modelScore?: number;
   tier?: 'strong' | 'weak';
   excerpt: string;
   /** Knowledge provenance: the stable citation URI + catalog identity. */
@@ -115,6 +134,8 @@ export interface ProjectRetrievalResult {
  * migration is complete.
  */
 export function resolveRetrievalPolicy(args: {
+  /** A preview's explicit policy — outranks everything, never persisted. */
+  override?: RetrievalPolicy;
   step?: RetrievalPolicy;
   gezel: GezelDetail;
   config: GezelConfig;
@@ -122,7 +143,10 @@ export function resolveRetrievalPolicy(args: {
 }): ResolvedRetrievalPolicy {
   let policy: RetrievalPolicy;
   let inheritedFrom: ResolvedRetrievalPolicy['inheritedFrom'];
-  if (args.step) {
+  if (args.override) {
+    policy = args.override;
+    inheritedFrom = 'override';
+  } else if (args.step) {
     policy = args.step;
     inheritedFrom = 'craftbook-step';
   } else if (args.gezel.parsed.frontmatter.retrieval) {
@@ -150,6 +174,30 @@ export function resolveRetrievalPolicy(args: {
     sources: policy.sources ?? ALL_SOURCES,
     inheritedFrom,
   };
+}
+
+/**
+ * The policy a session's turns run under, resolved exactly as
+ * `retrieveProjectContext` resolves it — including the active craftbook
+ * step's own policy. For paths beside indexed context that must honor the
+ * same Off switch.
+ */
+export async function resolveSessionRetrievalPolicy(args: {
+  store: Store;
+  record: RetrievalSessionRef;
+  gezel: GezelDetail;
+  config: GezelConfig;
+  contextWindow?: number;
+  override?: RetrievalPolicy;
+}): Promise<ResolvedRetrievalPolicy> {
+  const taskContext = await resolveTaskContext(args.store, args.record);
+  return resolveRetrievalPolicy({
+    ...(args.override ? { override: args.override } : {}),
+    step: taskContext?.step.retrieval,
+    gezel: args.gezel,
+    config: args.config,
+    ...(args.contextWindow ? { contextWindow: args.contextWindow } : {}),
+  });
 }
 
 /**
@@ -213,10 +261,14 @@ function isGrounded(
   );
 }
 
+/** What per-turn retrieval needs from search. The relevance model is optional. */
+export type RetrievalSearch = Pick<SearchService, 'searchProject'> &
+  Partial<Pick<SearchService, 'relevanceFor' | 'relevanceReady'>>;
+
 export async function retrieveProjectContext(args: {
   store: Store;
-  search: SearchService;
-  record: ChatSession;
+  search: RetrievalSearch;
+  record: RetrievalSessionRef;
   gezel: GezelDetail;
   config: GezelConfig;
   userText: string;
@@ -226,6 +278,10 @@ export async function retrieveProjectContext(args: {
   projectIds?: readonly string[];
   /** The tools wired this turn; the footer names only these. Absent → it names none. */
   availableToolNames?: readonly string[];
+  /** Retrieval preview only: judge under this policy instead of the resolved one. */
+  policyOverride?: RetrievalPolicy;
+  /** Retrieval preview only: this relevance-model arm instead of the resolved setting. */
+  relevanceOverride?: RelevanceModelOverride;
   /**
    * Fired as soon as the scoped search returns — BEFORE the relevance floor
    * and hydration can turn the whole call into `null`. This is the telemetry
@@ -239,9 +295,15 @@ export async function retrieveProjectContext(args: {
     rawResults: number;
     arms?: import('./search-service.js').RetrievalArmTiming[];
   }) => void;
+  /**
+   * Fired once the search ran, whatever the outcome: one decision per
+   * candidate. Non-content, like the probe.
+   */
+  onDecisionTrace?: (trace: RetrievalDecisionTrace) => void;
 }): Promise<ProjectRetrievalResult | null> {
   const taskContext = await resolveTaskContext(args.store, args.record);
   const policy = resolveRetrievalPolicy({
+    ...(args.policyOverride ? { override: args.policyOverride } : {}),
     step: taskContext?.step.retrieval,
     gezel: args.gezel,
     config: args.config,
@@ -252,16 +314,24 @@ export async function retrieveProjectContext(args: {
   const query = retrievalQuery(args.userText, args.messageOrigin, taskContext);
   if (!query) return null;
   const queryHash = createHash('sha256').update(query).digest('hex').slice(0, 16);
+  const depth = MODE_RESULTS[policy.mode];
+  const relevance = (await args.search.relevanceFor?.('turn', args.relevanceOverride)) ?? null;
+  // A loaded model re-judges a wider pool; a cold one changes nothing, so
+  // the turn keeps today's depth and the model warms for the next turn.
+  const overFetch = relevance !== null && args.search.relevanceReady?.(relevance) === true;
   const found = await args.search.searchProject(query, {
     projectIds: args.projectIds ?? [args.record.projectId],
     gezelId: args.record.gezelId,
     includeShared: policy.sources.includes('shared'),
     sources: policy.sources,
-    maxResults: MODE_RESULTS[policy.mode],
+    maxResults: overFetch ? Math.min(RELEVANCE_WINDOW.turn, depth * 3) : depth,
     // This retrieval rides a user's turn. A cold embedder costs tens of
     // seconds of model load, so the keyword arms answer this turn and the
     // vector arm rejoins once the pipeline is warm.
     skipColdEmbedder: true,
+    ...(relevance
+      ? { relevance: { surface: 'turn' as const, mode: 'filter' as const, active: relevance } }
+      : {}),
   });
   args.onSearchProbe?.({
     query,
@@ -271,26 +341,104 @@ export async function retrieveProjectContext(args: {
     ...(found.arms ? { arms: found.arms } : {}),
   });
 
+  // A candidate is JUDGED when a calibrated relevance model scored it: the
+  // model alone keeps or drops it. Everything else — model off, cold, past
+  // its window, or uncalibrated (which may reorder, never drop) — goes
+  // through the rank-derived floor and grounding exactly as before.
+  const stage = found.relevance?.applied ? found.relevance : undefined;
+  const scores = stage?.scores ?? new Map<string, number>();
+  const judged = (result: UnifiedSearchResult) =>
+    stage?.calibrated === true && scores.has(result.id);
+  const fused = stage?.fused ?? found.results;
+  const fusedIndex = new Map(fused.map((result, index) => [result.id, index]));
+  const fusedById = new Map(fused.map((result) => [result.id, result]));
+
+  const trace = new RetrievalTraceBuilder('turn', queryHash);
+  trace.addAll(fused);
+  if (stage) {
+    trace.scored(scores);
+    for (const result of stage.hidden) trace.reject(result, 'relevance-model');
+  }
+  const emit = <T>(value: T): T => {
+    trace.rejectRemaining('budget');
+    args.onDecisionTrace?.(
+      trace.finish({
+        ...(found.sourcesIncomplete ? { sourcesIncomplete: true } : {}),
+        ...(found.relevance ? { relevanceModel: relevanceSummary(found.relevance) } : {}),
+      }),
+    );
+    return value;
+  };
+  const returned = new Set(found.results.map((result) => result.id));
+  for (const result of fused) if (!returned.has(result.id)) trace.reject(result, 'depth');
+  // Over-fetched candidates the model never scored stay out: the wider pool
+  // exists for the model to choose from, not to widen what the floor admits.
+  const inDepth = found.results.filter((result) => {
+    if (scores.has(result.id) || (fusedIndex.get(result.id) ?? 0) < depth) return true;
+    trace.reject(result, 'depth');
+    return false;
+  });
+
   const foreign =
     taskContext && args.record.taskRef
       ? await otherTasksFolders(args.store, args.record.projectId, args.record.taskRef)
       : [];
-  const diverse = diversify(found.results)
-    .filter(clearsInjectionFloor)
-    .filter((result) => !insideOtherTask(result, foreign, args.record.projectId))
-    .filter((result) => !onReferenceList(result, taskContext?.task.references));
-  if (diverse.length === 0) return null;
+  const diversified = diversify(inDepth);
+  const survivors = new Set(diversified.map((result) => result.id));
+  for (const result of inDepth) {
+    if (survivors.has(result.id)) continue;
+    trace.reject(result, result.retrievalSource ? 'duplicate-path' : 'source-policy');
+  }
+  const filtered = diversified.filter((result) => {
+    // An unjudged candidate meets the floor on its fused relevance — the
+    // model's raw, uncalibrated score is not on the floor's scale.
+    if (!judged(result) && !clearsInjectionFloor(fusedById.get(result.id) ?? result)) {
+      trace.reject(result, 'floor');
+      return false;
+    }
+    if (insideOtherTask(result, foreign, args.record.projectId)) {
+      trace.reject(result, 'other-task');
+      return false;
+    }
+    if (onReferenceList(result, taskContext?.task.references)) {
+      trace.reject(result, 'reference-list');
+      return false;
+    }
+    return true;
+  });
+  const diverse = filtered.slice(0, depth);
+  for (const result of filtered.slice(depth)) trace.reject(result, 'depth');
+  if (diverse.length === 0) return emit(null);
   const terms = queryTerms(query);
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
   const hits: ProjectRetrievalHit[] = [];
   let knowledgeCount = 0;
   for (const result of diverse) {
     const source = result.retrievalSource;
-    if (!source || !policy.sources.includes(source)) continue;
+    if (!source || !policy.sources.includes(source)) {
+      trace.reject(result, 'source-policy');
+      continue;
+    }
+    const modelScore = scores.get(result.id);
+    const identity = {
+      id: result.id,
+      docKey: retrievalDocKey(result),
+      kind: result.kind,
+      ...(result.arm ? { arm: result.arm } : {}),
+      ...(modelScore !== undefined ? { modelScore } : {}),
+    };
     if (source === 'knowledge') {
-      if (!result.uri || knowledgeCount >= KNOWLEDGE_MAX_CHUNKS[policy.mode]) continue;
+      if (!result.uri) {
+        trace.reject(result, 'source-policy');
+        continue;
+      }
+      if (knowledgeCount >= KNOWLEDGE_MAX_CHUNKS[policy.mode]) {
+        trace.reject(result, 'knowledge-cap');
+        continue;
+      }
       knowledgeCount++;
       hits.push({
+        ...identity,
         source,
         score: result.score,
         ...(result.relevance !== undefined ? { relevance: result.relevance } : {}),
@@ -309,9 +457,16 @@ export async function retrieveProjectContext(args: {
       policy.mode === 'lean'
         ? tidy(result.snippet ?? result.subtitle ?? result.title, maxExcerptChars)
         : await hydrateExcerpt(args.store, args.record.projectId, result, maxExcerptChars);
-    if (!excerpt) continue;
-    if (!isGrounded(result, excerpt, terms)) continue;
+    if (!excerpt) {
+      trace.reject(result, 'no-excerpt');
+      continue;
+    }
+    if (!judged(result) && !isGrounded(result, excerpt, terms)) {
+      trace.reject(result, 'grounding');
+      continue;
+    }
     hits.push({
+      ...identity,
       source,
       ...(result.projectId ? { projectId: result.projectId } : {}),
       ...(result.path ? { path: result.path } : {}),
@@ -323,7 +478,7 @@ export async function retrieveProjectContext(args: {
       excerpt,
     });
   }
-  if (hits.length === 0) return null;
+  if (hits.length === 0) return emit(null);
 
   const rendered = renderWithinBudget(
     hits,
@@ -331,8 +486,9 @@ export async function retrieveProjectContext(args: {
     args.record.projectId,
     retrievalFooter(new Set(args.availableToolNames ?? [])),
   );
-  if (!rendered.prompt) return null;
-  return {
+  if (!rendered.prompt) return emit(null);
+  for (const hit of rendered.hits) trace.keep(hit);
+  return emit({
     query,
     queryHash,
     policy,
@@ -341,7 +497,7 @@ export async function retrieveProjectContext(args: {
     estimatedTokens: estimateTokens(rendered.prompt),
     hits: rendered.hits,
     truncated: found.truncated || rendered.hits.length < hits.length,
-  };
+  });
 }
 
 /**
@@ -403,7 +559,7 @@ function insideOtherTask(
   );
 }
 
-async function resolveTaskContext(store: Store, record: ChatSession) {
+async function resolveTaskContext(store: Store, record: RetrievalSessionRef) {
   if (!record.taskRef || !record.stepId) return null;
   const parsed = parseTaskRef(record.taskRef);
   if (!parsed) return null;

@@ -61,6 +61,8 @@ export * from './render.js';
 export * from './image.js';
 export * from './recognition.js';
 export * from './retrieval.js';
+export * from './retrieval-trace.js';
+export * from './relevance-model.js';
 export * from './video.js';
 export * from './audio.js';
 export * from './script-input.js';

@@ -1,5 +1,6 @@
 #include "gezel_llama.h"
 #include "utf8_stream.h"
+#include "chat_formats.h"
 #include "llama.h"
 #include "gguf.h"
 
@@ -18,6 +19,14 @@
 #include <unistd.h>
 #include <vector>
 
+#ifdef GEZEL_CPU_VARIANTS
+#include <dlfcn.h>
+#include "ggml-backend.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+#endif
+
 using clock_type = std::chrono::steady_clock;
 constexpr uint64_t cancelled_bit = uint64_t{1} << 63;
 constexpr size_t max_prompt_bytes = 1024 * 1024;
@@ -33,6 +42,24 @@ struct gezel_llama_engine {
     uint32_t batch_tokens = 0;
     uint32_t context_tokens = 0;
     std::string chat_template;
+    bool gemma4_turns = false;
+    // Tokens held in the context's memory, in position order. Only a request
+    // that finished cleanly leaves this set; everything else starts empty.
+    std::vector<llama_token> cached;
+    // Plain attention memory can drop a suffix and keep the rest exactly.
+    // Recurrent and hybrid states (Qwen 3.5, LFM2, Granite 4) cannot: their
+    // rollback snapshots serve speculative decoding, and reusing them changed
+    // greedy output (2026-09-26). A sliding window (Gemma) has already evicted
+    // the positions a longer prompt's prefix needs. Both resume from a
+    // checkpoint instead.
+    bool reusable_memory = false;
+    // For those models, a copy of the state attention memory cannot rebuild,
+    // taken one token before the end of the last prompt, and the tokens it
+    // covers. Every model a 6 GB phone can hold is hybrid or windowed, so
+    // without this each tool step re-reads the whole prompt. Qwen 3.5 2B's is 19 MiB at any
+    // prompt length; its turn 2 fell from 10.9 s to 0.6 s with identical output.
+    std::vector<uint8_t> checkpoint;
+    std::vector<llama_token> checkpoint_tokens;
 
     void unload() {
         if (context) llama_free(context);
@@ -42,6 +69,9 @@ struct gezel_llama_engine {
         if (model_file) std::fclose(model_file);
         model_file = nullptr;
         chat_template.clear();
+        cached.clear();
+        checkpoint.clear();
+        checkpoint_tokens.clear();
     }
     ~gezel_llama_engine() { unload(); }
     int32_t stopped() const {
@@ -92,6 +122,43 @@ int32_t stop_error(gezel_llama_engine & engine, gezel_llama_error * error) {
     return fail(error, status, status == GEZEL_LLAMA_CANCELLED ? "Request cancelled" : "Request timed out");
 }
 
+/**
+ * Android ships one ggml CPU library per instruction-set level and loads the
+ * best one this CPU supports. A single ARMv8.0 build left a phone's dot-product
+ * units idle: 11 tok/s prompt reading on a Galaxy S20 FE against 68 for the
+ * dot-product build, and 27 against 218 on a Galaxy S26+ (2026-09-26). The
+ * libraries stay inside the APK (extractNativeLibs=false), where ggml's own
+ * directory scan cannot see them, so each is opened by name through the app's
+ * linker namespace and asked for its score, as ggml_backend_load_best does.
+ */
+void load_cpu_variant() {
+#ifdef GEZEL_CPU_VARIANTS
+    // build-llama.py's ANDROID_CPU_VARIANTS: no SVE/SME, which scored highest
+    // and ran slowest on a Galaxy S26+.
+    static const char * const variants[] = {
+        "libggml-cpu-android_armv8.6_1.so", "libggml-cpu-android_armv8.2_2.so",
+        "libggml-cpu-android_armv8.2_1.so", "libggml-cpu-android_armv8.0_1.so",
+    };
+    const char * best = nullptr;
+    int best_score = 0;
+    for (const char * name : variants) {
+        void * handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+        if (!handle) continue;
+        const auto score = reinterpret_cast<int (*)()>(dlsym(handle, "ggml_backend_score"));
+        const int value = score ? score() : 0;
+        if (value > best_score) { best_score = value; best = name; }
+        dlclose(handle);
+    }
+    const bool loaded = best && ggml_backend_load(best);
+#ifdef __ANDROID__
+    __android_log_print(loaded ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "GezelLlama", "CPU backend %s (score %d)",
+                        loaded ? best : "unavailable", best_score);
+#else
+    (void) loaded;
+#endif
+#endif
+}
+
 int32_t load_impl(gezel_llama_engine & engine, const char * path,
                  const gezel_llama_load_options & options, gezel_llama_error * error) {
     engine.unload();
@@ -125,6 +192,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     metadata.reset();
     std::rewind(engine.model_file);
     if (engine.stopped()) return stop_error(engine, error);
+    if (ggml_backend_dev_count() == 0)
+        return fail(error, GEZEL_LLAMA_UNSUPPORTED, "No inference library in this app supports this device's processor");
     if (options.gpu_layers != 0 && !llama_supports_gpu_offload())
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "This library has no GPU backend; use gpu_layers=0");
 
@@ -144,7 +213,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     if (strnlen(chat, max_prompt_bytes + 1) > max_prompt_bytes)
         return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Model chat template exceeds the byte limit");
     const llama_chat_message probe[] = {{"user", "Hello"}};
-    if (llama_chat_apply_template(chat, probe, 1, true, nullptr, 0) < 0)
+    engine.gemma4_turns = gezel_mobile::chat_formats::is_gemma4(chat);
+    if (!engine.gemma4_turns && llama_chat_apply_template(chat, probe, 1, true, nullptr, 0) < 0)
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Model chat template requires an unsupported Jinja renderer");
     engine.chat_template = chat;
     auto context = llama_context_default_params();
@@ -163,6 +233,8 @@ int32_t load_impl(gezel_llama_engine & engine, const char * path,
     if (!llama_get_memory(engine.context))
         return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Model does not support the required decoder memory");
     engine.context_tokens = std::min(options.context_tokens, llama_n_ctx(engine.context));
+    engine.reusable_memory = !llama_model_is_recurrent(engine.model) && !llama_model_is_hybrid(engine.model) &&
+        llama_model_n_swa(engine.model) == 0;
     engine.batch_tokens = options.batch_tokens;
     return GEZEL_LLAMA_OK;
 }
@@ -192,13 +264,24 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
     }
     if (std::strcmp(messages[count - 1].role, "user") != 0)
         return fail(error, GEZEL_LLAMA_INVALID_ARGUMENT, "Transcript must end with a user message");
-    const auto size = llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, nullptr, 0);
-    if (size < 0) return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Chat template cannot format this transcript");
-    if (size == 0 || static_cast<size_t>(size) > max_prompt_bytes)
-        return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
-    std::vector<char> prompt(static_cast<size_t>(size) + 1);
-    if (llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, prompt.data(), prompt.size()) != size)
-        return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Chat template size changed unexpectedly");
+    std::vector<char> prompt;
+    int32_t size;
+    if (engine.gemma4_turns) {
+        const auto text = gezel_mobile::chat_formats::gemma4(chat);
+        if (text.size() > max_prompt_bytes)
+            return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
+        prompt.assign(text.begin(), text.end());
+        prompt.push_back('\0');
+        size = static_cast<int32_t>(text.size());
+    } else {
+        size = llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, nullptr, 0);
+        if (size < 0) return fail(error, GEZEL_LLAMA_UNSUPPORTED, "Chat template cannot format this transcript");
+        if (size == 0 || static_cast<size_t>(size) > max_prompt_bytes)
+            return fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Formatted prompt exceeds its byte limit");
+        prompt.resize(static_cast<size_t>(size) + 1);
+        if (llama_chat_apply_template(engine.chat_template.c_str(), chat.data(), chat.size(), true, prompt.data(), prompt.size()) != size)
+            return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Chat template size changed unexpectedly");
+    }
     const llama_vocab * vocab = llama_model_get_vocab(engine.model);
     const auto required = llama_tokenize(vocab, prompt.data(), size, nullptr, 0, true, true);
     if (required == INT32_MIN || required >= 0)
@@ -210,13 +293,61 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
     std::vector<llama_token> tokens(token_count);
     if (llama_tokenize(vocab, prompt.data(), size, tokens.data(), tokens.size(), true, true) != static_cast<int32_t>(tokens.size()))
         return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Could not tokenize the chat transcript");
-    llama_memory_clear(llama_get_memory(engine.context), true);
-    for (size_t offset = 0; offset < tokens.size(); offset += engine.batch_tokens) {
+    // Keep what the previous request left in memory where this transcript starts
+    // the same way. A phone re-reading a ~3,000-token system prompt on every tool
+    // step spent about 2.5 minutes per step (Galaxy S20 FE, 2026-09-26).
+    // Greedy output can still differ from a fresh prefill at a near-tie: the
+    // previous reply was decoded one token at a time, and single-token and
+    // batched CPU kernels round differently. On Llama 3.2 3B the reused state
+    // moved logits by at most 0.37, inside the 0.41 that separates two fresh
+    // prefills of different batch shapes.
+    auto memory = llama_get_memory(engine.context);
+    size_t reuse = 0;
+    while (reuse < engine.cached.size() && reuse < tokens.size() && engine.cached[reuse] == tokens[reuse]) ++reuse;
+    if (!engine.reusable_memory) {
+        // Attention memory still holds the checkpoint's positions only if the
+        // cached tokens agree that far; the checkpoint restores the rest.
+        const auto & covered = engine.checkpoint_tokens;
+        const bool resumable = !engine.checkpoint.empty() && covered.size() <= reuse && covered.size() < tokens.size() &&
+            std::equal(covered.begin(), covered.end(), tokens.begin());
+        reuse = resumable && llama_state_seq_set_data_ext(engine.context, engine.checkpoint.data(), engine.checkpoint.size(), 0,
+                                                          LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == engine.checkpoint.size()
+            ? covered.size() : 0;
+    }
+    // Decode at least one token so the sampler reads fresh logits.
+    reuse = std::min(reuse, tokens.size() - 1);
+    // A sliding window keeps only its last positions; if the window ending at
+    // `reuse` was already evicted, what remains cannot continue the prefix.
+    const auto window = llama_model_n_swa(engine.model);
+    if (window > 0 && reuse > 0 &&
+        llama_memory_seq_pos_min(memory, 0) > std::max<llama_pos>(0, static_cast<llama_pos>(reuse) - window))
+        reuse = 0;
+    if (reuse == 0 || !llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reuse), -1)) {
+        llama_memory_clear(memory, true);
+        reuse = 0;
+    }
+    engine.cached.assign(tokens.begin(), tokens.begin() + static_cast<std::ptrdiff_t>(reuse));
+    // A checkpoint needs a token left to decode after it, so the prompt's last
+    // token goes in its own batch.
+    const size_t checkpoint_at = engine.reusable_memory ? 0 : tokens.size() - 1;
+    for (size_t offset = reuse; offset < tokens.size();) {
         if (engine.stopped()) return stop_error(engine, error);
-        const auto n = static_cast<int32_t>(std::min<size_t>(engine.batch_tokens, tokens.size() - offset));
+        if (offset == checkpoint_at && checkpoint_at > 0) {
+            const auto bytes = llama_state_seq_get_size_ext(engine.context, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+            engine.checkpoint.resize(bytes);
+            const bool saved = bytes > 0 &&
+                llama_state_seq_get_data_ext(engine.context, engine.checkpoint.data(), bytes, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == bytes;
+            if (saved) engine.checkpoint_tokens.assign(tokens.begin(), tokens.begin() + static_cast<std::ptrdiff_t>(offset));
+            else { engine.checkpoint.clear(); engine.checkpoint_tokens.clear(); }
+        }
+        const auto end = offset < checkpoint_at ? checkpoint_at : tokens.size();
+        const auto n = static_cast<int32_t>(std::min<size_t>(engine.batch_tokens, end - offset));
         const auto status = llama_decode(engine.context, llama_batch_get_one(tokens.data() + offset, n));
         if (engine.stopped()) return stop_error(engine, error);
         if (status != 0) return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Prompt decoding failed");
+        engine.cached.insert(engine.cached.end(), tokens.begin() + static_cast<std::ptrdiff_t>(offset),
+                             tokens.begin() + static_cast<std::ptrdiff_t>(offset + static_cast<size_t>(n)));
+        offset += static_cast<size_t>(n);
     }
     auto params = llama_sampler_chain_default_params();
     params.no_perf = true;
@@ -274,6 +405,7 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
             const auto status = llama_decode(engine.context, llama_batch_get_one(&token, 1));
             if (engine.stopped()) return stop_error(engine, error);
             if (status != 0) return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Token decoding failed");
+            engine.cached.push_back(token);
         }
     }
     if (engine.stopped()) return stop_error(engine, error);
@@ -294,7 +426,10 @@ gezel_llama_engine * gezel_llama_create(void) {
         // The global backend registry outlives individual engine handles. Freeing
         // it when one handle closes could invalidate another handle's inference.
         static std::once_flag initialized;
-        std::call_once(initialized, [] { llama_backend_init(); });
+        std::call_once(initialized, [] {
+            load_cpu_variant();
+            llama_backend_init();
+        });
         return new gezel_llama_engine;
     } catch (...) { return nullptr; }
 }
@@ -360,12 +495,17 @@ int32_t gezel_llama_generate(gezel_llama_engine * engine, const gezel_llama_mess
     try { status = generate_impl(*engine, messages, count, config, callback, user_data, output, error); }
     catch (const std::bad_alloc &) { status = fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Insufficient inference memory"); }
     catch (...) { status = fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Unexpected native inference failure"); }
-    // Aborted decode may leave partially evaluated batches. No state from a
-    // failed or completed request may affect the next full-transcript request.
-    // Metal decode can return before GPU work completes; wait before clearing
-    // buffers, including when cancellation skipped the next logits read.
+    // Metal decode can return before GPU work completes; wait before touching
+    // memory, including when cancellation skipped the next logits read.
     llama_synchronize(engine->context);
-    llama_memory_clear(llama_get_memory(engine->context), true);
+    // An aborted decode may leave partially evaluated batches, so only a request
+    // that finished cleanly keeps its memory for the next one to reuse. A reply
+    // stopped after its first token still finished cleanly: every decoded token
+    // is in `cached`, and nothing else is in memory.
+    if (status != GEZEL_LLAMA_OK) {
+        llama_memory_clear(llama_get_memory(engine->context), true);
+        engine->cached.clear();
+    }
     return finish(status);
 }
 }

@@ -10,6 +10,7 @@ import {
   scoreTrialFacts,
   validateScoreEvidence,
 } from './fixed-rubric.ts';
+import { retrievalArmProof } from './retrieval-facts.ts';
 
 const SNAPSHOT_DIRS = new Set([
   '.git',
@@ -240,6 +241,48 @@ export function continuitySection(facts: TrialFacts): string[] {
   ];
 }
 
+export function retrievalSection(facts: TrialFacts): string[] {
+  const r = facts.retrieval;
+  if (!r) return [];
+  const proof = retrievalArmProof(r);
+  const arm = r.arm
+    ? `${r.arm.mode}, references ${r.arm.references ? 'on' : 'off'}, embeddings ${r.arm.embeddings ? 'on' : 'off'}`
+    : 'eval default';
+  const list = (counts: Record<string, number>) =>
+    Object.entries(counts)
+      .map(([key, n]) => `${key} ${n}`)
+      .join(', ') || '—';
+  const lines = [
+    '## Retrieval',
+    '',
+    'What reached the prompts from the indexes. Reported separately; it does not affect the capability composite.',
+    '',
+    '| Metric | Value | Source |',
+    '|---|---:|---|',
+    `| Arm | ${arm} | \`retrieval.arm\` |`,
+    `| Arm proof | ${proof.ok ? 'applied' : `FAILED — ${proof.problems.join('; ')}`} | \`retrievalArmProof\` |`,
+    `| Policy modes / sources | ${list(r.policy.modes)} / ${list(r.policy.inheritedFrom)} | \`retrieval.policy\` |`,
+    `| Turn probes → injections | ${r.turn.probes} → ${r.turn.injections} (${r.turn.sessionsWithInjection} sessions) | \`retrieval.turn\` |`,
+    `| Injected hits by source | ${list(r.turn.hitsBySource)} | \`retrieval.turn.hitsBySource\` |`,
+    `| Injected tokens | ${r.turn.injectedTokens} | \`retrieval.turn.injectedTokens\` |`,
+    `| Rejected candidates | ${list(r.turn.rejected)} | \`retrieval.turn.rejected\` |`,
+    `| Reference searches / tasks with references / items | ${r.references.searches} / ${r.references.tasksWithReferences} of ${r.references.tasks} / ${r.references.items} | \`retrieval.references\` |`,
+    `| Stamped messages | ${r.stampedMessages} | \`retrieval.stampedMessages\` |`,
+  ];
+  for (const [key, exposure] of Object.entries(r.exposure ?? {})) {
+    const channels = [
+      exposure.referenced ? 'referenced' : null,
+      exposure.injected ? 'injected' : null,
+      exposure.readByTool ? 'read by tool' : null,
+    ].filter(Boolean);
+    lines.push(
+      `| Exposure: \`${key}\` | ${channels.join(', ') || 'none'} | \`retrieval.exposure\` |`,
+    );
+  }
+  lines.push('');
+  return lines;
+}
+
 /** Render only evidence-backed sections; analysis/recommendations are a separate phase. */
 export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRubricScore): string {
   const outcome = facts.outcome.success ? 'success' : (facts.outcome.failureMode ?? 'failed');
@@ -276,6 +319,7 @@ export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRub
     ...performanceRows(facts),
     '',
     ...continuitySection(facts),
+    ...retrievalSection(facts),
     ...nativeReliabilitySection(facts),
     '## Evidence map',
     '',

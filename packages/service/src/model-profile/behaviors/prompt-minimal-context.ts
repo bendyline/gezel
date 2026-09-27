@@ -27,6 +27,7 @@
  * `GEZEL_FORCE_BEHAVIORS` for A/B.
  */
 
+import { MINIMAL_FOOTPRINT_MAX_WINDOW } from '@bendyline/gezel';
 import type { Behavior } from '../types.js';
 
 /**
@@ -35,7 +36,7 @@ import type { Behavior } from '../types.js';
  * manifest. 4096 covers the genuinely tiny local models (2K/4K); anything
  * larger holds the standard stack with room to spare.
  */
-export const MINIMAL_CONTEXT_MAX_WINDOW = 4096;
+export const MINIMAL_CONTEXT_MAX_WINDOW = MINIMAL_FOOTPRINT_MAX_WINDOW;
 
 export const PromptMinimalContext: Behavior = {
   id: 'prompt.minimal-context',

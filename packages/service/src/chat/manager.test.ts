@@ -5590,6 +5590,28 @@ describe('ChatManager — per-turn shared-library recall', () => {
     expect(prompt).not.toContain('notes/misc.md');
   });
 
+  it('stays silent when indexed context is Off', async () => {
+    await store.ensureSharedProject();
+    await store.writeConfig({ retrieval: { mode: 'off' } });
+    const calls: string[] = [];
+    manager.setContentIndex(
+      libraryIndex(
+        [
+          {
+            path: 'policies/refunds.md',
+            snippet: 'Refunds are issued within 30 days.',
+            score: 0.82,
+          },
+        ],
+        calls,
+      ),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).not.toContain('policies/refunds.md');
+    expect(calls).toEqual([]);
+  });
+
   it('does not search on a message with no retrievable topic', async () => {
     await store.ensureSharedProject();
     const queries: string[] = [];

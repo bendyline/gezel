@@ -34,7 +34,7 @@ class StageSdkTest(unittest.TestCase):
         manifest = {"schemaVersion": 1, "target": "ios", "gezelABIVersion": 1,
                     "upstream": pin, "patches": [], "verification": {"linkSmoke": "passed"},
                     "bridgeSources": {name: sdk.digest(sdk.HERE / name) for name in
-                                      ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "CMakeLists.txt")},
+                                      ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "chat_formats.h", "CMakeLists.txt")},
                     "settings": {"minimumOS": "16.4"},
                     "files": {name: sdk.digest(build / name) for name in files}}
         (build / "manifest.json").write_text(json.dumps(manifest))

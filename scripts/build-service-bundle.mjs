@@ -161,6 +161,12 @@ async function main() {
     );
   }
   console.log('[build-service-bundle] verified bundled browser UI');
+  const handboekCatalog = join(target, 'dist', 'handboek.gezk');
+  if (!existsSync(handboekCatalog)) {
+    throw new Error(
+      `[build-service-bundle] expected ${handboekCatalog}; the bundled Handboek knowledge catalog is missing`,
+    );
+  }
 
   // Runtime import verification happens after archive creation against a
   // freshly extracted copy. Checking only this loose tree missed a Windows
@@ -170,6 +176,9 @@ async function main() {
 
 async function verifyBundleRuntime(root) {
   console.log(`[build-service-bundle] verifying extracted runtime: ${root}`);
+  if (!existsSync(join(root, 'dist', 'handboek.gezk'))) {
+    throw new Error('[build-service-bundle] extracted runtime is missing dist/handboek.gezk');
+  }
   // Importing the service module resolves its eager dependency graph. We
   // spawn a throwaway node process, let it import
   // `index.js` (which exports `startService` without *calling* it — so no

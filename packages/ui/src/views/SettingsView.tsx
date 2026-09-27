@@ -67,6 +67,7 @@ import {
 const loadAmbientDashboardModule = () => import('../components/AmbientDashboardCard.js');
 const loadConnectedAppsModule = () => import('../components/ConnectedAppsPanel.js');
 const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCard.js');
+const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
 const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
 const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
 const loadRemoteServersModule = () => import('../components/RemoteServersPanel.js');
@@ -93,6 +94,9 @@ const AmbientDashboardCard = lazy(() =>
 );
 const ConnectedAppsPanel = lazy(() =>
   loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
+);
+const RelevanceModelCard = lazy(() =>
+  loadRelevanceModelModule().then(({ RelevanceModelCard }) => ({ default: RelevanceModelCard })),
 );
 const FaceRecognitionCard = lazy(() =>
   loadFaceRecognitionModule().then(({ FaceRecognitionCard }) => ({ default: FaceRecognitionCard })),
@@ -1353,6 +1357,17 @@ function DaemonSettingsView() {
     },
     [config],
   );
+
+  const setTaskReferences = useCallback(async (enabled: boolean) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ taskReferences: { enabled } });
+      setConfig(res);
+      setStatus('reference lookup saved');
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
 
   const setSummarization = useCallback(
     async (patch: Partial<NonNullable<ConfigResponse['summarization']>>) => {
@@ -3147,6 +3162,7 @@ function DaemonSettingsView() {
               <MemorySection
                 config={config}
                 onRetrievalChange={setRetrieval}
+                onTaskReferencesChange={setTaskReferences}
                 onSummarizationChange={setSummarization}
               />
             </>
@@ -4529,12 +4545,18 @@ interface MemorySectionProps {
       maxTokens?: number | null;
     },
   ) => Promise<void>;
+  onTaskReferencesChange: (enabled: boolean) => Promise<void>;
   onSummarizationChange: (
     patch: Partial<NonNullable<ConfigResponse['summarization']>>,
   ) => Promise<void>;
 }
 
-function MemorySection({ config, onRetrievalChange, onSummarizationChange }: MemorySectionProps) {
+function MemorySection({
+  config,
+  onRetrievalChange,
+  onTaskReferencesChange,
+  onSummarizationChange,
+}: MemorySectionProps) {
   const retrievalMode =
     config?.retrieval?.mode ?? (config?.autoRecall?.enabled === false ? 'off' : 'balanced');
   const summarizeEnabled = config?.summarization?.enabled !== false;
@@ -4555,12 +4577,20 @@ function MemorySection({ config, onRetrievalChange, onSummarizationChange }: Mem
           Higher settings provide more direct evidence. Lower settings preserve context space on
           memory-constrained models. The gezel can still call <code>search</code> when this is Off.
         </p>
-        <div className="provider-switch" style={{ marginTop: '0.5rem' }}>
+        <div
+          className="gz-tray"
+          role="radiogroup"
+          aria-label="Indexed context per turn"
+          style={{ marginTop: '0.5rem' }}
+        >
           {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
-              className={`provider-pill${retrievalMode === mode ? ' provider-pill-active' : ''}`}
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={retrievalMode === mode}
+              className={`gz-key${retrievalMode === mode ? ' gz-key-active' : ''}`}
               onClick={() => void onRetrievalChange({ mode })}
             >
               {mode[0]!.toUpperCase() + mode.slice(1)}
@@ -4587,6 +4617,25 @@ function MemorySection({ config, onRetrievalChange, onSummarizationChange }: Mem
             disabled={retrievalMode === 'off'}
           />
         </div>
+      </div>
+
+      <Suspense fallback={null}>
+        <RelevanceModelCard />
+      </Suspense>
+
+      <div style={{ marginBottom: '1.25rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={config?.taskReferences?.enabled !== false}
+            onChange={(e) => void onTaskReferencesChange(e.target.checked)}
+          />
+          <strong>Look up references when a task starts.</strong>
+        </label>
+        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
+          A task started from a request searches your knowledge catalogs and shared documents for
+          its subject once, and gives every step what it found.
+        </p>
       </div>
 
       <div>

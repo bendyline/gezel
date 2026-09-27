@@ -446,6 +446,17 @@ describe('sessionRouteGuard', () => {
     expect((await ui.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(200);
   });
 
+  it('keeps retrieval previews first-party: they can read any gezel’s memory', async () => {
+    const app = sessionPolicyApp(session('proj-a'));
+    expect((await app.request('/api/projects/proj-a/retrieval/preview', jsonPost({}))).status).toBe(
+      403,
+    );
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/projects/proj-a/retrieval/preview', jsonPost({}))).status).toBe(
+      200,
+    );
+  });
+
   it('lets coordinator sessions cross projects but still blocks UI/admin capabilities', async () => {
     const app = sessionPolicyApp(session('proj-a', true));
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(200);

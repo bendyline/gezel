@@ -8,8 +8,11 @@
  * class never opens a catalog database itself.
  */
 
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readFile, readdir, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   GezelConfig,
   IncompleteKnowledgeDownload,
@@ -42,12 +45,17 @@ import {
   type ModelDownloadProgress,
   compareCatalogVersions,
   knowledgeEmbeddingProfile,
+  readGezkManifest,
 } from '@bendyline/gezel-knowledge';
 import {
   knowledgeCatalogVersionDir,
   knowledgeCatalogsDir,
   knowledgeDownloadsDir,
 } from '@bendyline/gezel/paths';
+import {
+  HANDBOEK_KNOWLEDGE_CATALOG,
+  HANDBOEK_KNOWLEDGE_PUBLISHER,
+} from '../handboek/knowledge-source.js';
 import type { HistoryManager } from '../history/manager.js';
 import {
   sharedKnowledgeRoot,
@@ -203,6 +211,8 @@ export interface KnowledgeManagerOptions {
     profile: KnowledgeEmbeddingProfile,
     opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
   ) => Promise<number[]>;
+  /** Test seam; null turns off the bundled Handboek. */
+  bundledHandboekArchive?: string | null;
 }
 
 export class KnowledgeManager {
@@ -266,6 +276,9 @@ export class KnowledgeManager {
 
   /** Mount every enabled registry entry. Failures quarantine, never throw. */
   async start(): Promise<void> {
+    await this.ensureBundledHandboek().catch((err) => {
+      log.warn(`bundled Handboek catalog unavailable: ${errorMessage(err)}`);
+    });
     for (const entry of this.registry.read().catalogs) {
       if (!entry.enabled) continue;
       await this.mountEntry(entry).catch((err) => {
@@ -273,6 +286,44 @@ export class KnowledgeManager {
         log.warn(`catalog ${entry.ref.catalogId} failed to mount: ${reason}`);
         this.registry.quarantine(entry.ref.publisherId, entry.ref.catalogId, reason);
       });
+    }
+  }
+
+  private async ensureBundledHandboek(): Promise<void> {
+    const archive =
+      this.opts.bundledHandboekArchive === undefined
+        ? findBundledHandboekArchive()
+        : this.opts.bundledHandboekArchive;
+    if (!archive) return;
+    const bytes = await readFile(archive);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const existing = this.registry.find(HANDBOEK_KNOWLEDGE_PUBLISHER, HANDBOEK_KNOWLEDGE_CATALOG);
+    if (existing && existing.source !== 'bundled') {
+      log.warn(
+        'Handboek catalog id is already used by a user-installed catalog; leaving it intact',
+      );
+      return;
+    }
+    if (existing?.ref.contentDigest === digest) return;
+    const enabled = existing?.enabled ?? true;
+    const manifest = await readGezkManifest(archive);
+    for await (const event of installKnowledgeCatalog({
+      home: this.opts.home,
+      source: { kind: 'file', path: archive },
+      origin: 'bundled',
+      expectedIdentity: {
+        publisherId: HANDBOEK_KNOWLEDGE_PUBLISHER,
+        catalogId: HANDBOEK_KNOWLEDGE_CATALOG,
+        version: manifest.version,
+      },
+      registry: this.registry,
+      validateCatalog: (rootDir, deep) => this.opts.host.validate(rootDir, deep),
+    })) {
+      if (event.type === 'error') throw new Error(event.error);
+      if (event.type === 'done') {
+        if (!enabled) this.registry.setEnabled(event.ref.publisherId, event.ref.catalogId, false);
+        await pruneOtherKnowledgeCatalogVersions(this.opts.home, event.ref);
+      }
     }
   }
 
@@ -1095,6 +1146,7 @@ export class KnowledgeManager {
   async remove(catalogId: string): Promise<boolean> {
     const entry = this.registry.read().catalogs.find((c) => c.ref.catalogId === catalogId);
     if (!entry) return false;
+    if (entry.source === 'bundled') return false;
     const key = this.keyFor(entry.ref);
     await this.opts.host.unmount(key).catch(() => {});
     this.mountedByKey.delete(key);
@@ -1335,6 +1387,19 @@ export class KnowledgeManager {
   }
 
   /**
+   * Load every mounted catalog's own query model now. A search waits for
+   * these only briefly, so a caller that needs the semantic path measured
+   * (the retrieval preview's `warm`) loads them first.
+   */
+  async warmQueryModels(): Promise<void> {
+    const profiles = new Map<string, KnowledgeEmbeddingProfile>();
+    for (const info of this.mountedByKey.values()) {
+      if (info.semanticSearch === 'profile') profiles.set(info.embedding.id, info.embedding);
+    }
+    for (const profile of profiles.values()) await this.embedForProfile('warm', profile);
+  }
+
+  /**
    * A profile's query vector, or undefined when its model is unavailable or
    * not ready within `budgetMs` (that group searches FTS). A load that misses
    * the budget keeps running — loads are single-flight per profile — so the
@@ -1412,6 +1477,17 @@ export class KnowledgeManager {
     const selected = new Set((policy.refs ?? []).map((r) => `${r.publisherId}/${r.catalogId}`));
     return mounted.filter((m) => selected.has(m.key)).map((m) => m.key);
   }
+}
+
+function findBundledHandboekArchive(): string | null {
+  const override = process.env.GEZEL_HANDBOEK_GEZK?.trim();
+  if (override) return existsSync(override) ? resolve(override) : null;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const built = join(here, 'handboek.gezk');
+  if (existsSync(built)) return built;
+  if (process.env.VITEST) return null;
+  const source = join(here, '..', '..', 'assets', 'handboek', 'handboek.gezk');
+  return existsSync(source) ? source : null;
 }
 
 export class KnowledgeNotFoundError extends Error {

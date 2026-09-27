@@ -186,12 +186,25 @@ export async function auditMobilePromptBudgets() {
     }
     const assembled = captured.at(-1);
     const system = assembled?.messages.find((message) => message.role === 'system')?.content ?? '';
-    const inventoryText = system.slice(system.lastIndexOf('\n[') + 1);
-    let inventory: Array<{ name: string }> = [];
-    try {
-      inventory = JSON.parse(inventoryText);
-    } catch {}
     const bytes = (value: string) => new TextEncoder().encode(value).length;
+    // The listing starts where the prompt footprint says: JSON schemas at
+    // `full`, one line per tool at `compact` and `signatures`.
+    const toolsAt = system.indexOf('## Tools available this turn');
+    const toolsText = toolsAt < 0 ? '' : system.slice(toolsAt);
+    const jsonAt = toolsText.lastIndexOf('\n[');
+    let inventory: Array<{ name: string; bytes: number }> = [];
+    if (jsonAt >= 0) {
+      try {
+        inventory = (JSON.parse(toolsText.slice(jsonAt + 1)) as Array<{ name: string }>).map(
+          (tool) => ({ name: tool.name, bytes: bytes(JSON.stringify(tool)) }),
+        );
+      } catch {}
+    } else {
+      inventory = toolsText
+        .split('\n')
+        .filter((line) => line.startsWith('- '))
+        .map((line) => ({ name: line.slice(2, line.indexOf('(')), bytes: bytes(line) }));
+    }
     results.push({
       id: entry.id,
       recordingOnly: true,
@@ -208,11 +221,10 @@ export async function auditMobilePromptBudgets() {
       totalPromptBytes:
         assembled?.messages.reduce((sum, message) => sum + bytes(message.content), 0) ?? null,
       systemBytes: bytes(system),
-      toolInventoryBytes: inventory.length ? bytes(inventoryText) : null,
+      toolListing: jsonAt >= 0 ? 'full' : inventory.length ? 'lines' : 'none',
+      toolInventoryBytes: inventory.length ? bytes(toolsText) : null,
       toolCount: inventory.length,
-      tools: inventory
-        .map((tool) => ({ name: tool.name, bytes: bytes(JSON.stringify(tool)) }))
-        .sort((a, b) => b.bytes - a.bytes),
+      tools: inventory.sort((a, b) => b.bytes - a.bytes),
       exactMessages: assembled?.messages ?? [],
       probeContextTokens: assembled?.contextSize,
       aboutBytes: bytes((await store.getGezel(gezelId))?.about ?? ''),

@@ -1,10 +1,4 @@
-import {
-  GEZEL_VERSION,
-  UpdateConfigRequestSchema,
-  createLogger,
-  resolveSandboxCopilot,
-  resolveShowWorkInProgressFeatures,
-} from '@bendyline/gezel';
+import { type GezelConfig, UpdateConfigRequestSchema, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -19,6 +13,7 @@ import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
+import { configResponseFields } from './config-view.js';
 import { usesMachineEngine } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
@@ -145,6 +140,16 @@ export function maskValue(value: string): string {
   return `****${value.slice(-4)}`;
 }
 
+/** The stored remote-serving settings plus the live listener state. */
+function remoteServingView(ctx: ServiceContext, config: GezelConfig) {
+  const status = ctx.remoteServing.status();
+  return {
+    ...(config.remoteServing ?? {}),
+    enabled: status.listening,
+    ...(status.port ? { port: status.port } : {}),
+  };
+}
+
 export function configRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -170,155 +175,13 @@ export function configRoutes(ctx: ServiceContext): Hono {
     // Mask secrets so they don't leak into the UI. The has* booleans let
     // the UI know whether a given credential is configured.
     return c.json({
-      provider: resolveDefaultProviderName(config),
+      ...configResponseFields(config),
       ...creds,
-      ollamaBaseUrl: config.ollamaBaseUrl,
-      autoStartOllama: config.autoStartOllama ?? true,
-      ollamaNumCtx: config.ollamaNumCtx,
-      ollamaNumPredict: config.ollamaNumPredict,
-      ollamaThink: config.ollamaThink,
-      ollamaStreamingIdleSec: config.ollamaStreamingIdleSec,
-      ollamaPreFirstByteIdleSec: config.ollamaPreFirstByteIdleSec,
-      ollamaTurnTimeoutMin: config.ollamaTurnTimeoutMin,
-      copilotTurnTimeoutMin: config.copilotTurnTimeoutMin,
-      defaultModel: config.defaultModel,
-      defaultReasoningEffort: config.defaultReasoningEffort,
-      firstRunCompleted: config.firstRunCompleted,
-      firstRunInstallError: config.firstRunInstallError,
-      meesterGezelId: config.meesterGezelId,
-      klerkGezelId: config.klerkGezelId,
-      boekwachterGezelId: config.boekwachterGezelId,
-      keurmeesterGezelId: config.keurmeesterGezelId,
-      keurmeester: config.keurmeester,
-      debugMode: config.debugMode === true,
-      showAdvancedFeatures: config.showAdvancedFeatures === true,
-      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
-        config.showWorkInProgressFeatures,
-        GEZEL_VERSION,
-      ),
-      resetTemplatesOnStartup: config.resetTemplatesOnStartup === true,
-      roleBasedNameOnlyMode: config.roleBasedNameOnlyMode === true,
-      showPoppetjes: config.showPoppetjes !== false,
-      narrateAssistantReplies: config.narrateAssistantReplies === true,
-      narrateProgressUpdates: config.narrateProgressUpdates !== false,
-      aiEngagementMode: config.aiEngagementMode ?? 'proactive',
-      showSystemTray: config.showSystemTray !== false,
-      autoUpdateChecks: config.autoUpdateChecks !== false,
-      quitOnClose: config.quitOnClose === true,
-      themePref: config.themePref,
-      cliShowThinking: config.cliShowThinking !== false,
-      cliShowWrites: config.cliShowWrites === true,
-      documentExportOptions: config.documentExportOptions,
-      inlineSpellChecking: config.inlineSpellChecking !== false,
-      inlineGrammarChecking: config.inlineGrammarChecking !== false,
-      sidebarSide: config.sidebarSide,
-      homeGreetingCollapsed: config.homeGreetingCollapsed === true,
-      workshopTempo: config.workshopTempo ?? 'bedrijvig',
-      nightShift: config.nightShift,
-      toolFilterMode: config.toolFilterMode ?? 'always',
-      channels: config.channels,
-      sandboxCopilot: resolveSandboxCopilot(config.sandboxCopilot),
-      fetchUrl: config.fetchUrl,
-      webSearch: config.webSearch,
-      playwrightHeadless: config.playwrightHeadless !== false,
-      projectMru: config.projectMru,
-      // The unified tab MRU (projects + gezels + documents + tasks).
-      // Hand-pick alongside `projectMru` because the response shape is a
-      // hand-crafted whitelist; without this entry, GET /api/config
-      // silently strips the field and the boot path falls back to the
-      // legacy `projectMru` only — leaving any tab kinds beyond projects
-      // (and any project tabs added since the last `projectMru` write)
-      // missing from the bar after each app relaunch.
-      recentTabs: config.recentTabs,
       copilotCliInstallDir,
-      cacheBudgetMb: config.cacheBudgetMb,
-      providerConcurrency: config.providerConcurrency,
-      localEngineIdleTimeoutMs: config.localEngineIdleTimeoutMs,
-      // Install-wide per-model tuning. Hand-pick into the whitelist or the
-      // Settings preset/fine-tuning controls "lose" their value on the
-      // next GET — the resolver still reads them from config.json so the
-      // chosen preset DOES apply, but the dropdown would render empty.
-      modelTuning: config.modelTuning,
-      modelTuningProfile: config.modelTuningProfile,
-      // llama-cpp passthrough so the Settings UI can display + edit
-      // saved values. The supervisor reads `llamaCppBackendOverride`
-      // directly from config.json on app boot (see
-      // packages/app/src/supervisor/index.ts) — a UI change here only
-      // affects the next launch.
-      llamaCppBaseUrl: config.llamaCppBaseUrl,
-      llamaCppModelPath: config.llamaCppModelPath,
-      llamaCppNumCtx: config.llamaCppNumCtx,
-      llamaCppBackendOverride: config.llamaCppBackendOverride,
-      llamaCppKvCacheType: config.llamaCppKvCacheType,
-      llamaCppFlashAttn: config.llamaCppFlashAttn,
-      llamaCppSpecType: config.llamaCppSpecType,
-      llamaCppCpuMoe: config.llamaCppCpuMoe,
-      llamaCppNCpuFfn: config.llamaCppNCpuFfn,
-      llamaCppMlock: config.llamaCppMlock,
-      llamaCppLoadMode: config.llamaCppLoadMode,
-      llamaCppLazyMode: config.llamaCppLazyMode,
-      llamaCppReasoningPreserve: config.llamaCppReasoningPreserve,
-      llamaCppSwaFull: config.llamaCppSwaFull,
-      ds4BaseUrl: config.ds4BaseUrl,
-      ds4ModelPath: config.ds4ModelPath,
-      ds4VisionEncoderPath: config.ds4VisionEncoderPath,
-      ds4NumCtx: config.ds4NumCtx,
-      ds4SsdStreaming: config.ds4SsdStreaming,
-      ds4CacheExpertsGb: config.ds4CacheExpertsGb,
-      nativeVision: config.nativeVision,
-      mlxBaseUrl: config.mlxBaseUrl,
-      mlxModelPath: config.mlxModelPath,
-      mlxPackageSpec: config.mlxPackageSpec,
-      mlxKvBits: config.mlxKvBits,
-      anthropicCli: config.anthropicCli,
-      codexCli: config.codexCli,
       anthropicCliStatus: cliDetections.anthropicCli,
       codexCliStatus: cliDetections.codexCli,
       appleFoundationModelsStatus: { installed: appleFoundationModelsInstalled() },
-      imageProvider: config.imageProvider,
-      defaultImageModel: config.defaultImageModel,
-      imageGenerationConfirmation: config.imageGenerationConfirmation,
-      // Video generation settings. Hand-pick like everything above, or the
-      // Video panel reads undefined on every GET: the active-model radio
-      // snaps back to the first installed model and the confirmation tray
-      // back to "Ask", even though config.json (and the engine) has the
-      // user's real choice.
-      videoProvider: config.videoProvider,
-      defaultVideoModel: config.defaultVideoModel,
-      videoGenerationConfirmation: config.videoGenerationConfirmation,
-      defaultSttModel: config.defaultSttModel,
-      microphoneDeviceId: config.microphoneDeviceId,
-      microphoneDeviceLabel: config.microphoneDeviceLabel,
-      gpuMemoryPolicy: config.gpuMemoryPolicy,
-      deviceSafety: config.deviceSafety,
-      // Centralized security & compliance posture. Hand-pick into the
-      // whitelist or the Security & Compliance panel "loses" its value on
-      // the next GET (the enforcement paths read it straight from
-      // config.json, so gates still apply — but the UI would render the
-      // default `free` slider position regardless of the stored policy).
-      securityPolicy: config.securityPolicy,
-      // OpenAI-compatible endpoint controls (Settings → Connected Apps).
-      // Hand-pick into the whitelist like everything above, or the panel's
-      // toggle/dropdown would render defaults on the next GET.
-      openaiEndpoints: config.openaiEndpoints,
-      // Live gilde content updates toggle (Settings → About). Same
-      // whitelist rule as above.
-      gildeUpdates: config.gildeUpdates,
-      // Knowledge-catalog defaults (Settings → Knowledge). Same whitelist
-      // rule as above — the registry file stays authoritative for installs.
-      knowledge: config.knowledge,
-      // Face recognition biometric opt-in (Settings → People). Same
-      // whitelist rule as above.
-      faceRecognition: config.faceRecognition,
-      // Ambient dashboard + wallpaper toggles (Settings → Ambient
-      // display). Same whitelist rule as above.
-      ambientDashboard: config.ambientDashboard,
-      ambientDisplay: config.ambientDisplay,
-      remoteServing: {
-        ...(config.remoteServing ?? {}),
-        enabled: ctx.remoteServing.status().listening,
-        ...(ctx.remoteServing.status().port ? { port: ctx.remoteServing.status().port } : {}),
-      },
+      remoteServing: remoteServingView(ctx, config),
     });
   });
 
@@ -686,128 +549,27 @@ export function configRoutes(ctx: ServiceContext): Hono {
         ctx.chat.onEngagementModeChangedToOff();
       }
     }
+    // Turning the relevance check on (or picking another model) downloads the
+    // model in the background, network permitting.
+    if (body.relevanceModel !== undefined) void ctx.relevance.reconcile().catch(() => {});
     const creds = await readCredentialView(ctx.secrets);
+    const copilotCliInstallDir = (
+      await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk')
+    )?.path;
+    const cliDetections = getCliPresence({
+      ...(updated.anthropicCli ? { anthropicCli: updated.anthropicCli } : {}),
+      ...(updated.codexCli ? { codexCli: updated.codexCli } : {}),
+    });
+    // The same view GET returns: Settings swaps this response into its state,
+    // so a field missing here reverts the control the instant it is saved.
     return c.json({
-      provider: resolveDefaultProviderName(updated),
+      ...configResponseFields(updated),
       ...creds,
-      ollamaBaseUrl: updated.ollamaBaseUrl,
-      autoStartOllama: updated.autoStartOllama ?? true,
-      ollamaNumCtx: updated.ollamaNumCtx,
-      ollamaNumPredict: updated.ollamaNumPredict,
-      ollamaThink: updated.ollamaThink,
-      ollamaStreamingIdleSec: updated.ollamaStreamingIdleSec,
-      ollamaPreFirstByteIdleSec: updated.ollamaPreFirstByteIdleSec,
-      ollamaTurnTimeoutMin: updated.ollamaTurnTimeoutMin,
-      copilotTurnTimeoutMin: updated.copilotTurnTimeoutMin,
-      defaultModel: updated.defaultModel,
-      defaultReasoningEffort: updated.defaultReasoningEffort,
-      firstRunCompleted: updated.firstRunCompleted,
-      firstRunInstallError: updated.firstRunInstallError,
-      meesterGezelId: updated.meesterGezelId,
-      klerkGezelId: updated.klerkGezelId,
-      boekwachterGezelId: updated.boekwachterGezelId,
-      keurmeesterGezelId: updated.keurmeesterGezelId,
-      keurmeester: updated.keurmeester,
-      debugMode: updated.debugMode === true,
-      showAdvancedFeatures: updated.showAdvancedFeatures === true,
-      showWorkInProgressFeatures: resolveShowWorkInProgressFeatures(
-        updated.showWorkInProgressFeatures,
-        GEZEL_VERSION,
-      ),
-      resetTemplatesOnStartup: updated.resetTemplatesOnStartup === true,
-      roleBasedNameOnlyMode: updated.roleBasedNameOnlyMode === true,
-      showPoppetjes: updated.showPoppetjes !== false,
-      narrateAssistantReplies: updated.narrateAssistantReplies === true,
-      narrateProgressUpdates: updated.narrateProgressUpdates !== false,
-      aiEngagementMode: updated.aiEngagementMode ?? 'proactive',
-      showSystemTray: updated.showSystemTray !== false,
-      autoUpdateChecks: updated.autoUpdateChecks !== false,
-      quitOnClose: updated.quitOnClose === true,
-      themePref: updated.themePref,
-      cliShowThinking: updated.cliShowThinking !== false,
-      cliShowWrites: updated.cliShowWrites === true,
-      documentExportOptions: updated.documentExportOptions,
-      inlineSpellChecking: updated.inlineSpellChecking !== false,
-      inlineGrammarChecking: updated.inlineGrammarChecking !== false,
-      sidebarSide: updated.sidebarSide,
-      homeGreetingCollapsed: updated.homeGreetingCollapsed === true,
-      workshopTempo: updated.workshopTempo ?? 'bedrijvig',
-      nightShift: updated.nightShift,
-      toolFilterMode: updated.toolFilterMode ?? 'always',
-      channels: updated.channels,
-      sandboxCopilot: resolveSandboxCopilot(updated.sandboxCopilot),
-      fetchUrl: updated.fetchUrl,
-      webSearch: updated.webSearch,
-      playwrightHeadless: updated.playwrightHeadless !== false,
-      localEngineIdleTimeoutMs: updated.localEngineIdleTimeoutMs,
-      // Echo llama-cpp fields for parity with the GET handler. Without
-      // these the UI's Settings → On-device → Advanced controls would
-      // appear to "lose" their value the instant the user hits Save —
-      // setConfig(next) would clear the displayed value even though
-      // the underlying config.json (and the supervisor's view of it)
-      // is correct.
-      llamaCppBaseUrl: updated.llamaCppBaseUrl,
-      llamaCppModelPath: updated.llamaCppModelPath,
-      llamaCppNumCtx: updated.llamaCppNumCtx,
-      llamaCppBackendOverride: updated.llamaCppBackendOverride,
-      llamaCppKvCacheType: updated.llamaCppKvCacheType,
-      llamaCppFlashAttn: updated.llamaCppFlashAttn,
-      llamaCppSpecType: updated.llamaCppSpecType,
-      llamaCppCpuMoe: updated.llamaCppCpuMoe,
-      llamaCppNCpuFfn: updated.llamaCppNCpuFfn,
-      llamaCppMlock: updated.llamaCppMlock,
-      llamaCppLoadMode: updated.llamaCppLoadMode,
-      llamaCppLazyMode: updated.llamaCppLazyMode,
-      llamaCppReasoningPreserve: updated.llamaCppReasoningPreserve,
-      llamaCppSwaFull: updated.llamaCppSwaFull,
-      ds4BaseUrl: updated.ds4BaseUrl,
-      ds4ModelPath: updated.ds4ModelPath,
-      ds4VisionEncoderPath: updated.ds4VisionEncoderPath,
-      ds4NumCtx: updated.ds4NumCtx,
-      ds4SsdStreaming: updated.ds4SsdStreaming,
-      ds4CacheExpertsGb: updated.ds4CacheExpertsGb,
-      nativeVision: updated.nativeVision,
-      mlxBaseUrl: updated.mlxBaseUrl,
-      mlxModelPath: updated.mlxModelPath,
-      mlxPackageSpec: updated.mlxPackageSpec,
-      mlxKvBits: updated.mlxKvBits,
-      // Keep PUT response parity with GET. Settings swaps this response into
-      // local state, so omitting the nested Codex settings made the effort
-      // picker jump straight back to the model default after every change.
-      codexCli: updated.codexCli,
-      imageProvider: updated.imageProvider,
-      defaultImageModel: updated.defaultImageModel,
-      imageGenerationConfirmation: updated.imageGenerationConfirmation,
-      videoProvider: updated.videoProvider,
-      defaultVideoModel: updated.defaultVideoModel,
-      videoGenerationConfirmation: updated.videoGenerationConfirmation,
-      defaultSttModel: updated.defaultSttModel,
-      microphoneDeviceId: updated.microphoneDeviceId,
-      microphoneDeviceLabel: updated.microphoneDeviceLabel,
-      gpuMemoryPolicy: updated.gpuMemoryPolicy,
-      deviceSafety: updated.deviceSafety,
-      // Echo install-wide tuning so the preset / custom fine-tuning
-      // dropdowns keep their value the instant the user hits Save —
-      // setConfig(next) would otherwise clear the displayed selection
-      // even though config.json (and the resolver) is correct. Same
-      // bug class as the llama-cpp echo above.
-      modelTuning: updated.modelTuning,
-      modelTuningProfile: updated.modelTuningProfile,
-      // Echo the security posture for parity with GET — without it the
-      // Security & Compliance panel's optimistic setConfig(next) would
-      // revert the slider/toggles to the default `free` the instant the
-      // user changes them, even though config.json is correct. Same
-      // echo-bug class as the llama-cpp / tuning fields above.
-      securityPolicy: updated.securityPolicy,
-      // Same echo-bug class as securityPolicy above: without this, the
-      // Connected Apps toggle/dropdown revert visually the instant the
-      // user changes them.
-      openaiEndpoints: updated.openaiEndpoints,
-      remoteServing: {
-        ...(updated.remoteServing ?? {}),
-        enabled: ctx.remoteServing.status().listening,
-        ...(ctx.remoteServing.status().port ? { port: ctx.remoteServing.status().port } : {}),
-      },
+      copilotCliInstallDir,
+      anthropicCliStatus: cliDetections.anthropicCli,
+      codexCliStatus: cliDetections.codexCli,
+      appleFoundationModelsStatus: { installed: appleFoundationModelsInstalled() },
+      remoteServing: remoteServingView(ctx, updated),
     });
   });
 

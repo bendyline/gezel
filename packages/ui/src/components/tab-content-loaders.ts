@@ -12,7 +12,6 @@ export const loadDocumentDetailModule = () => import('../views/DocumentDetail.js
 export const loadDocumentsViewModule = () => import('../views/DocumentsView.js');
 export const loadGezelDetailModule = () => import('../views/GezelDetail.js');
 export const loadGezellenViewModule = () => import('../views/GezellenView.js');
-export const loadHandboekViewModule = () => import('../views/HandboekView.js');
 export const loadHistoryViewModule = () => import('../views/HistoryView.js');
 export const loadKnowledgeViewModule = () => import('../views/KnowledgeView.js');
 export const loadProjectsViewModule = () => import('../views/ProjectsView.js');
@@ -55,7 +54,7 @@ function moduleForTab(tab: RecentTab): Promise<unknown> {
         case 'history':
           return loadHistoryViewModule();
         case 'handboek':
-          return loadHandboekViewModule();
+          return loadKnowledgeViewModule();
         case 'knowledge':
           return loadKnowledgeViewModule();
         case 'benchmarks':

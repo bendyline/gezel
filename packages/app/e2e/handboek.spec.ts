@@ -35,33 +35,23 @@ test.afterAll(async () => {
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
-test('handboek opens from the sidebar, renders an article, and plays as video', async () => {
-  // The sidebar renders the Handboek area link once the app shell is up.
-  const link = page.getByTestId('sidebar-area-handboek');
+test('bundled Handboek opens in Knowledge with its articles and images', async () => {
+  const link = page.getByTestId('sidebar-area-knowledge');
   await link.waitFor({ state: 'visible', timeout: 20_000 });
   await link.click();
 
-  const view = page.getByTestId('handboek-view');
+  const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
 
-  // TOC areas + the auto-opened first article (welcome).
-  await expect(view.getByText('Concepts')).toBeVisible();
-  await expect(page.getByTestId('handboek-doc')).toBeVisible({ timeout: 15_000 });
+  // Topics and the auto-opened welcome article come from the .gezk.
+  await expect(view.getByRole('button', { name: 'Concepts', exact: false })).toBeVisible();
+  await expect(view.locator('.knowledge-reader-body')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { level: 2, name: 'What is gezel?' })).toBeVisible();
 
-  // Open a personalized article — the fresh install auto-creates a
-  // Meester, so the crew article names them.
-  await view
-    .getByRole('button', { name: 'Your crew: gezellen, the Meester, and the Voorman' })
-    .click();
-  await expect(page.getByText(/Your Meester is/).first()).toBeVisible({ timeout: 15_000 });
-
-  // The Meester's poppetje figure must actually paint — a blob-URL SVG
-  // with no xmlns resolves but renders 0×0 (the invisible-poppetjes
-  // incident), so assert real intrinsic size, not just presence.
+  // The bundled image is fetched through the catalog asset route.
   await page.waitForFunction(
     () => {
-      const imgs = Array.from(document.querySelectorAll('.handboek-doc img'));
+      const imgs = Array.from(document.querySelectorAll('.knowledge-reader-body img'));
       return imgs.some(
         (el) =>
           (el as HTMLImageElement).src.startsWith('blob:') &&
@@ -71,28 +61,9 @@ test('handboek opens from the sidebar, renders an article, and plays as video', 
     undefined,
     { timeout: 15_000 },
   );
-
-  // Toggle to the video playback mode: the DocPlayer mounts and its clock
-  // actually runs. Handboek articles carry no narration audio, so playback
-  // rides the synthetic clock — which sat frozen at 0:00 / 0:00 on the first
-  // slide for as long as the player measured the timeline by the (empty)
-  // audio track rather than by the document.
-  await view.getByRole('radio', { name: 'Video' }).click();
-  const player = page.getByTestId('handboek-player');
-  await expect(player).toBeVisible();
-  await expect(page.getByTestId('handboek-doc')).toHaveCount(0);
-
-  const scrubber = player.getByRole('slider');
-  // The player is visible one render before its audio-sync effect publishes
-  // the synthetic document duration, so wait for that initialization.
-  await expect
-    .poll(async () => Number(await scrubber.getAttribute('aria-valuemax')), { timeout: 15_000 })
-    .toBeGreaterThan(0);
-  await expect
-    .poll(async () => Number(await scrubber.getAttribute('aria-valuenow')), { timeout: 15_000 })
-    .toBeGreaterThan(0);
-
-  // And back to the document.
-  await view.getByRole('radio', { name: 'Document' }).click();
-  await expect(page.getByTestId('handboek-doc')).toBeVisible();
+  await view.getByRole('button', { name: 'Concepts', exact: false }).click();
+  await view
+    .getByRole('button', { name: 'Your crew: gezellen, the Meester, and the Voorman' })
+    .click();
+  await expect(view.locator('.knowledge-reader-body')).toContainText('Meester');
 });

@@ -5,10 +5,12 @@ import {
   type GezelGender,
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   NATIVE_TOOL_NOTE,
+  PROMPT_FOOTPRINT_POLICY,
   type ProjectFileEntry,
   type PromptTaskContext,
   type Task,
   type TaskCraftbookStep,
+  capAboutForFootprint,
   createLogger,
   displayName,
   isGatedStep,
@@ -17,6 +19,7 @@ import {
   normalizeStepGate,
   pronounFormsForGender,
   pronounsForGender,
+  renderProjectBrief,
   renderTaskContextBlock,
   renderTaskOutline,
 } from '@bendyline/gezel';
@@ -405,14 +408,6 @@ export interface BuildInstructionsOptions {
 }
 
 /**
- * Char budget for the about.md body in minimal-context mode. ~900 chars ≈
- * ~225 tokens — enough to carry the gezel's character (which IS the value
- * of a persona model) while leaving the bulk of a 2K window for the
- * conversation. Truncation is sentence-aware with a visible marker.
- */
-const MINIMAL_CONTEXT_ABOUT_MAX_CHARS = 900;
-
-/**
  * Row cap for the shared-documents listing. Lower than the workspace's 200:
  * the library is a map the model navigates by search, not an inventory it
  * works through, and this block rides the volatile band on every non-executor
@@ -554,14 +549,6 @@ function isGuardedToolMention(procedure: string, index: number): boolean {
 }
 
 /** Sentence-aware cap of the about body for minimal-context mode. */
-function capAboutForMinimalContext(about: string, maxChars: number): string {
-  if (about.length <= maxChars) return about;
-  const slice = about.slice(0, maxChars);
-  const boundary = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'));
-  const kept = (boundary > maxChars * 0.5 ? slice.slice(0, boundary + 1) : slice).trim();
-  return `${kept}\n\n(About condensed to fit this model's small context window.)`;
-}
-
 export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstructions {
   const leanProfile = opts.leanProfile === true;
   const {
@@ -1711,9 +1698,23 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // Everything rides the stable band (nothing volatile survives), so both
   // cache modes get the same string. See prompt-minimal-context.ts.
   if (minimalContext) {
-    const cappedBody = capAboutForMinimalContext(body, MINIMAL_CONTEXT_ABOUT_MAX_CHARS);
+    const cappedBody = capAboutForFootprint(body, PROMPT_FOOTPRINT_POLICY.minimal.aboutMaxChars);
+    // A model that can act on the project keeps a condensed brief of it; the
+    // text-only branch has no workspace, so the brief would only cost prefill.
+    const brief = project
+      ? renderProjectBrief(
+          {
+            about: project.about,
+            ...(isProjectStrategicOwner ? { missionObjectives: project.missionObjectives } : {}),
+          },
+          PROMPT_FOOTPRINT_POLICY.minimal.projectBriefMaxChars,
+        )
+      : '';
+    const minimalProject = project
+      ? `\n\n---\n\nYou are working in the project "${project.name}".${brief ? `\n\n${brief}` : ''}`
+      : '';
     const minimalFull = minimalContextNativeTools
-      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${taskContext}${activeTaskAnchor}`
+      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
       : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
     return {
       full: minimalFull,

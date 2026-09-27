@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type ChatSessionSummary,
   type Craftbook,
+  type CraftbookCategory,
   type CraftbookConnectorNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
@@ -109,6 +110,7 @@ import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './i
 import type { InputStagingManager } from './inputs/staging.js';
 import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
+import { referencesHistoryDetails } from './references.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
 import {
   buildSpawnedChildTask,
@@ -148,6 +150,8 @@ export interface CraftbookResolver {
     craftbook: Craftbook;
     sourceId: string;
     version?: string;
+    /** The catalog shelf; unknown for project and local books. */
+    category?: CraftbookCategory;
   } | null>;
 }
 
@@ -664,17 +668,26 @@ export class TaskManager {
 
   /**
    * What a launcher needs before creating a task from a craftbook: its name
-   * for the default title and the paramSchema its params and inputs resolve
-   * against. Null when the book does not resolve for this project.
+   * for the default title, the paramSchema its params and inputs resolve
+   * against, and its catalog shelf when it has one. Null when the book does
+   * not resolve for this project.
    */
   async describeCraftbook(
     projectId: string,
     craftbookId: string,
     opts: { version?: string; sourceId?: string } = {},
-  ): Promise<{ name: string; paramSchema: Craftbook['paramSchema'] } | null> {
+  ): Promise<{
+    name: string;
+    paramSchema: Craftbook['paramSchema'];
+    category?: CraftbookCategory;
+  } | null> {
     const resolved = await this.craftbookResolver?.resolve(craftbookId, { ...opts, projectId });
     if (!resolved) return null;
-    return { name: resolved.craftbook.name, paramSchema: resolved.craftbook.paramSchema ?? {} };
+    return {
+      name: resolved.craftbook.name,
+      paramSchema: resolved.craftbook.paramSchema ?? {},
+      ...(resolved.category ? { category: resolved.category } : {}),
+    };
   }
 
   /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
@@ -1268,6 +1281,7 @@ export class TaskManager {
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
         ...(task.inputs ? { inputs: inputsHistoryDetails(task.inputs) } : {}),
+        ...(task.references ? { references: referencesHistoryDetails(task.references) } : {}),
       },
     });
 
@@ -3025,7 +3039,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
-        imageEvidence: async () => {
+        imageEvidence: async (artifact = false) => {
           if (!this.history) return { observable: false, paths: [] };
           const events = await this.history.listEvents({
             projectId,
@@ -3036,7 +3050,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             const d = event.details;
             return d?.success === true &&
               d.name === 'read_image_as_base64' &&
-              d.imageArtifact === false &&
+              d.imageArtifact === artifact &&
               d.taskRef === task.ref &&
               // Generalist sessions survive graph transitions; their bridge's
               // step tag can name the previous step after a repair back-edge.

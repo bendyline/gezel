@@ -102,9 +102,17 @@ def prerequisites(args):
     return info
 
 
-def configure_build(source, build, flags, jobs):
+def configure_build(source, build, flags, jobs, targets=("gezel-llama",)):
     run(["cmake", "-S", HERE, "-B", build, "-G", "Unix Makefiles", f"-DGEZEL_LLAMA_SOURCE_DIR={source}", *flags])
-    run(["cmake", "--build", build, "--config", "Release", "--target", "gezel-llama", "--parallel", jobs])
+    run(["cmake", "--build", build, "--config", "Release", "--target", *targets, "--parallel", jobs])
+
+
+# One ggml CPU library per instruction-set level; the bridge loads the best
+# the device supports (load_cpu_variant in gezel_llama.cpp keeps the same list).
+# The SVE/SME variants are left out: on a Galaxy S26+ they scored highest and
+# ran slowest, Gemma 4 E2B replying at 2.9 tok/s on armv9.2 against 41 on
+# armv8.6 (i8mm), and Qwen 3.5 2B reading prompts a third slower (2026-09-27).
+ANDROID_CPU_VARIANTS = ("android_armv8.0_1", "android_armv8.2_1", "android_armv8.2_2", "android_armv8.6_1")
 
 
 def copy_headers(source, destination):
@@ -181,10 +189,15 @@ def build_android(args, source, output, pin):
             "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
             "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
         ]
-        configure_build(source, build, flags, args.jobs)
+        variants = ANDROID_CPU_VARIANTS if abi == "arm64-v8a" else ()
+        if variants:
+            flags += ["-DGGML_BACKEND_DL=ON", "-DGGML_CPU_ALL_VARIANTS=ON"]
+        configure_build(source, build, flags, args.jobs,
+                        ("gezel-llama", *(f"ggml-cpu-{variant}" for variant in variants)))
         libs = output / "jniLibs" / abi
         libs.mkdir(parents=True)
-        for name in ("gezel-llama", "llama", "ggml", "ggml-base", "ggml-cpu"):
+        cpu = [f"ggml-cpu-{variant}" for variant in variants] or ["ggml-cpu"]
+        for name in ("gezel-llama", "llama", "ggml", "ggml-base", *cpu):
             shutil.copy2(build / "bin" / f"lib{name}.so", libs)
         shutil.copy2(args.ndk_tools / "sysroot/usr/lib" / triples[abi] / "libc++_shared.so", libs)
         for library in libs.glob("*.so"):
@@ -195,8 +208,9 @@ def build_android(args, source, output, pin):
         compiler = args.ndk_tools / "bin" / f"{triples[abi]}{args.android_api}-clang++"
         run([compiler, "-std=c++17", "-I", output / "include", HERE / "link-smoke.cpp",
              "-L", libs, "-Wl,-rpath-link," + str(libs), "-lgezel-llama", "-lllama", "-lggml", "-lggml-base",
-             "-lggml-cpu", "-o", build / "link-smoke"])
-    return {"minimumAPI": args.android_api, "abis": args.abi, "backend": "cpu", "elfPageAlignment": 16384}
+             *([] if variants else ["-lggml-cpu"]), "-o", build / "link-smoke"])
+    return {"minimumAPI": args.android_api, "abis": args.abi, "backend": "cpu", "elfPageAlignment": 16384,
+            "cpuVariants": list(ANDROID_CPU_VARIANTS)}
 
 
 def build_host(args, source, output, pin):
@@ -253,7 +267,7 @@ def main():
     (output / "manifest.json").write_text(json.dumps({
         "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": [], "gezelABIVersion": 1,
         "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in
-                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "CMakeLists.txt")},
+                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "chat_formats.h", "CMakeLists.txt")},
         "toolchains": toolchains, "settings": settings, "files": checksums,
         "verification": {"linkSmoke": "passed", "deviceInference": "not-run", "hostContractTests": "passed" if args.target == "host" else "not-run"},
     }, indent=2) + "\n")

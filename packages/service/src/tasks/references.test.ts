@@ -1,7 +1,11 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SearchService } from '../search/search-service.js';
-import { gatherTaskReferences, taskReferencesAsRetrieval } from './references.js';
+import {
+  gatherTaskReferences,
+  referencesHistoryDetails,
+  taskReferencesAsRetrieval,
+} from './references.js';
 
 function knowledge(id: string, title: string, snippet: string, chunk = 'a'): UnifiedSearchResult {
   return {
@@ -109,6 +113,40 @@ describe('gatherTaskReferences', () => {
     ).toBeNull();
   });
 
+  it('traces why each candidate did or did not make the list', async () => {
+    const { search } = searchReturning([
+      knowledge('290627', 'Quiche', 'Quiche is a French tart.'),
+      knowledge('290627', 'Quiche', 'Quiche Lorraine is the best-known variant.', 'b'),
+      knowledge('18668378', 'QuEChERS', 'A sample preparation method.'),
+      { ...shared('notes.md', 'quiche notes'), path: undefined },
+      ...['a', 'b', 'c', 'd', 'e'].map((n) => shared(`quiche-${n}.md`, `quiche ${n}`)),
+    ]);
+    let trace: import('@bendyline/gezel').RetrievalDecisionTrace | null = null;
+    const references = await gatherTaskReferences({
+      search,
+      projectId: 'default',
+      subject: 'quiche',
+      craftbookName: BOOK,
+      onDecisionTrace: (t) => {
+        trace = t;
+      },
+    });
+    const finished = trace as unknown as import('@bendyline/gezel').RetrievalDecisionTrace;
+    expect(finished.surface).toBe('references');
+    expect(finished.counts).toEqual({
+      kept: 5,
+      'duplicate-path': 1,
+      lexical: 1,
+      'source-policy': 1,
+      'reference-limit': 1,
+    });
+    expect(references?.selection).toMatchObject({
+      method: 'lexical',
+      candidates: 9,
+      rejected: { 'duplicate-path': 1, lexical: 1, 'source-policy': 1, 'reference-limit': 1 },
+    });
+  });
+
   it('launches without references when the search misses its budget', async () => {
     vi.useFakeTimers();
     const search = {
@@ -152,5 +190,32 @@ describe('taskReferencesAsRetrieval', () => {
       { source: 'shared', path: 'recipes.md', title: 'recipes.md', score: 1 },
     ]);
     expect(taskReferencesAsRetrieval(undefined)).toBeUndefined();
+  });
+});
+
+describe('referencesHistoryDetails', () => {
+  it('records citations and counts, never the subject or snippet text', () => {
+    const details = referencesHistoryDetails({
+      subject: 'quiche',
+      gatheredAt: 't',
+      items: [
+        {
+          source: 'knowledge',
+          title: 'Quiche',
+          uri: 'knowledge://bendyline/wikipedia-food-drink/290627#chunk=a',
+          snippet: 'A French tart.',
+        },
+        { source: 'shared', title: 'recipes.md', path: 'recipes.md', snippet: 'Sunday quiche.' },
+      ],
+    });
+    expect(details).toMatchObject({
+      kept: 2,
+      bySource: { knowledge: 1, shared: 1 },
+      citations: ['knowledge://bendyline/wikipedia-food-drink/290627', 'shared:recipes.md'],
+    });
+    expect(details.subjectHash).toMatch(/^[0-9a-f]{16}$/);
+    const serialized = JSON.stringify(details);
+    expect(serialized).not.toContain('quiche');
+    expect(serialized).not.toContain('French tart');
   });
 });

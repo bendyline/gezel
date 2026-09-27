@@ -88,6 +88,56 @@ function gatedSteps(gate: unknown) {
 }
 
 describe('completion gates — checks floor', () => {
+  it('requires artifact receipts for artifact images, even at the same workspace path', async () => {
+    const history = new HistoryManager(home);
+    const imageTasks = new TaskManager(store, history);
+    await writeArtifactFile(
+      'media/input.json',
+      JSON.stringify({ images: [{ path: 'media/view.png' }] }),
+    );
+    const task = await imageTasks.create('default', {
+      title: 'Artifact image proof',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      executionMode: 'stepwise',
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [
+          {
+            kind: 'imageEvidence',
+            file: 'media/input.json',
+            imagesKey: 'images',
+            baseDir: '.',
+            artifact: true,
+          },
+        ],
+      }),
+    });
+    const details = {
+      name: 'read_image_as_base64',
+      path: 'media/view.png',
+      success: true,
+      imageArtifact: false,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    };
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Workspace receipt',
+      details,
+    });
+    const blocked = await imageTasks.completeStepChecked('default', task.num, task.activeStepId!);
+    expect(blocked.status).toBe('held');
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'default',
+      summary: 'Artifact receipt',
+      details: { ...details, imageArtifact: true },
+    });
+    const passed = await imageTasks.completeStepChecked('default', task.num, task.activeStepId!);
+    expect(passed.status, JSON.stringify(passed)).toBe('advanced');
+  });
+
   it('accepts current generalist image evidence across a stale bridge step tag, but excludes earlier activations', async () => {
     const history = new HistoryManager(home);
     const imageTasks = new TaskManager(store, history);

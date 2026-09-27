@@ -1,0 +1,168 @@
+/* Project Tools tab: installed packages, package.json scripts, and the
+   user's approval decisions. A left-aligned reading column with the Settings
+   tab's gutters; each list is one bordered ledger with hairline rows, and an
+   empty list is a dashed slot so "nothing yet" reads as a place, not a
+   missing card. */
+.project-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  max-width: 52rem;
+  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 3vw, 2.5rem) 2.5rem;
+}
+
+.project-tools-lede {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.project-tools-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-tools-title {
+  margin: 0 0 0.75rem;
+  font-size: var(--text-xl);
+}
+
+/* Regular-weight serif keeps a group heading visibly below its section's
+   bold title (PT Serif has only 400 and 700). */
+.project-tools-subtitle {
+  margin: 1.25rem 0 0.5rem;
+  font-size: var(--text-lg);
+  font-weight: 400;
+}
+
+.project-tools-hint {
+  margin: -0.35rem 0 0.75rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.project-tools-hint + .project-tools-subtitle {
+  margin-top: 0.25rem;
+}
+
+.project-tools-install {
+  gap: 0.5rem;
+  max-width: 30rem;
+  margin: 0 0 0.75rem;
+}
+
+.project-tools-install input {
+  min-width: 0;
+  border-radius: var(--radius-md);
+}
+
+.project-tools-install button {
+  border-radius: var(--radius-md);
+}
+
+.project-tools-install button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.project-tools-log {
+  min-height: 0;
+  max-height: 16rem;
+  margin: 0 0 0.75rem;
+  overflow: auto;
+  user-select: text;
+}
+
+.project-tools-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.project-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.6rem 0.9rem;
+  font-size: var(--text-md);
+}
+
+.project-tools-row + .project-tools-row {
+  border-top: 1px solid var(--border);
+}
+
+.project-tools-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.project-tools-version,
+.project-tools-command {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+  user-select: text;
+}
+
+.project-tools-version {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+}
+
+.project-tools-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* A script's command can be long; give the name a fixed column so the
+   commands line up, and let the command wrap rather than widen the page. */
+.project-tools-row--script {
+  display: grid;
+  grid-template-columns: minmax(6rem, 11rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.project-tools-command {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.project-tools-empty {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@container project-view (max-width: 520px) {
+  .project-tools {
+    padding: 0.75rem;
+  }
+
+  .project-tools-install input,
+  .project-tools-install button {
+    min-height: 44px;
+  }
+}
+
+/* Resolves against `.project-body-content`, so an output-pane split that
+   narrows the tab stacks the script rows too. */
+@container (max-width: 520px) {
+  .project-tools-row--script {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+}

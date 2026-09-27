@@ -806,8 +806,16 @@ function extractToolStructuredContent(
   itemType: 'command_execution' | 'mcp_tool_call' | 'file_change' | 'web_search',
   raw: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
-  const out: Record<string, unknown> = {};
-  if (typeof raw.status === 'string') out.status = raw.status;
+  // Codex nests MCP results under `result`, using snake_case in its event
+  // protocol. Keep the service-returned read ranges: request arguments cannot
+  // prove which bytes the model received. Do not copy image content blocks.
+  const result = itemType === 'mcp_tool_call' ? toolResultRecord(raw) : undefined;
+  const structured = result?.structured_content ?? result?.structuredContent;
+  const out: Record<string, unknown> =
+    structured && typeof structured === 'object' && !Array.isArray(structured)
+      ? { ...(structured as Record<string, unknown>) }
+      : {};
+  if (typeof raw.status === 'string' && out.status === undefined) out.status = raw.status;
   if (typeof raw.exit_code === 'number') out.exitCode = raw.exit_code;
   if (itemType === 'file_change' && typeof raw.diff === 'string') {
     out.diff = truncateTelemetry(raw.diff);
@@ -818,11 +826,25 @@ function extractToolStructuredContent(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function toolResultRecord(raw: Record<string, unknown>): Record<string, unknown> | undefined {
+  return raw.result && typeof raw.result === 'object' && !Array.isArray(raw.result)
+    ? (raw.result as Record<string, unknown>)
+    : undefined;
+}
+
 /** Best available user-readable response for a completed Codex tool item. */
 function extractToolResultText(raw: Record<string, unknown>): string | undefined {
   for (const key of ['output', 'stdout', 'result', 'message'] as const) {
     const value = raw[key];
     if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  const content = toolResultRecord(raw)?.content;
+  if (Array.isArray(content)) {
+    const text = content
+      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text)
+      .join('\n');
+    if (text) return text;
   }
   return undefined;
 }
@@ -840,7 +862,9 @@ function redactKnownSecrets(
 }
 
 function isToolItemError(raw: Record<string, unknown>): boolean {
-  if (raw.is_error === true) return true;
+  const result = toolResultRecord(raw);
+  if (raw.is_error === true || raw.isError === true) return true;
+  if (result?.is_error === true || result?.isError === true) return true;
   if (typeof raw.exit_code === 'number' && raw.exit_code !== 0) return true;
   if (typeof raw.status === 'string' && /^(error|failed|failure)$/i.test(raw.status)) return true;
   return false;

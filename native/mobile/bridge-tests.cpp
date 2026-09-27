@@ -146,6 +146,19 @@ static void bridge_tests(const char * path) {
     ++generation.request_id;
     CHECK(gezel_llama_generate(engine.get(), transcript, 3, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
     CHECK(text == "aaaaaaaa" && result.prompt_tokens != first_tokens);
+    // Reused prompt memory: the same transcript again, one that extends the last,
+    // and one that diverges early must each decode from a consistent cache.
+    const gezel_llama_message extended[] = {{"system", "Brief replies."}, {"user", "Hello"},
+                                            {"assistant", "aaaaaaaa"}, {"user", "More"}};
+    const gezel_llama_message diverged[] = {{"system", "Other rules."}, {"user", "Hello"}};
+    for (const auto & request : {std::make_pair(message, size_t{2}), std::make_pair(message, size_t{2}),
+                                 std::make_pair(extended, size_t{4}), std::make_pair(diverged, size_t{2}),
+                                 std::make_pair(extended, size_t{4})}) {
+        text.clear();
+        ++generation.request_id;
+        CHECK(gezel_llama_generate(engine.get(), request.first, request.second, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+        CHECK(text == "aaaaaaaa" && result.generated_tokens == 8);
+    }
     generation.max_tokens = 512;
     CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_CONTEXT_LIMIT);
     generation.max_tokens = 8;
@@ -201,6 +214,11 @@ static void bridge_tests(const char * path) {
     };
     CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, callback, &slow, &result, &error) == GEZEL_LLAMA_TIMEOUT);
     generation.timeout_ms = 60000;
+    // A request that failed starts the next one from empty memory.
+    text.clear();
+    ++generation.request_id;
+    CHECK(gezel_llama_generate(engine.get(), extended, 4, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+    CHECK(text == "aaaaaaaa");
     const gezel_llama_message invalid[] = {{"user", "\xff"}};
     CHECK(gezel_llama_generate(engine.get(), invalid, 1, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_INVALID_ARGUMENT);
     CHECK(gezel_llama_unload(engine.get(), &error) == GEZEL_LLAMA_OK);
@@ -210,6 +228,13 @@ static void bridge_tests(const char * path) {
     load.max_model_bytes = 1024 * 1024;
     write_fixture(path, "custom-unsupported-template");
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_UNSUPPORTED);
+    // Gemma 4's template is Jinja the built-in renderer does not know; the
+    // bridge renders its turn format itself.
+    write_fixture(path, "{{ bos_token }}{% for m in messages %}<|turn>{{ m.role }}\n{{ m.content }}<turn|>\n{% endfor %}");
+    CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_OK);
+    text.clear();
+    CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+    CHECK(text == "aaaaaaaa");
     write_fixture(path, "chatml", 2);
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_UNSUPPORTED);
     write_fixture(path);

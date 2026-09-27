@@ -66,8 +66,9 @@ public final class GezelRuntimePlugin extends Plugin {
         if (result.getResultCode() != Activity.RESULT_OK || uri == null) { call.resolve(new JSObject().put("model", JSONObject.NULL)); return; }
         runtime.importModel(adapt(call), uri);
     }
+    // Start and stop pair per activity; the runtime counts them.
+    @Override protected void handleOnStart() { runtime.onForeground(); }
     @Override protected void handleOnStop() { runtime.onBackground(); }
-    @Override protected void handleOnResume() { runtime.onForeground(); }
     @Override protected void handleOnDestroy() {
         if (pickingModel) { pickingModel = false; runtime.releaseModelMutation(); }
         try { if (listener != null) listener.close(); } catch (Exception ignored) {}

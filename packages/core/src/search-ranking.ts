@@ -66,6 +66,45 @@ export function scoreResult(
 }
 
 /**
+ * Where a relevance model's calibrated thresholds land on the 0–1 relevance
+ * scale. Mapping each model's own `drop` / `keep` / `strong` scores onto these
+ * fixed anchors lets every surface cut in one uniform space, whichever model
+ * judged the passage — and keeps `strong` meaning what the tier already means.
+ */
+export const MODEL_RELEVANCE_ANCHORS = {
+  drop: 0.1,
+  keep: 0.3,
+  strong: STRONG_TIER_MIN_RELEVANCE,
+} as const;
+
+/**
+ * A relevance model's activated score (0–1) as calibrated relevance: monotone
+ * and piecewise-linear through the model's thresholds. An uncalibrated model
+ * (no thresholds) passes its raw score through — good for ordering, and the
+ * callers never drop on it.
+ */
+export function relevanceFromModelScore(
+  score: number,
+  thresholds: { drop: number; keep: number; strong: number } | null,
+): number {
+  const s = clamp01(score);
+  if (!thresholds) return s;
+  const points: Array<[number, number]> = [
+    [0, 0],
+    [thresholds.drop, MODEL_RELEVANCE_ANCHORS.drop],
+    [thresholds.keep, MODEL_RELEVANCE_ANCHORS.keep],
+    [thresholds.strong, MODEL_RELEVANCE_ANCHORS.strong],
+    [1, 1],
+  ];
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1]!;
+    const [x1, y1] = points[i]!;
+    if (s <= x1) return x1 === x0 ? y1 : y0 + ((s - x0) / (x1 - x0)) * (y1 - y0);
+  }
+  return 1;
+}
+
+/**
  * Relevance estimate for an FTS-only corpus that reports rank order but no
  * usable score. RRF-shaped (k=10) and anchored so rank 0 = 0.6, the fixed
  * pseudo-relevance these corpora carried historically, so the top hit's

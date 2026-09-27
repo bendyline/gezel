@@ -2,6 +2,11 @@ import { CRAFTBOOK_AUTHORING_SCENARIOS } from '../craftbooks/authoring/index.ts'
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { runnableGenericCraftbookSpecs } from '../craftbooks/specs.ts';
 import type { EvalScenario } from '../types.ts';
+import {
+  annotatedChatPolicyClosedScenario,
+  annotatedChatPolicyScenario,
+  annotatedDeckScenarios,
+} from './annotated-work.ts';
 import { arcadeDeluxeScenario } from './arcade-deluxe.ts';
 import { bookstoreOpenapiScenario } from './bookstore-openapi.ts';
 import { codebaseEvolutionScenario } from './codebase-evolution.ts';
@@ -41,6 +46,7 @@ import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflo
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
 import { researchVerifyT1, researchVerifyT2, researchVerifyT3 } from './research-verify.ts';
+import { retrievalBenchScenario } from './retrieval-bench.ts';
 import { schemaMigrationScenario } from './schema-migration.ts';
 import { selfCorrectionScenario } from './self-correction.ts';
 import { squisqBroadRefactorScenario } from './squisq-broad-refactor.ts';
@@ -69,6 +75,9 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [molenStructureAssetsScenario.id]: molenStructureAssetsScenario,
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
+  ...Object.fromEntries(annotatedDeckScenarios().map((scenario) => [scenario.id, scenario])),
+  [annotatedChatPolicyScenario.id]: annotatedChatPolicyScenario,
+  [annotatedChatPolicyClosedScenario.id]: annotatedChatPolicyClosedScenario,
   [ticTacToeScenario.id]: ticTacToeScenario,
   [petShopScenario.id]: petShopScenario,
   [tankCombatScenario.id]: tankCombatScenario,
@@ -128,6 +137,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // own embedder (Phase-4 gate: p95 < 750 ms; injection budgets are
   // CI-guarded in the service suite).
   [knowledgeBenchScenario.id]: knowledgeBenchScenario,
+  [retrievalBenchScenario.id]: retrievalBenchScenario,
   // Index-leverage agent probes on the same pinned corpus:
   // a 34-file mechanical rename and a 6-question "where does X live" Q&A.
   // Run warm-vs-cold via the ab-index bin (GEZEL_INDEX_ARM).

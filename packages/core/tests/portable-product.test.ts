@@ -451,6 +451,29 @@ describe('ordinary client against offline product runtime', () => {
     expect([...files.entries.keys()]).toContain(`projects/${project.id}/project.json`);
     expect([...files.entries.keys()].some((path) => path.includes('mobile-v1'))).toBe(false);
   });
+  it('condenses a long about and project brief to the minimal footprint on a 4096 window', async () => {
+    const { client, service, seen } = await setup();
+    const gezel = await client.createGezel({
+      name: 'Anika',
+      role: 'Writer',
+      about: 'Anika drafts plain, careful prose for neighbours. '.repeat(40),
+    });
+    const project = await client.createProject({
+      name: 'Garden notes',
+      about: 'An accessible neighbourhood garden. '.repeat(40),
+      missionObjectives: 'A short seasonal plan. '.repeat(40),
+    });
+    await client.addGezelToProject(project.id, gezel.id);
+    const session = await client.createChatSession({ gezelId: gezel.id, projectId: project.id });
+    await client.sendToChatSession(session.id, { message: 'Hello' });
+    await settled(service);
+    const system = JSON.parse(seen[0]!)[0].content as string;
+    expect(system).toContain("(About condensed to fit this model's small context window.)");
+    expect(system).toContain('### About this project\nAn accessible neighbourhood garden.');
+    expect(system).toContain('### Mission objectives\nA short seasonal plan.');
+    expect(system.match(/\(Condensed\.\)/g)).toHaveLength(2);
+    expect(system.split('## Tools available this turn')[0]!.length).toBeLessThan(2000);
+  });
   it('never starts inference when the initial conversation write fails', async () => {
     let generated = false;
     const { client, files } = await setup({
@@ -490,7 +513,8 @@ describe('ordinary client against offline product runtime', () => {
   });
 
   it('fits the tool listing to a small native context and remembers the fit', async () => {
-    // The iOS bridge fixture: one token per byte, 8192 context, 256-token replies.
+    // The iOS bridge fixture: one token per byte, 256-token replies, and a
+    // window just too small for the compact listing.
     const systems: string[] = [];
     const { service, client } = await setup({
       models: async () => ({
@@ -512,7 +536,7 @@ describe('ordinary client against offline product runtime', () => {
     });
     const gezel = await client.createGezel({ name: 'Native tester', role: 'Helper' });
     await client.updateConfig({
-      modelContextOverrides: { 'llama-cpp:fixture': 8192 },
+      modelContextOverrides: { 'llama-cpp:fixture': 3200 },
       modelTuning: { fixture: { sampling: { maxTokens: 256 } } },
     });
     const session = await client.createChatSession({ gezelId: gezel.id });
@@ -521,8 +545,13 @@ describe('ordinary client against offline product runtime', () => {
     const saved = await client.getChatSession(session.id);
     expect(saved.lastTurnError).toBeUndefined();
     expect(saved.messages.map((item) => item.content)).toEqual(['Say hello.', 'Hello.']);
-    expect(systems[0]).toContain('"parameters"');
+    // A phone starts at the compact listing: the full JSON schemas are
+    // prefill time the model rarely needs.
+    expect(systems[0]).not.toContain('"parameters"');
+    expect(systems[0]).toMatch(/- read_file\(path: string[^\n]*\): /);
+    expect(systems).toHaveLength(2);
     expect(systems.at(-1)).toContain('- read_file(path: string');
+    expect(systems.at(-1)).not.toMatch(/- read_file\(path: string[^\n]*\): /);
 
     const attempts = systems.length;
     await client.sendToChatSession(session.id, { message: 'Once more.' });

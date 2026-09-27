@@ -58,7 +58,11 @@ describe('buildInstructions — minimal-context mode', () => {
     expect(full).not.toMatch(/no tools and no workspace/i);
     // Native tool definitions travel outside the prompt.
     expect(full).not.toMatch(/Tools available this turn/i);
-    expect(full).not.toContain('Some Work Project');
+    // It can act on the project, so it keeps a condensed brief of it.
+    expect(full).toContain('You are working in the project "Some Work Project".');
+    expect(full).toContain('### About this project\nA long project brief.');
+    expect(full).toContain('(Condensed.)');
+    expect(full.length).toBeLessThan(2048);
   });
 
   it('emits the no-tools conversational steer', () => {

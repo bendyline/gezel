@@ -410,6 +410,19 @@ export const TaskReferencesSchema = z.object({
   subject: z.string(),
   gatheredAt: z.string(),
   items: z.array(TaskReferenceSchema).max(TASK_REFERENCE_LIMITS.items),
+  /** How the items were chosen from the search's candidates — counts only. */
+  selection: z
+    .object({
+      method: z.enum(['lexical', 'relevance-model', 'mixed']),
+      modelId: z.string().optional(),
+      /** What the relevance model did when one was on: scored, partial, cold, timeout, … */
+      modelStatus: z.string().optional(),
+      candidates: z.number().int().nonnegative(),
+      /** Rejected candidates per decision reason (`RETRIEVAL_DECISION_REASONS`). */
+      rejected: z.record(z.string(), z.number().int().nonnegative()),
+      ms: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 export type TaskReferences = z.infer<typeof TaskReferencesSchema>;
 

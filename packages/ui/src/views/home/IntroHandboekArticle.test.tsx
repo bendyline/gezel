@@ -47,13 +47,10 @@ const { api } = await import('../../api.js');
 describe('IntroHandboekArticle', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    vi.mocked(api.getHandboekArticle).mockResolvedValue({
+    vi.mocked(api.readKnowledgeDocument).mockResolvedValue({
       id: 'welcome',
       title: 'What is gezel?',
-      area: 'conceptual',
       markdown: '# What is gezel?\n\nA crew of AI companions that works for you.',
-      figures: [],
-      generated: false,
     } as never);
   });
 
@@ -63,7 +60,7 @@ describe('IntroHandboekArticle', () => {
       expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
     });
     expect(screen.getByTestId('linear-doc-view')).toHaveClass('gezel-article-view');
-    expect(api.getHandboekArticle).toHaveBeenCalledWith('welcome');
+    expect(api.readKnowledgeDocument).toHaveBeenCalledWith('handboek', 'welcome');
     expect(screen.queryByTestId('doc-player')).not.toBeInTheDocument();
   });
 
@@ -89,38 +86,36 @@ describe('IntroHandboekArticle', () => {
     expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
   });
 
-  it('routes "Open in Handboek" to the handboek view, landing on the article', async () => {
+  it('routes "Open in Handboek" to its Knowledge catalog', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];
     const handler = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:navigate', handler);
+    window.addEventListener('gezel:open-knowledge-document', handler);
 
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
     await user.click(screen.getByRole('button', { name: /Open in Handboek/ }));
-    window.removeEventListener('gezel:navigate', handler);
+    window.removeEventListener('gezel:open-knowledge-document', handler);
 
-    expect(events.at(-1)?.detail).toEqual({ view: 'handboek' });
-    expect(window.localStorage.getItem('gezel:handboek:article')).toBe('welcome');
+    expect(events.at(-1)?.detail).toEqual({ catalogId: 'handboek', documentId: 'welcome' });
   });
 
   it('sends intra-article links to the Handboek on the linked article', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];
     const handler = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:navigate', handler);
+    window.addEventListener('gezel:open-knowledge-document', handler);
 
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
     await user.click(screen.getByText('crew link'));
-    window.removeEventListener('gezel:navigate', handler);
+    window.removeEventListener('gezel:open-knowledge-document', handler);
 
-    expect(events.at(-1)?.detail).toEqual({ view: 'handboek' });
-    expect(window.localStorage.getItem('gezel:handboek:article')).toBe('the-crew');
+    expect(events.at(-1)?.detail).toEqual({ catalogId: 'handboek', documentId: 'the-crew' });
   });
 
   it('falls back to a Handboek link when the article fetch fails', async () => {
-    vi.mocked(api.getHandboekArticle).mockRejectedValue(new Error('boom'));
+    vi.mocked(api.readKnowledgeDocument).mockRejectedValue(new Error('boom'));
     render(<IntroHandboekArticle />);
     await waitFor(() => {
       expect(screen.getByTestId('home-intro-handboek-fallback')).toBeInTheDocument();

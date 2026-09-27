@@ -29,6 +29,7 @@ intermediate render.
 | `catalog-and-primitives.css` | Engine/model settings, catalog/toolsets, transformation flow, and base Radix primitives |
 | `project-surfaces.css` | Project output, remaining tab primitives, questions, creation galleries, mail, and connected project surfaces |
 | `../views/ProjectsView.css` | **On demand:** Responsive project master/detail and phone project controls |
+| `../views/ProjectToolsTab.css` | **On demand:** Project Tools tab — packages, scripts, and approvals (owned by `ProjectToolsTab`) |
 | `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
 | `github-and-growth.css` | GitHub workspace and gezel growth surfaces |
@@ -37,7 +38,7 @@ intermediate render.
 | `village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |
 | `squisq-theme.css` | Rebinds the vendored Squisq editor's `--squisq-*` chrome palette onto gezel's tokens |
-| `handbook.css` | **On demand:** Handboek master/detail surface (owned by `HandboekView`) |
+| `handbook.css` | Legacy Handboek master/detail surface, retained for compatibility tests |
 | `knowledge.css` | **On demand:** Knowledge catalog browser (owned by `KnowledgeView`) |
 
 ## Editing rules

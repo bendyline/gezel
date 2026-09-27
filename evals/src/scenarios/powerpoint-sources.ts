@@ -93,7 +93,7 @@ const DECOY_BLOCKS: readonly DocumentBlock[] = [
  * carry no variants because there is only one way to write them and they are
  * the values no model could have guessed.
  */
-const HALVARD_FACTS = [
+export const HALVARD_FACTS = [
   { id: 'berths', label: 'pilot berth count', required: ['4 berths', 'four berths'] },
   { id: 'boarding', label: 'boarding time', required: ['21.4', '12.8'] },
   { id: 'missed', label: 'missed-sailing rate', required: ['6.7', '2.1'] },
@@ -104,10 +104,10 @@ const HALVARD_FACTS = [
   },
 ];
 
-const DECOY_FIGURES = ['Kelby', '33.9', '27.2', '11.5', '9.4', '9 berths'];
+export const DECOY_FIGURES = ['Kelby', '33.9', '27.2', '11.5', '9.4', '9 berths'];
 
-const OUTPUT_DIR = 'powerpoint/eval';
-const DECK_MD = `${OUTPUT_DIR}/deck.md`;
+export const OUTPUT_DIR = 'powerpoint/eval';
+export const DECK_MD = `${OUTPUT_DIR}/deck.md`;
 const DECK_PPTX = 'deliverables/halvard-pilot.pptx';
 
 /** Gates every variant shares: the packet, the outline, the deck, the binary. */
@@ -206,7 +206,7 @@ function groundingCheck(forbidden?: readonly string[]): CraftbookEvalGateCheck {
   };
 }
 
-interface VariantOptions {
+export interface VariantOptions {
   scenarioId: string;
   title: string;
   objective: string;
@@ -228,7 +228,7 @@ interface VariantOptions {
   forbidden?: readonly string[];
 }
 
-function variant(source: CraftbookEvalSpec, opts: VariantOptions): CraftbookEvalSpec {
+export function variant(source: CraftbookEvalSpec, opts: VariantOptions): CraftbookEvalSpec {
   const deliverables = commonDeliverables({ citations: opts.citations ?? 'required' });
   const deckDeliverable = deliverables?.find((d) => d.path === DECK_MD);
   if (opts.grounded !== false && deckDeliverable) {

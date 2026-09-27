@@ -35,6 +35,7 @@ import {
   resolveKeurmeesterFlag,
   resolveProviderFlag,
   resolveRepairPolicyFlag,
+  resolveRetrievalFlags,
 } from './args.ts';
 
 async function main() {
@@ -94,6 +95,7 @@ async function main() {
   const forceBehaviors = parseCsv(args.flags['force-behaviors']);
   const removeBehaviors = parseCsv(args.flags['remove-behaviors']);
   const generalistMode = resolveGeneralistFlag(args.flags);
+  const retrieval = resolveRetrievalFlags(args.flags);
   const repairPolicy = resolveRepairPolicyFlag(args.flags);
   const keurmeester = resolveKeurmeesterFlag(args.flags);
 
@@ -110,6 +112,7 @@ async function main() {
       ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
       engine: provider,
       ...(generalistMode ? { generalistMode } : {}),
+      ...(retrieval ? { retrieval } : {}),
       ...(repairPolicy ? { repairPolicy } : {}),
       ...(keurmeester ? { keurmeester } : {}),
       ...(args.flags['mlx-source-home']

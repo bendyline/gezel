@@ -472,6 +472,7 @@ import type {
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
+import { RetrievalClient } from './retrieval.js';
 import {
   type ConsumeSseJsonOptions,
   SseResponseError,
@@ -1484,16 +1485,8 @@ export interface ConfigResponse {
     error?: string;
   };
   /** Passive presence for the `codex` binary. Mirrors `anthropicCliStatus`. */
-  codexCliStatus?: {
-    installed: boolean;
-    path?: string;
-    version?: string;
-    error?: string;
-  };
-  /**
-   * An Apple silicon Mac with the gezel-apple-fm helper installed. Whether
-   * Apple Intelligence is enabled is reported when the provider starts.
-   */
+  codexCliStatus?: ConfigResponse['anthropicCliStatus'];
+  /** Apple silicon with the gezel-apple-fm helper; availability is known once it starts. */
   appleFoundationModelsStatus?: { installed: boolean };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
@@ -1561,6 +1554,21 @@ export interface ConfigResponse {
    */
   faceRecognition?: {
     enabled?: boolean;
+  };
+  /**
+   * The launch reference list for craftbooks started with a subject.
+   * Default on. See `GezelConfig.taskReferences` in core schemas.
+   */
+  taskReferences?: {
+    enabled?: boolean;
+  };
+  /**
+   * The on-device relevance check. Default off. See
+   * `GezelConfig.relevanceModel` in core schemas.
+   */
+  relevanceModel?: {
+    enabled?: boolean;
+    modelId?: string;
   };
   /**
    * Opt-in ambient dashboard (Settings → Ambient display). Default off.
@@ -2191,6 +2199,7 @@ export class GezelClient {
   private readonly fetchImpl: typeof fetch;
   readonly taskInputs: TaskInputsClient;
   readonly officeIntegrations: OfficeIntegrationsClient;
+  readonly retrieval: RetrievalClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2202,9 +2211,9 @@ export class GezelClient {
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
     this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
-    this.officeIntegrations = new OfficeIntegrationsClient(<T>(m: string, p: string, b?: unknown) =>
-      this.request<T>(m, p, b),
-    );
+    const json = <T>(m: string, p: string, b?: unknown) => this.request<T>(m, p, b);
+    this.officeIntegrations = new OfficeIntegrationsClient(json);
+    this.retrieval = new RetrievalClient(json);
   }
 
   private async request<T>(

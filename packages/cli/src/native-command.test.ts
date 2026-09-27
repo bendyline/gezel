@@ -9,6 +9,7 @@ import {
   formatNativeList,
   formatNativeStatus,
   installNativeToolkit,
+  parseNativeEngine,
   parseNativeVariant,
 } from './native-command.js';
 
@@ -67,6 +68,12 @@ describe('parseNativeVariant', () => {
       '--variant must be one of cuda, vulkan, metal, cpu (got "rocm")',
     );
   });
+
+  it('accepts a known engine and rejects anything else', () => {
+    expect(parseNativeEngine('duckdb')).toBe('duckdb');
+    expect(parseNativeEngine(undefined)).toBeUndefined();
+    expect(() => parseNativeEngine('ollama')).toThrow(/--engine must be one of .*duckdb/);
+  });
 });
 
 describe('native status formatting', () => {
@@ -76,7 +83,7 @@ describe('native status formatting', () => {
         'release: native-v0.1.31 (verified pin)',
         'platform: linux-x64',
         'llama backend: cuda',
-        'toolkit: 1/4 installed',
+        'toolkit: 1/4 installed (uv, sd-server, whisper-server, llama-server; see `gezel native list` for every engine)',
       ].join('\n'),
     );
   });
@@ -123,6 +130,17 @@ describe('installNativeToolkit', () => {
     ]);
     expect(getNativeEngineStatus).toHaveBeenCalledTimes(2);
     expect(writes.join('')).toContain('llama-server: ready');
+  });
+
+  it('installs only the requested engine when one is named', async () => {
+    const { client, ensureNativeEngine } = clientFor(status());
+
+    await installNativeToolkit(client, {
+      engines: ['duckdb'],
+      output: { writeProgress: () => {} },
+    });
+
+    expect(ensureNativeEngine.mock.calls.map(([engine]) => engine)).toEqual(['duckdb']);
   });
 
   it('uses the detected backend when no explicit variant is supplied', async () => {

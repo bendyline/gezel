@@ -166,7 +166,6 @@ const AREA_LINKS: RecentTabArea[] = [
   'scripts',
   'history',
   'knowledge',
-  'handboek',
   'settings',
 ];
 

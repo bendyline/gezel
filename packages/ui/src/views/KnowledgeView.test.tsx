@@ -160,4 +160,27 @@ describe('KnowledgeView', () => {
       await screen.findByRole('button', { name: 'Open knowledge settings' }),
     ).toBeInTheDocument();
   });
+
+  it('opens the bundled welcome article after a stale catalog selection and allows returning to the list', async () => {
+    window.localStorage.setItem('gezel:knowledge:catalog', 'removed-catalog');
+    window.localStorage.setItem('gezel:knowledge:document', 'removed-document');
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
+      catalogs: [
+        {
+          ...CATALOG,
+          ref: { ...CATALOG.ref, publisherId: 'bendyline', catalogId: 'handboek' },
+          name: 'Handboek',
+          source: 'bundled',
+        },
+      ],
+    });
+    render(<KnowledgeView />);
+    await waitFor(() =>
+      expect(api.readKnowledgeDocument).toHaveBeenCalledWith('handboek', 'welcome'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '← Documents' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-view')).toHaveClass('knowledge-view--list'),
+    );
+  });
 });

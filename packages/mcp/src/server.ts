@@ -10931,11 +10931,17 @@ server.tool(
       // which is how a cold reference-catalog model read as "the food
       // catalog has nothing on quiche".
       const incomplete = res.sourcesIncomplete === true;
+      // Off-topic matches the relevance model left out. Named, so "nothing
+      // relevant" never reads as "nothing indexed".
+      const weak = res.hiddenBelowRelevanceFloor ?? 0;
+      const weakNote = weak > 0 ? ` (${weak} weak match${weak === 1 ? '' : 'es'} hidden)` : '';
       const resultSummary = modelResults.length
-        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}`
+        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}${weakNote}`
         : incomplete
           ? 'Nothing returned yet: some sources did not answer in time, so this is not evidence the topic is absent. Repeat the same search once before concluding there is no indexed material'
-          : 'No indexed project knowledge matched';
+          : weak > 0
+            ? `No closely relevant results${weakNote}`
+            : 'No indexed project knowledge matched';
       const summary = res.craftbooks.length
         ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
         : `${resultSummary}.`;

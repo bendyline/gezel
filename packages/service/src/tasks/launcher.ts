@@ -2,6 +2,7 @@ import {
   type CreateTaskRequest,
   type Task,
   type TaskReferences,
+  craftbookCategoryFamily,
   craftbookReferenceSubject,
 } from '@bendyline/gezel';
 import { ConnectorPrepError } from '../connectors/task-prep.js';
@@ -32,7 +33,7 @@ import type { TaskRunner } from './runner.js';
  */
 export interface TaskLaunchDeps {
   tasks: Pick<TaskManager, 'create' | 'list' | 'describeCraftbook'>;
-  store: Pick<Store, 'getProject' | 'getGezel'>;
+  store: Pick<Store, 'getProject' | 'getGezel' | 'readConfig'>;
   taskRunner: Pick<TaskRunner, 'enqueueHandoff'>;
   history?: Pick<HistoryManager, 'log'>;
   /**
@@ -128,6 +129,8 @@ export class TaskLauncher {
     const gather = this.deps.gatherReferences;
     if (!gather || !body.craftbookId || body.status === 'draft') return null;
     if (body.cron || body.nightShift) return null;
+    const config = await this.deps.store.readConfig().catch(() => null);
+    if (config?.taskReferences?.enabled === false) return null;
     const book = await this.deps.tasks
       .describeCraftbook(projectId, body.craftbookId, {
         ...(body.craftbookSourceId ? { sourceId: body.craftbookSourceId } : {}),
@@ -135,10 +138,17 @@ export class TaskLauncher {
       })
       .catch(() => null);
     if (!book) return null;
+    // A code book's material is the repository, which per-turn retrieval and
+    // the code tools already reach; its description searched against the
+    // reference catalogs finds namesakes ("cart" → Shopping cart) that would
+    // then ride every step. Only a subject it declares is looked up.
+    const codeWork =
+      book.category !== undefined && craftbookCategoryFamily(book.category) === 'code';
     const subject = craftbookReferenceSubject({
       paramSchema: book.paramSchema,
       ...(body.craftbookParams ? { params: body.craftbookParams } : {}),
       ...(body.inputs ? { inputs: body.inputs } : {}),
+      ...(body.description && !codeWork ? { description: body.description } : {}),
     });
     if (!subject) return null;
     return gather({ projectId, subject, craftbookName: book.name }).catch(() => null);

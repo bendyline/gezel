@@ -81,27 +81,52 @@ export function fillMainContentParam(args: {
   return suppliedSource ? params : { ...params, [key]: message };
 }
 
+/** Longest task description passed on as a reference subject. */
+const DESCRIPTION_SUBJECT_CHARS = 300;
+
 /**
  * What a launch is ABOUT, for the reference list searched at launch: the
- * value of the book's main content param. Null when that is empty, or when
- * the launch also supplies its own source (`sourcePath`, `content`, or an
- * `input` picker) — supplied sources are authoritative, and a list of other
- * material would compete with them.
+ * value of the book's main content param, else the task description. Most
+ * books declare no main content param — the person's words reach them only
+ * as the description — so without the fallback almost no launch had a
+ * subject. Null when the launch supplies its own source (`sourcePath`,
+ * `content`, or an `input` picker): supplied sources are authoritative, and
+ * a list of other material would compete with them.
+ *
+ * The description is the person's message, not the padding a short one is
+ * given, and only its opening: a long brief names its subject first, and
+ * every word of it would widen what the list admits.
  */
 export function craftbookReferenceSubject(args: {
   paramSchema: unknown;
   params?: Record<string, string>;
   inputs?: Record<string, unknown>;
+  /** The task description — the fallback subject. Omit to allow only the main param. */
+  description?: string;
 }): string | null {
-  const key = mainContentParamKey(args.paramSchema);
-  const subject = key ? args.params?.[key]?.trim() : undefined;
-  if (!key || !subject) return null;
   if (args.inputs && Object.keys(args.inputs).length > 0) return null;
+  const key = mainContentParamKey(args.paramSchema);
   const otherSource = SOURCE_FORM_KEYS.some(
     (candidate) => candidate !== key && (args.params?.[candidate]?.trim().length ?? 0) > 0,
   );
-  return otherSource ? null : subject;
+  if (otherSource) return null;
+  const subject = key ? args.params?.[key]?.trim() : undefined;
+  if (subject) return subject;
+  return args.description ? descriptionSubject(args.description) : null;
 }
+
+function descriptionSubject(description: string): string | null {
+  const own = description.replace(LAUNCH_PADDING_RE, ' ').replace(/\s+/g, ' ').trim();
+  if (!own) return null;
+  if (own.length <= DESCRIPTION_SUBJECT_CHARS) return own;
+  const cut = own.slice(0, DESCRIPTION_SUBJECT_CHARS);
+  const sentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return (sentenceEnd >= 40 ? cut.slice(0, sentenceEnd + 1) : cut).trim();
+}
+
+/** Matches either padding sentence `composeCraftbookTaskDescription` can add. */
+const LAUNCH_PADDING_RE =
+  /Run the "[^"\n]*" craftbook (?:end to end for this request|against this project)\./g;
 
 /**
  * The task description for a launch: the person's own words, verbatim,

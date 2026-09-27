@@ -270,3 +270,36 @@ export function resolveProviderFlag(
   }
   return value;
 }
+
+/**
+ * Resolve `--retrieval off|lean|balanced|deep`, `--references on|off`,
+ * `--embeddings on|off`, and `--library-recall on|off` into a
+ * `TrialOptions.retrieval` arm. Undefined when `--retrieval` is absent (the
+ * eval default). Exits on an unknown value, like `--generalist`: a typo that
+ * fell through to a default would quietly invalidate an arm.
+ */
+export function resolveRetrievalFlags(
+  flags: Record<string, string | boolean>,
+): import('../types.ts').TrialRetrievalArm | undefined {
+  const raw = flags.retrieval;
+  if (raw === undefined || raw === false) return undefined;
+  const mode = String(raw).trim();
+  if (!['off', 'lean', 'balanced', 'deep'].includes(mode)) {
+    console.error(`Unknown --retrieval "${mode}". Expected one of: off, lean, balanced, deep.`);
+    process.exit(2);
+  }
+  const onOff = (name: string, fallback: boolean): boolean => {
+    const value = flags[name];
+    if (value === undefined) return fallback;
+    if (value === true || value === 'on') return true;
+    if (value === 'off') return false;
+    console.error(`Unknown --${name} "${String(value)}". Expected on or off.`);
+    process.exit(2);
+  };
+  return {
+    mode: mode as 'off' | 'lean' | 'balanced' | 'deep',
+    references: onOff('references', mode !== 'off'),
+    embeddings: onOff('embeddings', true),
+    libraryRecall: onOff('library-recall', false),
+  };
+}

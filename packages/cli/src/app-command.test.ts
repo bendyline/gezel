@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezappManifest, ImportAiAppResult } from '@bendyline/gezel';
@@ -391,6 +391,23 @@ describe('runAppStatus', () => {
     await runAppStatus(client, dir, {});
     expect(logged.join('\n')).toContain('No gezel project is linked');
     expect(createProject).not.toHaveBeenCalled();
+  });
+
+  it('finds the project bound to the realpath of a symlinked folder', async () => {
+    const real = join(dir, 'real');
+    const link = join(dir, 'link');
+    await mkdir(real);
+    await symlink(real, link, 'junction');
+    const projectTypeStatus = vi.fn().mockResolvedValue({ projectId: 'p1', seeds: [] });
+    const client = stubClient({
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'p1', name: 'Demo', workingDir: await realpath(real) }],
+      }),
+      projectTypeStatus,
+    });
+    await runAppStatus(client, link, {});
+    expect(projectTypeStatus).toHaveBeenCalledWith('p1');
+    expect(logged.join('\n')).not.toContain('No gezel project is linked');
   });
 
   it('reports the applied app, updates, and seed drift', async () => {
