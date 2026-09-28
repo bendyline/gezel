@@ -104,6 +104,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      # The prewarm runs service source under tsx, which resolves core and
+      # knowledge through their built `dist/`. Quality's jobs have already run
+      # `pnpm build` by this point; this job leaves that to `validate`, so
+      # build just the prewarm's closure rather than the whole workspace twice.
+      - name: Build the test embedder's dependencies
+        run: pnpm --filter "@bendyline/gezel..." --filter "@bendyline/gezel-knowledge..." run build
+
       # `pnpm validate` runs the embedding-backed service suites. Prewarm the
       # shared test model before Vitest workers can race a cold or partial
       # download, matching the unit, coverage, and stability jobs in Quality.
