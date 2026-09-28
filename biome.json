@@ -35,6 +35,7 @@
       "reports/**",
       "runs/**",
       "ship-audit/**",
+      ".release-audit/**",
       "**/.upstream/**",
       "**/.vscode-test/**",
       "native/build/**",
