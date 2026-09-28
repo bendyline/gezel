@@ -184,7 +184,7 @@ describe('QueueMeter — preparing window', () => {
     expect(stop).toHaveTextContent('■ Stop');
     await userEvent.click(stop);
 
-    expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('sess-1');
+    expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('sess-1', { stopTask: true });
     expect(stop).toBeDisabled();
     expect(stop).toHaveTextContent('Stopping…');
   });

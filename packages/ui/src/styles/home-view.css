@@ -56,10 +56,10 @@
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Break out of .app-main's 1rem 1.25rem padding for a full-bleed
-     workshop. The negative margins exactly cancel the parent padding. */
-  margin: -1rem -1.25rem;
-  height: calc(100% + 2rem);
+  /* Break out of .app-main's padding for a full-bleed workshop. The
+     negative margins exactly cancel the parent padding. */
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
   display: flex;
   flex-direction: column;
   color: var(--ink);

@@ -80,6 +80,7 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
         const p = pending.get(msg.id);
         if (!p) return;
         pending.delete(msg.id);
+        if (pending.size === 0) w.unref();
         if (msg.error !== undefined) p.reject(new Error(msg.error));
         else p.resolve(msg.result);
       });
@@ -114,6 +115,12 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
+      // An idle worker must not keep the daemon alive, but a request in
+      // flight must. During startup nothing else holds the event loop open
+      // yet, so an unref'd worker let Node drain mid-await: the daemon exited
+      // 0 while installing the bundled Handboek into a fresh home, which is
+      // every eval trial and every first launch (2026-09-27).
+      w.ref();
       w.postMessage({ id, op, args });
     });
   };

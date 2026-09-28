@@ -49,6 +49,8 @@
   --gezel-paper-control: #ece8e5;
   --gezel-paper-control-deep: #e4dfdc;
   --gezel-paper-inset: #ddd3bd;
+  /* True black, for surfaces that must meet the phone's own system bars. */
+  --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
   --gezel-ink-muted: #666;
   --gezel-ink-warm: #2a2520;
@@ -113,6 +115,11 @@
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
   --accent: var(--gezel-terra);
   --accent-hover: var(--gezel-terra-hover);
+  /* Text variants are deliberately darker than their fill/border peers in
+     light mode. The semantic colors are attractive structural accents but do
+     not reach 4.5:1 as normal-size text on every paper surface. */
+  --accent-text: #8c4428;
+  --accent-text-hover: #78381f;
   /* Dark ink keeps selected text legible on both themes' medium-orange
      accent fills. */
   --accent-selection-ink: #231207;
@@ -155,10 +162,13 @@
   /* Semantic colors */
   --success: #27ae60;
   --success-bg: rgba(39, 174, 96, 0.12);
+  --success-text: #14622f;
   --warning: #e67e22;
   --warning-bg: rgba(230, 126, 34, 0.12);
+  --warning-text: #7c4200;
   --danger: #c0392b;
   --danger-bg: rgba(192, 57, 43, 0.12);
+  --danger-text: #98271d;
 
   /* Unified-diff blocks (tool-call edits). Deeper ink than the semantic
      status colors so code text stays readable on the parchment surface;
@@ -241,6 +251,8 @@
     --gezel-terra: #c0875d;
     --gezel-terra-hover: #d5a07a;
     --gezel-terra-raised: #b07a50;
+    --accent-text: #d5a07a;
+    --accent-text-hover: #e0b897;
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -250,10 +262,13 @@
     --sage-soft: #3a4634;
     --success: #6ad38f;
     --success-bg: rgba(106, 211, 143, 0.15);
+    --success-text: #6ad38f;
     --warning: #f0a04b;
     --warning-bg: rgba(240, 160, 75, 0.15);
+    --warning-text: #f0a04b;
     --danger: #e74c3c;
     --danger-bg: rgba(231, 76, 60, 0.15);
+    --danger-text: #ff8175;
     --diff-add: #6ad38f;
     --diff-add-bg: rgba(106, 211, 143, 0.08);
     --diff-rem: #ff9b9b;
@@ -307,6 +322,8 @@
   --gezel-terra: #c0875d;
   --gezel-terra-hover: #d5a07a;
   --gezel-terra-raised: #b07a50;
+  --accent-text: #d5a07a;
+  --accent-text-hover: #e0b897;
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -316,10 +333,13 @@
   --sage-soft: #3a4634;
   --success: #6ad38f;
   --success-bg: rgba(106, 211, 143, 0.15);
+  --success-text: #6ad38f;
   --warning: #f0a04b;
   --warning-bg: rgba(240, 160, 75, 0.15);
+  --warning-text: #f0a04b;
   --danger: #e74c3c;
   --danger-bg: rgba(231, 76, 60, 0.15);
+  --danger-text: #ff8175;
   --diff-add: #6ad38f;
   --diff-add-bg: rgba(106, 211, 143, 0.08);
   --diff-rem: #ff9b9b;
@@ -590,4 +610,20 @@ html.embedded-chat #root {
   padding: 12px;
   font-size: 0.85rem;
   color: var(--text-muted, var(--text));
+}
+
+/* The native phone app paints its status and navigation bars true black, and
+   the near-black dark canvas read as a lighter band beside them (Galaxy S26+,
+   2026-09-27). The page ground goes to true black there; cards and panels keep
+   their small lift. Desktop windows, however narrow, keep the warm canvas. */
+@media (prefers-color-scheme: dark) {
+  html[data-platform="mobile"]:not([data-theme="light"]) {
+    --bg: var(--gezel-paper-night);
+    --home-workshop-paper: var(--gezel-paper-night);
+  }
+}
+
+html[data-platform="mobile"][data-theme="dark"] {
+  --bg: var(--gezel-paper-night);
+  --home-workshop-paper: var(--gezel-paper-night);
 }

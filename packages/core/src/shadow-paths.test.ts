@@ -12,6 +12,10 @@ describe('isReservedShadowArtifactPath', () => {
     expect(isReservedShadowArtifactPath('./shadow/x.md')).toBe(true);
     expect(isReservedShadowArtifactPath('shadow\\x.md')).toBe(true);
     expect(isReservedShadowArtifactPath('docs/../shadow/x.md')).toBe(true);
+    // Windows opens `shadow./x.md` and `shadow /x.md` as `shadow/x.md`.
+    expect(isReservedShadowArtifactPath('shadow./x.md')).toBe(true);
+    expect(isReservedShadowArtifactPath('shadow /x.md')).toBe(true);
+    expect(isReservedShadowArtifactPath('.../shadow/x.md')).toBe(true);
   });
 
   it('leaves ordinary artifact paths alone', () => {

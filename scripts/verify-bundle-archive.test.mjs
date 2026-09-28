@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { link, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -199,6 +199,40 @@ describe('verifyBundleArchiveRoundTrip', () => {
       verifyBundleArchiveRoundTrip({ sourceDir, archivePath, expectedFileCount }),
       /unexpected 1: \._package\.json/,
     );
+  });
+
+  it('keeps the build account out of the headers and every entry unwritable by others', async () => {
+    // A root extractor that preserves owners hands each entry to the uid in its
+    // header, so a CI runner's uid there became the owner of the machine
+    // service's code tree on every install.
+    await chmod(join(archiveSourceDir, 'package.json'), 0o666);
+    await chmod(join(archiveSourceDir, 'dist'), 0o777);
+    await archive();
+
+    const headers = [];
+    await tar.list({
+      file: archivePath,
+      strict: true,
+      onReadEntry(entry) {
+        headers.push({
+          path: entry.path,
+          uid: entry.uid,
+          gid: entry.gid,
+          uname: entry.uname,
+          gname: entry.gname,
+          mode: entry.mode,
+        });
+      },
+    });
+
+    assert.ok(headers.length > 0);
+    for (const header of headers) {
+      assert.ok(!header.uid, `${header.path} records uid ${header.uid}`);
+      assert.ok(!header.gid, `${header.path} records gid ${header.gid}`);
+      assert.ok(!header.uname, `${header.path} records user ${header.uname}`);
+      assert.ok(!header.gname, `${header.path} records group ${header.gname}`);
+      assert.equal(header.mode & 0o022, 0, `${header.path} mode ${header.mode.toString(8)}`);
+    }
   });
 
   it('rejects stale metadata even when the archive mirrors the source', async () => {

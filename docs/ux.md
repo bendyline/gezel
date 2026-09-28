@@ -339,7 +339,34 @@ foreground tasks through the shared views. Host capability flags identify
 operations that require the desktop daemon. Do not build a second mobile
 project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
-Interactive targets are at least 44px, project tabs retain readable labels,
+
+The compact layout runs one notch denser than desktop: `html[data-layout="mobile"]`
+sets the root to 87.5%, so the whole `--text-*` rem scale shrinks together.
+Never shrink a single view to compensate. It also narrows the main gutter
+through `--app-main-pad-inline` on `.app-main` (0.75rem instead of 1.25rem).
+Full-bleed views cancel that gutter with the same `--app-main-pad-block` /
+`--app-main-pad-inline` tokens, never with literal negative margins. A view
+that adds its own inset on top of the gutter drops it in compact, so every
+compact view's content edge lines up. Page-level panes, such as first-run
+setup, span that full width without a second indent. The compact title bar leads with the
+navigation button, left of the brand. The button stays while the navigation is
+open, pressed, and a second tap returns to the current view, so the brand never
+shifts. In the compact rail, the
+active row stands alone: a full border and `--radius-md` on all four corners,
+with equal side margins. It has no tab bridge, because no content pane sits
+beside it to merge into. A choice with one option shows no tray. For example,
+Tasks hides its kind filter on a host without background work. In dark mode
+the native app paints its ground `--gezel-paper-night` (true black) to meet the
+phone's own system bars. Desktop windows, including narrow ones, keep the warm
+dark canvas. Native `<select>`s in the phone's model setup keep the system
+picker, but their closed control is recast like `.gz-select-trigger`, because
+Android's web view draws a dark-scheme select as a flat grey slab.
+
+Interactive targets are at least 44px on touch input, which is
+`@media (any-pointer: coarse)` and never the window width alone. A narrow
+desktop window driven by a mouse keeps the desktop navigation's row heights
+and caret column. Project and conversation tabs drop to icons only when
+their labels no longer fit (see [Tab rows fit by shedding labels](#patterns)),
 and narrow file browsers use list → detail/back while keeping editors mounted.
 Compact chat composers extend to both edges of their pane, with no outer
 desktop gutter. Only the text and controls keep a small inner inset. Native
@@ -404,6 +431,23 @@ background, which is how the first attempt read as a chip parked in the
 address line. Reach for this only when the tab genuinely sits on the seam of
 what it switches; a tab floating above unrelated content has nothing to
 connect to and should be an underline tab or keys instead.
+
+**Tab rows fit by shedding labels, not by scrolling.** A tab row that
+names where you can go must show every destination at once. The project
+section tabs and the compact conversation tabs (Chat / Task / Skills /
+References) render through `FittedTabsList`, which steps down in three
+stages as the row narrows: every label; icons with the current tab still
+named beside its icon; icons alone. Labels win whenever they fit, so a
+desktop window never shows an icon row it has room to spell out. An
+iconified tab keeps its label as visually hidden text (its accessible name
+never changes with width) and shows it in a tooltip on hover. The fit is
+measured, not guessed from breakpoints: a hidden probe row lays out each tab
+in all three faces with the live classes. So owner CSS styles a face through
+the trigger's `data-face`, never the list's `data-fit`. Glyphs come from
+`SectionIcon`; Tasks and Settings reuse the navigation rail's drawings so
+one concept keeps one picture. To keep every section on a phone, an
+iconified project tab may narrow below 44px wide, down to WCAG's 24px
+minimum. It keeps the 44px height.
 
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
@@ -557,6 +601,15 @@ modifier for task-only pieces. New gallery surfaces should reuse the
 skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
+
+At 560px and below, a gallery dialog shows as many rows as the screen allows.
+Search goes through the shared `GallerySearch`
+([components/GallerySearch.tsx](../packages/ui/src/components/GallerySearch.tsx)).
+The field folds to a magnifier key, then opens on its own row when pressed,
+and stays open while it holds a query. The header subtitle and the picker's
+footnote drop out. Each card becomes one row: a 2rem mark, then the name,
+then a single line of description, with the "Soon" stamp in line. Wider
+dialogs keep the full cards and the always-visible field.
 
 **A gallery dialog is a two-step wizard.** Both tenants are: New Task and
 New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
@@ -882,6 +935,25 @@ steampunk, medieval props, or nostalgic clutter. Source art is 512×512 WebP
 and must remain recognizable in the 44px gallery crop. Catalog image renderers
 must replace missing or failed assets with the surface's category glyph or
 initial; never expose the browser's native broken-image placeholder.
+
+**Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
+entries Gezel ships and reviews with thousands imported automatically from
+the public MCP registry, and the two must never look like more of the same.
+A community-tier item (`sourceId === 'community'`) carries a small uppercase
+`community` badge after its name — the neutral badge recipe shared with
+search's `related` and chat's `automatic`, never a warning colour, because
+an unvetted entry is usually fine and the badge is provenance, not alarm —
+plus a "Shared by *maintainer*" line, since "install only what you trust"
+is meaningless without a name to trust. Three rules travel with it. Reviewed
+entries rank ahead of community ones in every list
+(`reviewedBeforeCommunity`), while community entries stay searchable. The
+explanation is visible text, not only a tooltip: any list showing a
+community entry carries one muted line saying what the badge means. And the
+moment a community toolset asks for keys — its config form — repeats the
+caution as a `warning` line, because that is where a wallet tool would ask
+for a private key. The helpers and copy live in
+[catalog-provenance.ts](../packages/ui/src/components/catalog-provenance.ts);
+`CommunityBadge` is the one rendering of the badge.
 
 **Embedded Handboek pages.** When a surface needs explanatory copy that
 also belongs in the documentation, don't hardcode the prose — embed the

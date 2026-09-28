@@ -310,7 +310,7 @@ describe('craftbook document routes — end to end', () => {
       }),
     });
     expect(result.status).toBe(403);
-    expect(await result.text()).toContain('Only an explicit owner');
+    expect(await result.text()).toContain('trusting custom scripts requires the owner or the CLI');
   });
 
   it.runIf(process.platform !== 'darwin')(

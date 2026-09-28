@@ -65,7 +65,8 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
     // model was tuned for — LTX at 704×480, WAN 2.2 TI2V-5B at 1280×704.
     // Generating WAN at LTX's default would produce a wrong-aspect,
     // degraded clip. The caller's explicit value always wins.
-    const defaults = await resolveVideoDefaults(ctx, provider, req.model);
+    const effectiveModelId = await resolveEffectiveVideoModelId(ctx, provider, req.model);
+    const defaults = await resolveVideoDefaults(ctx, effectiveModelId);
     const effWidth = req.width ?? defaults.width;
     const effHeight = req.height ?? defaults.height;
     const effNumFrames = req.numFrames ?? defaults.numFrames;
@@ -88,7 +89,7 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
         // and prefer its friendly catalog name ("LTX-2.3 …"); fall back to the
         // requested id, then the provider placeholder.
         const installed = await provider.listInstalledModels().catch(() => []);
-        const effectiveModel = req.model ? installed.find((m) => m.id === req.model) : installed[0];
+        const effectiveModel = installed.find((m) => m.id === effectiveModelId);
         const modelLabel = effectiveModel?.name ?? req.model?.trim() ?? `${provider.name}-default`;
         const verdict = await awaitVideoApproval(ctx, {
           projectId,
@@ -250,6 +251,26 @@ interface VideoDefaults {
 }
 
 /**
+ * The model a request will run on, by the precedence the engine's
+ * `VideoModelSelector` applies at launch: the requested id, else the
+ * Settings default when it is installed, else the first installed model.
+ * The defaults and the approval card must describe that model — a distilled
+ * model handed another model's guidance scale samples with guidance it was
+ * never trained for.
+ */
+export async function resolveEffectiveVideoModelId(
+  ctx: Pick<ServiceContext, 'store'>,
+  provider: Pick<VideoProvider, 'listInstalledModels'>,
+  requestedModel: string | undefined,
+): Promise<string | undefined> {
+  if (requestedModel) return requestedModel;
+  const installed = await provider.listInstalledModels().catch(() => []);
+  const configured = (await ctx.store.readConfig().catch(() => null))?.defaultVideoModel;
+  const preferred = configured ? installed.find((m) => m.id === configured) : undefined;
+  return (preferred ?? installed[0])?.id;
+}
+
+/**
  * Pull the model's native generation defaults from the catalog so an
  * omitted request field uses what the model was tuned for (resolution,
  * frame count, fps, steps). Mirrors `resolveRecommendedImageSteps`.
@@ -257,11 +278,9 @@ interface VideoDefaults {
  * then apply) when the model isn't a catalog `video-model`.
  */
 async function resolveVideoDefaults(
-  ctx: Pick<ServiceContext, 'catalog' | 'videoProvider'>,
-  provider: VideoProvider,
-  requestedModel: string | undefined,
+  ctx: Pick<ServiceContext, 'catalog'>,
+  modelId: string | undefined,
 ): Promise<VideoDefaults> {
-  const modelId = requestedModel ?? (await provider.listInstalledModels().catch(() => []))[0]?.id;
   if (!modelId) return {};
   const detail = await ctx.catalog.get('video-model', modelId).catch(() => null);
   if (!detail || detail.manifest.kind !== 'video-model') return {};

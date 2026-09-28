@@ -92,8 +92,28 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private var store: MobileModelStore?
     private var storeError: Error?
     private let engine = gezel_llama_create()
+    // Written and read under sizingLock: the model listing runs on the storage
+    // queue and fits windows against what the inference queue holds.
     private var loadedModelId: String?
+    private var loadedPath: String?
     private var loadedContextSize = 0
+    /// Serializes the bridge's dry-run sizing with model loads, and guards the
+    /// loaded-model fields and `allocations`.
+    private let sizingLock = NSLock()
+    /// Bytes per model file and window from the bridge's dry run, or -1 when
+    /// llama.cpp cannot load the file at that window. Imported files never
+    /// change in place, so an entry cannot go stale.
+    private var allocations: [String: Int64] = [:]
+    /// The bridge's own buffers beside llama.cpp's: the hybrid/windowed state
+    /// checkpoint, token vectors and the reply text.
+    private static let bridgeBufferBytes: Int64 = 128 * 1024 * 1024
+    /// Windows offered above the 4K floor, largest first. Phones and small
+    /// desktops aim for 8K-16K; the floor is what the phone prompt was sized for.
+    private static let contextLadder = [16384, 8192]
+    private static let floorContext = 4096
+    /// Room a larger window must leave in the process allowance, so the chosen
+    /// window is not the one that barely fits.
+    private static let ladderSpareBytes: Int64 = 256 * 1024 * 1024
 
     private init(root: URL) {
         do {
@@ -165,10 +185,84 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     public func listModels(_ call: NativeCall) {
         withStore(call) { store in
             let library = try store.listModels()
-            var result: [String: Any] = ["models": library.models.map(self.modelJSON)]
+            var models = library.models.map(self.modelJSON)
+            // The window the phone can hold for the model it would run next,
+            // which the product runtime uses unless the person chose one. Only
+            // the selected model is sized, so a long library costs no dry runs.
+            if let selected = library.selectedModelId,
+               let index = library.models.firstIndex(where: { $0.id == selected }),
+               let located = try? store.modelURL(id: selected),
+               let context = self.fitContext(id: selected, path: located.1.path) {
+                models[index]["contextTokens"] = context
+            }
+            var result: [String: Any] = ["models": models]
             if let selected = library.selectedModelId { result["selectedModelId"] = selected }
             return result
         }
+    }
+
+    private func loadOptions(contextSize: Int) -> gezel_llama_load_options {
+        var options = gezel_llama_default_load_options()
+        options.context_tokens = UInt32(contextSize)
+        #if !targetEnvironment(simulator)
+        options.gpu_layers = -1
+        #endif
+        return options
+    }
+
+    /// Bytes a load at this window takes, from the bridge's dry run, or -1 when
+    /// llama.cpp cannot load the file at it. Unlike Android, iOS charges the
+    /// memory-mapped weights too: Metal wraps them, and whether the process
+    /// footprint then counts those pages has not been measured.
+    private func allocation(path: String, contextSize: Int) -> Int64 {
+        guard let engine else { return -1 }
+        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value ?? 0
+        let key = "\(path)\n\(size)\n\(contextSize)"
+        sizingLock.lock(); defer { sizingLock.unlock() }
+        if let known = allocations[key] { return known }
+        var options = loadOptions(contextSize: contextSize)
+        var estimate = gezel_llama_memory_estimate()
+        estimate.struct_size = UInt32(MemoryLayout<gezel_llama_memory_estimate>.size)
+        estimate.abi_version = gezel_llama_abi_version()
+        var error = gezel_llama_error()
+        let status = path.withCString { gezel_llama_estimate_memory(engine, $0, &options, &estimate, &error) }
+        let bytes = status == 0
+            ? Int64(estimate.model_bytes + estimate.context_bytes + estimate.compute_bytes) + Self.bridgeBufferBytes
+            : -1
+        allocations[key] = bytes
+        return bytes
+    }
+
+    /// Admission charge. A file the dry run cannot size keeps the old flat floor
+    /// (weights, 256 MiB, 64 KiB per token); its load then reports the real error.
+    private func requiredBytes(path: String, sizeBytes: Int64, contextSize: Int) -> UInt64 {
+        let bytes = allocation(path: path, contextSize: contextSize)
+        return bytes >= 0 ? UInt64(bytes) : UInt64(sizeBytes) + 256 * 1024 * 1024 + UInt64(contextSize) * 64 * 1024
+    }
+
+    /// 16K or 8K when the process allowance holds that window with room to
+    /// spare, else the 4K floor, which admission still checks. A loaded model
+    /// keeps its window, so a listing never makes the next turn reload it;
+    /// memory another loaded model holds counts as free, since loading this one
+    /// releases it.
+    private func fitContext(id: String, path: String) -> Int? {
+        guard engine != nil else { return nil }
+        sizingLock.lock()
+        let heldId = loadedModelId, heldPath = loadedPath, heldContext = loadedContextSize
+        sizingLock.unlock()
+        if heldId == id { return heldContext }
+        #if targetEnvironment(simulator)
+        // The simulator reports no allowance; checkResources keeps it small.
+        return nil
+        #else
+        var available = Int64(os_proc_available_memory())
+        if let heldPath { available += max(0, allocation(path: heldPath, contextSize: heldContext)) }
+        for context in Self.contextLadder {
+            let bytes = allocation(path: path, contextSize: context)
+            if bytes >= 0, bytes + Self.ladderSpareBytes <= available { return context }
+        }
+        return Self.floorContext
+        #endif
     }
 
     private func downloadSource(_ call: NativeCall) throws -> MobileModelSource {
@@ -396,10 +490,13 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             }
             tools = specs
         }
+        guard let sampling = LlamaSampling(call.getObject("sampling")) else {
+            call.reject("Sampling settings are outside the supported range", "INVALID_REQUEST"); return
+        }
         let maxTokens = call.getInt("maxTokens") ?? 1024
         let outputLimit = providerId == "llama-cpp" ? 4096 : AppleFoundationProvider.maximumOutputTokens
         let contextSize = call.getInt("contextSize") ?? 4096
-        guard inputBytes <= 1_000_000, (1...outputLimit).contains(maxTokens), (512...(providerId == "llama-cpp" ? 8192 : AppleFoundationProvider.availability().contextTokens)).contains(contextSize), maxTokens + 128 < contextSize, turns.last?.role == "user" else {
+        guard inputBytes <= 1_000_000, (1...outputLimit).contains(maxTokens), (512...(providerId == "llama-cpp" ? 16384 : AppleFoundationProvider.availability().contextTokens)).contains(contextSize), maxTokens + 128 < contextSize, turns.last?.role == "user" else {
             call.reject("Conversation or token budget is outside the supported range"); return
         }
         operationLock.lock()
@@ -414,7 +511,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         } else {
             operationLock.unlock()
             inferenceQueue.async {
-                self.runGeneration(call, requestId: requestId, modelId: modelId!, turns: turns, maxTokens: maxTokens, contextSize: contextSize)
+                self.runGeneration(call, requestId: requestId, modelId: modelId!, turns: turns, maxTokens: maxTokens, contextSize: contextSize, sampling: sampling)
             }
         }
     }
@@ -478,7 +575,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
                 return value
             }
             let result = [
-                descriptor("llama-cpp", "Imported GGUF model", llamaReason, 8192, 4096),
+                descriptor("llama-cpp", "Imported GGUF model", llamaReason, 16384, 4096),
                 descriptor("apple-foundation-models", "Apple on-device AI", restriction ?? apple.reason, apple.contextTokens, AppleFoundationProvider.maximumOutputTokens)
             ]
             DispatchQueue.main.async { call.resolve(["providers": result]) }
@@ -509,7 +606,9 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             let status = gezel_llama_unload(engine, &error)
             guard status == 0 else { throw MobileInferenceError(code: "BUSY", message: errorText(&error)) }
         }
-        loadedModelId = nil; loadedContextSize = 0
+        sizingLock.lock()
+        loadedModelId = nil; loadedPath = nil; loadedContextSize = 0
+        sizingLock.unlock()
     }
 
     public func releaseModel(_ call: NativeCall) { requestRelease(call) }
@@ -635,7 +734,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         finishGeneration(call, terminal: terminal)
     }
 
-    private func runGeneration(_ call: NativeCall, requestId: String, modelId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int) {
+    private func runGeneration(_ call: NativeCall, requestId: String, modelId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int, sampling: LlamaSampling) {
         let stream = NativeChatStream(plugin: self, requestId: requestId)
         // Reassert cancellation while a blocking call runs, including the tiny
         // interval between assigning its ID and entering the native function.
@@ -653,25 +752,22 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             var nativeError = gezel_llama_error()
             if loadedModelId != model.id || loadedContextSize != contextSize {
                 try unloadLlama()
-                // Conservative floor; native allocation and memory warnings
-                // still enforce the actual model's working-set requirements.
-                try checkResources(additionalBytes: UInt64(model.sizeBytes) + 256 * 1024 * 1024 + UInt64(contextSize) * 64 * 1024)
+                // Native allocation and memory warnings still enforce the
+                // model's actual working set.
+                try checkResources(additionalBytes: requiredBytes(path: url.path, sizeBytes: model.sizeBytes, contextSize: contextSize))
                 guard let operation = nextOperation(requestId) else {
                     return ["text": "", "stopReason": "cancelled"]
                 }
-                var options = gezel_llama_default_load_options()
+                var options = loadOptions(contextSize: contextSize)
                 options.request_id = operation
-                options.context_tokens = UInt32(contextSize)
-                #if !targetEnvironment(simulator)
-                options.gpu_layers = -1
-                #endif
+                sizingLock.lock()
                 let status = url.path.withCString { gezel_llama_load(engine, $0, &options, &nativeError) }
+                if status == 0 { loadedModelId = model.id; loadedPath = url.path; loadedContextSize = contextSize }
+                sizingLock.unlock()
                 guard status == 0 else {
-                    loadedModelId = nil
                     if isCancelled(requestId) { return ["text": "", "stopReason": "cancelled"] }
                     throw NSError(domain: "GezelLlama", code: Int(status), userInfo: [NSLocalizedDescriptionKey: errorText(&nativeError)])
                 }
-                loadedModelId = model.id; loadedContextSize = contextSize
             }
             try checkResources(additionalBytes: 64 * 1024 * 1024)
             guard let operation = nextOperation(requestId) else {
@@ -680,6 +776,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             var options = gezel_llama_default_generation_options()
             options.request_id = operation
             options.max_tokens = UInt32(maxTokens)
+            sampling.apply(to: &options)
             // The library's default deadline is a flat minute covering prompt
             // processing as well as decoding, which a long reply on a phone
             // passes routinely. Scale it with the reply actually asked for, and
@@ -730,5 +827,42 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             guard let result else { throw MobileStoreError.invalidModel }
             return ["model": self.modelJSON(try result.get())]
         }
+    }
+}
+
+/// A model's catalog sampling, resolved by the product runtime the same way the
+/// desktop resolves it. Absent fields keep the bridge's defaults: greedy
+/// decoding, top-k 40 / top-p 0.95 when sampling, no repetition penalty.
+struct LlamaSampling {
+    var temperature: Float = 0
+    var topK: UInt32 = 40
+    var topP: Float = 0.95
+    var minP: Float = 0
+    var repeatPenalty: Float = 1
+    var repeatLastN: UInt32 = 64
+    // An unset seed varies per reply, so a retry is not the same text again.
+    var seed = UInt32.random(in: 0...UInt32(Int32.max))
+
+    init?(_ value: [String: Any]?) {
+        guard let value else { return }
+        func number(_ key: String) -> Double? { (value[key] as? NSNumber)?.doubleValue }
+        if let v = number("temperature") { temperature = Float(v) }
+        if let v = number("topK") { guard v >= 0, v <= 1000, v == v.rounded() else { return nil }; topK = UInt32(v) }
+        if let v = number("topP") { topP = Float(v) }
+        if let v = number("minP") { minP = Float(v) }
+        if let v = number("repetitionPenalty") { repeatPenalty = Float(v) }
+        if let v = number("repetitionContext") { guard v >= 0, v <= 4096, v == v.rounded() else { return nil }; repeatLastN = UInt32(v) }
+        if let v = number("seed"), v == v.rounded() { seed = UInt32(truncatingIfNeeded: Int64(v)) & UInt32(Int32.max) }
+        guard (0...2).contains(temperature), topP > 0, topP <= 1, minP >= 0, minP < 1, (1...2).contains(repeatPenalty) else { return nil }
+    }
+
+    func apply(to options: inout gezel_llama_generation_options) {
+        options.temperature = temperature
+        options.top_k = topK
+        options.top_p = topP
+        options.min_p = minP
+        options.repeat_penalty = repeatPenalty
+        options.repeat_last_n = repeatLastN
+        options.seed = seed
     }
 }

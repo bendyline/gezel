@@ -75,6 +75,7 @@ import type {
   BackupPlan,
   BackupRequest,
   CancelCodeReviewResponse,
+  CancelSessionTurnRequest,
   CatalogItemDetail,
   CatalogItemSummary,
   CatalogItemVersionInfo,
@@ -5081,9 +5082,16 @@ export class GezelClient {
     return this.request('GET', `/api/sessions/${encodeURIComponent(sessionId)}/telemetry`);
   }
 
-  /** Forcibly end a wedged turn. Safe to call when nothing's running. */
-  cancelChatSessionTurn(sessionId: string): Promise<{ cancelled: boolean }> {
-    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`);
+  /**
+   * End the running turn. Safe to call when nothing's running. Pass
+   * `stopTask` for the person's explicit Stop: a task step the session is
+   * working is then paused, so nothing restarts it until they resume.
+   */
+  cancelChatSessionTurn(
+    sessionId: string,
+    opts?: CancelSessionTurnRequest,
+  ): Promise<{ cancelled: boolean; taskPaused?: boolean }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`, opts);
   }
 
   /**

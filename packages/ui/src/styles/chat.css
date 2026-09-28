@@ -57,7 +57,7 @@
 }
 
 .msg-failed .msg-live-status {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Themed through `--danger`, not a fixed salmon: the literal that used
@@ -67,7 +67,7 @@
   margin-top: 0.25rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   font-size: 0.85rem;
@@ -80,7 +80,7 @@
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
   font-family: var(--font-ui);
-  color: var(--accent-hover, #996142);
+  color: var(--accent-text-hover, #996142);
   background: rgba(176, 114, 76, 0.1);
   border: 1px solid rgba(176, 114, 76, 0.28);
   font-size: 0.82rem;
@@ -93,7 +93,7 @@
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
   font-family: var(--font-ui);
-  color: var(--warning);
+  color: var(--warning-text);
   background: var(--warning-bg);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
   font-size: 0.82rem;
@@ -136,7 +136,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.72rem;
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
   flex: 0 0 auto;
 }
 .msg-image-gen-narrative-prompt {
@@ -349,7 +349,7 @@
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   cursor: pointer;
   text-decoration: underline;
@@ -381,7 +381,7 @@
 }
 
 .thinking-tool-failed .thinking-tool-icon {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Pending mid-stream tool calls — markup detected in the streaming
@@ -443,7 +443,7 @@
 .thinking-tool-error {
   /* Indent past the ✗ so the reason hangs under the tool name. */
   margin: 0.15rem 0 0.1rem 1.35rem;
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: 0.74rem;
   line-height: 1.35;
   white-space: pre-wrap;
@@ -730,7 +730,7 @@
 .msg-tool-card-kind {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .msg-tool-card-headline {
@@ -1185,7 +1185,7 @@
   align-items: center;
   gap: 0.2rem;
   flex-shrink: 0;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .queue-position-you {
   display: inline-flex;
@@ -1197,7 +1197,7 @@
   border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  color: var(--accent-hover);
+  color: var(--accent-text-hover);
   font-size: var(--text-2xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1301,7 +1301,7 @@
 .msg-ghost-queued-edit-error {
   margin-top: 0.25rem;
   font-size: var(--text-xs);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Small "nudged" badge on user bubbles whose message was delivered
@@ -1378,7 +1378,7 @@
 .msg-handoff-note-kind {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .msg-handoff-note-project {
@@ -1470,13 +1470,13 @@
 }
 
 .msg-queued-task-icon {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .msg-queued-task-kind {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .msg-queued-task-headline {
@@ -1593,7 +1593,7 @@
 }
 
 .msg-tool-failure-icon {
-  color: var(--danger);
+  color: var(--danger-text);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -1713,7 +1713,7 @@
 }
 .msg-reasoning-mark.failed {
   border-color: var(--danger, #d06a6a);
-  color: var(--danger, #d06a6a);
+  color: var(--danger-text, #d06a6a);
 }
 
 /* Live think-phase stream — the always-open, dimmed counterpart to
@@ -1892,6 +1892,10 @@
   min-width: max-content;
   padding: 0.45rem 0.7rem;
   text-align: center;
+}
+
+.chat-rail-compact-tabs .chat-rail-compact-tab[data-face="icon"] {
+  padding-inline: 0.5rem;
 }
 
 .chat-rail-compact-panel.gz-tabs-content {
@@ -2291,7 +2295,7 @@ body.chat-rail-resizing webview {
 }
 .chat-pill-task-icon {
   flex: 0 0 auto;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .chat-pill-task-number {
   flex: 0 0 auto;
@@ -2537,7 +2541,7 @@ body.chat-rail-resizing webview {
 .msg-context-compaction-details summary {
   width: fit-content;
   cursor: pointer;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .msg-context-compaction-body {
   margin-top: 0.5rem;
@@ -3008,7 +3012,7 @@ button.timeline-session-divider::before {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   text-align: left;
   cursor: pointer;
   text-decoration: underline;
@@ -3088,7 +3092,7 @@ button.timeline-session-divider-continuing::before {
   gap: 0.26rem;
   font-style: italic;
   font-size: 0.72rem;
-  color: var(--accent, #b0724c);
+  color: var(--accent-text, #b0724c);
   margin-left: auto;
 }
 
@@ -3413,7 +3417,7 @@ button.timeline-session-divider-child::before {
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--radius-md);
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: var(--text-xs);
   line-height: 1.45;
 }
@@ -3604,7 +3608,7 @@ button.timeline-session-divider-child::before {
   justify-content: center;
   width: 0.8rem;
   flex: 0 0 0.8rem;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chat-rail-task-menu-ref {
@@ -3876,7 +3880,7 @@ button.timeline-session-divider-child::before {
 }
 
 .craftbook-param-form-error {
-  color: var(--danger, #d9534f);
+  color: var(--danger-text, #d9534f);
   margin: 0;
 }
 
@@ -4418,7 +4422,7 @@ button.timeline-session-divider-child::before {
 }
 
 .chat-rail-machine-file-icon {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chat-rail-machine-file-label {

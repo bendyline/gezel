@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RestoreReview } from '@bendyline/gezel';
@@ -39,10 +39,10 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** Back up the current home to a file and return its path. */
-async function makeBackup(name = 'backup.zip'): Promise<string> {
+async function makeBackup(name = 'backup.zip', request: { excludeWorkspaces?: boolean } = {}) {
   const file = join(out, name);
   const job = jobs.create('backup');
-  await runBackup({ home, store, jobs, version: '1.2.3' }, { outPath: file }, job);
+  await runBackup({ home, store, jobs, version: '1.2.3' }, { outPath: file, ...request }, job);
   return file;
 }
 
@@ -182,18 +182,111 @@ describe('runRestore', () => {
     expect(await readFile(join(home, 'documents', 'mission.md'), 'utf8')).toContain('# Mission');
   });
 
-  it('never applies another machine’s folder locations', async () => {
-    // The dangerous direction: a backup made on a machine that kept its
-    // gezels on an external drive. Applying that path here would send this
-    // install looking for its content somewhere that does not exist.
-    const foreignPath = join(out, 'machine-a-external-drive');
+  it('keeps documents added to the library since the backup', async () => {
+    // The library is often the person's cloud-synced folder; swapping it for
+    // the backup's copy deleted everything filed since, on every device.
+    await writeFile(join(home, 'documents', 'mission.md'), '# Mission');
+    const file = await makeBackup();
+    await mkdir(join(home, 'documents', 'clients'), { recursive: true });
+    await writeFile(join(home, 'documents', 'clients', 'acme.md'), 'FILED AFTER THE BACKUP');
+
+    const review = await scanRestore(deps(), file);
+    expect(review.items.find((i) => i.kind === 'document-root')?.conflict).toBe('none');
+    expect(review.warnings.some((w) => /nothing there is removed or replaced/.test(w))).toBe(true);
+    const { job } = await restore(review, addAll(review));
+
+    expect(job.status).toBe('done');
+    expect(await readFile(join(home, 'documents', 'clients', 'acme.md'), 'utf8')).toBe(
+      'FILED AFTER THE BACKUP',
+    );
+    expect(await readFile(join(home, 'documents', 'mission.md'), 'utf8')).toBe('# Mission');
+  });
+
+  it('keeps the live version of a changed document and saves the backup’s beside it', async () => {
+    const mission = join(home, 'documents', 'mission.md');
+    await writeFile(mission, 'AS BACKED UP');
+    const file = await makeBackup();
+    await writeFile(mission, 'EDITED SINCE');
+
+    const review = await scanRestore(deps(), file);
+    await restore(review, addAll(review));
+    // Restoring the same backup twice adds nothing more.
+    const again = await scanRestore(deps(), file);
+    await restore(again, addAll(again));
+
+    expect(await readFile(mission, 'utf8')).toBe('EDITED SINCE');
+    const day = new Date().toISOString().slice(0, 10);
+    const names = (await readdir(join(home, 'documents'))).filter((n) => n.startsWith('mission'));
+    expect(names.sort()).toEqual([`mission (from backup ${day}).md`, 'mission.md']);
+    expect(await readFile(join(home, 'documents', `mission (from backup ${day}).md`), 'utf8')).toBe(
+      'AS BACKED UP',
+    );
+  });
+
+  it('keeps working files a backup left out when a project is replaced', async () => {
+    const project = await store.createProject({ name: 'Roof Survey' });
+    const dir = join(home, 'projects', project.id);
+    await writeFile(join(dir, 'workspace', 'notes.md'), 'FIELD NOTES');
+    const file = await makeBackup('no-workspaces.zip', { excludeWorkspaces: true });
+    await writeFile(join(dir, 'workspace', 'later.md'), 'WRITTEN AFTER THE BACKUP');
+
+    const review = await scanRestore(deps(), file);
+    expect(review.warnings.some((w) => /keeps the working files/.test(w))).toBe(true);
+    const { job } = await restore(review, {
+      items: [{ kind: 'project', id: project.id, action: 'replace' }],
+    });
+
+    expect(job.status).toBe('done');
+    expect(await readFile(join(dir, 'workspace', 'notes.md'), 'utf8')).toBe('FIELD NOTES');
+    expect(await readFile(join(dir, 'workspace', 'later.md'), 'utf8')).toBe(
+      'WRITTEN AFTER THE BACKUP',
+    );
+    expect(await exists(join(dir, 'project.json'))).toBe(true);
+    expect((await readdir(join(home, 'projects'))).some((n) => n.includes('restore-'))).toBe(false);
+  });
+
+  it('keeps working files when the backup’s copy of the project had none', async () => {
+    // Older backups never recorded that working files were left out; all
+    // they show is a project with no working files in it.
+    const project = await store.createProject({ name: 'Roof Survey' });
+    const workspace = join(home, 'projects', project.id, 'workspace');
+    await rm(workspace, { recursive: true, force: true });
+    await mkdir(workspace);
+    const file = await makeBackup();
+    await writeFile(join(workspace, 'later.md'), 'WRITTEN AFTER THE BACKUP');
+
+    const review = await scanRestore(deps(), file);
+    await restore(review, { items: [{ kind: 'project', id: project.id, action: 'replace' }] });
+
+    expect(await readFile(join(workspace, 'later.md'), 'utf8')).toBe('WRITTEN AFTER THE BACKUP');
+  });
+
+  it('still rolls working files back when the backup carries them', async () => {
+    const project = await store.createProject({ name: 'Roof Survey' });
+    const notes = join(home, 'projects', project.id, 'workspace', 'notes.md');
+    await writeFile(notes, 'AS BACKED UP');
+    const file = await makeBackup();
+    await writeFile(notes, 'CHANGED SINCE');
+
+    const review = await scanRestore(deps(), file);
+    await restore(review, { items: [{ kind: 'project', id: project.id, action: 'replace' }] });
+
+    expect(await readFile(notes, 'utf8')).toBe('AS BACKED UP');
+  });
+
+  it('brings back house roles, never this device’s providers, folders or security', async () => {
+    // A config names engines, listeners and the security level. A backup
+    // from another machine, or a crafted one, must not be able to set them.
+    const meester = await store.createGezel({ name: 'Meester' });
     await store.writeConfig({
       provider: 'llama-cpp',
-      externalFolders: { gezels: foreignPath },
+      externalFolders: { gezels: join(out, 'machine-a-external-drive') },
+      mlxPackageSpec: 'mlx-lm @ https://example.invalid/evil.whl',
+      meesterGezelId: meester.id,
+      roleBasedNameOnlyMode: true,
     });
     const file = await makeBackup();
 
-    // A different install: same content, no external folders of its own.
     const targetHome = await mkdtemp(join(tmpdir(), 'gezel-restore-target-'));
     try {
       const targetStore = new Store({ home: targetHome });
@@ -206,11 +299,46 @@ describe('runRestore', () => {
 
       const config = (await targetStore.readConfig()) as Record<string, unknown>;
       expect(config.externalFolders).toBeUndefined();
-      // The rest of the settings still come across.
-      expect(config.provider).toBe('llama-cpp');
+      expect(config.provider).toBeUndefined();
+      expect(config.mlxPackageSpec).toBeUndefined();
+      expect(config.meesterGezelId).toBe(meester.id);
+      expect(config.roleBasedNameOnlyMode).toBe(true);
     } finally {
       await rm(targetHome, { recursive: true, force: true });
     }
+  });
+
+  it('drops a role pointing at a gezel the restore did not bring', async () => {
+    const meester = await store.createGezel({ name: 'Meester' });
+    const other = await store.createGezel({ name: 'Other' });
+    await store.writeConfig({ meesterGezelId: meester.id });
+    const file = await makeBackup();
+    await store.writeConfig({ meesterGezelId: other.id });
+    await store.deleteGezel(meester.id);
+
+    const review = await scanRestore(deps(), file);
+    const content = review.items.filter((i) => i.kind === 'settings-file');
+    await restore(review, {
+      items: content.map((i) => ({ kind: i.kind, id: i.id, action: 'add' as const })),
+      settings: true,
+    });
+
+    expect((await store.readConfig()).meesterGezelId).toBe(other.id);
+  });
+
+  it('stops before changing anything when the settings cannot be used', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const configPath = join(home, 'config.json');
+    await writeFile(configPath, JSON.stringify({ roleBasedNameOnlyMode: 'yes' }));
+    const file = await makeBackup();
+    await rm(configPath);
+    await store.deleteGezel(gezel.id);
+
+    const review = await scanRestore(deps(), file);
+    await expect(restore(review, { ...addAll(review), settings: true })).rejects.toThrow(
+      /not valid/,
+    );
+    expect(await exists(join(home, 'gezels', gezel.id))).toBe(false);
   });
 
   it('clears its staging once the restore lands', async () => {

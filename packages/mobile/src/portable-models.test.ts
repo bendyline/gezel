@@ -52,4 +52,16 @@ describe('mobile catalog provenance', () => {
     });
     expect(models[0]!.source).not.toHaveProperty('sizeBytes');
   });
+
+  it('carries the tuning phones resolve sampling from', () => {
+    const tuned = item();
+    Object.assign(tuned.manifest, {
+      tuning: { sampling: { temperature: 0.6, topK: 20 } },
+      style: { family: 'qwen', reasoningFormat: 'think', toolCallFormat: 'function-call' },
+    });
+    const [model] = portableCatalogModels([tuned]);
+    expect(model!.tuning).toEqual({ sampling: { temperature: 0.6, topK: 20 } });
+    expect(model!.reasoningFormat).toBe('think');
+    expect(portableCatalogModels([item()])[0]).not.toHaveProperty('tuning');
+  });
 });

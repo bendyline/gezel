@@ -113,6 +113,31 @@ describe('spawnPnpm', () => {
     expect(captured?.options.detached).toBeUndefined();
   });
 
+  it('leads a process group on POSIX only when asked, never on Windows', () => {
+    const captured: import('node:child_process').SpawnOptions[] = [];
+    const spawnImpl = ((
+      _command: string,
+      _args: readonly string[],
+      options: import('node:child_process').SpawnOptions,
+    ) => {
+      captured.push(options);
+      return new EventEmitter();
+    }) as unknown as typeof import('node:child_process').spawn;
+    const invocation = {
+      command: process.execPath,
+      args: ['pnpm.mjs', 'exec', 'playwright'],
+      shell: false,
+      mode: 'node-script' as const,
+    };
+
+    spawnPnpm(invocation, { cwd: workRoot, processGroup: true }, spawnImpl);
+    spawnPnpm(invocation, { cwd: workRoot }, spawnImpl);
+
+    expect(captured[0]?.detached).toBe(process.platform === 'win32' ? undefined : true);
+    expect(captured[0]).not.toHaveProperty('processGroup');
+    expect(captured[1]?.detached).toBeUndefined();
+  });
+
   it.runIf(process.platform === 'win32')(
     'preserves piped output from the Windows shell fallback',
     async () => {

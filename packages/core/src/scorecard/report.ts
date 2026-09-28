@@ -3,6 +3,7 @@ import {
   type ScorecardCell,
   type ScorecardDataset,
   type ScorecardDevice,
+  type ScorecardMemoryCoverage,
   type ScorecardModelResult,
   type ScorecardRun,
 } from './schema.js';
@@ -168,6 +169,38 @@ export function inferredScorecardDeviceClass(device: ScorecardDevice): string | 
     (device.memoryGb ?? 0) > 100
     ? 'DGX Spark Class'
     : null;
+}
+
+/**
+ * Graphics chips that share the computer's memory without the allocations
+ * showing up in the engine's resident memory: NVIDIA's unified-memory
+ * superchips, and PC integrated graphics. Apple Silicon is the exception that
+ * DOES show them, which is why darwin is decided before this is consulted.
+ */
+const SHARED_MEMORY_GPU =
+  /\b(?:GB10|GB200|GH200|Jetson|Thor|integrated|Radeon\s+8\d{2}0S|Radeon\s+\d{3}M)\b/i;
+
+/**
+ * What the memory column of a round actually measured.
+ *
+ * An explicit `memoryCoverage` on the run wins. Older rounds carry none, so it
+ * is derived from the device: the evidence is in the checked-in data, where
+ * Mac figures track weight size (qwen3.8-27b q8 minus q4 ≈ the 12 GB weight
+ * difference) while DGX Spark figures sit far below the weights themselves.
+ */
+export function scorecardMemoryCoverage(run: ScorecardRun): ScorecardMemoryCoverage {
+  if (run.memoryCoverage) return run.memoryCoverage;
+  const device = run.provenance.device;
+  if (device.platform === 'darwin') return 'full';
+  const gpu = device.gpuModel?.trim() ?? '';
+  if (
+    inferredScorecardDeviceClass(device) !== null ||
+    /\bDGX\b/i.test(device.label) ||
+    SHARED_MEMORY_GPU.test(gpu)
+  ) {
+    return 'incomplete';
+  }
+  return gpu ? 'system-only' : 'full';
 }
 
 /**

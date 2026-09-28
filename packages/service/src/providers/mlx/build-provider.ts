@@ -20,12 +20,13 @@ import {
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
-import { nativeVisionEnabledFor } from '../vision-capability.js';
+import { nativeVisionPreferenceFor } from '../vision-capability.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
 import { drafterDirFor, resolveSpecDrafter } from './spec-drafter.js';
 import { MLX_DEFAULT_PACKAGE_SPEC, MLX_VENV_NAME, mlxVenvPackages } from './venv.js';
+import { MlxVisionMode, mlxCacheFingerprint, resolveMlxVisionPolicy } from './vision-mode.js';
 import { hasMlxVisionTower } from './vision.js';
 
 const log = createLogger('chat');
@@ -201,9 +202,18 @@ export async function buildMlxProvider(opts: {
     throw err;
   }
 
-  const visionEnabled =
-    (defaultModelId ? nativeVisionEnabledFor(config.nativeVision, defaultModelId) : true) &&
-    (await hasMlxVisionTower(modelDir));
+  // Text-only until a request carries pixels — see vision-mode.ts for why the
+  // vision tower is not simply loaded whenever the checkpoint has one.
+  const visionMode = new MlxVisionMode(
+    resolveMlxVisionPolicy({
+      preference: nativeVisionPreferenceFor(
+        config.nativeVision,
+        modelCatalogInfo?.id ?? defaultModelId,
+      ),
+      hasVisionTower: await hasMlxVisionTower(modelDir),
+    }),
+    modelCatalogInfo?.id ?? defaultModelId ?? modelDir,
+  );
 
   // A per-model override below the host floor is deliberate user intent —
   // lower the floor to the override instead of silently raising the request
@@ -582,7 +592,8 @@ export async function buildMlxProvider(opts: {
   // catalog republishes that don't change weights. A catalog version
   // bump or a switch to a different model path produces a different
   // fingerprint, so old caches are never accidentally loaded against
-  // new weights.
+  // new weights. The launch's tower segments it further — see
+  // `mlxCacheFingerprint` — while the PLE view below keys on the weights alone.
   // Replica isolation: replica 0 keeps the canonical cache root; 1+
   // get a `replica-N` sibling subdir so concurrent MLX wrappers
   // don't collide on each other's disk-cache writes. The python
@@ -665,6 +676,7 @@ export async function buildMlxProvider(opts: {
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     resolveLaunch: async () => {
+      const vision = visionMode.takeLaunch();
       const port = cachedPort ?? (await pickFreePort());
       cachedPort = port;
       return {
@@ -678,7 +690,7 @@ export async function buildMlxProvider(opts: {
           pythonServerPath,
           '--model',
           modelDir,
-          ...(visionEnabled ? ['--vision'] : []),
+          ...(vision ? ['--vision'] : []),
           '--external-ple-dir',
           join(
             store.homePath,
@@ -697,7 +709,7 @@ export async function buildMlxProvider(opts: {
           '--persist-dir',
           cacheRoot,
           '--model-fingerprint',
-          modelFingerprint,
+          mlxCacheFingerprint(modelFingerprint, vision),
           '--disk-cache-budget-mb',
           String(diskCacheBudgetMb),
           // Tunable prefill chunk size — only forwarded when the
@@ -764,7 +776,7 @@ export async function buildMlxProvider(opts: {
 
   const provider = new MlxProvider({
     supervisor,
-    visionEnabled,
+    vision: visionMode,
     ...baseProviderOpts,
     // Weights + KV at the admitted window — the broker-ledger reservation
     // the pool should hold for this replica (M1).

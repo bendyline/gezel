@@ -5,7 +5,18 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { canonicalRecipients } from './recipient.js';
 import type { OutgoingMail } from './types.js';
+
+/**
+ * Collapse line breaks and other control characters. Gmail sends to every
+ * address in the raw headers, so a CRLF in the subject would otherwise add a
+ * `Bcc:` line the recipient allowlist never saw.
+ */
+function singleLine(s: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point
+  return s.replace(/[\u0000-\u001f\u007f]+/g, ' ');
+}
 
 /** RFC2047 encode a header value when it contains non-ASCII. */
 function encodeHeaderWord(s: string): string {
@@ -20,16 +31,20 @@ function foldBase64(b64: string): string {
 
 /** Build a complete RFC822 message buffer for `from` → `mail`. */
 export function buildRawMime(from: string, mail: OutgoingMail): Buffer {
+  const cc = canonicalRecipients(mail.cc ?? []);
+  const bcc = canonicalRecipients(mail.bcc ?? []);
   const headers: string[] = [
-    `From: ${from}`,
-    `To: ${mail.to.join(', ')}`,
-    ...(mail.cc?.length ? [`Cc: ${mail.cc.join(', ')}`] : []),
-    ...(mail.bcc?.length ? [`Bcc: ${mail.bcc.join(', ')}`] : []),
-    `Subject: ${encodeHeaderWord(mail.subject)}`,
+    `From: ${singleLine(from)}`,
+    `To: ${canonicalRecipients(mail.to).join(', ')}`,
+    ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []),
+    ...(bcc.length ? [`Bcc: ${bcc.join(', ')}`] : []),
+    `Subject: ${encodeHeaderWord(singleLine(mail.subject))}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${randomBytes(12).toString('hex')}@gezel.local>`,
-    ...(mail.inReplyTo ? [`In-Reply-To: ${mail.inReplyTo}`] : []),
-    ...(mail.references?.length ? [`References: ${mail.references.join(' ')}`] : []),
+    ...(mail.inReplyTo ? [`In-Reply-To: ${singleLine(mail.inReplyTo)}`] : []),
+    ...(mail.references?.length
+      ? [`References: ${mail.references.map(singleLine).join(' ')}`]
+      : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: base64',

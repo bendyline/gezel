@@ -135,14 +135,10 @@ export function rewriteHandboekKnowledgeLinks(
       if (fence) return line;
       return line.replace(
         /(!?)\[([^\]]*)\]\(([^()\s]+)\)/g,
-        (whole, image: string, label: string, target: string) => {
-          if (
-            /^[a-z][a-z0-9+.-]*:/i.test(target) ||
-            target.startsWith('//') ||
-            target.startsWith('#')
-          )
+        (whole, image: string, label: string, href: string) => {
+          if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//') || href.startsWith('#'))
             return whole;
-          const [, rawPath = '', suffix = ''] = /^([^?#]*)(.*)$/.exec(target) ?? [];
+          const [, rawPath = '', suffix = ''] = /^([^?#]*)(.*)$/.exec(href) ?? [];
           if (image) {
             const assetPath = posix.normalize(`${area}/${rawPath}`);
             return assetPath.startsWith('assets/') ? `![${label}](${assetPath}${suffix})` : whole;

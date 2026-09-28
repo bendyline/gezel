@@ -9,17 +9,25 @@ let root: string;
 const cleanup: Array<() => Promise<void>> = [];
 
 /** A service module that records its options and never binds a port. */
-function stubService(port = 41234): HostServiceModule & { calls: unknown[]; stopped: number } {
+function stubService(port = 41234): HostServiceModule & {
+  calls: unknown[];
+  stopped: number;
+  directFetch: typeof fetch;
+} {
   const calls: unknown[] = [];
+  const directFetch: typeof fetch = async () => new Response('direct');
   const module = {
     calls,
     stopped: 0,
+    directFetch,
     startService: async (opts: Record<string, unknown>) => {
       calls.push(opts);
       return {
         port,
         clientToken: 'client-token',
         cert: null,
+        profile: 'embedded-inference' as const,
+        fetch: directFetch,
         stop: async () => {
           module.stopped += 1;
         },
@@ -67,6 +75,41 @@ describe('hostInProcess', () => {
       port: 0,
       preferCanonicalPort: false,
     });
+  });
+
+  it('passes the inference-only embedding profile to the service', async () => {
+    const home = join(root, 'app-home');
+    const service = stubService();
+    const connection = await hostInProcess('qualla', {
+      home,
+      mode: 'in-process',
+      inferenceOnly: true,
+      serviceModule: service,
+    });
+    cleanup.push(() => connection.close());
+
+    expect(service.calls[0]).toMatchObject({ embeddedInferenceOnly: true });
+    expect(connection.fetch).toBe(service.directFetch);
+  });
+
+  it('fails fast when the service is too old for the inference-only profile', async () => {
+    const home = join(root, 'app-home');
+    const service = stubService();
+    const startService = service.startService.bind(service);
+    service.startService = async (opts) => {
+      const running = await startService(opts);
+      return { ...running, profile: undefined, fetch: undefined };
+    };
+
+    await expect(
+      hostInProcess('qualla', {
+        home,
+        mode: 'in-process',
+        inferenceOnly: true,
+        serviceModule: service,
+      }),
+    ).rejects.toMatchObject({ code: 'service_inference_only_unsupported' });
+    expect(service.stopped).toBe(1);
   });
 
   it('joins the daemon a sibling instance already started', async () => {

@@ -379,7 +379,7 @@
 .filemap-finding-severity {
   padding: 1px 4px;
   border-radius: var(--radius-sm);
-  color: var(--warning);
+  color: var(--warning-text);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
   font-size: var(--text-2xs);
   font-weight: 700;
@@ -387,7 +387,7 @@
 }
 .filemap-finding-card[data-severity="critical"] .filemap-finding-severity,
 .filemap-finding-card[data-severity="high"] .filemap-finding-severity {
-  color: var(--danger);
+  color: var(--danger-text);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 .filemap-finding-location {
@@ -415,7 +415,7 @@
   white-space: pre-wrap;
 }
 .filemap-finding-task {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 .filemap-finding-task-link {
@@ -630,7 +630,7 @@ button.filemap-review-issue:hover {
 .filemap-overlay-stat {
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent, #c9722e);
+  color: var(--accent-text, #c9722e);
   white-space: nowrap;
 }
 .filemap-add {
@@ -751,7 +751,7 @@ button.linklike {
   padding: 0.08rem 0.4rem;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .gz-budget-tag-custom {
   background: var(--border);
@@ -759,7 +759,7 @@ button.linklike {
 }
 .gz-budget-tag-risky {
   background: color-mix(in srgb, var(--warning) 22%, transparent);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 .gz-budget-track {
   position: relative;
@@ -785,7 +785,7 @@ button.linklike {
   white-space: nowrap;
 }
 .gz-budget-marker-arrow {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.6rem;
   line-height: 1;
 }
@@ -871,7 +871,7 @@ button.linklike {
   display: block;
   margin-top: 0.5rem;
   max-width: 26rem;
-  color: var(--warning);
+  color: var(--warning-text);
 }
 .engine-memory-budget-actions {
   display: flex;
@@ -923,7 +923,7 @@ button.linklike {
   color: var(--muted, #777);
 }
 .project-overview-chip.pending {
-  color: var(--accent, #c9722e);
+  color: var(--accent-text, #c9722e);
   border-color: var(--accent, #c9722e);
 }
 .project-overview-architecture {
@@ -997,7 +997,7 @@ button.linklike {
   font-family: var(--font-ui);
 }
 .people-card-name:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 .people-card-rename {
@@ -1014,7 +1014,7 @@ button.linklike {
   cursor: pointer;
 }
 .people-card-forget:hover {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: var(--danger);
 }
 .project-overview-open-digest {

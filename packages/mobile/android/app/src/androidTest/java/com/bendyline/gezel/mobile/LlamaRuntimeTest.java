@@ -89,6 +89,17 @@ public final class LlamaRuntimeTest {
         assertEightTokens();
     }
 
+    @Test public void catalogSamplingDecodesAndRejectsOutOfRangeValues() {
+        load();
+        AtomicInteger chunks = new AtomicInteger();
+        assertEquals(FINISH_LENGTH, LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8,
+            0.7f, 20, 0.8f, 0.05f, 1.1f, 64, 7, bytes -> { chunks.incrementAndGet(); return true; }));
+        assertTrue("Sampled generation must stream", chunks.get() > 0);
+        assertThrows(IllegalStateException.class, () -> LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8,
+            0.7f, 20, 0f, 0f, 1f, 64, 7, bytes -> true));
+        assertEightTokens();
+    }
+
     @Test public void invalidRequestsFailWithoutPoisoningNextGeneration() {
         assertThrows(IllegalStateException.class, () ->
             LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8, bytes -> true));

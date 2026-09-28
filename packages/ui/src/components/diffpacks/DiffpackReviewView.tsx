@@ -3,6 +3,7 @@ import { formatDiffpackRef } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { formatAbsoluteTime } from '../../relative-time.js';
+import '../../styles/diffpacks.css';
 import { MarkdownField } from '../MarkdownField.js';
 import { GitDiffView } from '../github/GitDiffView.js';
 import { plural } from '../github/gitCopy.js';

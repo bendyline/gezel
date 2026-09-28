@@ -62,7 +62,7 @@
 }
 
 .script-editor-dirty {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .script-editor-rail-toggle {
@@ -169,7 +169,7 @@
 }
 
 .script-code-editor__error {
-  color: var(--danger, #b3402e);
+  color: var(--danger-text, #b3402e);
 }
 
 .script-code-editor__host {
@@ -283,7 +283,7 @@
 }
 
 .script-editor-problem--error .script-editor-problem-msg {
-  color: var(--danger, #b3402e);
+  color: var(--danger-text, #b3402e);
 }
 
 .script-editor-problem--warning .script-editor-problem-msg {
@@ -687,7 +687,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent, #6af);
+  color: var(--accent-text, #6af);
   cursor: pointer;
   font: inherit;
   text-align: left;
@@ -875,7 +875,7 @@
 .gate-condition-add {
   align-self: flex-start;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px dashed var(--border);
   border-radius: 8px;
   padding: 6px 10px;

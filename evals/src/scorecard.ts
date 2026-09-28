@@ -345,6 +345,11 @@ export function mergeScorecard(
         // class of loss as the provenance fields below; an explicit note
         // still wins.
         ...(run.note === undefined && prior.note !== undefined ? { note: prior.note } : {}),
+        // Same for a hand-recorded memory coverage: the writer never sets one,
+        // so a rebuild would silently revert a corrected round to the guess.
+        ...(run.memoryCoverage === undefined && prior.memoryCoverage !== undefined
+          ? { memoryCoverage: prior.memoryCoverage }
+          : {}),
         provenance: {
           ...run.provenance,
           startedAt: prior.provenance.startedAt,

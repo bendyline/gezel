@@ -111,6 +111,116 @@ describe('::handboek-model-scorecard', () => {
     expect(md).toContain('78.5\u00a0tok/s output<br>1,182\u00a0tok/s prefill');
   });
 
+  describe('memory column honesty', () => {
+    const measuredOn = (device: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      dataset({
+        runs: [
+          {
+            id: 'r2',
+            provenance: {
+              startedAt: '2026-09-07T00:00:00.000Z',
+              device,
+              harnessCommit: 'abc1234',
+              gildeVersion: '0.1.60',
+              count: 3,
+              judgeModelId: null,
+            },
+            suites: ['core'],
+            scenariosBySuite: { core: ['tictactoe'] },
+            ...extra,
+          },
+        ],
+        results: [
+          {
+            modelId: 'qwen3.8-flash-next-iq4',
+            label: 'qwen3.8-flash-next-iq4',
+            engine: 'llama-cpp',
+            tier: 'large',
+            parameterSize: '180B',
+            runId: 'r2',
+            suiteId: 'core',
+            runtime: { contextTokens: 131072, peakMemoryMb: 5577 },
+            cells: [{ scenarioId: 'tictactoe', trials: 3, successes: 3, nonModelFailures: 0 }],
+          },
+        ],
+      });
+    const spark = {
+      label: 'DGX Spark Class',
+      platform: 'linux',
+      arch: 'arm64',
+      memoryGb: 122,
+      gpuModel: 'NVIDIA GB10',
+    };
+    const discrete = {
+      label: 'win32 · AMD Ryzen 9 7950X3D',
+      platform: 'win32',
+      arch: 'x64',
+      memoryGb: 64,
+      gpuModel: 'AMD Radeon AI PRO R9700',
+    };
+
+    it('drops the memory figure on a shared-memory machine the probe cannot see into', () => {
+      for (const md of [
+        renderScorecardMarkdown(measuredOn(spark), 'core', { includeTaskCount: false }),
+        renderScorecardRunsMarkdown(measuredOn(spark), ['core'], { includeTaskCount: false }),
+      ]) {
+        expect(md).toContain('| Model | Size | Tasks passed | Performance | Context |\n');
+        expect(md).not.toContain('Memory used');
+        expect(md).not.toContain('5.4\u00a0GB');
+        expect(md).toContain("Memory isn't shown for this round.");
+      }
+    });
+
+    it('labels a discrete-GPU round as system memory and says what it leaves out', () => {
+      const md = renderScorecardRunsMarkdown(measuredOn(discrete), ['core'], {
+        includeTaskCount: false,
+      });
+      expect(md).toContain(
+        '| Model | Size | Tasks passed | Performance | Context | System memory |',
+      );
+      expect(md).toContain('5.4\u00a0GB');
+      expect(md).toContain('separate graphics card');
+      expect(md).not.toContain('Memory used');
+    });
+
+    it('keeps a Mac round as the full footprint with no caveat', () => {
+      const md = renderScorecardRunsMarkdown(
+        measuredOn({ label: 'Mac · Apple M4 Max', platform: 'darwin', arch: 'arm64' }),
+        ['core'],
+        { includeTaskCount: false },
+      );
+      expect(md).toContain('| Context | Memory used |');
+      expect(md).not.toContain('graphics');
+    });
+
+    it('lets a round state its own coverage', () => {
+      const md = renderScorecardRunsMarkdown(
+        measuredOn(discrete, { memoryCoverage: 'incomplete' }),
+        ['core'],
+        { includeTaskCount: false },
+      );
+      expect(md).not.toContain('System memory');
+      expect(md).toContain("Memory isn't shown for this round.");
+    });
+
+    it('applies the same rule in the filterable site block, still as one HTML block', () => {
+      const html = renderScorecardFilterHtml(measuredOn(spark), ['core'], {
+        includeTaskCount: false,
+      });
+      expect(html).toContain('<th>Context</th></tr>');
+      expect(html).not.toContain('5.4\u00a0GB');
+      expect(html).toContain('<p class="hb-scorecard-memory-note">Memory isn');
+      expect(html.split('\n').every((line) => line.startsWith('<'))).toBe(true);
+      expect(html).not.toContain('\n\n');
+
+      const site = renderScorecardFilterHtml(measuredOn(discrete), ['core'], {
+        includeTaskCount: false,
+      });
+      expect(site).toContain('<th>System memory</th>');
+      expect(site).toContain('separate graphics card');
+    });
+  });
+
   it('keeps the Performance column when an older round has no speed probe', () => {
     const md = renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: false });
     expect(md).toContain('| Model | Size | Tasks passed | Performance |');

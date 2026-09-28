@@ -15,6 +15,10 @@ export interface HostServiceModule {
     port: number;
     clientToken: string;
     cert: { certPem: string } | null;
+    /** Identifies the service scope that actually started. */
+    profile?: 'full' | 'embedded-inference';
+    /** Direct authenticated app transport for an in-process service. */
+    fetch?: typeof fetch;
     stop: () => Promise<void>;
   }>;
 }
@@ -72,6 +76,13 @@ export interface HostOptions {
    * keeps existing Node embedders on the path they already use.
    */
   mode?: 'child' | 'in-process';
+  /**
+   * Start only the inference and model-management surface needed by an
+   * embedding app. This skips the standalone product's schedulers, channels,
+   * editor bridges, indexing, and background maintenance. In `in-process`
+   * mode it also removes the need for a separate Node executable.
+   */
+  inferenceOnly?: boolean;
   /**
    * How this build was distributed. Pass `store` from a Mac App Store or
    * Microsoft Store build: the daemon then refuses every runtime download of
@@ -178,6 +189,13 @@ export interface EnsureModelOptions {
   bundle?: string;
   /** Make this the daemon's default model. Defaults to true when hosting. */
   pinAsDefault?: boolean;
+  /**
+   * Whether Gezel may download model weights when the model is not already
+   * present and no bundle was supplied. Defaults to true. Set false when an
+   * app may prepare an engine automatically but requires a separate user
+   * gesture before downloading model data.
+   */
+  allowWeightDownload?: boolean;
   onEvent?(event: EnsureProgressEvent): void;
   signal?: AbortSignal;
 }

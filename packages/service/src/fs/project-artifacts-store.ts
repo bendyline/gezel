@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import {
+  artifactSegments,
   isReservedDiffpackArtifactPath,
   isReservedPromptDraftArtifactPath,
   isReservedShadowArtifactPath,
@@ -642,15 +643,7 @@ export function normalizeArtifactPath(p: string): string {
 }
 
 function isProtectedConnectorCorpusPath(path: string): boolean {
-  const segments = path
-    .replaceAll('\\', '/')
-    .split('/')
-    .filter((segment) => segment !== '' && segment !== '.');
-  const collapsed: string[] = [];
-  for (const segment of segments) {
-    if (segment === '..') collapsed.pop();
-    else collapsed.push(segment);
-  }
+  const collapsed = artifactSegments(path);
   if (collapsed[0]?.toLowerCase() !== 'data') return false;
   return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
 }

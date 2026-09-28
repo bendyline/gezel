@@ -183,6 +183,30 @@ describe('launchReadiness with a "fill at least one" rule', () => {
     expect(launchReadiness(launch, deckWithRule)).toEqual({ ready: true });
   });
 
+  it('asks for the message when the composer is empty and nothing else fills the rule', () => {
+    // An empty brief used to reach the daemon and come back as a raw 500.
+    const launch: PromptDraftTaskLaunch = {
+      craftbookId: 'powerpoint-deck',
+      params: {},
+      origin: 'user',
+    };
+    expect(launchReadiness(launch, deckWithRule, { hasMessage: false })).toEqual({
+      ready: false,
+      reason: 'Write what this task should be about.',
+    });
+    expect(
+      launchReadiness({ ...launch, params: { topic: 'Delft' } }, deckWithRule, {
+        hasMessage: false,
+      }),
+    ).toEqual({ ready: true });
+  });
+
+  it('says so when the catalog answered without the book', () => {
+    const launch: PromptDraftTaskLaunch = { craftbookId: 'gone', params: {}, origin: 'user' };
+    expect(launchReadiness(launch, null, { missing: true }).reason).toMatch(/not available/);
+    expect(launchReadiness(launch, null).reason).toBe('Loading the craftbook…');
+  });
+
   it('holds Send in plain words when the rule does not include the main content', () => {
     const noTopic = {
       ...deckWithRule,
@@ -284,7 +308,6 @@ describe('mergeSuggestedLaunch', () => {
     const merged = mergeSuggestedLaunch({
       current,
       plan: plan({ topic: 'France' }),
-      text: 'A deck about France',
       suppressed: null,
       manifest: deck,
     });
@@ -297,7 +320,6 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: merged,
         plan: plan({ topic: 'France' }),
-        text: 'A deck about France',
         suppressed: null,
         manifest: deck,
       }),
@@ -310,7 +332,6 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: own,
         plan: plan(),
-        text: 'x',
         suppressed: null,
         manifest: deck,
       }),
@@ -319,14 +340,13 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: own,
         plan: null,
-        text: 'x',
         suppressed: null,
         manifest: deck,
       }),
     ).toBe(own);
   });
 
-  it('clears a suggestion when the plan goes quiet or the text was dismissed', () => {
+  it('clears a suggestion when the plan goes quiet or the book was dismissed', () => {
     const suggested: PromptDraftTaskLaunch = {
       craftbookId: 'powerpoint-deck',
       params: { topic: 'France' },
@@ -336,7 +356,6 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: suggested,
         plan: null,
-        text: 'A deck about France',
         suppressed: null,
         manifest: deck,
       }),
@@ -345,20 +364,19 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: suggested,
         plan: plan({ topic: 'France' }),
-        text: 'A deck about France',
-        suppressed: { craftbookId: 'powerpoint-deck', text: 'A deck about France' },
+        suppressed: { craftbookId: 'powerpoint-deck' },
         manifest: deck,
       }),
     ).toBeNull();
+    // Editing the message after turning the task down does not bring it back.
     expect(
       mergeSuggestedLaunch({
         current: null,
         plan: plan({ topic: 'Spain' }),
-        text: 'A deck about Spain',
-        suppressed: { craftbookId: 'powerpoint-deck', text: 'A deck about France' },
+        suppressed: { craftbookId: 'powerpoint-deck' },
         manifest: deck,
       }),
-    ).toMatchObject({ params: { topic: 'Spain' } });
+    ).toBeNull();
   });
 
   it('attaches nothing the book would refuse, and waits for the manifest', () => {
@@ -369,7 +387,6 @@ describe('mergeSuggestedLaunch', () => {
           ...plan(),
           craftbook: { id: 'ebook-compile', name: 'Ebook', invocation: { description: 'x' } },
         },
-        text: 'x',
         suppressed: null,
         manifest: compile,
       }),
@@ -378,7 +395,6 @@ describe('mergeSuggestedLaunch', () => {
       mergeSuggestedLaunch({
         current: null,
         plan: plan(),
-        text: 'x',
         suppressed: null,
         manifest: null,
       }),

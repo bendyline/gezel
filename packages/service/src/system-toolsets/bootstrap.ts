@@ -81,6 +81,59 @@ export interface SystemBootstrapOptions {
  *      Playwright's own CLI to download Chromium into our managed dir.
  */
 export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<void> {
+  const controller = new AbortController();
+  const work = bootstrap(opts, controller.signal);
+  const entry: RunningBootstrap = {
+    controller,
+    settled: work.then(
+      () => undefined,
+      () => undefined,
+    ),
+  };
+  running.add(entry);
+  try {
+    await work;
+  } finally {
+    running.delete(entry);
+  }
+}
+
+interface RunningBootstrap {
+  controller: AbortController;
+  settled: Promise<void>;
+}
+
+const running = new Set<RunningBootstrap>();
+const STOP_WAIT_MS = 10_000;
+
+/**
+ * Stop every bootstrap in flight — its downloads, its pnpm install, and the
+ * Chromium installer's whole process tree — and wait for them to unwind.
+ *
+ * The service calls this on shutdown. Without it a quit during first run
+ * left `playwright install chromium` downloading as an orphan, and in
+ * embedded mode its open pipes kept the invisible app process alive for
+ * minutes after the window closed. Nothing is recorded for a stopped step,
+ * so the next boot redoes it from the start.
+ */
+export async function stopSystemBootstraps(waitMs = STOP_WAIT_MS): Promise<void> {
+  const inFlight = [...running];
+  if (inFlight.length === 0) return;
+  for (const entry of inFlight) entry.controller.abort();
+  // The kills are already issued; the wait only lets their exits be observed.
+  // An extract or publish step cannot be interrupted, and must not hold quit.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all(inFlight.map((entry) => entry.settled)),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+async function bootstrap(opts: SystemBootstrapOptions, signal: AbortSignal): Promise<void> {
   const { home, store, statusBus, logger } = opts;
   const debugOn = opts.debug?.isEnabled() === true;
 
@@ -117,6 +170,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
 
   // Install / refresh each eager manifest entry.
   for (const entry of eager) {
+    if (signal.aborted) return;
     const existing = tracking.toolsets[entry.toolsetId];
     const trackingSatisfied =
       existing && existing.version === entry.version && existing.integrity === entry.integrity;
@@ -196,7 +250,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
 
     statusBus.publish({ phase: 'installing-toolsets', currentToolset: entry.toolsetId });
     try {
-      const { installPath } = await installOne(home, entry, logger, existing?.version);
+      const { installPath } = await installOne(home, entry, signal, logger, existing?.version);
       const trackingEntry: SystemTrackingEntry = {
         toolsetId: entry.toolsetId,
         version: entry.version,
@@ -237,6 +291,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
       // Library entries: nothing else to do — callers look them up via
       // `resolveSystemLibraryPath()` against the tracking file.
     } catch (err) {
+      if (signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
       logger?.error?.(`[system-toolsets] failed to install ${entry.toolsetId}: ${msg}`);
       if (debugOn && err instanceof Error && err.stack) {
@@ -263,7 +318,9 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
       playwrightInstallPath: rec.installPath,
       statusBus,
       logger,
+      signal,
     });
+    if (res.cancelled) return;
     if (!res.ok) {
       statusBus.publish({
         phase: 'error',
@@ -580,10 +637,12 @@ function tailLines(log: string, n: number): string {
 async function installOne(
   home: string,
   entry: PinnedSystemToolset,
+  signal: AbortSignal,
   logger?: SystemBootstrapOptions['logger'],
   previousVersion?: string,
 ): Promise<InstallOneResult> {
   const gen = installSystemToolsetStreaming(home, entry, {
+    signal,
     ...(logger ? { logger } : {}),
     ...(previousVersion ? { previousVersion } : {}),
   });

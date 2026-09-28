@@ -386,7 +386,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -404,7 +404,6 @@ describe('ChatComposer attached task', () => {
       message: 'Please make a PowerPoint about Mongolia.',
       gezelId: 'tomas',
       projectId: 'default',
-      sessionId: 'session-1',
     });
     await waitFor(() =>
       expect(api.patchPromptDraft).toHaveBeenCalledWith(
@@ -430,7 +429,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -447,8 +446,9 @@ describe('ChatComposer attached task', () => {
     await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
   });
 
-  it('dismissing a suggestion keeps it away for that text and opts the send out of the route', async () => {
+  it('dismissing a suggestion keeps it away while the message is edited, and opts the send out of the route', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-1' } as never);
     vi.mocked(api.sendToChatSession).mockResolvedValue({ accepted: true, sessionId: 'session-1' });
     vi.mocked(streamChatEvents).mockImplementation(async function* () {
       yield { type: 'done' } as never;
@@ -458,7 +458,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -475,6 +475,12 @@ describe('ChatComposer attached task', () => {
       }),
     );
 
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia and its steppes.' },
+    });
+    await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
+
     pressSendShortcut();
     await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
     expect(api.sendToChatSession).toHaveBeenCalledWith(
@@ -486,6 +492,7 @@ describe('ChatComposer attached task', () => {
 
   it('sending with an attached task creates it instead of a chat turn', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-1' } as never);
     vi.mocked(api.launchTaskFromChatSession).mockResolvedValue({
       task: { ref: 'default/7', num: 7, projectId: 'default', title: 'Deck' },
       userMessage: { role: 'user', content: 'x', at: '2026-09-24T00:00:01.000Z' },
@@ -498,7 +505,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={{ ...taskLaunch, onLaunched }}
       />,
     );
@@ -527,6 +534,26 @@ describe('ChatComposer attached task', () => {
     // The stale plan must not resurrect the suggestion onto a fresh draft
     // after the message went out: exactly one draft was ever created.
     expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('suggests nothing in an ongoing thread, where the words are a reply', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please turn this into a PowerPoint.' },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(api.previewTurnIntent).not.toHaveBeenCalled();
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
   });
 
   /** Mount empty, then pick a task-bearing draft — the way the thread picker hands one over. */
@@ -1000,7 +1027,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 
@@ -1013,7 +1040,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 

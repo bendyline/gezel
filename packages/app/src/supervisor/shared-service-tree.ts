@@ -39,7 +39,10 @@
  * available differs:
  *
  *   - POSIX reads ownership and mode directly. `stat` is nearly free, so
- *     verifying beats trusting.
+ *     verifying beats trusting. It also asks more than "not ours": the tree
+ *     and the directories that hold the entry point must belong to root, as
+ *     the installers publish it, because a tree the service account owned was
+ *     one that account could rewrite under every other account's daemon.
  *   - Windows cannot. `st.mode` is synthesized there, so the POSIX test would
  *     pass vacuously; and the DACL that carries the real answer is not even
  *     readable — the installer keeps `%ProgramData%\Gezel` private, so an
@@ -115,6 +118,11 @@ export interface SharedServiceTreeOptions {
   regQuery?: RegQuery;
   /** Windows only. Injectable so tests need no real ACL to observe. */
   writeProbe?: WriteProbe;
+  /**
+   * POSIX only. The account the installer publishes the tree as — root.
+   * Injectable because a test fixture cannot be owned by root.
+   */
+  publisherUid?: number;
 }
 
 /**
@@ -153,7 +161,7 @@ export async function resolveSharedServiceTree(
     const rejection =
       platform === 'win32'
         ? await rejectUntrustedWindowsTree(treeDir, daemonEntry, meta.sha256, opts)
-        : await rejectUntrustedTree(treeDir, daemonEntry);
+        : await rejectUntrustedTree(treeDir, opts.publisherUid ?? 0);
     if (rejection) {
       opts.logger?.warn?.(
         `[supervisor] not adopting the machine service tree at ${treeDir}: ${rejection}`,
@@ -258,30 +266,82 @@ async function rejectUntrustedWindowsTree(
 }
 
 /**
+ * Entries inside the tree whose ownership is checked on every launch. The
+ * directories matter more than the files: owning a directory is what stops
+ * anyone else renaming, replacing, or adding the entries beneath it. A missing
+ * optional entry is skipped; its absence breaks the daemon on its own.
+ */
+const PUBLISHED_ENTRIES: ReadonlyArray<{ path: readonly string[]; optional?: true }> = [
+  { path: ['.gezel-bundle.sha256'] },
+  { path: ['package.json'] },
+  { path: ['dist'] },
+  { path: ['dist', 'bin'] },
+  { path: ['dist', 'bin', 'gezeld.js'] },
+  { path: ['node_modules'], optional: true },
+];
+
+/**
  * Why this tree must not be executed, or null when it is safe to.
  *
- * Checked on the tree root, its parent, and the daemon entry point. The parent
- * matters because write access to it is rename access to everything below:
- * being able to swap `<home>/service` for another directory is equivalent to
- * being able to rewrite its contents.
+ * The parent matters because write access to it is rename access to everything
+ * below: being able to swap `<home>/service` for another directory is
+ * equivalent to being able to rewrite its contents. It belongs to the service
+ * account on every platform — it is that account's home — so it is held only to
+ * "not writable by this account or by everyone".
+ *
+ * The tree itself must belong to the publisher (root). The service account
+ * parses untrusted model files, and a tree it owned was one it could rewrite
+ * for every account's daemon. Requiring root ownership is also what makes the
+ * parent's looser rule sufficient: the only root-owned directory carrying this
+ * bundle's sentinel is the one the installer published, so moving another
+ * directory into its place cannot pass.
  */
-async function rejectUntrustedTree(treeDir: string, daemonEntry: string): Promise<string | null> {
+async function rejectUntrustedTree(treeDir: string, publisherUid: number): Promise<string | null> {
   const selfUid = typeof process.getuid === 'function' ? process.getuid() : null;
   if (selfUid === null) return 'this platform does not report a uid';
 
-  for (const path of [dirname(treeDir), treeDir, daemonEntry]) {
-    // realpath first: a symlinked component means the bytes we would execute
-    // are not the ones whose ownership we are about to check.
-    const real = await realpath(path);
-    const info = await stat(real);
-    if ((info.mode & 0o022) !== 0) {
-      return `${real} is group- or world-writable (mode ${(info.mode & 0o7777).toString(8)})`;
+  // realpath first: a symlinked component means the bytes we would execute
+  // are not the ones whose ownership we are about to check.
+  const parent = await realpath(dirname(treeDir));
+  const parentInfo = await stat(parent);
+  if ((parentInfo.mode & 0o022) !== 0) {
+    return `${parent} is group- or world-writable (mode ${(parentInfo.mode & 0o7777).toString(8)})`;
+  }
+  if (selfUid !== 0 && parentInfo.uid === selfUid) {
+    return `${parent} is owned by this account, so it carries no more trust than a local extraction`;
+  }
+
+  const root = await realpath(treeDir);
+  const rootProblem = publishedEntryProblem(root, await stat(root), publisherUid);
+  if (rootProblem) return rootProblem;
+  for (const entry of PUBLISHED_ENTRIES) {
+    const path = join(root, ...entry.path);
+    let info: Awaited<ReturnType<typeof lstat>>;
+    try {
+      info = await lstat(path);
+    } catch (err) {
+      if (entry.optional && (err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
     }
-    // Root is trusted; so is any other service identity. Our own uid is not:
-    // an unprivileged account cannot vouch for a tree it could rewrite.
-    if (selfUid !== 0 && info.uid === selfUid) {
-      return `${real} is owned by this account, so it carries no more trust than a local extraction`;
-    }
+    // Inside the tree nothing is followed: the installer publishes real
+    // entries, and a link would move the check off the bytes that run.
+    if (info.isSymbolicLink()) return `${path} is a symlink`;
+    const problem = publishedEntryProblem(path, info, publisherUid);
+    if (problem) return problem;
+  }
+  return null;
+}
+
+function publishedEntryProblem(
+  path: string,
+  info: { mode: number; uid: number },
+  publisherUid: number,
+): string | null {
+  if ((info.mode & 0o022) !== 0) {
+    return `${path} is group- or world-writable (mode ${(info.mode & 0o7777).toString(8)})`;
+  }
+  if (info.uid !== publisherUid) {
+    return `${path} belongs to uid ${info.uid}, not the installer (uid ${publisherUid})`;
   }
   return null;
 }

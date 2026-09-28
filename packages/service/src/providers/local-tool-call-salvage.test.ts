@@ -1941,6 +1941,34 @@ describe('findClaudeInvokeToolCallSpans', () => {
   });
 });
 
+describe('MiniCPM5 <function name> salvage', () => {
+  it('reads CDATA verbatim and alongside an <invoke>, in text order', () => {
+    const text =
+      'Saving the plan.\n' +
+      '<function name="write_artifact"><param name="path">plan.md</param>' +
+      '<param name="content"><![CDATA[# Plan\n<b>1</b> & 2\n]]></param></function>\n' +
+      '<invoke name="read_task_notes"><parameter name="ref">demo/1</parameter></invoke>';
+    const spans = findClaudeInvokeToolCallSpans(text, KNOWN);
+    expect(spans.map((s) => [s.name, s.arguments])).toEqual([
+      ['write_artifact', { path: 'plan.md', content: '# Plan\n<b>1</b> & 2\n' }],
+      ['read_task_notes', { ref: 'demo/1' }],
+    ]);
+    expect(stripClaudeInvokeToolCallsFromText(text, spans).trim()).toBe('Saving the plan.');
+  });
+
+  it('leaves Hermes <function=X> and unknown tools alone', () => {
+    expect(
+      findClaudeInvokeToolCallSpans(
+        '<function=list_documents><parameter=path>a</parameter></function>',
+        KNOWN,
+      ),
+    ).toEqual([]);
+    expect(
+      findClaudeInvokeToolCallSpans('<function name="launch_rocket"></function>', KNOWN),
+    ).toEqual([]);
+  });
+});
+
 describe('stripClaudeInvokeToolCallsFromText', () => {
   it('splices the salvaged invoke out of visible content', () => {
     const text =

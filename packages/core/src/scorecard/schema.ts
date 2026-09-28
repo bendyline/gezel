@@ -94,11 +94,35 @@ export const ScorecardProvenanceSchema = z
   .strict();
 export type ScorecardProvenance = z.infer<typeof ScorecardProvenanceSchema>;
 
+/**
+ * What a round's `runtime.peakMemoryMb` actually captured.
+ *
+ * The harness sums the resident memory of the daemon + engine process tree.
+ * That sees GPU allocations only where the operating system charges them to
+ * the process, so the same column means three different things by machine:
+ *
+ * - `full` — the whole footprint. CPU-only hosts, and Apple Silicon, where
+ *   Metal's buffers count against the process.
+ * - `system-only` — a discrete graphics card: the computer's own memory is
+ *   counted, what the model holds on the card is not.
+ * - `incomplete` — a graphics chip sharing the computer's memory in a way the
+ *   probe cannot see (CUDA on DGX Spark / GB10). The model's weights are
+ *   missing entirely, so the figure is not a footprint at all — a 180B model
+ *   measured at a few GB.
+ *
+ * Absent on rounds recorded before this field existed; readers derive it from
+ * the device through `scorecardMemoryCoverage`, and an explicit value wins.
+ */
+export const ScorecardMemoryCoverageSchema = z.enum(['full', 'system-only', 'incomplete']);
+export type ScorecardMemoryCoverage = z.infer<typeof ScorecardMemoryCoverageSchema>;
+
 export const ScorecardRunSchema = z
   .object({
     /** Stable id, e.g. "2026-08-09-mac-studio-m4max". */
     id: z.string().min(1),
     provenance: ScorecardProvenanceSchema,
+    /** What the memory column measured on this device; see the schema above. */
+    memoryCoverage: ScorecardMemoryCoverageSchema.optional(),
     /** Suites this run covered end to end. */
     suites: z.array(z.string().min(1)).min(1),
     /**

@@ -57,9 +57,23 @@ prefill governs the pause before it starts, while output governs how fast text
 appears. A dash means that round did not record a throughput probe.
 
 **Context** is the working memory the model was given for these runs — how
-much it can hold at once. **Memory used** is the peak RAM the model and its
-engine actually occupied, which is the number to check against your own
-machine. When the engine reported its KV-cache precision, it appears beside
+much it can hold at once. **Memory used** is the most memory the model and its
+engine held on the test machine. What that number covers depends on the
+machine, so each round says which one it measured:
+
+- **On a Mac** the graphics chip shares the computer's memory and our
+  measurement sees all of it, so **Memory used** is the model's whole
+  footprint.
+- **On a PC with a separate graphics card** the column is called **System
+  memory**. It counts the computer's own memory only, not what the model keeps
+  on the graphics card.
+- **On machines like the DGX Spark**, where the graphics chip shares memory in
+  a way our measurement can't see, the column is left out. The number would
+  read far below what the model really uses.
+
+Treat these as a rough guide from one machine, not a promise about yours. The
+Models catalogue in the app is the better check for whether a model fits your
+computer. When the engine reported its KV-cache precision, it appears beside
 the model name — for example, `(kv: q8_0)`.
 
 Each **test round** keeps all of its tables together under one provenance

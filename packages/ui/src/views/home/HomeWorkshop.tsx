@@ -210,7 +210,12 @@ export function HomeWorkshop({
     api.runMeesterStatus().catch(() => setStatusRunning(false));
   }, []);
 
-  const visibleTasks = useMemo(() => tasks.filter((t) => t.status !== 'canceled'), [tasks]);
+  // System jobs use a user assignee to keep TaskRunner from launching a model,
+  // but they are service controls, not work waiting on the person at Home.
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => t.status !== 'canceled' && t.origin?.kind !== 'system-job'),
+    [tasks],
+  );
 
   const pendingQuestions = useMemo(() => questions.filter((q) => !q.answer), [questions]);
 

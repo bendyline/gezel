@@ -54,10 +54,19 @@ export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): P
       jobId: INDEXING_JOB_ID,
       ...(configuredId ? { managedByGezelId: configuredId } : {}),
     };
+    // Builds that ran generalist mode over this task pinned the Generalist on
+    // its step. Unpin it so nothing that resolves a step owner treats the job
+    // as a gezel's work.
+    const stepsPinned =
+      installed.executionMode === 'generalist' ||
+      installed.craftbook.steps.some(
+        (s) => s.assignee !== undefined || s.suggestedGezelId !== undefined,
+      );
     if (
       installed.assignee.kind !== 'user' ||
       (installed.status !== 'active' && installed.status !== 'paused') ||
-      JSON.stringify(installed.origin) !== JSON.stringify(origin)
+      JSON.stringify(installed.origin) !== JSON.stringify(origin) ||
+      stepsPinned
     ) {
       await store.writeTask({
         ...installed,
@@ -66,6 +75,17 @@ export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): P
         assignee: { kind: 'user' },
         status: installed.status === 'paused' ? 'paused' : 'active',
         origin,
+        ...(stepsPinned
+          ? {
+              executionMode: 'stepwise' as const,
+              craftbook: {
+                ...installed.craftbook,
+                steps: installed.craftbook.steps.map(
+                  ({ assignee: _assignee, suggestedGezelId: _suggested, ...step }) => step,
+                ),
+              },
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       });
     }

@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { pnpmTargetFor, verifyPnpmRuntimeTree } from './pnpm-runtime-inventory.mjs';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
+import { loadSupplementalLicenses, packageLicenseCoverage } from './supplemental-licenses.mjs';
 
 const execFileP = promisify(execFile);
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -82,9 +83,11 @@ async function packageLicenseFiles(packagePath) {
 export async function stageDependencyLicenses(
   destinationRoot = destination,
   inventory = readProductionLicenseInventory(),
+  { supplemental } = {},
 ) {
   const textsDir = join(destinationRoot, 'npm', 'texts');
   await mkdir(textsDir, { recursive: true });
+  const supplementalLicenses = supplemental ?? (await loadSupplementalLicenses());
   const records = [];
   const missing = [];
   const installed = [];
@@ -127,14 +130,36 @@ export async function stageDependencyLicenses(
         if (sources.length > 0 && !canonicalByLicense.has(reportedLicense)) {
           canonicalByLicense.set(reportedLicense, sources);
         }
-        installed.push({ reportedLicense, pkg, version, packageJson, sources });
+        const coverage = await packageLicenseCoverage(
+          { name: pkg.name, version, packagePath },
+          supplementalLicenses,
+        );
+        missing.push(...coverage.problems);
+        installed.push({
+          reportedLicense,
+          pkg,
+          version,
+          packageJson,
+          sources,
+          supplementalTexts: coverage.texts,
+        });
       }
     }
   }
 
   for (const item of installed) {
     const { reportedLicense, pkg, version, packageJson } = item;
-    let materials = item.sources.map((source) => ({ source, name: basename(source) }));
+    // A reviewed supplement carries the package's real license (onnxruntime-
+    // node's MIT is Microsoft's, not its npm publisher's), so it replaces the
+    // generated fallback rather than sitting beside it.
+    let materials = [
+      ...item.sources.map((source) => ({ source, name: basename(source) })),
+      ...item.supplementalTexts.map((text) => ({
+        source: text.path,
+        name: text.file,
+        supplemental: `legal/licenses/${text.file}`,
+      })),
+    ];
     let generatedFallback = false;
     if (materials.length === 0) {
       generatedFallback = true;
@@ -167,6 +192,7 @@ export async function stageDependencyLicenses(
           file: `texts/${outputName}`,
           source: material.name,
           sha256: digest,
+          ...(material.supplemental ? { supplemental: material.supplemental } : {}),
         });
       }
       records.push({

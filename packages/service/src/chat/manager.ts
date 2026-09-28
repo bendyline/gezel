@@ -409,6 +409,7 @@ import {
 import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
+import { markTurnCancelled, turnCancelReasonOf } from './turn-cancel-marker.js';
 import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
@@ -3138,7 +3139,7 @@ export class ChatManager extends LocalEngineRuntime {
     // one of these callbacks before all cancellations have settled.
     this.afterSessionIdle.clear();
     for (const sessionId of Array.from(this.pendingSends.keys())) {
-      this.rejectQueuedForSession(sessionId, 'emergency stop');
+      this.rejectQueuedForSession(sessionId, 'emergency stop', 'emergency-stop');
     }
 
     const results = await Promise.allSettled(
@@ -4677,6 +4678,11 @@ export class ChatManager extends LocalEngineRuntime {
             }
             break;
           } catch (error) {
+            // A turn someone stopped on purpose (Stop, interrupt, emergency
+            // stop, a superseding dispatch, shutdown) is not a failed
+            // handoff, and re-sending it undoes the stop. Shutdown also
+            // refuses every later send.
+            if (this.shuttingDown || turnCancelReasonOf(error)) throw error;
             if (attempt === maxHandoffSendAttempts) throw error;
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
@@ -4710,6 +4716,18 @@ export class ChatManager extends LocalEngineRuntime {
         }
       })().catch(async (err) => {
         const detail = err instanceof Error ? err.message : String(err);
+        const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
+        if (cancelReason) {
+          // Not a failed handoff, so never "paused for help". After a
+          // shutdown the task stays active and rehydrates on the next boot;
+          // otherwise whoever stopped the turn owns what happens next: Stop
+          // pauses the task, an interrupt carries on in this session, and a
+          // superseding dispatch already holds the step.
+          log.info(
+            `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
+          );
+          return;
+        }
         log.error(
           `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
         );
@@ -6769,11 +6787,16 @@ export class ChatManager extends LocalEngineRuntime {
    * `archiveSession`, `deleteSession`, and `shutdown` — all paths
    * where queued messages will never run.
    */
-  private rejectQueuedForSession(sessionId: string, reason: string): void {
+  private rejectQueuedForSession(
+    sessionId: string,
+    reason: string,
+    cancel?: TurnCancelReason,
+  ): void {
     const q = this.pendingSends.get(sessionId);
     if (!q || q.length === 0) return;
     this.pendingSends.delete(sessionId);
     const err = new Error(`send rejected: ${reason} (session ${sessionId})`);
+    if (cancel) markTurnCancelled(err, cancel);
     for (const entry of q) {
       for (const w of entry.waiters) {
         try {
@@ -8844,6 +8867,7 @@ export class ChatManager extends LocalEngineRuntime {
             typeof assistantMessage.content === 'string' ? assistantMessage.content : '',
             assistantMessage.toolCalls,
             expectedFilePath,
+            userText,
           );
           if (proseDeliverable) {
             const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];
@@ -9818,6 +9842,8 @@ export class ChatManager extends LocalEngineRuntime {
           );
         });
       }
+      if (intentionallyCancelled)
+        markTurnCancelled(err, inflightTurn.cancelReason ?? 'unspecified');
       throw err;
     } finally {
       liveUnsub();
@@ -11145,7 +11171,7 @@ export class ChatManager extends LocalEngineRuntime {
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
     for (const sessionId of Array.from(this.pendingSends.keys())) {
-      this.rejectQueuedForSession(sessionId, 'service shutting down');
+      this.rejectQueuedForSession(sessionId, 'service shutting down', 'service-restart');
     }
     await Promise.allSettled(
       Array.from(this.inflight.keys()).map((sessionId) =>

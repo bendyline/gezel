@@ -49,20 +49,23 @@ describe('proofing provider', () => {
     expect(typeof first).not.toBe('function');
   });
 
-  it('seeds the engine with previously accepted words and appends new ones', async () => {
-    window.localStorage.setItem('gezel:proof-dictionary', JSON.stringify(['gezel', 'poppetje']));
-    const { gezelProofingProvider } = await load();
+  it('seeds the engine with gezel vocabulary plus previously accepted words and appends new ones', async () => {
+    window.localStorage.setItem('gezel:proof-dictionary', JSON.stringify(['gezel', 'Tlaxcala']));
+    const { gezelProofingProvider, PRODUCT_VOCABULARY } = await load();
     const { config } = gezelProofingProvider() as unknown as {
       config: { initialWords: string[]; onDictionaryWord: (w: string) => void };
     };
 
-    expect(config.initialWords).toEqual(['gezel', 'poppetje']);
+    // The product's own words never show as misspellings, and a stored word
+    // the list already has is not passed twice.
+    expect(config.initialWords).toEqual([...PRODUCT_VOCABULARY, 'Tlaxcala']);
+    expect(config.initialWords).toContain('gezels');
 
-    config.onDictionaryWord('craftbook');
+    config.onDictionaryWord('Oaxaca');
     expect(JSON.parse(window.localStorage.getItem('gezel:proof-dictionary') ?? '[]')).toEqual([
       'gezel',
-      'poppetje',
-      'craftbook',
+      'Tlaxcala',
+      'Oaxaca',
     ]);
   });
 
@@ -77,9 +80,9 @@ describe('proofing provider', () => {
 
   it('ignores unreadable dictionary storage rather than failing to construct', async () => {
     window.localStorage.setItem('gezel:proof-dictionary', 'not json');
-    const { gezelProofingProvider } = await load();
+    const { gezelProofingProvider, PRODUCT_VOCABULARY } = await load();
     const { config } = gezelProofingProvider() as unknown as { config: { initialWords: string[] } };
-    expect(config.initialWords).toEqual([]);
+    expect(config.initialWords).toEqual([...PRODUCT_VOCABULARY]);
   });
 });
 

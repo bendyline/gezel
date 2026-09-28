@@ -65,9 +65,18 @@ typedef struct gezel_llama_generation_options {
     uint32_t max_tokens;
     uint32_t timeout_ms;
     uint32_t max_output_bytes;
-    /** Zero uses greedy decoding. Positive values use top-k/top-p/temperature. */
+    /** Zero uses greedy decoding. Positive values use top-k/top-p/min-p/temperature. */
     float temperature;
     uint32_t seed;
+    /** Keep only the k likeliest tokens when sampling; 0 disables. */
+    uint32_t top_k;
+    /** Nucleus mass kept when sampling; 1 disables. */
+    float top_p;
+    /** Drop tokens below this fraction of the likeliest; 0 disables. */
+    float min_p;
+    /** Penalty on tokens repeated within `repeat_last_n`; 1 disables. Greedy too. */
+    float repeat_penalty;
+    uint32_t repeat_last_n;
 } gezel_llama_generation_options;
 
 typedef struct gezel_llama_result {
@@ -104,6 +113,30 @@ void gezel_llama_destroy(gezel_llama_engine * engine);
 int32_t gezel_llama_load(gezel_llama_engine * engine, const char * model_path,
     const gezel_llama_load_options * options, gezel_llama_error * error);
 int32_t gezel_llama_unload(gezel_llama_engine * engine, gezel_llama_error * error);
+
+/** Bytes a load with the same options would allocate, as llama.cpp accounts
+ * them for this device's backends (repacked weight copies included). */
+typedef struct gezel_llama_memory_estimate {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    /** Weight buffers. */
+    uint64_t model_bytes;
+    /** The part of model_bytes a load serves straight from the memory-mapped
+     * file: clean pages the OS can reclaim and read again (mostly embedding
+     * tables, read a few rows at a time). The rest is allocated. */
+    uint64_t mapped_model_bytes;
+    /** KV cache and recurrent state at the requested context. */
+    uint64_t context_bytes;
+    /** Scratch buffers for one batch. */
+    uint64_t compute_bytes;
+} gezel_llama_memory_estimate;
+
+/** Blocking; reads GGUF metadata only and allocates no tensor data. It shares no
+ * state with a loaded model, so it may run beside one; hosts serialize it with
+ * loads anyway. Validates options and the file exactly as gezel_llama_load does. */
+int32_t gezel_llama_estimate_memory(gezel_llama_engine * engine, const char * model_path,
+    const gezel_llama_load_options * options, gezel_llama_memory_estimate * estimate,
+    gezel_llama_error * error);
 
 /** Blocking bounded text chat. Caller-owned strings/options stay valid until it
  * returns. Every call starts a fresh KV context from the supplied full transcript.

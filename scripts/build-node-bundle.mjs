@@ -42,6 +42,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { deployMlRuntime } from './deploy-ml-runtime.mjs';
 import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
+import { packDeployedGildeCommunity, verifyPackedGildeCommunity } from './pack-gilde-community.mjs';
 import { runIsolatedPnpmDeploy } from './pnpm-deploy.mjs';
 import {
   pruneRuntimeFilesWithReport,
@@ -131,6 +132,12 @@ async function main() {
   // the declaration files the in-app script editor reads as content.
   await pruneRuntimeFilesWithReport(target);
   await verifyRuntimeDeclarationAssets(target);
+
+  // Same as the Electron service bundle: gilde's ~30k-file community tier
+  // ships as one content pack, so extracting this archive is not dominated
+  // by tiny manifests.
+  await packDeployedGildeCommunity(target, { label: 'build-node-bundle' });
+  await verifyPackedGildeCommunity(target, { label: 'build-node-bundle' });
 
   // Convenience launchers at the bundle root so an extracted bundle runs as
   // `./gezel start --web` (POSIX) / `gezel start --web` (Windows) instead of

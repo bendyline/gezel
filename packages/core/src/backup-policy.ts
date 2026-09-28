@@ -25,6 +25,24 @@ export function backupSettingsTarget(id: BackupSettingsFileId): string {
   return id;
 }
 
+/** Config keys naming the gezel that holds each house role. */
+export const BACKUP_ROLE_CONFIG_KEYS = [
+  'meesterGezelId',
+  'klerkGezelId',
+  'boekwachterGezelId',
+  'keurmeesterGezelId',
+] as const;
+
+/**
+ * The only config keys a restore applies. Everything else in a config names
+ * this device's providers, engines, folders, listeners or security level, and
+ * a backup file must not be able to change those.
+ */
+export const BACKUP_RESTORABLE_CONFIG_KEYS = [
+  ...BACKUP_ROLE_CONFIG_KEYS,
+  'roleBasedNameOnlyMode',
+] as const;
+
 export interface BackupItemRef {
   kind: BackupItemKind;
   id: string;

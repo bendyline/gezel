@@ -190,6 +190,48 @@ if command -v systemctl >/dev/null 2>&1; then
   done
 fi
 
+# Every root pass below over a tree the service account can write is safe only
+# while nothing runs as that account. Such a pass resolves each path when it
+# acts on it, so a live process could swap a checked entry for a link to a
+# system file between the check and the chown/chmod — the account parses
+# untrusted model files, so it is the one to assume compromised. Stopping the
+# unit ends its cgroup; this also ends anything that escaped it.
+service_account_pids() {
+  for status_file in /proc/[0-9]*/status; do
+    fields=$(awk '$1 == "State:" { state = $2 } $1 == "Uid:" { uids = $2 " " $3 " " $4 " " $5 } END { print state, uids }' "$status_file" 2>/dev/null) || continue
+    # shellcheck disable=SC2086
+    set -- $fields
+    [ "$#" -ge 2 ] || continue
+    case $1 in Z | X) continue ;; esac
+    shift
+    for id in "$@"; do
+      if [ "$id" = "$account_uid" ]; then
+        pid=${status_file#/proc/}
+        echo "${pid%/status}"
+        break
+      fi
+    done
+  done
+}
+
+stop_service_account_processes() {
+  stop_attempt=0
+  while :; do
+    account_pids=$(service_account_pids)
+    [ -z "$account_pids" ] && return 0
+    stop_attempt=$((stop_attempt + 1))
+    if [ "$stop_attempt" -gt 10 ]; then
+      echo "[gezel after-install] ERROR: processes still run as $GEZEL_USER ($(echo $account_pids)); refusing to repair files that account can change" >&2
+      exit 1
+    fi
+    # shellcheck disable=SC2086
+    kill -KILL $account_pids 2>/dev/null || true
+    sleep 1
+  done
+}
+
+stop_service_account_processes
+
 # 2. Private system state with a narrow runtime discovery exception. The 0711
 # parent permits traversal to a known path but not directory listing; runtime
 # is 0755 so user daemons can read only the metadata gezeld publishes.
@@ -205,6 +247,18 @@ if [ ! -f "$MIGRATE_SHARED_CLI" ]; then
   exit 1
 fi
 assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+# The migration moves private product data into this directory and the
+# publishing step below trusts what root placed there, so it must be one root
+# created. Every release that made it left it root-owned; anything else was
+# prepared by another account and is refused rather than adopted.
+if [ ! -e "$SHARED_DIR" ]; then
+  mkdir -p -m 700 -- "$SHARED_DIR"
+fi
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+if [ ! -d "$SHARED_DIR" ] || [ "$(stat -c %u -- "$SHARED_DIR")" != 0 ]; then
+  echo "[gezel after-install] ERROR: $SHARED_DIR is not a root-owned directory; refusing to migrate into or publish it" >&2
+  exit 1
+fi
 echo "[gezel after-install] migrating legacy projects and gezels into $SHARED_DIR"
 ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI" \
   --source="$DATA_DIR" \
@@ -224,46 +278,138 @@ assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
 # Upgrade migration: strip all group/other access and replace legacy owners.
 # Do not dereference symlinks or cross into mounted filesystems.
 #
-# $SERVICE_TREE is pruned from all four sweeps below. It holds the previous
-# install's ~33k-file service bundle, which step 2b replaces wholesale and then
-# sets ownership and modes on directly — so walking it here is four extra
-# traversals of the largest directory on the machine to fix up files that are
-# about to be deleted. It is also the one subtree whose final modes differ
-# (it is readable, not private; see step 2b), so leaving it in the `go-rwx`
-# sweep would fight that on every upgrade.
-find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o \
-  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
-# Remove named/default POSIX ACLs when the platform provides setfacl. chmod
-# alone can leave dormant named entries that regain access after a later mode
-# change. On minimal systems without ACL tooling, the mode mask still denies
-# all group/other access.
-find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o ! -type l -exec setfacl -b -- {} +
-find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o -type d -exec setfacl -k -- {} +
-find "$DATA_DIR" -xdev \( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" \) -prune -o \
-  ! -type l -exec chmod go-rwx {} +
-chmod 711 "$DATA_DIR"
-chmod 755 "$DATA_DIR/runtime"
-chmod 700 "$DATA_DIR/logs"
-if find "$ASSETS_DIR" -xdev -type l -print -quit | grep -q .; then
-  echo "[gezel after-install] ERROR: shared asset store contains a symlink" >&2
-  exit 1
-fi
-find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +
-find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +
+# These passes run as root over a tree the service account owns. With that
+# account's processes gone (above), nothing moves entries while they run; what
+# remains is anything it left behind. A symlink is never followed and never
+# given a mode or ACL. A regular file with more than one link is left exactly as
+# it is: it may be a hard link to a file that account does not own, and a chown
+# or chmod through that name would change the linked system file.
+#
+# $SERVICE_TREE and its staging/backup siblings are pruned. Step 2b replaces
+# that family wholesale and publishes it with root's ownership, so walking its
+# ~33k files here would only re-own root's code to the service account moments
+# before deleting it. $SHARED_DIR is pruned because it is not this account's
+# state; it is published separately below.
+private_state_find() {
+  find "$DATA_DIR" -xdev \
+    \( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" -o -path "$SERVICE_TREE.previous" -o -path "$SERVICE_TREE.staging-*" \) -prune -o \
+    \( -type f -links +1 \) -prune -o \
+    "$@"
+}
+
+harden_private_state() {
+  private_state_find -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
+  # Remove named/default POSIX ACLs when the platform provides setfacl. chmod
+  # alone can leave dormant named entries that regain access after a later mode
+  # change. On minimal systems without ACL tooling, the mode mask still denies
+  # all group/other access.
+  private_state_find ! -type l -exec setfacl -b -- {} +
+  private_state_find -type d -exec setfacl -k -- {} +
+  private_state_find ! -type l -exec chmod go-rwx {} +
+  chmod 711 "$DATA_DIR"
+  chmod 755 "$DATA_DIR/runtime"
+  chmod 700 "$DATA_DIR/logs"
+  if find "$ASSETS_DIR" -xdev -type l -print -quit | grep -q .; then
+    echo "[gezel after-install] ERROR: shared asset store contains a symlink" >&2
+    exit 1
+  fi
+  find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +
+  find "$ASSETS_DIR" -xdev -type f -links 1 -exec chmod 644 {} +
+}
+
+harden_private_state
 
 # The broker owns no product routes and never receives these paths. Interactive
 # accounts collaborate through their own user daemons. Sticky/setgid roots and
 # default ACLs keep newly-created nested content writable across accounts.
-find "$SHARED_DIR" -xdev -exec chown --no-dereference root:root -- {} +
-find "$SHARED_DIR" -xdev ! -type l -exec chmod a+rwX {} +
-find "$SHARED_DIR" -xdev -type d -exec chmod 2777 {} +
-chmod 3777 "$SHARED_DIR"
-find "$SHARED_DIR" -xdev -type d -exec setfacl -m d:u::rwx,d:g::rwx,d:o::rwx,d:m::rwx -- {} +
-# Defense in depth beyond systemd's InaccessiblePaths: the non-login broker
-# identity cannot even traverse the shared root outside its service sandbox.
-setfacl -m "u:$GEZEL_USER:---" "$SHARED_DIR"
-chown root:root "$SHARED_DIR/.gezel-machine-shared-v1.json"
-chmod 644 "$SHARED_DIR/.gezel-machine-shared-v1.json"
+#
+# Root never walks this collaborative tree. Every local account can rename
+# anything inside a scope directory, so a root pass over it — chown, chmod or
+# setfacl by path, `find -exec` included — could be steered through a swapped-in
+# symlink or hard link onto a system file (a world-writable /etc/shadow, say).
+# Nested directories stay setgid and non-sticky on purpose: collaborating
+# accounts replace each other's files. Content they create needs no repair; it
+# inherits the setgid bit and the default ACLs below when it is created.
+#
+# Root touches only the root itself and the root-owned scope directories and
+# marker directly inside its sticky top level — entries no other account can
+# move — plus entities the migration has just placed, via publish_migrated_entity.
+SHARED_DEFAULT_ACL=d:u::rwx,d:g::rwx,d:o::rwx,d:m::rwx
+
+# A migrated entity arrives private: owned by the service account (moved from
+# its home) or by root (copied across filesystems), with no group/other access.
+# Nothing but root can reach inside until it is published, so its subtree can
+# be walked by path — provided the walk is anchored to the directory rather
+# than to its name, which any local account can rename. The subshell's `cd`
+# pins the directory; everything after it is relative to that directory, and
+# access opens only with the final chmod of `.`. Published entities (open, or
+# owned by anyone else) are never walked again.
+publish_migrated_entity() (
+  scope_dir=$1
+  name=$2
+  case $name in
+    '' | [!A-Za-z0-9@]* | *[!A-Za-z0-9@._-]*) exit 0 ;;
+  esac
+  cd -P -- "$scope_dir/$name" 2>/dev/null || exit 0
+  [ "$(pwd -P)" = "$shared_physical/${scope_dir##*/}/$name" ] || exit 0
+  owner_mode=$(stat -c '%u %a' .) || exit 0
+  # shellcheck disable=SC2086
+  set -- $owner_mode
+  case $1 in 0 | "$account_uid") ;; *) exit 0 ;; esac
+  case $2 in *00) ;; *) exit 0 ;; esac
+  echo "[gezel after-install] publishing migrated shared entity ${scope_dir##*/}/$name"
+  if find . -xdev -type f -links +1 -print -quit | grep -q .; then
+    echo "[gezel after-install] WARNING: hard-linked files in ${scope_dir##*/}/$name stay private" >&2
+  fi
+  find . -xdev -mindepth 1 \( -type f -links +1 \) -prune -o \
+    -exec chown --no-dereference root:root -- {} + \
+    ! -type l -exec setfacl -b -- {} + \
+    \( -type d -exec setfacl -m "$SHARED_DEFAULT_ACL" -- {} + -exec chmod 2777 {} + \
+      -o -exec chmod a+rwX,ug-s {} + \)
+  chown root:root .
+  setfacl -b .
+  setfacl -m "$SHARED_DEFAULT_ACL" .
+  chmod 2777 .
+)
+
+publish_shared_data() {
+  shared_physical=$(cd -P -- "$SHARED_DIR" && pwd -P)
+  chown root:root -- "$SHARED_DIR"
+  setfacl -b -- "$SHARED_DIR"
+  chmod 3777 "$SHARED_DIR"
+  setfacl -m "$SHARED_DEFAULT_ACL" -- "$SHARED_DIR"
+  # Defense in depth beyond systemd's InaccessiblePaths: the non-login broker
+  # identity cannot even traverse the shared root outside its service sandbox.
+  setfacl -m "u:$GEZEL_USER:---" "$SHARED_DIR"
+  for scope in projects gezels; do
+    scope_dir="$SHARED_DIR/$scope"
+    if [ ! -e "$scope_dir" ] && [ ! -L "$scope_dir" ]; then
+      continue
+    fi
+    if [ -L "$scope_dir" ] || [ ! -d "$scope_dir" ] || [ "$(stat -c %u -- "$scope_dir")" != 0 ]; then
+      echo "[gezel after-install] WARNING: leaving $scope_dir unchanged: it is not a root-owned directory" >&2
+      continue
+    fi
+    setfacl -b -- "$scope_dir"
+    chmod 2777 "$scope_dir"
+    setfacl -m "$SHARED_DEFAULT_ACL" -- "$scope_dir"
+    for entity in "$scope_dir"/*; do
+      if [ -e "$entity" ] || [ -L "$entity" ]; then
+        publish_migrated_entity "$scope_dir" "${entity##*/}"
+      fi
+    done
+  done
+  shared_marker="$SHARED_DIR/.gezel-machine-shared-v1.json"
+  if [ -L "$shared_marker" ] || [ ! -f "$shared_marker" ] ||
+    [ "$(stat -c '%u %h' -- "$shared_marker")" != "0 1" ]; then
+    echo "[gezel after-install] ERROR: $shared_marker is not a root-owned regular file" >&2
+    exit 1
+  fi
+  chown root:root -- "$shared_marker"
+  chmod 644 -- "$shared_marker"
+}
+
+publish_shared_data
 
 # Remove any root-equivalent token left by a pre-split release before runtime
 # becomes readable. gezeld recreates it as a scoped first-party credential.
@@ -305,12 +451,22 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
 #
 # `go=u-w` grants group/other exactly what the owner has, minus write: 0755
 # stays 0755, 0644 stays 0644, executables keep their exec bits. Write access
-# remains the service account's alone, which is the property that matters —
-# a user-writable tree executed by a root-adjacent daemon would be an
-# escalation, and the supervisor refuses to adopt one for that reason.
-find "$SERVICE_TREE" -xdev \
-  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} + \
-  ! -type l -exec chmod go=u-w {} +
+# stays root's alone, which is the property that matters. Every account's
+# daemon executes this tree, so it must not belong to the service account
+# either: that account parses untrusted model files, and a tree it owned was
+# one it could rewrite under all of them. The supervisor refuses to adopt a
+# tree root does not own, and gezeld.service mounts it read-only. The
+# extractor already created it as root in a private staging directory, and
+# nothing else runs as the service account now, so this pass is on a tree no
+# one else can change.
+publish_service_tree() {
+  find "$SERVICE_TREE" -xdev \
+    -exec chown --no-dereference root:root -- {} + \
+    ! -type l -exec setfacl -b -- {} + \
+    -exec chmod go=u-w {} +
+}
+
+publish_service_tree
 
 # 3. Preserve electron-builder's standard Linux desktop integration. Supplying
 # our own afterInstall hook replaces electron-builder's default hook entirely,

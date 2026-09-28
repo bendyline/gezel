@@ -88,9 +88,16 @@ standard-library trust.
 `PortableScriptRunner` takes a host resolver, dispatcher, configuration reader and
 atomic run-record writer. It shares the desktop input/output validators, method
 capabilities, metadata parser and execution-policy check. A host records admission
-and each host-call intent before effects, then stores the completed run using the
-ordinary `projects/<id>/scripts/runs/<date>/<runId>.json` convention. Missing
-output, invalid output and failed audit writes cannot report success.
+before any effect and stores the completed run using the ordinary
+`projects/<id>/scripts/runs/<date>/<runId>.json` convention. Between the two,
+progress snapshots are coalesced to one per `checkpointIntervalMs` (default 1 s);
+a call's intent is written ahead of its effect when no snapshot is that recent.
+Invalid output and failed audit writes cannot report success, and neither can a
+gate that stamps no verdict. Any other script that declares `outputs` but never
+calls `gezel.output()` finishes `ok` with no output and a warning in its log.
+Each run may make 250,000 host calls (`limits.maxHostCalls`); standard-scope and
+provenance-trusted scripts are bounded only by their timeout
+(`limits.maxTrustedHostCalls`).
 Long-running deadlines use the shared awake-time budget. Explicit host
 cancellation takes precedence over sleep credit and waits for dispatched host
 effects and child audits to settle.

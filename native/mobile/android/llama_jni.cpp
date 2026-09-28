@@ -84,8 +84,32 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_load(JNIEnv * env, jclass, jlong han
     fail(env, "Native model loading ran out of resources");
 }
 
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_estimate(JNIEnv * env, jclass, jlong handle, jstring path, jint context) try {
+    std::string nativePath = utf8(env, path);
+    if (env->ExceptionCheck()) return nullptr;
+    auto options = gezel_llama_default_load_options();
+    options.context_tokens = static_cast<uint32_t>(context);
+    options.threads = performance_threads();
+    gezel_llama_memory_estimate estimate{sizeof(estimate), GEZEL_LLAMA_ABI_VERSION, 0, 0, 0, 0};
+    gezel_llama_error error{};
+    if (gezel_llama_estimate_memory(engine(handle), nativePath.c_str(), &options, &estimate, &error) != GEZEL_LLAMA_OK) {
+        fail(env, error.message);
+        return nullptr;
+    }
+    const jlong values[] = {static_cast<jlong>(estimate.model_bytes), static_cast<jlong>(estimate.mapped_model_bytes),
+                            static_cast<jlong>(estimate.context_bytes), static_cast<jlong>(estimate.compute_bytes)};
+    jlongArray result = env->NewLongArray(4);
+    if (result) env->SetLongArrayRegion(result, 0, 4, values);
+    return result;
+} catch (...) {
+    fail(env, "Native model sizing ran out of resources");
+    return nullptr;
+}
+
 extern "C" JNIEXPORT jint JNICALL
-Java_com_bendyline_gezel_llama_LlamaRuntime_generate(JNIEnv * env, jclass, jlong handle, jobjectArray roles, jobjectArray contents, jlong request, jint maxTokens, jobject callback) try {
+Java_com_bendyline_gezel_llama_LlamaRuntime_generate(JNIEnv * env, jclass, jlong handle, jobjectArray roles, jobjectArray contents, jlong request, jint maxTokens,
+        jfloat temperature, jint topK, jfloat topP, jfloat minP, jfloat repeatPenalty, jint repeatLastN, jint seed, jobject callback) try {
     if (!roles || !contents || !callback) { fail(env, "Conversation and stream callback are required"); return 0; }
     jsize count = env->GetArrayLength(roles);
     if (count != env->GetArrayLength(contents) || count < 1 || count > 128) { fail(env, "Invalid conversation"); return 0; }
@@ -114,6 +138,13 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_generate(JNIEnv * env, jclass, jlong
     auto options = gezel_llama_default_generation_options();
     options.request_id = static_cast<uint64_t>(request);
     options.max_tokens = static_cast<uint32_t>(maxTokens);
+    options.temperature = temperature;
+    options.top_k = static_cast<uint32_t>(topK);
+    options.top_p = topP;
+    options.min_p = minP;
+    options.repeat_penalty = repeatPenalty;
+    options.repeat_last_n = static_cast<uint32_t>(repeatLastN);
+    options.seed = static_cast<uint32_t>(seed);
     // The library's default deadline is a flat minute covering prompt
     // processing as well as decoding, which a long reply on a phone passes
     // routinely. Scale it with the reply actually asked for, and keep a

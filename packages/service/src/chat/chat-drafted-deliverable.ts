@@ -88,6 +88,25 @@ function stripFencedBlocks(content: string): string {
   return content.replace(/```[\s\S]*?```/g, ' ').replace(/~~~[\s\S]*?~~~/g, ' ');
 }
 
+/** A `text` or `markdown` fence holds a document, not code, so the draft
+ *  inside is what gets measured. Code fences are still stripped. */
+function unwrapDocumentFences(content: string): string {
+  return content.replace(
+    /(^|\n)(`{3,}|~{3,})(?:text|txt|markdown|md)[ \t]*\n([\s\S]*?)(?:\n\2[ \t]*(?=\n|$)|$)/gi,
+    '$1$3',
+  );
+}
+
+/**
+ * Floor for a reply that opens with the very file the request asked for.
+ * That label is the model saying "this is the deliverable", so neither the
+ * heading test nor the 800-char floor applies: MiniCPM5 1B, asked for
+ * `plan.md`, answered with a 760-char plan in a `text` fence whose first
+ * line was `plan.md`, sections labelled `objective:` rather than `##`, and
+ * no detector fired (2026-09-28).
+ */
+const LABELED_DELIVERABLE_MIN_CHARS = 300;
+
 /**
  * Detect the "wrote a whole report in chat but never saved it" failure:
  * the assistant produced a substantial structured markdown document as
@@ -98,38 +117,85 @@ function stripFencedBlocks(content: string): string {
  * (a postmortem, analysis, plan) that a weak local model chatters out
  * over many turns without ever calling `write_file` / `write_artifact`.
  *
- * Returns the inferred workspace path — the caller's expected-deliverable
- * path when one is in scope, else a kebab-cased `<h1-title>.md`, else
- * `report.md` — or null when the reply isn't a substantial structured
- * document. Fenced blocks are stripped before measuring; the caller
- * additionally gates on a write tool being available (same as the
- * chat-coded detector) so only build-capable roles get nudged.
+ * Returns the inferred workspace path (see {@link inferProseDeliverablePath})
+ * or null when the reply isn't a substantial structured document. Code
+ * fences are stripped before measuring; the caller additionally gates on
+ * a write tool being available (same as the chat-coded detector) so only
+ * build-capable roles get nudged.
  */
 export function detectProseDeliverableWithoutWrite(
   content: string,
   toolCalls: ReadonlyArray<{ name: string; success: boolean }> | undefined,
   expectedPath?: string,
+  requestText?: string,
 ): { path: string } | null {
   const wrote = (toolCalls ?? []).some((tc) => tc.success && CHAT_CODED_WRITE_TOOLS.has(tc.name));
   if (wrote) return null;
   if (!content) return null;
-  const prose = stripFencedBlocks(content);
-  const hasH1 = /^#\s+\S/m.test(prose);
-  const headingCount = (prose.match(/^#{1,6}\s+\S/gm) ?? []).length;
-  if (!hasH1 && headingCount < 2) return null;
+  const prose = stripFencedBlocks(unwrapDocumentFences(content));
   const nonWhitespace = prose.replace(/\s+/g, '').length;
-  if (nonWhitespace < PROSE_DELIVERABLE_MIN_CHARS) return null;
-  return { path: inferProseDeliverablePath(prose, expectedPath) };
+  if (opensWithAskedFile(prose, expectedPath, requestText)) {
+    if (nonWhitespace < LABELED_DELIVERABLE_MIN_CHARS) return null;
+  } else {
+    const hasH1 = /^#\s+\S/m.test(prose);
+    const headingCount = (prose.match(/^#{1,6}\s+\S/gm) ?? []).length;
+    if (!hasH1 && headingCount < 2) return null;
+    if (nonWhitespace < PROSE_DELIVERABLE_MIN_CHARS) return null;
+  }
+  return { path: inferProseDeliverablePath(prose, expectedPath, requestText) };
 }
 
+const DOCUMENT_PATH = String.raw`[\w./-]+\.(?:md|markdown|txt|rst)`;
+
+/** A document the request asks to be written, e.g. "write the plan as
+ *  `plan.md`" or "save it to notes/summary.md". Deliberately requires the
+ *  path right after the verb or after as/to/into/called/named: "write a
+ *  summary of `notes.md`" names an INPUT, and nudging a write there would
+ *  overwrite the user's source. */
+const REQUESTED_PATH = new RegExp(
+  String.raw`\b(?:write|save|create|produce|draft|store)\b(?:[^\n.]{0,80}?\b(?:as|to|into|called|named)\s+|\s+)[\x60"'*]*(${DOCUMENT_PATH})\b`,
+  'i',
+);
+
+/** A reply whose opening line is only a filename (`plan.md`, `**plan.md**`,
+ *  `# plan.md`) is the model announcing where the document belongs. */
+const ANNOUNCED_PATH = new RegExp(
+  String.raw`^\s*(?:#+\s*)?[\x60*]*(${DOCUMENT_PATH})[\x60*]*\s*:?\s*$`,
+  'i',
+);
+
 /**
- * Pick the save path for a chat-only report: the caller's expected
- * deliverable path when set, else a kebab-cased filename derived from the
- * H1 title, else the generic `report.md`.
+ * Pick the save path for a chat-only report, most authoritative first: the
+ * caller's expected-deliverable path, a document the request named, a
+ * filename the reply opened with, a kebab-cased `<h1-title>.md`, and
+ * finally `report.md`. The H1 guess used to outrank the request: a 0.8B
+ * asked for `plan.md` replied "plan.md\n# Relocation Plan: …", was told to
+ * save `relocation-plan-….md`, complied, and the plan the user asked for
+ * never existed.
  */
-function inferProseDeliverablePath(prose: string, expectedPath?: string): string {
+function announcedPath(prose: string): string | undefined {
+  const firstLine = prose.split('\n').find((line) => line.trim().length > 0) ?? '';
+  return firstLine.match(ANNOUNCED_PATH)?.[1];
+}
+
+function opensWithAskedFile(prose: string, expectedPath?: string, requestText?: string): boolean {
+  const announced = announcedPath(prose)?.toLowerCase();
+  const asked = (expectedPath?.trim() || requestText?.match(REQUESTED_PATH)?.[1])?.toLowerCase();
+  if (!announced || !asked) return false;
+  return asked === announced || asked.endsWith(`/${announced}`);
+}
+
+function inferProseDeliverablePath(
+  prose: string,
+  expectedPath?: string,
+  requestText?: string,
+): string {
   const expected = expectedPath?.trim();
   if (expected) return expected;
+  const requested = requestText?.match(REQUESTED_PATH)?.[1];
+  if (requested) return requested;
+  const announced = announcedPath(prose);
+  if (announced) return announced;
   const h1 = prose.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1]?.trim();
   const kebab = h1
     ? h1

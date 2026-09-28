@@ -572,6 +572,89 @@ describe('HomeView', () => {
     expect(screen.queryByText('Helicopter lift feels floaty')).not.toBeInTheDocument();
   });
 
+  it('does not count the shared library indexing job on a new Home', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'default', name: 'Default' },
+        {
+          id: 'shared',
+          name: 'Shared Library',
+          properties: { 'gezel.sharedLibrary': '1' },
+        },
+      ],
+    } as never);
+    vi.mocked(api.listProjectTasks).mockImplementation(
+      async (projectId) =>
+        ({
+          tasks:
+            projectId === 'shared'
+              ? [
+                  {
+                    ref: 'shared/1',
+                    projectId: 'shared',
+                    status: 'active',
+                    assignee: { kind: 'user' },
+                    origin: { kind: 'system-job', jobId: 'boekwachter-indexing' },
+                  },
+                ]
+              : [],
+        }) as never,
+    );
+
+    render(<HomeView />);
+    await waitFor(() => expect(api.listProjectTasks).toHaveBeenCalledWith('default'));
+    expect(api.listProjectTasks).not.toHaveBeenCalledWith('shared');
+    expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
+  });
+
+  it('does not count a legacy system job kept in Default as pending user work', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({
+      tasks: [
+        {
+          ref: 'default/1',
+          projectId: 'default',
+          status: 'active',
+          assignee: { kind: 'user' },
+          origin: { kind: 'system-job', jobId: 'boekwachter-indexing' },
+        },
+        {
+          ref: 'default/2',
+          projectId: 'default',
+          status: 'active',
+          assignee: { kind: 'user' },
+        },
+      ],
+    } as never);
+
+    render(<HomeView />);
+    await waitFor(() => expect(screen.getByText('1 waiting on you')).toBeInTheDocument());
+    expect(screen.queryByText('2 waiting on you')).not.toBeInTheDocument();
+  });
+
+  it('recognizes the shared library by marker when its ID collides with a user project', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      hasGithubToken: true,
+      meesterGezelId: 'gz-meester',
+      recentTabs: [{ kind: 'project', id: 'shared-library', at: Date.now() }],
+    } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'default', name: 'Default' },
+        { id: 'shared', name: 'My shared project' },
+        {
+          id: 'shared-library',
+          name: 'Shared Library',
+          properties: { 'gezel.sharedLibrary': '1' },
+        },
+      ],
+    } as never);
+
+    render(<HomeView />);
+    await waitFor(() => expect(api.listProjectTasks).toHaveBeenCalledWith('shared'));
+    expect(api.listProjectTasks).not.toHaveBeenCalledWith('shared-library');
+  });
+
   it('does not render the workshop side rail', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [

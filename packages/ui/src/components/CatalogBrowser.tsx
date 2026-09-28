@@ -13,7 +13,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
+import { CommunityBadge } from './CommunityBadge.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
+import {
+  COMMUNITY_CATALOG_NOTICE,
+  isCommunityCatalogItem,
+  reviewedBeforeCommunity,
+} from './catalog-provenance.js';
 
 /**
  * Shared catalog browser. Given a `kind`, loads items via the catalog
@@ -212,8 +218,10 @@ export function CatalogBrowser({
       });
     }
     if (filter) out = out.filter(filter);
-    return out;
+    return reviewedBeforeCommunity(out);
   }, [items, query, filterTags, filter, activeCategory, kind]);
+
+  const showsCommunity = visible.some(isCommunityCatalogItem);
 
   // Knowledge catalogs are downloads too: same card chrome as the model kinds.
   const isModelCatalog =
@@ -225,7 +233,12 @@ export function CatalogBrowser({
   return (
     <div className={`catalog-browser${isModelCatalog ? ' catalog-browser--models' : ''}`}>
       <div className="catalog-filter">
-        <input placeholder="Filter…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input
+          placeholder="Filter…"
+          aria-label="Filter catalog"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <button type="button" onClick={() => void refresh()}>
           Refresh
         </button>
@@ -256,6 +269,9 @@ export function CatalogBrowser({
           ))}
         </div>
       )}
+      {showsCommunity && (
+        <p className="muted small catalog-community-notice">{COMMUNITY_CATALOG_NOTICE}</p>
+      )}
       {loading && <p className="muted small">Loading…</p>}
       {error && <p className="error">{error}</p>}
       {!loading && visible.length === 0 && (
@@ -271,7 +287,15 @@ export function CatalogBrowser({
               <div className="catalog-item-header">
                 <CatalogItemLogo item={item} />
                 <div className="catalog-item-head">
-                  <div className="catalog-item-name">{item.manifest.name}</div>
+                  <div className="catalog-item-name">
+                    {item.manifest.name}
+                    {isCommunityCatalogItem(item) && <CommunityBadge />}
+                  </div>
+                  {isCommunityCatalogItem(item) && item.manifest.maintainer.name && (
+                    <div className="catalog-item-attribution">
+                      Shared by <strong>{item.manifest.maintainer.name}</strong>
+                    </div>
+                  )}
                   {item.manifest.kind === 'knowledge-catalog' && (
                     <div className="catalog-item-attribution">
                       <div>

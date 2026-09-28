@@ -13,6 +13,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../connectors/types.js';
+import { canonicalRecipients, recipientEntries } from './recipient.js';
 import { messageToRecord } from './storage.js';
 import type { MailCursor, MailProvider } from './types.js';
 
@@ -84,9 +85,11 @@ export class MailConnectorAdapter implements ConnectorAdapter<NormalizedRecord, 
       body?: unknown;
       inReplyTo?: unknown;
     };
-    const list = (v: unknown): string[] =>
-      Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
-    const to = list(send.to);
+    // Same parser and same fields as the recipient-allowlist enforcer, so
+    // nothing reaches the provider that the enforcer did not check.
+    const to = canonicalRecipients(recipientEntries(send.to));
+    const cc = canonicalRecipients(recipientEntries(send.cc));
+    const bcc = canonicalRecipients(recipientEntries(send.bcc));
     if (!to.length) throw new Error('send requires a non-empty `to` list');
     const address = this.identity.address;
     if (!address) throw new Error('this mail binding has no address to send from');
@@ -95,8 +98,8 @@ export class MailConnectorAdapter implements ConnectorAdapter<NormalizedRecord, 
       : address;
     const sent = await this.provider.send(fromAddr, {
       to,
-      ...(list(send.cc).length ? { cc: list(send.cc) } : {}),
-      ...(list(send.bcc).length ? { bcc: list(send.bcc) } : {}),
+      ...(cc.length ? { cc } : {}),
+      ...(bcc.length ? { bcc } : {}),
       subject: typeof send.subject === 'string' ? send.subject : '',
       bodyMarkdown: typeof send.body === 'string' ? send.body : '',
       ...(typeof send.inReplyTo === 'string' && send.inReplyTo

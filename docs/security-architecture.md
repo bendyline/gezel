@@ -181,8 +181,14 @@ actually offered. `requireInternalApiAccess` first keeps inference-only app/devi
 `/v1`, while admitting explicitly approved `product` and `cli` credentials.
 `sessionRouteGuard` then denies session tokens by default, admitting only explicitly classified
 MCP routes and rejecting config, raw sessions/tool invocation, events, terminals, engine/admin
-routes, foreign project-document fallbacks, and body/query scope spoofing. Three ownership/
-role middlewares provide additional defense-in-depth:
+routes, foreign project-document fallbacks, and body/query scope spoofing. It also keeps the
+user's own moves off session tokens: applying or dismissing a change proposal (apply is the
+only `userInitiated` workspace write), firing or dismissing report actions, forcing a step past
+its gate, and creating a task that trusts custom scripts are denied outright; retrying or
+resuming a paused task (and, for a coordinator, canceling one) is admitted only inside a turn
+the user started (`ChatManager.isUserDirectedTurn`). A session-token `/scripts/run` is recorded
+as a `chat` run, never `manual`, so the script-execution policy and gezel-only artifact denials
+apply. Three ownership/role middlewares provide additional defense-in-depth:
 
 | Guard | Confines a **non-team session** token to… | Env flag | Default |
 |---|---|---|---|

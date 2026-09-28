@@ -83,6 +83,11 @@
   border-radius: var(--radius-md) 0 0 var(--radius-md);
 }
 
+/* Hosts without background work (the phone) have no scheduled/recurring half. */
+.tasks-filters button.tasks-create-main:only-child {
+  border-radius: var(--radius-md);
+}
+
 .tasks-filters button.tasks-create-more {
   min-width: 2rem;
   padding-inline: 0.55rem;
@@ -352,7 +357,7 @@
 
 .task-expand:hover {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .task-expand:focus-visible {
@@ -494,7 +499,7 @@
 }
 
 .task-bulk-message {
-  color: var(--success);
+  color: var(--success-text);
   font-size: var(--text-sm);
 }
 
@@ -786,7 +791,7 @@
 }
 
 .step-dot.status-active .step-dot-label {
-  color: var(--success, #27ae60);
+  color: var(--success-text, #27ae60);
   font-weight: 700;
 }
 
@@ -795,7 +800,7 @@
   font-size: 0.65rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--success, #27ae60);
+  color: var(--success-text, #27ae60);
   margin-top: -0.15rem;
 }
 
@@ -840,7 +845,7 @@
 }
 
 .step-dot.status-active:hover:not(:disabled) .step-dot-label {
-  color: var(--success, #27ae60);
+  color: var(--success-text, #27ae60);
 }
 
 /* Connector segment between two adjacent steps. Color tracks the
@@ -1220,7 +1225,7 @@ button.bench-step-foot:disabled {
 
 /* The active step: terracotta status word with a pulsing tracker dot. */
 .bench-step.status-active .bench-step-status {
-  color: var(--accent);
+  color: var(--accent-text);
   display: inline-flex;
   align-items: center;
   gap: 0.35em;
@@ -1546,7 +1551,7 @@ button.bench-step-foot:disabled {
 
 .step-status-pill.status-active {
   background: var(--success-bg, rgba(39, 174, 96, 0.12));
-  color: var(--success, #27ae60);
+  color: var(--success-text, #27ae60);
   border-color: var(--success, #27ae60);
 }
 

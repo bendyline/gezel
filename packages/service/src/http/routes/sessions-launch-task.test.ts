@@ -220,6 +220,38 @@ describe('POST /api/sessions/:id/launch-task', () => {
     expect((await preview(worker.id)).visible).toBe(false);
   });
 
+  it('answers a launch missing what the book needs with 422 and the fields to fill', async () => {
+    // Task + a book that needs a topic or source, sent with no words, used to
+    // come back as a scrubbed "Gezel API error 500".
+    await svc.context.store.writeProjectCraftbook(projectId, {
+      ...DECK_BOOK,
+      id: 'needs-a-subject',
+      paramSchema: {
+        type: 'object',
+        anyOf: [
+          { required: ['topic'], properties: { topic: { minLength: 1 } } },
+          { required: ['sourcePath'], properties: { sourcePath: { minLength: 1 } } },
+        ],
+        properties: {
+          topic: { type: 'string', title: 'Topic' },
+          sourcePath: { type: 'string', title: 'Source file' },
+        },
+      },
+    });
+    const session = await openSession();
+    const res = await launch(session.id, {
+      message: '',
+      launch: { craftbookId: 'needs-a-subject', params: {} },
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      error: 'Fill in Topic or Source file to start this task.',
+      code: 'craftbook_params_missing',
+      params: ['topic', 'sourcePath'],
+    });
+  });
+
   it('refuses an unknown session, an unknown draft, and an unavailable craftbook', async () => {
     const session = await openSession();
     const launchBody = { craftbookId: 'topic-deck', params: {} };

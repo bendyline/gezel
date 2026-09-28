@@ -21,13 +21,16 @@ interface CliArgs {
   meta: string;
   dest: string;
   force: boolean;
+  sharedReadOnly: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
-  const args: Partial<CliArgs> = { force: false };
+  const args: Partial<CliArgs> = { force: false, sharedReadOnly: false };
   for (const a of argv) {
     if (a === '--force') {
       args.force = true;
+    } else if (a === '--shared-readonly') {
+      args.sharedReadOnly = true;
     } else if (a.startsWith('--tarball=')) {
       args.tarball = a.slice('--tarball='.length);
     } else if (a.startsWith('--meta=')) {
@@ -46,6 +49,9 @@ function parseArgs(argv: readonly string[]): CliArgs {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // This process only unpacks public product code. The parent installer and
+  // daemon retain umask 077 for private state; never widen it in-process there.
+  if (args.sharedReadOnly) process.umask(0o022);
   const logger = {
     info: (m: string) => process.stdout.write(`${m}\n`),
     warn: (m: string) => process.stderr.write(`${m}\n`),
@@ -55,6 +61,7 @@ async function main(): Promise<void> {
     metaPath: args.meta,
     installDir: args.dest,
     force: args.force,
+    sharedReadOnly: args.sharedReadOnly,
     logger,
   });
   // The elapsed time lands in the package manager's own transcript (apt's

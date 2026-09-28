@@ -512,6 +512,92 @@ describe('ordinary client against offline product runtime', () => {
     expect(saved.messages.some((item) => item.role === 'assistant')).toBe(false);
   });
 
+  it('sizes the conversation to the window the device fits, unless the person chose one', async () => {
+    const requests: Array<Parameters<PortableInference['generate']>[0]> = [];
+    const { service, client } = await setup({
+      models: async () => ({
+        models: [{ id: 'fixture', name: 'Fixture', sizeBytes: 100, contextTokens: 16384 }],
+        selectedModelId: 'fixture',
+      }),
+      generate: async (request) => {
+        requests.push(request);
+        return { text: 'Hello.', stopReason: 'stop' };
+      },
+    });
+    const { gezels } = await client.listGezels();
+    const session = await client.createChatSession({ gezelId: gezels[0]!.id });
+    await client.sendToChatSession(session.id, { message: 'Say hello.' });
+    await settled(service);
+    expect(requests.at(-1)).toMatchObject({ contextSize: 16384, maxTokens: 1000 });
+    await client.updateConfig({ modelContextOverrides: { 'llama-cpp:fixture': 4096 } });
+    await client.sendToChatSession(session.id, { message: 'Once more.' });
+    await settled(service);
+    expect(requests.at(-1)).toMatchObject({ contextSize: 4096 });
+  });
+
+  it("passes a downloaded model's catalog sampling to the engine, and none for an imported file", async () => {
+    const requests: Array<Parameters<PortableInference['generate']>[0]> = [];
+    const identity = {
+      catalogId: 'qwen-fixture',
+      catalogVersion: '1.0.0',
+      sourceId: 'bundled',
+      huggingfaceRepo: 'owner/repo',
+      revision: 'a'.repeat(40),
+      filename: 'model.gguf',
+      sha256: 'b'.repeat(64),
+    };
+    let selected = 'downloaded';
+    const { service, client } = await setup({
+      models: async () => ({
+        models: [
+          {
+            id: 'downloaded',
+            name: 'Downloaded',
+            sizeBytes: 100,
+            source: { ...identity, sizeBytes: 100 },
+          },
+          { id: 'imported', name: 'Imported', sizeBytes: 100 },
+        ],
+        selectedModelId: selected,
+      }),
+      generate: async (request) => {
+        requests.push(request);
+        return { text: 'Hello.', stopReason: 'stop' };
+      },
+    });
+    service.setContent({
+      templates: [],
+      craftbooks: [],
+      models: [
+        {
+          name: 'Qwen fixture',
+          approxSizeBytes: 100,
+          source: identity,
+          reasoningFormat: 'think',
+          tuning: {
+            sampling: { temperature: 0.7, topK: 20 },
+            profiles: {
+              'thinking-general': { sampling: { temperature: 0.6, repetitionPenalty: 1.05 } },
+            },
+          },
+        },
+      ],
+    });
+    const { gezels } = await client.listGezels();
+    const first = await client.createChatSession({ gezelId: gezels[0]!.id });
+    await client.sendToChatSession(first.id, { message: 'Say hello.' });
+    await settled(service);
+    expect(requests.at(-1)?.sampling).toMatchObject({ topK: 20 });
+    expect(requests.at(-1)?.sampling?.temperature).toBeGreaterThan(0);
+
+    selected = 'imported';
+    const second = await client.createChatSession({ gezelId: gezels[0]!.id });
+    await client.sendToChatSession(second.id, { message: 'Say hello.' });
+    await settled(service);
+    expect(requests.at(-1)?.modelId).toBe('imported');
+    expect(requests.at(-1)?.sampling).toBeUndefined();
+  });
+
   it('fits the tool listing to a small native context and remembers the fit', async () => {
     // The iOS bridge fixture: one token per byte, 256-token replies, and a
     // window just too small for the compact listing.

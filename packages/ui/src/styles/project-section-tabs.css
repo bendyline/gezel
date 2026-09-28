@@ -1,5 +1,6 @@
-/* Shared by desktop projects and the native foreground shell. Keep the
-   section names visible; a phone should not require learning a new icon set. */
+/* Shared by desktop projects and the native foreground shell. Section names
+   show whenever they fit; a narrower row drops to icons (FittedTabsList)
+   rather than hiding sections behind a horizontal scroll. */
 .project-section-tabs {
   flex: 1 1 auto;
   min-width: 0;
@@ -63,4 +64,17 @@
 .project-section-tabs.is-compact .gz-tabs-trigger {
   min-height: 44px;
   padding-inline: 0.85rem;
+}
+
+/* Iconified tabs may narrow below their natural width, and on touch below
+   44px, so every section stays on screen; the row keeps its 44px height.
+   24px is WCAG's minimum target. Flex centering keeps the glyph centered
+   once the tab is narrower than glyph plus padding. */
+.project-section-tabs .gz-tabs-trigger[data-face="icon"] {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: max(1.5rem, 24px);
+  padding-inline: 0.55rem;
 }

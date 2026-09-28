@@ -2,9 +2,10 @@
 /**
  * Generate a CycloneDX inventory of everything a Gezel installer redistributes.
  *
- * Four sources, because no single one sees the whole payload:
+ * Five sources, because no single one sees the whole payload:
  *
- *   - pnpm's production license graph — the npm dependency tree;
+ *   - pnpm's production license inventory — npm identities and licences;
+ *   - pnpm's resolved production trees — workspace roots and dependency edges;
  *   - the pin-bound inventory of pnpm's own vendored `dist/node_modules`;
  *   - NOTICE.md's native-engine, native-helper-source, and bundled-runtime
  *     rows, read through check-notice.mjs so the pins and legal texts are the
@@ -20,32 +21,80 @@
  *
  * PLATFORM SCOPE: one SBOM accompanies installers for four platforms, so it is
  * a superset. Native components carry a `gezel:platforms` property naming the
- * payload keys they ship on; consumers filter on it. The workspace npm half
- * cannot be scoped that way — pnpm reports only the optional dependencies
- * installed on the generating host — so `gezel:npm-platform` records which
- * host that was. The vendored pnpm graph is pin-bound and platform-scoped
- * separately, so it is complete even when generated on Linux.
+ * payload keys they ship on; consumers filter on it. pnpm reports only the
+ * optional dependencies installed on the generating host (`gezel:npm-platform`
+ * records which host that was), so the platform prebuilds every other
+ * installer carries are added from pnpm-lock.yaml by sbom-enrichment.mjs. The
+ * vendored pnpm graph is pin-bound and platform-scoped separately.
+ *
+ * HASHES describe bytes, never a guess: an npm component carries the registry
+ * tarball digest pnpm-lock.yaml pins; native payload files, the Windows
+ * node.exe, the DuckDB executables, and the binaries inside onnxruntime-node
+ * carry the SHA-256 of the file that ships; runtimes and elevate.exe carry
+ * their distribution archive digests on `externalReferences`.
  */
 
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { allPlatformKeys, platformKeysForEngine } from './native-payload.mjs';
 import { mergePnpmRuntimeSbomComponents } from './pnpm-runtime-inventory.mjs';
-import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
+import {
+  DECLARED_BUT_NOT_SHIPPED,
+  PACKAGED_WORKSPACE_ROOTS,
+  packagedWorkspaceFilters,
+  readPackagedProductionDependencyTree,
+  readProductionLicenseInventory,
+} from './production-dependency-inventory.mjs';
+import {
+  buildPnpmSbomGraph,
+  finalizeSbomDependencyGraph,
+  npmPurl,
+} from './sbom-dependency-graph.mjs';
+import {
+  declaredManifestLicense,
+  enrichNpmComponents,
+  installerBinaryComponents,
+  lockfilePlatformPrebuilds,
+  nativePayloadComponents,
+  normalizeComponentLicenses,
+  readPnpmLockfile,
+  runtimeArtifacts,
+  supplementalBinaryComponents,
+} from './sbom-enrichment.mjs';
+import { loadSupplementalLicenses } from './supplemental-licenses.mjs';
 
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.argv[2] ?? 'artifacts/gezel.cdx.json');
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-const byLicense = readProductionLicenseInventory();
+const byLicense = readProductionLicenseInventory({ filters: packagedWorkspaceFilters() });
+const packagedProjects = readPackagedProductionDependencyTree();
 const notice = await verifyNoticeInventory();
+const supplemental = await loadSupplementalLicenses();
+const lockfile = await readPnpmLockfile(join(repoRoot, 'pnpm-lock.yaml'));
 const components = [];
+const installedPackages = new Map();
 
 for (const [license, packages] of Object.entries(byLicense)) {
   for (const pkg of packages) {
-    for (const version of pkg.versions) {
+    for (const [index, version] of pkg.versions.entries()) {
       const purl = npmPurl(pkg.name, version);
       const slash = pkg.name.startsWith('@') ? pkg.name.indexOf('/') : -1;
+      const path = pkg.paths?.[index];
+      if (typeof path === 'string' && path) {
+        const versions = installedPackages.get(pkg.name) ?? new Map();
+        versions.set(version, path);
+        installedPackages.set(pkg.name, versions);
+      }
+      // pnpm says Unknown for npm's legacy `licenses: [{ type }]` array shape;
+      // the installed manifest still names the licence.
+      let declared = license;
+      if (license === 'Unknown' && typeof path === 'string' && path) {
+        const manifest = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
+        declared = declaredManifestLicense(manifest) ?? license;
+      }
       components.push({
         type: 'library',
         'bom-ref': purl,
@@ -53,19 +102,30 @@ for (const [license, packages] of Object.entries(byLicense)) {
         name: slash > 0 ? pkg.name.slice(slash + 1) : pkg.name,
         version,
         scope: 'required',
-        licenses: [{ license: { name: license } }],
+        licenses: [{ license: { name: declared } }],
         purl,
       });
     }
   }
 }
+
+const pnpmWorkspaceGraph = buildPnpmSbomGraph({
+  projects: packagedProjects,
+  components,
+  entryWorkspaceNames: PACKAGED_WORKSPACE_ROOTS,
+  repoRoot,
+  excludedPackageNames: DECLARED_BUT_NOT_SHIPPED,
+});
 // Native engines — compiled from pinned upstream sources by build-native.yml
 // and staged under `packages/app/native-bin/<platform-key>/`.
+const engineRefs = new Map();
 for (const engine of notice.native.components) {
   const purl = githubPurl(engine.source, engine.version);
+  const ref = purl ?? `gezel:native/${engine.id}@${engine.version}`;
+  engineRefs.set(engine.id, ref);
   components.push({
     type: 'application',
-    'bom-ref': purl ?? `gezel:native/${engine.id}@${engine.version}`,
+    'bom-ref': ref,
     name: engine.id,
     version: engine.version,
     scope: 'required',
@@ -109,8 +169,12 @@ for (const component of notice.native.helperComponents) {
 
 // Bundled application runtimes — Electron, plus the pinned Node and pnpm the
 // supervisor extracts for the sandbox runner and scheduled-job installs.
+const runtimeFiles = await runtimeArtifacts({ repoRoot, versions: notice.runtimes.versions });
 for (const runtime of notice.runtimes.components) {
   const purl = githubPurl(runtime.source, runtime.version);
+  const artifacts = runtimeFiles[runtime.name];
+  if (!artifacts)
+    throw new Error(`sbom-enrichment.mjs has no pinned artifacts for ${runtime.name}`);
   components.push({
     type: 'application',
     'bom-ref': purl ?? `gezel:runtime/${runtime.name}@${runtime.version}`,
@@ -120,11 +184,16 @@ for (const runtime of notice.runtimes.components) {
     description: `${runtime.name} — application runtime shipped inside the installer`,
     licenses: [licenseEntry(runtime.license)],
     ...(purl ? { purl } : {}),
+    ...(artifacts.hashes ? { hashes: artifacts.hashes } : {}),
     properties: [
       { name: 'gezel:component-kind', value: 'bundled-runtime' },
       { name: 'gezel:platforms', value: allPlatformKeys().join(',') },
     ],
-    ...(runtime.source ? { externalReferences: [{ type: 'vcs', url: runtime.source }] } : {}),
+    externalReferences: [
+      ...(runtime.source ? [{ type: 'vcs', url: runtime.source }] : []),
+      ...artifacts.externalReferences,
+    ],
+    ...(artifacts.components?.length ? { components: artifacts.components } : {}),
   });
 }
 
@@ -218,9 +287,69 @@ components.push({
   ],
 });
 
+const nativeFileManifest = JSON.parse(
+  await readFile(
+    join(repoRoot, 'packages', 'service', 'src', 'engines', 'native-file-manifest.json'),
+    'utf8',
+  ),
+);
+const nativePayloads = nativePayloadComponents({
+  manifest: nativeFileManifest,
+  engineRefs,
+  helperSourceRefsForKey: (key) =>
+    notice.native.helperComponents
+      .filter((component) => component.platforms.includes(key))
+      .map((component) => `gezel:native-helper-source/${component.id}@${component.version}`),
+  cudaRuntimeRef: 'gezel:native/nvidia-cuda-runtime',
+});
+components.push(...nativePayloads.components);
+
+// Binaries carried inside npm packages under terms the package metadata omits
+// (DirectML inside onnxruntime-node), and electron-builder's elevate.exe.
+const embeddedBinaries = await supplementalBinaryComponents({ supplemental, installedPackages });
+components.push(...embeddedBinaries.components);
+components.push(...(await installerBinaryComponents({ supplemental, repoRoot })));
+
+const hashedNpmComponents = enrichNpmComponents(components, lockfile);
+const platformPrebuilds = lockfilePlatformPrebuilds({
+  components,
+  lockfile,
+  excludedPackageNames: DECLARED_BUT_NOT_SHIPPED,
+});
+components.push(...platformPrebuilds.components);
+const spdxIdentified = normalizeComponentLicenses(components);
+
 components.sort((a, b) => a['bom-ref'].localeCompare(b['bom-ref']));
 
 const rootPurl = npmPurl(rootPackage.name, rootPackage.version);
+const directPayloadRefs = components
+  .filter((component) =>
+    component.properties?.some(
+      (property) =>
+        property.name === 'gezel:component-kind' &&
+        [
+          'native-engine',
+          'native-helper-derived-source',
+          'bundled-runtime',
+          'native-redistributable',
+          'native-payload',
+          'installer-binary',
+        ].includes(property.value),
+    ),
+  )
+  .map((component) => component['bom-ref']);
+const dependencies = finalizeSbomDependencyGraph({
+  rootRef: rootPurl,
+  rootDependsOn: [...pnpmWorkspaceGraph.entryRefs, ...directPayloadRefs],
+  components,
+  dependencyGroups: [
+    pnpmWorkspaceGraph.dependencies,
+    pnpmDependencies,
+    nativePayloads.dependencies,
+    embeddedBinaries.dependencies,
+    platformPrebuilds.dependencies,
+  ],
+});
 const bom = {
   $schema: 'https://cyclonedx.org/schema/bom-1.6.schema.json',
   bomFormat: 'CycloneDX',
@@ -235,7 +364,7 @@ const bom = {
           type: 'application',
           author: 'Bendyline',
           name: 'gezel-sbom-generator',
-          version: '3',
+          version: '5',
         },
       ],
     },
@@ -248,22 +377,34 @@ const bom = {
     },
     properties: [
       // One SBOM is published beside installers for four platforms, so it is a
-      // superset. Native components say which platforms they ship on; the npm
-      // half cannot, because pnpm only reports optional dependencies installed
-      // on this host. Record the host so a consumer can tell which
-      // platform-specific npm packages are represented and which are missing.
+      // superset. Components say which platforms they ship on. pnpm installs
+      // only this host's optional dependencies; the other platforms' prebuilds
+      // come from pnpm-lock.yaml and are marked `gezel:inventory-source`.
       { name: 'gezel:scope', value: 'superset-across-platforms' },
       { name: 'gezel:npm-platform', value: `${process.platform}-${process.arch}` },
+      { name: 'gezel:npm-foreign-platform-source', value: 'pnpm-lock.yaml' },
       { name: 'gezel:native-platforms', value: allPlatformKeys().join(',') },
+      { name: 'gezel:dependency-root-refs', value: pnpmWorkspaceGraph.entryRefs.join(',') },
+      { name: 'gezel:native-inventory-refs', value: directPayloadRefs.join(',') },
+      {
+        name: 'gezel:hashes',
+        value:
+          'npm components: registry tarball digest pinned in pnpm-lock.yaml; file components: SHA-256 of the shipped file; runtimes and installer binaries: distribution archive digests on externalReferences',
+      },
     ],
   },
   components,
-  dependencies: pnpmDependencies,
+  dependencies,
 };
 
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, `${JSON.stringify(bom, null, 2)}\n`, { mode: 0o600 });
-console.log(`✓ wrote CycloneDX SBOM with ${components.length} components to ${output}`);
+console.log(
+  `✓ wrote CycloneDX SBOM with ${components.length} components and ${dependencies.length} dependency nodes to ${output}`,
+);
+console.log(
+  `  ${hashedNpmComponents} npm components hashed from pnpm-lock.yaml, ${platformPrebuilds.components.length} foreign-platform prebuilds added, ${spdxIdentified} licences expressed in SPDX, ${nativePayloads.components.length} native payloads and ${embeddedBinaries.components.length} embedded binary components with file digests`,
+);
 
 /**
  * A CycloneDX licence entry. SPDX expressions ("Apache-2.0 OR MIT") belong in
@@ -283,12 +424,4 @@ function githubPurl(sourceUrl, version) {
   if (!match || !version) return null;
   const [, owner, repo] = match;
   return `pkg:github/${encodeURIComponent(owner)}/${encodeURIComponent(repo.replace(/\.git$/, ''))}@${encodeURIComponent(version)}`;
-}
-
-function npmPurl(name, version) {
-  if (name.startsWith('@')) {
-    const [scope, packageName] = name.slice(1).split('/');
-    return `pkg:npm/%40${encodeURIComponent(scope)}/${encodeURIComponent(packageName)}@${encodeURIComponent(version)}`;
-  }
-  return `pkg:npm/${encodeURIComponent(name)}@${encodeURIComponent(version)}`;
 }

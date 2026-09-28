@@ -14,6 +14,7 @@ import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import '../styles/history.css';
 
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },
@@ -297,6 +298,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
           </Select.Root>
           <input
             placeholder="Search…"
+            aria-label="Search history"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             style={{ flex: 1 }}

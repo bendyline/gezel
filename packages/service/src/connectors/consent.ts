@@ -12,6 +12,7 @@
  */
 
 import type { ProjectConnectorBinding, ProjectDetail } from '@bendyline/gezel';
+import { canonicalRecipients, parseRecipient, recipientEntries } from '../mail/recipient.js';
 
 export interface ConsentContext {
   project: ProjectDetail;
@@ -23,7 +24,12 @@ export interface ConsentContext {
   input: unknown;
 }
 
-export type ConsentVerdict = { ok: true } | { ok: false; reason: string };
+/**
+ * `input`, when present, replaces the draft's input for the commit: an
+ * enforcer that normalized what it checked hands the adapter exactly that,
+ * so no second parser downstream can read the draft differently.
+ */
+export type ConsentVerdict = { ok: true; input?: unknown } | { ok: false; reason: string };
 export type ConsentEnforcer = (ctx: ConsentContext) => ConsentVerdict | Promise<ConsentVerdict>;
 
 const enforcers = new Map<string, ConsentEnforcer>();
@@ -47,26 +53,30 @@ export async function enforceConsent(
   return enforcer(ctx);
 }
 
-/** Extract the bare email address from a `Name <addr>` or `addr` string. */
-export function extractEmail(addr: string): string {
-  const m = /<([^>]+)>/.exec(addr);
-  return (m ? m[1]! : addr).trim().toLowerCase();
-}
-
 export interface RecipientAllowlist {
   allowedRecipients?: string[];
   allowedDomains?: string[];
 }
 
-/** True when `addr` is permitted by an explicit recipient/domain allowlist. */
-export function recipientAllowedBy(addr: string, allowlist: RecipientAllowlist): boolean {
-  const email = extractEmail(addr);
-  if (!email || !email.includes('@')) return false;
-  const recipients = (allowlist.allowedRecipients ?? []).map((a) => a.toLowerCase());
+/** True when `address` (already a bare address) is on an explicit recipient/domain allowlist. */
+function addressAllowedBy(address: string, allowlist: RecipientAllowlist): boolean {
+  const email = address.toLowerCase();
+  const recipients = (allowlist.allowedRecipients ?? []).map((a) => a.trim().toLowerCase());
   if (recipients.includes(email)) return true;
-  const domain = email.split('@')[1] ?? '';
-  const domains = (allowlist.allowedDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
+  const domain = email.slice(email.lastIndexOf('@') + 1);
+  const domains = (allowlist.allowedDomains ?? []).map((d) =>
+    d.trim().toLowerCase().replace(/^@/, ''),
+  );
   return domain.length > 0 && domains.includes(domain);
+}
+
+/**
+ * True when the recipient entry names exactly one address and that address
+ * is permitted by an explicit recipient/domain allowlist.
+ */
+export function recipientAllowedBy(entry: unknown, allowlist: RecipientAllowlist): boolean {
+  const parsed = parseRecipient(entry);
+  return parsed.ok && addressAllowedBy(parsed.address, allowlist);
 }
 
 const splitList = (v: string | undefined): string[] =>
@@ -75,20 +85,21 @@ const splitList = (v: string | undefined): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+const RECIPIENT_FIELDS = ['to', 'cc', 'bcc'] as const;
+
 /**
- * Recipients named by an action draft: the mail-shaped frontmatter fields
- * when present, else `to`/`cc`/`bcc` arrays on the JSON input.
+ * Every recipient entry an action draft names: the mail-shaped frontmatter
+ * fields AND the `to`/`cc`/`bcc` fields on the JSON input. Both are checked
+ * because the draft file is writable in the corpus; checking only one of them
+ * would let the other carry an address past the allowlist.
  */
-export function draftRecipients(data: Record<string, string>, input: unknown): string[] {
-  const fromFrontmatter = [...splitList(data.to), ...splitList(data.cc), ...splitList(data.bcc)];
-  if (fromFrontmatter.length) return fromFrontmatter;
+export function draftRecipients(data: Record<string, string>, input: unknown): unknown[] {
+  const entries: unknown[] = RECIPIENT_FIELDS.flatMap((field) => splitList(data[field]));
   if (input !== null && typeof input === 'object') {
-    const o = input as { to?: unknown; cc?: unknown; bcc?: unknown };
-    return [o.to, o.cc, o.bcc]
-      .flatMap((v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []))
-      .filter((v): v is string => typeof v === 'string');
+    const o = input as Record<string, unknown>;
+    for (const field of RECIPIENT_FIELDS) entries.push(...recipientEntries(o[field]));
   }
-  return [];
+  return entries;
 }
 
 /** Binding-config allowlist for the `recipient-allowlist` scope. */
@@ -110,6 +121,17 @@ registerConsentEnforcer('recipient-allowlist', (ctx) => {
   if (!recipients.length) {
     return { ok: false, reason: 'the draft names no recipients' };
   }
+  const malformed: string[] = [];
+  for (const entry of recipients) {
+    const parsed = parseRecipient(entry);
+    if (!parsed.ok) malformed.push(`${JSON.stringify(entry)} (${parsed.reason})`);
+  }
+  if (malformed.length) {
+    return {
+      ok: false,
+      reason: `recipient(s) must each be one plain email address: ${malformed.join(', ')}`,
+    };
+  }
   const allowlist = bindingAllowlist(ctx.binding);
   const blocked = recipients.filter((r) => !recipientAllowedBy(r, allowlist));
   if (blocked.length) {
@@ -118,8 +140,19 @@ registerConsentEnforcer('recipient-allowlist', (ctx) => {
       reason: `recipient(s) not on the binding's allowlist: ${blocked.join(', ')}. Add them to the connector's allowed recipients or domains first.`,
     };
   }
-  return { ok: true };
+  return { ok: true, input: withCanonicalRecipients(ctx.input) };
 });
+
+/** The input with each recipient field replaced by the bare addresses the enforcer checked. */
+function withCanonicalRecipients(input: unknown): unknown {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return input;
+  const out: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  for (const field of RECIPIENT_FIELDS) {
+    if (out[field] === undefined || out[field] === null) continue;
+    out[field] = canonicalRecipients(recipientEntries(out[field]));
+  }
+  return out;
+}
 
 /** Cheap shape gate for a draft's `images`; byte-level checks (existence,
  *  size, mime) stay in the adapter's `runAction`. */

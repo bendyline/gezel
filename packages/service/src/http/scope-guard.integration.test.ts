@@ -74,6 +74,34 @@ function linkedGet(path: string, token: string, sourceProjectId: string): Promis
 }
 
 describe('token scope guard (integration)', () => {
+  it('keeps resuming a paused task and applying a proposal off session tokens', async () => {
+    const task = await svc.context.tasks.create('default', {
+      title: 'Paused work',
+      description: 'A task the guard test pauses so that a session cannot resume it on its own.',
+      assignee: { kind: 'user' },
+      steps: [{ id: 'do', name: 'Do it', terminal: true }],
+    });
+    await svc.context.tasks.setStatus('default', task.num, 'paused');
+    const worker = svc.context.tokenStore.issueSession({
+      appId: 'session:resume-worker',
+      projectId: 'default',
+      gezelId: 'gz-worker',
+      team: false,
+    });
+    const status = `/api/projects/default/tasks/${task.num}/status`;
+    const resume = await postJson(status, worker.token, { status: 'active' });
+    expect(resume.status).toBe(403);
+    expect(((await resume.json()) as { hint?: string }).hint).toMatch(/resuming a paused task/);
+    expect((await svc.context.tasks.get('default', task.num))?.status).toBe('paused');
+    expect(
+      (await postJson(`/api/projects/default/diffpacks/${task.num}/apply`, worker.token, {}))
+        .status,
+    ).toBe(403);
+
+    expect((await postJson(status, svc.context.token, { status: 'active' })).status).toBe(200);
+    expect((await svc.context.tasks.get('default', task.num))?.status).toBe('active');
+  });
+
   it('confines a worker session to its project; team + root reach any project', async () => {
     const worker = svc.context.tokenStore.issueSession({
       appId: 'session:worker',

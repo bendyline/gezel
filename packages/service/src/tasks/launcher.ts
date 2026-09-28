@@ -1,4 +1,5 @@
 import {
+  CraftbookParamsError,
   type CreateTaskRequest,
   type Task,
   type TaskReferences,
@@ -221,5 +222,21 @@ export function launchErrorResponse(
     };
   }
   if (err instanceof TaskInputError) return { status: 422, body: taskInputErrorBody(err) };
+  if (err instanceof CraftbookParamsError) {
+    return {
+      status: 422,
+      body: {
+        error: `Fill in ${joinTitles(err.titles, err.needs === 'all' ? 'and' : 'or')} to start this task.`,
+        code: err.code,
+        craftbookId: err.craftbookId,
+        params: err.params,
+      },
+    };
+  }
   return null;
+}
+
+function joinTitles(items: string[], conjunction: 'and' | 'or'): string {
+  if (items.length <= 2) return items.join(` ${conjunction} `);
+  return `${items.slice(0, -1).join(', ')}, ${conjunction} ${items[items.length - 1]}`;
 }

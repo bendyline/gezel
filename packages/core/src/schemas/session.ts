@@ -664,6 +664,17 @@ export const UpdateQueuedMessageResponseSchema = z.object({
 export type UpdateQueuedMessageResponse = z.infer<typeof UpdateQueuedMessageResponseSchema>;
 
 /**
+ * Optional body for `POST /api/sessions/:id/cancel`. `stopTask` marks the
+ * person's explicit Stop: when the session is working a task step, that task
+ * is paused so nothing restarts the step until they resume it. Callers that
+ * cancel in order to carry on (re-engage, clearing a wedged turn) omit it.
+ */
+export const CancelSessionTurnRequestSchema = z.object({
+  stopTask: z.boolean().optional(),
+});
+export type CancelSessionTurnRequest = z.infer<typeof CancelSessionTurnRequestSchema>;
+
+/**
  * Body for `POST /api/sessions/:id/interrupt` — cancel the in-progress
  * turn (partial reply salvaged exactly like a plain cancel) and send
  * `message` immediately, ahead of any queued entries. Response reuses

@@ -56,6 +56,7 @@ export async function hostInProcess(
       running = await service.startService({
         home,
         role: 'user',
+        embeddedInferenceOnly: opts.inferenceOnly === true,
         // Ephemeral: the canonical 6228 belongs to the user's own Gezel, and
         // an app that claimed it would answer for the whole machine.
         port: 0,
@@ -78,9 +79,24 @@ export async function hostInProcess(
       throw err;
     }
 
+    if (
+      opts.inferenceOnly === true &&
+      (running.profile !== 'embedded-inference' || typeof running.fetch !== 'function')
+    ) {
+      await running.stop().catch(() => undefined);
+      await clearOwnRuntime(home);
+      throw new GezelSdkError(
+        'the installed @bendyline/gezel-service does not support the inference-only in-process profile; update @bendyline/gezel-app-sdk and @bendyline/gezel-service together',
+        { code: 'service_inference_only_unsupported' },
+      );
+    }
+
     const cert = running.cert?.certPem ?? null;
     const baseUrl = `${cert ? 'https' : 'http'}://127.0.0.1:${running.port}`;
-    const fetchImpl = fetchOverride ?? (cert ? createTrustingFetch({ cert }) : globalThis.fetch);
+    const directFetch = opts.inferenceOnly === true ? running.fetch : undefined;
+    const ownedFetch =
+      !fetchOverride && !directFetch && cert ? createTrustingFetch({ cert }) : null;
+    const fetchImpl = fetchOverride ?? directFetch ?? ownedFetch ?? globalThis.fetch;
     let stopping: Promise<void> | undefined;
     return {
       mode: 'hosted',
@@ -94,8 +110,12 @@ export async function hostInProcess(
       close: () => {
         stopping ??= (async () => {
           try {
-            await running.stop();
-            await clearOwnRuntime(home);
+            try {
+              await ownedFetch?.destroy();
+            } finally {
+              await running.stop();
+              await clearOwnRuntime(home);
+            }
           } finally {
             active = false;
             env.restore();

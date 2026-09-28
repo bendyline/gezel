@@ -5,7 +5,9 @@
  * deliberate and reviewed. The v1.26211.26 audit removed unsigned executable
  * memory and DYLD environment variables. This follow-up also removed two
  * App Sandbox-only network keys that had no effect because Gezel is not App
- * Sandbox-enabled.
+ * Sandbox-enabled. The v1.26270.76 audit went the other way: Narrate and the
+ * ambient wallpaper declared usage strings but lacked the resource
+ * entitlements hardened runtime requires, so macOS refused both silently.
  *
  * Electron's maintained notarization guidance makes the compatibility boundary
  * version-based, not architecture-based: Electron 11 and older needed unsigned
@@ -81,6 +83,33 @@ function macScalar(block, key) {
   return block.match(new RegExp(`^ {2}${escaped}:\\s*([^#\\n]+)`, 'm'))?.[1].trim();
 }
 
+/** `mac.extendInfo` as `key -> string | null` (null = removed from Info.plist). */
+function macExtendInfo(mac) {
+  const start = mac.indexOf('\n  extendInfo:');
+  assert.notEqual(start, -1, 'mac.extendInfo is missing from electron-builder.yml');
+  const entries = new Map();
+  for (const line of mac.slice(start + '\n  extendInfo:'.length).split('\n')) {
+    if (/^\s*#/.test(line) || line.trim() === '') continue;
+    const match = /^ {4}([A-Za-z0-9]+):\s*(.*)$/.exec(line);
+    if (!match) break;
+    const raw = match[2].trim();
+    entries.set(match[1], raw === 'null' || raw === '~' || raw === '' ? null : raw);
+  }
+  return entries;
+}
+
+/**
+ * Hardened-runtime resource entitlements and the Info.plist usage string macOS
+ * pairs with each. Either half alone is broken: without the entitlement the
+ * resource is refused silently; without the string the app is terminated or
+ * the prompt has nothing to say.
+ */
+const RESOURCE_ENTITLEMENT_USAGE_KEYS = new Map([
+  ['com.apple.security.device.audio-input', 'NSMicrophoneUsageDescription'],
+  ['com.apple.security.device.camera', 'NSCameraUsageDescription'],
+  ['com.apple.security.automation.apple-events', 'NSAppleEventsUsageDescription'],
+]);
+
 test('source plist grants exactly the reviewed true entitlement set', async () => {
   const entitlements = await sourceEntitlements();
   assertExactReviewedEntitlements(entitlements, 'packages/app/entitlements.mac.plist');
@@ -119,6 +148,25 @@ test('electron-builder applies this plist to hardened app and helper signatures'
   assert.equal(macScalar(mac, 'hardenedRuntime'), 'true');
   assert.equal(macScalar(mac, 'entitlements'), 'entitlements.mac.plist');
   assert.equal(macScalar(mac, 'entitlementsInherit'), 'entitlements.mac.plist');
+});
+
+test('every declared privacy usage string ships with its hardened-runtime entitlement', async () => {
+  const [entitlements, builder] = await Promise.all([
+    sourceEntitlements(),
+    readFile(builderPath, 'utf8'),
+  ]);
+  const extendInfo = macExtendInfo(macBlock(builder));
+  for (const [entitlement, usageKey] of RESOURCE_ENTITLEMENT_USAGE_KEYS) {
+    const declared = typeof extendInfo.get(usageKey) === 'string';
+    const granted = entitlements.get(entitlement) === true;
+    assert.equal(
+      granted,
+      declared,
+      declared
+        ? `${usageKey} promises this access, but hardened runtime refuses it without ${entitlement}`
+        : `${entitlement} is granted, but ${usageKey} is not declared for the consent prompt`,
+    );
+  }
 });
 
 test('Electron stays new enough to omit unsigned executable memory on every architecture', async () => {

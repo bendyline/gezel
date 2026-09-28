@@ -1071,7 +1071,7 @@ export const GezelConfigSchema = z.object({
   /**
    * Per-model native vision (`--mmproj` at launch), keyed by catalog id.
    *
-   * **Absent means ON**; `false` is an explicit opt-out. The projector now
+   * **Absent means ON** (MLX aside, below); `false` is an explicit opt-out. The projector now
    * ships with the model and memory planning prices it in, so a model that
    * can see does, without the user first finding a switch. Resolve it only
    * through `nativeVisionEnabledFor` — three layers read this and a default
@@ -1094,8 +1094,13 @@ export const GezelConfigSchema = z.object({
    * cost lands on cold starts, not on every turn.
    *
    * The cold-start trade applies to llama.cpp's mmproj path. ds4 uses this
-   * same per-model preference for its `--vision` encoder, while MLX has no
-   * vision path yet — see `MLX_VISION_SUPPORTED`.
+   * same per-model preference for its `--vision` encoder.
+   *
+   * MLX reads it differently, because its vision tower slows every text turn:
+   * absent means the engine starts text-only and reloads with vision the
+   * first time a request carries an image; `true` keeps vision loaded from
+   * launch; `false` never loads it. See `nativeVisionPreferenceFor` and the
+   * service's `mlx/vision-mode.ts`.
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —

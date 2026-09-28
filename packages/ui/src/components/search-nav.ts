@@ -1,5 +1,9 @@
 import type { UnifiedSearchResult, UnifiedSearchResultKind } from '@bendyline/gezel';
-import { type NavAction, openTabAction as openTab } from './nav-actions.js';
+import {
+  type NavAction,
+  openHandboekArticleActions,
+  openTabAction as openTab,
+} from './nav-actions.js';
 import type { OpenFileIntent } from './pending-open-file.js';
 import type { OpenKnowledgeIntent } from './pending-open-knowledge.js';
 import type { OpenSessionIntent } from './pending-open-session.js';
@@ -156,13 +160,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
     }
     case 'handboek': {
       const articleId = r.id.slice('handboek:'.length);
-      if (!articleId) return [];
-      const intent: OpenKnowledgeIntent = { catalogId: 'handboek', documentId: articleId };
-      return [
-        { kind: 'open-knowledge', intent },
-        openTab({ kind: 'area', area: 'knowledge' }),
-        { kind: 'event', type: 'gezel:open-knowledge-document', detail: intent },
-      ];
+      return articleId ? openHandboekArticleActions(articleId) : [];
     }
     case 'knowledge': {
       if (!r.catalogId) return [];

@@ -83,6 +83,31 @@ function categoryAllowed(category: ProofCategory): boolean {
  */
 const MAX_IGNORED_DOCUMENTS = 250;
 
+/**
+ * Gezel's own vocabulary. Without it the first document a new person opens
+ * (the shared library's "About this library") shows the product's name as a
+ * misspelling. Dutch plurals are listed explicitly: the engine does not
+ * derive them.
+ */
+export const PRODUCT_VOCABULARY: readonly string[] = [
+  'gezel',
+  'gezels',
+  'gezellen',
+  'meester',
+  'meesters',
+  'voorman',
+  'voormannen',
+  'klerk',
+  'boekwachter',
+  'keurmeester',
+  'handboek',
+  'craftbook',
+  'craftbooks',
+  'poppetje',
+  'poppetjes',
+  'gilde',
+];
+
 function readDictionary(): string[] {
   try {
     const raw = window.localStorage.getItem(DICTIONARY_STORAGE_KEY);
@@ -131,7 +156,7 @@ export function gezelProofingProvider(): ProofingProvider {
   if (!provider) {
     const engine = createHarperProofingProvider({
       wasmUrl: '/harper/harper_wasm_bg.wasm',
-      initialWords: readDictionary(),
+      initialWords: [...new Set([...PRODUCT_VOCABULARY, ...readDictionary()])],
       onDictionaryWord: appendDictionaryWord,
     });
     // Category filtering sits here rather than in the editor because the

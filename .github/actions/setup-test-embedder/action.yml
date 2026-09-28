@@ -1,7 +1,8 @@
 name: 'Set up verified test embedder'
 description: >-
   Restores the small CI embedding model and proves its cached ONNX graph loads
-  before parallel Vitest workers can share it.
+  before parallel Vitest workers can share it. Requires @bendyline/gezel and
+  @bendyline/gezel-knowledge (and their deps) to be built first.
 
 runs:
   using: composite

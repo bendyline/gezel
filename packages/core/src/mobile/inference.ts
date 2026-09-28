@@ -20,6 +20,21 @@ export type MobileNativeTool = NativeTool;
 export type MobileNativeToolCall = NativeToolCall;
 export type MobileNativeToolReply = NativeToolReply;
 
+/**
+ * Sampling one generation uses, in the catalog's field names. Hosts implement
+ * the subset their engine supports; an absent field keeps the engine default
+ * (greedy decoding on the llama.cpp bridge).
+ */
+export interface PortableSampling {
+  temperature?: number;
+  topK?: number;
+  topP?: number;
+  minP?: number;
+  repetitionPenalty?: number;
+  repetitionContext?: number;
+  seed?: number;
+}
+
 export interface PortableInference {
   providers(): Promise<MobileProvider[]>;
   models?(): Promise<MobileModelInventory>;
@@ -31,6 +46,7 @@ export interface PortableInference {
       modelId?: string;
       contextSize?: number;
       maxTokens?: number;
+      sampling?: PortableSampling;
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
       tools?: MobileNativeTool[];
     },

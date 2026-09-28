@@ -158,6 +158,8 @@ import { shouldServeUiShell, staticUiCacheControl } from './static-ui.js';
 
 interface BuildAppOptions {
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
+  /** Mount inference/model routes in the narrow embedded-app profile. */
+  embeddedInferenceOnly?: boolean;
   /**
    * Preview-capability store to share with a separate plain-HTTP preview
    * listener (see `buildPreviewApp`). Both the minting endpoint (here) and
@@ -306,6 +308,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     log: (m) => sessionRouteLog.warn(m),
     isProjectLinked,
     isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
+    taskStatus: async (projectId, num) =>
+      (await ctx.store.readTask(projectId, num))?.status ?? null,
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
@@ -695,7 +699,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // so its more specific paths win — Hono's nested routers don't
   // intercept extensions otherwise.
   app.route('/v1/models/ensure', v1ModelsEnsureRoutes(ctx));
-  app.route('/v1/models', v1ModelsRoutes(ctx));
+  app.route(
+    '/v1/models',
+    v1ModelsRoutes(ctx, { localOnly: options.embeddedInferenceOnly === true }),
+  );
   // Header-less iframe requests authenticate with a short-lived capability
   // minted by the first-party project endpoint. A path segment carries it so
   // relative assets inherit authority without exposing a UI/root credential.

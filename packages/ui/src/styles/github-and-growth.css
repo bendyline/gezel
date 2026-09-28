@@ -108,7 +108,7 @@
 }
 
 .gh-changes-discard-all:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .gh-changes-truncated {
@@ -168,7 +168,7 @@
 }
 
 .gh-change-kind-modified {
-  color: var(--warning);
+  color: var(--warning-text);
   background: var(--warning-bg);
 }
 
@@ -188,7 +188,7 @@
 }
 
 .gh-change-kind-conflicted {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
 }
 
@@ -247,7 +247,7 @@
 }
 
 .gh-change-discard:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Save box pinned under the changed-file list. */
@@ -359,7 +359,7 @@
 .gh-changes-empty-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--success);
+  color: var(--success-text);
 }
 
 /* The diff renderer itself. */
@@ -519,11 +519,11 @@
 
 .gh-conflicts-dot {
   flex: none;
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .gh-conflicts-dot.is-resolved {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .gh-conflicts-rail-path {
@@ -588,7 +588,7 @@
   background: transparent;
   border: 1px dashed var(--accent);
   border-radius: var(--radius-md);
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   font: inherit;
   font-size: 0.85rem;
@@ -694,7 +694,7 @@
   padding: 0.5rem;
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
@@ -807,7 +807,7 @@
 }
 
 .gh-review-stop:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .gh-review-history {
@@ -858,7 +858,7 @@
 }
 
 .gh-review-outcome-error {
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-bg);
   border-color: transparent;
 }
@@ -888,7 +888,7 @@
 }
 
 .gh-review-rail-button:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Compact widths: stack the two-pane layouts. */
@@ -1073,7 +1073,7 @@
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
   background: var(--warning-bg);
-  color: var(--warning);
+  color: var(--warning-text);
   font-size: 0.85rem;
   max-width: 560px;
 }
@@ -1126,7 +1126,7 @@
 
 .growth-retire {
   margin-top: 0.4rem;
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .growth-cosmetics-row {

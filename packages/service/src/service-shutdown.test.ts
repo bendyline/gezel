@@ -28,6 +28,23 @@ afterEach(async () => {
 });
 
 describe('service shutdown', () => {
+  it('starts and stops the inference-only embedded profile', async () => {
+    process.env.GEZEL_MOCK_PROVIDER = '1';
+    process.env.GEZEL_SECRETS_BACKEND = 'file';
+    home = await mkdtemp(join(tmpdir(), 'gezel-service-embedded-'));
+    service = await startService({ home, embeddedInferenceOnly: true });
+
+    expect(service.port).toBeGreaterThan(0);
+    expect(service.profile).toBe('embedded-inference');
+    expect(service.fetch).toBeTypeOf('function');
+    const models = await service.fetch?.(`https://127.0.0.1:${service.port}/v1/models`, {
+      headers: { Authorization: `Bearer ${service.clientToken}` },
+    });
+    expect(models?.status).toBe(200);
+    await service.stop();
+    stopped = true;
+  }, 30_000);
+
   it('drains chat background work exactly once', async () => {
     process.env.GEZEL_MOCK_PROVIDER = '1';
     process.env.GEZEL_SECRETS_BACKEND = 'file';

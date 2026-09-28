@@ -140,6 +140,13 @@ Across the mobile prompt-budget audit's cases
 system message fell from 12.6–18.9 KB to 3.8–6.2 KB, most of it the tool listing
 (9.7–13.8 KB of JSON down to 2.4–3.4 KB of signatures).
 
+A phone's window is the device's to size. The native runtime measures what each window
+would take with llama.cpp's own dry-run accounting (`gezel_llama_estimate_memory`) and
+reports 16K or 8K when that fits with room to spare, else 4K, on the selected model
+(`MobileModel.contextTokens`); the product runtime uses it unless the person set one. So
+a phone model resolves `compact` at 8K–16K and `minimal` at 4K. ML Kit and Apple's
+on-device model stay at their fixed 4K.
+
 **Why `minimal` exists (fit).** `talkie-1930-13b-q4` (a 2048-token period-writing model)
 needed ~2,681 tokens of standing prompt against its 2,048 window, so the engine rejected
 even "hi there" before generating a token. On the desktop,
@@ -175,7 +182,10 @@ one Python-style call, `[read_file(path='brief.md')]`, also runs
 ([tools/pythonic-call.ts](../packages/core/src/tools/pythonic-call.ts)): LFM2 models
 call tools that way whatever the prompt says, and none of LFM2.5's calls ran on a
 Galaxy S26+ until it was accepted. Keyword arguments and Python literals only;
-prose around the call, or a second call, is still not a call. Reasoning blocks
+prose around the call, or a second call, is still not a call. Gemma 4's own
+format, `<|tool_call>call:list_dir{}<tool_call|>` with `<|"|>`-delimited strings,
+runs under the same whole-reply rule ([tools/gemma-call.ts](../packages/core/src/tools/gemma-call.ts));
+Gemma 4 E4B switched between it and the JSON envelope within one run. Reasoning blocks
 (`<think>…</think>`) are stripped before the envelope is parsed, and are held off screen
 while they stream.
 

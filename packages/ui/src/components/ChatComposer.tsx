@@ -630,7 +630,15 @@ export function ChatComposer({
     // A confirmed plan remains accurate enough to display while the next
     // debounced preview is pending. Clear it immediately only when routing is
     // impossible locally or when the conversation address has changed.
-    if (message.length < 8 || parseOpenChatQuery(intentPreviewText) !== null) {
+    // Suggestions attach only on a fresh thread, where the Task key is. In
+    // an ongoing one, "turn this into a slide deck" is a reply to the gezel,
+    // and a suggestion would make Enter launch a task from those words.
+    if (
+      message.length < 8 ||
+      parseOpenChatQuery(intentPreviewText) !== null ||
+      !taskLaunchEnabled ||
+      liveSessionId !== null
+    ) {
       setTurnIntentPlan(null);
       return;
     }
@@ -653,7 +661,7 @@ export function ChatComposer({
         .catch(() => {});
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [gezelId, intentPreviewText, liveSessionId, projectId]);
+  }, [gezelId, intentPreviewText, liveSessionId, projectId, taskLaunchEnabled]);
 
   const createFreshSession = useCallback(async (): Promise<string> => {
     const created = await api.createChatSession({
@@ -1288,9 +1296,9 @@ export function ChatComposer({
       if (runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
         body.passiveCcGezelIds = ccIds;
       if (sentDraftId) body.draftId = sentDraftId;
-      // The person dismissed the task the daemon would suggest for exactly
-      // this text; a plain send must not have the daemon re-derive it.
-      if (taskLaunchEnabled && taskLaunch.dismissedForText(userText)) body.turnIntent = 'off';
+      // The person turned down the task the daemon suggested for this
+      // message; a plain send must not have the daemon re-derive it.
+      if (taskLaunchEnabled && taskLaunch.suggestionDismissed()) body.turnIntent = 'off';
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
@@ -1409,7 +1417,9 @@ export function ChatComposer({
       return;
     }
     try {
-      await api.cancelChatSessionTurn(sid);
+      // The person's Stop: if this thread is working a task step, the task
+      // pauses too, so nothing picks the step back up behind their back.
+      await api.cancelChatSessionTurn(sid, { stopTask: true });
       setServerInflight(false);
       setError(null);
     } catch (err) {

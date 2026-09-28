@@ -309,13 +309,15 @@ public final class MobileProductEvalTest {
     }
     private void removeProductTree() throws Exception {
         if (productRoot != null && productRoot.isDirectory()) try (java.util.stream.Stream<java.nio.file.Path> entries = Files.walk(productRoot.toPath())) {
-            for (java.nio.file.Path path : entries.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+            // Collectors, not Stream.toList(): that is Java 16, and an Android 13
+            // device without ART module updates lacks it (ONYX Boox, 2026-09-27).
+            for (java.nio.file.Path path : entries.sorted(java.util.Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) Files.delete(path);
         }
     }
     private Map<String, String> productSnapshot(File directory) throws Exception {
         Map<String, String> snapshot = new java.util.TreeMap<>();
         try (java.util.stream.Stream<java.nio.file.Path> entries = Files.walk(directory.toPath())) {
-            for (java.nio.file.Path path : entries.filter(Files::isRegularFile).toList()) {
+            for (java.nio.file.Path path : entries.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())) {
                 java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
                 try (java.io.InputStream input = Files.newInputStream(path)) {
                     byte[] buffer = new byte[65536];

@@ -12,6 +12,7 @@ import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
+import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
@@ -779,15 +780,12 @@ export function NewProjectDialog({
                         : 'Pick a starting point — blank, connected, or purpose-built.'}
                     </p>
                   </div>
-                  <label className="gz-npd-search">
-                    <span className="sr-only">Search project types</span>
-                    <input
-                      type="search"
-                      value={projectTypeQuery}
-                      onChange={(event) => setProjectTypeQuery(event.target.value)}
-                      placeholder="Search types…"
-                    />
-                  </label>
+                  <GallerySearch
+                    label="Search project types"
+                    placeholder="Search types…"
+                    value={projectTypeQuery}
+                    onChange={setProjectTypeQuery}
+                  />
                 </header>
                 <div className="gz-npd-body">
                   <nav className="gz-npd-rail" aria-label="Project type categories">

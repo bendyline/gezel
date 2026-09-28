@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { posix, win32 } from 'node:path';
+import { delimiter, dirname, posix, win32 } from 'node:path';
 
 export interface ManagedScriptRuntimeDeps {
   execPath?: string;
@@ -35,4 +35,28 @@ export function discoverManagedScriptRuntimes(
 
   const managedPnpm = path.join(home, 'bin', 'pnpm-runtime', 'bin', 'pnpm.mjs');
   if (exists(managedPnpm)) env.GEZEL_PNPM_PATH ??= managedPnpm;
+}
+
+export interface BundledNodePathDeps {
+  env?: NodeJS.ProcessEnv;
+  exists?: (path: string) => boolean;
+}
+
+/**
+ * Prepend the bundled Node directory to `PATH` for child processes that run
+ * through shell shims. Internal code can use `GEZEL_NODE_PATH` directly, but
+ * a shim such as `node_modules/.bin/playwright` resolves `node` through PATH.
+ * Packaged service launchers provide only a minimal PATH, so leaving this out
+ * makes those shims fail with `node: not found`.
+ */
+export function ensureBundledNodeOnPath(deps: BundledNodePathDeps = {}): void {
+  const env = deps.env ?? process.env;
+  const exists = deps.exists ?? existsSync;
+  const nodePath = env.GEZEL_NODE_PATH;
+  if (!nodePath || !exists(nodePath)) return;
+  const dir = dirname(nodePath);
+  const current = env.PATH ?? '';
+  const parts = current.split(delimiter).filter(Boolean);
+  if (parts.includes(dir)) return;
+  env.PATH = current.length === 0 ? dir : `${dir}${delimiter}${current}`;
 }

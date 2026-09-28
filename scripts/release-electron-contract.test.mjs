@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -24,6 +25,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     readme,
     nativeWorkflow,
     fixAsar,
+    builderPatch,
   ] = await Promise.all([
     readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
@@ -40,6 +42,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     readFile(join(root, 'README.md'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'build-native.yml'), 'utf8'),
     readFile(join(root, 'packages', 'app', 'scripts', 'fix-asar.cjs'), 'utf8'),
+    readFile(join(root, 'patches', 'app-builder-lib@26.15.3.patch'), 'utf8'),
   ]);
 
   assert.match(tsup, /noExternal:/);
@@ -130,7 +133,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'the Linux release smoke must exercise Chromium sandbox startup',
   );
 
-  assert.match(builder, /minimumSystemVersion: '13\.5'/);
+  assert.match(builder, /minimumSystemVersion: '14\.0'/);
   assert.match(
     builder,
     /^\s+- '!dist\/\*\.map'$/m,
@@ -152,6 +155,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /^\s{2}isRelocatable: false$/m,
     'the system-service PKG must always install Gezel.app at /Applications',
   );
+  assert.match(builderPatch, /packageInfo\.BundleInstallScriptTimeout = 1800/);
+  assert.match(builderPatch, /packageInfo\[propertyName\] = componentName/);
+  assert.match(builderPatch, /args\.push\("--scripts", componentScriptsDir\)/);
+  assert.match(builderPatch, /const componentName = `component-\$\{scriptName\}`/);
+  const builderPatchSha = createHash('sha256').update(builderPatch).digest('hex');
+  assert.match(
+    lockfile,
+    new RegExp(`app-builder-lib@26\\.15\\.3: ${builderPatchSha}`),
+    'the lockfile must carry the current electron-builder patch hash',
+  );
+  assert.match(workflow, /node scripts\/verify-macos-pkg-contract\.mjs "\$pkg"/);
   assert.match(workflow, /latest-mac\.yml/);
   assert.match(workflow, /packages\/app\/dist\/installers\/\*\.zip\.blockmap/);
   assert.equal(
@@ -328,8 +342,8 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const dependencyFloor of [
     /"dompurify@>=3 <4": "3\.4\.13"/,
-    /"js-yaml@<4": "3\.15\.1"/,
-    /"js-yaml@>=4 <5": "4\.3\.1"/,
+    /"js-yaml@<4": "3\.15\.2"/,
+    /"js-yaml@>=4 <5": "4\.3\.2"/,
     /"mermaid@>=11 <12": "11\.16\.1"/,
   ]) {
     assert.match(workspace, dependencyFloor);
@@ -337,15 +351,15 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const patchedResolution of [
     /dompurify@3\.4\.13:/,
-    /js-yaml@3\.15\.1:/,
-    /js-yaml@4\.3\.1:/,
+    /js-yaml@3\.15\.2:/,
+    /js-yaml@4\.3\.2:/,
     /mermaid@11\.16\.1:/,
   ]) {
     assert.match(lockfile, patchedResolution);
   }
   assert.doesNotMatch(
     lockfile,
-    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.0|4\.3\.0)|mermaid@11\.16\.0):/,
+    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.[01]|4\.3\.[01])|mermaid@11\.16\.0):/,
     'the lockfile must not reintroduce a B3-vulnerable resolution',
   );
 });
@@ -496,7 +510,14 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /sudo dscl \. -read \/Users\/_gezeld/);
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
+  assert.match(macPkgSmoke, /createServer\(\)\.listen\(6228, "127\.0\.0\.1"/);
+  assert.match(macPkgSmoke, /\[\[ "\$port" -ne 6228 \]\]/);
+  assert.match(macPkgSmoke, /kill -0 "\$port_blocker_pid"/);
+  assert.match(macPkgSmoke, /\.gezel-bundle\.shared-readonly-v1/);
+  assert.match(macPkgSmoke, /! -user root -o -perm -002 -o -perm -020/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
+  assert.match(macPkgSmoke, /service\.staging-999999999-/);
+  assert.match(macPkgSmoke, /\[\[ ! -e "\$abandoned_staging" \]\]/);
   assert.match(macPkgSmoke, /sudo \/bin\/bash "\$uninstaller"\n/);
   assert.match(macPkgSmoke, /--remove-machine-data --remove-shared-data/);
   assert.match(macPkgSmoke, /\[\[ -e "\$data_dir\/\.gezel-uninstall-preserve-smoke" \]\]/);

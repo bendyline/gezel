@@ -432,6 +432,7 @@ function WorkspacePicker({
           type="search"
           className="gz-cbi-filter"
           placeholder={isFolder ? 'Filter folders' : 'Filter files'}
+          aria-label={isFolder ? 'Filter project folders' : 'Filter project files'}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
