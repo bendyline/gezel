@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   close: vi.fn(async () => {}),
   destroy: vi.fn(async () => {}),
@@ -20,7 +20,9 @@ import { createPatientFetch, createTrustingFetch } from './node-tls.js';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.options.length = 0;
+  vi.stubEnv('GEZEL_HTTP_VERSION', undefined);
 });
+afterEach(() => vi.unstubAllEnvs());
 describe('managed Node transport', () => {
   it('pins a CA with hostname validation and caller-owned deadlines, using the matching fetch implementation', async () => {
     const request = createTrustingFetch({ cert: 'test certificate' });
@@ -48,6 +50,26 @@ describe('managed Node transport', () => {
     );
     await request.close();
   });
+  it.each([
+    [undefined, '1.1', false],
+    ['1.1', undefined, false],
+    ['auto', '1.1', true],
+  ] as const)(
+    'selects %s over process preference %s without changing trust',
+    async (httpVersion, env, allowH2) => {
+      vi.stubEnv('GEZEL_HTTP_VERSION', env);
+      const request = createTrustingFetch({ cert: 'pinned certificate', httpVersion });
+      expect(mocks.options).toEqual([
+        {
+          connect: { ca: 'pinned certificate', rejectUnauthorized: true },
+          allowH2,
+          headersTimeout: 0,
+          bodyTimeout: 0,
+        },
+      ]);
+      await request.close();
+    },
+  );
   it('owns independent dispatchers and idempotent graceful/forced cleanup', async () => {
     const a = createPatientFetch();
     const b = createPatientFetch();

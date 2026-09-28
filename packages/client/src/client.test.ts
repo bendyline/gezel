@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 import { GezelApiError, GezelClient } from './client.js';
 
 describe('GezelClient task refs', () => {
+  it('forwards observer cancellation to all task status reads without serializing it', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async () => Response.json({}));
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+    await client.getTaskByRef('p/1', controller.signal);
+    await client.listTaskChildren('p', 1, undefined, controller.signal);
+    await client.listQuestions({ projectId: 'p', pending: true }, controller.signal);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetchImpl.mock.calls as unknown as Array<[unknown, RequestInit]>) {
+      expect(init.method).toBe('GET');
+      expect(init.signal).toBe(controller.signal);
+      expect(init.body).toBeUndefined();
+    }
+  });
+
   it('rejects malformed task refs without throwing synchronously', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });

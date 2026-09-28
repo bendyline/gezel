@@ -493,6 +493,16 @@ query
   `-- merge as one lower-priority arm beside project/shared/memory results
 ```
 
+Beside the shard arms, every catalog's document index (`fts_documents`: title,
+summary, aliases) answers as the exact-name arm, and it ranks name-first: a
+title equal to the query comes first, then BM25 with the title weighted 10×,
+aliases 5× and the summary 1× ([fts-query.ts](../packages/knowledge/src/reader/fts-query.ts)).
+FTS5's default `rank` weights the columns alike, which let short summaries that
+repeat a title's words outrank the page itself — a series page like "1944
+Republican Party vice presidential candidate selection" fell out of its own
+top 5. The same query backs the compiler's smoke verification and the
+validator, so seal-time and install-time checks agree with search.
+
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest
 keywords and compiler-emitted topic centroids, to select a bounded set. Explicit
