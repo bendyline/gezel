@@ -1,4 +1,11 @@
+/**
+ * Typed product API client shared by desktop, CLI and integrations. Transport,
+ * authentication and JSON error handling are centralized here; individual
+ * buffered GET responses retry transient connection failures at most three
+ * times with the original caller signal. Mutations and streams never retry.
+ */
 import { GezelApiError, describeTransportError } from './api-error.js';
+import { withReadTransportRetry } from './read-retry.js';
 export { GezelApiError } from './api-error.js';
 import type {
   AppToolCallResultRequest,
@@ -2224,6 +2231,17 @@ export class GezelClient {
     extraHeaders?: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<T> {
+    const read = () => this.requestOnce<T>(method, path, body, extraHeaders, signal);
+    return method === 'GET' ? withReadTransportRetry(read, path, signal) : read();
+  }
+
+  private async requestOnce<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, {
@@ -2241,7 +2259,11 @@ export class GezelClient {
       throw new GezelApiError(
         `Gezel API transport unavailable on ${method} ${path}: ${message}`,
         0,
-        { kind: 'transport', cause: message },
+        {
+          kind: 'transport',
+          cause: message,
+          causeName: error instanceof Error ? error.name : undefined,
+        },
       );
     }
     if (!res.ok) {
@@ -2275,6 +2297,24 @@ export class GezelClient {
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
+  }
+
+  private readBlob(path: string, failureLabel: string, signal?: AbortSignal): Promise<Blob> {
+    return withReadTransportRetry(
+      async () => {
+        const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          ...(signal ? { signal } : {}),
+        });
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          throw new GezelApiError(`${failureLabel}: ${res.status}`, res.status);
+        }
+        return res.blob();
+      },
+      path,
+      signal,
+    );
   }
 
   health(signal?: AbortSignal): Promise<HealthResponse> {
@@ -2588,12 +2628,10 @@ export class GezelClient {
 
   /** Download the proposal as a zip of patches + notes + `git apply` instructions. */
   async exportDiffpack(projectId: string, packId: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`diffpack export failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`,
+      'diffpack export failed',
+    );
   }
 
   /* ── diffpack drafting ──────────────────────────────────────────────
@@ -2883,12 +2921,10 @@ export class GezelClient {
       : assetPath;
     const encoded = relative.split('/').map(encodeURIComponent).join('/');
     const query = opts?.version ? `?v=${encodeURIComponent(opts.version)}` : '';
-    const url = `${this.baseUrl}/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets/${encoded}${query}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`knowledge asset fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets/${encoded}${query}`,
+      'knowledge asset fetch failed',
+    );
   }
 
   // ── storage accounting, cleanup & backup ──
@@ -3235,12 +3271,10 @@ export class GezelClient {
   }
 
   async fetchProjectAttachment(projectId: string, filename: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/attachments/${encodeURIComponent(filename)}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`attachment fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/attachments/${encodeURIComponent(filename)}`,
+      'attachment fetch failed',
+    );
   }
 
   // ── Legacy session-scoped images ─────────────────────────────
@@ -3304,12 +3338,10 @@ export class GezelClient {
    * as `fetchSessionImage`.
    */
   async fetchProjectArtifactBlob(projectId: string, filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`artifact fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/artifacts/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'artifact fetch failed',
+    );
   }
 
   /**
@@ -3318,12 +3350,10 @@ export class GezelClient {
    * which also can't put a bearer token into an `<img src>`.
    */
   async fetchProjectWorkspaceBlob(projectId: string, filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`workspace fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/workspace/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'workspace fetch failed',
+    );
   }
 
   /**
@@ -3331,12 +3361,10 @@ export class GezelClient {
    * `<img src>` can't carry a bearer token so we do the fetch by hand.
    */
   async fetchSessionImage(projectId: string, sessionId: string, filename: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(filename)}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(filename)}`,
+      'image fetch failed',
+    );
   }
 
   /**
@@ -3489,11 +3517,7 @@ export class GezelClient {
    * URL in the DOM. The SSE query-token exemption is one URL by design.
    */
   async fetchCatalogFile(path: string): Promise<Blob> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`catalog file fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(path, 'catalog file fetch failed');
   }
 
   createGezelFromTemplate(
@@ -4952,15 +4976,18 @@ export class GezelClient {
    * `projectId`, returns every question for that project; pass
    * `pending: true` to filter to unanswered.
    */
-  listQuestions(opts?: {
-    projectId?: string;
-    pending?: boolean;
-  }): Promise<ListQuestionsResponse> {
+  listQuestions(
+    opts?: {
+      projectId?: string;
+      pending?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<ListQuestionsResponse> {
     const params = new URLSearchParams();
     if (opts?.projectId) params.set('project', opts.projectId);
     if (opts?.pending) params.set('pending', 'true');
     const qs = params.toString();
-    return this.request('GET', `/api/questions${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/api/questions${qs ? `?${qs}` : ''}`, undefined, undefined, signal);
   }
 
   /**
@@ -6014,10 +6041,14 @@ export class GezelClient {
   readProjectArtifact(
     id: string,
     filePath: string,
+    signal?: AbortSignal,
   ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/artifacts/read?path=${encodeURIComponent(filePath)}`,
+      undefined,
+      undefined,
+      signal,
     );
   }
 
@@ -7411,12 +7442,7 @@ export class GezelClient {
 
   /** Narration segment WAV — same bearer-in-fetch pattern as the artifact blobs. */
   async fetchHandboekNarrationAudio(hash: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/handboek/narration/audio/${hash}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`narration fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(`/api/handboek/narration/audio/${hash}`, 'narration fetch failed');
   }
 
   listDocuments(
@@ -7541,12 +7567,10 @@ export class GezelClient {
    * the editor's MediaProvider goes through this and creates a blob URL.
    */
   async fetchDocumentBlob(filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/documents/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`document fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/documents/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'document fetch failed',
+    );
   }
 
   /**
@@ -7632,18 +7656,24 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/tasks`, body);
   }
 
-  getTask(projectId: string, num: number): Promise<Task> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}`);
+  getTask(projectId: string, num: number, signal?: AbortSignal): Promise<Task> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}`,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
-  getTaskByRef(ref: string): Promise<Task> {
+  getTaskByRef(ref: string, signal?: AbortSignal): Promise<Task> {
     const parsed = parseTaskRef(ref);
     // This method's public contract is promise-based. Returning a rejection
     // keeps malformed or stale persisted refs inside callers' normal
     // `.catch()` / async error paths instead of throwing synchronously from a
     // React effect and unmounting the renderer.
     if (!parsed) return Promise.reject(new Error(`invalid task ref "${ref}"`));
-    return this.getTask(parsed.projectId, parsed.num);
+    return this.getTask(parsed.projectId, parsed.num, signal);
   }
 
   updateTask(projectId: string, num: number, body: UpdateTaskRequest): Promise<Task> {
@@ -7981,6 +8011,7 @@ export class GezelClient {
     projectId: string,
     num: number,
     filter?: { status?: TaskStatus; limit?: number },
+    signal?: AbortSignal,
   ): Promise<ListTasksResponse> {
     const params = new URLSearchParams();
     if (filter?.status) params.set('status', filter.status);
@@ -7989,6 +8020,9 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/children${qs}`,
+      undefined,
+      undefined,
+      signal,
     );
   }
 

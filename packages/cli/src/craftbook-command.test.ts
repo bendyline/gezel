@@ -1,4 +1,5 @@
 import type { Task } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseCraftbookParams,
@@ -137,5 +138,133 @@ describe('task wait', () => {
     const result = await waitForTask(client, 'p/1', { timeoutMs: 100 });
     expect(result.outcome).toBe('blocked');
     expect(result.questionIds).toEqual(['answer-me']);
+  });
+});
+
+describe('bounded task observation recovery', () => {
+  const task = (status: Task['status']) =>
+    ({ status, projectId: 'p', num: 1, ref: 'p/1', craftbook: { spawn: {} } }) as Task;
+  const reset = () =>
+    new GezelApiError('Task GET failed', 0, {
+      kind: 'transport',
+      cause: 'fetch failed (read ECONNRESET)',
+    });
+
+  it.each(['getTaskByRef', 'listTaskChildren', 'listQuestions'] as const)(
+    'retries only the failed %s read before completing',
+    async (method) => {
+      const client = {
+        getTaskByRef: vi
+          .fn()
+          .mockResolvedValueOnce(task('active'))
+          .mockResolvedValue(task('complete')),
+        listTaskChildren: vi.fn().mockResolvedValue({ tasks: [] }),
+        listQuestions: vi.fn().mockResolvedValue({ questions: [] }),
+        createTask: vi.fn(),
+        setTaskStatus: vi.fn(),
+      };
+      if (method === 'getTaskByRef')
+        client.getTaskByRef
+          .mockReset()
+          .mockRejectedValueOnce(reset())
+          .mockResolvedValue(task('complete'));
+      else client[method].mockRejectedValueOnce(reset());
+      expect((await waitForTask(client, 'p/1', { timeoutMs: 5000, pollMs: 1 })).outcome).toBe(
+        'complete',
+      );
+      expect(client[method]).toHaveBeenCalledTimes(2);
+      expect(client.createTask).not.toHaveBeenCalled();
+      expect(client.setTaskStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it('bounds persistent connection failures at the initial request plus three retries', async () => {
+    const error = reset();
+    const client = { getTaskByRef: vi.fn().mockRejectedValue(error), listTaskChildren: vi.fn() };
+    await expect(waitForTask(client, 'p/1', { timeoutMs: 5000 })).rejects.toBe(error);
+    expect(client.getTaskByRef).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    new GezelApiError('Unauthorized', 401),
+    new GezelApiError('Quota', 429),
+    new GezelApiError('Server error', 503),
+    new GezelApiError('Bad certificate', 0, {
+      kind: 'transport',
+      cause: 'self-signed certificate',
+    }),
+    new Error('Programming error'),
+    new SyntaxError('Invalid task JSON'),
+  ])('does not retry non-transient failures: %s', async (error) => {
+    const client = { getTaskByRef: vi.fn().mockRejectedValue(error), listTaskChildren: vi.fn() };
+    await expect(waitForTask(client, 'p/1', { timeoutMs: 5000 })).rejects.toBe(error);
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
+
+  it('does not multiply retries already exhausted by the public client', async () => {
+    const error = new GezelApiError('Task GET failed', 0, {
+      kind: 'transport',
+      cause: 'read ECONNRESET',
+      readRetryExhausted: true,
+      attempts: 4,
+    });
+    const client = { getTaskByRef: vi.fn().mockRejectedValue(error), listTaskChildren: vi.fn() };
+    await expect(waitForTask(client, 'p/1', { timeoutMs: 5000 })).rejects.toBe(error);
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
+
+  it('keeps retries within the original timeout and never cancels the task', async () => {
+    const client = {
+      getTaskByRef: vi.fn().mockResolvedValue(task('active')),
+      listTaskChildren: vi.fn().mockRejectedValue(reset()),
+      setTaskStatus: vi.fn(),
+    };
+    const result = await waitForTask(client, 'p/1', { timeoutMs: 20 });
+    expect(result.outcome).toBe('timeout');
+    expect(client.listTaskChildren).toHaveBeenCalledOnce();
+    expect(client.setTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it('honors abort during an in-flight status read', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Observer stopped');
+    const client = {
+      getTaskByRef: vi.fn(
+        (_ref: string, signal?: AbortSignal) =>
+          new Promise<Task>((_resolve, reject) => {
+            signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
+          }),
+      ),
+      listTaskChildren: vi.fn(),
+    };
+    const pending = waitForTask(client, 'p/1', { timeoutMs: 5000, signal: controller.signal });
+    const assertion = expect(pending).rejects.toBe(reason);
+    controller.abort(reason);
+    await assertion;
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
+
+  it('honors abort during retry backoff without starting another read', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Observer stopped');
+    const client = { getTaskByRef: vi.fn().mockRejectedValue(reset()), listTaskChildren: vi.fn() };
+    const pending = waitForTask(client, 'p/1', { timeoutMs: 5000, signal: controller.signal });
+    const assertion = expect(pending).rejects.toBe(reason);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort(reason);
+    await assertion;
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a transport failure while reading a successful response body', async () => {
+    const error = new TypeError('terminated', {
+      cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }),
+    });
+    const client = {
+      getTaskByRef: vi.fn().mockRejectedValueOnce(error).mockResolvedValue(task('complete')),
+      listTaskChildren: vi.fn(),
+    };
+    expect((await waitForTask(client, 'p/1', { timeoutMs: 5000 })).outcome).toBe('complete');
+    expect(client.getTaskByRef).toHaveBeenCalledTimes(2);
   });
 });

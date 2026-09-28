@@ -1,3 +1,8 @@
+/**
+ * CLI connection policy for explicit remotes, legacy services, and the user's daemon.
+ * The app SDK owns authorization and discovery; command clients share the selected
+ * pinned transport. Global options are declared here and applied by bin/gezel.ts.
+ */
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -29,6 +34,8 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 
 /** Global flags shared across commands (defined on the root program). */
 export interface CliGlobals {
+  /** Use HTTP/1.1 for this CLI process while retaining certificate validation. */
+  http1?: boolean;
   /** Connect to a Gezel service at this URL using an approved CLI grant. */
   connect?: string;
   /** Bearer token for `--connect` (skips the grant prompt). */

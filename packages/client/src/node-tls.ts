@@ -1,10 +1,17 @@
-/** Node-only daemon transport. Fetch and dispatcher must use the same undici version. */
+/**
+ * Node-only daemon transport with caller-owned deadlines and pinned TLS.
+ * Fetch and dispatcher must use the same undici version. HTTP/2 negotiation
+ * remains the default; the CLI can opt its whole process into HTTP/1.1 with
+ * GEZEL_HTTP_VERSION=1.1, including transports created by discovery and the SDK.
+ */
 import { readFile } from 'node:fs/promises';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 export interface TrustingFetchOptions {
   /** PEM trust anchor. Certificate and hostname validation stay enabled. */
   cert: string | Buffer;
+  /** Override the process's GEZEL_HTTP_VERSION choice; auto permits HTTP/2 negotiation. */
+  httpVersion?: 'auto' | '1.1';
 }
 
 /** The creator owns this dispatcher; borrowed clients must not close it. */
@@ -43,7 +50,8 @@ function createManagedFetch(options: Agent.Options): ManagedFetch {
 export function createTrustingFetch(opts: TrustingFetchOptions): ManagedFetch {
   return createManagedFetch({
     connect: { ca: opts.cert, rejectUnauthorized: true },
-    allowH2: true,
+    // HTTP/1.1 uses the pool's independent connections so SSE cannot block uploads.
+    allowH2: (opts.httpVersion ?? process.env.GEZEL_HTTP_VERSION) !== '1.1',
   });
 }
 

@@ -553,12 +553,15 @@ export class CatalogHandle {
 
   // ── search ────────────────────────────────────────────────────────────────
 
-  /** Catalog-wide title/summary/alias FTS — always runs regardless of routing. */
+  /**
+   * Catalog-wide title/summary/alias FTS — always runs regardless of routing.
+   * Name-first: an exact title, then title-weighted BM25 (see fts-query.ts).
+   */
   searchDocumentsFts(query: string, limit = 10): Array<{ documentId: string; rank: number }> {
     const match = ftsQuery(query);
     if (!match) return [];
     try {
-      return documentFtsTopIds(this.router.db, match, limit).map((documentId, i) => ({
+      return documentFtsTopIds(this.router.db, match, limit, query).map((documentId, i) => ({
         documentId,
         rank: i,
       }));
