@@ -57,6 +57,7 @@ import {
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  trialHardProgressTimeoutMs,
   trialMaxDurationMs,
   workspacePathSignature,
 } from './runner.ts';
@@ -453,6 +454,7 @@ describe('evalDaemonEnvForTrial', () => {
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
       GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
+      GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
     });
   });
 
@@ -502,6 +504,7 @@ describe('evalDaemonEnvForTrial', () => {
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
       GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
+      GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
       GEZEL_CRAFTBOOK_DOC_FORMAT: 'json',
     });
     expect(evalDaemonEnvForTrial({ craftbookDocFormat: 'md' }).GEZEL_CRAFTBOOK_DOC_FORMAT).toBe(
@@ -1811,6 +1814,30 @@ describe('trialMaxDurationMs', () => {
         decodeRateTokensPerSec: 5,
       }),
     ).toBe(160 * 60_000);
+  });
+});
+
+describe('trialHardProgressTimeoutMs', () => {
+  const MINUTE = 60_000;
+
+  it('scales an authored no-progress window for a slow local decode rate', () => {
+    expect(
+      trialHardProgressTimeoutMs({
+        authoredProgressTimeoutMs: 8 * MINUTE,
+        decodeRateTokensPerSec: 4.54,
+      }),
+    ).toBeGreaterThan(35 * MINUTE);
+  });
+
+  it('preserves engine and operator floors', () => {
+    expect(
+      trialHardProgressTimeoutMs({
+        authoredProgressTimeoutMs: 8 * MINUTE,
+        decodeRateTokensPerSec: 20,
+        minProgressTimeoutMs: 30 * MINUTE,
+        envProgressFloorMs: 45 * MINUTE,
+      }),
+    ).toBe(45 * MINUTE);
   });
 });
 

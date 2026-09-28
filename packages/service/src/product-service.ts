@@ -2195,6 +2195,26 @@ export async function startProductService(
               config: {},
             });
           },
+          ...(process.env.GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA === '1'
+            ? {
+                reusePreparedCorpus: async (project, need, preparedParams) => {
+                  const corpusScope = preparedParams.corpusScope
+                    ?.trim()
+                    .replace(/^artifacts\//, '')
+                    .replace(/\/+$/, '');
+                  if (!corpusScope) return null;
+                  const listing = await store.listProjectArtifactsRecursiveDetailed(project.id, {
+                    subpath: corpusScope,
+                  });
+                  const fileCount = listing.entries.filter((entry) => !entry.isDirectory).length;
+                  if (fileCount === 0) return null;
+                  return {
+                    params: { corpusScope },
+                    summary: `Reused ${fileCount}${listing.truncated ? '+' : ''} locally seeded ${need.typeId} record(s) from \`${corpusScope}/\` (eval fixture; no source sync).`,
+                  };
+                },
+              }
+            : {}),
         },
         { projectId, craftbookId, connectors: needs, params },
       );

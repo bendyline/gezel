@@ -162,6 +162,21 @@ describe('stepToolKit', () => {
   it('a step with no file signal has no kit', () => {
     expect(stepToolKit({})).toBeNull();
   });
+
+  it('a task-note evaluator gets a compact read-only kit', () => {
+    const kit = stepToolKit({
+      consumes: [{ file: 'draft.md' }],
+      toolPolicy: { outputMedium: 'task-note' },
+    });
+
+    expect(kit?.kind).toBe('markdown-doc');
+    expect(kit?.path).toBeNull();
+    expect(kit?.tools.has('read_file')).toBe(true);
+    expect(kit?.tools.has('read_artifact')).toBe(true);
+    expect(kit?.tools.has('write_file')).toBe(false);
+    expect(kit?.tools.has('write_artifact')).toBe(false);
+    expect(kit?.tools.has('run_nodejs_script')).toBe(false);
+  });
 });
 
 describe('firstActionForKind', () => {

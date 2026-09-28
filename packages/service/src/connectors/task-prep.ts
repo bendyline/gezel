@@ -153,6 +153,17 @@ export interface RunConnectorTaskPrepDeps {
     project: ProjectDetail,
     need: CraftbookConnectorNeed,
   ) => Promise<ProjectConnectorBinding | null>;
+  /**
+   * Eval-only seam for a corpus the hermetic scenario already materialized
+   * locally. Production leaves this unset, so required connectors still bind
+   * and sync normally. The callback must verify the requested corpus exists
+   * and is non-empty before returning a result.
+   */
+  reusePreparedCorpus?: (
+    project: ProjectDetail,
+    need: CraftbookConnectorNeed,
+    params: Record<string, string>,
+  ) => Promise<ConnectorTaskPrepResult | null>;
 }
 
 /**
@@ -189,6 +200,15 @@ export async function runConnectorTaskPrep(
         'policy',
         `Craftbook "${input.craftbookId}" reads the ${need.typeId} connector, but this install's security level keeps all data on the machine. Choose a level below Super Lockdown in Settings → Security, then run it again.`,
       );
+    }
+    const prepared = await deps.reusePreparedCorpus?.(project, need, {
+      ...input.params,
+      ...params,
+    });
+    if (prepared) {
+      Object.assign(params, prepared.params ?? {});
+      if (prepared.summary) summaries.push(prepared.summary);
+      continue;
     }
     let binding = (project.connectors ?? []).find((b) => b.type === need.typeId && !b.disabled);
     if (!binding && !need.optional && deps.ensureBinding) {

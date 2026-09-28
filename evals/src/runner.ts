@@ -342,14 +342,15 @@ export async function runTrial(
   // died at 901s of its authored 900s window while llama-server logged
   // `prompt processing, progress = 0.36`, and symptom-debug at 603s of 600s;
   // the same model+engine scored 10/11 on a fast box and 8/11 here, inverting
-  // capability into a hardware artifact. Same failure shape as the MLX
-  // soft-window lift below, and the same proper long-term fix: make the
-  // watchdog streaming-aware rather than time-only.
-  const hardProgressTimeoutMs = Math.max(
-    scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
-    llamaEvalLaunch?.hardProgressTimeoutMs ?? 0,
-    envHardProgressFloorMs(),
-  );
+  // capability into a hardware artifact. We preserve the watchdog's
+  // deliberate requirement for product-visible progress, but scale its wall
+  // window by the preflight decode rate just like the scenario ceiling.
+  const hardProgressTimeoutMs = trialHardProgressTimeoutMs({
+    authoredProgressTimeoutMs: scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
+    decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    minProgressTimeoutMs: llamaEvalLaunch?.hardProgressTimeoutMs,
+    envProgressFloorMs: envHardProgressFloorMs(),
+  });
   // Soft progress watchdog: fires when the daemon shows no activity
   // across our fingerprint signals (turns, tools, slot updates, stream
   // pulses) for this long. Default 5 min covers normal "model thinking
@@ -1519,6 +1520,11 @@ export function evalDaemonEnvForTrial(opts: {
 }): NodeJS.ProcessEnv {
   return {
     GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+    // A few workflow evals seed the exact connector corpus they grade before
+    // launching the craftbook. Let the trial daemon verify and reuse those
+    // local files instead of requiring credentials or touching the network.
+    // Production never sets this seam.
+    GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
     ...(opts.enableEmbeddings ? {} : { GEZEL_DISABLE_EMBEDDINGS: '1' }),
     ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),
     ...(opts.relevanceModel === null ? { GEZEL_RELEVANCE_MODEL: 'off' } : {}),
@@ -1620,6 +1626,32 @@ export function throughputScaledMaxDurationMs(args: {
     MAX_CEILING_THROUGHPUT_SCALE,
   );
   return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
+}
+
+/**
+ * Resolve the hard no-progress window with the same hardware invariance as
+ * the overall ceiling. This watchdog intentionally ignores engine-only
+ * pulses so endless generation cannot keep a broken workflow alive, but a
+ * first-turn prompt prefill has no task/tool/file progress to report. On the
+ * 4.5 t/s CPU Gemma rail, real 9k-12k-token prompts took 8-20 minutes to
+ * prefill and were killed by 8m/20m authored windows while llama.cpp was
+ * steadily processing them. Those windows were calibrated on the same
+ * ~20 t/s reference machine as scenario ceilings, so scale them together.
+ */
+export function trialHardProgressTimeoutMs(args: {
+  authoredProgressTimeoutMs: number;
+  decodeRateTokensPerSec?: number | null;
+  minProgressTimeoutMs?: number;
+  envProgressFloorMs?: number;
+}): number {
+  return Math.max(
+    throughputScaledMaxDurationMs({
+      authoredMaxDurationMs: args.authoredProgressTimeoutMs,
+      decodeRateTokensPerSec: args.decodeRateTokensPerSec,
+    }),
+    args.minProgressTimeoutMs ?? 0,
+    args.envProgressFloorMs ?? 0,
+  );
 }
 
 /** Explicit operator budgets also take precedence over engine startup presets. */
