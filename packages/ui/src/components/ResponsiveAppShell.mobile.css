@@ -385,6 +385,16 @@ html[data-layout="mobile"] {
   font-size: 87.5%;
 }
 
+/* iOS zooms the page into any focused field whose text is under 16px, and the
+   denser root put the chat composer at 14px. A zoomed visual viewport also
+   stops the mobile host's keyboard tracking, so the header stayed up and the
+   layout never refit above the keyboard. The query matches iOS WebKit only. */
+@supports (-webkit-touch-callout: none) {
+  html[data-layout="mobile"] :is(input, textarea, select, [contenteditable="true"]) {
+    font-size: max(16px, 1em);
+  }
+}
+
 /* A narrow pane cannot spare the desktop gutter on both sides. Full-bleed
    views cancel it with the same token, so they stay flush. */
 .app.app-compact .app-main {

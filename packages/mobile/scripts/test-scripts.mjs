@@ -3,11 +3,11 @@ import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(new URL('../../ui/package.json', import.meta.url));
 const { chromium } = require('playwright');
-const { createServer } = await import(require.resolve('vite'));
+const { createServer } = await import(pathToFileURL(require.resolve('vite')).href);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await createServer({
   root,
@@ -669,8 +669,8 @@ if(result.status!=='ok')throw new Error(result.error); gezel.output(result);`;
       };
     },
     {
-      coreRuntimeUrl: `/@fs${fileURLToPath(new URL('../../core/dist/runtime/index.js', import.meta.url))}`,
-      clientUrl: `/@fs${fileURLToPath(new URL('../../client/dist/index.js', import.meta.url))}`,
+      coreRuntimeUrl: `/@fs${new URL('../../core/dist/runtime/index.js', import.meta.url).pathname}`,
+      clientUrl: `/@fs${new URL('../../client/dist/index.js', import.meta.url).pathname}`,
     },
   );
   assert.deepEqual(external, [], 'script workflow made external requests');

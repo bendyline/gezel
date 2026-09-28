@@ -1,6 +1,6 @@
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GezelApiError } from './api-error.js';
 import { ensureProjectForFolder } from './ensure-project-for-folder.js';
@@ -65,7 +65,7 @@ describe('ensureProjectForFolder', () => {
         throw new GezelApiError('Not Found', 404, '404 Not Found');
       }),
       listProjects: vi.fn(async () => ({
-        projects: [{ id: 'orphan', name: dir.split('/').pop()! }],
+        projects: [{ id: 'orphan', name: basename(dir) }],
       })),
     });
     const res = await ensureProjectForFolder(client as never, dir, { mode: 'solo', source: 'cli' });

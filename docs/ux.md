@@ -342,7 +342,9 @@ Model setup belongs in Settings, with a compact link from an unconfigured chat.
 
 The compact layout runs one notch denser than desktop: `html[data-layout="mobile"]`
 sets the root to 87.5%, so the whole `--text-*` rem scale shrinks together.
-Never shrink a single view to compensate. It also narrows the main gutter
+Never shrink a single view to compensate. Editable fields are the one floor:
+on iOS they stay at 16px or more, because iOS zooms the page into a focused
+field with smaller text. It also narrows the main gutter
 through `--app-main-pad-inline` on `.app-main` (0.75rem instead of 1.25rem).
 Full-bleed views cancel that gutter with the same `--app-main-pad-block` /
 `--app-main-pad-inline` tokens, never with literal negative margins. A view

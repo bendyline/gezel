@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const uiRequire = createRequire(new URL('../../ui/package.json', import.meta.url));
 const { chromium } = uiRequire('playwright');
-const { createServer } = await import(uiRequire.resolve('vite'));
+const { createServer } = await import(pathToFileURL(uiRequire.resolve('vite')).href);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await createServer({
   configFile: false,
