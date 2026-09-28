@@ -2169,8 +2169,9 @@ export type VideoModelFamily = z.infer<typeof VideoModelFamilySchema>;
  *     subfolders (downloaded from a reference repo via per-file
  *     {@link VideoModelSourceSchema} `repo` overrides). The engine builds
  *     the transformer with `from_single_file` and grafts it onto the
- *     components. This is how the LTX-2.3 22B fp8 checkpoint loads against
- *     the LTX-2 component stack.
+ *     components. Only valid when every grafted component matches the
+ *     checkpoint's architecture: LTX-2.3's bundled VAE differs from LTX-2's,
+ *     which is why LTX-2.3 ships as a `diffusers-tree` install instead.
  */
 export const VideoModelLoadSchema = z.object({
   strategy: z.enum(['diffusers-tree', 'single-file']).default('diffusers-tree'),
@@ -2196,6 +2197,15 @@ export const VideoModelLoadSchema = z.object({
    * engine muxes into the MP4. Video-only families leave this false.
    */
   audio: z.boolean().default(false),
+  /**
+   * Fixed denoising schedule for a distilled checkpoint, highest sigma
+   * first. The engine passes it as `sigmas` and runs exactly this many
+   * steps, whatever step count the caller asked for — a distilled model
+   * trained on one schedule degrades on any other (LTX-2.3 distilled:
+   * `DISTILLED_SIGMA_VALUES` in diffusers' `pipelines/ltx2/utils.py`).
+   * Absent → the scheduler derives sigmas from the step count.
+   */
+  sigmas: z.array(z.number().positive().max(1)).min(1).max(64).optional(),
 });
 export type VideoModelLoad = z.infer<typeof VideoModelLoadSchema>;
 
@@ -2233,10 +2243,10 @@ export const VideoModelSourceSchema = z.object({
         /**
          * Override the source-level `huggingfaceRepo`/`revision` for this
          * one file. Lets a single install assemble files from more than one
-         * repo — e.g. the LTX-2.3 transformer checkpoint from
-         * `Lightricks/LTX-2.3-fp8` alongside the VAE / text-encoder /
-         * vocoder components pinned from `Lightricks/LTX-2`. Absent → the
-         * file comes from the source-level repo at the source revision.
+         * repo — e.g. a `single-file` transformer checkpoint alongside
+         * component subfolders pinned from a reference diffusers repo.
+         * Absent → the file comes from the source-level repo at the
+         * source revision.
          */
         repo: z
           .string()

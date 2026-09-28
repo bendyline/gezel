@@ -73,8 +73,27 @@ public final class GezelNativeRuntime {
      * stop cancelled the new activity's reply mid-stream (Galaxy S20 FE eval,
      * 2026-09-26). */
     private int startedActivities;
+    // Written and read under `sizing`: the model listing runs on the storage
+    // queue and fits windows against what the inference queue holds.
     private String loadedId;
+    private String loadedPath;
     private int loadedContext;
+    /** Serializes the bridge's dry-run sizing with model loads. */
+    private final Object sizing = new Object();
+    /** Allocated bytes per model file and window from the bridge's dry run, or
+     * -1 when llama.cpp cannot load the file at that window. Imported files
+     * never change in place, so an entry cannot go stale. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> allocations = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The bridge's own buffers beside llama.cpp's: the hybrid/windowed state
+     * checkpoint (19 MiB for Qwen 3.5 2B), token vectors and the reply text. */
+    private static final long BRIDGE_BUFFER_BYTES = 128L * 1024 * 1024;
+    /** Windows offered above the 4K floor, largest first. Phones and small
+     * desktops aim for 8K-16K; the floor is what the phone prompt was sized for. */
+    private static final int[] CONTEXT_LADDER = {16384, 8192};
+    private static final int FLOOR_CONTEXT = 4096;
+    /** Room a larger window must leave beyond Android's low-memory threshold,
+     * so the chosen window is not the one that barely fits. */
+    private static final long LADDER_SPARE_BYTES = 256L * 1024 * 1024;
 
     /** Loading a model is itself what pushes a 6 GB phone into memory pressure:
      * lmkd kills background apps and every process hears RUNNING_CRITICAL.
@@ -100,6 +119,36 @@ public final class GezelNativeRuntime {
         catch (LinkageError error) { initializationError = "Native inference is not included in this build"; }
     }
 
+    /**
+     * A model's catalog sampling, resolved by the product runtime the same way
+     * the desktop resolves it. Absent fields keep the bridge's defaults: greedy
+     * decoding, top-k 40 / top-p 0.95 when sampling, no repetition penalty.
+     */
+    private static final class Sampling {
+        final float temperature, topP, minP, repeatPenalty;
+        final int topK, repeatLastN, seed;
+        private Sampling(float temperature, int topK, float topP, float minP, float repeatPenalty, int repeatLastN, int seed) {
+            this.temperature = temperature; this.topK = topK; this.topP = topP; this.minP = minP;
+            this.repeatPenalty = repeatPenalty; this.repeatLastN = repeatLastN; this.seed = seed;
+        }
+        static Sampling from(JSONObject value) {
+            // An unset seed varies per reply, so a retry is not the same text again.
+            int seed = new java.util.Random().nextInt() & Integer.MAX_VALUE;
+            if (value == null) return new Sampling(0f, 40, 0.95f, 0f, 1f, 64, seed);
+            float temperature = (float) value.optDouble("temperature", 0);
+            int topK = value.optInt("topK", 40);
+            float topP = (float) value.optDouble("topP", 0.95);
+            float minP = (float) value.optDouble("minP", 0);
+            float repeatPenalty = (float) value.optDouble("repetitionPenalty", 1);
+            int repeatLastN = value.optInt("repetitionContext", 64);
+            if (value.has("seed")) seed = value.optInt("seed", seed) & Integer.MAX_VALUE;
+            if (!(temperature >= 0 && temperature <= 2) || topK < 0 || topK > 1000 || !(topP > 0 && topP <= 1)
+                || !(minP >= 0 && minP < 1) || !(repeatPenalty >= 1 && repeatPenalty <= 2) || repeatLastN < 0 || repeatLastN > 4096)
+                throw new IllegalArgumentException("Sampling settings are outside the supported range");
+            return new Sampling(temperature, topK, topP, minP, repeatPenalty, repeatLastN, seed);
+        }
+    }
+
     private static String failureMessage(Throwable error) {
         if (error instanceof OutOfMemoryError) return "Not enough memory for this model";
         if (error instanceof CancellationException) return "The operation was cancelled";
@@ -111,10 +160,15 @@ public final class GezelNativeRuntime {
     /** Admission is a conservative floor, not an estimate of every GGUF's KV
      * cache. Native allocation and Android memory-pressure callbacks remain
      * authoritative, and no smaller model is substituted on failure. */
-    private void checkResources(long additionalBytes) {
+    private ActivityManager.MemoryInfo memoryInfo() {
         ActivityManager manager = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
         ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
         manager.getMemoryInfo(info);
+        return info;
+    }
+
+    private void checkResources(long additionalBytes) {
+        ActivityManager.MemoryInfo info = memoryInfo();
         if (info.lowMemory || info.availMem < additionalBytes + info.threshold)
             throw new IllegalStateException("Not enough available memory. Choose a smaller model or conversation capacity.");
         if (Build.VERSION.SDK_INT >= 29) {
@@ -140,7 +194,87 @@ public final class GezelNativeRuntime {
         }); } catch (RejectedExecutionException error) { completion.run(); call.reject("The app is closing"); }
     }
 
-    public void listModels(NativeCall call) { storage(call, () -> store.listModels()); }
+    public void listModels(NativeCall call) { storage(call, () -> withFittedContext(store.listModels())); }
+
+    /** The window the phone can hold for the model it would run next, which the
+     * product runtime uses unless the person chose one. Only the selected model
+     * is sized, so a long library costs no dry runs. */
+    private NativeObject withFittedContext(NativeObject library) throws Exception {
+        String selected = library.optString("selectedModelId", null);
+        if (selected == null) return library;
+        org.json.JSONArray models = library.getJSONArray("models");
+        for (int index = 0; index < models.length(); index++) {
+            org.json.JSONObject model = models.getJSONObject(index);
+            if (!selected.equals(model.getString("id"))) continue;
+            Integer context = fitContext(selected, store.model(selected)[1]);
+            if (context != null) model.put("contextTokens", context.intValue());
+        }
+        return library;
+    }
+
+    /**
+     * Allocated bytes a load at this window takes from Android's available
+     * memory, or -1 when llama.cpp cannot load the file at it. The bridge sizes
+     * the weights as this CPU backend places them, repacked copies included;
+     * the part served from the memory-mapped file is reclaimable cache in
+     * availMem, so it is not charged.
+     */
+    private long allocation(String path, int contextSize) {
+        String key = path + '\n' + new java.io.File(path).length() + '\n' + contextSize;
+        Long known = allocations.get(key);
+        if (known != null) return known;
+        long bytes;
+        try {
+            long[] estimate;
+            synchronized (sizing) { estimate = LlamaRuntime.estimate(engine, path, contextSize); }
+            bytes = estimate[0] - estimate[1] + estimate[2] + estimate[3] + BRIDGE_BUFFER_BYTES;
+        } catch (IllegalStateException error) { bytes = -1; }
+        allocations.put(key, bytes);
+        return bytes;
+    }
+
+    /** Admission charge. A file the dry run cannot size keeps the old flat floor
+     * (weights, 256 MiB, 64 KiB per token); its load then reports the real error. */
+    private long requiredBytes(String path, int contextSize) {
+        long bytes = engine == 0 ? -1 : allocation(path, contextSize);
+        return bytes >= 0 ? bytes : new java.io.File(path).length() + 256L * 1024 * 1024 + (long) contextSize * 64 * 1024;
+    }
+
+    /**
+     * 16K or 8K when this phone can hold that window with room to spare, else
+     * the 4K floor, which admission still checks. A loaded model keeps its
+     * window, so a listing never makes the next turn reload it; memory another
+     * loaded model holds counts as free, since loading this one releases it.
+     */
+    private Integer fitContext(String id, String path) {
+        if (engine == 0) return null;
+        String heldId, heldPath;
+        int heldContext;
+        synchronized (sizing) { heldId = loadedId; heldPath = loadedPath; heldContext = loadedContext; }
+        if (id.equals(heldId)) return heldContext;
+        ActivityManager.MemoryInfo info = memoryInfo();
+        long available = info.availMem - info.threshold;
+        if (heldId != null) available += Math.max(0, allocation(heldPath, heldContext));
+        int chosen = FLOOR_CONTEXT;
+        for (int context : CONTEXT_LADDER) {
+            long bytes = allocation(path, context);
+            if (bytes >= 0 && bytes + LADDER_SPARE_BYTES <= available) { chosen = context; break; }
+        }
+        // Field evidence for the fit, once per change: the listing is read at
+        // every turn start, several times a second while a turn is set up.
+        String decision = id + ':' + chosen;
+        if (!decision.equals(lastFit)) {
+            lastFit = decision;
+            android.util.Log.i("GezelRuntime", "Context window " + chosen + " for " + id + ": needs " +
+                mib(allocation(path, 16384)) + " MiB at 16K, " + mib(allocation(path, 8192)) + " at 8K, " +
+                mib(allocation(path, FLOOR_CONTEXT)) + " at 4K; " + mib(available) + " MiB available");
+        }
+        return chosen;
+    }
+
+    private volatile String lastFit;
+
+    private static long mib(long bytes) { return bytes < 0 ? -1 : bytes / (1024 * 1024); }
 
     private synchronized boolean reserveDownloadAdmission() {
         if (backgrounded || releaseRequested || downloads == null) return false;
@@ -206,7 +340,7 @@ public final class GezelNativeRuntime {
         } catch (Exception error) { llamaReason = "Import a GGUF model first"; }
         if (inactive) { availability = "unavailable"; aiReason = llamaReason; }
         JSONArray providers = new JSONArray();
-        providers.put(descriptor("llama-cpp", "Imported model", llamaReason == null ? "available" : "unavailable", llamaReason, 8192, 4096));
+        providers.put(descriptor("llama-cpp", "Imported model", llamaReason == null ? "available" : "unavailable", llamaReason, 16384, 4096));
         providers.put(descriptor("android-mlkit", "Android on-device AI", availability, aiReason, context, MlKitPrompt.MAX_OUTPUT_TOKENS));
         return new NativeObject().put("providers", providers);
     }
@@ -355,6 +489,9 @@ public final class GezelNativeRuntime {
         }
         int maxTokens = call.getInt("maxTokens", 1024);
         int contextSize = call.getInt("contextSize", 4096);
+        final Sampling sampling;
+        try { sampling = Sampling.from(call.getObject("sampling")); }
+        catch (IllegalArgumentException error) { call.reject(error.getMessage(), "INVALID_REQUEST"); return; }
         try {
             if (!"llama-cpp".equals(providerId) && !"android-mlkit".equals(providerId)) throw new IllegalArgumentException("Unknown on-device provider");
             if ("android-mlkit".equals(providerId) && modelId != null && !providerId.equals(modelId)) {
@@ -373,17 +510,17 @@ public final class GezelNativeRuntime {
                 if (contents[index].length() > 64_000) throw new IllegalArgumentException("Conversation message is too long");
                 bytes += contents[index].getBytes(StandardCharsets.UTF_8).length;
             }
-            if (bytes > 256 * 1024 || !roles[roles.length - 1].equals("user") || maxTokens < 1 || maxTokens > ("llama-cpp".equals(providerId) ? 4096 : MlKitPrompt.MAX_OUTPUT_TOKENS) || contextSize < 512 || contextSize > ("llama-cpp".equals(providerId) ? 8192 : MlKitPrompt.CONTEXT_TOKENS) || maxTokens + 128 >= contextSize) throw new IllegalArgumentException("Conversation or token budget is outside the supported range");
+            if (bytes > 256 * 1024 || !roles[roles.length - 1].equals("user") || maxTokens < 1 || maxTokens > ("llama-cpp".equals(providerId) ? 4096 : MlKitPrompt.MAX_OUTPUT_TOKENS) || contextSize < 512 || contextSize > ("llama-cpp".equals(providerId) ? 16384 : MlKitPrompt.CONTEXT_TOKENS) || maxTokens + 128 >= contextSize) throw new IllegalArgumentException("Conversation or token budget is outside the supported range");
             synchronized (this) {
                 if (destroyed || backgrounded) { call.reject("Reopen the app to start a conversation", "BACKGROUND"); return; }
                 if (activeId != null || modelMutation || releaseRequested) { call.reject("Another conversation or memory cleanup is running", "BUSY"); return; }
                 activeId = requestId; activeProvider = providerId; cancelled = false; mlkit.begin();
-                inferenceQueue.execute(() -> runGeneration(call, requestId, modelId, roles, contents, maxTokens, contextSize));
+                inferenceQueue.execute(() -> runGeneration(call, requestId, modelId, roles, contents, maxTokens, contextSize, sampling));
             }
         } catch (Exception error) { call.reject(failureMessage(error)); }
     }
 
-    private void runGeneration(NativeCall call, String requestId, String modelId, String[] roles, String[] contents, int maxTokens, int contextSize) {
+    private void runGeneration(NativeCall call, String requestId, String modelId, String[] roles, String[] contents, int maxTokens, int contextSize, Sampling sampling) {
         StringBuilder text = new StringBuilder();
         ScheduledFuture<?> cancelTimer = null;
         NativeObject result = null;
@@ -393,7 +530,7 @@ public final class GezelNativeRuntime {
             cancelTimer = cancellationQueue.scheduleAtFixedRate(() -> {
                 if (isCancelled(requestId)) cancelActive(requestId);
             }, 50, 50, TimeUnit.MILLISECONDS);
-            result = performGeneration(requestId, modelId, roles, contents, maxTokens, contextSize, text);
+            result = performGeneration(requestId, modelId, roles, contents, maxTokens, contextSize, sampling, text);
         }
         catch (Exception | LinkageError | OutOfMemoryError error) {
             if (!(error instanceof OutOfMemoryError) && isCancelled(requestId)) result = new NativeObject().put("text", text.toString()).put("stopReason", "cancelled");
@@ -417,7 +554,7 @@ public final class GezelNativeRuntime {
         for (NativeCall waiter : waiting) waiter.resolve();
     }
 
-    private NativeObject performGeneration(String requestId, String modelId, String[] roles, String[] contents, int maxTokens, int contextSize, StringBuilder text) throws Exception {
+    private NativeObject performGeneration(String requestId, String modelId, String[] roles, String[] contents, int maxTokens, int contextSize, Sampling sampling, StringBuilder text) throws Exception {
             if (isCancelled(requestId)) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             if ("android-mlkit".equals(activeProvider)) {
                 unloadLlama();
@@ -430,17 +567,20 @@ public final class GezelNativeRuntime {
             String[] model = store.model(modelId);
             if (!model[0].equals(loadedId) || contextSize != loadedContext) {
                 unloadLlama();
-                checkResources(new java.io.File(model[1]).length() + 256L * 1024 * 1024 + (long) contextSize * 64 * 1024);
+                checkResources(requiredBytes(model[1], contextSize));
                 long operation = nextOperation(requestId);
                 if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
-                loadedId = null;
-                LlamaRuntime.load(engine, model[1], operation, contextSize);
-                loadedId = model[0]; loadedContext = contextSize;
+                synchronized (sizing) {
+                    LlamaRuntime.load(engine, model[1], operation, contextSize);
+                    loadedId = model[0]; loadedPath = model[1]; loadedContext = contextSize;
+                }
             }
             long operation = nextOperation(requestId);
             if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             checkResources(64L * 1024 * 1024);
-            int reason = LlamaRuntime.generate(engine, roles, contents, operation, maxTokens, utf8 -> {
+            int reason = LlamaRuntime.generate(engine, roles, contents, operation, maxTokens,
+                sampling.temperature, sampling.topK, sampling.topP, sampling.minP, sampling.repeatPenalty,
+                sampling.repeatLastN, sampling.seed, utf8 -> {
                 if (isCancelled(requestId)) return false;
                 String delta = new String(utf8, StandardCharsets.UTF_8);
                 emitDelta(requestId, text, delta);
@@ -457,7 +597,7 @@ public final class GezelNativeRuntime {
     }
 
     private void unloadLlama() {
-        loadedId = null; loadedContext = 0;
+        synchronized (sizing) { loadedId = null; loadedPath = null; loadedContext = 0; }
         if (engine != 0) LlamaRuntime.unload(engine);
     }
 

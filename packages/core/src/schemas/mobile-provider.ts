@@ -116,6 +116,13 @@ export const MobileModelSchema = z
       .int()
       .positive()
       .max(4 * 1024 * 1024 * 1024),
+    /**
+     * The conversation window this device can hold for the model right now,
+     * sized by the native runtime from llama.cpp's own memory accounting: 16K
+     * or 8K with room to spare, else a 4K floor. Reported for the selected
+     * model; the default whenever the person has not chosen a window.
+     */
+    contextTokens: z.number().int().min(512).max(1_048_576).optional(),
   })
   .strict();
 export type MobileModel = z.infer<typeof MobileModelSchema>;
@@ -139,7 +146,8 @@ export type MobileModelInventory = z.infer<typeof MobileModelInventorySchema>;
  * inference still validates the actual tokenized prompt before generation. */
 export const MobileInferenceBudgetSchema = z
   .object({
-    contextSize: z.number().int().min(512).max(8192),
+    // The native bridge's ceiling (gezel_llama.cpp max_context_tokens).
+    contextSize: z.number().int().min(512).max(16384),
     maxTokens: z.number().int().min(1).max(4096),
   })
   .strict()

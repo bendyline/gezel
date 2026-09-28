@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareSemver, isSemver } from './catalog.js';
+import { VideoModelLoadSchema, compareSemver, isSemver } from './catalog.js';
 
 describe('catalog semver helpers', () => {
   it('isSemver accepts standard major.minor.patch', () => {
@@ -50,5 +50,19 @@ describe('catalog semver helpers', () => {
 
   it('compareSemver throws on non-semver input', () => {
     expect(() => compareSemver('latest', '1.0.0')).toThrow(/not semver/);
+  });
+});
+
+describe('VideoModelLoadSchema.sigmas', () => {
+  it('accepts a fixed distilled schedule and leaves it absent by default', () => {
+    const schedule = [1, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875];
+    expect(VideoModelLoadSchema.parse({ sigmas: schedule }).sigmas).toEqual(schedule);
+    expect(VideoModelLoadSchema.parse({}).sigmas).toBeUndefined();
+  });
+
+  it('rejects sigmas outside (0, 1] and an empty schedule', () => {
+    expect(VideoModelLoadSchema.safeParse({ sigmas: [1.2, 0.5] }).success).toBe(false);
+    expect(VideoModelLoadSchema.safeParse({ sigmas: [0.5, 0] }).success).toBe(false);
+    expect(VideoModelLoadSchema.safeParse({ sigmas: [] }).success).toBe(false);
   });
 });

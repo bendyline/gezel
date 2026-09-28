@@ -21,7 +21,7 @@ intermediate render.
 | `../views/GezellenView.css` | **On demand:** Gezellen roster/detail split and compact navigation (owned by `GezellenView`) |
 | `../views/GezelDetail.css` | **On demand:** Gezel appearance and accessory customization (owned by `GezelDetail`) |
 | `settings-and-status.css` | Settings navigation/panels, machine policy, and project status/index controls |
-| `history.css` | History master/detail view |
+| `history.css` | **On demand:** History master/detail view (owned by `HistoryView`) |
 | `tasks.css` | Task lists, detail, status controls, step tracker, and phase editor |
 | `home.css` | Shared article, provider/status, session, and settings recipes |
 | `home-view.css` | **On demand:** Home workshop, first-run setup, media downloads, and intro surface (owned by `HomeView`) |
@@ -31,9 +31,10 @@ intermediate render.
 | `../views/ProjectsView.css` | **On demand:** Responsive project master/detail and phone project controls |
 | `../views/ProjectToolsTab.css` | **On demand:** Project Tools tab — packages, scripts, and approvals (owned by `ProjectToolsTab`) |
 | `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
+| `fitted-tabs.css` | **On demand:** Tab faces (label / icon / both) and the hidden probe row for `FittedTabsList` |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
 | `github-and-growth.css` | GitHub workspace and gezel growth surfaces |
-| `diffpacks.css` | Change-proposal review pane (the project Proposals tab) |
+| `diffpacks.css` | **On demand:** Change-proposal review pane (owned by `DiffpackReviewView`) |
 | `scripts-and-craftbooks.css` | Script editor, craftbook editor, automation, and gates |
 | `village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |

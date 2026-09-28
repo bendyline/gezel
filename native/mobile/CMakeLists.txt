@@ -9,6 +9,8 @@ add_subdirectory("${GEZEL_LLAMA_SOURCE_DIR}" llama)
 add_library(gezel-llama gezel_llama.cpp)
 target_compile_features(gezel-llama PUBLIC cxx_std_17)
 target_include_directories(gezel-llama PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+# llama-ext.h (llama_get_memory_breakdown, for gezel_llama_estimate_memory).
+target_include_directories(gezel-llama PRIVATE "${GEZEL_LLAMA_SOURCE_DIR}/src")
 target_link_libraries(gezel-llama PUBLIC llama)
 set_target_properties(gezel-llama PROPERTIES
     POSITION_INDEPENDENT_CODE ON

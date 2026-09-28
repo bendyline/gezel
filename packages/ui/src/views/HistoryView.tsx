@@ -14,6 +14,7 @@ import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import '../styles/history.css';
 
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },

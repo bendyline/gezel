@@ -1894,6 +1894,10 @@
   text-align: center;
 }
 
+.chat-rail-compact-tabs .chat-rail-compact-tab[data-face="icon"] {
+  padding-inline: 0.5rem;
+}
+
 .chat-rail-compact-panel.gz-tabs-content {
   flex: 1;
   min-width: 0;

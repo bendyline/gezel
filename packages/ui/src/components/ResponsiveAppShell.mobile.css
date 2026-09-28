@@ -20,10 +20,15 @@
   direction: ltr;
 }
 
-.responsive-app-shell[data-compact="true"] .app-sidebar-item,
-.responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
-.responsive-app-shell[data-compact="true"] .app-sidebar-add {
-  min-height: 44px;
+/* The 44px floor is for fingers. A narrow desktop window driven by a mouse
+   keeps the desktop rail's row rhythm; at the compact density that floor
+   alone read as loose line spacing. */
+@media (any-pointer: coarse) {
+  .responsive-app-shell[data-compact="true"] .app-sidebar-item,
+  .responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
+  .responsive-app-shell[data-compact="true"] .app-sidebar-add {
+    min-height: 44px;
+  }
 }
 
 .responsive-app-shell[data-compact="true"]
@@ -169,7 +174,8 @@
   cursor: pointer;
 }
 
-.app-header-navigation:hover {
+.app-header-navigation:hover,
+.app-header-navigation[aria-pressed="true"] {
   background: rgba(255, 255, 255, 0.16);
   border-color: var(--titlebar-ink);
 }
@@ -232,6 +238,17 @@
 
 .tasks-view.tasks-view-compact [hidden] {
   display: none !important;
+}
+
+/* The overall Tasks area insets its header against the app gutter, which
+   doubles the indent once that gutter is the only margin a phone can spare.
+   Line the toolbar up with every other compact view's content edge. */
+.app.app-compact .tasks-view-overall {
+  padding-top: 0;
+}
+
+.app.app-compact .tasks-view-overall > :is(.tasks-header, .error) {
+  margin-inline: 0;
 }
 
 .tasks-view.tasks-view-compact > button {
@@ -358,4 +375,74 @@
 
 :root:not([data-platform]) .app.app-compact .app-header {
   padding-inline: 0.75rem;
+}
+
+/* Compact density. At a phone's display scale the desktop-sized UI read
+   10-20% too large (Galaxy S26+, 2026-09-27), and a narrow desktop window is
+   the same layout. Nearly every size is in rem, so a smaller root scales text
+   and spacing together while px touch targets (44px) keep their size. */
+html[data-layout="mobile"] {
+  font-size: 87.5%;
+}
+
+/* A narrow pane cannot spare the desktop gutter on both sides. Full-bleed
+   views cancel it with the same token, so they stay flush. */
+.app.app-compact .app-main {
+  --app-main-pad-inline: 0.75rem;
+}
+
+/* First run nests the steps under their headings with stacked indents. At
+   phone width those indents, the home view's own padding, and the pane
+   gutter left the setup a narrow column in the middle of the screen. */
+.app.app-compact .home-view {
+  padding-inline: 0;
+}
+
+.app.app-compact .home-firstrun-heading {
+  font-size: 1.35rem;
+}
+
+.app.app-compact
+  :is(.home-firstrun-lede, .home-firstrun-body, .home-firstrun-body .setup-section:has(> h3)) {
+  padding-left: 0;
+}
+
+.app.app-compact .home-firstrun-body .setup-section:has(> h3) > h3 {
+  margin-left: 0;
+}
+
+.app.app-compact :is(.home-firstrun-body .home-ondevice-link, .home-media-section) {
+  padding-left: 0;
+}
+
+/* Compact navigation fills the screen with nothing beside it, so the selected
+   row is a standalone key rather than a tab bridging into a content pane.
+   The bridge ran it to the screen edge, where it read as cropped. The
+   html + attribute prefix outranks the right-rail variants in either
+   stylesheet order. */
+html[data-layout="mobile"] .app-sidebar-scroll {
+  --sidebar-tab-rail-inset: 0px;
+  --sidebar-tab-bridge-size: 0px;
+}
+
+html[data-layout="mobile"]
+  .app-sidebar-scroll
+  :is(
+    .app-sidebar-item.active:not(:is(.app-sidebar-proj-row, .app-sidebar-gezel-row) > *),
+    .app-sidebar-group-header.active,
+    .app-sidebar-proj-row.active,
+    .app-sidebar-gezel-row.active,
+    .app-sidebar-tree .tree-row.tree-row-selected
+  ) {
+  --sidebar-tab-bridge-size: 0px;
+  width: auto;
+  margin-inline: 0;
+  border: 1px solid var(--sidebar-tab-border);
+  border-radius: var(--radius-md);
+}
+
+html[data-layout="mobile"]
+  .app-sidebar-scroll
+  :is(.app-sidebar-item.active, .app-sidebar-tree .tree-row.tree-row-selected)::after {
+  display: none;
 }

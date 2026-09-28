@@ -1,5 +1,6 @@
 import { parseGemmaToolCall } from './gemma-call.js';
 import { parsePythonicToolCall } from './pythonic-call.js';
+import { parseXmlFunctionCall } from './xml-function-call.js';
 
 /** Strict completion-only protocol for text engines. Never execute JSON embedded
  * in prose, fenced examples, quoted documents, partial streams, or output cut off
@@ -64,7 +65,8 @@ function parseWholeEnvelope(text: string): ToolEnvelope | null {
   return (
     (closed ? parseExactToolEnvelope(closed) : null) ??
     parsePythonicToolCall(text) ??
-    parseGemmaToolCall(text)
+    parseGemmaToolCall(text) ??
+    parseXmlFunctionCall(text)
   );
 }
 

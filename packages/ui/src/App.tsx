@@ -165,6 +165,7 @@ function FullApp() {
   const setupOpened = useRef(false);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
+  const toggleNavigation = useCallback(() => setNavigationOpen((open) => !open), []);
   useBackNavigation(compact, navigationOpen, openNavigation);
   // Random vertical slice into the wood texture, picked once per app
   // launch so each session shows a different band of grain across the
@@ -759,18 +760,21 @@ function FullApp() {
             } as React.CSSProperties
           }
         >
-          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
-          {compact && !navigationOpen && (
+          {/* Leads the bar, where a phone's menu button sits, and stays while
+              the navigation is open so the brand beside it never shifts. */}
+          {compact && (
             <button
               type="button"
               className="app-header-navigation"
-              onClick={openNavigation}
+              onClick={toggleNavigation}
               aria-label="Navigation"
+              aria-pressed={navigationOpen}
               title="Navigation"
             >
               <NavigationMenuIcon />
             </button>
           )}
+          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
           {pendingQuestionCount > 0 && (
             <button
               type="button"

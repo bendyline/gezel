@@ -117,6 +117,7 @@ export function ProductModelSettings({
           service={service}
           provider={selected}
           modelId={modelId}
+          fittedContext={inventory.models.find(({ id }) => id === modelId)?.contextTokens}
           disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
           refresh={refresh}
           onError={onError}

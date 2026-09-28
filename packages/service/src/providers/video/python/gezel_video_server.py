@@ -44,7 +44,7 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 def log(msg: str) -> None:
@@ -52,12 +52,37 @@ def log(msg: str) -> None:
     print(f"[video-server] {msg}", flush=True)
 
 
+# Fallback when a pipeline's vocoder doesn't declare its output rate. LTX-2's
+# vocoder emits 24 kHz; LTX-2.3's bandwidth-extension vocoder emits 48 kHz, so
+# the rate must come from the loaded vocoder — muxing 48 kHz samples as 24 kHz
+# plays the soundtrack at half speed, an octave low, twice as long as the clip.
+LTX2_FALLBACK_AUDIO_SAMPLE_RATE = 24000
+
+# LTX-2.x guidance a caller's `guidance_scale=1` leaves ON: the pipeline
+# defaults audio CFG to 7, spatio-temporal guidance to 1 (0 disables it) and
+# modality guidance to 3. Lightricks' reference samples a CFG-free (distilled)
+# checkpoint with no guidance of any kind, so guidance 1 turns every term off —
+# otherwise each step pays for extra transformer passes and the audio is
+# guided at a strength the model was never distilled for.
+# Frame area above which the LTX-2.x VAE decodes in tiles on unified memory.
+# Measured on LTX-2.3's VAE (float32, 121 frames, Metal driver peak over the
+# resident weights): 768x512 needs 14.5 GiB untiled vs 18.8 GiB tiled, so the
+# default size decodes whole; 1280x704 needs 39.1 GiB untiled vs 24.4 GiB
+# tiled, which is the difference between fitting a 128 GB Mac and swapping.
+# The two lines cross near 510k pixels per frame.
+LTX2_TILE_ABOVE_PIXELS = 1024 * 512
+
+LTX2_GUIDANCE_FREE = {
+    "audio_guidance_scale": 1.0,
+    "stg_scale": 0.0,
+    "audio_stg_scale": 0.0,
+    "modality_scale": 1.0,
+    "audio_modality_scale": 1.0,
+}
+
 # Per-family default negative prompt. These mirror the strings the
 # official LTX / WAN diffusers examples ship — they materially improve
 # output quality and every reference pipeline includes one.
-# LTX-2 audio is generated at 24 kHz (per the diffusers LTX-2 reference).
-LTX2_AUDIO_SAMPLE_RATE = 24000
-
 DEFAULT_NEGATIVE_PROMPT = {
     "ltx": "worst quality, inconsistent motion, blurry, jittery, distorted",
     "ltx2": "worst quality, inconsistent motion, blurry, jittery, distorted, static",
@@ -85,10 +110,12 @@ class Engine:
     * ``load_strategy`` is ``diffusers-tree`` (``from_pretrained`` over a
       full repo) or ``single-file`` (build the transformer from one
       checkpoint with ``from_single_file`` and graft it onto the component
-      subfolders — how LTX-2.3's fp8 transformer rides the LTX-2 stack).
+      subfolders of a matching reference repo).
     * ``vae_dtype`` forces the VAE precision independent of the transformer
       (WAN and LTX-2 need a float32 VAE or the decode washes out).
     * ``audio`` muxes the LTX-2 audio track into the MP4.
+    * ``sigmas`` pins a distilled checkpoint's fixed denoising schedule; the
+      step count is then ``len(sigmas)`` whatever the request asked for.
     """
 
     def __init__(
@@ -103,6 +130,7 @@ class Engine:
         transformer_class: Optional[str] = None,
         vae_dtype: Optional[str] = None,
         audio: bool = False,
+        sigmas: Optional[List[float]] = None,
     ) -> None:
         self.model_dir = model_dir
         self.family = family
@@ -113,6 +141,7 @@ class Engine:
         self.transformer_class = transformer_class
         self.vae_dtype = vae_dtype
         self.audio = audio
+        self.sigmas = sigmas
         self._pipe: Any = None
         self._pipe_sig: Optional[str] = None  # the loaded pipeline class name
         self._ltx_condition = False  # True for the *Condition unified pipelines
@@ -274,11 +303,8 @@ class Engine:
                 pipe.enable_attention_slicing()
             except Exception:  # noqa: BLE001
                 pass
-        if self.accelerator == "cuda" and hasattr(pipe, "enable_vae_tiling"):
-            try:
-                pipe.enable_vae_tiling()
-            except Exception:  # noqa: BLE001
-                pass
+        if self.accelerator == "cuda":
+            _set_vae_tiling(pipe, True)
         return pipe
 
     def _patch_rope_for_mps(self, pipe) -> None:  # noqa: ANN001
@@ -335,7 +361,7 @@ class Engine:
         fps = int(req.get("fps") or 24)
         width = int(req.get("width") or 704)
         height = int(req.get("height") or 480)
-        steps = int(req.get("steps") or 40)
+        steps = len(self.sigmas) if self.sigmas else int(req.get("steps") or 40)
         # Classifier-free guidance. Distilled few-step models want ≈1, dev
         # models ≈3 (LTX-2 ≈4). None → the pipeline's own default.
         guidance_scale = req.get("guidanceScale")
@@ -370,8 +396,12 @@ class Engine:
             )
             if negative:
                 kwargs["negative_prompt"] = negative
+            if self.sigmas:
+                kwargs["sigmas"] = list(self.sigmas)
             if guidance_scale is not None:
                 kwargs["guidance_scale"] = float(guidance_scale)
+                if self.family == "ltx2" and float(guidance_scale) <= 1.0:
+                    kwargs.update(LTX2_GUIDANCE_FREE)
             # LTX-2 takes the clip frame rate as a generation parameter (it
             # conditions motion on it); LTX 0.9.x only uses fps at encode.
             if self.family == "ltx2":
@@ -380,11 +410,14 @@ class Engine:
                 kwargs["generator"] = generator
             if want_i2v:
                 kwargs["image"] = _decode_image(input_image_b64)
+            if self.family == "ltx2" and self.accelerator != "cuda":
+                _set_vae_tiling(pipe, width * height > LTX2_TILE_ABOVE_PIXELS)
 
             result = pipe(**kwargs)
             frames = result.frames[0]
             # LTX-2 also returns a synchronized audio waveform [B, C, samples].
             audio = getattr(result, "audio", None)
+            audio_sample_rate = _vocoder_sample_rate(pipe)
 
         # Encode to mp4 in a temp file (the encoders want a path), read the
         # bytes back, and pull a PNG poster from the first frame.
@@ -392,13 +425,11 @@ class Engine:
             out_path = os.path.join(tmp, "out.mp4")
             if self.audio and audio is not None:
                 # Mux the LTX-2 audio track alongside the frames.
-                from diffusers.pipelines.ltx2.export_utils import encode_video
-
-                encode_video(
+                _encode_video_with_audio()(
                     video=frames,
                     fps=fps,
                     audio=audio[0].float().cpu(),
-                    audio_sample_rate=LTX2_AUDIO_SAMPLE_RATE,
+                    audio_sample_rate=audio_sample_rate,
                     output_path=out_path,
                 )
             else:
@@ -419,6 +450,41 @@ class Engine:
                 "mimeType": "video/mp4",
             },
         }
+
+
+def _set_vae_tiling(pipe, enabled: bool) -> None:  # noqa: ANN001
+    """Toggle tiled VAE decoding. diffusers dropped the pipeline-level
+    ``enable_vae_tiling`` helper, so the old ``hasattr(pipe, ...)`` guard made
+    tiling a silent no-op; the switch now lives on the VAE itself."""
+    vae = getattr(pipe, "vae", None)
+    toggle = getattr(vae, "enable_tiling" if enabled else "disable_tiling", None) or getattr(
+        pipe, "enable_vae_tiling" if enabled else "disable_vae_tiling", None
+    )
+    if toggle is None:
+        return
+    try:
+        toggle()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _vocoder_sample_rate(pipe) -> int:  # noqa: ANN001
+    """The rate the pipeline's vocoder actually emits (see the fallback note)."""
+    config = getattr(getattr(pipe, "vocoder", None), "config", None)
+    rate = getattr(config, "output_sampling_rate", None)
+    return int(rate) if rate else LTX2_FALLBACK_AUDIO_SAMPLE_RATE
+
+
+def _encode_video_with_audio():  # noqa: ANN202 - the diffusers muxer
+    """diffusers moved ``encode_video`` to ``diffusers.utils`` and made the old
+    ``pipelines.ltx2.export_utils`` shim raise from 0.40.0 on — after the whole
+    clip has rendered. Prefer the new home; the old one only serves a venv
+    older than the pinned floor."""
+    try:
+        from diffusers.utils import encode_video
+    except ImportError:
+        from diffusers.pipelines.ltx2.export_utils import encode_video
+    return encode_video
 
 
 def _decode_image(b64: str):  # noqa: ANN201 - PIL image
@@ -486,6 +552,13 @@ def make_handler(engine: Engine):  # noqa: ANN201
     return Handler
 
 
+def _parse_sigmas(raw: str) -> List[float]:
+    values = [float(part) for part in raw.split(",") if part.strip()]
+    if not values or any(not 0.0 < v <= 1.0 for v in values):
+        raise argparse.ArgumentTypeError(f"sigmas must be in (0, 1]: {raw!r}")
+    return values
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, help="path to the model directory")
@@ -503,6 +576,12 @@ def main() -> int:
     parser.add_argument("--transformer-class", default=None, help="single-file: transformer model class")
     parser.add_argument("--vae-dtype", default=None, choices=["float32", "bfloat16"])
     parser.add_argument("--audio", action="store_true", help="mux the pipeline's audio track")
+    parser.add_argument(
+        "--sigmas",
+        default=None,
+        type=_parse_sigmas,
+        help="comma-separated fixed denoising schedule (distilled checkpoints)",
+    )
     args = parser.parse_args()
 
     # Belt-and-suspenders: the supervisor sets these too, but pin offline
@@ -521,12 +600,14 @@ def main() -> int:
         transformer_class=args.transformer_class,
         vae_dtype=args.vae_dtype,
         audio=args.audio,
+        sigmas=args.sigmas,
     )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(engine))
     log(
         f"listening on http://{args.host}:{args.port} (family={args.family}, "
         f"accel={args.accelerator}, strategy={args.load_strategy}, "
-        f"pipeline={args.pipeline_class or 'auto'})"
+        f"pipeline={args.pipeline_class or 'auto'}, "
+        f"sigmas={len(args.sigmas) if args.sigmas else 'scheduler'})"
     )
     try:
         server.serve_forever()

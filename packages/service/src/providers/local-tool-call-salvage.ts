@@ -1,4 +1,4 @@
-import { parseExactToolEnvelope } from '@bendyline/gezel';
+import { parseExactToolEnvelope, parseXmlFunctionParams } from '@bendyline/gezel';
 /**
  * Tool-call salvage helpers shared across local providers (MLX,
  * llama.cpp, Ollama). Two failure modes covered:
@@ -1320,6 +1320,11 @@ const CLAUDE_PARAMETER_RE =
 // strip the wrapper as part of cleanup so the visible bubble doesn't
 // show an empty `<function_calls></function_calls>` shell.
 const CLAUDE_FUNCTION_CALLS_WRAPPER_RE = /<function_calls\s*>\s*<\/function_calls\s*>/g;
+// MiniCPM5's native shape, the same idea with different tag names:
+// `<function name="X">` holding `<param name="K">` children, multi-line
+// values in CDATA. Not Hermes, which writes `<function=X>`.
+const XML_FUNCTION_RE =
+  /<function\s+name="([a-zA-Z_][a-zA-Z0-9_-]*)"\s*>([\s\S]*?)<\/function\s*>/g;
 
 /**
  * Coerce a `<parameter>` text body the same way XML attributes are
@@ -1359,6 +1364,10 @@ export interface ClaudeInvokeToolCallSpan {
  * via `<parameter name="K">value</parameter>`; tools that take no
  * arguments just have empty invoke bodies.
  *
+ * MiniCPM5's `<function name="X"><param name="K">…</param></function>`
+ * is read here too: same structure, and every provider already runs this
+ * pass. Its CDATA values stay verbatim (see `parseXmlFunctionParams`).
+ *
  * Strict gating: tag name must resolve to a known tool. Same alias
  * resolution as the prose / XML-tag paths handles punctuation and
  * case drift (`browserSnapshot` → `browser_snapshot`).
@@ -1382,7 +1391,14 @@ export function findClaudeInvokeToolCallSpans(
     }
     out.push({ name, arguments: args, start: m.index, end: m.index + m[0].length });
   }
-  return out;
+  for (const m of text.matchAll(XML_FUNCTION_RE)) {
+    const name = resolveToolNameAlias(m[1]!, knownToolNames);
+    if (!name) continue;
+    const args = parseXmlFunctionParams(m[2] ?? '');
+    if (!args) continue;
+    out.push({ name, arguments: args, start: m.index, end: m.index + m[0].length });
+  }
+  return out.sort((a, b) => a.start - b.start);
 }
 
 export function findClaudeInvokeToolCallSpan(

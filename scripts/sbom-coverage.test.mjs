@@ -674,6 +674,43 @@ test('the shipped roots cannot reach the Capacitor packages only the mobile app 
   );
 });
 
+test('the closure walk skips a sibling-checkout link but not a missing workspace importer', () => {
+  const lockfile = parsePnpmLockfile(
+    [
+      "lockfileVersion: '9.0'",
+      '',
+      'importers:',
+      '',
+      '  packages/app:',
+      '    dependencies:',
+      '      core:',
+      '        specifier: workspace:*',
+      '        version: link:../core',
+      '      content:',
+      '        specifier: link:../../../content',
+      '        version: link:../../../content',
+      '',
+      '  packages/core:',
+      '    dependencies:',
+      '      leaf:',
+      '        specifier: 1.0.0',
+      '        version: 1.0.0',
+      '',
+      '  packages/orphan:',
+      '    dependencies:',
+      '      ghost:',
+      '        specifier: workspace:*',
+      '        version: link:../ghost',
+      '',
+    ].join('\n'),
+  );
+  assert.deepEqual([...lockfileProductionClosure(lockfile, ['packages/app'])], ['leaf@1.0.0']);
+  assert.throws(
+    () => lockfileProductionClosure(lockfile, ['packages/orphan']),
+    /no importer packages\/ghost/,
+  );
+});
+
 test('every native payload file carries the digest the installer verifier checks', async () => {
   const manifest = JSON.parse(
     await readFile(

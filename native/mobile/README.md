@@ -180,14 +180,36 @@ exclusive lifetime ownership: first finish loading/generation and stop concurren
 cancel callers. Backend registration is process-wide and outlives engine handles;
 individual model/context allocations are released on unload/destroy.
 
-Version 1 admits 256–8,192 context tokens (also bounded by the model's trained
+Version 1 admits 256–16,384 context tokens (also bounded by the model's trained
 context), 1–512 batch tokens, 1–8 threads, up to 128 messages/256 KiB transcript,
 up to 4,096 generated tokens, and up to 4 MiB output. Defaults are conservative;
 the caller must reserve prompt plus requested output within the context. Model
 file limits default to 4 GiB and cannot exceed 8 GiB; split GGUF models are rejected.
 These are allocation/input bounds, **not a hard resident-memory budget**: model
 architecture, KV cache, backend buffers, and app/UI memory still require measured
-device admission. Models must be app-owned immutable files; the opened file
+device admission.
+
+Generation options carry a model's sampling: `temperature` (0 = greedy),
+`top_k`, `top_p`, `min_p`, and a repetition penalty over the last
+`repeat_last_n` tokens, which also applies to greedy decoding. The defaults keep
+the historical greedy behaviour. The product runtime resolves the values from
+the model's catalog tuning with the same resolver as the desktop
+(`resolveTuning` in core) and clamps them to these ranges. An imported file with
+no catalog identity keeps the defaults. Until 2026-09-27 no host set them, so
+every phone reply was greedy whatever the catalog said.
+
+`gezel_llama_estimate_memory` is that measurement's input. It performs a
+metadata-only load (llama.cpp's `no_alloc`, the way upstream `--fit` sizes a
+context) with the same options and reports the weight, KV and compute bytes as
+llama.cpp places them on this device, including the CPU backend's repacked weight
+copies, plus the part of the weights a real load maps from the file. The runtimes
+admit a load against it and size each model's conversation window from it: 16K or
+8K when that fits with room to spare, else a 4K floor. Android charges only
+allocated bytes, since its available memory counts mapped file pages as
+reclaimable. iOS charges everything. The flat charge it replaced (weights,
+256 MiB, 64 KiB per token) was four times the real KV of hybrid models such as
+Qwen 3.5 2B, which made a Galaxy S20 FE refuse a model it ran well, and was under
+the real KV of dense models such as Llama 3.2 3B. Models must be app-owned immutable files; the opened file
 descriptor remains with the engine until unload. No API here provides downloads,
 filesystem tools, network access, or script execution.
 

@@ -114,8 +114,14 @@ describe('Responsive navigation in the desktop app', () => {
     expect(navigation.textContent).toBe('');
     expect(navigation.querySelector('.app-header-navigation-icon')).toBeInTheDocument();
     expect(document.querySelector('.app-compact-navigation')).not.toBeInTheDocument();
+    expect(navigation).toHaveAttribute('aria-pressed', 'false');
+    expect(navigation.nextElementSibling).toHaveClass('app-header-brand');
     fireEvent.click(navigation);
     expect(draft).not.toBeVisible();
+    expect(navigation).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(navigation);
+    expect(draft).toBeVisible();
+    fireEvent.click(navigation);
     fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
     expect(draft).toBeVisible();
     expect(draft).toHaveValue('Keep this draft');

@@ -140,6 +140,13 @@ Across the mobile prompt-budget audit's cases
 system message fell from 12.6–18.9 KB to 3.8–6.2 KB, most of it the tool listing
 (9.7–13.8 KB of JSON down to 2.4–3.4 KB of signatures).
 
+A phone's window is the device's to size. The native runtime measures what each window
+would take with llama.cpp's own dry-run accounting (`gezel_llama_estimate_memory`) and
+reports 16K or 8K when that fits with room to spare, else 4K, on the selected model
+(`MobileModel.contextTokens`); the product runtime uses it unless the person set one. So
+a phone model resolves `compact` at 8K–16K and `minimal` at 4K. ML Kit and Apple's
+on-device model stay at their fixed 4K.
+
 **Why `minimal` exists (fit).** `talkie-1930-13b-q4` (a 2048-token period-writing model)
 needed ~2,681 tokens of standing prompt against its 2,048 window, so the engine rejected
 even "hi there" before generating a token. On the desktop,

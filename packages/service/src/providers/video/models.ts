@@ -251,8 +251,9 @@ export class VideoModelManager {
           const fileResult = await this.downloadFileConcurrent(
             itemDir,
             // Per-file repo/revision override (multi-repo single-file
-            // installs, e.g. LTX-2.3 transformer + LTX-2 components) falls
-            // back to the source-level repo for ordinary diffusers trees.
+            // installs: a transformer checkpoint plus a reference repo's
+            // components) falls back to the source-level repo for ordinary
+            // diffusers trees.
             file.repo ?? src.huggingfaceRepo,
             file.revision ?? src.revision,
             file,

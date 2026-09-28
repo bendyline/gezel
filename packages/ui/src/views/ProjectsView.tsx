@@ -52,7 +52,7 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
-import { ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
+import { type ProjectSectionTab, ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
@@ -2419,58 +2419,74 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 onValueChange={(value) => setTab(value as ProjectTab)}
                 onPreload={(value) => preloadProjectTab(value as ProjectTab)}
                 compact={effectiveCompact}
-                items={[
-                  {
-                    value: 'output',
-                    label: 'Output',
-                    show: runtimeCapabilities().htmlPreview && compactOutputAvailable,
-                  },
-                  { value: 'chat', label: 'Chat', show: true },
-                  {
-                    value: 'overview',
-                    label: 'Overview',
-                    show: projectTabIsVisible(selected, 'overview'),
-                  },
-                  {
-                    value: 'tasks',
-                    label: 'Tasks',
-                    show: projectTabIsVisible(selected, 'tasks'),
-                  },
-                  {
-                    value: 'packages',
-                    label: 'Tools',
-                    show: projectTabIsVisible(selected, 'approvals'),
-                  },
-                  {
-                    value: 'workspace',
-                    label: 'Workspace',
-                    show: projectTabIsVisible(selected, 'workspace'),
-                  },
-                  {
-                    value: 'artifacts',
-                    label: 'Artifacts',
-                    show: projectTabIsVisible(selected, 'artifacts'),
-                  },
-                  // Shown only once the project has proposals: a tab that is
-                  // empty for every project that never ran a fix is noise.
-                  {
-                    value: 'proposals',
-                    label: 'Proposals',
-                    show: diffpackCount > 0,
-                  },
-                  { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
-                  {
-                    value: 'mail',
-                    label: 'Mail',
-                    show: showWorkInProgressFeatures && isEmailProject(selected),
-                  },
-                  {
-                    value: 'map',
-                    label: 'Village',
-                    show: projectTabIsVisible(selected, 'map'),
-                  },
-                  { value: 'about', label: 'Settings', show: true },
-                ].filter((item) => item.show && supportsProjectSection(item.value))}
+                items={(
+                  [
+                    {
+                      value: 'output',
+                      label: 'Output',
+                      icon: 'output',
+                      show: runtimeCapabilities().htmlPreview && compactOutputAvailable,
+                    },
+                    { value: 'chat', label: 'Chat', icon: 'chat', show: true },
+                    {
+                      value: 'overview',
+                      label: 'Overview',
+                      icon: 'overview',
+                      show: projectTabIsVisible(selected, 'overview'),
+                    },
+                    {
+                      value: 'tasks',
+                      label: 'Tasks',
+                      icon: 'tasks',
+                      show: projectTabIsVisible(selected, 'tasks'),
+                    },
+                    {
+                      value: 'packages',
+                      label: 'Tools',
+                      icon: 'tools',
+                      show: projectTabIsVisible(selected, 'approvals'),
+                    },
+                    {
+                      value: 'workspace',
+                      label: 'Workspace',
+                      icon: 'workspace',
+                      show: projectTabIsVisible(selected, 'workspace'),
+                    },
+                    {
+                      value: 'artifacts',
+                      label: 'Artifacts',
+                      icon: 'artifacts',
+                      show: projectTabIsVisible(selected, 'artifacts'),
+                    },
+                    // Shown only once the project has proposals: a tab that is
+                    // empty for every project that never ran a fix is noise.
+                    {
+                      value: 'proposals',
+                      label: 'Proposals',
+                      icon: 'proposals',
+                      show: diffpackCount > 0,
+                    },
+                    {
+                      value: 'github',
+                      label: 'GitHub',
+                      icon: 'github',
+                      show: Boolean(selected.github?.url),
+                    },
+                    {
+                      value: 'mail',
+                      label: 'Mail',
+                      icon: 'mail',
+                      show: showWorkInProgressFeatures && isEmailProject(selected),
+                    },
+                    {
+                      value: 'map',
+                      label: 'Village',
+                      icon: 'village',
+                      show: projectTabIsVisible(selected, 'map'),
+                    },
+                    { value: 'about', label: 'Settings', icon: 'settings', show: true },
+                  ] satisfies Array<ProjectSectionTab & { show: boolean }>
+                ).filter((item) => item.show && supportsProjectSection(item.value))}
               />
               {selected.archived && (
                 <span className="project-archived-badge" title="Hidden from primary navigation">

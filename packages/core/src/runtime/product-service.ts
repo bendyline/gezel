@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
 import { checkHandoffChain } from '../handoff-limits.js';
-import type { PortableInference } from '../mobile/inference.js';
+import type { PortableInference, PortableSampling } from '../mobile/inference.js';
 import { pickRandomNameWithGender } from '../names.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
 import {
@@ -27,6 +27,7 @@ import {
 } from '../schemas/api.js';
 import type { ChatEvent, ChatMessage } from '../schemas/gezel.js';
 import {
+  type MobileModelInventory,
   type MobileProviderId,
   MobileProviderIdSchema,
   resolveMobileInferenceBudget,
@@ -71,6 +72,7 @@ import {
   preparePortableMessage,
   validatePortableMessageHints,
 } from './message-delivery.js';
+import { portableSampling } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
 import { answeredQuestion } from './questions.js';
 import type { PortableScripts } from './script-host.js';
@@ -92,7 +94,7 @@ import {
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
 import type { PortableTransformTarget } from './transform.js';
 
-export type { PortableInference } from '../mobile/inference.js';
+export type { PortableInference, PortableSampling } from '../mobile/inference.js';
 const requiredString = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || !value.trim()) throw new ProductError(`${name} is required`);
   return value;
@@ -492,13 +494,41 @@ export class PortableProductService {
         409,
       );
     const budget = resolveMobileInferenceBudget(provider, {
-      contextSize: config.modelContextOverrides?.[`${providerId}:${modelId}`],
+      contextSize:
+        config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
+        fittedContext(inventory, modelId),
       maxTokens:
         gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
         config.modelTuning?.[modelId]?.sampling?.maxTokens,
     });
+    const sampling =
+      providerId === 'llama-cpp'
+        ? portableSampling({
+            catalog: this.catalogModelFor(inventory, modelId),
+            installDefault: config.modelTuning?.[modelId],
+            override: gezel.parsed.frontmatter.tuning,
+            tuningProfileId: gezel.parsed.frontmatter.tuningProfile,
+            installDefaultProfileId: config.modelTuningProfile?.[modelId],
+            suggestedProfileId: gezel.parsed.frontmatter.suggestedTuningProfile,
+          })
+        : undefined;
     signal.throwIfAborted();
-    return { gezelId: gezel.id, about: gezel.about, providerId, modelId, ...budget };
+    return {
+      gezelId: gezel.id,
+      about: gezel.about,
+      providerId,
+      modelId,
+      ...budget,
+      ...(sampling ? { sampling } : {}),
+    };
+  }
+
+  /** The catalog entry of a downloaded model; an imported file has none. */
+  private catalogModelFor(inventory: MobileModelInventory | undefined, modelId: string) {
+    const catalogId = inventory?.models.find((model) => model.id === modelId)?.source?.catalogId;
+    return catalogId
+      ? this.content.models?.find((model) => model.source.catalogId === catalogId)
+      : undefined;
   }
 
   private async startTurn(
@@ -603,11 +633,24 @@ export class PortableProductService {
           409,
         );
       const limits = resolveMobileInferenceBudget(provider, {
-        contextSize: config.modelContextOverrides?.[`${providerId}:${modelId}`],
+        contextSize:
+          config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
+          fittedContext(inventory, modelId),
         maxTokens:
           context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
           config.modelTuning?.[modelId]?.sampling?.maxTokens,
       });
+      const sampling =
+        providerId === 'llama-cpp'
+          ? portableSampling({
+              catalog: this.catalogModelFor(inventory, modelId),
+              installDefault: config.modelTuning?.[modelId],
+              override: context.gezel.parsed.frontmatter.tuning,
+              tuningProfileId: context.gezel.parsed.frontmatter.tuningProfile,
+              installDefaultProfileId: config.modelTuningProfile?.[modelId],
+              suggestedProfileId: context.gezel.parsed.frontmatter.suggestedTuningProfile,
+            })
+          : undefined;
       session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
@@ -741,6 +784,7 @@ export class PortableProductService {
         {
           modelId,
           ...limits,
+          ...(sampling ? { sampling } : {}),
           startListing: provider.capabilities.tools
             ? footprint.nativeToolListing
             : footprint.textToolListing,
@@ -799,6 +843,7 @@ export class PortableProductService {
       modelId: string;
       contextSize: number;
       maxTokens: number;
+      sampling?: PortableSampling;
       startListing: PortableToolListing;
       nativeTools?: NativeToolBinding;
     },
@@ -2050,6 +2095,14 @@ export class PortableProductService {
     throw new ProductError('This file operation is not available on this host', 501);
   }
 }
+/** The window the device reported it can hold for this model, when it did. */
+function fittedContext(
+  inventory: MobileModelInventory | undefined,
+  modelId: string,
+): number | undefined {
+  return inventory?.models.find((model) => model.id === modelId)?.contextTokens;
+}
+
 function mimeFor(path: string): string {
   const extension = path.split('.').at(-1)?.toLowerCase();
   const types: Record<string, string> = {

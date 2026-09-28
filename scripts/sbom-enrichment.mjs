@@ -299,7 +299,12 @@ export function lockfileProductionClosure(lockfile, importerPaths) {
     })) {
       if (rawVersion.startsWith('link:')) {
         if (base === undefined) continue;
-        queue.push({ importer: posix.join(base, rawVersion.slice('link:'.length)) });
+        const target = posix.join(base, rawVersion.slice('link:'.length));
+        // A link that leaves the workspace is a sibling-checkout override
+        // (`pnpm link:gilde`), not an importer: it has no registry identity
+        // and the lockfile records none of its dependencies.
+        if (target.split('/')[0] === '..' && !lockfile.importers.has(target)) continue;
+        queue.push({ importer: target });
         continue;
       }
       queue.push({ key: `${name}@${rawVersion.replace(/\(.*$/, '')}` });

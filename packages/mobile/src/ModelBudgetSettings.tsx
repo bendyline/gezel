@@ -10,6 +10,7 @@ export function ModelBudgetSettings({
   service,
   provider,
   modelId,
+  fittedContext,
   disabled,
   refresh,
   onError,
@@ -17,6 +18,8 @@ export function ModelBudgetSettings({
   service: PortableProductService;
   provider: MobileProvider;
   modelId: string;
+  /** The window the device reported it can hold for this model; the default. */
+  fittedContext?: number | undefined;
   disabled: boolean;
   refresh(): Promise<void>;
   onError(error: unknown): void;
@@ -34,10 +37,10 @@ export function ModelBudgetSettings({
       .then((config) => {
         if (!live) return;
         // Show an out-of-range saved choice so it can be corrected explicitly.
-        const defaults = resolveMobileInferenceBudget({
-          contextTokens: provider.contextTokens,
-          maxOutputTokens: provider.maxOutputTokens,
-        });
+        const defaults = resolveMobileInferenceBudget(
+          { contextTokens: provider.contextTokens, maxOutputTokens: provider.maxOutputTokens },
+          { contextSize: fittedContext },
+        );
         setContextSize(String(config.modelContextOverrides?.[key] ?? defaults.contextSize));
         setMaxTokens(
           String(config.modelTuning?.[modelId]?.sampling?.maxTokens ?? defaults.maxTokens),
@@ -47,7 +50,15 @@ export function ModelBudgetSettings({
     return () => {
       live = false;
     };
-  }, [service, key, modelId, provider.contextTokens, provider.maxOutputTokens, onError]);
+  }, [
+    service,
+    key,
+    modelId,
+    provider.contextTokens,
+    provider.maxOutputTokens,
+    fittedContext,
+    onError,
+  ]);
   return (
     <form
       className="mobile-model-library"
@@ -85,8 +96,9 @@ export function ModelBudgetSettings({
     >
       <h3>Conversation limits</h3>
       <p>
-        These limits apply to this model. Larger conversations use more memory; longer replies take
-        more time. Changes apply to the next message, including existing conversations.
+        These limits apply to this model. Unless you set one, the conversation size fits the memory
+        this device has free. Larger conversations use more memory; longer replies take more time.
+        Changes apply to the next message, including existing conversations.
       </p>
       <label className="mobile-model-label">
         Conversation capacity (tokens)

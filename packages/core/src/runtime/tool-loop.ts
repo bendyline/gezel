@@ -20,7 +20,7 @@ import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
 import { extractReasoning } from '../transform/reasoning.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
-import type { PortableInference } from './product-service.js';
+import type { PortableInference, PortableSampling } from './product-service.js';
 import { type PortableToolActions, executePortableTool } from './product-tools.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive, portableTaskSessionState } from './task-authority.js';
@@ -182,6 +182,8 @@ export async function runPortableToolLoop(options: {
   modelId: string;
   contextSize: number;
   maxTokens: number;
+  /** The model's resolved catalog sampling; absent keeps the engine default. */
+  sampling?: PortableSampling;
   /** Set when the provider calls tools through its own API (`capabilities.tools`). */
   nativeTools?: NativeToolBinding;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
@@ -390,6 +392,7 @@ export async function runPortableToolLoop(options: {
             modelId: options.modelId,
             contextSize: options.contextSize,
             maxTokens: options.maxTokens,
+            ...(options.sampling ? { sampling: options.sampling } : {}),
             messages: prompt,
             ...(nativeSpecs.length ? { tools: nativeSpecs } : {}),
           },

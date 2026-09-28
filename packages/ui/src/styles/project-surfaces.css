@@ -1368,6 +1368,35 @@
   flex: none;
 }
 
+/* The magnifier key only exists for narrow dialogs; see the 560px block. */
+.gz-npd-search-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.gz-npd-search-toggle:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+.gz-npd-search-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.gz-npd-search-field {
+  display: block;
+}
+
 .gz-npd-search input[type="search"] {
   width: 100%;
   box-sizing: border-box;
@@ -1908,18 +1937,122 @@
   }
 }
 
+/* A phone or a narrow window has room for a handful of rows, not cards. The
+   header keeps only the title and a magnifier key (the field opens on its own
+   row when pressed), and each card becomes one row: a small mark, the name,
+   and a single line of description. */
 @media (max-width: 560px) {
   .gz-npd-header {
-    align-items: stretch;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem 1rem 0.65rem;
+  }
+
+  .gz-npd-header-copy {
+    flex: 1 1 0;
+  }
+
+  .gz-npd-header-sub {
+    display: none;
   }
 
   .gz-npd-search {
+    width: auto;
+  }
+
+  .gz-npd-search[data-open="true"] {
+    flex: 1 1 100%;
     width: 100%;
+  }
+
+  .gz-dialog .gz-npd-search-field {
+    margin-bottom: 0;
+  }
+
+  .gz-npd-search:not([data-open="true"]) .gz-npd-search-toggle {
+    display: inline-flex;
+  }
+
+  .gz-npd-search:not([data-open="true"]) .gz-npd-search-field {
+    display: none;
+  }
+
+  .gz-npd-rail {
+    padding: 0.35rem 0.75rem;
+  }
+
+  .gz-npd-gallery {
+    padding: 0.65rem 0.75rem 0.9rem;
+  }
+
+  .gz-npd-section + .gz-npd-section {
+    margin-top: 0.9rem;
+  }
+
+  .gz-npd-section-head {
+    margin-bottom: 0.4rem;
   }
 
   .gz-npd-grid {
     grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .gz-npd-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "mark name badge"
+      "mark desc desc";
+    align-items: center;
+    column-gap: 0.65rem;
+    row-gap: 0.05rem;
+    min-height: 0;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-md);
+  }
+
+  /* A lifted full-width row reads as a drag, not a hover. */
+  .gz-npd-card:hover:not(:disabled) {
+    box-shadow: none;
+    transform: none;
+  }
+
+  .gz-npd-card-mark {
+    grid-area: mark;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+  }
+
+  .gz-npd-card-mark-svg {
+    padding: 0.3rem;
+  }
+
+  .gz-npd-card-name {
+    grid-area: name;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .gz-npd-card-description {
+    grid-area: desc;
+    -webkit-line-clamp: 1;
+  }
+
+  .gz-npd-card-badge {
+    grid-area: badge;
+    position: static;
+  }
+}
+
+@media (max-width: 560px) and (any-pointer: coarse) {
+  .gz-npd-search-toggle {
+    width: 44px;
+    height: 44px;
   }
 }
 
@@ -2537,17 +2670,48 @@
 }
 
 @media (max-width: 560px) {
+  /* The project picker keeps its row with the magnifier beside it; an open
+     search takes the next row. */
   .gz-ntd-header-controls {
-    flex-direction: column;
-    align-items: stretch;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    align-items: center;
     width: 100%;
   }
 
-  .gz-npd-pick-footer,
+  /* `.gz-dialog label` outranks the plain class, so claim the row explicitly.
+     The label must not stretch: hovering a label hovers its control. */
+  .gz-dialog .gz-ntd-header-project {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+  }
+
+  .gz-ntd-header-controls .gz-npd-search {
+    width: auto;
+    margin-left: auto;
+  }
+
+  .gz-ntd-header-controls .gz-npd-search[data-open="true"] {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
   .gz-npd-detail-footer {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  /* The picker's footnote restates the title; the rows need its space. */
+  .gz-npd-pick-footer .gz-npd-footnote {
+    display: none;
+  }
+
+  .gz-npd-pick-footer {
+    justify-content: flex-end;
   }
 }
 

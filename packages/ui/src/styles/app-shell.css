@@ -2116,12 +2116,12 @@ button.machine-memory-unload-button {
   /* `+ 2rem` grows the view back over the 1rem top/bottom padding the
      negative margins cancel — without it the listing falls 2rem short of
      the app frame and leaves a gap at the bottom. */
-  height: calc(100% + 2rem);
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
   min-height: 0;
-  /* Negative margin cancels `.app-main`'s 1rem 1.25rem padding so the
-     split butts against the app frame. The two panes carry their own
-     internal padding where it makes sense. */
-  margin: -1rem -1.25rem;
+  /* Negative margin cancels `.app-main`'s padding so the split butts
+     against the app frame. The two panes carry their own internal padding
+     where it makes sense. */
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
 }
 .gezels-listing .listing-header {
   display: flex;
@@ -2379,8 +2379,8 @@ button.machine-memory-unload-button {
    frame. Scoped to the direct child so the split view below — where
    `.document-detail` is nested under `.documents-detail` — is untouched. */
 .app-main > .document-detail {
-  margin: -1rem -1.25rem;
-  height: calc(100% + 2rem);
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
 }
 .app-main > .document-detail .editor-wrap {
   border: none;
@@ -2658,10 +2658,14 @@ button.machine-memory-unload-button {
 }
 
 .app-main {
+  /* Full-bleed views cancel this gutter with the same tokens, so a layout
+     that narrows it (compact) never leaves them misaligned. */
+  --app-main-pad-block: 1rem;
+  --app-main-pad-inline: 1.25rem;
   flex: 1;
   min-width: 0;
   overflow: auto;
-  padding: 1rem 1.25rem;
+  padding: var(--app-main-pad-block) var(--app-main-pad-inline);
 }
 
 /* Split workspaces and pane-based browsers go edge-to-edge with no surrounding
@@ -2953,11 +2957,13 @@ button.machine-memory-unload-button {
 }
 /* Keep the status signal's column intact, but let the project name flow below
    the hidden action trigger. Once revealed, an opaque patch covers the last
-   few characters rather than reflowing the row. */
+   few characters rather than reflowing the row. The offset clears the signal
+   column (22px + two 0.2rem margins) and then the name's own 0.45rem inset, so
+   the key sits as far inside the row highlight as the icon does on the left. */
 .app-sidebar-proj-row > .project-actions-trigger {
   position: absolute;
   z-index: 3;
-  right: calc(22px + 0.55rem);
+  right: calc(22px + 0.85rem);
   left: auto;
   margin-right: 0;
 }

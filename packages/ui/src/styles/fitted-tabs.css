@@ -1,0 +1,55 @@
+/* FittedTabsList: the faces a tab can wear and the hidden probe row that
+   decides which one fits. Each bar's padding, distribution and touch sizing
+   stay in its owner file, keyed on the trigger's `data-face` so the probes
+   (which carry the same classes and `data-face`) measure exactly what the
+   live row would draw. */
+
+.fitted-tab-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+/* One line tall, so an icon row keeps the label row's height and the pane
+   below does not shift when the labels drop. */
+.fitted-tab-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 1.3em;
+  height: 1lh;
+}
+
+.fitted-tab-icon svg {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+.fitted-tab-label[data-text]::before {
+  content: attr(data-text);
+}
+
+.fitted-tabs-probe {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.fitted-tabs-probe-row {
+  display: flex;
+  width: max-content;
+}
+
+/* Out-specifies each owner's distribution rule (`flex: 1 1 0` would size a
+   probe by the row, not by its content). */
+.fitted-tabs .fitted-tabs-probe .fitted-tabs-probe-row > .fitted-tab {
+  flex: none;
+  white-space: nowrap;
+}

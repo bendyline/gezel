@@ -8867,6 +8867,7 @@ export class ChatManager extends LocalEngineRuntime {
             typeof assistantMessage.content === 'string' ? assistantMessage.content : '',
             assistantMessage.toolCalls,
             expectedFilePath,
+            userText,
           );
           if (proseDeliverable) {
             const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];

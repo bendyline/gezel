@@ -14,6 +14,15 @@ public final class LlamaRuntime {
     public static native void destroy(long engine);
     public static native void unload(long engine);
     public static native void load(long engine, String path, long requestId, int contextSize);
-    public static native int generate(long engine, String[] roles, String[] contents, long requestId, int maxTokens, Delta delta);
+    /** What a load at this context would take, without loading: weight bytes, the
+     * part of them mapped from the file, context (KV) bytes, scratch bytes. */
+    public static native long[] estimate(long engine, String path, int contextSize);
+    /** Sampling follows the bridge's gezel_llama_generation_options; temperature 0 is greedy. */
+    public static native int generate(long engine, String[] roles, String[] contents, long requestId, int maxTokens,
+        float temperature, int topK, float topP, float minP, float repeatPenalty, int repeatLastN, int seed, Delta delta);
+    /** Greedy decoding with no repetition penalty: the bridge's defaults. */
+    public static int generate(long engine, String[] roles, String[] contents, long requestId, int maxTokens, Delta delta) {
+        return generate(engine, roles, contents, requestId, maxTokens, 0f, 40, 0.95f, 0f, 1f, 64, 1, delta);
+    }
     public static native void cancel(long engine, long requestId);
 }

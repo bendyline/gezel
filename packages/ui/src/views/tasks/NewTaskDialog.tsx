@@ -21,6 +21,7 @@ import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
+import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { MarkdownField } from '../../components/MarkdownField.js';
 import {
@@ -915,15 +916,12 @@ export function NewTaskDialog({
                         </Select.Root>
                       </label>
                     )}
-                    <label className="gz-npd-search">
-                      <span className="sr-only">Search craftbooks</span>
-                      <input
-                        type="search"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search craftbooks…"
-                      />
-                    </label>
+                    <GallerySearch
+                      label="Search craftbooks"
+                      placeholder="Search craftbooks…"
+                      value={query}
+                      onChange={setQuery}
+                    />
                   </div>
                 </header>
                 <div className="gz-npd-body">

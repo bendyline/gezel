@@ -7,13 +7,24 @@ import {
 } from './mobile-provider.js';
 
 describe('portable inference budget admission', () => {
-  const llama = { contextTokens: 8192, maxOutputTokens: 4096 };
+  const llama = { contextTokens: 16384, maxOutputTokens: 4096 };
   it('uses sustainable defaults while preserving explicit per-model choices', () => {
     expect(resolveMobileInferenceBudget(llama)).toEqual({ contextSize: 4096, maxTokens: 1024 });
     expect(resolveMobileInferenceBudget(llama, { contextSize: 8192, maxTokens: 4096 })).toEqual({
       contextSize: 8192,
       maxTokens: 4096,
     });
+    // The window the device reported it fits for the model, 16K at most.
+    expect(resolveMobileInferenceBudget(llama, { contextSize: 16384 })).toEqual({
+      contextSize: 16384,
+      maxTokens: 1024,
+    });
+    expect(() =>
+      resolveMobileInferenceBudget(
+        { contextTokens: 32768, maxOutputTokens: 4096 },
+        { contextSize: 32768 },
+      ),
+    ).toThrow();
     expect(resolveMobileInferenceBudget({ contextTokens: 2048, maxOutputTokens: 256 })).toEqual({
       contextSize: 2048,
       maxTokens: 256,
@@ -66,5 +77,16 @@ describe('verified mobile model source admission', () => {
     expect(MobileModelSchema.parse({ id, name: 'Model', source, sizeBytes: 1024 }).source).toEqual(
       source,
     );
+  });
+  it('carries the window the device fits for a model, within token bounds', () => {
+    const id = 'model';
+    expect(
+      MobileModelSchema.parse({ id, name: 'Model', sizeBytes: 1024, contextTokens: 8192 })
+        .contextTokens,
+    ).toBe(8192);
+    for (const contextTokens of [0, 511, 4096.5, Number.NaN])
+      expect(() =>
+        MobileModelSchema.parse({ id, name: 'Model', sizeBytes: 1024, contextTokens }),
+      ).toThrow();
   });
 });
