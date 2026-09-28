@@ -1,6 +1,6 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { type ExecFn, defaultExec, system32Tool } from './exec.js';
 
 /**
@@ -38,8 +38,9 @@ export function trustStoreSupported(platform: NodeJS.Platform = process.platform
   return platform === 'darwin' || platform === 'win32';
 }
 
+/** A macOS path handed to `security`, so POSIX separators whatever the host. */
 export function loginKeychainPath(home: string): string {
-  return join(home, 'Library', 'Keychains', 'login.keychain-db');
+  return posix.join(home, 'Library', 'Keychains', 'login.keychain-db');
 }
 
 export function buildDarwinAddTrustedArgs(pemPath: string, keychain: string): string[] {

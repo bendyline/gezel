@@ -49,6 +49,20 @@ import {
   normalizeToolNameSpelling,
 } from './tool-inventory.js';
 
+// The server builds its client on the client package's undici transport,
+// which the global `fetch` stub below never reaches. Route it back to the
+// stub: otherwise a dispatched handler dials GEZEL_BASE_URL for real, and
+// on Linux the refused connection counts as transient, so every read
+// retries with backoff and the dispatch tests outlive their timeout.
+vi.mock('@bendyline/gezel-client/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@bendyline/gezel-client/node')>()),
+  createPatientFetch: () =>
+    Object.assign((...args: Parameters<typeof fetch>) => globalThis.fetch(...args), {
+      close: async () => {},
+      destroy: async () => {},
+    }),
+}));
+
 interface RegisteredTool {
   description?: string;
   inputSchema?: z.ZodTypeAny;

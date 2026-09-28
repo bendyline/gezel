@@ -123,7 +123,10 @@ describe('macOS registration', () => {
   });
 
   it('copies the manifest into the container wef folder, named by GUID', async () => {
-    const manifest = join(home, 'manifest dir', `It's "mine".xml`);
+    // Windows forbids `"` in file names, so the hostile name keeps only the
+    // space and apostrophe there.
+    const hostileName = process.platform === 'win32' ? "It's mine.xml" : `It's "mine".xml`;
+    const manifest = join(home, 'manifest dir', hostileName);
     await mkdir(join(home, 'manifest dir'), { recursive: true });
     await writeFile(manifest, '<OfficeApp/>');
     await mkdir(join(home, 'Library', 'Containers', 'com.microsoft.Word', 'Data'), {
