@@ -263,14 +263,12 @@ describe('validateGezappSource', () => {
   it('resolves a bundled required toolset into the dependency lock', async () => {
     const files = minimalApp();
     const manifest = JSON.parse(files[`${TYPE_DIR}/versions/1.0.0/manifest.json`]!);
-    manifest.toolsets = [{ id: 'web-search', need: 'required' }];
+    manifest.toolsets = [{ id: 'docblocks', need: 'required' }];
     files[`${TYPE_DIR}/versions/1.0.0/manifest.json`] = json(manifest);
     const dir = await writeTree(await tempDir(), files);
     const result = await validateGezappSource(dir);
     expect(errorRules(result.findings)).toEqual([]);
-    expect(result.manifest?.dependencies.map((dependency) => dependency.id)).toEqual([
-      'web-search',
-    ]);
+    expect(result.manifest?.dependencies.map((dependency) => dependency.id)).toEqual(['docblocks']);
   });
 
   it('flags a shard mismatch', async () => {

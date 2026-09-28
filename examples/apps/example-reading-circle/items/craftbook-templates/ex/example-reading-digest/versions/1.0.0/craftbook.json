@@ -6,21 +6,22 @@
   "releasedAt": "2026-08-24T00:00:00Z",
   "toolsets": [
     {
-      "toolsetId": "web-search",
-      "reason": "Find reception and background on the current book for the context section."
+      "toolsetId": "docblocks",
+      "optional": true,
+      "reason": "Save a Word copy of the digest for members who read it away from gezel."
     }
   ],
   "steps": [
     {
       "id": "gather",
       "name": "Gather",
-      "prompt": "Use read_file on circle.json and on every notes/ file from the last two weeks. Collect what the circle actually discussed: themes, disagreements, favorite passages. Then use the web-search tools once or twice for reception or background on the current book worth one short paragraph. Keep working notes with write_task_note.",
+      "prompt": "Use read_file on circle.json and on every notes/ file from the last two weeks. Collect what the circle actually discussed: themes, disagreements, favorite passages. Then search once or twice (web_search, or wikipedia_search when no web search provider is set up) for reception or background on the current book worth one short paragraph. Keep working notes with write_task_note.",
       "next": "digest"
     },
     {
       "id": "digest",
       "name": "Write the digest",
-      "prompt": "Write the digest with write_artifact to reports/reading-digest.md. Sections: What we read, What we said (grounded in the notes, quoting members only where the notes quote them), A little context (from the search), and Questions for next time. Keep it under a page.",
+      "prompt": "Write the digest with write_artifact to reports/reading-digest.md. Sections: What we read, What we said (grounded in the notes, quoting members only where the notes quote them), A little context (from the search), and Questions for next time. Keep it under a page. If the DocBlocks tools are available, also make a Word copy: convert that markdown with convert_document and save it with save_artifact as reports/reading-digest.docx.",
       "terminal": true
     }
   ]

@@ -26,9 +26,9 @@
   ],
   "toolsets": [
     {
-      "id": "web-search",
+      "id": "docblocks",
       "need": "required",
-      "reason": "The reading-digest craftbook searches for book context; installing it at adoption lets the night-shift schedule arm."
+      "reason": "The reading-digest craftbook saves a Word copy of each digest with it."
     }
   ],
   "craftbooks": ["session-prep", "example-reading-digest"],

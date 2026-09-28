@@ -151,7 +151,7 @@ describe('examples/apps', () => {
       createdAt: CREATED_AT,
     });
     const lock = packed.manifest.dependencies.find(
-      (dependency) => dependency.kind === 'toolset' && dependency.id === 'web-search',
+      (dependency) => dependency.kind === 'toolset' && dependency.id === 'docblocks',
     );
     expect(lock?.required).toBe(true);
   });
