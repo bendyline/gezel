@@ -151,9 +151,6 @@ fix it, never *whether*:
   cause, download the job's uploaded artifacts (`gh api .../artifacts`)
   before concluding it cannot be diagnosed. Fix what the evidence proves,
   and say plainly what could not be verified on this machine.
-- **Conventional commits.** Report it once and move on. It does not block,
-  and fixing it would mean rewriting pushed history, which is the user's
-  call. Do not propose a rebase.
 - **Infrastructure** (lost runner, registry 5xx, network timeouts, cache
   service errors). Report it. Do not re-run the job yourself.
 

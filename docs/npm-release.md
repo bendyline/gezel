@@ -84,10 +84,9 @@ This is unrelated to the Electron app's `1.YYDDD.RUN` scheme, which
 [`scripts/stamp-version.mjs`](../scripts/stamp-version.mjs) mints in CI and
 never commits.
 
-Conventional Commits are enforced by the `commitlint` job in
-[quality.yml](../.github/workflows/quality.yml) on pull requests **and** on
-pushes to `main`. There is no local git hook, deliberately — but the messages
-are load-bearing, because every published version bump derives from them.
+Conventional Commits are not checked anywhere — no local git hook and no CI
+job — but the messages are load-bearing, because every published version bump
+derives from them: a commit whose subject has no type releases nothing.
 
 ### `GEZEL_VERSION` is stamped during `prepare`
 
