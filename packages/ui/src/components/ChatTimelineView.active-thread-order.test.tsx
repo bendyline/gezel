@@ -149,6 +149,37 @@ describe('ChatTimelineView — the composer thread sits at the bottom', () => {
     ).toBeNull();
   });
 
+  it('keeps the newest parent exchange last when older sub-threads hang from an earlier turn', async () => {
+    renderTimeline('s1', [
+      message({ sessionId: 's1', content: 'where should I start', at: minutesAgo(180) }),
+      message({
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'start with the schedule',
+        at: minutesAgo(179),
+      }),
+      message({
+        sessionId: 's2',
+        gezelId: 'g2',
+        role: 'assistant',
+        content: 'planner consultation',
+        at: minutesAgo(178),
+        parentSession: { sessionId: 's1', gezelId: 'g1', kind: 'consultation' },
+      }),
+      message({ sessionId: 's1', content: 'is it done yet', at: minutesAgo(1) }),
+    ]);
+
+    await waitFor(() => expect(document.querySelectorAll('.timeline-thread').length).toBe(3));
+    const threads = [...document.querySelectorAll<HTMLElement>('.timeline-thread')];
+    expect(threads[1]?.classList.contains('timeline-session-subthread')).toBe(true);
+    expect(threads.at(-1)?.textContent).toContain('is it done yet');
+    expect(
+      document.querySelector(
+        '.timeline-session-divider-continuing.timeline-session-divider-active',
+      ),
+    ).not.toBeNull();
+  });
+
   it('leaves chronological order alone when the active thread went cold', async () => {
     const stale = new Date(NOW - 48 * 60 * 60 * 1000).toISOString();
     renderTimeline('s1', [

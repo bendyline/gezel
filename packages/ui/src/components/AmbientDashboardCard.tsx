@@ -1,5 +1,7 @@
 import type { AmbientDashboardStatusResponse, AmbientDashboardTheme } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { AmbientDashboardThemeSelect } from './AmbientDashboardThemeSelect.js';
@@ -118,14 +120,16 @@ export function AmbientDashboardCard() {
   }, [refreshStatus, refreshPreview]);
 
   useEffect(() => {
-    void refreshStatus();
+    void refreshStatus().then((initial) => {
+      if (initial?.running) pollUntilIdle();
+    });
     void refreshPreview();
     void refreshBridge();
     return () => {
       if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
       if (previewRef.current) URL.revokeObjectURL(previewRef.current);
     };
-  }, [refreshStatus, refreshPreview, refreshBridge]);
+  }, [refreshStatus, refreshPreview, refreshBridge, pollUntilIdle]);
 
   const saveEnabled = useCallback(
     async (next: boolean) => {
@@ -147,11 +151,16 @@ export function AmbientDashboardCard() {
     setError(null);
     try {
       await api.runAmbientDashboard();
-      setStatus((current) => (current ? { ...current, running: true } : current));
-      pollUntilIdle();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // 409: a run already holds the slot (often a scheduled one, or a
+      // manual run still waiting on a busy local model). Follow it.
+      if (!(err instanceof GezelApiError && err.status === 409)) {
+        setError(apiErrorMessage(err));
+        return;
+      }
     }
+    setStatus((current) => (current ? { ...current, running: true } : current));
+    pollUntilIdle();
   }, [pollUntilIdle]);
 
   const saveTheme = useCallback(

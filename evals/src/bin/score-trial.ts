@@ -29,6 +29,11 @@ import { pathToFileURL } from 'node:url';
 import { type ContinuityFacts, summarizeContinuityForRunDir } from '../continuity-facts.ts';
 import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
 import { summarizeKeurmeesterCasesSync } from '../keurmeester-metrics.ts';
+import {
+  type RetrievalFacts,
+  type RetrievalOracle,
+  summarizeRetrievalForRunDir,
+} from '../retrieval-facts.ts';
 import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
 
 export interface TrialFacts {
@@ -64,6 +69,7 @@ export interface TrialFacts {
    * history capture. The generalist-mode A/B reads this block.
    */
   continuity?: ContinuityFacts;
+  retrieval?: RetrievalFacts;
 
   outcome: {
     success: boolean;
@@ -734,6 +740,7 @@ export function score(runDir: string): TrialFacts {
     failureMode?: string;
     modelTier?: string;
     generalistMode?: string;
+    retrievalArm?: import('../types.ts').TrialRetrievalArm;
     engine?: string;
     finalSniff?: TrialFinalSniff;
     nativeEngineIncidents?: NativeEngineIncidentSummary;
@@ -1071,6 +1078,11 @@ export function score(runDir: string): TrialFacts {
     ...(result.generalistMode ? { generalistMode: result.generalistMode } : {}),
     ...(result.engine ? { engine: result.engine } : {}),
   });
+  const retrieval = summarizeRetrievalForRunDir(
+    runDir,
+    { ...(result.retrievalArm ? { retrievalArm: result.retrievalArm } : {}) },
+    readJson<RetrievalOracle>(join(runDir, 'retrieval-oracle.json')),
+  );
   const { timeToFirstTokenMs, firstTurnTtftMs } = parseFirstTokenTiming(
     readLines(join(runDir, 'daemon.log')).join('\n'),
     result.startedAt,
@@ -1088,6 +1100,7 @@ export function score(runDir: string): TrialFacts {
     ...(keurmeester ? { keurmeester } : {}),
     ...(craftbook ? { craftbook } : {}),
     ...(continuity ? { continuity } : {}),
+    ...(retrieval ? { retrieval } : {}),
     ...(result.nativeEngineIncidents
       ? { nativeEngineIncidents: result.nativeEngineIncidents }
       : {}),

@@ -37,6 +37,7 @@ RUNTIME_PORT="${DATA_DIR}/runtime/port"
 RUNTIME_CERT="${DATA_DIR}/runtime/cert.pem"
 SERVICE_STDOUT="${DATA_DIR}/logs/service-stdout.log"
 SERVICE_STDERR="${DATA_DIR}/logs/service-stderr.log"
+SERVICE_HEALTH_TIMEOUT=180
 
 report_unhandled_error() {
   status="$1"
@@ -84,7 +85,8 @@ dump_service_diagnostics() {
 }
 
 wait_for_service_health() {
-  health_deadline=$((SECONDS + 60))
+  health_deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT))
+  health_report_at=$((SECONDS + 15))
   while [ "$SECONDS" -lt "$health_deadline" ]; do
     if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1 && \
        [ -s "$RUNTIME_PORT" ] && [ -s "$RUNTIME_CERT" ]; then
@@ -111,10 +113,14 @@ wait_for_service_health() {
         fi
       fi
     fi
+    if [ "$SECONDS" -ge "$health_report_at" ]; then
+      echo "[gezel postinstall] waiting for service health ($((health_deadline - SECONDS))s remaining)"
+      health_report_at=$((SECONDS + 15))
+    fi
     sleep 1
   done
 
-  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} did not become healthy within 60 seconds" >&2
+  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} did not become healthy within ${SERVICE_HEALTH_TIMEOUT} seconds" >&2
   dump_service_diagnostics
   return 1
 }
@@ -262,6 +268,41 @@ if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Every root pass below over a tree the daemon account can write is safe only
+# while nothing runs as that account. Such a pass resolves each path when it
+# acts on it, so a live process could swap a checked entry for a link to a
+# system file between the check and the chown/chmod — the account parses
+# untrusted model files, so it is the one to assume compromised. Bootout ends
+# the job; this also ends anything that left its process group.
+service_account_running() {
+  for id_flag in -U -u; do
+    pgrep_status=0
+    /usr/bin/pgrep "$id_flag" "$DAEMON_USER" >/dev/null 2>&1 || pgrep_status=$?
+    case $pgrep_status in
+      0) return 0 ;;
+      1) ;;
+      *)
+        echo "[gezel postinstall] ERROR: cannot list processes running as ${DAEMON_USER} (pgrep exit ${pgrep_status})" >&2
+        exit 1
+        ;;
+    esac
+  done
+  return 1
+}
+
+stop_service_account_processes() {
+  for _ in $(seq 1 10); do
+    service_account_running || return 0
+    /usr/bin/pkill -KILL -U "$DAEMON_USER" 2>/dev/null || true
+    /usr/bin/pkill -KILL -u "$DAEMON_USER" 2>/dev/null || true
+    sleep 1
+  done
+  echo "[gezel postinstall] ERROR: processes still run as ${DAEMON_USER}; refusing to repair files that account can change" >&2
+  exit 1
+}
+
+stop_service_account_processes
+
 # 2. Create and migrate the system-scope data hierarchy. The parent is 0711:
 # user daemons can traverse the known runtime path but cannot list private or
 # legacy state. runtime alone is 0755; its discovery files are the only
@@ -289,6 +330,19 @@ if [ ! -f "$MIGRATE_SHARED_CLI" ]; then
   exit 1
 fi
 assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+# The migration moves private product data into this directory and the
+# publishing step below trusts what root placed there, so it must be one root
+# created. /Users/Shared is world-writable: any account could have made
+# /Users/Shared/Gezel first, and would keep full control of a directory it
+# owns. Every release that made it left it root-owned; anything else is
+# refused rather than adopted. Because /Users/Shared is sticky, a root-owned
+# entry cannot be replaced after this check.
+mkdir -m 700 "$SHARED_DIR" 2>/dev/null || true
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+if [ ! -d "$SHARED_DIR" ] || [ "$(stat -f %u "$SHARED_DIR")" != 0 ]; then
+  echo "[gezel postinstall] ERROR: $SHARED_DIR is not a root-owned directory; refusing to migrate into or publish it. Remove it (after checking what it holds) and reinstall." >&2
+  exit 1
+fi
 echo "[gezel postinstall] migrating legacy projects and gezels into $SHARED_DIR"
 # Known duplicate/conflict states are reconciled inside the migration CLI. Any
 # remaining non-zero exit means the complete shared root was not published.
@@ -319,7 +373,8 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
   --tarball="$BUNDLE_TARBALL" \
   --meta="$BUNDLE_META" \
   --dest="$SERVICE_TREE" \
-  --force
+  --force \
+  --shared-readonly
 echo "[gezel postinstall] service bundle ready in $((SECONDS - extract_started))s"
 
 # Upgrade migration: remove legacy world/group permissions without following
@@ -327,53 +382,144 @@ echo "[gezel postinstall] service bundle ready in $((SECONDS - extract_started))
 # Physical, same-filesystem walks avoid following planted descendant symlinks
 # or crossing a mounted tree while privileged ownership/mode changes run.
 #
+# These passes run as root over trees the daemon account owns. With that
+# account's processes gone (above), nothing moves entries while they run; what
+# remains is anything it left behind. A symlink is never followed and never
+# given a mode or ACL. A regular file with more than one link is left exactly
+# as it is: macOS lets any account hard-link a file it does not own, and a
+# chown or chmod through that name would change the linked system file.
+#
 # Product code, interrupted product-code staging trees, and public assets are
 # pruned from this private-state pass. The service family is replaced or
-# reclaimed above and published below; assets have their own public-mode pass.
+# reclaimed/published above; assets have their own public-mode pass.
 # Keeping the actions in one find traversal matters on inode-heavy upgrades.
-echo "[gezel postinstall] hardening private machine state"
-private_hardening_started=$SECONDS
-find -x "$DATA_DIR" \
-  \( -path "$SERVICE_TREE" -o \
-     -path "${SERVICE_TREE}.previous" -o \
-     -path "${SERVICE_TREE}.staging-*" -o \
-     -path "$ASSETS_DIR" \) -prune -o \
-  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
-  ! -type l -exec chmod -N {} + \
-  -exec chmod go-rwx {} +
-chmod 711 "$DATA_DIR"
-chmod 755 "$DATA_DIR/runtime"
-chmod 700 "$DATA_DIR/logs"
-echo "[gezel postinstall] private machine state hardened in $((SECONDS - private_hardening_started))s"
+harden_private_state() {
+  find -x "$DATA_DIR" \
+    \( -path "$SERVICE_TREE" -o \
+       -path "${SERVICE_TREE}.previous" -o \
+       -path "${SERVICE_TREE}.staging-*" -o \
+       -path "$ASSETS_DIR" \) -prune -o \
+    \( -type f -links +1 \) -prune -o \
+    -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
+    ! -type l -exec chmod -N {} + \
+    -exec chmod go-rwx {} +
+  chmod 711 "$DATA_DIR"
+  chmod 755 "$DATA_DIR/runtime"
+  chmod 700 "$DATA_DIR/logs"
+}
 
 # Shared model bundles are the sole public data subtree. Refuse links before
 # widening modes so an elevated upgrade can never publish an external target.
-if find -x "$ASSETS_DIR" -type l -print -quit | grep -q .; then
-  echo "[gezel postinstall] ERROR: shared asset store contains a symlink" >&2
-  exit 1
-fi
+harden_shared_assets() {
+  if find -x "$ASSETS_DIR" -type l -print -quit | grep -q .; then
+    echo "[gezel postinstall] ERROR: shared asset store contains a symlink" >&2
+    exit 1
+  fi
+  find -x "$ASSETS_DIR" \
+    \( -type f -links +1 \) -prune -o \
+    -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
+    ! -type l -exec chmod -N {} + \
+    \( -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} + \)
+}
+
+echo "[gezel postinstall] hardening private machine state"
+private_hardening_started=$SECONDS
+harden_private_state
+echo "[gezel postinstall] private machine state hardened in $((SECONDS - private_hardening_started))s"
 echo "[gezel postinstall] normalizing shared model store"
 assets_hardening_started=$SECONDS
-find -x "$ASSETS_DIR" \
-  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
-  ! -type l -exec chmod -N {} + \
-  \( -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} + \)
+harden_shared_assets
 echo "[gezel postinstall] shared model store normalized in $((SECONDS - assets_hardening_started))s"
 
 # Shared product data is intentionally writable by interactive local accounts;
 # the engine broker never opens it. The sticky root protects the root-owned
-# trust marker and top-level migrated entity directories from replacement,
-# while inherited ACLs keep new nested files collaborative across accounts.
-find -x "$SHARED_DIR" ! -type l \
-  -exec chmod -N {} + \
-  -exec chmod a+rwX {} +
-chmod 1777 "$SHARED_DIR"
-find -x "$SHARED_DIR" -type d -exec chmod +a "everyone allow read,write,execute,append,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit" {} +
-# The shared root is for interactive user daemons, not the engine identity.
-# Put this inherited deny first; root still performs future installer repairs.
-chmod +a# 0 "${DAEMON_USER} deny list,search,read,write,execute,append,delete,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit" "$SHARED_DIR"
-chown root:wheel "$SHARED_DIR/.gezel-machine-shared-v1.json"
-chmod 644 "$SHARED_DIR/.gezel-machine-shared-v1.json"
+# trust marker and scope directories from replacement, while inherited ACLs
+# keep new nested files collaborative across accounts.
+#
+# Root never walks this collaborative tree. Every local account can rename
+# anything inside a scope directory, so a root pass over it — chmod by path,
+# `find -exec` included — could be steered through a swapped-in symlink or
+# hard link onto a system file (an everyone-writable /etc/sudoers, say). Nested
+# directories stay non-sticky on purpose: collaborating accounts replace each
+# other's files. Content they create needs no repair; it inherits the
+# everyone ACE below when it is created.
+#
+# Root touches only the root itself and the root-owned scope directories and
+# marker directly inside its sticky top level — entries no other account can
+# move — plus entities the migration has just placed, via publish_migrated_entity.
+SHARED_EVERYONE_ACE="everyone allow read,write,execute,append,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit"
+
+# A migrated entity arrives private: owned by the daemon account (moved from its
+# home) or by root (copied across volumes), with no group/other access. Nothing
+# but root can reach inside once its ACL is cleared, so its subtree can be
+# walked by path — provided the walk is anchored to the directory rather than
+# to its name, which any local account can rename. The subshell's `cd` pins the
+# directory; everything after it is relative to that directory, and access
+# opens only with the final changes to `.`. Published entities (open, or owned
+# by anyone else) are never walked again.
+publish_migrated_entity() (
+  scope_dir=$1
+  name=$2
+  case $name in
+    '' | [!A-Za-z0-9@]* | *[!A-Za-z0-9@._-]*) exit 0 ;;
+  esac
+  cd -P -- "$scope_dir/$name" 2>/dev/null || exit 0
+  [ "$(pwd -P)" = "$shared_physical/${scope_dir##*/}/$name" ] || exit 0
+  owner_mode=$(stat -f '%u %Lp' .) || exit 0
+  # shellcheck disable=SC2086
+  set -- $owner_mode
+  case $1 in 0 | "$daemon_uid") ;; *) exit 0 ;; esac
+  case $2 in *00) ;; *) exit 0 ;; esac
+  chmod -N .
+  echo "[gezel postinstall] publishing migrated shared entity ${scope_dir##*/}/$name"
+  if find -x . -type f -links +1 -print -quit | grep -q .; then
+    echo "[gezel postinstall] WARNING: hard-linked files in ${scope_dir##*/}/$name stay private" >&2
+  fi
+  find -x . -mindepth 1 \( -type l -o \( -type f -links +1 \) \) -prune -o \
+    -exec chmod -N {} + \
+    -exec chmod a+rwX,ug-s {} + \
+    -type d -exec chmod +a "$SHARED_EVERYONE_ACE" {} +
+  chmod a+rwX .
+  chmod +a "$SHARED_EVERYONE_ACE" .
+)
+
+publish_shared_data() {
+  shared_physical=$(cd -P -- "$SHARED_DIR" && pwd -P)
+  chmod -N "$SHARED_DIR"
+  chmod 1777 "$SHARED_DIR"
+  chmod +a "$SHARED_EVERYONE_ACE" "$SHARED_DIR"
+  # The shared root is for interactive user daemons, not the engine identity.
+  # Put this inherited deny first; root still performs future installer repairs.
+  chmod +a# 0 "${DAEMON_USER} deny list,search,read,write,execute,append,delete,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit" "$SHARED_DIR"
+  for scope in projects gezels; do
+    scope_dir="$SHARED_DIR/$scope"
+    if [ ! -e "$scope_dir" ] && [ ! -L "$scope_dir" ]; then
+      continue
+    fi
+    if [ -L "$scope_dir" ] || [ ! -d "$scope_dir" ] || [ "$(stat -f %u "$scope_dir")" != 0 ]; then
+      echo "[gezel postinstall] WARNING: leaving $scope_dir unchanged: it is not a root-owned directory" >&2
+      continue
+    fi
+    chmod -N "$scope_dir"
+    chmod a+rwX "$scope_dir"
+    chmod +a "$SHARED_EVERYONE_ACE" "$scope_dir"
+    for entity in "$scope_dir"/*; do
+      if [ -e "$entity" ] || [ -L "$entity" ]; then
+        publish_migrated_entity "$scope_dir" "${entity##*/}"
+      fi
+    done
+  done
+  shared_marker="$SHARED_DIR/.gezel-machine-shared-v1.json"
+  if [ -L "$shared_marker" ] || [ ! -f "$shared_marker" ] ||
+    [ "$(stat -f '%u %l' "$shared_marker")" != "0 1" ]; then
+    echo "[gezel postinstall] ERROR: $shared_marker is not a root-owned regular file" >&2
+    exit 1
+  fi
+  chown root:wheel "$shared_marker"
+  chmod 644 "$shared_marker"
+}
+
+publish_shared_data
 
 # Invalidate legacy root-equivalent discovery material before making runtime
 # traversable. The replacement auth-token is a scoped first-party credential.
@@ -387,26 +533,10 @@ rm -f \
   "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
-# Readable, not private. This tree is the only thing under $DATA_DIR that is not
-# the daemon's private state: it is product code, the exact bytes of the
-# world-readable tarball inside /Applications/Gezel.app that produced it.
-# Publishing it lets each account's user daemon execute this copy instead of
-# unpacking a byte-identical second one into its own home — one ~33k-file
-# extraction per machine rather than one per account (see
-# supervisor/shared-service-tree.ts). $DATA_DIR stays 0711, so the directory is
-# reachable by path but not listable.
-#
-# `go=u-w` grants group/other exactly what the owner has, minus write, so
-# executables keep their exec bits and write access stays the daemon account's
-# alone. That last part is the property that matters: the supervisor refuses to
-# adopt a tree the calling account could rewrite.
-echo "[gezel postinstall] publishing service tree"
-service_publish_started=$SECONDS
-find -x "$SERVICE_TREE" \
-  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} + \
-  ! -type l -exec chmod -N {} + \
-  -exec chmod go=u-w {} +
-echo "[gezel postinstall] service tree published in $((SECONDS - service_publish_started))s"
+# Product code was published root-owned and readable (0644/0755) by the
+# extractor. Do not walk it again: three metadata mutations on every file
+# cost over seven minutes on a real upgrade. Only this public-code extraction
+# uses umask 022; all private machine state retains the policy above.
 
 # 3. Install the LaunchDaemon plist (root:wheel 644 — Apple convention).
 if [ ! -f "$PLIST_SRC" ]; then
@@ -449,7 +579,9 @@ bootstrap_err=$(launchctl bootstrap system "$PLIST_DST" 2>&1) || {
   fi
 }
 
-kickstart_err=$(launchctl kickstart -k "system/${DAEMON_LABEL}" 2>&1) || {
+# bootstrap + RunAtLoad already starts it. Never use -k here: that kills the
+# just-started process and doubles cold-start work before our health wait.
+kickstart_err=$(launchctl kickstart "system/${DAEMON_LABEL}" 2>&1) || {
   echo "[gezel postinstall] kickstart reported '${kickstart_err}'; waiting for health" >&2
 }
 wait_for_service_health

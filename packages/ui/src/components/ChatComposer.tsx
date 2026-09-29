@@ -44,7 +44,10 @@ import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
 import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
+import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
+import { modelSetupAction } from './model-setup-action.js';
+import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayout.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -175,7 +178,9 @@ export interface ChatComposerProps {
   /**
    * Optional content rendered between the "To:" line and the editor —
    * SessionSwitcher slots in here so the session picker reads as part
-   * of the composer instead of floating above it.
+   * of the composer instead of floating above it. A narrow composer moves
+   * it into the editor toolbar instead, inside `ComposerToolbarContext`,
+   * so the conversation keeps that row.
    */
   belowAddressLine?: ReactNode;
   /**
@@ -350,6 +355,10 @@ export function ChatComposer({
   taskLaunch: taskLaunchProps,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
+  // Hysteresis because a split grip can drag the width across the line, and
+  // each crossing remounts the thread bar in its other home.
+  const narrow = useCompactLayout(composerRef, COMPACT_LAYOUT_THRESHOLD_PX, 24);
+  const threadBarInToolbar = narrow && Boolean(belowAddressLine);
   useEffect(() => {
     if (!focusRequestKey) return;
     const frame = window.requestAnimationFrame(() => {
@@ -379,6 +388,7 @@ export function ChatComposer({
   // composer never regresses to a misleading Send button.
   const [serverInflight, setServerInflight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const setupAction = error ? modelSetupAction(error) : null;
   // Session resolution and the send/interrupt POST happen before the daemon
   // accepts ownership of the draft. Keep a synchronous ref as the actual
   // double-submit lock (React state does not update until the event returns)
@@ -630,7 +640,15 @@ export function ChatComposer({
     // A confirmed plan remains accurate enough to display while the next
     // debounced preview is pending. Clear it immediately only when routing is
     // impossible locally or when the conversation address has changed.
-    if (message.length < 8 || parseOpenChatQuery(intentPreviewText) !== null) {
+    // Suggestions attach only on a fresh thread, where the Task key is. In
+    // an ongoing one, "turn this into a slide deck" is a reply to the gezel,
+    // and a suggestion would make Enter launch a task from those words.
+    if (
+      message.length < 8 ||
+      parseOpenChatQuery(intentPreviewText) !== null ||
+      !taskLaunchEnabled ||
+      liveSessionId !== null
+    ) {
       setTurnIntentPlan(null);
       return;
     }
@@ -653,7 +671,7 @@ export function ChatComposer({
         .catch(() => {});
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [gezelId, intentPreviewText, liveSessionId, projectId]);
+  }, [gezelId, intentPreviewText, liveSessionId, projectId, taskLaunchEnabled]);
 
   const createFreshSession = useCallback(async (): Promise<string> => {
     const created = await api.createChatSession({
@@ -1288,9 +1306,9 @@ export function ChatComposer({
       if (runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
         body.passiveCcGezelIds = ccIds;
       if (sentDraftId) body.draftId = sentDraftId;
-      // The person dismissed the task the daemon would suggest for exactly
-      // this text; a plain send must not have the daemon re-derive it.
-      if (taskLaunchEnabled && taskLaunch.dismissedForText(userText)) body.turnIntent = 'off';
+      // The person turned down the task the daemon suggested for this
+      // message; a plain send must not have the daemon re-derive it.
+      if (taskLaunchEnabled && taskLaunch.suggestionDismissed()) body.turnIntent = 'off';
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
@@ -1409,7 +1427,9 @@ export function ChatComposer({
       return;
     }
     try {
-      await api.cancelChatSessionTurn(sid);
+      // The person's Stop: if this thread is working a task step, the task
+      // pauses too, so nothing picks the step back up behind their back.
+      await api.cancelChatSessionTurn(sid, { stopTask: true });
       setServerInflight(false);
       setError(null);
     } catch (err) {
@@ -1600,21 +1620,28 @@ export function ChatComposer({
           </span>
           <div className="chat-composer-error-text">
             {error}
-            {error.includes('Settings → Artificial Intelligence') && (
+            {setupAction && (
               <div>
                 <button
                   type="button"
                   className="gz-key"
                   onClick={() => {
-                    requestSettingsSection('defaults');
+                    const { target } = setupAction;
+                    if (target.kind === 'home') {
+                      window.dispatchEvent(
+                        new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
+                      );
+                      return;
+                    }
+                    requestSettingsSection(target.section);
                     window.dispatchEvent(
                       new CustomEvent('gezel:navigate', {
-                        detail: { view: 'settings', section: 'defaults' },
+                        detail: { view: 'settings', section: target.section },
                       }),
                     );
                   }}
                 >
-                  Choose a model
+                  {setupAction.label}
                 </button>
               </div>
             )}
@@ -1734,7 +1761,7 @@ export function ChatComposer({
         </button>
         {addressLineTrailing}
       </div>
-      {belowAddressLine}
+      {!threadBarInToolbar && belowAddressLine}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
           <div className="chat-open-command-menu" role="menu" aria-label="Open targets">
@@ -1805,8 +1832,18 @@ export function ChatComposer({
           fullWidth
           thinMargins
           toolbarSlotAfterActions={
-            runtimeCapabilities().chatAttachments ? (
-              <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+            runtimeCapabilities().chatAttachments || threadBarInToolbar ? (
+              <>
+                {runtimeCapabilities().chatAttachments && (
+                  <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+                )}
+                {threadBarInToolbar && (
+                  <ComposerToolbarContext.Provider value>
+                    <div className="chat-composer-toolbar-thread">{belowAddressLine}</div>
+                  </ComposerToolbarContext.Provider>
+                )}
+                <span className="chat-composer-toolbar-spacer" aria-hidden="true" />
+              </>
             ) : null
           }
           toolbarSlotRight={

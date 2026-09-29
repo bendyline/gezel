@@ -20,7 +20,12 @@ export const SERVICE_WORKER_ENTRIES = {
   },
   'gguf-metadata': { built: 'providers/llama-cpp/gguf-metadata-worker.js' },
   knowledge: { built: 'knowledge/search-worker.js' },
+  'relevance-model': { built: 'relevance/relevance-worker.js' },
   quickjs: { built: 'scripts/quickjs-worker.js', source: 'scripts/quickjs-worker.ts' },
+  // The eval harness, compiled from `evals/` by tsup.config.ts and spawned as
+  // a child process by eval/harness.ts in every install without a checkout.
+  'eval-harness': { built: 'evals/all.js' },
+  'eval-catalog': { built: 'evals/catalog.js' },
 } as const;
 
 export type ServiceWorkerEntry = keyof typeof SERVICE_WORKER_ENTRIES;

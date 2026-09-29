@@ -21,6 +21,38 @@ export function craftbookParamDefaults(
 }
 
 /**
+ * A launch that leaves out a parameter the craftbook needs. Typed so launch
+ * routes can answer 422 with the fields to fill, not a 500. `titles` are the
+ * fields' display names, in the same order as `params`; `needs` says whether
+ * every one of them is required or any one will do.
+ */
+export class CraftbookParamsError extends Error {
+  readonly code = 'craftbook_params_missing';
+  constructor(
+    message: string,
+    readonly craftbookId: string,
+    readonly params: string[],
+    readonly titles: string[],
+    readonly needs: 'all' | 'one',
+  ) {
+    super(message);
+    this.name = 'CraftbookParamsError';
+  }
+}
+
+function paramTitles(paramSchema: Craftbook['paramSchema'], keys: string[]): string[] {
+  const properties = (
+    paramSchema && typeof paramSchema.properties === 'object' && paramSchema.properties !== null
+      ? paramSchema.properties
+      : {}
+  ) as Record<string, { title?: unknown } | undefined>;
+  return keys.map((key) => {
+    const title = properties[key]?.title;
+    return typeof title === 'string' && title.trim() ? title.trim() : key;
+  });
+}
+
+/**
  * Enforce the launch-time input constraints craftbooks use to prevent an
  * active worker from receiving an impossible first step. The catalog schema
  * is intentionally permissive JSON Schema, so this focuses on the two
@@ -42,8 +74,12 @@ export function assertCraftbookParamRequirements(
     : [];
   const missing = required.filter((key) => !Object.prototype.hasOwnProperty.call(params, key));
   if (missing.length > 0) {
-    throw new Error(
+    throw new CraftbookParamsError(
       `Craftbook "${craftbookId}" requires invocation parameter${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`,
+      craftbookId,
+      missing,
+      paramTitles(paramSchema, missing),
+      'all',
     );
   }
 
@@ -79,8 +115,12 @@ export function assertCraftbookParamRequirements(
   if (satisfied) return;
 
   const choices = [...new Set(alternatives.flatMap((branch) => branch.map(({ key }) => key)))];
-  throw new Error(
+  throw new CraftbookParamsError(
     `Craftbook "${craftbookId}" requires at least one non-empty invocation parameter: ${choices.join(', ')}`,
+    craftbookId,
+    choices,
+    paramTitles(paramSchema, choices),
+    'one',
   );
 }
 

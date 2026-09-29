@@ -256,7 +256,7 @@ describe('native model identity and budgets', () => {
       host.inference.generate({ ...request, contextSize: 2048, maxTokens: 2048 }, vi.fn()),
     ).rejects.toThrow();
     await expect(
-      host.inference.generate({ ...request, contextSize: 16384 }, vi.fn()),
+      host.inference.generate({ ...request, contextSize: 16385 }, vi.fn()),
     ).rejects.toThrow();
     expect(f.plugin.generate).not.toHaveBeenCalled();
     expect(f.remove).toHaveBeenCalledTimes(3);

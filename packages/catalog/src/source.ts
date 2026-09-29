@@ -1,4 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   CRAFTBOOK_TEST_FILENAME,
@@ -6,6 +5,7 @@ import {
   type CatalogItemIdentity,
   CatalogItemIdentitySchema,
   type CatalogItemManifest,
+  CatalogItemManifestSchema,
   type CatalogItemSummary,
   type CatalogItemVersionInfo,
   type CatalogKind,
@@ -28,15 +28,153 @@ import {
   isSemver,
   maxMinGezelVersion,
   parseCraftbookDoc,
+  parseCraftbookDocValue,
   parseCraftbookTestSpec,
+  parseTolerant,
   satisfiesMinGezelVersion,
 } from '@bendyline/gezel';
 import { sanitizePresentationSvg } from '@bendyline/gezel/svg';
+import { z } from 'zod';
+import { categorizeToolset } from './categorize.js';
+import { type ContentTree, openContentTree } from './content-tree.js';
 import { gildeDataDir } from './gilde-data.js';
 
 // Through the core logger, not console: a library that writes straight to
 // stderr cannot be silenced by GEZEL_LOG_LEVEL or routed by its host.
 const log = createLogger('catalog');
+
+/**
+ * Parse content with this build's schema, tolerantly (see `parseTolerant`):
+ * gilde ships on its own schedule, so values written for a newer gezel are
+ * dropped rather than failing the item. Throws the strict issues when the
+ * content is structurally incompatible, so callers keep the catch they had.
+ */
+function readContent<S extends z.ZodType>(schema: S, raw: unknown, where: string): z.output<S> {
+  const result = parseTolerant(schema, raw);
+  if (!result.ok) throw new z.ZodError(result.issues);
+  noteIgnored(where, result.ignored);
+  return result.data;
+}
+
+const notedIgnored = new Set<string>();
+
+/**
+ * Once per file per process: content ahead of this build is a steady state,
+ * not an error, but a value that quietly disappears is how three craftbooks
+ * shipped without their artifact flags, so it is never silent either.
+ */
+function noteIgnored(where: string, ignored: string[]): void {
+  if (ignored.length === 0 || notedIgnored.has(where)) return;
+  notedIgnored.add(where);
+  const shown = ignored.slice(0, 5).join(', ');
+  const more = ignored.length > 5 ? ` (+${ignored.length - 5} more)` : '';
+  log.info(`${where}: ignored what this build does not understand — ${shown}${more}`);
+}
+
+/**
+ * gilde's file-bundle index, one per kind directory beside the legacy
+ * `index.json`. Each entry snapshots an item's own files as raw JSON — the
+ * identity manifest, every version's stamp, and the newest version's
+ * payload — so gilde needs no schema, no version policy, and no copy of the
+ * merge below to write it, and this build turns it into manifests with the
+ * same resolver it runs over the item folders.
+ */
+export const FILE_INDEX_FILENAME = 'raw-index.json';
+
+/** A version folder as discovery sees it: its payload's own stamp. */
+interface VersionStamp {
+  version: string;
+  releasedAt: string;
+  minGezelVersion?: string;
+}
+
+/**
+ * An item's own files, as the resolver reads them: from the item folder, or
+ * from the file-bundle index. One resolver over both is what keeps a listing
+ * from disagreeing with a detail read.
+ */
+interface ItemFiles {
+  /** The on-disk path of an item-relative file, for messages. */
+  path(rel: string): string;
+  /** An item-relative JSON file: undefined when absent, throws when unparseable. */
+  json(rel: string): Promise<unknown>;
+  /** Every version folder whose payload stamps its own folder name. */
+  versions(): Promise<VersionStamp[]>;
+}
+
+interface FileIndexEntry {
+  id: string;
+  identity: unknown;
+  versions: VersionStamp[];
+  latest?: { version: string; file: string; payload: unknown };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readVersionStamp(raw: unknown): VersionStamp | null {
+  if (!isRecord(raw) || typeof raw.version !== 'string' || typeof raw.releasedAt !== 'string') {
+    return null;
+  }
+  return {
+    version: raw.version,
+    releasedAt: raw.releasedAt,
+    ...(typeof raw.minGezelVersion === 'string' ? { minGezelVersion: raw.minGezelVersion } : {}),
+  };
+}
+
+function readFileIndexEntry(raw: unknown): FileIndexEntry | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !isRecord(raw.identity)) return null;
+  const versions = Array.isArray(raw.versions)
+    ? raw.versions.map(readVersionStamp).filter((v): v is VersionStamp => v !== null)
+    : [];
+  const latest = raw.latest;
+  const hasLatest =
+    isRecord(latest) &&
+    typeof latest.version === 'string' &&
+    typeof latest.file === 'string' &&
+    isRecord(latest.payload);
+  return {
+    id: raw.id,
+    identity: raw.identity,
+    versions,
+    ...(hasLatest
+      ? { latest: { version: latest.version, file: latest.file, payload: latest.payload } }
+      : {}),
+  } as FileIndexEntry;
+}
+
+/**
+ * Serves what the snapshot carries and reads everything else — an older
+ * version a `minGezelVersion` floor picked — from the item folder.
+ */
+class IndexedItemFiles implements ItemFiles {
+  constructor(
+    private readonly entry: FileIndexEntry,
+    private readonly folder: ItemFiles,
+  ) {}
+
+  path(rel: string): string {
+    return this.folder.path(rel);
+  }
+
+  async json(rel: string): Promise<unknown> {
+    if (rel === 'manifest.json') return this.entry.identity;
+    const latest = this.entry.latest;
+    if (latest && rel === `versions/${latest.version}/${latest.file}`) return latest.payload;
+    // Discovery takes craftbook.json over manifest.json, so a snapshot of
+    // the latter means the version folder has no craftbook.json.
+    if (latest?.file === 'manifest.json' && rel === `versions/${latest.version}/craftbook.json`) {
+      return undefined;
+    }
+    return this.folder.json(rel);
+  }
+
+  async versions(): Promise<VersionStamp[]> {
+    return this.entry.versions;
+  }
+}
 
 /**
  * ─ CatalogSource ───────────────────────────────────────────────────
@@ -62,6 +200,10 @@ const log = createLogger('catalog');
  * prose inlined as `description`, scripts inlined as the `scripts` map).
  * The legacy layout is still read as a fallback — user/community roots
  * may carry it.
+ *
+ * Any root may instead hold a single `content.pack` (see content-pack.ts)
+ * carrying that same tree verbatim; packaged builds ship the community tier
+ * that way. Reads go through `ContentTree`, so both forms behave identically.
  */
 export interface CatalogSource {
   readonly id: string;
@@ -197,6 +339,7 @@ export class BundledSource implements CatalogSource {
   private readonly rootProvider: () => string;
   private readonly useIndex: boolean;
   private readonly gezelVersion: string;
+  private tree: { root: string; tree: Promise<ContentTree> } | null = null;
 
   constructor(options: BundledSourceOptions | string = {}) {
     // Back-compat: old positional `root: string` signature.
@@ -218,6 +361,25 @@ export class BundledSource implements CatalogSource {
     return this.rootProvider();
   }
 
+  /** The reader for the current root, re-resolved when the provider flips. */
+  private contentTree(): Promise<ContentTree> {
+    const root = this.root;
+    if (this.tree?.root !== root) this.tree = { root, tree: openContentTree(root) };
+    return this.tree.tree;
+  }
+
+  private async readBytes(path: string): Promise<Buffer> {
+    return (await this.contentTree()).readFile(path);
+  }
+
+  private async readText(path: string): Promise<string> {
+    return (await this.readBytes(path)).toString('utf8');
+  }
+
+  private async listDir(path: string): Promise<string[]> {
+    return (await this.contentTree()).readdir(path);
+  }
+
   /** True when this build satisfies a content `minGezelVersion` floor. */
   private floorSatisfied(floor: string | undefined): boolean {
     return satisfiesMinGezelVersion(floor, this.gezelVersion);
@@ -229,14 +391,59 @@ export class BundledSource implements CatalogSource {
 
   async list(kind: CatalogKind): Promise<CatalogItemSummary[]> {
     if (this.useIndex) {
+      const bundled = await this.listFromFileIndex(kind);
+      if (bundled) return bundled;
       const indexed = await this.listFromIndex(kind);
       if (indexed) return indexed;
     }
     return this.listFromDisk(kind);
   }
 
+  private summary(kind: CatalogKind, manifest: CatalogItemManifest): CatalogItemSummary {
+    return {
+      sourceId: this.id,
+      kind,
+      manifest,
+      logoUrl: this.logoUrlFor(kind, manifest.id, manifest),
+    };
+  }
+
   /**
-   * Fast-path: when `{kindDir}/index.json` is present, load every
+   * Fast path over gilde's file-bundle index ({@link FILE_INDEX_FILENAME}):
+   * one read instead of walking every item folder, resolved by the same
+   * `loadResolvedManifest` the walk uses. Null when the file is absent or
+   * unreadable, and the caller tries the legacy index, then the walk.
+   */
+  private async listFromFileIndex(kind: CatalogKind): Promise<CatalogItemSummary[] | null> {
+    const indexPath = join(this.root, KIND_DIR[kind], FILE_INDEX_FILENAME);
+    const text = await this.readOptional(indexPath);
+    if (text === null) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      log.warn(`failed to parse ${indexPath}:`, err);
+      return null;
+    }
+    if (!isRecord(parsed) || parsed.kind !== kind || !Array.isArray(parsed.items)) {
+      log.warn(`${indexPath}: kind/items mismatch — falling back`);
+      return null;
+    }
+    const items: CatalogItemSummary[] = [];
+    for (const raw of parsed.items) {
+      const entry = readFileIndexEntry(raw);
+      if (!entry) continue;
+      const files = new IndexedItemFiles(entry, this.folderFiles(kind, entry.id));
+      const manifest = await this.loadResolvedManifest(kind, entry.id, undefined, files);
+      if (manifest) items.push(this.summary(kind, manifest));
+    }
+    items.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
+    return items;
+  }
+
+  /**
+   * Legacy fast path, for a gilde that predates the file-bundle index: when
+   * `{kindDir}/index.json` is present, load every
    * summary from that one file instead of walking ~3,800 per-item
    * folders. The index is generated by gilde `tools/build-index.mjs` and
    * embeds the same `CatalogItemManifest` shape this source produces
@@ -249,7 +456,7 @@ export class BundledSource implements CatalogSource {
     const indexPath = join(this.root, KIND_DIR[kind], 'index.json');
     let raw: string;
     try {
-      raw = await readFile(indexPath, 'utf8');
+      raw = await this.readText(indexPath);
     } catch {
       return null;
     }
@@ -269,7 +476,21 @@ export class BundledSource implements CatalogSource {
     for (const raw of obj.entries) {
       const e = raw as { manifest?: unknown; iconSvg?: unknown };
       if (!e.manifest || typeof e.manifest !== 'object') continue;
-      let manifest = e.manifest as CatalogItemManifest;
+      // gilde writes the index against its own copy of the schemas, which
+      // can be older or newer than this build's, so an entry is read like
+      // any other content: through this build's schema, tolerantly. An entry
+      // this build cannot read at all resolves from the item's own folder,
+      // where an older eligible version may still be readable.
+      let manifest: CatalogItemManifest | null = null;
+      const read = parseTolerant(CatalogItemManifestSchema, e.manifest);
+      if (read.ok && read.data.kind === kind) {
+        noteIgnored(`${indexPath} → ${read.data.id}`, read.ignored);
+        manifest = read.data;
+      } else {
+        const id = (e.manifest as { id?: unknown }).id;
+        if (typeof id === 'string') manifest = await this.loadResolvedManifest(kind, id);
+      }
+      if (!manifest) continue;
       // The index is built without app-version context (gilde's
       // build-index.mjs always embeds the newest resolved version). When
       // that version's effective `minGezelVersion` floor is above this
@@ -302,32 +523,26 @@ export class BundledSource implements CatalogSource {
     const base = join(this.root, KIND_DIR[kind]);
     let shards: string[] = [];
     try {
-      shards = await readdir(base);
+      shards = await this.listDir(base);
     } catch (err) {
       if (isAbsentDir(err)) return [];
       throw err;
     }
     const items: CatalogItemSummary[] = [];
     for (const shard of shards) {
-      // The index file lives at the kind-dir root next to shard folders;
-      // skip it so the walker doesn't try to descend into it.
-      if (shard === 'index.json') continue;
+      // Index files live at the kind-dir root next to shard folders; skip
+      // them so the walker doesn't try to descend into one.
+      if (shard.endsWith('.json')) continue;
       let ids: string[] = [];
       try {
-        ids = await readdir(join(base, shard));
+        ids = await this.listDir(join(base, shard));
       } catch (err) {
         if (isAbsentDir(err)) continue;
         throw err;
       }
       for (const id of ids) {
         const manifest = await this.loadResolvedManifest(kind, id);
-        if (!manifest) continue;
-        items.push({
-          sourceId: this.id,
-          kind,
-          manifest,
-          logoUrl: this.logoUrlFor(kind, id, manifest),
-        });
+        if (manifest) items.push(this.summary(kind, manifest));
       }
     }
     items.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
@@ -404,7 +619,7 @@ export class BundledSource implements CatalogSource {
       if (!isSemver(version)) return null;
       const versioned = join(itemDir, 'versions', version, relPath);
       try {
-        return await readFile(versioned);
+        return await this.readBytes(versioned);
       } catch {
         // Single-document craftbooks (V2) carry their scripts inline in
         // `craftbook.json` — serve `scripts/{name}.ts` reads from the doc
@@ -422,7 +637,7 @@ export class BundledSource implements CatalogSource {
       }
     }
     try {
-      return await readFile(join(itemDir, relPath));
+      return await this.readBytes(join(itemDir, relPath));
     } catch {
       return null;
     }
@@ -438,21 +653,11 @@ export class BundledSource implements CatalogSource {
    */
   async listItemFiles(kind: CatalogKind, id: string): Promise<string[]> {
     const dir = this.itemDir(kind, id);
-    let entries: Array<{ parentPath?: string; path?: string; name: string; isFile(): boolean }>;
+    let out: string[];
     try {
-      entries = (await readdir(dir, { recursive: true, withFileTypes: true })) as never;
+      out = await (await this.contentTree()).listFiles(dir);
     } catch {
       return [];
-    }
-    const out: string[] = [];
-    for (const e of entries) {
-      if (!e.isFile()) continue;
-      // Node's Dirent under `recursive` carries the containing dir in
-      // `parentPath` (Node 20.12+) or the older `path`; join + relativize.
-      const parent = e.parentPath ?? e.path ?? dir;
-      const abs = join(parent, e.name);
-      const rel = abs.startsWith(dir) ? abs.slice(dir.length).replace(/^[/\\]+/, '') : e.name;
-      out.push(rel.split('\\').join('/'));
     }
     out.sort();
     return out;
@@ -462,7 +667,7 @@ export class BundledSource implements CatalogSource {
   private async readCraftbookDoc(versionDir: string): Promise<CraftbookDoc | null> {
     const text = await this.readOptional(join(versionDir, 'craftbook.json'));
     if (text === null) return null;
-    const parsed = parseCraftbookDoc(text, 'json');
+    const parsed = parseCraftbookDoc(text, 'json', { tolerant: true });
     return parsed.ok ? parsed.doc : null;
   }
 
@@ -480,7 +685,8 @@ export class BundledSource implements CatalogSource {
   ): Promise<{ version: string; spec: CraftbookTestSpec } | null> {
     const identity = await this.loadIdentity('craftbook-template', id);
     if (!identity) return null;
-    const picked = await this.pickVersion('craftbook-template', id, identity, version);
+    const folders = await this.discoverVersionFolders('craftbook-template', id);
+    const picked = this.pickVersion(folders, identity, version);
     if (!picked) return null;
     const file = join(
       this.itemDir('craftbook-template', id),
@@ -509,17 +715,30 @@ export class BundledSource implements CatalogSource {
     return join(this.root, KIND_DIR[kind], shardPrefix(id), id);
   }
 
+  /** The item folder as an {@link ItemFiles}. */
+  private folderFiles(kind: CatalogKind, id: string): ItemFiles {
+    const dir = this.itemDir(kind, id);
+    return {
+      path: (rel) => join(dir, rel),
+      json: async (rel) => {
+        const text = await this.readOptional(join(dir, rel));
+        return text === null ? undefined : JSON.parse(text);
+      },
+      versions: () => this.discoverVersionFolders(kind, id),
+    };
+  }
+
   /** Read + validate the identity (root) manifest for an item. */
-  private async loadIdentity(kind: CatalogKind, id: string): Promise<CatalogItemIdentity | null> {
-    const file = join(this.itemDir(kind, id), 'manifest.json');
-    let raw: string;
+  private async loadIdentity(
+    kind: CatalogKind,
+    id: string,
+    files: ItemFiles = this.folderFiles(kind, id),
+  ): Promise<CatalogItemIdentity | null> {
+    const file = files.path('manifest.json');
     try {
-      raw = await readFile(file, 'utf8');
-    } catch {
-      return null;
-    }
-    try {
-      const parsed = CatalogItemIdentitySchema.parse(JSON.parse(raw));
+      const raw = await files.json('manifest.json');
+      if (raw === undefined) return null;
+      const parsed = readContent(CatalogItemIdentitySchema, raw, file);
       if (parsed.kind !== kind) {
         log.warn(
           `${file}: identity kind=${parsed.kind} doesn't match directory kind=${kind}, skipping`,
@@ -543,18 +762,15 @@ export class BundledSource implements CatalogSource {
   }
 
   /** Enumerate `versions/{semver}/manifest.json` entries. Unsorted. */
-  private async discoverVersionFolders(
-    kind: CatalogKind,
-    id: string,
-  ): Promise<Array<{ version: string; releasedAt: string; minGezelVersion?: string }>> {
+  private async discoverVersionFolders(kind: CatalogKind, id: string): Promise<VersionStamp[]> {
     const versionsDir = join(this.itemDir(kind, id), 'versions');
     let names: string[];
     try {
-      names = await readdir(versionsDir);
+      names = await this.listDir(versionsDir);
     } catch {
       return [];
     }
-    const out: Array<{ version: string; releasedAt: string; minGezelVersion?: string }> = [];
+    const out: VersionStamp[] = [];
     for (const name of names) {
       if (!isSemver(name)) continue;
       // Craftbook templates carry a single-document `craftbook.json`
@@ -568,7 +784,7 @@ export class BundledSource implements CatalogSource {
         const versionFile = join(versionsDir, name, filename);
         let raw: string;
         try {
-          raw = await readFile(versionFile, 'utf8');
+          raw = await this.readText(versionFile);
         } catch {
           continue;
         }
@@ -611,13 +827,11 @@ export class BundledSource implements CatalogSource {
    * `minSupportedVersion` whose `minGezelVersion` floor this build
    * satisfies. Returns null when nothing satisfies.
    */
-  private async pickVersion(
-    kind: CatalogKind,
-    id: string,
+  private pickVersion(
+    folders: VersionStamp[],
     identity: CatalogItemIdentity,
     requested?: string,
-  ): Promise<string | null> {
-    const folders = await this.discoverVersionFolders(kind, id);
+  ): string | null {
     if (folders.length === 0) return null;
     if (requested) {
       return folders.some((f) => f.version === requested) ? requested : null;
@@ -646,10 +860,12 @@ export class BundledSource implements CatalogSource {
     kind: CatalogKind,
     id: string,
     version?: string,
+    files: ItemFiles = this.folderFiles(kind, id),
   ): Promise<CatalogItemManifest | null> {
-    const identity = await this.loadIdentity(kind, id);
+    const identity = await this.loadIdentity(kind, id, files);
     if (!identity) return null;
-    const chosen = await this.pickVersion(kind, id, identity, version);
+    const folders = await files.versions();
+    const chosen = this.pickVersion(folders, identity, version);
     if (!chosen) {
       if (version) {
         log.warn(`${kind}/${id}: requested version ${version} not found on disk`);
@@ -662,7 +878,6 @@ export class BundledSource implements CatalogSource {
         // Likewise for items whose every version carries a
         // `minGezelVersion` floor above this build — content authored
         // ahead of the next app release, not an error.
-        const folders = await this.discoverVersionFolders(kind, id);
         const yanked = new Set(identity.yankedVersions);
         const everythingIneligible =
           folders.length > 0 &&
@@ -673,11 +888,9 @@ export class BundledSource implements CatalogSource {
       }
       return null;
     }
-    const versionDir = join(this.itemDir(kind, id), 'versions', chosen);
     const yankedSet = new Set(identity.yankedVersions);
     const minSupportedVersion = identity.minSupportedVersion;
-    const allFolders = await this.discoverVersionFolders(kind, id);
-    const availableVersions = allFolders
+    const availableVersions = folders
       .filter((f) => {
         if (yankedSet.has(f.version)) return false;
         if (minSupportedVersion && safeCompare(f.version, minSupportedVersion) < 0) return false;
@@ -690,29 +903,43 @@ export class BundledSource implements CatalogSource {
     // canonical (Craftbooks V2). A present-but-invalid document is a hard
     // miss — never fall back to a possibly-stale legacy manifest beside it.
     if (kind === 'craftbook-template' && identity.kind === 'craftbook-template') {
-      const docText = await this.readOptional(join(versionDir, 'craftbook.json'));
-      if (docText !== null) {
-        const parsed = parseCraftbookDoc(docText, 'json');
+      const docRel = `versions/${chosen}/craftbook.json`;
+      const docFile = files.path(docRel);
+      let doc: unknown;
+      try {
+        doc = await files.json(docRel);
+      } catch (err) {
+        log.warn(`invalid craftbook document ${docFile}: not valid JSON —`, err);
+        return null;
+      }
+      if (doc !== undefined) {
+        const parsed = parseCraftbookDocValue(doc, { tolerant: true });
         if (!parsed.ok) {
           log.warn(
-            `invalid craftbook document ${join(versionDir, 'craftbook.json')}:\n${formatCraftbookDocErrors(parsed.errors)}`,
+            `invalid craftbook document ${docFile}:\n${formatCraftbookDocErrors(parsed.errors)}`,
           );
           return null;
         }
+        noteIgnored(docFile, parsed.ignored ?? []);
         return craftbookManifestFromDoc(identity, parsed.doc, chosen, availableVersions);
       }
       // No craftbook.json → legacy manifest.json + about.md + scripts/ layout
       // (user homes and community roots may still carry it).
     }
-    const versionFile = join(versionDir, 'manifest.json');
+    const versionRel = `versions/${chosen}/manifest.json`;
+    const versionFile = files.path(versionRel);
     let versionPayload: unknown;
     try {
-      versionPayload = JSON.parse(await readFile(versionFile, 'utf8'));
+      versionPayload = await files.json(versionRel);
     } catch (err) {
       log.warn(`failed to read ${versionFile}:`, err);
       return null;
     }
-    const parsedVersion = parseVersionPayload(kind, versionPayload);
+    if (versionPayload === undefined) {
+      log.warn(`failed to read ${versionFile}: not found`);
+      return null;
+    }
+    const parsedVersion = parseVersionPayload(kind, versionPayload, versionFile);
     if (!parsedVersion) {
       log.warn(`invalid version manifest ${versionFile}`);
       return null;
@@ -743,7 +970,7 @@ export class BundledSource implements CatalogSource {
 
   private async readOptional(path: string): Promise<string | null> {
     try {
-      return await readFile(path, 'utf8');
+      return await this.readText(path);
     } catch {
       return null;
     }
@@ -857,41 +1084,45 @@ type AnyVersionPayload =
       __kind: 'knowledge-catalog';
     });
 
-function parseVersionPayload(kind: CatalogKind, raw: unknown): AnyVersionPayload | null {
+function parseVersionPayload(
+  kind: CatalogKind,
+  raw: unknown,
+  where: string,
+): AnyVersionPayload | null {
   try {
     if (kind === 'toolset') {
-      const p = ToolsetVersionManifestSchema.parse(raw);
+      const p = readContent(ToolsetVersionManifestSchema, raw, where);
       return { ...p, __kind: 'toolset' } as AnyVersionPayload;
     }
     if (kind === 'gezel-template') {
-      const p = GezelTemplateVersionManifestSchema.parse(raw);
+      const p = readContent(GezelTemplateVersionManifestSchema, raw, where);
       return { ...p, __kind: 'gezel-template' } as AnyVersionPayload;
     }
     if (kind === 'craftbook-template') {
-      const p = CraftbookTemplateVersionManifestSchema.parse(raw);
+      const p = readContent(CraftbookTemplateVersionManifestSchema, raw, where);
       return { ...p, __kind: 'craftbook-template' } as AnyVersionPayload;
     }
     if (kind === 'project-type') {
-      const p = ProjectTypeVersionManifestSchema.parse(raw);
+      const p = readContent(ProjectTypeVersionManifestSchema, raw, where);
       return { ...p, __kind: 'project-type' } as AnyVersionPayload;
     }
     if (kind === 'connector-type') {
-      const p = ConnectorTypeVersionManifestSchema.parse(raw);
+      const p = readContent(ConnectorTypeVersionManifestSchema, raw, where);
       return { ...p, __kind: 'connector-type' } as AnyVersionPayload;
     }
     if (kind === 'chat-model') {
-      const p = ChatModelVersionManifestSchema.parse(raw);
+      const p = readContent(ChatModelVersionManifestSchema, raw, where);
       return { ...p, __kind: 'chat-model' } as AnyVersionPayload;
     }
     if (kind === 'video-model') {
-      const p = VideoModelVersionManifestSchema.parse(raw);
+      const p = readContent(VideoModelVersionManifestSchema, raw, where);
       return { ...p, __kind: 'video-model' } as AnyVersionPayload;
     }
     if (kind === 'knowledge-catalog') {
-      const p = KnowledgeCatalogVersionManifestSchema.parse(raw);
+      const p = readContent(KnowledgeCatalogVersionManifestSchema, raw, where);
       return { ...p, __kind: 'knowledge-catalog' } as AnyVersionPayload;
     }
-    const p = ImageModelVersionManifestSchema.parse(raw);
+    const p = readContent(ImageModelVersionManifestSchema, raw, where);
     return { ...p, __kind: 'image-model' } as AnyVersionPayload;
   } catch {
     return null;
@@ -932,7 +1163,17 @@ function mergeIdentityAndVersion(
       ...(version.requirements ? { requirements: version.requirements } : {}),
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       availableVersions,
-      ...(identity.category ? { category: identity.category } : {}),
+      // Derived here, not by gilde's index builder, so a folder read and an
+      // index read agree and the rule has one owner.
+      category:
+        identity.category ||
+        categorizeToolset({
+          id: identity.id,
+          name: identity.name,
+          description: identity.description,
+          tags: identity.tags,
+          maintainerName: identity.maintainer?.name,
+        }),
     };
   }
   if (

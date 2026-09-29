@@ -13,12 +13,18 @@
  *                        preflight; a single trial has no probe to read).
  *   --runs-dir <path>    override `<repo>/evals/runs/`
  *   --cache-root <path>  override `~/.gezel-eval-cache`
+ *   --offline            refuse providers or model setup that could use the network
  *   --llama-bin <path>   override the auto-resolved llama-server binary
  *   --image-bin <path>   override the auto-resolved sd-server binary
+ *   --source-home <dir>  read local models from this gezel home; never download
+ *   --write-reports      write score.json + postmortem.md when the trial ends
+ *   --retrieval <mode>   retrieval arm (off|lean|balanced|deep), with
+ *                        --references/--embeddings/--library-recall on|off
  *   --list               list scenarios and exit
  */
 import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
+import { writeTrialReport } from '../postmortem-report.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
 import { runTrial } from '../runner.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
@@ -34,6 +40,7 @@ import {
   resolveKeurmeesterFlag,
   resolveProviderFlag,
   resolveRepairPolicyFlag,
+  resolveRetrievalFlags,
 } from './args.ts';
 
 async function main() {
@@ -42,17 +49,24 @@ async function main() {
   assertKnownFlags(args.flags, [
     'cache-root',
     'decode-rate',
+    'embeddings',
     'force-behaviors',
     'image-bin',
     'image-model',
+    'library-recall',
     'list',
     'llama-bin',
     'llm-judge',
     'mlx-source-home',
     'model',
+    'offline',
+    'references',
     'remove-behaviors',
+    'retrieval',
     'runs-dir',
+    'source-home',
     'timeout',
+    'write-reports',
   ]);
 
   if (args.flags.list) {
@@ -92,6 +106,7 @@ async function main() {
   const forceBehaviors = parseCsv(args.flags['force-behaviors']);
   const removeBehaviors = parseCsv(args.flags['remove-behaviors']);
   const generalistMode = resolveGeneralistFlag(args.flags);
+  const retrieval = resolveRetrievalFlags(args.flags);
   const repairPolicy = resolveRepairPolicyFlag(args.flags);
   const keurmeester = resolveKeurmeesterFlag(args.flags);
 
@@ -108,16 +123,21 @@ async function main() {
       ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
       engine: provider,
       ...(generalistMode ? { generalistMode } : {}),
+      ...(retrieval ? { retrieval } : {}),
       ...(repairPolicy ? { repairPolicy } : {}),
       ...(keurmeester ? { keurmeester } : {}),
       ...(args.flags['mlx-source-home']
         ? { mlxSourceHome: String(args.flags['mlx-source-home']) }
+        : {}),
+      ...(typeof args.flags['source-home'] === 'string'
+        ? { modelSourceHome: args.flags['source-home'] }
         : {}),
       ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
       ...(decodeRateOverride !== undefined ? { decodeRateTokensPerSec: decodeRateOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
+      ...(args.flags.offline ? { offline: true } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
       ...(args.flags['image-bin'] ? { sdBin: String(args.flags['image-bin']) } : {}),
       signal: ac.signal,
@@ -134,6 +154,11 @@ async function main() {
     // surfaces it as a parallel qualitative section in the postmortem.
     if (args.flags['llm-judge']) {
       await maybeJudgeTrial({ scenario, runDir: result.runDir });
+    }
+    if (args.flags['write-reports']) {
+      const report = await writeTrialReport(result.runDir, { force: true });
+      if (report.score)
+        console.log(`  composite: ${report.score.composite} (${report.score.band})`);
     }
 
     console.log('');

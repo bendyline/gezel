@@ -261,6 +261,33 @@ describe('DocumentDetail', () => {
     expect(api.writeDocument).toHaveBeenLastCalledWith('first.md', 'newer content');
   });
 
+  // The read route resolves `projects/<id>/...` to project files. Hydrating the
+  // library editor with one would autosave a copy into the shared library.
+  it('never opens a project artifact in the library editor', async () => {
+    vi.mocked(api.readDocument).mockResolvedValue({
+      path: 'projects/default/reviews/weekly.md',
+      content: '# Weekly review',
+      kind: 'artifact',
+      resolvedFrom: { projectId: 'default', relativePath: 'reviews/weekly.md' },
+    } as never);
+    const files = vi.fn();
+    window.addEventListener('gezel:open-file', files);
+    render(<DocumentDetail path="projects/default/reviews/weekly.md" />);
+
+    const open = await screen.findByRole('button', { name: 'Open in project' });
+    expect(screen.queryByTestId('editor-shell')).not.toBeInTheDocument();
+    open.click();
+    window.removeEventListener('gezel:open-file', files);
+
+    expect((files.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      projectId: 'default',
+      path: 'reviews/weekly.md',
+      source: 'artifacts',
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.writeDocument).not.toHaveBeenCalled();
+  });
+
   it('shows an error placeholder when readDocument rejects', async () => {
     vi.mocked(api.readDocument).mockRejectedValue(new Error('not found'));
     render(<DocumentDetail path="missing.md" />);

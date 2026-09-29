@@ -58,11 +58,14 @@ const PYTORCH_CPU_INDEX = 'https://download.pytorch.org/whl/cpu';
  * (`sentencepiece` + `protobuf`).
  */
 const COMMON_PACKAGES = [
-  // WAN 2.2 TI2V-5B (and its `AutoencoderKLWan` + `expand_timesteps`
-  // pipeline) landed in diffusers 0.35; LTX has been supported since
-  // 0.32, so 0.35 is a safe shared floor for both families.
-  'diffusers>=0.35.0',
-  'transformers>=4.47.0',
+  // The floor is set by the newest family: LTX-2 pipelines arrived in
+  // 0.37, LTX-2.3 (its VAE layout and 48 kHz vocoder) in 0.38, and 0.39
+  // fixed a connector regression that reversed the text-token order LTX-2.x
+  // was trained on. WAN (0.35) and LTX 0.9.x (0.32) are older still. A
+  // floor bump re-provisions existing venvs through `ensureVenv`'s spec key.
+  'diffusers>=0.39.0',
+  // Gemma 3 (`Gemma3ForConditionalGeneration`, the LTX-2.x text encoder).
+  'transformers>=4.50.0',
   'accelerate>=1.2.0',
   'safetensors>=0.4.5',
   'sentencepiece>=0.2.0',

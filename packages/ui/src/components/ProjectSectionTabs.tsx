@@ -1,10 +1,13 @@
 import { useEffect, useRef } from 'react';
 import * as Tabs from '../primitives/Tabs.js';
+import { FittedTabsList } from './FittedTabsList.js';
+import type { SectionIconName } from './SectionIcon.js';
 import '../styles/project-section-tabs.css';
 
 export interface ProjectSectionTab {
   value: string;
   label: string;
+  icon: SectionIconName;
   disabled?: boolean;
 }
 
@@ -23,31 +26,24 @@ export function ProjectSectionTabs({
   compact?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  // Icons fit the row in every layout we ship, but a phone holding every
+  // optional section can still overflow; keep the current tab in view then.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection and layout changes can move the active tab outside the scrollport.
   useEffect(() => {
     listRef.current
-      ?.querySelector<HTMLElement>('[data-state="active"]')
+      ?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
       ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [value, compact]);
 
   return (
     <div ref={listRef} className={`project-section-tabs${compact ? ' is-compact' : ''}`}>
       <Tabs.Root value={value} onValueChange={onValueChange}>
-        <Tabs.List aria-label="Project sections">
-          {items.map((item) => (
-            <Tabs.Trigger
-              key={item.value}
-              value={item.value}
-              disabled={item.disabled}
-              data-testid={`project-tab-${item.value}`}
-              onPointerEnter={() => onPreload?.(item.value)}
-              onFocus={() => onPreload?.(item.value)}
-              onPointerDown={() => onPreload?.(item.value)}
-            >
-              {item.label}
-            </Tabs.Trigger>
-          ))}
-        </Tabs.List>
+        <FittedTabsList
+          ariaLabel="Project sections"
+          value={value}
+          onPreload={onPreload}
+          items={items.map((item) => ({ ...item, testId: `project-tab-${item.value}` }))}
+        />
       </Tabs.Root>
     </div>
   );

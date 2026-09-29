@@ -243,7 +243,7 @@ export class DiffusersVideoProvider implements VideoProvider {
     const payload = (await res.json()) as {
       video?: string;
       poster?: string;
-      meta?: { mimeType?: string };
+      meta?: { mimeType?: string; steps?: number };
     };
     if (!payload.video) throw new Error('video engine response missing `video`');
     const video = Buffer.from(payload.video, 'base64');
@@ -255,7 +255,12 @@ export class DiffusersVideoProvider implements VideoProvider {
       meta: {
         model: launchedModelId ?? modelId,
         seed,
-        steps,
+        // A distilled model runs its fixed schedule regardless of the
+        // requested count; the engine reports what it actually ran.
+        steps:
+          typeof payload.meta?.steps === 'number' && payload.meta.steps > 0
+            ? payload.meta.steps
+            : steps,
         widthPx: width,
         heightPx: height,
         numFrames,

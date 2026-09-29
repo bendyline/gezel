@@ -40,12 +40,26 @@ function Chevron({ direction }: { direction: 'up' | 'down' }) {
 function Chips({ chips }: { chips: HomeChip[] }) {
   return (
     <>
-      {chips.map((c) => (
-        <span key={c.label} className="home-workshop-chip">
-          <span className="home-workshop-chip-dot" style={{ background: c.dot }} />
-          {c.label}
-        </span>
-      ))}
+      {chips.map((c) =>
+        c.onClick ? (
+          <button
+            key={c.label}
+            type="button"
+            className="home-workshop-chip home-workshop-chip-action"
+            onClick={c.onClick}
+            title={c.actionLabel}
+            aria-label={c.actionLabel ? `${c.label}: ${c.actionLabel}` : c.label}
+          >
+            <span className="home-workshop-chip-dot" style={{ background: c.dot }} />
+            {c.label}
+          </button>
+        ) : (
+          <span key={c.label} className="home-workshop-chip">
+            <span className="home-workshop-chip-dot" style={{ background: c.dot }} />
+            {c.label}
+          </span>
+        ),
+      )}
     </>
   );
 }

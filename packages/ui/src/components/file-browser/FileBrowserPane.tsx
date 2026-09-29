@@ -89,6 +89,8 @@ export interface FileBrowserPaneProps {
   mutations: FileMutations;
   /** The right-hand pane: viewer, editor, or folder browser. */
   viewer: ReactNode;
+  /** A bar above the viewer, e.g. the way back to where the file was opened from. */
+  viewerNotice?: ReactNode;
   /** Optional fourth column (the workspace's index/review pane). */
   extraPane?: ReactNode;
   /** Status/summary chip rendered in the tree header (index state). */
@@ -131,6 +133,7 @@ export function FileBrowserPane({
   emptyMessage,
   mutations,
   viewer,
+  viewerNotice,
   extraPane,
   headerExtra,
   titleReplacement,
@@ -452,6 +455,7 @@ export function FileBrowserPane({
             {selectedPath && <span title={selectedPath}>{selectedPath.split('/').at(-1)}</span>}
           </div>
         )}
+        {viewerNotice}
         {viewer}
         {mutations.activeDropZone === 'detail' && (
           <div className="document-drop-overlay" aria-hidden="true">

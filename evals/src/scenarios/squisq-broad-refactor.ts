@@ -92,6 +92,7 @@ async function setup(ctx: EvalContext): Promise<void> {
 
 export const squisqBroadRefactorScenario: EvalScenario = {
   id: 'squisq-broad-refactor',
+  requires: ['external-checkout'],
   description:
     'Wide mechanical rename (34 files) on the pinned squisq corpus — the index-leverage refactor probe. Hermetic rg-accounting grader; run warm-vs-cold via ab-index.',
   prompt: 'Kickoff is sent directly to the developer in setup; this prompt is never sent.',

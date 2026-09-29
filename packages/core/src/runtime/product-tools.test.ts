@@ -57,6 +57,25 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('workspace', 'default', 'report.md')).toBeNull();
   });
 
+  it('explains a rejected argument in words the model can retry from', async () => {
+    const { store, session } = await fixture();
+    await expect(
+      executePortableTool(
+        store,
+        session,
+        'write_artifact',
+        { path: 'note.md', content: 'Hi', create: true },
+        actions,
+      ),
+    ).rejects.toThrow(
+      'write_artifact does not take `create`. It takes: path, content (? is optional). Call it again with corrected arguments.',
+    );
+    await expect(
+      executePortableTool(store, session, 'write_artifact', { path: 'note.md' }, actions),
+    ).rejects.toThrow('write_artifact needs `content`.');
+    expect(await store.readFile('artifacts', 'default', 'note.md')).toBeNull();
+  });
+
   it('honors output-medium and group exclusions without elevating the role', async () => {
     const { store, gezel } = await fixture();
     const task = await store.createTask('default', {
@@ -434,8 +453,9 @@ describe('portable tool authority and durable effects', () => {
       { text: envelope, stopReason: 'length' as const },
       { text: `Here is the call:\n\`\`\`json\n${envelope}\n\`\`\``, stopReason: 'stop' as const },
       { text: `\`\`\`json\n${envelope}\n\`\`\`\nThat writes it.`, stopReason: 'stop' as const },
-      // A fenced reply is how a model shows an example; it stays text (see portable-workflows).
-      { text: `\`\`\`json\n${envelope}\n\`\`\``, stopReason: 'stop' as const },
+      { text: `\`\`\`json\n${envelope}\n\`\`\``, stopReason: 'length' as const },
+      // A cut-off call looks exactly like one a model forgot to close.
+      { text: envelope.slice(0, -1), stopReason: 'length' as const },
     ]) {
       const checkpoint = vi.fn();
       await runPortableToolLoop({

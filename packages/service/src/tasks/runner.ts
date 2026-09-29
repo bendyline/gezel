@@ -630,6 +630,10 @@ export class TaskRunner {
         // children dispatch through the scheduler's spawn path; rehydrating
         // the host itself would make its inert "wait" step run as real work.
         if (task.cron || task.fanout) continue;
+        // A system job's work runs inside the service; its step is a control
+        // surface. Homes created by builds that pinned a gezel on that step
+        // would otherwise dispatch it as a model turn on every boot.
+        if (task.origin?.kind === 'system-job') continue;
         if (opts.nightShiftOnly && task.nightShift?.enabled !== true) continue;
         if (!task.activeStepId) continue;
         const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);

@@ -5,6 +5,8 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { LibreOfficeSetupCard } from './LibreOfficeSetupCard.js';
+import { OfficeSetupCard } from './OfficeSetupCard.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
 import { PiSetupCard } from './PiSetupCard.js';
 import { VSCodeSetupCard } from './VSCodeSetupCard.js';
@@ -70,6 +72,17 @@ interface GezelOption {
 }
 
 const AUTOMATIC_FALLBACK_GEZEL = '__AUTOMATIC__';
+
+/**
+ * Gezel's own add-ins reconnect without a code (the daemon's first-party
+ * grants), so revoking one only resets it. Each entry says how to disconnect
+ * that add-in for good.
+ */
+const SELF_CONNECTING_ADD_INS: Record<string, string> = {
+  office: 'To disconnect it for good, remove it under Use Gezel in Word, Excel, and PowerPoint.',
+  libreoffice: 'To disconnect it for good, remove it under Use Gezel in LibreOffice.',
+  vscode: 'To disconnect it for good, uninstall the Gezel extension in VS Code.',
+};
 
 type EndpointsStatusScope = 'endpoints' | 'ollama';
 
@@ -387,6 +400,10 @@ export function ConnectedAppsPanel() {
         onChanged={refresh}
       />
 
+      <OfficeSetupCard key={`office-${harnessSetupRefreshKey}`} onChanged={refresh} />
+
+      <LibreOfficeSetupCard key={`libreoffice-${harnessSetupRefreshKey}`} onChanged={refresh} />
+
       <div className="settings-subsection">
         <h3>Ollama emulation</h3>
         <label className="debug-toggle">
@@ -554,10 +571,18 @@ export function ConnectedAppsPanel() {
         title={revokeTarget ? `Revoke ${revokeTarget.appName}?` : 'Revoke app'}
         message={
           revokeTarget ? (
-            <>
-              The next time <strong>{revokeTarget.appName}</strong> tries to use gezel it will be
-              denied. The app can reconnect later by going through the consent flow again.
-            </>
+            SELF_CONNECTING_ADD_INS[revokeTarget.appId] ? (
+              <>
+                <strong>{revokeTarget.appName}</strong> is a Gezel add-in on this computer, so it
+                connects again on its own the next time it opens. Revoking only resets the
+                connection. {SELF_CONNECTING_ADD_INS[revokeTarget.appId]}
+              </>
+            ) : (
+              <>
+                The next time <strong>{revokeTarget.appName}</strong> tries to use gezel it will be
+                denied. The app can reconnect later by going through the consent flow again.
+              </>
+            )
           ) : null
         }
         confirmLabel="Revoke"

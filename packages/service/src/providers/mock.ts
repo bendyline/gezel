@@ -10,7 +10,7 @@
  *   const mgr = new ChatManager({ ..., providers: [['copilot', mock]] });
  */
 import { randomUUID } from 'node:crypto';
-import { turnCancelledMessage } from '@bendyline/gezel';
+import { stripCurrentDateTimeLine, turnCancelledMessage } from '@bendyline/gezel';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue } from './queue.js';
 import {
@@ -41,7 +41,10 @@ type Named = 'copilot' | 'openai' | 'ollama' | 'llama-cpp' | 'mlx' | 'ds4';
 export interface MockCall {
   kind: 'create' | 'resume' | 'send' | 'disconnect';
   sessionId?: string;
+  /** The turn's prompt without the leading current-date line. */
   prompt?: string;
+  /** The turn's prompt exactly as the provider received it. */
+  rawPrompt?: string;
   opts?: SessionOpts;
   sendOpts?: SendAndWaitOpts;
 }
@@ -424,7 +427,9 @@ export class MockProvider implements LLMProvider {
   /** @internal */
   nextScriptedResponse(prompt: string): string {
     const queued = this.responseQueue.shift();
-    return queued ?? `Mock reply: ${prompt}`;
+    // The chat manager starts every turn with the current date; echoing it
+    // would make every reply time-dependent.
+    return queued ?? `Mock reply: ${stripCurrentDateTimeLine(prompt)}`;
   }
 
   /** @internal */
@@ -474,7 +479,13 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 
   async sendAndWait(prompt: string, sendOpts?: SendAndWaitOpts): Promise<string> {
     if (this.disconnected) throw new Error('[mock] session already disconnected');
-    this.provider.recordCall({ kind: 'send', sessionId: this.sessionId, prompt, sendOpts });
+    this.provider.recordCall({
+      kind: 'send',
+      sessionId: this.sessionId,
+      prompt: stripCurrentDateTimeLine(prompt),
+      rawPrompt: prompt,
+      sendOpts,
+    });
 
     // Reset captured calls — each turn surfaces only its own emissions.
     this._capturedExternalCalls = [];

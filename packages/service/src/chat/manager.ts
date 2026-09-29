@@ -2,14 +2,21 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
+  MINIMAL_FOOTPRINT_MAX_WINDOW,
   buildToolReceipt,
   findAskCycleOrDepth,
   inferTargetProject,
+  isOwnerStep,
+  renderCurrentDateTimeLine,
+  resolvePromptFootprint,
+  stepOwnerGezelId,
   taskTranscriptCompatible,
+  withCurrentDateTimeLine,
 } from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  RetrievalDecisionTrace,
   SendToSessionRequest,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
@@ -112,7 +119,6 @@ import {
   renderTranscript,
   summarizeSessionForMemory,
 } from '../memory/summarizer.js';
-import { MINIMAL_CONTEXT_MAX_WINDOW } from '../model-profile/behaviors/prompt-minimal-context.js';
 import { resolveProfileForCatalogId } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
 import {
@@ -179,6 +185,7 @@ import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/bu
 
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
+import { AppleFoundationModelsProvider } from '../providers/apple-foundation-models/provider.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -213,10 +220,22 @@ import { artifactPathsOf, extractReferencedFiles } from '../references/file-refe
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
-import { retrieveProjectContext } from '../search/project-retrieval.js';
+import {
+  resolveSessionRetrievalPolicy,
+  retrieveProjectContext,
+} from '../search/project-retrieval.js';
+import { retrievalTraceEnabled, traceHistoryDetails } from '../search/retrieval-trace.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
+import {
+  WRAP_UP_MAX_FILES,
+  composeTaskWrapUp,
+  loadTaskOutputs,
+  taskFinishedQuestion,
+  wantsWrapUp,
+} from '../tasks/completion-wrapup.js';
+import { reviewTaskFigures } from '../tasks/figure-review.js';
 import {
   buildStageOneNudge,
   buildStageTwoNudge,
@@ -226,6 +245,8 @@ import {
 } from '../tasks/gate-escalation.js';
 import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
+import { findOwnerThread } from '../tasks/owner-thread.js';
+import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
 import {
   discoverProjectMcpToolsets,
@@ -401,6 +422,7 @@ import {
 import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
+import { markTurnCancelled, turnCancelReasonOf } from './turn-cancel-marker.js';
 import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
@@ -409,6 +431,7 @@ import {
   resolveTurnIntentPlan,
   shouldConstrainToExactCraftbookInvocation,
 } from './turn-intent-plan.js';
+import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-file-claim.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { nativeVisionEnabledFor } from './vision-capability.js';
@@ -2307,12 +2330,9 @@ export class ChatManager extends LocalEngineRuntime {
         ) &&
         normalizedGate.scripts.length === 0;
       if (!adv && !readEvidenceOnly) continue;
-      // Only this gezel's step (step assignee → suggested → task assignee).
-      const owner =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : (step.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      // Only this gezel's step (step assignee → suggested → task assignee);
+      // an owner step advances only when the owner says so.
+      const owner = stepOwnerGezelId(task, step);
       if (owner !== gezelId) continue;
 
       // A fixed-action evidence step intentionally hides
@@ -3130,7 +3150,7 @@ export class ChatManager extends LocalEngineRuntime {
     // one of these callbacks before all cancellations have settled.
     this.afterSessionIdle.clear();
     for (const sessionId of Array.from(this.pendingSends.keys())) {
-      this.rejectQueuedForSession(sessionId, 'emergency stop');
+      this.rejectQueuedForSession(sessionId, 'emergency stop', 'emergency-stop');
     }
 
     const results = await Promise.allSettled(
@@ -4609,7 +4629,29 @@ export class ChatManager extends LocalEngineRuntime {
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
                 : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           try {
+            const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            // Asking a question is a successful suspension point, not a
+            // failed fixed-action attempt. In particular,
+            // `run_package_script` raises a command-approval question and
+            // deliberately ends the provider turn; answering it injects a
+            // follow-up into this same session. Retrying here races that
+            // follow-up, consumes the bounded handoff budget, and can pause
+            // an otherwise healthy task before the approved command runs.
+            // Count questions created during this send even when the eval
+            // harness (or a very fast user) has already answered them.
+            const yieldedToQuestion = (
+              await this.store.listProjectQuestions(handoffSession.projectId).catch(() => [])
+            ).some(
+              (question) =>
+                question.sessionId === handoffSession.id && question.createdAt >= sendStartedAt,
+            );
+            if (yieldedToQuestion) {
+              log.info(
+                `[chat] ${args.taskRef}/${dispatchStepId}: handoff yielded to a question; waiting for its answer instead of spending a recovery attempt`,
+              );
+              break;
+            }
             if (requiresExactOutcome) {
               const parsed = parseTaskRef(args.taskRef);
               const afterSend = parsed
@@ -4647,6 +4689,11 @@ export class ChatManager extends LocalEngineRuntime {
             }
             break;
           } catch (error) {
+            // A turn someone stopped on purpose (Stop, interrupt, emergency
+            // stop, a superseding dispatch, shutdown) is not a failed
+            // handoff, and re-sending it undoes the stop. Shutdown also
+            // refuses every later send.
+            if (this.shuttingDown || turnCancelReasonOf(error)) throw error;
             if (attempt === maxHandoffSendAttempts) throw error;
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
@@ -4680,6 +4727,18 @@ export class ChatManager extends LocalEngineRuntime {
         }
       })().catch(async (err) => {
         const detail = err instanceof Error ? err.message : String(err);
+        const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
+        if (cancelReason) {
+          // Not a failed handoff, so never "paused for help". After a
+          // shutdown the task stays active and rehydrates on the next boot;
+          // otherwise whoever stopped the turn owns what happens next: Stop
+          // pauses the task, an interrupt carries on in this session, and a
+          // superseding dispatch already holds the step.
+          log.info(
+            `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
+          );
+          return;
+        }
         log.error(
           `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
         );
@@ -6379,11 +6438,13 @@ export class ChatManager extends LocalEngineRuntime {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     const at = nowIso();
+    const retrieval = taskReferencesAsRetrieval(args.task.references);
     const userMessage: ChatMessage = {
       role: 'user',
       content: args.userText,
       at,
       ...(args.draftId ? { draftId: args.draftId } : {}),
+      ...(retrieval ? { retrieval } : {}),
     };
     const craftbookName = args.task.craftbook.name;
     const card = craftbookStartCardForTask(args.task, {
@@ -6737,11 +6798,16 @@ export class ChatManager extends LocalEngineRuntime {
    * `archiveSession`, `deleteSession`, and `shutdown` — all paths
    * where queued messages will never run.
    */
-  private rejectQueuedForSession(sessionId: string, reason: string): void {
+  private rejectQueuedForSession(
+    sessionId: string,
+    reason: string,
+    cancel?: TurnCancelReason,
+  ): void {
     const q = this.pendingSends.get(sessionId);
     if (!q || q.length === 0) return;
     this.pendingSends.delete(sessionId);
     const err = new Error(`send rejected: ${reason} (session ${sessionId})`);
+    if (cancel) markTurnCancelled(err, cancel);
     for (const entry of q) {
       for (const w of entry.waiters) {
         try {
@@ -7617,6 +7683,7 @@ export class ChatManager extends LocalEngineRuntime {
     state.record.turnStartedAt = nowIso();
     if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
       state.record.title =
+        (await this.taskThreadTitle(state.record, userMessage)) ??
         deriveThreadTitleFromMessages(state.record.messages.slice(0, -1), {
           requireCompletedTurn: true,
         }) ??
@@ -7850,7 +7917,10 @@ export class ChatManager extends LocalEngineRuntime {
         this.events.publish(scope, {
           type: 'turn_stats',
           provider,
-          ...(state.record.model ? { model: state.record.model } : {}),
+          // The model that ran, so speed is filed under it and not the pin.
+          ...((state.effectiveModel ?? state.record.model)
+            ? { model: state.effectiveModel ?? state.record.model }
+            : {}),
           promptTokens: ev.promptTokens,
           completionTokens: ev.completionTokens,
           durationMs: ev.durationMs,
@@ -8090,6 +8160,16 @@ export class ChatManager extends LocalEngineRuntime {
         );
       }
       let continuations = 0;
+      // Every provider receives the turn through the sends below, so this is
+      // the one place the date reaches them all. It rides the user turn rather
+      // than the system prompt so the cached prefix never churns, and it goes
+      // first so the user's words stay last. It is added only at the provider
+      // seam: `promptForTurn` also feeds prefix-anchored classifiers
+      // (`isValidationRepairPrompt`, no-op confirmations) that a leading
+      // bracket line would blind. Continuations already have it in history.
+      const clockLine = renderCurrentDateTimeLine();
+      const providerPrompt = () =>
+        continuations === 0 ? withCurrentDateTimeLine(promptForTurn, clockLine) : promptForTurn;
       let falseCapabilityDenialCorrected = false;
       const maxContinuations = resolveContinuationBudget(state);
       // Voorman-idle recovery is a project-level suggestion, not a broken
@@ -8120,7 +8200,7 @@ export class ChatManager extends LocalEngineRuntime {
       while (true) {
         const debugOn = this.debug?.isEnabled() === true;
         if (continuations === 0) {
-          const preview = debugOn ? promptForTurn : promptForTurn.slice(0, 80);
+          const preview = debugOn ? providerPrompt() : promptForTurn.slice(0, 80);
           log.info(`sending to session ${sessionId} via ${state.record.providerName}: ${preview}`);
           // Log the system prompt once per session when debug is on. Not
           // on every turn — it doesn't change mid-session, so re-logging
@@ -8159,7 +8239,7 @@ export class ChatManager extends LocalEngineRuntime {
           scope,
           state,
           liveSession,
-          promptForTurn,
+          providerPrompt(),
         );
         log.debug(
           `runSend#${tag} pressure-check END rebuilt=${pressureResult.rebuilt} ` +
@@ -8345,7 +8425,7 @@ export class ChatManager extends LocalEngineRuntime {
           }
           inflightTurn.providerStarted = true;
           this.telemetry.noteProviderRequestStart(sessionId);
-          finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+          finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
         } catch (err) {
           if (err instanceof ProviderDisposedError && !inflightTurn.cancelled) {
             // Only the provider's pre-start guard uses this error type. A
@@ -8374,7 +8454,7 @@ export class ChatManager extends LocalEngineRuntime {
               throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
             }
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await fresh.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await fresh.sendAndWait(providerPrompt(), sendOpts);
           } else if (
             isContextOverflowError(err) &&
             compactionsThisSend < this.maxCompactionsPerSend
@@ -8397,7 +8477,7 @@ export class ChatManager extends LocalEngineRuntime {
               scope,
               state,
               liveSession,
-              promptForTurn,
+              providerPrompt(),
               {
                 force: true,
               },
@@ -8408,7 +8488,7 @@ export class ChatManager extends LocalEngineRuntime {
             liveUnsub = subscribeLive(liveSession);
             compactionsThisSend++;
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
           } else if (!isSessionGoneError(err)) throw err;
           else {
             // The provider session is no longer resumable. Rebuild from scratch
@@ -8443,7 +8523,7 @@ export class ChatManager extends LocalEngineRuntime {
             liveSession = fresh;
             liveUnsub = subscribeLive(liveSession);
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
           }
         }
         // A provider should reject when its signal is aborted, but keep the
@@ -8571,9 +8651,14 @@ export class ChatManager extends LocalEngineRuntime {
         let commandApprovalRaisedThisTurn = false;
         try {
           const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
+          // A task finishing in the background files its "ready" card on
+          // this thread; it belongs to the wrap-up, not to this reply.
           const raisedQuestions = projectQuestions.filter(
             (q) =>
-              q.sessionId === sessionId && q.intent !== undefined && q.createdAt >= iterStartedAt,
+              q.sessionId === sessionId &&
+              q.intent !== undefined &&
+              q.intent.kind !== 'task-finished' &&
+              q.createdAt >= iterStartedAt,
           );
           // An immediate answer may already be queued. It still owns the next
           // turn: a stall-recovery nudge must not run ahead of that answer.
@@ -8812,6 +8897,7 @@ export class ChatManager extends LocalEngineRuntime {
             typeof assistantMessage.content === 'string' ? assistantMessage.content : '',
             assistantMessage.toolCalls,
             expectedFilePath,
+            userText,
           );
           if (proseDeliverable) {
             const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];
@@ -9786,6 +9872,8 @@ export class ChatManager extends LocalEngineRuntime {
           );
         });
       }
+      if (intentionallyCancelled)
+        markTurnCancelled(err, inflightTurn.cancelReason ?? 'unspecified');
       throw err;
     } finally {
       liveUnsub();
@@ -9899,6 +9987,7 @@ export class ChatManager extends LocalEngineRuntime {
     record.messages.push(userMessage);
     if (!record.title || record.title === NEW_THREAD_TITLE) {
       record.title =
+        (await this.taskThreadTitle(record, userMessage)) ??
         deriveThreadTitleFromMessages(record.messages.slice(0, -1), {
           requireCompletedTurn: true,
         }) ??
@@ -10362,6 +10451,18 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Record which model this session's turns are really served by. A pinned
+   * model that is not installed is replaced by a stand-in on every turn
+   * (`ensureServableLocalModel`) while `record.model` keeps the pin, and the
+   * thread label read that pin.
+   */
+  private async noteServedModel(record: ChatSession, served: string | undefined): Promise<void> {
+    if (!served || record.servedModel === served) return;
+    record.servedModel = served;
+    await this.store.writeSession(record);
+  }
+
+  /**
    * Build a brand-new live session for an existing record, ignoring any
    * stored `providerState` (use when the stored one is known dead). Used by
    * the mid-conversation "session gone" recovery path in `send`.
@@ -10378,6 +10479,7 @@ export class ChatManager extends LocalEngineRuntime {
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
+    await this.noteServedModel(record, effectiveModel ?? provider.getEffectiveModelId?.());
     const effectiveContextWindow = await this.resolveEffectiveContextWindow(
       provider,
       effectiveModel,
@@ -11113,7 +11215,7 @@ export class ChatManager extends LocalEngineRuntime {
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
     for (const sessionId of Array.from(this.pendingSends.keys())) {
-      this.rejectQueuedForSession(sessionId, 'service shutting down');
+      this.rejectQueuedForSession(sessionId, 'service shutting down', 'service-restart');
     }
     await Promise.allSettled(
       Array.from(this.inflight.keys()).map((sessionId) =>
@@ -11644,6 +11746,124 @@ export class ChatManager extends LocalEngineRuntime {
     const wantsGb = (minFreeBytes / GIB).toFixed(0);
     const freeGb = (freeBytes / GIB).toFixed(1);
     return `loading ${model ?? providerName} for background work wants at least ${wantsGb} GB of free memory and only ${freeGb} GB is free right now; it will run once memory frees up or the model is loaded for interactive use`;
+  }
+
+  /**
+   * Tell the owner a task they launched from a chat is finished: a
+   * deterministic `task-wrapup` message in the thread that launched it,
+   * naming the files the task wrote, then a `task_settled` event the app
+   * turns into an OS notification. Returns the thread id, or null when the
+   * task earns no wrap-up (see `wantsWrapUp`) or its thread is gone.
+   *
+   * A launch from inside another task's session climbs to the first
+   * ancestor that is not task-scoped: that is the thread the person reads.
+   */
+  /**
+   * A task thread's title. Its first user turn is the dispatch seed the
+   * machinery wrote, and the title extractor turned one into "Default/2
+   * Bakery Weekly Admin Relief 20th craftbook"; the task already has a name.
+   */
+  private async taskThreadTitle(record: ChatSession, first: ChatMessage): Promise<string | null> {
+    if (!record.taskRef || first.origin !== 'system') return null;
+    const ref = parseTaskRef(record.taskRef);
+    if (!ref) return null;
+    const task = await this.store.readTask(ref.projectId, ref.num).catch(() => null);
+    return task?.title.trim() || null;
+  }
+
+  /** Append a message the runtime wrote to a thread, persist it, and publish it. */
+  private async appendToThread(
+    thread: ChatSession,
+    message: ChatMessage,
+  ): Promise<{ record: ChatSession; scope: PublishScope }> {
+    // The live record, when the thread is open, so unsaved turn state survives.
+    const record = this.states.get(thread.id)?.record ?? thread;
+    record.messages.push(message);
+    record.lastActivityAt = message.at;
+    await this.store.writeSession(record);
+    const scope: PublishScope = {
+      sessionId: record.id,
+      gezelId: record.gezelId,
+      projectId: record.projectId,
+    };
+    this.events.publish(scope, { type: 'complete', message });
+    return { record, scope };
+  }
+
+  /**
+   * Introduce a gezel hired for a task in the thread the owner reads, before
+   * they start. The crew used to be recruited silently: a copywriter and an
+   * omroeper joined the roster mid-task without a word to the owner.
+   */
+  async postCrewIntroduction(
+    task: Task,
+    gezelId: string,
+    step: TaskCraftbookStep,
+  ): Promise<string | null> {
+    const thread = await findOwnerThread(this.store, task);
+    if (!thread || thread.gezelId === gezelId) return null;
+    const gezel = await this.store.getGezel(gezelId).catch(() => null);
+    if (!gezel) return null;
+    const role = gezel.role?.trim();
+    const message: ChatMessage = {
+      role: 'assistant',
+      content:
+        `I've brought **${gezel.name}** onto the crew${role ? ` as your ${role}` : ''} ` +
+        `for **${task.title}**. ${gezel.name} starts with "${step.name}".`,
+      at: nowIso(),
+      synthetic: 'crew-introduction',
+      referencedTasks: [task.ref],
+    };
+    const { record } = await this.appendToThread(thread, message);
+    return record.id;
+  }
+
+  async postTaskWrapUp(task: Task, outcome: 'complete' | 'canceled'): Promise<string | null> {
+    if (!wantsWrapUp(task, outcome)) return null;
+    const thread = await findOwnerThread(this.store, task);
+    if (!thread) return null;
+
+    const outputs = await loadTaskOutputs(this.store, task);
+    const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
+
+    const message: ChatMessage = {
+      role: 'assistant',
+      content: composeTaskWrapUp(task, outputs, figures),
+      at: nowIso(),
+      synthetic: 'task-wrapup',
+      referencedTasks: [task.ref],
+      ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+    };
+    const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
+    if (artifacts.length > 0) message.referencedArtifacts = artifacts;
+
+    const { record, scope } = await this.appendToThread(thread, message);
+    this.events.publishProjectEvent(record.projectId, {
+      type: 'task_settled',
+      taskRef: task.ref,
+      title: task.title,
+      outcome,
+      sessionId: record.id,
+    });
+
+    // A "ready for you" card in Updates, so the finished work stays one click
+    // away after the thread scrolls on. One per task, however it settles.
+    const pending = await this.store.listProjectQuestions(record.projectId).catch(() => []);
+    const alreadyFiled = pending.some(
+      (q) => q.intent?.kind === 'task-finished' && q.intent.taskRef === task.ref && !q.answer,
+    );
+    if (!alreadyFiled) {
+      const question = taskFinishedQuestion({
+        task,
+        thread: record,
+        outputs,
+        at: message.at,
+        ...(figures ? { figures } : {}),
+      });
+      await this.store.writeQuestion(question);
+      this.events.publish(scope, { type: 'question_asked', question });
+    }
+    return record.id;
   }
 
   /**
@@ -12672,6 +12892,16 @@ export class ChatManager extends LocalEngineRuntime {
         ...(this.gpuArbiter ? { arbiter: this.gpuArbiter } : {}),
         catalog: this.catalog,
       });
+    } else if (name === 'apple-foundation-models') {
+      // Apple's own on-device model through the macOS helper. Before this
+      // branch existed the name validated and then silently became Ollama.
+      provider = new AppleFoundationModelsProvider();
+    } else if (name === 'android-mlkit') {
+      const error = new Error(
+        'Android on-device AI runs only in the Gezel mobile app.',
+      ) as Error & { isActionable?: boolean };
+      error.isActionable = true;
+      throw error;
     } else {
       provider = new OllamaProvider({
         baseUrl: config.ollamaBaseUrl,
@@ -12846,6 +13076,21 @@ export class ChatManager extends LocalEngineRuntime {
     if (!this.contentIndexRef?.searchLibrary) return [];
     const text = userText.trim();
     if (text.length < TURN_LIBRARY_RECALL_MIN_CHARS) return [];
+    // Library recall is indexed context by another road: with retrieval Off
+    // (or the shared library outside the policy's sources) it must stay
+    // silent, or "Off" still puts library snippets in front of the model.
+    const [gezel, config] = await Promise.all([
+      this.store.getGezel(state.record.gezelId).catch(() => null),
+      this.store.readConfig().catch(() => null),
+    ]);
+    if (!gezel || !config) return [];
+    const policy = await resolveSessionRetrievalPolicy({
+      store: this.store,
+      record: state.record,
+      gezel,
+      config,
+    });
+    if (policy.mode === 'off' || !policy.sources.includes('shared')) return [];
     const libraryId = await this.store.sharedProjectId().catch(() => null);
     if (!libraryId) return [];
     // A session scoped to the library already lists these files as its
@@ -12908,6 +13153,7 @@ export class ChatManager extends LocalEngineRuntime {
         rawResults: number;
         arms?: unknown[];
       } | null = null;
+      let trace: RetrievalDecisionTrace | null = null;
       const result = await retrieveProjectContext({
         store: this.store,
         search,
@@ -12922,7 +13168,14 @@ export class ChatManager extends LocalEngineRuntime {
         onSearchProbe: (p) => {
           probe = p;
         },
+        onDecisionTrace: (t) => {
+          trace = t;
+        },
       });
+      const traceDetails = (() => {
+        const captured = trace as RetrievalDecisionTrace | null;
+        return captured ? traceHistoryDetails(captured, retrievalTraceEnabled(config)) : {};
+      })();
       if (!result) {
         // Zero-injection telemetry (per query hash, once per session): the
         // arms ran; nothing cleared the floor or survived hydration.
@@ -12954,6 +13207,7 @@ export class ChatManager extends LocalEngineRuntime {
                   rawResults: zero.rawResults,
                   hits: [],
                   ...(zero.arms ? { arms: zero.arms } : {}),
+                  ...traceDetails,
                 },
               })
               .catch(() => {});
@@ -12982,11 +13236,16 @@ export class ChatManager extends LocalEngineRuntime {
             truncated: result.truncated,
             hits: result.hits.map((hit) => ({
               source: hit.source,
+              docKey: hit.docKey,
+              kind: hit.kind,
+              ...(hit.arm ? { arm: hit.arm } : {}),
               projectId: hit.projectId,
               path: hit.path,
               line: hit.line,
               lineEnd: hit.lineEnd,
               score: hit.score,
+              ...(hit.relevance !== undefined ? { relevance: hit.relevance } : {}),
+              ...(hit.modelScore !== undefined ? { modelScore: hit.modelScore } : {}),
               // Knowledge provenance (citation coordinates only, never text).
               ...(hit.uri ? { uri: hit.uri } : {}),
               ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
@@ -12994,6 +13253,7 @@ export class ChatManager extends LocalEngineRuntime {
             })),
             // Per-arm timing/outcome telemetry (non-content — never snippets).
             ...(probeArms ? { arms: probeArms } : {}),
+            ...traceDetails,
           },
         })
         .catch(() => {});
@@ -13224,6 +13484,7 @@ export class ChatManager extends LocalEngineRuntime {
       // or ignores them.
       delete record.model;
       delete record.modelSource;
+      delete record.servedModel;
       await this.store.writeSession(record);
     }
 
@@ -13393,6 +13654,7 @@ export class ChatManager extends LocalEngineRuntime {
     );
 
     const liveEffectiveModel = effectiveModel ?? provider.getEffectiveModelId?.();
+    await this.noteServedModel(record, liveEffectiveModel);
     const state: LiveSessionState = {
       record,
       session,
@@ -14076,10 +14338,12 @@ export class ChatManager extends LocalEngineRuntime {
           // invites a chat turn to start the run — and Default always holds
           // the Meester's perpetual Night Shift oversight task.
           if (t.cron || t.nightShift?.enabled) return false;
+          const activeStep = t.craftbook.steps.find((s) => s.id === t.activeStepId);
+          // Waiting on the owner's review is nobody's work to pick up.
+          if (isOwnerStep(activeStep)) return false;
           if (t.assignee.kind === 'gezel' && t.assignee.gezelId === record.gezelId) return true;
           // Step-level assignment: the active step may name this gezel
           // even if the task's top-level assignee is someone else.
-          const activeStep = t.craftbook.steps.find((s) => s.id === t.activeStepId);
           if (
             activeStep?.assignee?.kind === 'gezel' &&
             activeStep.assignee.gezelId === record.gezelId
@@ -14173,11 +14437,23 @@ export class ChatManager extends LocalEngineRuntime {
     // contextWindow is at/below MINIMAL_CONTEXT_MAX_WINDOW (talkie-1930 at
     // 2048), or when the manifest opts in via the behavior.
     const modelContextWindow = await resolveCatalogContextWindow(this.catalog, resolvedCatalogId);
-    const minimalContextActive =
-      profileHasBehavior(modelProfile, 'prompt.minimal-context') ||
-      (typeof modelContextWindow === 'number' &&
-        modelContextWindow > 0 &&
-        modelContextWindow <= MINIMAL_CONTEXT_MAX_WINDOW);
+    // The shared prompt footprint (core/prompt-footprint.ts). A native-tool
+    // provider has no catalog window, so its own (Apple's reports 4096 before
+    // OS 27) decides; until it has reported, assume the small floor.
+    const footprintProvider = this.providers.get(record.providerName);
+    const nativeToolsProvider = footprintProvider?.nativeTools === true;
+    const promptFootprint = resolvePromptFootprint({
+      contextWindow:
+        modelContextWindow ??
+        (nativeToolsProvider
+          ? (footprintProvider?.getContextWindow?.() ?? MINIMAL_FOOTPRINT_MAX_WINDOW)
+          : undefined),
+      ...(profileHasBehavior(modelProfile, 'prompt.minimal-context')
+        ? { requested: 'minimal' as const }
+        : {}),
+    });
+    const minimalContextActive = promptFootprint === 'minimal';
+    const nativeToolsMinimal = minimalContextActive && nativeToolsProvider;
     // Index-derived prompt features (Tier 3): the gestalt block and the
     // retrieval-first steer, both marker behaviors resolved here and
     // rendered/gated inside buildInstructions.
@@ -14723,6 +14999,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable ? { expectedDeliverable: record.expectedDeliverable } : {}),
       ...(executorContextTrimActive ? { trimExecutorContext: true } : {}),
       ...(minimalContextActive ? { minimalContext: true } : {}),
+      ...(nativeToolsMinimal ? { minimalContextNativeTools: true } : {}),
       ...(taskContext?.step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
       ...(project?.leanProfile ? { leanProfile: true } : {}),
       ...(workspaceGestalt ? { workspaceGestalt } : {}),
@@ -17049,187 +17326,6 @@ function latestExpectedFilePath(messages: Array<{ content?: string }>): string |
     if (filePath) return filePath;
   }
   return null;
-}
-
-/**
- * Detect file-save claims that weren't backed by a `write_file` /
- * `write_artifact` / `append_to_file` call this turn. Matches phrasings
- * the matrix #2 squisq-review case produced ("saved the full report to
- * `review.md`", "wrote the file at <path>"), and the broader family
- * those drift toward ("filed at", "written to", "I've saved <X> to
- * <path>"). The path is captured for the re-prompt so the model can
- * either follow through (`write_file({path:<captured>, content:<their
- * deliverable>})`) or correct the false claim.
- *
- * Conservative pattern by design — false positives feel adversarial to
- * the user when the model didn't actually claim what we say it did. We
- * require:
- *   1. A claim verb in past tense AND
- *   2. A capture-group path with a file extension (so "saved to disk" /
- *      "filed in workspace" don't fire) AND
- *   3. The path NOT being something the message also called read-only
- *      (e.g. "read review.md" — past-tense "read" matches but our verb
- *      list excludes it).
- *
- * Returns the captured path on match for use in the re-prompt; null
- * when no claim is detected.
- */
-const SAVE_CLAIM_PATTERNS = [
-  // `saved to <path>` / `saved the report to <path>` / `saved <something> to <path>`
-  /\bsaved\b(?:[\s\S]{0,80}?)\bto\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-  // `wrote (it|the file|the review|<name>) to <path>` / `wrote <path>`
-  /\bwrote\b(?:[\s\S]{0,80}?)\bto\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-  /\bwrote\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-  // `filed (the report) (at|in|as) <path>` / `filed at <path>`
-  /\bfiled\b(?:[\s\S]{0,80}?)\b(?:at|in|as)\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-  // `written to <path>` (passive voice, common with Meester relaying)
-  /\bwritten\s+to\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-];
-
-/**
- * Existence / completion claims — the family the write-verb patterns
- * above miss. Wild-caught (Space Shooter Arcade): a voorman
- * with no `write_file` told the Meester the deliverable "is in place",
- * "exists", "is complete" three times — none of which match `saved/wrote/
- * filed/written to`, so the unsaved-file-claim guard never fired and the
- * false "done" stood. These are stricter than the write-verb patterns
- * (path MUST be quoted/backticked) because completion language is far
- * more common in ordinary prose — the call site's workspace cross-check
- * is the authoritative false-positive guard regardless.
- */
-const COMPLETION_CLAIM_PATTERNS = [
-  // "`index.html` is in place / is complete / is done / has been delivered"
-  /[`'"]([\w./\-]+\.[a-z0-9]{1,6})[`'"]\s+(?:is|has been|was)\s+(?:in place|complete|completed|done|ready|created|delivered|finished|live|saved|generated)\b/i,
-  // "delivered / created / completed / shipped (the X) `index.html`"
-  /\b(?:delivered|created|completed|finished|shipped|produced|generated)\s+(?:the\s+[\w-]+\s+)?[`'"]([\w./\-]+\.[a-z0-9]{1,6})[`'"]/i,
-  // "`index.html` exists"
-  /[`'"]([\w./\-]+\.[a-z0-9]{1,6})[`'"]\s+exists\b/i,
-];
-
-/**
- * Modify / edit claims — "updated `index.html`", "modified the Enemy class
- * in `index.html`", "applied the change to `index.html`". The save and
- * completion patterns miss these entirely: their verb lists are about
- * bringing a file into EXISTENCE, not editing one that's already there.
- * Wild-caught (qwen3.6 developer "Space Shooter Arcade"): asked
- * to subtract 50 points, the model read the file, reasoned out the exact
- * `replace_in_file` edit, then emitted "I have updated the game logic in
- * `index.html`" with NO write call — the edit never landed and nothing
- * caught the false claim. Path MUST be quoted/backticked (edit language is
- * common in ordinary prose); the call site fires for these REGARDLESS of
- * on-disk existence, since an existing file says nothing about whether this
- * turn's edit actually happened.
- */
-const MODIFY_CLAIM_PATTERNS = [
-  // "updated / modified / edited / changed / patched / refactored / replaced
-  //  (… in)? `index.html`"
-  /\b(?:updated|modified|edited|changed|adjusted|patched|refactored|revised|tweaked|replaced)\b(?:[\s\S]{0,80}?)[`'"]([\w./\-]+\.[a-z0-9]{1,6})[`'"]/i,
-  // "applied the change(s) to `index.html`"
-  /\bapplied\b(?:[\s\S]{0,80}?)\bto\s+[`'"]?([\w./\-]+\.[a-z0-9]{1,6})[`'"]?/i,
-];
-
-/**
- * A retraction ("the file was NOT created", "couldn't apply the change") is
- * the correction we WANT — never nag it as a false claim. Gates the
- * completion AND modify patterns (the write-verb patterns are past-tense-
- * specific and rarely collide with negations).
- */
-const RETRACTION_PATTERN =
-  /\b(?:not|never|no longer|isn't|wasn't|doesn't|hasn't|couldn't|can't|unable to)\b[^.]{0,40}\b(?:create|created|save|saved|wrote|written|complete|completed|done|in place|deliver|delivered|exist|exists|ready|generate|generated|update|updated|modif(?:y|ied)|edit|edited|change|changed|appl(?:y|ied))\b/i;
-
-export function detectUnsavedFileClaim(
-  content: string,
-  toolCalls: ChatMessageToolCall[] | undefined,
-): { claimedPath: string; kind: 'wrote' | 'exists' | 'modified' } | null {
-  if (!content || content.length < 20) return null;
-  // A successful file-writing call this turn excuses the prose — the
-  // model both said "saved" and actually saved. `replace_in_file` counts:
-  // it's how a targeted edit lands, and a "I updated X" claim backed by a
-  // successful replace_in_file is TRUE. Failed writes do not excuse the
-  // prose: the user sees the failed tool row, so a follow-up "I saved it"
-  // must be corrected or retried.
-  const wroteSomething = (toolCalls ?? []).some(
-    (c) => (c.success || isRecoverableSavedDraftToolCall(c)) && isFileWritingEvidenceToolCall(c),
-  );
-  if (wroteSomething) return null;
-  // First-person write-verb claims ("saved to X", "wrote X").
-  for (const re of SAVE_CLAIM_PATTERNS) {
-    const m = content.match(re);
-    if (m?.[1]) return { claimedPath: m[1], kind: 'wrote' };
-  }
-  // Modify/completion claims share the retraction guard ("X was NOT
-  // changed" / "X was NOT created" is the correction we want, not a false
-  // claim to nag).
-  if (!RETRACTION_PATTERN.test(content)) {
-    // Modify/edit claims ("updated `X`", "applied the change to `X`").
-    // Checked before completion so "updated AND completed `X`" reads as the
-    // stronger 'modified' verdict — unlike a create claim, an already-
-    // existing file is NOT proof the edit landed, and the call site treats
-    // 'modified' specially for exactly that reason.
-    for (const re of MODIFY_CLAIM_PATTERNS) {
-      const m = content.match(re);
-      if (m?.[1]) return { claimedPath: m[1], kind: 'modified' };
-    }
-    // Existence / completion claims ("`X` is in place / exists / is done").
-    for (const re of COMPLETION_CLAIM_PATTERNS) {
-      const m = content.match(re);
-      if (m?.[1]) return { claimedPath: m[1], kind: 'exists' };
-    }
-  }
-  return null;
-}
-
-function isRecoverableSavedDraftToolCall(call: ChatMessageToolCall): boolean {
-  return (
-    call.name === 'write_file' &&
-    call.success === false &&
-    typeof call.errorMessage === 'string' &&
-    /Invalid first draft\s+\S+\s+was saved anyway so you can continue with/i.test(call.errorMessage)
-  );
-}
-
-function isFileWritingEvidenceToolCall(call: ChatMessageToolCall): boolean {
-  if (
-    call.name === 'write_file' ||
-    call.name === 'write_artifact' ||
-    call.name === 'append_to_file' ||
-    call.name === 'replace_in_file'
-  ) {
-    return true;
-  }
-  // CLI-backed providers expose native shell/file-edit actions instead
-  // of gezel MCP write_file. A successful native action in the same turn
-  // is enough evidence to avoid a false "no write landed" nudge; the
-  // scenario/runtime check remains the authority on whether the edit was
-  // actually correct.
-  return call.name === 'shell' || call.name === 'file_change';
-}
-
-/**
- * Re-prompt template for the unsaved-file-claim case. Names the claimed
- * path verbatim so the model has a concrete target instead of guessing.
- * Two valid resolutions: actually write the file, or retract the claim.
- * Both keep the user-visible thread truthful — the worst outcome is
- * leaving the false claim standing.
- */
-function buildUnsavedFileClaimNudge(
-  claimedPath: string,
-  canWrite: boolean,
-  kind: 'wrote' | 'exists' | 'modified' = 'wrote',
-): string {
-  // Delegator role (no `write_file`) — the voorman/meester case. Pointing
-  // it at `write_file` would be the very mistake that started this; point
-  // it at delegation + verification instead.
-  if (!canWrite) {
-    const verb = kind === 'modified' ? 'changed' : 'created';
-    return `You implied the file at \`${claimedPath}\` was ${verb}, but you have no \`write_file\` tool in this role — nothing has been written. Do not claim it's done. Valid next moves:\n  1. DELEGATE: use \`message_gezel\` for the Builder/Developer you assigned this task to, or first call \`ensure_gezel\` for a Builder/Developer if none exists. Include \`expectedDeliverable: { kind: "file", filePath: "${claimedPath}" }\` and ask them to make the change and reply with the path. Do not call \`ask_specialist\` for file deliverables.\n  2. Once they deliver, confirm with \`read_file\` BEFORE telling anyone it's done.\n  3. If you genuinely cannot delegate, tell the user plainly the file was NOT ${verb} and what's blocking it.\nDo not leave the false claim standing.`;
-  }
-  // Modify claim — the file exists but this turn made no edit. Reading is
-  // not editing; point at the patch tools, not a from-scratch write.
-  if (kind === 'modified') {
-    return `You said you changed \`${claimedPath}\` (e.g. "updated"/"modified"/"applied the change"), but no successful \`write_file\` / \`replace_in_file\` / \`append_to_file\` call landed this turn — the file on disk is UNCHANGED. Reading a file is not editing it. Valid next moves:\n  1. Apply the edit NOW: \`replace_in_file({ path: "${claimedPath}", find: <exact current snippet>, replace: <new snippet> })\` for a targeted change, or \`write_file({ path: "${claimedPath}", content: <full corrected file> })\` for a rewrite.\n  2. If you couldn't make the change, say plainly it was NOT applied and what's blocking it.\nDo not leave the false claim standing.`;
-  }
-  return `You said the file at \`${claimedPath}\` was saved, but no successful \`write_file\` / \`write_artifact\` / \`append_to_file\` call landed this turn — the file doesn't actually exist on disk. Valid next moves:\n  1. If you have workspace write access, call \`write_file({ path: "${claimedPath}", content: <the deliverable you described> })\` now. If you don't have the content ready, generate it in this turn and write it.\n  2. If you do not have workspace write access, hand off to a developer with the exact path and change needed.\n  3. If saving wasn't actually the right move, correct your previous statement — say plainly that the file was NOT saved and what you'll do instead.\nDo not leave the false claim standing.`;
 }
 
 /**

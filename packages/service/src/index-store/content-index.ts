@@ -2196,6 +2196,29 @@ export class ContentIndex {
     }
   }
 
+  /**
+   * Indexed chunk text at each (path, line) of one project corpus, keyed
+   * `path:line`. Only the relevance stage reads this, for the few candidates
+   * it scores; search results themselves keep their short snippets.
+   */
+  async chunkTextsAt(
+    projectId: string,
+    corpus: 'workspace' | 'artifacts',
+    refs: ReadonlyArray<{ path: string; lineStart: number }>,
+  ): Promise<Map<string, string>> {
+    if (refs.length === 0) return new Map();
+    const index =
+      corpus === 'artifacts'
+        ? await this.openArtifacts(projectId)
+        : ((await this.open(projectId))?.index ?? null);
+    if (!index) return new Map();
+    try {
+      return index.chunkTextsAt(refs);
+    } finally {
+      index.close();
+    }
+  }
+
   /** Indexed artifact record paths (artifacts-relative), for the search catalog. */
   async listArtifactIndexFiles(projectId: string, cap = 2000): Promise<string[]> {
     const index = await this.openArtifacts(projectId);

@@ -19,6 +19,14 @@ describe('classifyTrial — terminal classes', () => {
     expect(c.failureClass).toBe('operator');
   });
 
+  it('a withheld tool that was wired anyway is the harness, not the model', () => {
+    const c = classifyTrial({
+      success: false,
+      reason: 'closed worker still had lookup tools: search',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'tool-roster-leak' });
+  });
+
   it('capacity denial in the reason', () => {
     const c = classifyTrial({
       success: false,
@@ -362,5 +370,33 @@ describe('classifyTrial — generalist-mode continuity rules', () => {
       daemonLog: '[service] fanout barrier release failed for p/1: boom',
     });
     expect(c).toMatchObject({ failureClass: 'model', rule: 'model-default' });
+  });
+});
+
+describe('classifyTrial — ungradable trials', () => {
+  it('files a runtime layer that could not start as a grader failure', () => {
+    const c = classifyTrial({
+      success: false,
+      reason:
+        'p/workspace/index.html passed sniff but could not be graded: runtime layer unavailable (chromium unavailable: no browser)',
+    });
+    expect(c).toMatchObject({ failureClass: 'grader', rule: 'grader-unavailable' });
+  });
+
+  it('files a missing grader tool as a grader failure', () => {
+    const c = classifyTrial({
+      success: false,
+      reason:
+        'grader tool unavailable: the Vitest runner that grades this scenario is not installed',
+    });
+    expect(c.failureClass).toBe('grader');
+  });
+
+  it('never re-files an advisory runtime-layer success', () => {
+    const c = classifyTrial({
+      success: true,
+      reason: 'p/workspace/index.html passed sniff; runtime layer unavailable',
+    });
+    expect(c.failureClass).toBe('pass');
   });
 });

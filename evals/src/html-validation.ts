@@ -10,6 +10,8 @@
  * which is deliberately eval-only — product gates stay deterministic.
  */
 
+import { launchEvalChromium } from './chromium.ts';
+
 export {
   MIN_INLINE_JS_BYTES,
   detectUnclosedScript,
@@ -83,20 +85,17 @@ export async function renderAndAssert(
     failed: [],
     pageErrors: [],
   };
-  // Defer the playwright import so the module remains lazy-loadable —
-  // a trial that doesn't use renderAndAssert never pays the import
-  // cost (Playwright pulls in ~hundred MB worth of native deps).
-  let chromium: typeof import('playwright').chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch (err) {
-    report.bootstrapError = `playwright import failed: ${err instanceof Error ? err.message : String(err)}`;
-    return report;
-  }
   // biome-ignore lint/suspicious/noExplicitAny: keep import optional
   let browser: any = null;
+  // Launch outside the assertion try so a missing browser is reported as a
+  // bootstrap problem (the runtime layer never ran), not as a failed page.
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await launchEvalChromium();
+  } catch (err) {
+    report.bootstrapError = `chromium unavailable: ${err instanceof Error ? err.message : String(err)}`;
+    return report;
+  }
+  try {
     const context = await browser.newContext();
     const page = await context.newPage();
     page.on('pageerror', (err: Error) => {

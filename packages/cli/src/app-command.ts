@@ -6,7 +6,7 @@
  * bin/gezel.ts so it stays out of ordinary CLI startup.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type {
   AiAppDetail,
@@ -324,16 +324,21 @@ export async function runAppSetEnabled(
 
 // ── apply an app to a folder ──
 
-/** Match a project bound to this folder, mirroring `ensureProjectForFolder`. */
-function findProjectForFolder(projects: Project[], folder: string): Project | undefined {
-  const wd = resolve(folder);
-  return projects.find(
-    (project) =>
-      !!project.workingDir &&
-      (process.platform === 'win32'
-        ? project.workingDir.toLowerCase() === wd.toLowerCase()
-        : project.workingDir === wd),
-  );
+/**
+ * Match a project bound to this folder, mirroring `ensureProjectForFolder`:
+ * the path as given or its realpath. That helper binds the realpath, so on
+ * macOS a folder under `/var` is stored as `/private/var/…`.
+ */
+async function findProjectForFolder(
+  projects: Project[],
+  folder: string,
+): Promise<Project | undefined> {
+  const requested = resolve(folder);
+  const real = await realpath(requested).catch(() => requested);
+  const fold = (p: string): string =>
+    process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p;
+  const wanted = new Set([fold(requested), fold(real)]);
+  return projects.find((project) => !!project.workingDir && wanted.has(fold(project.workingDir)));
 }
 
 /** `--param key=value` pairs → params object (split on the first `=`). */
@@ -442,7 +447,7 @@ export async function runAppApply(
   const params = parseParamFlags(opts.param ?? []);
 
   const { projects } = await client.listProjects();
-  const existing = findProjectForFolder(projects, folder);
+  const existing = await findProjectForFolder(projects, folder);
   const projectId = existing?.id ?? (await ensureProjectForFolder(client, folder));
   const project = await client.getProject(projectId);
   if (!opts.json) {
@@ -504,7 +509,7 @@ export async function runAppStatus(
   opts: AppOutputOptions,
 ): Promise<void> {
   const { projects } = await client.listProjects();
-  const project = findProjectForFolder(projects, folder);
+  const project = await findProjectForFolder(projects, folder);
   if (!project) {
     console.log(`No gezel project is linked to ${resolve(folder)}.`);
     console.log('Apply an app here with: gezel app apply <appId>');
@@ -584,7 +589,7 @@ async function resolveServeProject(
 ): Promise<string> {
   const { projects } = await client.listProjects();
   if (!appId) {
-    const existing = findProjectForFolder(projects, folder);
+    const existing = await findProjectForFolder(projects, folder);
     const projectId = existing?.id ?? (await ensureProjectForFolder(client, folder));
     const project = await client.getProject(projectId);
     if (!project.projectType) {

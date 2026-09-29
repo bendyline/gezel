@@ -216,23 +216,10 @@
   position: relative;
   z-index: 2;
   box-shadow: 0 5px 12px -3px var(--titlebar-pane-shadow);
-  /* The whole strip carries a faint wood-grain texture: woodtex screens
-     over the sage --titlebar base, then --titlebar-tex-veil is laid on
-     top at `normal` blend to knock it back to a whisper. Painted as the
-     element background (not a pseudo) so it sits behind every header
-     child with no stacking-context juggling, and covers the full bar
-     including the window-control padding. `--titlebar-bg-url` (Vite
-     asset) and `--titlebar-bg-pos-y` (per-launch random vertical slice,
-     [-512, 0)) are set inline by App.tsx; `auto 512px` compresses the
-     1024-tall source so the strip shows ~2× the grain lines and the
-     offset wraps cleanly under `repeat`. */
+  /* Flat sage, no texture: the bar must match the flat colors it meets —
+     the Windows/Linux window-control overlay (`titleBarOverlay.color` in
+     the Electron main process) and a phone's system-bar insets. */
   background-color: var(--titlebar, #667f62);
-  background-image: linear-gradient(var(--titlebar-tex-veil), var(--titlebar-tex-veil)),
-    var(--titlebar-bg-url, none);
-  background-repeat: repeat;
-  background-size: auto, auto 512px;
-  background-position: 0 0, 0 var(--titlebar-bg-pos-y, 0);
-  background-blend-mode: normal, screen;
   color: #f3ede0;
   /* The header doubles as the OS title bar — the whole strip is the drag
      handle, with interactive children opting out via `no-drag` below. */
@@ -281,11 +268,10 @@
   --wco-height: max(39px, env(titlebar-area-height, 39px));
   padding-right: calc(var(--wco-right) + 3px);
   padding-left: calc(var(--wco-left) + 1rem);
-  /* Pin the band to the painted patch. The overlay only paints its own
-     height, so a taller header shows a strip of wood-grain *below* the
-     buttons — reading as a mis-sized titlebar rather than as the seam it
-     is. Locking the height means a future oversized pill overflows
-     visibly instead of silently reintroducing that seam. */
+  /* Pin the band to the overlay. Its buttons and their hover fills span
+     only its own height, so a taller header leaves them floating above a
+     strip of bar — a mis-sized titlebar. Locking the height means a future
+     oversized pill overflows visibly instead. */
   height: var(--wco-height);
 }
 
@@ -300,50 +286,8 @@
   transform: translateY(1px);
 }
 
-/* The native window-control overlay (min/max/close) paints a solid sage
-   patch the wood-grain can't reach — its API only takes a flat color, not
-   an image. Rather than fight that, cordon the textured strip off from the
-   button cluster with a faint cream rule sitting exactly on the boundary
-   reported by `--wco-right` / `--wco-left` above, so the line lands on the
-   real edge at any display scale instead of a pixel beside it. The
-   pseudo-elements are positioned and non-interactive; they never overlap a
-   pill because `.app-header-right` carries a matching gutter below.
-
-   `width: min(1px, <inset>)` is what makes this safe on both sides at
-   once: the rule collapses to nothing when its side has no controls, so
-   the right-hand rule vanishes under a left-mounted Linux cluster and the
-   left-hand rule stays invisible everywhere else. macOS is excluded
-   entirely — its traffic lights sit on the texture with no painted patch
-   to cordon off. */
-:root[data-platform="win32"] .app-header::after,
-:root[data-platform="linux"] .app-header::after,
-:root[data-platform="win32"] .app-header::before,
-:root[data-platform="linux"] .app-header::before {
-  content: "";
-  position: absolute;
-  /* Span the full height of the title bar so the separator reads as a
-     clean edge running the entire band. */
-  top: 0;
-  bottom: 0;
-  background: rgba(243, 237, 224, 0.3);
-  pointer-events: none;
-}
-
-:root[data-platform="win32"] .app-header::after,
-:root[data-platform="linux"] .app-header::after {
-  right: var(--wco-right);
-  width: min(1px, var(--wco-right));
-}
-
-:root[data-platform="win32"] .app-header::before,
-:root[data-platform="linux"] .app-header::before {
-  left: var(--wco-left);
-  width: min(1px, var(--wco-left));
-}
-
-/* Keep the rightmost pill off the cordon rule so the line reads as a
-   deliberate separator with breathing room, not a border hugging the
-   meter. */
+/* Keep the rightmost pill a clear step away from the native window
+   controls rather than hugging the minimize button. */
 :root[data-platform="win32"] .app-header-right,
 :root[data-platform="linux"] .app-header-right {
   margin-right: 12px;
@@ -389,9 +333,8 @@
 }
 
 /* The empty middle of the header is the OS drag target — it inherits
-   `-webkit-app-region: drag` from `.app-header`, and the wood-grain now
-   lives on the titlebar background itself (see `.app-header` above), so
-   no dedicated grip element is needed for the affordance. */
+   `-webkit-app-region: drag` from `.app-header`, so no dedicated grip
+   element is needed for the affordance. */
 
 /* The right-side cluster (queue / engine / engagement / quota meters
    plus the hamburger overflow nav) is wrapped in `.app-header-right`
@@ -481,7 +424,7 @@
   /* Positioning context for the absolutely-placed magnifier glyph (was the
      element's own `position: absolute` before it moved into flow). */
   position: relative;
-  z-index: 2; /* above the wood-grain background; the palette portals above all */
+  z-index: 2; /* above the header's background; the palette portals above all */
 }
 
 .titlebar-search-input {
@@ -2116,12 +2059,12 @@ button.machine-memory-unload-button {
   /* `+ 2rem` grows the view back over the 1rem top/bottom padding the
      negative margins cancel — without it the listing falls 2rem short of
      the app frame and leaves a gap at the bottom. */
-  height: calc(100% + 2rem);
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
   min-height: 0;
-  /* Negative margin cancels `.app-main`'s 1rem 1.25rem padding so the
-     split butts against the app frame. The two panes carry their own
-     internal padding where it makes sense. */
-  margin: -1rem -1.25rem;
+  /* Negative margin cancels `.app-main`'s padding so the split butts
+     against the app frame. The two panes carry their own internal padding
+     where it makes sense. */
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
 }
 .gezels-listing .listing-header {
   display: flex;
@@ -2379,8 +2322,8 @@ button.machine-memory-unload-button {
    frame. Scoped to the direct child so the split view below — where
    `.document-detail` is nested under `.documents-detail` — is untouched. */
 .app-main > .document-detail {
-  margin: -1rem -1.25rem;
-  height: calc(100% + 2rem);
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
 }
 .app-main > .document-detail .editor-wrap {
   border: none;
@@ -2658,10 +2601,14 @@ button.machine-memory-unload-button {
 }
 
 .app-main {
+  /* Full-bleed views cancel this gutter with the same tokens, so a layout
+     that narrows it (compact) never leaves them misaligned. */
+  --app-main-pad-block: 1rem;
+  --app-main-pad-inline: 1.25rem;
   flex: 1;
   min-width: 0;
   overflow: auto;
-  padding: 1rem 1.25rem;
+  padding: var(--app-main-pad-block) var(--app-main-pad-inline);
 }
 
 /* Split workspaces and pane-based browsers go edge-to-edge with no surrounding
@@ -2953,11 +2900,13 @@ button.machine-memory-unload-button {
 }
 /* Keep the status signal's column intact, but let the project name flow below
    the hidden action trigger. Once revealed, an opaque patch covers the last
-   few characters rather than reflowing the row. */
+   few characters rather than reflowing the row. The offset clears the signal
+   column (22px + two 0.2rem margins) and then the name's own 0.45rem inset, so
+   the key sits as far inside the row highlight as the icon does on the left. */
 .app-sidebar-proj-row > .project-actions-trigger {
   position: absolute;
   z-index: 3;
-  right: calc(22px + 0.55rem);
+  right: calc(22px + 0.85rem);
   left: auto;
   margin-right: 0;
 }

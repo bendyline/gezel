@@ -462,6 +462,11 @@ export const PageReadResponseSchema = z.object({
   entries: z.array(PageReadEntrySchema).optional(),
   /** read/stat: change token — size:mtime hash; directories hash their listing. */
   etag: z.string(),
+  /**
+   * stat: false when the declared path does not exist yet. The etag is then a
+   * fixed sentinel, so a watch sees the file's arrival as a change.
+   */
+  exists: z.boolean().optional(),
   size: z.number().nonnegative().optional(),
   mtime: z.number().nonnegative().optional(),
 });

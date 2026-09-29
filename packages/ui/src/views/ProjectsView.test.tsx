@@ -1686,9 +1686,10 @@ describe('ProjectsView', () => {
         content: '# Existing document',
       } as never);
       await openRenderedFile();
+      // The editor gets the companion exactly as stored (see markdown-baseline.ts).
       expect(await screen.findByTestId('editor')).toHaveAttribute(
         'data-initial',
-        '# Existing document\n',
+        '# Existing document',
       );
       expect(api.readProjectArtifact).toHaveBeenCalledWith('pj-alpha', htmlLayout.markdownPath);
       expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
@@ -1749,7 +1750,7 @@ describe('ProjectsView', () => {
         await openRenderedFile(layout);
         expect(await screen.findByTestId('editor')).toHaveAttribute(
           'data-initial',
-          '# Imported office document\n',
+          '# Imported office document',
         );
         expect(outsideInMocks.importDocument).toHaveBeenCalledWith(expect.any(ArrayBuffer), layout);
         expect(writeDocument).toHaveBeenCalledWith('# Imported office document', 'report.md');
@@ -2238,6 +2239,14 @@ describe('ProjectsView', () => {
       render(<ProjectsView forceProjectId="pj-alpha" compact />);
       const chat = await screen.findByTestId('project-chat');
       expect(chat.getAttribute('data-compact')).toBe('true');
+    });
+
+    it('spends no row on a name-only heading in a compact single-project tab', async () => {
+      activeWidth = 390;
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.queryByRole('heading', { name: 'Alpha' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Projects' })).not.toBeInTheDocument();
     });
 
     it('keeps section names, selected project, and settings drafts when layout changes', async () => {

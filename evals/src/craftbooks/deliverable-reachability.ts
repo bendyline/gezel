@@ -115,6 +115,46 @@ function seededFixturePaths(spec: CraftbookEvalSpec): Set<string> {
   return new Set((spec.setup?.files ?? []).map((file) => file.path));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Treat authored path variables such as `characters/<name>/sheet.json` and
+ * `posts/<created>-<slug>/post.md` as declarations of their concrete eval
+ * paths. These are not folder drift: the kickoff prompt supplies the name,
+ * page number, date, or slug that the procedure deliberately resolves.
+ */
+function documentNamesPathTemplate(document: string, path: string): boolean {
+  const filename = basename(path);
+  if (!document.includes(filename)) return false;
+  const candidatePattern = new RegExp(`(?:[A-Za-z0-9_.{}<>-]+\\/)+${escapeRegExp(filename)}`, 'g');
+  for (const match of document.matchAll(candidatePattern)) {
+    const candidate = match[0];
+    if (!candidate.includes('<')) continue;
+    const expression = candidate
+      .split(/(<[^>]+>)/g)
+      .map((part) => (/^<[^>]+>$/.test(part) ? '[^/]+' : escapeRegExp(part)))
+      .join('');
+    if (new RegExp(`^${expression}$`).test(path)) return true;
+  }
+
+  // Some procedures declare the destination folder once, then enumerate
+  // children separately (for example "posts/<created>-<slug>/" followed by
+  // "post.md at the root" and "variants/ files"). A concrete child remains
+  // reachable when that symbolic folder is a prefix and its filename is named.
+  for (const match of document.matchAll(/(?:[A-Za-z0-9_.{}<>-]+\/)+/g)) {
+    const candidate = match[0];
+    if (!candidate.includes('<')) continue;
+    const expression = candidate
+      .split(/(<[^>]+>)/g)
+      .map((part) => (/^<[^>]+>$/.test(part) ? '[^/]+' : escapeRegExp(part)))
+      .join('');
+    if (new RegExp(`^${expression}`).test(path)) return true;
+  }
+  return false;
+}
+
 export function classifyDeliverableReachability(
   spec: CraftbookEvalSpec,
   template: CraftbookTemplateSummary,
@@ -125,11 +165,27 @@ export function classifyDeliverableReachability(
     .filter((path) => path && !seeded.has(path));
   if (graded.length === 0) return null;
 
+  const gatedPaths = craftbookGatedPaths(template);
+  // Guardrail and generic orchestration books intentionally do not own a
+  // static output filename: the user's kickoff supplies the concrete path,
+  // while the value of the book is its hook or review/release sequence. That
+  // is a valid workflow eval only when the sidecar proves both attribution
+  // and terminal progress. Without those two invariants it remains the old
+  // false-positive shape (a freehand worker can write anything and pass).
+  if (
+    gatedPaths.length === 0 &&
+    spec.mode === 'workflow' &&
+    spec.success.taskGraph?.requireCraftbookTask === true &&
+    spec.success.taskGraph.requireTerminalStep === true
+  ) {
+    return null;
+  }
+
   const document = resolveBookDocument(spec, template);
   const unreachable: string[] = [];
   const drifted: string[] = [];
   for (const path of graded) {
-    if (document.includes(path)) continue;
+    if (document.includes(path) || documentNamesPathTemplate(document, path)) continue;
     if (document.includes(basename(path))) drifted.push(path);
     else unreachable.push(path);
   }
@@ -140,7 +196,7 @@ export function classifyDeliverableReachability(
     scenarioId: spec.scenarioId,
     verdict: unreachable.length > 0 ? 'unreachable' : 'folder-drift',
     paths: unreachable.length > 0 ? unreachable : drifted,
-    bookGatedPaths: craftbookGatedPaths(template),
+    bookGatedPaths: gatedPaths,
   };
 }
 

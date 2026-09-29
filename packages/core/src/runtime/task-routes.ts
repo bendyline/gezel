@@ -9,6 +9,7 @@ import { type ScriptRef, type ScriptRun, normalizeScriptRefs } from '../schemas/
 import {
   AppendTaskNoteRequestSchema,
   CompleteStepRequestSchema,
+  type CompleteStepResponse,
   CreateTaskRequestSchema,
   SetTaskStatusRequestSchema,
   type Task,
@@ -81,7 +82,7 @@ export class PortableTaskRunner {
   cancelActive(): void {
     for (const controller of this.controllers.values()) controller.abort();
   }
-  async run(ref: string, retryInterruptedHooks = false) {
+  async run(ref: string, retryInterruptedHooks = false): Promise<{ task: Task; dispatched: true }> {
     if (this.isBusy()) throw new Error('Wait for the current task to finish');
     this.options.canRun?.();
     this.admitting = true;
@@ -200,7 +201,7 @@ export class PortableTaskRunner {
       this.options.onChange?.(started.task);
     }
   }
-  async pause(ref: string, status: 'paused' | 'canceled' = 'paused') {
+  async pause(ref: string, status: 'paused' | 'canceled' = 'paused'): Promise<Task> {
     const controller = this.controllers.get(ref);
     const running = this.running.get(ref);
     // Stop is an execution revocation even when disk is full. Persist the
@@ -226,7 +227,7 @@ export class PortableTaskRunner {
       await this.options.store.listQuestions({ projectId: task.projectId, pending: true })
     ).some((question) => question.taskRef === task.ref);
   }
-  private questionHold(task: Task) {
+  private questionHold(task: Task): CompleteStepResponse {
     return {
       task,
       gate: {
@@ -307,7 +308,7 @@ export class PortableTaskRunner {
     next?: string,
     force = false,
     execution?: PortableTaskCompletionExecution,
-  ) {
+  ): Promise<CompleteStepResponse> {
     if (this.completing.has(ref)) throw new Error('Task completion is already being checked');
     const existing = this.controllers.get(ref);
     const controller = existing ?? new AbortController();
@@ -374,7 +375,7 @@ export class PortableTaskRunner {
       if (!existing) this.controllers.delete(ref);
     }
   }
-  async create(projectId: string, body: unknown, beforeSave?: () => Promise<void>) {
+  async create(projectId: string, body: unknown, beforeSave?: () => Promise<void>): Promise<Task> {
     const request = CreateTaskRequestSchema.parse(body);
     const book = request.craftbookId
       ? await this.options.resolveCraftbook?.(
@@ -412,7 +413,7 @@ export class PortableTaskRunner {
     this.options.onChange?.(task);
     return task;
   }
-  async update(ref: string, input: unknown, expectedActiveStepId?: string) {
+  async update(ref: string, input: unknown, expectedActiveStepId?: string): Promise<Task> {
     const task = await this.options.store.updateTask(
       ref,
       UpdateTaskRequestSchema.parse(input),

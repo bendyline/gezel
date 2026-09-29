@@ -16,7 +16,7 @@
 
 import type { ModelTier } from '@bendyline/gezel';
 import { modelParameterSize } from './chat-model-manifest.ts';
-import { type ChatProvider, isLocalEngine } from './providers.ts';
+import { type ChatProvider, categorizeProvider, isLocalEngine } from './providers.ts';
 
 // mirrors packages/service/src/chat/local-model-tier.ts:parseBillionsFromModelId
 function parseBillionsFromModelId(modelId: string | undefined): number | undefined {
@@ -66,6 +66,8 @@ export function classifyEvalModelTier(args: {
   engine: ChatProvider;
   modelId: string;
 }): ModelTier {
+  // Apple's on-device model is ~3B and never in the catalog.
+  if (categorizeProvider(args.engine) === 'system-model') return 'tiny';
   if (!isLocalEngine(args.engine)) return 'cloud';
   const billions = modelBillionsForEval(args.modelId);
   if (billions === undefined) return 'tiny';

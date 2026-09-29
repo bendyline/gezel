@@ -49,6 +49,8 @@
   --gezel-paper-control: #ece8e5;
   --gezel-paper-control-deep: #e4dfdc;
   --gezel-paper-inset: #ddd3bd;
+  /* True black, for surfaces that must meet the phone's own system bars. */
+  --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
   --gezel-ink-muted: #666;
   --gezel-ink-warm: #2a2520;
@@ -131,12 +133,6 @@
   /* Brand palette */
   --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
-  /* Veil alpha that mutes the wood-grain titlebar texture. The grain is
-     screened over --titlebar, then this near-opaque sage green is laid on
-     top at `normal` blend so only a whisper of grain shows through across
-     the whole bar — a quiet texture, not a feature. Raise the alpha for
-     fainter grain, lower it for stronger. */
-  --titlebar-tex-veil: rgba(102, 127, 98, 0.88);
   /* Fill colour the home-tab gezel logotype flips to when active.
      Light mode: dark forest green that complements the sage titlebar
      and contrasts strongly with the cream-tan tab background. Dark
@@ -608,4 +604,20 @@ html.embedded-chat #root {
   padding: 12px;
   font-size: 0.85rem;
   color: var(--text-muted, var(--text));
+}
+
+/* The native phone app paints its status and navigation bars true black, and
+   the near-black dark canvas read as a lighter band beside them (Galaxy S26+,
+   2026-09-27). The page ground goes to true black there; cards and panels keep
+   their small lift. Desktop windows, however narrow, keep the warm canvas. */
+@media (prefers-color-scheme: dark) {
+  html[data-platform="mobile"]:not([data-theme="light"]) {
+    --bg: var(--gezel-paper-night);
+    --home-workshop-paper: var(--gezel-paper-night);
+  }
+}
+
+html[data-platform="mobile"][data-theme="dark"] {
+  --bg: var(--gezel-paper-night);
+  --home-workshop-paper: var(--gezel-paper-night);
 }

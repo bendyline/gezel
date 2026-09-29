@@ -72,7 +72,8 @@ const VISION_NATIVE: Record<ProviderName, 'always' | 'never' | 'per-model'> = {
 
 /**
  * MLX vision uses the complete installed vision tower and a separate uncached
- * serial path. The bound session, rather than a catalog tag, must confirm it.
+ * serial path. The bound session, rather than a catalog tag, must confirm it;
+ * the engine may still be text-only until the first image arrives.
  */
 export const MLX_VISION_SUPPORTED = true;
 
@@ -106,17 +107,34 @@ export interface VisionCapabilityInput {
  * concrete: the projector's bytes leave the memory budget, which on a tight
  * card is more context (see `mmprojBudgetBytes`).
  *
- * Every reader of `config.nativeVision` must go through here. Three call
- * sites already decide this — the engine launch, the per-turn image plan, and
- * the model list the UI renders — and a default that lives in three
- * expressions is a default that will disagree with itself.
+ * Every reader of `config.nativeVision` must go through here or through
+ * {@link nativeVisionPreferenceFor}. Three call sites already decide this —
+ * the engine launch, the per-turn image plan, and the model list the UI
+ * renders — and a default that lives in three expressions is a default that
+ * will disagree with itself.
+ *
+ * MLX is the exception to "absent means ON": its vision tower slows every
+ * text turn, so an unset preference there means "load it when an image
+ * arrives" (see `mlx/vision-mode.ts`), and only an explicit `true` keeps it
+ * loaded.
  */
 export function nativeVisionEnabledFor(
   nativeVision: Record<string, boolean> | undefined,
   modelId: string | undefined,
 ): boolean {
   if (!modelId) return false;
-  return nativeVision?.[modelId] !== false;
+  return nativeVisionPreferenceFor(nativeVision, modelId) !== 'off';
+}
+
+/** The explicit per-model choice in `config.nativeVision`, or `default` when there is none. */
+export type NativeVisionPreference = 'on' | 'off' | 'default';
+
+export function nativeVisionPreferenceFor(
+  nativeVision: Record<string, boolean> | undefined,
+  modelId: string | undefined,
+): NativeVisionPreference {
+  const choice = modelId ? nativeVision?.[modelId] : undefined;
+  return choice === true ? 'on' : choice === false ? 'off' : 'default';
 }
 
 /**
@@ -144,7 +162,7 @@ export function resolveVisionCapability(input: VisionCapabilityInput): {
 
   if (input.provider === 'mlx') {
     return input.mlxVisionAvailable && input.nativeVisionEnabled
-      ? { native: true, reason: 'the bound MLX engine runs with its vision tower' }
+      ? { native: true, reason: 'the bound MLX engine loads its vision tower for images' }
       : { native: false, reason: 'the bound MLX engine has no enabled vision tower' };
   }
   const visionSidecarPath = input.provider === 'ds4' ? input.visionEncoderPath : input.mmprojPath;

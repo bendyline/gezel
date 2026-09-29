@@ -497,23 +497,25 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
       data-testid="tasks-view"
     >
       <header className="tasks-header" hidden={compact && showCompactDetail}>
-        <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
-          {TASK_KIND_OPTIONS.filter(
-            (option) => runtimeCapabilities().background || option.value === 'one-time',
-          ).map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
-              role="radio"
-              aria-checked={kindFilter === option.value}
-              className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
-              onClick={() => setKindFilter(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {/* A host without background work has one kind only, and a
+            one-key tray is a choice that isn't one. */}
+        {runtimeCapabilities().background && (
+          <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
+            {TASK_KIND_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
+                role="radio"
+                aria-checked={kindFilter === option.value}
+                className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
+                onClick={() => setKindFilter(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="tasks-filters">
           {projectId === undefined && (
             <Select.Root

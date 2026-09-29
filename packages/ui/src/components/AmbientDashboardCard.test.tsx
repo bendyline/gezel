@@ -1,4 +1,5 @@
 import type { AmbientDashboardStatusResponse } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -101,5 +102,35 @@ describe('AmbientDashboardCard theme control', () => {
       await screen.findByText('Dashboard generation failed: one-shot timed out after 180000ms'),
     ).toBeInTheDocument();
     expect(screen.getByText(/Last generated/)).toBeInTheDocument();
+  });
+
+  it('follows a run already in flight instead of reporting the 409', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.runAmbientDashboard).mockRejectedValueOnce(
+      new GezelApiError('Gezel API error 409 on POST /api/ambient-dashboard/run', 409, {
+        error: 'a dashboard run is already in flight',
+      }),
+    );
+    render(<AmbientDashboardCard />);
+
+    vi.mocked(api.getAmbientDashboard).mockResolvedValue({ ...status, running: true });
+    await user.click(await screen.findByRole('button', { name: 'Generate now' }));
+
+    expect(await screen.findByText('The meester is composing a dashboard…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate now' })).toBeDisabled();
+    expect(screen.queryByText(/409/)).not.toBeInTheDocument();
+  });
+
+  it('keeps polling a run that was already going when the card opened', async () => {
+    vi.mocked(api.getAmbientDashboard).mockResolvedValue({ ...status, running: true });
+    render(<AmbientDashboardCard />);
+    expect(await screen.findByText('The meester is composing a dashboard…')).toBeInTheDocument();
+
+    vi.mocked(api.getAmbientDashboard).mockResolvedValue({
+      ...status,
+      lastGeneratedAt: new Date().toISOString(),
+    });
+    expect(await screen.findByText(/Last generated/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate now' })).toBeEnabled();
   });
 });

@@ -97,6 +97,8 @@ export function sessionRouteGuard(
     isProjectLinked?: LinkedProjectAccessCheck;
     /** Whether the session's in-flight turn was started by the user. */
     isUserDirectedTurn?: (sessionId: string) => boolean;
+    /** The task's persisted status, or null when there is no such task. */
+    taskStatus?: TaskStatusLookup;
   } = {},
 ): MiddlewareHandler {
   return async (c, next) => {
@@ -117,11 +119,14 @@ export function sessionRouteGuard(
       auth,
       opts.isProjectLinked,
       opts.isUserDirectedTurn,
+      opts.taskStatus,
     );
     if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason);
     return next();
   };
 }
+
+export type TaskStatusLookup = (projectId: string, num: number) => Promise<string | null>;
 
 type SessionRouteDecision = { ok: true } | { ok: false; reason: string };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
@@ -154,11 +159,31 @@ function queryUsesOwnHistoryScope(c: Context, auth: SessionAuth): boolean {
   return c.req.query('project') === auth.projectId && c.req.query('gezel') === auth.gezelId;
 }
 
+/**
+ * Whether setting this task active would lift a pause. An unparseable num is
+ * the route's own 400; a failed or missing lookup fails closed.
+ */
+async function wouldResumePausedTask(
+  lookup: TaskStatusLookup | undefined,
+  projectId: string,
+  rawNum: string,
+): Promise<boolean> {
+  const num = Number.parseInt(rawNum, 10);
+  if (!Number.isFinite(num) || num <= 0 || String(num) !== rawNum) return false;
+  if (!lookup) return true;
+  try {
+    return (await lookup(projectId, num)) === 'paused';
+  } catch {
+    return true;
+  }
+}
+
 async function isSessionRouteAllowed(
   c: Context,
   auth: SessionAuth,
   isProjectLinked?: LinkedProjectAccessCheck,
   isUserDirectedTurn?: (sessionId: string) => boolean,
+  taskStatus?: TaskStatusLookup,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -180,6 +205,11 @@ async function isSessionRouteAllowed(
     path === '/api/projects/poisoned'
   ) {
     return sessionDeny('project preview/status routes require a first-party client');
+  }
+  // Folder inference creates projects for arbitrary host paths and lists the
+  // user's well-known folders: a first-party client decision, never a gezel's.
+  if (path === '/api/projects/infer-for-path' || path === '/api/projects/well-known-folders') {
+    return sessionDeny('folder inference routes require a first-party client');
   }
 
   // Project item routes are the main MCP surface. Bind to the token's project
@@ -214,8 +244,61 @@ async function isSessionRouteAllowed(
           : 'restarting a paused task requires a first-party client',
       );
     }
+    const statusRoute = /^\/tasks\/([^/]+)\/status\/?$/.exec(rest);
+    if (method === 'POST' && statusRoute) {
+      const body = await readJsonSafe(c);
+      const userTurn = isUserDirectedTurn?.(sessionId(auth)) === true;
+      // Canceling cannot be undone, so it is the user's move in the same way:
+      // a coordinator cancels only inside a turn the user started, never on
+      // its own initiative. Pausing stays open to everyone, and a worker's
+      // own cancel is unchanged.
+      if (auth.team && body?.status === 'canceled' && !userTurn) {
+        return sessionDeny('canceling a task needs the user to ask for it in this turn');
+      }
+      // Setting a paused task active is the retry above without the budget
+      // reset. Every session's prompt says to do it when the user asks to
+      // resume, so any session may — inside that turn and no other.
+      if (
+        body?.status === 'active' &&
+        !userTurn &&
+        (await wouldResumePausedTask(taskStatus, targetProject, statusRoute[1]!))
+      ) {
+        return sessionDeny('resuming a paused task needs the user to ask for it in this turn');
+      }
+    }
+    // `force` skips the step's gate and is recorded as the user's own
+    // "Complete anyway"; `advance_task_step` never sends it.
+    if (method === 'POST' && /^\/tasks\/[^/]+\/steps\/[^/]+\/complete\/?$/.test(rest)) {
+      const body = await readJsonSafe(c);
+      if (body?.force) {
+        return sessionDeny('forcing a step past its gate requires a first-party client');
+      }
+    }
+    // The owner or the CLI vouches for a recipe's scripts; a gezel creating
+    // the task cannot vouch for scripts it may have written itself.
+    if (method === 'POST' && /^\/tasks\/?$/.test(rest)) {
+      const body = await readJsonSafe(c);
+      if (body?.trustScripts) {
+        return sessionDeny('trusting custom scripts requires the owner or the CLI');
+      }
+    }
+    // Applying a proposal is the one workspace write that passes
+    // `userInitiated` — the click is the write — and dismissing is the
+    // user's review verdict. Report actions are model-authored cards the
+    // user fires or dismisses after reading them. None is a gezel's move.
+    if (/^\/diffpacks\/[^/]+\/(?:apply|dismiss)\/?$/.test(rest)) {
+      return sessionDeny('reviewing a change proposal requires a first-party client');
+    }
+    if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
+      return sessionDeny('report actions are fired from a first-party client');
+    }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
+    }
+    // A retrieval preview judges as any gezel and can return injected text,
+    // so from a session token it would read another gezel's private memory.
+    if (rest === '/retrieval/preview' || rest === '/retrieval/preview/') {
+      return sessionDeny('retrieval previews require a first-party client');
     }
     // An upload is labelled "from your computer" in every prompt that names
     // it; a gezel staging files would forge that provenance.

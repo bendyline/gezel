@@ -1,7 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { serializeCraftbookDoc } from '@bendyline/gezel';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { parseCraftbookTestSpec, serializeCraftbookDoc } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import { applyDefaultCraftbookStepPolicies } from './craftbook-step-policy.js';
 import { gildePackageRoot } from './gilde-data.js';
 import {
   type TacticalBook,
@@ -12,8 +13,13 @@ import {
   tacticalCraftbookDoc,
 } from './tactical-workflows.js';
 
-const gildeRoot = gildePackageRoot();
+const gildeRoot = process.env.GILDE_DIR?.trim()
+  ? resolve(process.env.GILDE_DIR.trim())
+  : gildePackageRoot();
 const authoringRoot = join(gildeRoot, 'authoring', 'tactical');
+if (!existsSync(authoringRoot)) {
+  throw new Error(`tactical authoring inputs not found under ${gildeRoot}`);
+}
 const dataRoot = join(gildeRoot, 'data', 'craftbook-templates');
 const wave = TacticalWaveConfigSchema.parse(
   JSON.parse(readFileSync(join(authoringRoot, 'wave.json'), 'utf8')) as unknown,
@@ -32,7 +38,7 @@ describe('tactical craftbook compiler', () => {
       const book = readBook(release.id);
       expect(lintTacticalBook(book)).toEqual([]);
 
-      const generated = tacticalCraftbookDoc(book, release);
+      const generated = applyDefaultCraftbookStepPolicies(tacticalCraftbookDoc(book, release));
       const committed = readFileSync(
         join(
           dataRoot,
@@ -46,6 +52,25 @@ describe('tactical craftbook compiler', () => {
       );
 
       expect(serializeCraftbookDoc(generated, 'json')).toBe(committed);
+      const authoredTest = parseCraftbookTestSpec(
+        JSON.parse(
+          readFileSync(join(authoringRoot, 'evals', `${release.id}.json`), 'utf8'),
+        ) as unknown,
+      );
+      if (!authoredTest.ok) throw new Error(authoredTest.errors.join('\n'));
+      expect(`${JSON.stringify(authoredTest.spec, null, 2)}\n`).toBe(
+        readFileSync(
+          join(
+            dataRoot,
+            release.id.slice(0, 2),
+            release.id,
+            'versions',
+            release.version,
+            'test.json',
+          ),
+          'utf8',
+        ),
+      );
       expect(generated.paramSchema).toMatchObject({
         type: 'object',
         properties: {

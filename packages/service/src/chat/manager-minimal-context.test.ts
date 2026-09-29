@@ -1,4 +1,4 @@
-import type { ProjectDetail } from '@bendyline/gezel';
+import { NATIVE_TOOL_NOTE, type ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { MINIMAL_CONTEXT_MAX_WINDOW } from '../model-profile/behaviors/prompt-minimal-context.js';
 import { type BuildInstructionsOptions, buildInstructions } from './instructions.js';
@@ -46,6 +46,23 @@ describe('buildInstructions — minimal-context mode', () => {
     expect(full).not.toMatch(/Tools available this turn/i);
     expect(full).not.toMatch(/ask_user_question/i);
     expect(full).not.toMatch(/Workspace files/i);
+  });
+
+  it('tells a native-tool model when to use tools instead of that it has none', () => {
+    const { full } = buildInstructions({
+      ...opts,
+      minimalContext: true,
+      minimalContextNativeTools: true,
+    });
+    expect(full).toContain(NATIVE_TOOL_NOTE);
+    expect(full).not.toMatch(/no tools and no workspace/i);
+    // Native tool definitions travel outside the prompt.
+    expect(full).not.toMatch(/Tools available this turn/i);
+    // It can act on the project, so it keeps a condensed brief of it.
+    expect(full).toContain('You are working in the project "Some Work Project".');
+    expect(full).toContain('### About this project\nA long project brief.');
+    expect(full).toContain('(Condensed.)');
+    expect(full.length).toBeLessThan(2048);
   });
 
   it('emits the no-tools conversational steer', () => {

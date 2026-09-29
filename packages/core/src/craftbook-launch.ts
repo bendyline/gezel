@@ -81,6 +81,53 @@ export function fillMainContentParam(args: {
   return suppliedSource ? params : { ...params, [key]: message };
 }
 
+/** Longest task description passed on as a reference subject. */
+const DESCRIPTION_SUBJECT_CHARS = 300;
+
+/**
+ * What a launch is ABOUT, for the reference list searched at launch: the
+ * value of the book's main content param, else the task description. Most
+ * books declare no main content param — the person's words reach them only
+ * as the description — so without the fallback almost no launch had a
+ * subject. Null when the launch supplies its own source (`sourcePath`,
+ * `content`, or an `input` picker): supplied sources are authoritative, and
+ * a list of other material would compete with them.
+ *
+ * The description is the person's message, not the padding a short one is
+ * given, and only its opening: a long brief names its subject first, and
+ * every word of it would widen what the list admits.
+ */
+export function craftbookReferenceSubject(args: {
+  paramSchema: unknown;
+  params?: Record<string, string>;
+  inputs?: Record<string, unknown>;
+  /** The task description — the fallback subject. Omit to allow only the main param. */
+  description?: string;
+}): string | null {
+  if (args.inputs && Object.keys(args.inputs).length > 0) return null;
+  const key = mainContentParamKey(args.paramSchema);
+  const otherSource = SOURCE_FORM_KEYS.some(
+    (candidate) => candidate !== key && (args.params?.[candidate]?.trim().length ?? 0) > 0,
+  );
+  if (otherSource) return null;
+  const subject = key ? args.params?.[key]?.trim() : undefined;
+  if (subject) return subject;
+  return args.description ? descriptionSubject(args.description) : null;
+}
+
+function descriptionSubject(description: string): string | null {
+  const own = description.replace(LAUNCH_PADDING_RE, ' ').replace(/\s+/g, ' ').trim();
+  if (!own) return null;
+  if (own.length <= DESCRIPTION_SUBJECT_CHARS) return own;
+  const cut = own.slice(0, DESCRIPTION_SUBJECT_CHARS);
+  const sentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return (sentenceEnd >= 40 ? cut.slice(0, sentenceEnd + 1) : cut).trim();
+}
+
+/** Matches either padding sentence `composeCraftbookTaskDescription` can add. */
+const LAUNCH_PADDING_RE =
+  /Run the "[^"\n]*" craftbook (?:end to end for this request|against this project)\./g;
+
 /**
  * The task description for a launch: the person's own words, verbatim,
  * padded with one imperative sentence only when they are too short to meet
@@ -128,7 +175,9 @@ export function composeCraftbookLaunch(args: {
  * Empty strings, `null`, and `undefined` are dropped rather than sent as
  * `""`, because a book's `required` check treats an absent key and an empty
  * one the same and a `minLength` branch would reject the empty one anyway.
- * Objects and arrays are not string params and are skipped.
+ * Flat arrays are encoded as comma-separated values, matching how a scalar
+ * craftbook prompt naturally consumes multi-select form values. Nested
+ * structures are not string params and are skipped.
  */
 export function stringifyCraftbookParamValues(
   value: Record<string, unknown>,
@@ -139,6 +188,13 @@ export function stringifyCraftbookParamValues(
     if (typeof raw === 'boolean') out[key] = raw ? 'true' : 'false';
     else if (typeof raw === 'number') out[key] = String(raw);
     else if (typeof raw === 'string') out[key] = raw;
+    else if (
+      Array.isArray(raw) &&
+      raw.length > 0 &&
+      raw.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
+    ) {
+      out[key] = raw.map(String).join(',');
+    }
   }
   return out;
 }
@@ -151,11 +207,11 @@ export function stringifyCraftbookParamValues(
  *
  * `false` marks a parameter another surface fills (the night-fix planner's
  * issue refs, the Review panel's review id) or that the task description
- * already carries. Omitted, a parameter is asked unless its default is a
- * runtime template (`{{task.dir}}`, `powerpoint/task-{{task.num}}`): the
- * daemon resolves those at create, so the form could only show an empty box
- * labelled with a folder path the person has no reason to know. `true`
- * forces the field back into the form. Launch forms read it through
+ * already carries. Omitted, a parameter is asked unless it is the
+ * runtime-owned `workPath` and its default is a template such as
+ * `{{task.dir}}`. Other templated defaults are useful, user-overridable
+ * output choices and remain visible. `true` forces any field back into the
+ * form. Launch forms read it through
  * {@link paramAsksUser}; the terminal still accepts every parameter.
  */
 export const PARAM_ASK_USER_KEY = 'askUser';
@@ -168,12 +224,12 @@ export function isRuntimeTemplateDefault(value: unknown): boolean {
 }
 
 /** Whether a launch form should show this paramSchema property to a person. */
-export function paramAsksUser(property: unknown): boolean {
+export function paramAsksUser(property: unknown, key?: string): boolean {
   if (!property || typeof property !== 'object' || Array.isArray(property)) return true;
   const record = property as Record<string, unknown>;
   const explicit = record[PARAM_ASK_USER_KEY];
   if (typeof explicit === 'boolean') return explicit;
-  return !isRuntimeTemplateDefault(record.default);
+  return !(key === 'workPath' && isRuntimeTemplateDefault(record.default));
 }
 
 /**
@@ -189,7 +245,7 @@ export function withoutUnaskedParams<T extends Record<string, unknown> | undefin
   const properties = paramProperties(paramSchema);
   const hidden = new Set(
     Object.entries(properties)
-      .filter(([, property]) => !paramAsksUser(property))
+      .filter(([key, property]) => !paramAsksUser(property, key))
       .map(([key]) => key),
   );
   if (hidden.size === 0) return paramSchema;
@@ -314,7 +370,7 @@ export function unmetParamAlternatives(
   const filled = new Set(filledKeys);
   const given = (key: string): boolean => {
     if (filled.has(key)) return true;
-    if (properties[key] && !paramAsksUser(properties[key])) return true;
+    if (properties[key] && !paramAsksUser(properties[key], key)) return true;
     const value = values[key];
     if (value === undefined || value === null) return false;
     return typeof value === 'string' ? value.trim().length > 0 : true;

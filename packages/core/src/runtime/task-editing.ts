@@ -46,7 +46,7 @@ export function updateTaskStep(
   ref: string,
   stepId: string,
   raw: UpdateTaskStepRequest,
-) {
+): Promise<Task> {
   const patch = UpdateTaskStepRequestSchema.parse(raw);
   return editTaskStructure(repo, ref, async (task) => {
     const index = task.craftbook.steps.findIndex((step) => step.id === stepId);
@@ -55,7 +55,7 @@ export function updateTaskStep(
     await validate(repo, task);
   });
 }
-export function addTaskStep(repo: PortableRepository, ref: string, raw: unknown) {
+export function addTaskStep(repo: PortableRepository, ref: string, raw: unknown): Promise<Task> {
   const step = NewCraftbookStepSchema.parse(raw);
   const position = StepPositionSchema.parse(raw);
   return editTaskStructure(repo, ref, async (task) => {
@@ -68,7 +68,11 @@ export function addTaskStep(repo: PortableRepository, ref: string, raw: unknown)
     await validate(repo, task);
   });
 }
-export function removeTaskStep(repo: PortableRepository, ref: string, stepId: string) {
+export function removeTaskStep(
+  repo: PortableRepository,
+  ref: string,
+  stepId: string,
+): Promise<Task> {
   return editTaskStructure(repo, ref, async (task) => {
     task.craftbook.steps = removeStepAndCleanEdges(task.craftbook.steps, stepId);
     if (task.craftbook.entryStepId === stepId)
@@ -80,7 +84,11 @@ export function removeTaskStep(repo: PortableRepository, ref: string, stepId: st
     await validate(repo, task);
   });
 }
-export function reorderTaskSteps(repo: PortableRepository, ref: string, order: string[]) {
+export function reorderTaskSteps(
+  repo: PortableRepository,
+  ref: string,
+  order: string[],
+): Promise<Task> {
   return editTaskStructure(repo, ref, async (task) => {
     task.craftbook.steps = reorderStepsArray(task.craftbook.steps, order);
     await validate(repo, task);
@@ -90,7 +98,7 @@ export function updateTaskCraftbook(
   repo: PortableRepository,
   ref: string,
   raw: UpdateTaskCraftbookRequest,
-) {
+): Promise<Task> {
   const patch = UpdateTaskCraftbookRequestSchema.parse(raw);
   return editTaskStructure(repo, ref, async (task) => {
     for (const [key, value] of Object.entries(patch)) {
@@ -100,7 +108,11 @@ export function updateTaskCraftbook(
     await validate(repo, task);
   });
 }
-export function activateTaskStep(repo: PortableRepository, ref: string, stepId: string) {
+export function activateTaskStep(
+  repo: PortableRepository,
+  ref: string,
+  stepId: string,
+): Promise<Task> {
   return editTaskStructure(
     repo,
     ref,

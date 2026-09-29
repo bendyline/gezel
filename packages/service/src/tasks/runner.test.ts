@@ -1252,6 +1252,25 @@ describe('TaskRunner — startup rehydration', () => {
       updatedAt: now,
       createdBy: { kind: 'user' },
     });
+    // A system job whose step an older build pinned to a gezel (generalist
+    // mode ran over it). Its work runs inside the service; a boot must not
+    // turn the control surface into a model turn.
+    await store.writeTask({
+      projectId: 'p1',
+      num: 5,
+      ref: 'p1/5',
+      title: 'system job',
+      status: 'active',
+      assignee: { kind: 'user' },
+      origin: { kind: 'system-job', jobId: 'boekwachter-indexing' },
+      craftbook: fixtureCraftbook([
+        { id: 'index', name: 'index', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
+      ]),
+      activeStepId: 'index',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
     // A completed task — should NOT be rehydrated.
     await store.writeTask({
       projectId: 'p1',

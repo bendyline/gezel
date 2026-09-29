@@ -978,4 +978,20 @@ FunctionEnd
   SetRegView lastused
   ; Preserve shared models, engine state, and any legacy data for recovery.
   DetailPrint "GezelService removed. Shared model and legacy data at ${GEZEL_DATA_DIR} preserved."
+
+  ; Word/Excel/PowerPoint registration and Gezel's Office certificate
+  ; authority are per user: Settings -> Connected Apps writes a value under
+  ; HKCU\...\WEF\Developer per add-in (data = a manifest under the user's
+  ; .gezel\integrations\office\manifests) and puts the CA in the user's own
+  ; Root store. This macro also runs on every upgrade, and an update must not
+  ; unregister Office, hence the guard. HKCU here is the account that approved
+  ; the elevation; another account removes its own from Settings first.
+  ${ifNot} ${isUpdated}
+    DetailPrint "Removing Gezel from Word, Excel, and PowerPoint for this account..."
+    nsExec::ExecToLog `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$k = 'HKCU:\Software\Microsoft\Office\16.0\WEF\Developer'; if (Test-Path $$k) { foreach ($$v in (Get-ItemProperty $$k).PSObject.Properties) { if ([string]$$v.Value -like '*\.gezel\integrations\office\manifests\*') { Remove-ItemProperty -Path $$k -Name $$v.Name -ErrorAction SilentlyContinue } } }; Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $$_.Subject -like 'CN=Gezel Office Local CA*' } | Remove-Item -ErrorAction SilentlyContinue"`
+    Pop $0
+    ${If} $0 != 0
+      DetailPrint "WARNING: Gezel could not fully remove its Office add-in registration (exit $0). Remove it from Word, Excel, or PowerPoint's add-in list."
+    ${EndIf}
+  ${EndIf}
 !macroend

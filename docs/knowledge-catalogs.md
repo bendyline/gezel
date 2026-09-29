@@ -95,6 +95,28 @@ single-catalog scan-all stays affordable at ≤10 shards.
 
 ## Executive decision
 
+### Bundled Handboek
+
+The Handboek is a normal `.gezk` catalog (`bendyline/handboek`) built from the
+curated and generated documentation by
+`packages/service/scripts/build-handboek-gezk.ts`. Its source remains under
+`docs/handboek/`, and `gezel handboek export` continues to render that source
+to website HTML. The service package ships the archive in `dist/handboek.gezk`.
+On first start or a changed archive digest, the user daemon runs the same
+verified private install path as a local catalog and registers it as `bundled`.
+It appears in Knowledge, can be disabled, and participates in ordinary
+project-scoped search and proactive RAG. The built-in archive cannot be
+removed from Settings; disabling it is the user's opt-out. The legacy
+`/api/handboek` and `how_do_i` surfaces remain for older clients and
+specialized narration, while in-app browsing, Home, and search results open the Knowledge
+catalog.
+
+The catalog freezes device-neutral content. Personalized roster, installed
+model, and device macros remain available through the legacy API where needed;
+they do not enter the shared immutable archive. Images and rich Markdown are
+catalog assets and document bodies. The website exporter still has its own
+HTML, video, and Open Graph generation.
+
 A **knowledge catalog** is a versioned, read-only body of reference material that
 Gezel can search, cite, browse, and use as one bounded source in proactive indexed
 context. It is distributed as a standard ZIP with the `.gezk` extension and
@@ -470,6 +492,16 @@ query
   +-- cross-catalog merge: score calibration + dedupe + diversity caps
   `-- merge as one lower-priority arm beside project/shared/memory results
 ```
+
+Beside the shard arms, every catalog's document index (`fts_documents`: title,
+summary, aliases) answers as the exact-name arm, and it ranks name-first: a
+title equal to the query comes first, then BM25 with the title weighted 10×,
+aliases 5× and the summary 1× ([fts-query.ts](../packages/knowledge/src/reader/fts-query.ts)).
+FTS5's default `rank` weights the columns alike, which let short summaries that
+repeat a title's words outrank the page itself — a series page like "1944
+Republican Party vice presidential candidate selection" fell out of its own
+top 5. The same query backs the compiler's smoke verification and the
+validator, so seal-time and install-time checks agree with search.
 
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest

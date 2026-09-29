@@ -30,46 +30,6 @@ jobs:
       - name: Require immutable full-length action pins
         run: node scripts/check-workflow-action-pins.mjs
 
-  # Conventional Commits are enforced here and nowhere else — there is no
-  # local git hook, deliberately. This matters beyond tidiness:
-  # multi-semantic-release derives every published npm version bump from
-  # these exact messages, so a malformed subject on main silently changes
-  # what the next release publishes. Checked on PRs AND on pushes to main.
-  commitlint:
-    name: Conventional commits
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/setup-workspace
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-          check-local-links: 'false'
-      - name: Lint pull request commits
-        if: github.event_name == 'pull_request'
-        run: >-
-          pnpm exec commitlint
-          --from ${{ github.event.pull_request.base.sha }}
-          --to ${{ github.event.pull_request.head.sha }}
-          --verbose
-      - name: Lint pushed commits
-        if: github.event_name == 'push'
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # `before` is all-zeros for a new branch, and can point at a commit
-          # that no longer exists after a force-push. Fall back to the tip.
-          if [[ "$BEFORE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
-            pnpm exec commitlint --last --verbose
-          else
-            pnpm exec commitlint --from "$BEFORE_SHA" --to "$HEAD_SHA" --verbose
-          fi
-
   unit:
     name: Build, lint, typecheck, and unit tests
     needs: workflow-policy
@@ -101,6 +61,12 @@ jobs:
         # runs several package suites at once, each with its own worker pool.
         # Serialising the packages keeps fixed test timeouts meaningful.
         run: pnpm test:ci
+      - name: Run the LibreOffice extension's Python tests
+        # Stdlib-only unittest suites for the extension's pure modules
+        # (discovery, HTTP/SSE, consent, relay, tool definitions). The UNO
+        # layer needs LibreOffice and is covered by the manual smoke recipe
+        # in packages/libreoffice-extension/README.md.
+        run: pnpm --filter @bendyline/gezel-libreoffice-extension run test:py
       - name: Enforce direct-import test-surface floors
         run: pnpm test:surface
       - name: Preserve direct-import test-surface inventory

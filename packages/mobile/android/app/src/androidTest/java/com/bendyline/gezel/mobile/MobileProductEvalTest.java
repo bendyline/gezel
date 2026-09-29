@@ -7,10 +7,13 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.webkit.WebView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.bendyline.gezel.runtime.GezelNativeRuntime;
+import com.bendyline.gezel.runtime.NativeCall;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
@@ -137,8 +140,10 @@ public final class MobileProductEvalTest {
         if (!"1".equals(arguments.getString("evalContractsOnly"))) {
             JSONArray scenarios = options.optJSONArray("scenarios");
             if (scenarios == null) scenarios = new JSONArray(evaluate("[...window.__gezelMobileEval.scenarios,..." + options.getJSONArray("canonicalFixtures") + ".map(f=>f.id)]"));
+            long cooldownMs = Long.parseLong(arguments.getString("evalCooldownMs", "0"));
             for (int index = 0; index < scenarios.length(); index++) {
                 String scenario = scenarios.getString(index);
+                coolDown(cooldownMs);
                 android.util.Log.i("GezelMobileEval", "MOBILE_EVAL_STAGE isolated-trial " + scenario);
                 resetProduct(files, source);
                 runPhase(new JSONObject(options.toString()).put("scenarios", new JSONArray().put(scenario)), source, reports, reportFile);
@@ -190,6 +195,40 @@ public final class MobileProductEvalTest {
         Files.write(reportFile.toPath(), merged.getBytes(StandardCharsets.UTF_8));
     }
 
+    /**
+     * A phone on USB power reached THERMAL_STATUS_SEVERE after about five minutes
+     * of inference, and the runtime then refuses every request, so back-to-back
+     * trials measured the chassis rather than the model (Galaxy S20 FE, 2026-09-26).
+     */
+    private float idleHeadroom = Float.NaN;
+
+    /**
+     * Headroom is compared with what this phone showed before the first trial,
+     * not a fixed number: an S20 FE on USB power idles at about 0.74, so a fixed
+     * 0.75 threshold held every trial for the whole wait. The baseline waits for
+     * no thermal status at all; one read from a phone still warm from an earlier
+     * run (0.9) let every later trial start hot.
+     */
+    private void coolDown(long maxMs) {
+        if (maxMs <= 0) return;
+        PowerManager power = instrumentation.getTargetContext().getSystemService(PowerManager.class);
+        long started = SystemClock.elapsedRealtime();
+        int status;
+        float headroom;
+        while (true) {
+            status = power.getCurrentThermalStatus();
+            headroom = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? power.getThermalHeadroom(10) : Float.NaN;
+            if (Float.isNaN(idleHeadroom) && status == PowerManager.THERMAL_STATUS_NONE) idleHeadroom = headroom;
+            boolean cool = status < PowerManager.THERMAL_STATUS_MODERATE
+                && (Float.isNaN(headroom) || (!Float.isNaN(idleHeadroom) && headroom <= idleHeadroom + 0.05f));
+            if (cool || SystemClock.elapsedRealtime() - started >= maxMs) break;
+            // Headroom forecasts are rate limited; polling faster returns NaN.
+            SystemClock.sleep(15000);
+        }
+        android.util.Log.i("GezelMobileEval", "MOBILE_EVAL_STAGE cooldown waitedMs=" + (SystemClock.elapsedRealtime() - started)
+            + " thermalStatus=" + status + " headroom=" + headroom + " idleHeadroom=" + idleHeadroom);
+    }
+
     private void resetProduct(File files, String source) throws Exception {
         closeActivity();
         removeProductTree();
@@ -224,15 +263,24 @@ public final class MobileProductEvalTest {
     }
 
     private String evaluate(String source) throws Exception {
+        String result = evaluateWithin(source, 20);
+        assertNotNull("WebView evaluation timed out", result);
+        return result;
+    }
+    /** Returns null when no answer came back in time. */
+    private String evaluateWithin(String source, int seconds) throws Exception {
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<String> result = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> webView.evaluateJavascript(source, value -> { result.set(value); done.countDown(); }));
-        assertTrue("WebView evaluation timed out", done.await(20, TimeUnit.SECONDS));
-        return result.get();
+        return done.await(seconds, TimeUnit.SECONDS) ? result.get() : null;
     }
     private void waitForApp() throws Exception {
-        for (int attempt = 0; attempt < 600; attempt++) {
-            if (evaluate("Boolean(!window.__gezelEvalReloading && window.__GEZEL__?.fetch && document.querySelector('[data-testid=\"app-sidebar\"]') && window.Capacitor?.Plugins?.GezelMobile)").equals("true")) return;
+        long deadline = SystemClock.elapsedRealtime() + 120_000;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            // A page that navigates again while loading drops an evaluation's
+            // callback; that means not ready yet. Twice on the S20 FE a reload
+            // outlived one 20 s evaluation and failed the whole run.
+            if ("true".equals(evaluateWithin("Boolean(!window.__gezelEvalReloading && window.__GEZEL__?.fetch && document.querySelector('[data-testid=\"app-sidebar\"]') && window.Capacitor?.Plugins?.GezelMobile)", 5))) return;
             SystemClock.sleep(100);
         }
         fail("Packaged product did not initialize");
@@ -243,25 +291,33 @@ public final class MobileProductEvalTest {
         Field field = GezelMobilePlugin.class.getDeclaredField("storageQueue");
         field.setAccessible(true);
         ExecutorService storage = (ExecutorService) field.get(plugin);
-        Field inferenceField = GezelMobilePlugin.class.getDeclaredField("inferenceQueue");
-        inferenceField.setAccessible(true);
-        ExecutorService inference = (ExecutorService) inferenceField.get(plugin);
         instrumentation.runOnMainSync(() -> activity.finish());
         instrumentation.waitForIdleSync();
         assertTrue("Storage must stop before resetting data", storage.awaitTermination(30, TimeUnit.SECONDS));
-        assertTrue("Native inference and model unload must finish before the next trial", inference.awaitTermination(30, TimeUnit.SECONDS));
+        // Inference lives in the process-wide runtime, which outlives this
+        // activity and never shuts down; wait for its model release instead.
+        CountDownLatch released = new CountDownLatch(1);
+        String[] releaseFailure = new String[1];
+        GezelNativeRuntime.shared(instrumentation.getTargetContext()).releaseModel(new NativeCall(new JSONObject(), new NativeCall.Reply() {
+            @Override public void resolve(JSONObject value) { released.countDown(); }
+            @Override public void reject(String message, String code) { releaseFailure[0] = message; released.countDown(); }
+        }));
+        assertTrue("Native inference and model unload must finish before the next trial", released.await(30, TimeUnit.SECONDS));
+        assertNull("Native model release failed", releaseFailure[0]);
         activity = null;
         webView = null;
     }
     private void removeProductTree() throws Exception {
         if (productRoot != null && productRoot.isDirectory()) try (java.util.stream.Stream<java.nio.file.Path> entries = Files.walk(productRoot.toPath())) {
-            for (java.nio.file.Path path : entries.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+            // Collectors, not Stream.toList(): that is Java 16, and an Android 13
+            // device without ART module updates lacks it (ONYX Boox, 2026-09-27).
+            for (java.nio.file.Path path : entries.sorted(java.util.Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) Files.delete(path);
         }
     }
     private Map<String, String> productSnapshot(File directory) throws Exception {
         Map<String, String> snapshot = new java.util.TreeMap<>();
         try (java.util.stream.Stream<java.nio.file.Path> entries = Files.walk(directory.toPath())) {
-            for (java.nio.file.Path path : entries.filter(Files::isRegularFile).toList()) {
+            for (java.nio.file.Path path : entries.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())) {
                 java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
                 try (java.io.InputStream input = Files.newInputStream(path)) {
                     byte[] buffer = new byte[65536];

@@ -845,6 +845,9 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         ...(body.maxResults ? { maxResults: body.maxResults } : {}),
         ...(body.offset ? { offset: body.offset } : {}),
         ...(body.pathPrefix ? { pathPrefix: body.pathPrefix } : {}),
+        // A weak lead is still a lead to a model that asked: reorder, and
+        // drop only what a calibrated model calls plainly off-topic.
+        relevance: { surface: 'search', mode: 'reorder' },
       }),
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
@@ -868,7 +871,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         arguments: { craftbookId: suggestion.id, description: body.query },
       },
     }));
-    return c.json({ ...searchResult, craftbooks });
+    const { relevance, ...found } = searchResult;
+    const hidden = relevance?.hidden.length ?? 0;
+    return c.json({
+      ...found,
+      craftbooks,
+      ...(hidden > 0 ? { hiddenBelowRelevanceFloor: hidden } : {}),
+    });
   });
 
   // ── security-intel ─────────────────────────────────────────────────────────

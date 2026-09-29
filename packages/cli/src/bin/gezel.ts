@@ -1,3 +1,8 @@
+/**
+ * Gezel's command entrypoint applies global connection settings before dispatching
+ * management commands, workflows, or the TUI. Transport selection is process-wide
+ * so SDK discovery and command requests use the same protocol and trust policy.
+ */
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
 import {
   GEZEL_VERSION,
@@ -92,6 +97,7 @@ program
     'Connect to this Gezel service (first use asks for approval in the Gezel app).',
   )
   .option('--token <token>', 'Bearer token for --connect (must have CLI access).')
+  .option('--http1', 'Use HTTP/1.1 for daemon requests, keeping TLS certificate validation.')
   .option(
     '--standalone',
     'Always use your own per-user Gezel service, even if an older machine-wide install is present.',
@@ -113,6 +119,7 @@ registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 program.hook('preAction', () => {
   const globals = cliGlobals();
   validateGlobals(globals);
+  if (globals.http1) process.env.GEZEL_HTTP_VERSION = '1.1';
   applyHome(globals);
 });
 
@@ -2218,7 +2225,10 @@ program
     'Restore just these items, by id (repeatable, e.g. --only tamsin roof-survey)',
   )
   .option('--replace', 'Overwrite items that already exist here')
-  .option('--settings', 'Also restore preferences from the backup')
+  .option(
+    '--settings',
+    'Also restore which gezels hold roles such as the meester (never providers, folders or security)',
+  )
   .action(
     async (
       file: string,

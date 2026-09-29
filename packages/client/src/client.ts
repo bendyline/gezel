@@ -1,4 +1,11 @@
+/**
+ * Typed product API client shared by desktop, CLI and integrations. Transport,
+ * authentication and JSON error handling are centralized here; individual
+ * buffered GET responses retry transient connection failures at most three
+ * times with the original caller signal. Mutations and streams never retry.
+ */
 import { GezelApiError, describeTransportError } from './api-error.js';
+import { withReadTransportRetry } from './read-retry.js';
 export { GezelApiError } from './api-error.js';
 import type {
   AppToolCallResultRequest,
@@ -75,6 +82,7 @@ import type {
   BackupPlan,
   BackupRequest,
   CancelCodeReviewResponse,
+  CancelSessionTurnRequest,
   CatalogItemDetail,
   CatalogItemSummary,
   CatalogItemVersionInfo,
@@ -215,6 +223,8 @@ import type {
   ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
+  InferProjectForPathRequest,
+  InferProjectForPathResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
   InstallOpenCodePluginRequest,
   InstallPackageRequest,
@@ -426,6 +436,7 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WellKnownFoldersResponse,
   WikimediaImageSearchRequest,
   WikimediaImageSearchResponse,
   WikipediaReadRequest,
@@ -440,6 +451,16 @@ import type {
   WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
 import { KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
+import type {
+  EvalCatalog,
+  EvalJob,
+  EvalJobListResponse,
+  EvalJobSpec,
+  EvalJobStreamEvent,
+  EvalTargetsResponse,
+  EvalTrialDetail,
+  EvalTrialListResponse,
+} from '@bendyline/gezel/eval';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
@@ -467,7 +488,17 @@ import type {
   FoldersStatusResponse,
 } from './folders.js';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
+import type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
+import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
+import type {
+  MachineServingConfig,
+  MachineServingDevice,
+  MachineServingGrant,
+  MachineServingState,
+  PairedRemoteInfo,
+} from './remote-serving.js';
+import { RetrievalClient } from './retrieval.js';
 import {
   type ConsumeSseJsonOptions,
   SseResponseError,
@@ -486,6 +517,14 @@ export type {
   FoldersStatusResponse,
 } from './folders.js';
 export type { LlamaCppInstalledModel } from './llama-cpp-model.js';
+export type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
+export type {
+  MachineServingConfig,
+  MachineServingDevice,
+  MachineServingGrant,
+  MachineServingState,
+  PairedRemoteInfo,
+} from './remote-serving.js';
 
 export interface ScanModelBundleOptions {
   scanId?: string;
@@ -1480,12 +1519,9 @@ export interface ConfigResponse {
     error?: string;
   };
   /** Passive presence for the `codex` binary. Mirrors `anthropicCliStatus`. */
-  codexCliStatus?: {
-    installed: boolean;
-    path?: string;
-    version?: string;
-    error?: string;
-  };
+  codexCliStatus?: ConfigResponse['anthropicCliStatus'];
+  /** Apple silicon with the gezel-apple-fm helper; availability is known once it starts. */
+  appleFoundationModelsStatus?: { installed: boolean };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
   /** Per-provider default image model id. `'sd-cpp'` names a locally installed model. */
@@ -1554,6 +1590,21 @@ export interface ConfigResponse {
     enabled?: boolean;
   };
   /**
+   * The launch reference list for craftbooks started with a subject.
+   * Default on. See `GezelConfig.taskReferences` in core schemas.
+   */
+  taskReferences?: {
+    enabled?: boolean;
+  };
+  /**
+   * The on-device relevance check. Default off. See
+   * `GezelConfig.relevanceModel` in core schemas.
+   */
+  relevanceModel?: {
+    enabled?: boolean;
+    modelId?: string;
+  };
+  /**
    * Opt-in ambient dashboard (Settings → Ambient display). Default off.
    * See `GezelConfig.ambientDashboard` in core schemas.
    */
@@ -1585,63 +1636,6 @@ export interface ConfigResponse {
       requestsPerMinute?: number;
     };
   };
-}
-
-/** One server this device has paired with (token redacted). */
-export interface PairedRemoteInfo {
-  remoteId: string;
-  baseUrl: string;
-  displayName: string;
-  pinnedIdentityFingerprint: string;
-  scopes: string[];
-  pairedAt: number;
-  lastSeenAt?: number;
-  hasToken: boolean;
-}
-
-/** remoteServing config as managed on the machine broker. */
-export interface MachineServingConfig {
-  enabled?: boolean;
-  bindAddress?: string;
-  port?: number;
-  priority?: 'equal' | 'below-local' | 'above-local';
-  reserveLocalGb?: number;
-  allowModels?: string[];
-  limits?: {
-    maxConcurrentPerDevice?: number;
-    maxChatPerDevice?: number;
-    requestsPerMinute?: number;
-  };
-}
-
-/**
- * GET/PUT /api/machine-serving response. `config.enabled` reflects the
- * actual listener state; `identity` is the BROKER's device identity (the
- * fingerprint peers verify out-of-band), not the user daemon's.
- */
-export interface MachineServingState {
-  config: MachineServingConfig;
-  status: { listening: boolean; host?: string; port?: number };
-  identity: { deviceId: string; fingerprint: string };
-}
-
-export interface MachineServingGrant {
-  id: string;
-  appId: string;
-  appName: string;
-  scopes: string[];
-  status: 'pending' | 'approved' | 'denied' | string;
-  createdAt: number;
-  decidedAt?: number;
-}
-
-export interface MachineServingDevice {
-  appId: string;
-  appName: string;
-  scopes: string[];
-  createdAt: number;
-  lastUsedAt?: number;
-  deviceId?: string;
 }
 
 export type SendChannelResult =
@@ -1708,11 +1702,12 @@ export type LlamaCppInstallEvent =
     };
 
 // ── Evals (in-app Benchmarks panel) ──
-// Mirror of packages/service/src/eval/{scenarios,runner}.ts shapes —
-// kept in the client for now to avoid coupling the client to the
-// service package. When the catalog moves into `@bendyline/gezel`
-// proper this duplication goes away.
+// The current contract lives in `@bendyline/gezel` (schemas/eval.ts):
+// `getEvalCatalog`, `listEvalTargets`, the job methods, and the trial index.
+// The three shapes below belong to the first in-app runner's endpoints, kept
+// working for existing callers.
 
+/** @deprecated Use `getEvalCatalog()` and `EvalCatalogScenario`. */
 export interface EvalScenarioManifest {
   id: string;
   name: string;
@@ -1724,6 +1719,7 @@ export interface EvalScenarioManifest {
   anchored: boolean;
 }
 
+/** @deprecated Use `listEvalTrials()` and `EvalTrialSummary`. */
 export interface TrialOutcome {
   trialId: string;
   scenarioId: string;
@@ -1737,6 +1733,7 @@ export interface TrialOutcome {
   runDir: string;
 }
 
+/** @deprecated Use `createEvalJob()` + `streamEvalJob()`. */
 export type RunEvalEvent =
   | { type: 'spawned'; trialId?: string; runDir?: string }
   | { type: 'log'; line: string }
@@ -1891,127 +1888,6 @@ export interface ModelFitnessEntry {
   hardwareChanged: boolean;
 }
 
-/**
- * Events emitted by the `/api/mlx/models/:id/install` SSE stream. MLX
- * models are multi-file repos (config.json + weight shards) so the
- * `progress` event carries `fileIndex` / `fileCount` / `file` for
- * per-file progress inside the overall install.
- */
-export type MlxInstallEvent =
-  | {
-      type: 'progress';
-      fileIndex: number;
-      fileCount: number;
-      file: string;
-      bytesWritten: number;
-      totalBytes: number;
-      /** Cumulative bytes downloaded across every file so far. */
-      bytesWrittenAll: number;
-      /** Sum of file sizes pinned in the manifest. */
-      totalBytesAll: number;
-    }
-  /**
-   * Retrying after a transient network error. UI shows
-   * "Connection dropped on shard 2/5 — retrying in 4s (attempt 3/5)…"
-   * — the `file` field is the MLX shard currently being attempted.
-   */
-  | {
-      type: 'retrying';
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-      reason: string;
-      file: string;
-    }
-  | { type: 'verifying'; file: string }
-  | { type: 'extracting-metadata' }
-  | { type: 'done'; id: string; warning?: string }
-  /**
-   * Terminal failure. When `mismatch` is present, the failure is a
-   * sha256 mismatch against the catalog — the UI can offer "Download
-   * anyway" which retries with `{skipSha: true}`.
-   */
-  | {
-      type: 'error';
-      error: string;
-      mismatch?: { file: string; expected: string; actual: string };
-    };
-
-/** One installed MLX model directory on disk. */
-export interface MlxInstalledModel {
-  id: string;
-  name: string;
-  approxSizeBytes: number;
-  installedAt: string;
-  /** Absolute path of the model directory; `mlx_lm.server --model` takes this. */
-  modelDir: string;
-  /** Context capacity advertised by the model metadata. */
-  contextWindow?: number;
-  /** Per-turn cap Gezel would actually grant after applying its configured limit. */
-  effectiveContextWindow?: number;
-  /**
-   * Expected memory to serve ONE chat: resident weights (with runtime
-   * overhead) plus a single slot's KV cache at the granted context
-   * window. This is the figure that tracks measured peak RSS. Absent when
-   * the daemon could not price the launch (unreadable weights, older
-   * daemon).
-   */
-  predictedResidentBytes?: number;
-  /**
-   * What the capacity broker actually holds: weights plus {@link plannedSlots}
-   * slots' KV. Equals `predictedResidentBytes` on a single-slot host.
-   */
-  reservedResidentBytes?: number;
-  /** Concurrent engine slots the launch would be admitted at. */
-  plannedSlots?: number;
-  /**
-   * Present when the selected context policy cannot be admitted right now —
-   * same contract as the llama.cpp rows (`insufficient-memory` /
-   * `restart-required`).
-   */
-  contextSizingStatus?: 'insufficient-memory' | 'restart-required';
-  /** Applied per-model context override (tokens), when one is set. */
-  overrideContextTokens?: number;
-  /** What automatic sizing would grant; present only while an override is active. */
-  autoContextWindow?: number;
-  /** Post-quant single-slot KV linearization for the context slider's live estimate. */
-  kvBytesPerTokenPerSlot?: number;
-  kvFixedBytesPerSlot?: number;
-  weightsResidentBytes?: number;
-  quantization?: string;
-  chatTemplatePresent: boolean;
-  architecture?: string;
-  /** Catalog manifest `version` as of install. */
-  catalogVersion?: string;
-  /**
-   * True when the model lives in a read-only overlay (the machine/shared asset
-   * store), not this daemon's writable root. Delete refuses these, so the UI
-   * shows them as machine-provided instead of offering Delete.
-   */
-  readOnly?: boolean;
-  /**
-   * True when the catalog now describes different model FILES than the ones
-   * on disk — the daemon compares the payload, not the version string, so a
-   * metadata-only catalog edit never asks for a re-download.
-   */
-  updateAvailable?: boolean;
-  /** The catalog's current version, when it differs from the installed one. */
-  availableVersion?: string;
-  /** What changed, in one sentence, for the update tooltip. */
-  updateReason?: string;
-}
-
-/** Snapshot of the Python runtime powering MLX venvs. */
-export interface MlxRuntimeInfo {
-  source: 'system-uv' | 'system-python' | 'bundled-uv' | null;
-  installerPath?: string;
-  uvVersion?: string;
-  pythonVersion?: string;
-  bundledUvAvailable: boolean;
-  /** Populated when `source === null` — explains why no runtime was found. */
-  reason?: string;
-}
-
 /** Result envelope shared by `runPackageScript` + `runNpx`. */
 export interface RunWorkspaceCommandResult {
   ok: boolean;
@@ -2100,6 +1976,25 @@ const MlxInstallEventSchema: z.ZodType<MlxInstallEvent> = z.discriminatedUnion('
   z.object({ type: z.literal('done'), id: z.string(), warning: z.string().optional() }),
   z.object({ type: z.literal('error'), error: z.string(), mismatch: mismatchSchema.optional() }),
 ]);
+/**
+ * The eval job stream, checked only as far as the stream loop reads it.
+ *
+ * Deliberately not core's `EvalJobStreamEventSchema`: importing it pulls the
+ * whole eval-job schema graph into every client consumer's startup bundle —
+ * the desktop UI's initial load paid for a Settings page most people never
+ * open. The daemon's job record is the authority for the rest of the shape.
+ */
+const EvalJobStreamWireSchema = z.union([
+  z.object({ type: z.literal('log'), line: z.string() }),
+  z
+    .object({
+      type: z.enum(['snapshot', 'job']),
+      job: z.object({ id: z.string(), status: z.string() }).passthrough(),
+      log: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+]) as unknown as z.ZodType<EvalJobStreamEvent>;
+
 const RunEvalEventSchema: z.ZodType<RunEvalEvent> = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('spawned'),
@@ -2181,6 +2076,8 @@ export class GezelClient {
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
   readonly taskInputs: TaskInputsClient;
+  readonly officeIntegrations: OfficeIntegrationsClient;
+  readonly retrieval: RetrievalClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -2192,9 +2089,23 @@ export class GezelClient {
     const baseFetch = opts.fetch ?? fetch;
     this.fetchImpl = baseFetch.bind(globalThis);
     this.taskInputs = new TaskInputsClient(this.baseUrl, this.token, this.fetchImpl);
+    const json = <T>(m: string, p: string, b?: unknown) => this.request<T>(m, p, b);
+    this.officeIntegrations = new OfficeIntegrationsClient(json);
+    this.retrieval = new RetrievalClient(json);
   }
 
   private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const read = () => this.requestOnce<T>(method, path, body, extraHeaders, signal);
+    return method === 'GET' ? withReadTransportRetry(read, path, signal) : read();
+  }
+
+  private async requestOnce<T>(
     method: string,
     path: string,
     body?: unknown,
@@ -2218,7 +2129,11 @@ export class GezelClient {
       throw new GezelApiError(
         `Gezel API transport unavailable on ${method} ${path}: ${message}`,
         0,
-        { kind: 'transport', cause: message },
+        {
+          kind: 'transport',
+          cause: message,
+          causeName: error instanceof Error ? error.name : undefined,
+        },
       );
     }
     if (!res.ok) {
@@ -2252,6 +2167,24 @@ export class GezelClient {
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
+  }
+
+  private readBlob(path: string, failureLabel: string, signal?: AbortSignal): Promise<Blob> {
+    return withReadTransportRetry(
+      async () => {
+        const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          ...(signal ? { signal } : {}),
+        });
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {});
+          throw new GezelApiError(`${failureLabel}: ${res.status}`, res.status);
+        }
+        return res.blob();
+      },
+      path,
+      signal,
+    );
   }
 
   health(signal?: AbortSignal): Promise<HealthResponse> {
@@ -2565,12 +2498,10 @@ export class GezelClient {
 
   /** Download the proposal as a zip of patches + notes + `git apply` instructions. */
   async exportDiffpack(projectId: string, packId: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`diffpack export failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`,
+      'diffpack export failed',
+    );
   }
 
   /* ── diffpack drafting ──────────────────────────────────────────────
@@ -2860,12 +2791,10 @@ export class GezelClient {
       : assetPath;
     const encoded = relative.split('/').map(encodeURIComponent).join('/');
     const query = opts?.version ? `?v=${encodeURIComponent(opts.version)}` : '';
-    const url = `${this.baseUrl}/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets/${encoded}${query}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`knowledge asset fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/assets/${encoded}${query}`,
+      'knowledge asset fetch failed',
+    );
   }
 
   // ── storage accounting, cleanup & backup ──
@@ -3212,12 +3141,10 @@ export class GezelClient {
   }
 
   async fetchProjectAttachment(projectId: string, filename: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/attachments/${encodeURIComponent(filename)}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`attachment fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/attachments/${encodeURIComponent(filename)}`,
+      'attachment fetch failed',
+    );
   }
 
   // ── Legacy session-scoped images ─────────────────────────────
@@ -3281,12 +3208,10 @@ export class GezelClient {
    * as `fetchSessionImage`.
    */
   async fetchProjectArtifactBlob(projectId: string, filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`artifact fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/artifacts/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'artifact fetch failed',
+    );
   }
 
   /**
@@ -3295,12 +3220,10 @@ export class GezelClient {
    * which also can't put a bearer token into an `<img src>`.
    */
   async fetchProjectWorkspaceBlob(projectId: string, filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/workspace/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`workspace fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/workspace/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'workspace fetch failed',
+    );
   }
 
   /**
@@ -3308,12 +3231,10 @@ export class GezelClient {
    * `<img src>` can't carry a bearer token so we do the fetch by hand.
    */
   async fetchSessionImage(projectId: string, sessionId: string, filename: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(filename)}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(filename)}`,
+      'image fetch failed',
+    );
   }
 
   /**
@@ -3466,11 +3387,7 @@ export class GezelClient {
    * URL in the DOM. The SSE query-token exemption is one URL by design.
    */
   async fetchCatalogFile(path: string): Promise<Blob> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`catalog file fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(path, 'catalog file fetch failed');
   }
 
   createGezelFromTemplate(
@@ -3972,14 +3889,91 @@ export class GezelClient {
 
   // ── Evals (in-app Benchmarks panel) ──
 
+  /** The eval harness's registry: every scenario, suite, and provider default. */
+  getEvalCatalog(opts?: { refresh?: boolean }): Promise<EvalCatalog> {
+    return this.request('GET', opts?.refresh ? '/api/eval/catalog?refresh=1' : '/api/eval/catalog');
+  }
+
+  /** What this install can evaluate: models per provider, image models, environment. */
+  listEvalTargets(): Promise<EvalTargetsResponse> {
+    return this.request('GET', '/api/eval/targets');
+  }
+
+  listEvalJobs(): Promise<EvalJobListResponse> {
+    return this.request('GET', '/api/eval/jobs');
+  }
+
+  /** Queue a job. It runs in the daemon and outlives this request. */
+  createEvalJob(spec: EvalJobSpec): Promise<EvalJob> {
+    return this.request('POST', '/api/eval/jobs', spec);
+  }
+
+  getEvalJob(id: string): Promise<EvalJob> {
+    return this.request('GET', `/api/eval/jobs/${encodeURIComponent(id)}`);
+  }
+
+  cancelEvalJob(id: string): Promise<EvalJob> {
+    return this.request('POST', `/api/eval/jobs/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /**
+   * Follow one job: a snapshot (record + recent log), then live log lines
+   * and record updates. Resolves when the job reaches a terminal status;
+   * abort `signal` to stop watching without affecting the job.
+   */
+  async streamEvalJob(
+    id: string,
+    onEvent: (event: EvalJobStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const finished = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
+    await consumeApiSseJson({
+      url: `${this.baseUrl}/api/eval/jobs/${encodeURIComponent(id)}/stream`,
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal,
+      fetch: this.fetchImpl,
+      schema: EvalJobStreamWireSchema,
+      onEvent,
+      isTerminal: (event) => event.type !== 'log' && finished.has(event.job.status),
+      label: 'Eval job stream',
+    });
+  }
+
+  listEvalTrials(filter?: {
+    scenarioId?: string;
+    modelId?: string;
+    provider?: string;
+    jobId?: string;
+    limit?: number;
+  }): Promise<EvalTrialListResponse> {
+    const qs = new URLSearchParams();
+    if (filter?.scenarioId) qs.set('scenario', filter.scenarioId);
+    if (filter?.modelId) qs.set('model', filter.modelId);
+    if (filter?.provider) qs.set('provider', filter.provider);
+    if (filter?.jobId) qs.set('job', filter.jobId);
+    if (filter?.limit != null) qs.set('limit', String(filter.limit));
+    const query = qs.toString();
+    return this.request('GET', query ? `/api/eval/trials?${query}` : '/api/eval/trials');
+  }
+
+  getEvalTrial(trialId: string): Promise<EvalTrialDetail> {
+    return this.request('GET', `/api/eval/trials/${encodeURIComponent(trialId)}`);
+  }
+
+  /** @deprecated Use `getEvalCatalog()`. */
   listEvalScenarios(): Promise<{ scenarios: readonly EvalScenarioManifest[] }> {
     return this.request('GET', '/api/eval/scenarios');
   }
 
+  /**
+   * @deprecated Every install can run in-app evals now; the harness ships
+   * with the service.
+   */
   getEvalAvailability(): Promise<{ available: boolean; reason: string | null }> {
     return this.request('GET', '/api/eval/availability');
   }
 
+  /** @deprecated Use `listEvalTrials()`. */
   listEvalResults(filter?: {
     scenarioId?: string;
     limit?: number;
@@ -3992,6 +3986,9 @@ export class GezelClient {
   }
 
   /**
+   * @deprecated Use `createEvalJob()` + `streamEvalJob()`; this queues a
+   * one-trial job and cancels it if the stream is aborted.
+   *
    * Run an eval trial end-to-end. SSE-streams progress events; resolves
    * when the child harness exits. The `done` event carries the final
    * outcome; `error` events surface harness-side failures. UI consumers
@@ -4929,15 +4926,18 @@ export class GezelClient {
    * `projectId`, returns every question for that project; pass
    * `pending: true` to filter to unanswered.
    */
-  listQuestions(opts?: {
-    projectId?: string;
-    pending?: boolean;
-  }): Promise<ListQuestionsResponse> {
+  listQuestions(
+    opts?: {
+      projectId?: string;
+      pending?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<ListQuestionsResponse> {
     const params = new URLSearchParams();
     if (opts?.projectId) params.set('project', opts.projectId);
     if (opts?.pending) params.set('pending', 'true');
     const qs = params.toString();
-    return this.request('GET', `/api/questions${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/api/questions${qs ? `?${qs}` : ''}`, undefined, undefined, signal);
   }
 
   /**
@@ -5059,9 +5059,16 @@ export class GezelClient {
     return this.request('GET', `/api/sessions/${encodeURIComponent(sessionId)}/telemetry`);
   }
 
-  /** Forcibly end a wedged turn. Safe to call when nothing's running. */
-  cancelChatSessionTurn(sessionId: string): Promise<{ cancelled: boolean }> {
-    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`);
+  /**
+   * End the running turn. Safe to call when nothing's running. Pass
+   * `stopTask` for the person's explicit Stop: a task step the session is
+   * working is then paused, so nothing restarts it until they resume.
+   */
+  cancelChatSessionTurn(
+    sessionId: string,
+    opts?: CancelSessionTurnRequest,
+  ): Promise<{ cancelled: boolean; taskPaused?: boolean }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/cancel`, opts);
   }
 
   /**
@@ -5525,6 +5532,20 @@ export class GezelClient {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * Resolve a document (or folder) path to a project: the project that owns
+   * the folder, a new read-only folder project, or the Default project.
+   * Omit `path` for an unsaved document. See `project-inference/` in core.
+   */
+  inferProjectForPath(body: InferProjectForPathRequest): Promise<InferProjectForPathResponse> {
+    return this.request('POST', '/api/projects/infer-for-path', body);
+  }
+
+  /** The user's Documents / Pictures / cloud folders, with any project that owns each. */
+  listWellKnownFolders(): Promise<WellKnownFoldersResponse> {
+    return this.request('GET', '/api/projects/well-known-folders');
+  }
+
   setProjectWorkingDir(id: string, workingDir?: string): Promise<ProjectResponse> {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/working-dir`, {
       workingDir,
@@ -5970,10 +5991,14 @@ export class GezelClient {
   readProjectArtifact(
     id: string,
     filePath: string,
+    signal?: AbortSignal,
   ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/artifacts/read?path=${encodeURIComponent(filePath)}`,
+      undefined,
+      undefined,
+      signal,
     );
   }
 
@@ -7367,12 +7392,7 @@ export class GezelClient {
 
   /** Narration segment WAV — same bearer-in-fetch pattern as the artifact blobs. */
   async fetchHandboekNarrationAudio(hash: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/handboek/narration/audio/${hash}`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new Error(`narration fetch failed: ${res.status}`);
-    return res.blob();
+    return this.readBlob(`/api/handboek/narration/audio/${hash}`, 'narration fetch failed');
   }
 
   listDocuments(
@@ -7497,12 +7517,10 @@ export class GezelClient {
    * the editor's MediaProvider goes through this and creates a blob URL.
    */
   async fetchDocumentBlob(filePath: string): Promise<Blob> {
-    const url = `${this.baseUrl}/api/documents/read?path=${encodeURIComponent(filePath)}&raw=1`;
-    const res = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) throw new GezelApiError(`document fetch failed: ${res.status}`, res.status);
-    return res.blob();
+    return this.readBlob(
+      `/api/documents/read?path=${encodeURIComponent(filePath)}&raw=1`,
+      'document fetch failed',
+    );
   }
 
   /**
@@ -7588,18 +7606,24 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/tasks`, body);
   }
 
-  getTask(projectId: string, num: number): Promise<Task> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}`);
+  getTask(projectId: string, num: number, signal?: AbortSignal): Promise<Task> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}`,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
-  getTaskByRef(ref: string): Promise<Task> {
+  getTaskByRef(ref: string, signal?: AbortSignal): Promise<Task> {
     const parsed = parseTaskRef(ref);
     // This method's public contract is promise-based. Returning a rejection
     // keeps malformed or stale persisted refs inside callers' normal
     // `.catch()` / async error paths instead of throwing synchronously from a
     // React effect and unmounting the renderer.
     if (!parsed) return Promise.reject(new Error(`invalid task ref "${ref}"`));
-    return this.getTask(parsed.projectId, parsed.num);
+    return this.getTask(parsed.projectId, parsed.num, signal);
   }
 
   updateTask(projectId: string, num: number, body: UpdateTaskRequest): Promise<Task> {
@@ -7937,6 +7961,7 @@ export class GezelClient {
     projectId: string,
     num: number,
     filter?: { status?: TaskStatus; limit?: number },
+    signal?: AbortSignal,
   ): Promise<ListTasksResponse> {
     const params = new URLSearchParams();
     if (filter?.status) params.set('status', filter.status);
@@ -7945,6 +7970,9 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/children${qs}`,
+      undefined,
+      undefined,
+      signal,
     );
   }
 

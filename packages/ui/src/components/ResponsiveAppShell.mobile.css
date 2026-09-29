@@ -20,10 +20,15 @@
   direction: ltr;
 }
 
-.responsive-app-shell[data-compact="true"] .app-sidebar-item,
-.responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
-.responsive-app-shell[data-compact="true"] .app-sidebar-add {
-  min-height: 44px;
+/* The 44px floor is for fingers. A narrow desktop window driven by a mouse
+   keeps the desktop rail's row rhythm; at the compact density that floor
+   alone read as loose line spacing. */
+@media (any-pointer: coarse) {
+  .responsive-app-shell[data-compact="true"] .app-sidebar-item,
+  .responsive-app-shell[data-compact="true"] .app-sidebar-group-toggle,
+  .responsive-app-shell[data-compact="true"] .app-sidebar-add {
+    min-height: 44px;
+  }
 }
 
 .responsive-app-shell[data-compact="true"]
@@ -115,11 +120,113 @@
   overflow: hidden;
 }
 
+/* One row at every width: a wrapped titlebar drops search onto a second
+   band and doubles the header's height. */
 .app.app-compact .app-header {
   min-height: 52px;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+}
+
+/* Every key holds its width. Three 44px keys fit any phone; only a desktop
+   window narrower than about 250px can overflow them. */
+.app.app-compact .app-header > * {
+  flex-shrink: 0;
+}
+
+/* Updates becomes a key like its neighbours: a bell, with the count raised
+   onto its top-right corner as a notification badge. The word stays in the
+   accessible name. */
+.app.app-compact .app-header-questions {
+  position: relative;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  margin-bottom: 0;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  opacity: 1;
+}
+
+.app.app-compact .app-header-questions:hover,
+.app.app-compact .app-header-questions[aria-expanded="true"] {
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.app-header-questions-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.app.app-compact .app-header-questions .app-nav-badge {
+  position: absolute;
+  /* Straddles the key's corner. The key sits 4px below the header's top,
+     so -2px keeps the badge's 2px separating ring inside the bar. */
+  top: -2px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  transform: none;
+  box-shadow: 0 0 0 2px var(--titlebar);
+}
+
+/* On a Mac the compact bar is still the window's titlebar. Electron puts the
+   traffic lights 12px down (trafficLightPosition in the main process), which
+   centres them near 19px, the desktop bar's midline. 44px keys in a 52px bar
+   centre 7px below that, so the lights look stuck to the top edge. A trackpad
+   is not a finger, so these keys take the desktop titlebar's scale. The phone
+   preview keeps phone sizes: it stands in for a device, not this window. */
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .app-header {
+  min-height: 39px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  :is(.app-header-navigation, .app-header-questions, .titlebar-search-trigger) {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  :is(.app-header-navigation-icon, .app-header-questions-icon, .titlebar-search-trigger-icon) {
+  width: 16px;
+  height: 16px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  .app-header-questions
+  .app-nav-badge {
+  top: -4px;
+  right: -7px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 14px;
+}
+
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .titlebar-search-input {
+  min-height: 30px;
+}
+
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .titlebar-search-close {
+  width: 26px;
+  min-height: 26px;
 }
 
 :root[data-layout="mobile"] .app.app-compact .app-header {
@@ -150,10 +257,6 @@
   display: none;
 }
 
-.app.app-compact .app-header-brand {
-  min-height: 44px;
-}
-
 .app-header-navigation {
   align-self: center;
   display: inline-flex;
@@ -169,7 +272,8 @@
   cursor: pointer;
 }
 
-.app-header-navigation:hover {
+.app-header-navigation:hover,
+.app-header-navigation[aria-pressed="true"] {
   background: rgba(255, 255, 255, 0.16);
   border-color: var(--titlebar-ink);
 }
@@ -232,6 +336,17 @@
 
 .tasks-view.tasks-view-compact [hidden] {
   display: none !important;
+}
+
+/* The overall Tasks area insets its header against the app gutter, which
+   doubles the indent once that gutter is the only margin a phone can spare.
+   Line the toolbar up with every other compact view's content edge. */
+.app.app-compact .tasks-view-overall {
+  padding-top: 0;
+}
+
+.app.app-compact .tasks-view-overall > :is(.tasks-header, .error) {
+  margin-inline: 0;
 }
 
 .tasks-view.tasks-view-compact > button {
@@ -358,4 +473,84 @@
 
 :root:not([data-platform]) .app.app-compact .app-header {
   padding-inline: 0.75rem;
+}
+
+/* Compact density. At a phone's display scale the desktop-sized UI read
+   10-20% too large (Galaxy S26+, 2026-09-27), and a narrow desktop window is
+   the same layout. Nearly every size is in rem, so a smaller root scales text
+   and spacing together while px touch targets (44px) keep their size. */
+html[data-layout="mobile"] {
+  font-size: 87.5%;
+}
+
+/* iOS zooms the page into any focused field whose text is under 16px, and the
+   denser root put the chat composer at 14px. A zoomed visual viewport also
+   stops the mobile host's keyboard tracking, so the header stayed up and the
+   layout never refit above the keyboard. The query matches iOS WebKit only. */
+@supports (-webkit-touch-callout: none) {
+  html[data-layout="mobile"] :is(input, textarea, select, [contenteditable="true"]) {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* A narrow pane cannot spare the desktop gutter on both sides. Full-bleed
+   views cancel it with the same token, so they stay flush. */
+.app.app-compact .app-main {
+  --app-main-pad-inline: 0.75rem;
+}
+
+/* First run nests the steps under their headings with stacked indents. At
+   phone width those indents, the home view's own padding, and the pane
+   gutter left the setup a narrow column in the middle of the screen. */
+.app.app-compact .home-view {
+  padding-inline: 0;
+}
+
+.app.app-compact .home-firstrun-heading {
+  font-size: 1.35rem;
+}
+
+.app.app-compact
+  :is(.home-firstrun-lede, .home-firstrun-body, .home-firstrun-body .setup-section:has(> h3)) {
+  padding-left: 0;
+}
+
+.app.app-compact .home-firstrun-body .setup-section:has(> h3) > h3 {
+  margin-left: 0;
+}
+
+.app.app-compact :is(.home-firstrun-body .home-ondevice-link, .home-media-section) {
+  padding-left: 0;
+}
+
+/* Compact navigation fills the screen with nothing beside it, so the selected
+   row is a standalone key rather than a tab bridging into a content pane.
+   The bridge ran it to the screen edge, where it read as cropped. The
+   html + attribute prefix outranks the right-rail variants in either
+   stylesheet order. */
+html[data-layout="mobile"] .app-sidebar-scroll {
+  --sidebar-tab-rail-inset: 0px;
+  --sidebar-tab-bridge-size: 0px;
+}
+
+html[data-layout="mobile"]
+  .app-sidebar-scroll
+  :is(
+    .app-sidebar-item.active:not(:is(.app-sidebar-proj-row, .app-sidebar-gezel-row) > *),
+    .app-sidebar-group-header.active,
+    .app-sidebar-proj-row.active,
+    .app-sidebar-gezel-row.active,
+    .app-sidebar-tree .tree-row.tree-row-selected
+  ) {
+  --sidebar-tab-bridge-size: 0px;
+  width: auto;
+  margin-inline: 0;
+  border: 1px solid var(--sidebar-tab-border);
+  border-radius: var(--radius-md);
+}
+
+html[data-layout="mobile"]
+  .app-sidebar-scroll
+  :is(.app-sidebar-item.active, .app-sidebar-tree .tree-row.tree-row-selected)::after {
+  display: none;
 }

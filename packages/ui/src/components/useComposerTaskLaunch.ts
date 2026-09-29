@@ -9,7 +9,11 @@ import {
   mergeSuggestedLaunch,
   uploadStagingIds,
 } from './composer-task-launch.js';
-import { type CraftbookCatalogArt, useCraftbookCatalogArt } from './craftbook-catalog-art.js';
+import {
+  type CraftbookCatalogArt,
+  useCraftbookCatalogArt,
+  useCraftbookCatalogLookup,
+} from './craftbook-catalog-art.js';
 import type { PromptDraftController } from './usePromptDraft.js';
 
 /**
@@ -20,8 +24,9 @@ import type { PromptDraftController } from './usePromptDraft.js';
  * inputs whose staging may have been swept.
  *
  * Two rules the merge keeps: a person's own pick is never overwritten by a
- * suggestion, and a suggestion the person dismissed stays dismissed for
- * that text — in memory only, which is enough; a restart is a fresh look.
+ * suggestion, and a suggestion the person dismissed stays dismissed while
+ * they keep writing — until the composer is emptied or the message goes out.
+ * In memory only, which is enough; a restart is a fresh look.
  */
 export interface UseComposerTaskLaunchOptions {
   enabled: boolean;
@@ -30,7 +35,7 @@ export interface UseComposerTaskLaunchOptions {
   getText: () => string;
   /** The live daemon route preview for the current text. */
   plan: TurnIntentPlan | null;
-  /** The text the plan was computed for (suppression is keyed on it). */
+  /** The composer's current text, which the plan was computed for. */
   planText: string;
 }
 
@@ -44,8 +49,8 @@ export interface ComposerTaskLaunchController {
   dismiss: () => Promise<void>;
   /** The launch went out; forget it locally (the sent draft keeps the record). */
   clearAfterSend: () => void;
-  /** The person dismissed the suggestion the daemon would make for this text. */
-  dismissedForText: (text: string) => boolean;
+  /** The person dismissed the task the daemon is suggesting for this message. */
+  suggestionDismissed: () => boolean;
 }
 
 export function useComposerTaskLaunch(
@@ -62,8 +67,14 @@ export function useComposerTaskLaunch(
   draftRef.current = draft;
   const getTextRef = useRef(getText);
   getTextRef.current = getText;
+  const planRef = useRef(plan);
+  planRef.current = plan;
 
-  const art = useCraftbookCatalogArt(projectId, enabled ? (attached?.craftbookId ?? null) : null);
+  const lookup = useCraftbookCatalogLookup(
+    projectId,
+    enabled ? (attached?.craftbookId ?? null) : null,
+  );
+  const art = lookup.art;
   // The suggested book's manifest is fetched as soon as the plan names it,
   // one pass before it becomes the attachment — so either fetch may be the
   // one that already holds the book readiness has to judge.
@@ -135,10 +146,7 @@ export function useComposerTaskLaunch(
     const previous = attachedRef.current;
     if (!previous) return;
     if (previous.origin === 'suggested') {
-      suppressedRef.current = {
-        craftbookId: previous.craftbookId,
-        text: getTextRef.current().trim(),
-      };
+      suppressedRef.current = { craftbookId: previous.craftbookId };
     }
     setAttached(null);
     setStale([]);
@@ -163,10 +171,18 @@ export function useComposerTaskLaunch(
     suppressedRef.current = null;
   }, []);
 
-  const dismissedForText = useCallback((text: string): boolean => {
+  const suggestionDismissed = useCallback((): boolean => {
     const suppressed = suppressedRef.current;
-    return suppressed !== null && suppressed.text === text.trim();
+    if (!suppressed) return false;
+    // Still the book that was turned down, or no newer plan to say otherwise.
+    const suggested = planRef.current?.craftbook?.id;
+    return suggested === undefined || suggested === suppressed.craftbookId;
   }, []);
+
+  // An emptied composer is a new message: a dismissal does not outlive it.
+  useEffect(() => {
+    if (!planText.trim()) suppressedRef.current = null;
+  }, [planText]);
 
   // Fold the daemon's suggestion in once its book's manifest is known.
   useEffect(() => {
@@ -177,7 +193,6 @@ export function useComposerTaskLaunch(
     const next = mergeSuggestedLaunch({
       current: attachedRef.current,
       plan: planText.trim() ? plan : null,
-      text: planText,
       suppressed: suppressedRef.current,
       manifest: suggestionArt?.manifest ?? manifest,
     });
@@ -238,9 +253,14 @@ export function useComposerTaskLaunch(
     // a request per keystroke.
   }, [enabled, projectId, attached, persist]);
 
+  const hasMessage = planText.trim().length > 0;
+  const attachedMissing = lookup.status === 'missing' && resolvedArt === null;
   const readiness = useMemo<LaunchReadiness>(
-    () => (attached ? launchReadiness(attached, manifest) : { ready: true }),
-    [attached, manifest],
+    () =>
+      attached
+        ? launchReadiness(attached, manifest, { hasMessage, missing: attachedMissing })
+        : { ready: true },
+    [attached, manifest, hasMessage, attachedMissing],
   );
 
   return {
@@ -251,6 +271,6 @@ export function useComposerTaskLaunch(
     attach,
     dismiss,
     clearAfterSend,
-    dismissedForText,
+    suggestionDismissed,
   };
 }

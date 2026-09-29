@@ -9,6 +9,7 @@ import { createLogger } from '@bendyline/gezel';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { parseRawMessage } from '../mime.js';
+import { canonicalRecipients } from '../recipient.js';
 import type {
   FolderChanges,
   ImapCredential,
@@ -163,9 +164,9 @@ export class ImapMailProvider implements MailProvider {
     try {
       const info = await transport.sendMail({
         from,
-        to: mail.to,
-        ...(mail.cc?.length ? { cc: mail.cc } : {}),
-        ...(mail.bcc?.length ? { bcc: mail.bcc } : {}),
+        to: canonicalRecipients(mail.to),
+        ...(mail.cc?.length ? { cc: canonicalRecipients(mail.cc) } : {}),
+        ...(mail.bcc?.length ? { bcc: canonicalRecipients(mail.bcc) } : {}),
         subject: mail.subject,
         text: mail.bodyMarkdown,
         ...(mail.inReplyTo ? { inReplyTo: mail.inReplyTo } : {}),

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DeviceHealthGate, createSystemDeviceHealthProbe } from '@bendyline/gezel/native';
 import { repoRoot } from './native-bin.ts';
+import { writeTrialReport } from './postmortem-report.ts';
 import { PreflightExcludedError, ensurePreflightAdmission } from './preflight.ts';
 import { isLocalEngine } from './providers.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
@@ -123,6 +124,24 @@ function matrixDir(): string {
  * sniff fail, crash) are recorded in `perTrial` rather than aborting
  * the batch.
  */
+/**
+ * Score the finished trial and write its deterministic postmortem. A
+ * reporting failure is logged and never changes the trial's verdict — the
+ * report is a reading of `result.json`, not part of it.
+ */
+async function writeReportFor(runDir: string): Promise<number | undefined> {
+  try {
+    const report = await writeTrialReport(runDir);
+    return report.score?.composite;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[batch] could not write the trial report for ${runDir}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
+}
+
 export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Promise<BatchSummary> {
   const startedAt = new Date();
   const runsDir = resolveEvalRunsDir(opts.runsDir, batchDir);
@@ -152,8 +171,11 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
       modelId: opts.modelId,
       engine,
       ...(opts.mlxSourceHome ? { mlxSourceHome: opts.mlxSourceHome } : {}),
+      ...(opts.modelSourceHome ? { modelSourceHome: opts.modelSourceHome } : {}),
+      ...(opts.preflightRunsDir ? { preflightRunsDir: opts.preflightRunsDir } : {}),
       ...(opts.cacheRoot ? { cacheRoot: opts.cacheRoot } : {}),
       ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
+      ...(opts.offline ? { offline: true } : {}),
       // eslint-disable-next-line no-console
       log: (line) => console.log(line),
     });
@@ -162,6 +184,12 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
     }
     preflight = { ran: true, admitted: report.admitted, genTokensPerSec: report.genTokensPerSec };
   }
+  opts.events?.emit({
+    type: 'preflight',
+    admitted: preflight.ran ? (preflight.admitted ?? null) : null,
+    ...(preflight.genTokensPerSec != null ? { decodeTokensPerSec: preflight.genTokensPerSec } : {}),
+    ...(preflight.skippedReason ? { skippedReason: preflight.skippedReason } : {}),
+  });
 
   // The probe's measured throughput scales each scenario's authored hard
   // ceiling for this model/host pair, so a slow model isn't failed on wall
@@ -196,11 +224,45 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
     }
     const chunk = Array.from({ length: Math.min(parallel, opts.count - i) }, (_, k) => i + k);
     const settled = await Promise.allSettled(
-      chunk.map((idx) => {
-        const perTrialOpts = { ...opts, runsDir, ...measuredDecodeRate };
+      chunk.map(async (idx) => {
+        // One position per trial slot, not per attempt: a spawn retry
+        // re-announces the same slot rather than advancing the count.
+        const trialIndex = opts.events?.nextTrialIndex() ?? 0;
+        const perTrialOpts: BatchOptions = {
+          ...opts,
+          runsDir,
+          ...measuredDecodeRate,
+          ...(opts.events
+            ? {
+                onTrialStart: (info) =>
+                  opts.events?.emit({
+                    type: 'trial-start',
+                    scenarioId: scenario.id,
+                    trialId: info.trialId,
+                    runDir: info.runDir,
+                    trialIndex,
+                    totalTrials: opts.events.totalTrials(),
+                    startedAt: info.startedAt,
+                  }),
+              }
+            : {}),
+        };
         // eslint-disable-next-line no-console
         console.log(`[batch] starting trial ${idx + 1}/${opts.count}`);
-        return runTrialWithSpawnRetry(scenario, perTrialOpts);
+        const result = await runTrialWithSpawnRetry(scenario, perTrialOpts);
+        const composite = opts.writeReports ? await writeReportFor(result.runDir) : undefined;
+        opts.events?.emit({
+          type: 'trial-end',
+          scenarioId: scenario.id,
+          trialId: result.trialId,
+          runDir: result.runDir,
+          success: result.success,
+          reason: result.reason,
+          ...(result.failureClass ? { failureClass: result.failureClass } : {}),
+          durationMs: result.durationMs,
+          ...(composite !== undefined ? { composite } : {}),
+        });
+        return result;
       }),
     );
     for (const s of settled) {
@@ -355,6 +417,17 @@ export async function runMatrix(
     scenarioId: scenario.id,
     trials: capTrials(scenario),
   }));
+  if (opts.events) {
+    const totalTrials = requestedScenarios.reduce((sum, s) => sum + s.trials, 0);
+    opts.events.setTotalTrials(totalTrials);
+    opts.events.emit({
+      type: 'plan',
+      modelId: opts.modelId,
+      provider: opts.engine ?? 'llama-cpp',
+      scenarios: requestedScenarios,
+      totalTrials,
+    });
+  }
   // Say UP FRONT when the plan is not what `--count` asked for. Each capped
   // scenario already announces itself, but those lines arrive one at a time
   // over hours and are easy to miss beside the header, which prints a bare
@@ -453,6 +526,7 @@ export async function runMatrix(
     ...(matrixPreflight ? { preflight: matrixPreflight } : {}),
   };
   await writeFile(join(root, 'summary.json'), JSON.stringify(matrix, null, 2));
+  opts.events?.emit({ type: 'matrix-end', status, totalTrials, totalSuccesses });
 
   // eslint-disable-next-line no-console
   console.log(

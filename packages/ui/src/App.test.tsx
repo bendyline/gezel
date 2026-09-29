@@ -96,6 +96,26 @@ describe('Responsive navigation in the desktop app', () => {
     vi.unstubAllGlobals();
   });
 
+  it('shows Updates as a bell key on a phone and as a labelled tab when wide', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        { id: 'q1', projectId: 'p1' },
+        { id: 'q2', projectId: 'p1' },
+      ],
+    } as never);
+    render(<App />);
+    const key = await screen.findByRole('button', { name: /^Updates\s*2$/ });
+    expect(key.querySelector('.app-header-questions-icon')).toBeInTheDocument();
+
+    act(() => {
+      narrow = false;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    const tab = screen.getByRole('button', { name: /^Updates\s*2$/ });
+    expect(tab.querySelector('.app-header-questions-icon')).not.toBeInTheDocument();
+    expect(tab).toHaveTextContent('Updates');
+  });
+
   it('opens navigation on a phone, routes through the same project view, and keeps drafts on resize', async () => {
     render(<App />);
     expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
@@ -114,8 +134,14 @@ describe('Responsive navigation in the desktop app', () => {
     expect(navigation.textContent).toBe('');
     expect(navigation.querySelector('.app-header-navigation-icon')).toBeInTheDocument();
     expect(document.querySelector('.app-compact-navigation')).not.toBeInTheDocument();
+    expect(navigation).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: 'Meester home' })).not.toBeInTheDocument();
     fireEvent.click(navigation);
     expect(draft).not.toBeVisible();
+    expect(navigation).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(navigation);
+    expect(draft).toBeVisible();
+    fireEvent.click(navigation);
     fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
     expect(draft).toBeVisible();
     expect(draft).toHaveValue('Keep this draft');
@@ -127,6 +153,7 @@ describe('Responsive navigation in the desktop app', () => {
     expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
     expect(draft).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Meester home' })).toBeVisible();
     act(() => {
       narrow = true;
       mediaEvents.dispatchEvent(new Event('change'));
@@ -432,6 +459,45 @@ describe('Night Shift header status', () => {
     expect(await screen.findByText('Workspace indexing')).toBeInTheDocument();
     expect(screen.getByText('molen-internal · Studying workspace files')).toBeInTheDocument();
     expect(screen.getByText('Working on')).toBeInTheDocument();
+  });
+
+  // A fresh install listed oversight work "queued for tonight" that no model
+  // could run.
+  it('says the shift waits for a chat model on a fresh install', async () => {
+    const user = userEvent.setup();
+    const config = vi.mocked(api.getConfig).getMockImplementation();
+    const models = vi.mocked(api.listLlamaCppModels).getMockImplementation();
+    const tasks = vi.mocked(api.getNightShiftTasks).getMockImplementation();
+    try {
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as never);
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] });
+      vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+      vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+        background: [],
+        active: [],
+        upcoming: [
+          {
+            ref: 'default/1',
+            title: 'Night-shift oversight: project review',
+            projectId: 'default',
+          } as never,
+        ],
+      });
+      render(<App />);
+
+      await user.click(
+        await screen.findByRole('button', { name: /^Task speed: .*Click to change\.$/ }),
+      );
+
+      expect(
+        await screen.findByText('Night Shift starts once a chat model is installed.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Queued for tonight')).not.toBeInTheDocument();
+    } finally {
+      if (config) vi.mocked(api.getConfig).mockImplementation(config);
+      if (models) vi.mocked(api.listLlamaCppModels).mockImplementation(models);
+      if (tasks) vi.mocked(api.getNightShiftTasks).mockImplementation(tasks);
+    }
   });
 
   it('says plainly when an active shift has no real work in flight or queued', async () => {

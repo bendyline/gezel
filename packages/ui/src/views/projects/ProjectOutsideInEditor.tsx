@@ -15,7 +15,7 @@ import {
   createVersionCompatibleContentContainer,
   documentVersionBasename,
 } from '../../components/SquisqIntegration/index.js';
-import { normalizeMarkdownBaseline } from '../../components/markdown-baseline.js';
+import { markdownEquivalent } from '../../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../../hooks/useSerializedAutosave.js';
 
@@ -51,10 +51,11 @@ export function ProjectOutsideInEditor({
   const { layout, sourcePath } = outsideIn;
   const autosave = useSerializedAutosave({
     resourceKey: `outside-in:${projectId}:${file.source}:${sourcePath}`,
-    initialValue: normalizeMarkdownBaseline(file.content),
+    initialValue: file.content,
     save: async (content) => {
       await onSave(content);
     },
+    isEquivalent: markdownEquivalent,
   });
   const handleChange = useCallback(
     (content: string) => {

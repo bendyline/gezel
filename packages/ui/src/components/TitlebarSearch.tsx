@@ -48,6 +48,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
   const [resultsQuery, setResultsQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const wellRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<SearchMode>('search');
   const quickOpenShortcut = quickOpenShortcutLabel();
 
@@ -158,6 +159,14 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
     setCompactSearchActive(false);
   }, []);
 
+  // Closing the palette ends the search. The query used to stay in the well,
+  // so the next focus reopened stale results for a question already answered.
+  const dismiss = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+    setResults([]);
+  }, []);
+
   const pick = useCallback(
     (result: UnifiedSearchResult) => {
       runNavActions(resultToActions(result));
@@ -187,7 +196,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
         if (open) {
           e.preventDefault();
           e.stopPropagation();
-          setOpen(false);
+          dismiss();
         } else if (compact && compactSearchActive) {
           e.preventDefault();
           reset();
@@ -196,11 +205,14 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
         }
       }
     },
-    [activeIndex, compact, compactSearchActive, flat, open, pick, reset],
+    [activeIndex, compact, compactSearchActive, dismiss, flat, open, pick, reset],
   );
 
   return (
-    <Popover.Root open={open && query.trim().length > 0} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open && query.trim().length > 0}
+      onOpenChange={(next) => (next ? setOpen(true) : dismiss())}
+    >
       <Popover.Anchor asChild>
         {compact && !compactSearchActive ? (
           <button
@@ -218,6 +230,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
           </button>
         ) : (
           <div
+            ref={wellRef}
             className="titlebar-search"
             data-testid="titlebar-search"
             data-compact-search={compact ? 'active' : undefined}
@@ -266,6 +279,10 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
           sideOffset={6}
           // Keep keyboard focus in the input while the user arrows the list.
           onOpenAutoFocus={(e) => e.preventDefault()}
+          // A click back into the well edits the query; it is not a dismissal.
+          onInteractOutside={(e) => {
+            if (wellRef.current?.contains(e.target as Node)) e.preventDefault();
+          }}
         >
           <SearchPalette
             groups={groups}
@@ -279,8 +296,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
             onSeeAll={() => {
               const q = query.trim();
               if (!q) return;
-              setOpen(false);
-              setCompactSearchActive(false);
+              reset();
               openSearchResults(q);
             }}
           />

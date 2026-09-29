@@ -10,7 +10,6 @@ import type {
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
-import woodtexUrl from './assets/woodtex.png';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
@@ -28,8 +27,10 @@ import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
+import { OPEN_UPDATES_EVENT } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
@@ -107,6 +108,7 @@ function readEmbeddedParams(): {
   bg: string | null;
   fg: string | null;
   fontFamily: string | null;
+  compact: boolean;
 } | null {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
@@ -122,10 +124,20 @@ function readEmbeddedParams(): {
     bg: params.get('bg'),
     fg: params.get('fg'),
     fontFamily: params.get('fontFamily'),
+    // Narrow hosts (the Office task pane) drop the chat's right rail.
+    compact: params.get('compact') === '1',
   };
 }
 
 const EMBEDDED_PARAMS = readEmbeddedParams();
+
+// A host that names a gezel opens the chat addressed to them. ProjectChat
+// reads this memory before its own lead/roster ranking.
+if (EMBEDDED_PARAMS?.gezelId) {
+  writeChatThreadSelection(projectRecipientKey(EMBEDDED_PARAMS.projectId), {
+    gezelId: EMBEDDED_PARAMS.gezelId,
+  });
+}
 
 export function App() {
   if (EMBEDDED_PARAMS) {
@@ -139,6 +151,7 @@ export function App() {
           bg={EMBEDDED_PARAMS.bg}
           fg={EMBEDDED_PARAMS.fg}
           fontFamily={EMBEDDED_PARAMS.fontFamily}
+          compact={EMBEDDED_PARAMS.compact}
         />
       </Suspense>
     );
@@ -152,17 +165,8 @@ function FullApp() {
   const setupOpened = useRef(false);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
+  const toggleNavigation = useCallback(() => setNavigationOpen((open) => !open), []);
   useBackNavigation(compact, navigationOpen, openNavigation);
-  // Random vertical slice into the wood texture, picked once per app
-  // launch so each session shows a different band of grain across the
-  // titlebar. The CSS renders the 1024-tall source compressed to
-  // 512px (background-size: auto 512px) so the visible strip shows
-  // ~2× as many grain lines as native; the random offset has to
-  // range over that *rendered* height — `Math.random() * 512`, not
-  // 1024. `background-repeat: repeat` wraps naturally. Negated
-  // because CSS `background-position` is measured from the top-left
-  // of the painted area inward.
-  const [titlebarBgPosY] = useState(() => -Math.floor(Math.random() * 512));
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
@@ -481,6 +485,13 @@ function FullApp() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [questionsOpen]);
+  // Anything that counts the owner's questions (Home's "waiting on you" chip)
+  // opens the same drawer the titlebar's Updates button does.
+  useEffect(() => {
+    const onOpenUpdates = () => setQuestionsOpen(true);
+    window.addEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
+    return () => window.removeEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
+  }, []);
 
   // Global search shortcuts: ⌘P / Ctrl+P → quick-open (names/files),
   // ⌘K / Ctrl+K → full unified search. Both focus the titlebar box via
@@ -661,7 +672,11 @@ function FullApp() {
           // question arrives and the window is backgrounded — the tray is
           // the locus, so the user can be elsewhere and still get pulled
           // back. Gated on visibility to avoid notifying the active window.
-          if (ev.type === 'question_asked' && document.visibilityState === 'hidden') {
+          if (
+            ev.type === 'question_asked' &&
+            ev.question.intent?.kind !== 'task-finished' &&
+            document.visibilityState === 'hidden'
+          ) {
             const prompt = ev.question.prompt.split('\n')[0]?.slice(0, 140) ?? '';
             void window.__GEZEL__?.notify?.({
               title: 'Gezel needs your input',
@@ -669,9 +684,29 @@ function FullApp() {
               view: 'chat',
             });
           }
+          // Work the owner launched from a chat finished and its wrap-up
+          // landed in that thread. Same calm, hidden-window-only rule as
+          // questions: an owner watching the thread already sees it.
+          if (
+            ev.type === 'task_settled' &&
+            ev.outcome === 'complete' &&
+            document.visibilityState === 'hidden'
+          ) {
+            void window.__GEZEL__?.notify?.({
+              title: 'Your work is ready',
+              body: `${ev.title} is finished.`,
+              view: env.projectId === 'default' ? 'home' : 'projects',
+            });
+          }
           // Level-ups: fan out to the roster badge / Growth-tab surfaces,
           // and nudge via OS notification only when the window is hidden —
           // one calm notification, never a foreground interruption.
+          // XP recomputed after finished work: the growth surfaces reload.
+          if (ev.type === 'growth_updated') {
+            window.dispatchEvent(
+              new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
+            );
+          }
           if (ev.type === 'growth_level_up') {
             window.dispatchEvent(
               new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
@@ -732,31 +767,27 @@ function FullApp() {
       )}
       {/* The top bar remains the OS title bar (drag region + native
           window-control reservations via CSS padding). The brand mark routes
-          to the Meester home; compact layouts also keep their way back to the
-          navigation beside it instead of spending a separate content row. */}
+          to the Meester home. Compact layouts trade it for the navigation
+          button instead of spending a separate content row: the navigation
+          leads with Home, so the brand would be a second key for one place. */}
       <HeaderDensityContext.Provider value={headerDensity}>
-        <header
-          ref={headerRef}
-          className="app-header"
-          data-testid="app-header"
-          style={
-            {
-              ['--titlebar-bg-url' as string]: `url(${woodtexUrl})`,
-              ['--titlebar-bg-pos-y' as string]: `${titlebarBgPosY}px`,
-            } as React.CSSProperties
-          }
-        >
-          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
-          {compact && !navigationOpen && (
+        <header ref={headerRef} className="app-header" data-testid="app-header">
+          {/* Leads the bar, where a phone's menu button sits, and stays while
+              the navigation is open so the keys beside it never shift. */}
+          {compact && (
             <button
               type="button"
               className="app-header-navigation"
-              onClick={openNavigation}
+              onClick={toggleNavigation}
               aria-label="Navigation"
+              aria-pressed={navigationOpen}
               title="Navigation"
             >
               <NavigationMenuIcon />
             </button>
+          )}
+          {!compact && (
+            <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
           )}
           {pendingQuestionCount > 0 && (
             <button
@@ -770,9 +801,16 @@ function FullApp() {
               title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
               aria-expanded={questionsOpen}
             >
-              Updates
+              {compact ? (
+                <>
+                  <UpdatesIcon />
+                  <span className="sr-only">Updates</span>
+                </>
+              ) : (
+                'Updates'
+              )}
               <span className="app-nav-badge">{pendingQuestionCount}</span>
-              <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
+              {!compact && <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>}
             </button>
           )}
           {/* Unified search is anchored near the brand so changing status-pill
@@ -803,6 +841,7 @@ function FullApp() {
                   mode={engagementMode}
                   nightShift={nightShift}
                   onNightShiftChange={setNightShift}
+                  noChatModel={firstRun}
                 />
               </>
             )}
@@ -960,6 +999,25 @@ function NavigationMenuIcon() {
   );
 }
 
+function UpdatesIcon() {
+  return (
+    <svg
+      className="app-header-questions-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M10 3a4.5 4.5 0 0 0-4.5 4.5v3.2L4 13.5h12l-1.5-2.8V7.5A4.5 4.5 0 0 0 10 3Z" />
+      <path d="M8.3 16.2a1.8 1.8 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
 /** Task-speed choices shared by the titlebar menu and its trigger glyph. */
 type EngagementOption = {
   mode: EngagementMode;
@@ -1067,10 +1125,13 @@ function TaskSpeedMenu({
   mode,
   nightShift: state,
   onNightShiftChange: onChange,
+  noChatModel = false,
 }: {
   mode: EngagementMode;
   nightShift: NightShiftState;
   onNightShiftChange: (s: NightShiftState) => void;
+  /** First run: nothing can run until a chat model is installed. */
+  noChatModel?: boolean;
 }) {
   const current = ENGAGEMENT_OPTIONS.find((o) => o.mode === mode) ?? ENGAGEMENT_OPTIONS[0]!;
   const title = state.active
@@ -1310,16 +1371,23 @@ function TaskSpeedMenu({
                   ))}
                 </div>
               )}
-              {tasks.upcoming.length > 0 && (
-                <div className="app-nightshift-task-group">
-                  <div className="app-nightshift-task-heading">
-                    {state.active ? 'Up next' : 'Queued for tonight'}
+              {tasks.upcoming.length > 0 &&
+                (noChatModel ? (
+                  // A fresh install listed oversight work "queued for
+                  // tonight" that nothing could run.
+                  <p className="app-nightshift-task-group muted small">
+                    Night Shift starts once a chat model is installed.
+                  </p>
+                ) : (
+                  <div className="app-nightshift-task-group">
+                    <div className="app-nightshift-task-heading">
+                      {state.active ? 'Up next' : 'Queued for tonight'}
+                    </div>
+                    {tasks.upcoming.map((t) => (
+                      <NightShiftTaskRow key={t.ref} task={t} />
+                    ))}
                   </div>
-                  {tasks.upcoming.map((t) => (
-                    <NightShiftTaskRow key={t.ref} task={t} />
-                  ))}
-                </div>
-              )}
+                ))}
             </div>
           )}
           {state.active && tasks !== null && !hasWork && (

@@ -27,6 +27,39 @@ const input = {
 };
 
 describe('runConnectorTaskPrep', () => {
+  it('reuses a verified hermetic corpus without binding or syncing', async () => {
+    let syncCalled = false;
+    const result = await runConnectorTaskPrep(
+      {
+        getProject: async () =>
+          ({ id: 'p1', name: 'Review project', connectors: [] }) as unknown as ProjectDetail,
+        allowConnectorData: async () => true,
+        reusePreparedCorpus: async (_project, need, params) => {
+          expect(need.typeId).toBe('github-pulls');
+          expect(params.corpusScope).toBe('data/github-pulls/pr-52');
+          return {
+            params: { number: '52', corpusScope: 'data/github-pulls/pr-52' },
+            summary: 'reused seeded github-pulls corpus',
+          };
+        },
+        sync: async () => {
+          syncCalled = true;
+          throw new Error('must not sync a verified seeded corpus');
+        },
+      },
+      {
+        projectId: 'p1',
+        craftbookId: 'pull-request-review',
+        connectors: [{ typeId: 'github-pulls' }],
+        params: { corpusScope: 'data/github-pulls/pr-52' },
+      },
+    );
+
+    expect(syncCalled).toBe(false);
+    expect(result.params).toEqual({ number: '52', corpusScope: 'data/github-pulls/pr-52' });
+    expect(result.note).toContain('reused seeded github-pulls corpus');
+  });
+
   it('can provision a required zero-config native binding before syncing', async () => {
     let provisioned = false;
     let syncedBinding = '';

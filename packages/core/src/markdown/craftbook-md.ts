@@ -106,6 +106,7 @@ const STEP_FENCE_KEYS = [
   'onExit',
   'consumes',
   'advanceWhen',
+  'runWhen',
   'gate',
   'next',
   'branches',

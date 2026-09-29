@@ -1360,6 +1360,30 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist!.has('message_gezel')).toBe(false);
   });
 
+  it('narrows a task-note evaluator to inspection and task progression', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'p1/1', stepId: 'evaluate' }),
+      tier: 'medium',
+      activeStep: {
+        name: 'Evaluate the draft',
+        prompt: 'Inspect the draft, write a PASS or FAIL task note, then advance.',
+        consumes: [{ file: 'draft.md' }],
+        toolPolicy: { outputMedium: 'task-note' },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(false);
+    expect(allowlist!.has('write_artifact')).toBe(false);
+    expect(allowlist!.has('run_nodejs_script')).toBe(false);
+  });
+
   it('grants a role the exact canonical tool mandated by its assigned procedure', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

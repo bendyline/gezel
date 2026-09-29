@@ -284,7 +284,9 @@ export function DocumentsView() {
               <input
                 type="search"
                 className="documents-search-input"
-                placeholder={`${source.title} - search`}
+                // Short enough to fit beside the create tray at the rail's
+                // default width; "Documents - search" was cut off there.
+                placeholder="Search…"
                 aria-label="Search document contents"
                 value={search.query}
                 onChange={(e) => search.setQuery(e.target.value)}

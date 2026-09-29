@@ -22,8 +22,9 @@
     it; Electron renderers never receive it and the daemon root token never
     leaves process memory.
     GEZEL_SYSTEM_SCOPE=1 selects this split runtime policy.
-    GEZEL_PORT=6228 reserves the canonical machine-service endpoint; any
-    user-owned CLI fallback runs on a discoverable ephemeral port.
+    Leave GEZEL_PORT unset: prefer 6228, but fall back to an ephemeral port
+    if a user daemon took it while the broker was down during an upgrade.
+    Both the installer and user daemons discover the actual runtime/port.
 -->
 <plist version="1.0">
 <dict>
@@ -42,8 +43,6 @@
         <string>1</string>
         <key>GEZEL_HOME</key>
         <string>/Library/Application Support/Gezel</string>
-        <key>GEZEL_PORT</key>
-        <string>6228</string>
         <key>GEZEL_SYSTEM_SCOPE</key>
         <string>1</string>
         <key>GEZEL_SERVICE_ROLE</key>

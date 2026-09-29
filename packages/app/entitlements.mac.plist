@@ -65,5 +65,31 @@
          dlopen. Narrowing it means changing what gets loaded, not the plist. -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+
+    <!-- Narrate (the chat composer's explicit voice action) records
+         microphone-only audio. Under hardened runtime macOS denies the
+         microphone outright without this key: no consent prompt, no entry
+         under Privacy & Security, however NSMicrophoneUsageDescription reads.
+         That is how Narrate shipped broken from 15889b3b until the
+         v1.26270.76 audit.
+
+         It also reaches the helpers because this file is entitlementsInherit
+         too. That is deliberate: Chromium captures audio in its audio-service
+         utility process (the plain helper), and Chromium's own
+         app-entitlements.plist grants the key to that helper as well. TCC
+         still attributes the request to Gezel.app and the user still decides;
+         sandboxed renderers cannot open a device either way. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- The ambient wallpaper (src/ambient-display/darwin.ts) runs
+         /usr/bin/osascript so System Events can read and set the desktop
+         picture. TCC attributes that Apple Event to Gezel as the responsible
+         process, and a hardened-runtime app without this key is refused with
+         -1743 before the user is ever asked. Paired with
+         NSAppleEventsUsageDescription in electron-builder.yml's extendInfo,
+         which is the text of that consent prompt. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>

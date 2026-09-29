@@ -2,6 +2,8 @@ import type {
   GezmodelEngine,
   GezmodelImportProgress,
   GezmodelImportReview,
+  LibreOfficeSetupStatusResponse,
+  OfficeSetupStatusResponse,
   RuntimeCapabilities,
   SecurityPolicy,
 } from '@bendyline/gezel';
@@ -51,6 +53,9 @@ export type ModelBundleExportProgress = {
       bytesTotal?: number;
     }
 );
+
+/** What the desktop app's Office / LibreOffice bridges return. */
+export type OfficeBridgeResult<T> = { ok: true; status: T } | { ok: false; error: string };
 
 export type ModelBundleImportProgress = {
   scanId: string;
@@ -138,6 +143,26 @@ declare global {
         status(): Promise<{ ok: true; installed: boolean } | { ok: false; error: string }>;
         install(): Promise<{ ok: true } | { ok: false; error: string }>;
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
+      };
+      /**
+       * Word / Excel / PowerPoint add-ins (Settings -> Connected Apps).
+       * Absent outside Electron: the web UI shows status only. Each action
+       * performs the per-user OS steps and returns the daemon's status.
+       */
+      officeHost?: {
+        verify(): Promise<OfficeBridgeResult<OfficeSetupStatusResponse>>;
+        enable(
+          apps: Array<'word' | 'excel' | 'powerpoint'>,
+        ): Promise<OfficeBridgeResult<OfficeSetupStatusResponse>>;
+        repair(): Promise<OfficeBridgeResult<OfficeSetupStatusResponse>>;
+        disable(): Promise<OfficeBridgeResult<OfficeSetupStatusResponse>>;
+        clearCache(): Promise<{ ok: true } | { ok: false; error: string }>;
+      };
+      /** LibreOffice extension install via unopkg. Absent outside Electron. */
+      libreoffice?: {
+        verify(): Promise<OfficeBridgeResult<LibreOfficeSetupStatusResponse>>;
+        enable(): Promise<OfficeBridgeResult<LibreOfficeSetupStatusResponse>>;
+        disable(): Promise<OfficeBridgeResult<LibreOfficeSetupStatusResponse>>;
       };
       /**
        * Ambient display (wallpaper) surface. Absent outside Electron —

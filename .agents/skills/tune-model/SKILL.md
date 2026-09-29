@@ -154,7 +154,7 @@ Sampling only threads through the **gezel-session path** (the scenarios), never 
 #    Change exactly ONE field. Example: tame a repetition loop on llama-cpp.
 #    ../gilde/data/chat-models/<shard>/<modelId>/manifest.json → tuning.sampling.repetitionPenalty: 1.0 → 1.1
 
-# 2. Rebuild the index — the daemon reads data/chat-models/index.json (which CACHES the full manifest),
+# 2. Rebuild the index — the daemon lists from data/chat-models/raw-index.json (a SNAPSHOT of the files),
 #    NOT the per-model file. Without this the edit is invisible. (This is the #1 tune-model footgun.)
 pnpm --filter @bendyline/gezel-catalog build-index
 
@@ -226,11 +226,11 @@ Compare the full scorecard to the pre-change one. If the aggregate dropped or an
 `pnpm eval:all --count 1 --model <modelId> --provider <engine> --mlx-source-home <home>`
 ```
 
-The shipped artifact is the edited **root `manifest.json`** (+ `build-index` so `data/chat-models/index.json` reflects it). Confirm it lints clean (`pnpm --filter @bendyline/gezel-catalog lint-manifests`). Per repo rules, **do not commit** — leave the manifest edit + report for the user to review and commit.
+The shipped artifact is the edited **root `manifest.json`** (+ `build-index` so `data/chat-models/raw-index.json` and `index.json` reflect it). Confirm it lints clean (`pnpm --filter @bendyline/gezel-catalog lint-manifests`). Per repo rules, **do not commit** — leave the manifest edit + report for the user to review and commit.
 
 ## Guardrails & gotchas
 
-- **The `build-index` footgun (most common failure).** `data/chat-models/index.json` caches the *full* resolved manifest; the daemon reads that, not your edited per-model file. Every sampling/behavior manifest edit MUST be followed by `pnpm --filter @bendyline/gezel-catalog build-index` before the next eval, or you'll A/B two identical configs and conclude "the lever did nothing." (Behavior A/Bs via `ab-prompt-conduct --force/--remove` bypass this — they override at the daemon-env layer.)
+- **The `build-index` footgun (most common failure).** `data/chat-models/raw-index.json` snapshots the item files (builds that predate it read the resolved `index.json`); the daemon lists from that, not your edited per-model file. Every sampling/behavior manifest edit MUST be followed by `pnpm --filter @bendyline/gezel-catalog build-index` before the next eval, or you'll A/B two identical configs and conclude "the lever did nothing." (Behavior A/Bs via `ab-prompt-conduct --force/--remove` bypass this — they override at the daemon-env layer.)
 - **Never overtune to a scenario's sniff.** The anchored-scenario rule from [docs/eval-strategy.md](../../../docs/eval-strategy.md): do NOT pick a temperature or force a behavior *because it makes `tankcombat`'s tank-vocab sniff fire*. Tune to the genuine capability, and verify the win across MULTIPLE scenarios of the same class. A lever that only moves one scenario's specific signal is overfit — it helps no real user and it's the same sin as hard-coding a sniff into a craftbook gate. The regression sweep (Phase 4) is your overfit detector: a real tuning win generalizes.
 - **Never answer "use a bigger model."** If the flagship you're tuning still fails a scenario a medium model should pass, the finding is a *specific* lever or a *specific* framework gap — not a model-size recommendation. "This model can't" without a named lever or module is low-value work (eval-strategy.md's hard rule).
 - **MLX drops half the sampling knobs** (`presencePenalty`, `frequencyPenalty`, `dry`, `xtc`, `grammar`, per-request `thinkingBudget`). Check the engine before proposing a lever — an MLX DRY fix silently no-ops. `thinkingBudget` on MLX has no effect; on llama-cpp it's a *launch* flag (`--reasoning-budget`), applied server-wide, so a change needs a fresh daemon (every eval trial spawns one, so it's automatic there).

@@ -22,6 +22,7 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
+import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import { StepTracker } from './StepTracker.js';
@@ -686,26 +687,20 @@ export function ChatReferences({
           value={compactPane}
           onValueChange={(value) => setCompactPane(value as CompactPane)}
         >
-          <Tabs.List className="chat-rail-compact-tabs" aria-label="Conversation panels">
-            <Tabs.Trigger className="chat-rail-compact-tab" value="chat">
-              Chat
-            </Tabs.Trigger>
-            {hasTasks && (
-              <Tabs.Trigger className="chat-rail-compact-tab" value="tasks">
-                Task
-              </Tabs.Trigger>
-            )}
-            {hasSkills && (
-              <Tabs.Trigger className="chat-rail-compact-tab" value="skills">
-                Skills
-              </Tabs.Trigger>
-            )}
-            {hasReferences && (
-              <Tabs.Trigger className="chat-rail-compact-tab" value="references">
-                References
-              </Tabs.Trigger>
-            )}
-          </Tabs.List>
+          <FittedTabsList
+            ariaLabel="Conversation panels"
+            className="chat-rail-compact-tabs"
+            triggerClassName="chat-rail-compact-tab"
+            value={compactPane}
+            items={[
+              { value: 'chat', label: 'Chat', icon: 'chat' as const },
+              ...(hasTasks ? [{ value: 'tasks', label: 'Task', icon: 'tasks' as const }] : []),
+              ...(hasSkills ? [{ value: 'skills', label: 'Skills', icon: 'skills' as const }] : []),
+              ...(hasReferences
+                ? [{ value: 'references', label: 'References', icon: 'references' as const }]
+                : []),
+            ]}
+          />
 
           <Tabs.Content
             forceMount

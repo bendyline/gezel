@@ -104,7 +104,8 @@ function builtinDisallows(
   // step reads without always naming the tool. This function also never
   // withdraws a denial it made, so a lexical "no artifact mention" guess
   // outlived the prompt edit that added one (powerpoint-deck 1.7.9 → 1.7.10).
-  if (!media.has('workspace')) out.add('workspace-fs-write');
+  if (media.has('workspace')) out.delete('workspace-fs-write');
+  else out.add('workspace-fs-write');
 
   for (const [groupId, signal] of Object.entries(SPECIALIZED_GROUP_SIGNALS)) {
     if (groupId === 'web' && /research/i.test(step.suggestedRole ?? '')) continue;

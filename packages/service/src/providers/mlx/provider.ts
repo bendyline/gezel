@@ -140,6 +140,7 @@ import {
   type ChatMessage,
   setChatTemplateKwarg,
 } from './chat-protocol.js';
+import { MlxEngineGate } from './engine-gate.js';
 import { EngineLogRouter } from './engine-log-router.js';
 import {
   StreamingReasoningSplit,
@@ -176,6 +177,7 @@ import {
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
 import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
 import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
+import { MlxVisionMode, unseenToolImagesNote } from './vision-mode.js';
 
 export {
   buildMidStreamDropMessage,
@@ -220,13 +222,6 @@ const MAX_TOOL_LOOP_TURNS = LOCAL_TURN_LIMITS.iterations;
 // only the fallback for one-shot / test paths.
 const DEFAULT_TIMEOUT_MS = 600_000;
 
-/**
- * Don't announce an engine-gate wait shorter than this — a brief handoff
- * between iterations is normal and would flash the queue badge for a frame.
- */
-const ENGINE_GATE_WAIT_NOTICE_DELAY_MS = 200;
-/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
-const ENGINE_GATE_WAIT_NOTICE_MS = 5_000;
 // Fallback for direct/external provider construction where no catalog model
 // metadata is available. Supervised catalog models pass their native context
 // window explicitly from buildMlxProvider.
@@ -266,7 +261,7 @@ const MAX_MALFORMED_RETRIES = LOCAL_TURN_LIMITS.malformed;
 
 export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
-  readonly supportsImageInput: boolean;
+  readonly visionMode: MlxVisionMode;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
   readonly supportsPriorMessages = true;
@@ -365,26 +360,16 @@ export class MlxProvider implements LLMProvider {
   // (e.g. when uvicorn logs both "Application startup complete" and
   // "Uvicorn running" — both classify as `ready`).
   private engineStatsPending = false;
-  /**
-   * Width-N gate over actual engine requests. The width is the engine's
-   * batch capability ({@link batchMaxConcurrency}). At width 1 this is strict
-   * FIFO with one HTTP request in flight, while the sidecar still uses its
-   * snapshot-capable BatchGenerator internally. A wider gate lets up to N
-   * requests reach the sidecar for one static batched wave.
-   */
-  private engineGateActive = 0;
-  private readonly engineGateWaiters: Array<{
-    resolve: () => void;
-    reject: (reason?: unknown) => void;
-    signal?: AbortSignal;
-    onAbort?: () => void;
-  }> = [];
+  /** Width-N gate over physical engine requests; see {@link MlxEngineGate}. */
+  private readonly engineGate: MlxEngineGate;
   private readonly batchMaxConcurrency: number;
   private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
-    /** True only when the supervised sidecar loads its complete vision tower. */
+    /** A fixed tower: true only when the engine behind `baseUrl` serves images. */
     visionEnabled?: boolean;
+    /** Supervised engines: text-only until a request carries images; see vision-mode.ts. */
+    vision?: MlxVisionMode;
     supervisor?: NativeEngineSupervisor;
     baseUrl?: string;
     defaultModel?: string;
@@ -425,7 +410,6 @@ export class MlxProvider implements LLMProvider {
     if (opts.supervisor) this.supervisor = opts.supervisor;
     if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.defaultModel = opts.defaultModel ?? 'mlx';
-    this.supportsImageInput = opts.visionEnabled === true;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
     this.plannedReservation = opts.plannedReservationBytes;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -435,6 +419,9 @@ export class MlxProvider implements LLMProvider {
     if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
+    this.engineGate = new MlxEngineGate(batchMax);
+    this.visionMode = opts.vision ?? MlxVisionMode.fixed(opts.visionEnabled === true);
+    this.visionMode.bindEngine(this.supervisor, this.engineGate, () => this.disposed);
     // Interactive turns are capped at the memory-safe engine width (`batchMax`);
     // the engine gate below (`acquireExclusiveEngineRequest`) enforces the same
     // bound on real generation. The queue itself, though, must run at least ONE
@@ -470,6 +457,11 @@ export class MlxProvider implements LLMProvider {
    */
   get batch(): BatchCapability {
     return { maxConcurrency: this.batchMaxConcurrency };
+  }
+
+  /** Can see images now, or after one reload into the vision tower. */
+  get supportsImageInput(): boolean {
+    return this.visionMode.capable;
   }
 
   /**
@@ -517,7 +509,7 @@ export class MlxProvider implements LLMProvider {
 
   /** True only while this sidecar is serving or queuing a physical request. */
   isEngineBusy(): boolean {
-    return this.engineGateActive > 0 || this.engineGateWaiters.length > 0;
+    return this.engineGate.busy;
   }
 
   /** Hold startup demand through the first request, before the engine gate exists. */
@@ -540,78 +532,7 @@ export class MlxProvider implements LLMProvider {
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
     if (this.supervisor?.coordinatesCapacity && !capacityProtected)
       await this.supervisor.yieldForWaitingCapacity(signal);
-
-    const width = this.batchMaxConcurrency;
-    const waitStartedAt = Date.now();
-    if (this.engineGateActive < width) {
-      this.engineGateActive++;
-    } else {
-      // Park FIFO until a release hands us its slot. The active count
-      // stays at `width` across the handoff, so we never exceed it — at
-      // Width 1 is a strict provider-side FIFO; the sidecar still uses its
-      // singleton BatchGenerator path for cache snapshots.
-      let waitNotice: ReturnType<typeof setInterval> | null = null;
-      let waitNoticeDelay: ReturnType<typeof setTimeout> | null = null;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const waiter: (typeof this.engineGateWaiters)[number] = {
-            resolve,
-            reject,
-            ...(signal ? { signal } : {}),
-          };
-          if (signal) {
-            waiter.onAbort = () => {
-              const idx = this.engineGateWaiters.indexOf(waiter);
-              if (idx === -1) return;
-              this.engineGateWaiters.splice(idx, 1);
-              signal.removeEventListener('abort', waiter.onAbort!);
-              reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
-            };
-            signal.addEventListener('abort', waiter.onAbort, { once: true });
-          }
-          this.engineGateWaiters.push(waiter);
-          // Announce the park. Same reasoning as the llama.cpp gate: a turn
-          // that already cleared the ProviderQueue can still wait here for
-          // the length of another session's round-trip, and a wait with no
-          // signal reads to the user as a wedged model.
-          if (onWait) {
-            const publish = () => {
-              const idx = this.engineGateWaiters.indexOf(waiter);
-              if (idx === -1) return;
-              onWait({ aheadOf: this.engineGateActive + idx });
-            };
-            waitNoticeDelay = setTimeout(() => {
-              publish();
-              waitNotice = setInterval(publish, ENGINE_GATE_WAIT_NOTICE_MS);
-              waitNotice.unref?.();
-            }, ENGINE_GATE_WAIT_NOTICE_DELAY_MS);
-            waitNoticeDelay.unref?.();
-          }
-        });
-      } finally {
-        if (waitNoticeDelay) clearTimeout(waitNoticeDelay);
-        if (waitNotice) clearInterval(waitNotice);
-      }
-    }
-    const waitedMs = Date.now() - waitStartedAt;
-    if (waitedMs > 1_000) {
-      log.debug(`engine request ${label} waited ${waitedMs}ms for an MLX engine slot`);
-    }
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const next = this.engineGateWaiters.shift();
-      if (next) {
-        if (next.signal && next.onAbort) {
-          next.signal.removeEventListener('abort', next.onAbort);
-        }
-        // Hand our slot straight to the next waiter — active count unchanged.
-        next.resolve();
-      } else {
-        this.engineGateActive--;
-      }
-    };
+    return this.engineGate.acquire(label, signal, onWait);
   }
 
   async runExclusiveEngineRequest<T>(label: string, work: () => Promise<T>): Promise<T> {
@@ -1533,10 +1454,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
         if (budget.expired()) throw turnTimeoutError();
 
+        // Before the URL: loading the vision tower restarts the engine.
+        const messages = await this.deps.provider.visionMode.prepareRequest(
+          retireInspectedToolImages(this.messages),
+          this.currentTurnStartIdx,
+          opts?.queue?.signal,
+        );
         const baseUrl = await this.deps.resolveBaseUrl();
         const body: Record<string, unknown> = {
           model: this.deps.model,
-          messages: retireInspectedToolImages(this.messages),
+          messages,
           stream: true,
           // Per-turn output cap. mlx-vlm's stream_generate defaults to
           // a small built-in cap (256 in some versions) — verbose
@@ -3567,8 +3494,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             call.function.name.replaceAll('-', '_') === 'read_image_as_base64'
           ) {
             // Do not execute the bridge: that would emit a successful image-read
-            // receipt even though callTool() drops images and this sidecar has
-            // no vision path. A craftbook must not approve fabricated inspection.
+            // receipt although this engine can never load a vision tower and its
+            // pixels would be dropped. A craftbook must not approve fabricated inspection.
             output =
               'ERROR: Image inspection is unavailable in this text-only MLX runtime. No image was delivered. Use a provider with image input support; do not claim visual observations or approve a visual review.';
           } else if (
@@ -3644,6 +3571,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                   this.deps.numCtx,
                   this.estimatePromptChars(),
                 );
+                let unseenImages = 0;
                 output = await this.deps.bridges.callTool(call.function.name, args, {
                   budgetChars,
                   numCtxTokens: this.deps.numCtx,
@@ -3651,13 +3579,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                     askedQuestionThisTurn = true;
                   },
                   onImages: (images) => {
-                    if (!this.supportsImageInput)
-                      throw new Error(
-                        'This MLX model cannot receive tool images. No visual inspection occurred.',
-                      );
-                    toolImages.push(...images.map((image) => image.base64));
+                    if (this.supportsImageInput) toolImages.push(...images.map((i) => i.base64));
+                    else unseenImages += images.length;
                   },
                 });
+                output += unseenToolImagesNote(unseenImages);
               } catch (err) {
                 output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
               }

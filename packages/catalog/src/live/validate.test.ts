@@ -17,7 +17,7 @@ afterEach(async () => {
 async function writeToolset(
   dataDir: string,
   id: string,
-  opts: { broken?: boolean; minGezelVersion?: string } = {},
+  opts: { broken?: boolean; minGezelVersion?: string; futurePlatform?: boolean } = {},
 ) {
   const dir = join(dataDir, 'toolsets', id.slice(0, 2), id);
   await mkdir(join(dir, 'versions', '1.0.0'), { recursive: true });
@@ -44,6 +44,9 @@ async function writeToolset(
         runtime: { kind: 'http-mcp', url: 'https://example.com/mcp' },
         tools: [],
         config: [],
+        ...(opts.futurePlatform
+          ? { requirements: { platforms: ['linux-arm64', 'riscv64-plan9'] } }
+          : {}),
       });
   await writeFile(join(dir, 'versions', '1.0.0', 'manifest.json'), version);
 }
@@ -99,6 +102,21 @@ describe('validateGildeContentUpgrade', () => {
     await writeToolset(current, 'aa-tool');
     await writeToolset(candidate, 'aa-tool');
     await writeToolset(candidate, 'zz-future', { broken: true });
+    const result = await validateGildeContentUpgrade({
+      currentDataDir: current,
+      candidateDataDir: candidate,
+    });
+    expect(result).toEqual({ ok: true, checked: 1 });
+  });
+
+  // Content moves ahead of the app on its own schedule. An existing item
+  // that adopts a value this build does not know still resolves — the value
+  // is ignored — so it must not block the update for everyone on this build.
+  it('accepts a candidate whose existing item gained a value this build does not know', async () => {
+    const current = await makeDataDir('current');
+    const candidate = await makeDataDir('candidate');
+    await writeToolset(current, 'aa-tool');
+    await writeToolset(candidate, 'aa-tool', { futurePlatform: true });
     const result = await validateGildeContentUpgrade({
       currentDataDir: current,
       candidateDataDir: candidate,

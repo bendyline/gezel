@@ -1,6 +1,11 @@
-/** Noninteractive craftbook invocation and task observation for shell pipelines. */
+/**
+ * Noninteractive craftbook invocation and task observation for shell pipelines.
+ * Task observation retries only transient read failures, within the caller's
+ * original awake-time budget. It never changes task state or retries dispatch.
+ */
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Craftbook, Task } from '@bendyline/gezel';
-import { AwakeBudget } from '@bendyline/gezel';
+import { type AwakeBudget, createAwakeTimeout } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
 import { type StartCraftbook, findCraftbook } from './tui/craftbook-start.js';
@@ -70,49 +75,125 @@ export interface TaskWaitResult {
   questionIds?: string[];
 }
 
+const READ_RETRY_DELAYS = [250, 750, 1500];
+
+function transientTaskReadError(error: unknown): boolean {
+  const codes =
+    /ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|UND_ERR_(?:SOCKET|CONNECT_TIMEOUT)|NGHTTP2_ENHANCE_YOUR_CALM|Connect Timeout Error|socket hang up|other side closed/;
+  // Root and Node package entries can carry distinct bundled error classes.
+  // Match the public error shape while keeping HTTP/auth and TLS failures fatal.
+  if (error instanceof Error && error.name === 'GezelApiError') {
+    const apiError = error as Error & {
+      status?: number;
+      details?: { kind?: string; cause?: unknown; readRetryExhausted?: boolean };
+    };
+    return (
+      apiError.status === 0 &&
+      apiError.details?.kind === 'transport' &&
+      apiError.details.readRetryExhausted !== true &&
+      typeof apiError.details.cause === 'string' &&
+      codes.test(apiError.details.cause)
+    );
+  }
+  // fetch may fail while consuming a successful response body, after headers.
+  return (
+    error instanceof TypeError &&
+    error.cause instanceof Error &&
+    codes.test(`${(error.cause as Error & { code?: string }).code ?? ''} ${error.cause.message}`)
+  );
+}
+
+async function readTaskObservation<T>(
+  read: () => Promise<T>,
+  budget: AwakeBudget,
+  signal: AbortSignal,
+): Promise<T> {
+  for (let retries = 0; ; retries++) {
+    signal.throwIfAborted();
+    if (budget.expired()) throw new CliError('Task observation timed out.');
+    try {
+      return await read();
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!transientTaskReadError(error) || retries >= READ_RETRY_DELAYS.length || budget.expired())
+        throw error;
+      await delay(Math.min(READ_RETRY_DELAYS[retries]!, budget.remainingMs()), undefined, {
+        signal,
+      });
+    }
+  }
+}
+
 export async function waitForTask(
   client: Pick<GezelClient, 'getTaskByRef' | 'listTaskChildren'> &
     Partial<Pick<GezelClient, 'listQuestions'>>,
   ref: string,
-  options: { timeoutMs: number; pollMs?: number; onProgress?: (task: Task) => void },
+  options: {
+    timeoutMs: number;
+    pollMs?: number;
+    onProgress?: (task: Task) => void;
+    signal?: AbortSignal;
+  },
 ): Promise<TaskWaitResult> {
-  const budget = new AwakeBudget(options.timeoutMs);
+  const timeout = createAwakeTimeout(options.timeoutMs, { pollMs: 100 });
+  const budget = timeout.budget;
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeout.signal])
+    : timeout.signal;
   let previous = '';
-  for (;;) {
-    const task = await client.getTaskByRef(ref);
-    const progress = `${task.status}:${task.activeStepId}`;
-    if (progress !== previous) {
-      options.onProgress?.(task);
-      previous = progress;
-    }
-    if (task.status === 'complete') return { task, outcome: 'complete', exitCode: 0 };
-    if (task.status === 'canceled') return { task, outcome: 'canceled', exitCode: 1 };
-    if (task.status === 'paused' || task.status === 'draft')
-      return { task, outcome: 'blocked', exitCode: 2 };
-    // CLI workflow drivers own partial-failure policy and set the parent's
-    // status themselves. A paused article must not stop watching other work.
-    const refs = new Set([task.ref]);
-    if (task.fanout || task.craftbook.spawn || task.craftbook.cliWorkflow) {
-      const { tasks } = await client.listTaskChildren(task.projectId, task.num);
-      if (
-        !task.craftbook.cliWorkflow &&
-        !tasks.some((child) => child.status === 'active') &&
-        tasks.some((child) => child.status === 'paused' || child.status === 'canceled')
-      )
+  let lastTask: Task | undefined;
+  const read = <T>(operation: () => Promise<T>) => readTaskObservation(operation, budget, signal);
+  try {
+    for (;;) {
+      const task = await read(() => client.getTaskByRef(ref, signal));
+      lastTask = task;
+      const progress = `${task.status}:${task.activeStepId}`;
+      if (progress !== previous) {
+        options.onProgress?.(task);
+        previous = progress;
+      }
+      if (task.status === 'complete') return { task, outcome: 'complete', exitCode: 0 };
+      if (task.status === 'canceled') return { task, outcome: 'canceled', exitCode: 1 };
+      if (task.status === 'paused' || task.status === 'draft')
         return { task, outcome: 'blocked', exitCode: 2 };
-      if (!task.craftbook.cliWorkflow) for (const child of tasks) refs.add(child.ref);
+      // CLI workflow drivers own partial-failure policy and set the parent's
+      // status themselves. A paused article must not stop watching other work.
+      const refs = new Set([task.ref]);
+      if (task.fanout || task.craftbook.spawn || task.craftbook.cliWorkflow) {
+        const { tasks } = await read(() =>
+          client.listTaskChildren(task.projectId, task.num, undefined, signal),
+        );
+        if (
+          !task.craftbook.cliWorkflow &&
+          !tasks.some((child) => child.status === 'active') &&
+          tasks.some((child) => child.status === 'paused' || child.status === 'canceled')
+        )
+          return { task, outcome: 'blocked', exitCode: 2 };
+        if (!task.craftbook.cliWorkflow) for (const child of tasks) refs.add(child.ref);
+      }
+      if (client.listQuestions) {
+        const { questions } = await read(() =>
+          client.listQuestions!(
+            {
+              projectId: task.projectId,
+              pending: true,
+            },
+            signal,
+          ),
+        );
+        const questionIds = questions
+          .filter((q) => q.taskRef && refs.has(q.taskRef))
+          .map((q) => q.id);
+        if (questionIds.length) return { task, outcome: 'blocked', exitCode: 2, questionIds };
+      }
+      if (budget.expired()) return { task, outcome: 'timeout', exitCode: 3 };
+      await delay(Math.min(options.pollMs ?? 1000, budget.remainingMs()), undefined, { signal });
     }
-    if (client.listQuestions) {
-      const { questions } = await client.listQuestions({
-        projectId: task.projectId,
-        pending: true,
-      });
-      const questionIds = questions
-        .filter((q) => q.taskRef && refs.has(q.taskRef))
-        .map((q) => q.id);
-      if (questionIds.length) return { task, outcome: 'blocked', exitCode: 2, questionIds };
-    }
-    if (budget.expired()) return { task, outcome: 'timeout', exitCode: 3 };
-    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1000));
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    if (budget.expired() && lastTask) return { task: lastTask, outcome: 'timeout', exitCode: 3 };
+    throw error;
+  } finally {
+    timeout.dispose();
   }
 }

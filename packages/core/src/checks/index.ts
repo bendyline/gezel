@@ -19,7 +19,9 @@ export {
   fileCountByExt,
   fileMinBytes,
   fileMinLines,
+  frontmatterList,
   grepMatches,
+  listedFiles,
   notContainsPattern,
   totalMinBytes,
 } from './files.js';
@@ -93,6 +95,14 @@ export {
   type WordBandResult,
 } from './prose.js';
 export { wrapperReturnHint } from './runtime-hints.js';
+export {
+  checkFigures,
+  extractMoneyAmounts,
+  type FigureCheckOptions,
+  type FigureCheckResult,
+  type FigureFinding,
+  type FigureFindingKind,
+} from './figures.js';
 export {
   markdownHeadingsMatch,
   type MarkdownHeadingsMatchResult,

@@ -1,10 +1,21 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import * as tar from 'tar';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   compareVersions,
   extractBundleIfNeeded,
@@ -32,7 +43,8 @@ interface SeedOptions {
   version: string;
   /** Override the sha256 baked into the meta. Defaults to a stable per-version sha. */
   sha256?: string;
-  extraFile?: { path: string; content: string };
+  extraFile?: { path: string; content: string; mode?: number };
+  modes?: { file: number; directory: number; bin: number };
 }
 
 function fakeSha(seed: string): string {
@@ -64,6 +76,14 @@ async function seedTarballBundle(
   if (opts.extraFile) {
     await mkdir(join(staging, opts.extraFile.path, '..'), { recursive: true });
     await writeFile(join(staging, opts.extraFile.path), opts.extraFile.content);
+    if (opts.extraFile.mode !== undefined) {
+      await chmod(join(staging, opts.extraFile.path), opts.extraFile.mode);
+    }
+  }
+  if (opts.modes) {
+    await chmod(join(staging, 'package.json'), opts.modes.file);
+    await chmod(join(staging, 'dist'), opts.modes.directory);
+    await chmod(join(staging, 'dist', 'bin', 'gezeld.js'), opts.modes.bin);
   }
   await tar.create({ gzip: true, file: tarballPath, cwd: staging }, ['.']);
   // Compute the REAL tarball sha for the meta: extractBundleIfNeeded now
@@ -207,6 +227,70 @@ describe('extractBundleIfNeeded', () => {
     metaPath = join(root, 'service-bundle.meta.json');
     installDir = join(root, 'install');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'publishes shared code with final safe modes, not archive modes',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, {
+        version: '1.2.3',
+        modes: { file: 0o666, directory: 0o777, bin: 0o777 },
+        extraFile: { path: 'native-helper', content: '#!/bin/sh\n', mode: 0o6777 },
+      });
+      const opts = { installDir, tarballPath, metaPath, force: true, sharedReadOnly: true };
+      const result = await extractBundleIfNeeded(opts);
+      expect(result.action).toBe('forced');
+      for (const path of ['', 'dist', 'dist/bin', 'dist/bin/gezeld.js', 'native-helper']) {
+        expect((await stat(join(installDir, path))).mode & 0o7777).toBe(0o755);
+      }
+      for (const path of [
+        'package.json',
+        '.gezel-bundle.sha256',
+        '.gezel-bundle.shared-readonly-v1',
+      ]) {
+        expect((await stat(join(installDir, path))).mode & 0o7777).toBe(0o644);
+      }
+      expect((await extractBundleIfNeeded(opts)).action).toBe('up-to-date');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'repairs same-sha private extractions once before taking the fast path',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, {
+        version: '1.2.3',
+        modes: { file: 0o600, directory: 0o700, bin: 0o700 },
+      });
+      const opts = { installDir, tarballPath, metaPath, force: true };
+      await extractBundleIfNeeded(opts);
+      expect((await stat(join(installDir, 'package.json'))).mode & 0o777).toBe(0o600);
+      expect((await extractBundleIfNeeded({ ...opts, sharedReadOnly: true })).action).toBe(
+        'forced',
+      );
+      expect((await stat(join(installDir, 'package.json'))).mode & 0o777).toBe(0o644);
+      expect((await stat(join(installDir, 'dist'))).mode & 0o777).toBe(0o755);
+      expect((await extractBundleIfNeeded({ ...opts, sharedReadOnly: true })).action).toBe(
+        'up-to-date',
+      );
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    'strips inherited macOS ACLs before creating shared code',
+    async () => {
+      await seedTarballBundle(root, tarballPath, metaPath, { version: '1.2.3' });
+      execFileSync('/bin/chmod', [
+        '+a',
+        'everyone allow write,append,file_inherit,directory_inherit',
+        root,
+      ]);
+      await extractBundleIfNeeded({ installDir, tarballPath, metaPath, sharedReadOnly: true });
+      for (const path of ['', 'dist', 'package.json', 'dist/bin/gezeld.js']) {
+        expect(
+          execFileSync('/bin/ls', ['-lde', join(installDir, path)], { encoding: 'utf8' }),
+        ).not.toContain('everyone allow');
+      }
+    },
+  );
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
@@ -552,5 +636,145 @@ describe('extractBundleIfNeeded', () => {
     await expect(extractBundleIfNeeded({ tarballPath, metaPath, installDir })).rejects.toThrow(
       /Expected service bundle meta at/,
     );
+  });
+});
+
+/** Ownership is the whole question here, and Windows reports none. */
+const posixOnly = process.platform === 'win32' ? it.skip : it;
+
+describe('extractBundleIfNeeded as a root installer', () => {
+  let root: string;
+  let tarballPath: string;
+  let metaPath: string;
+  let installDir: string;
+  let installer: { uid: number; gid: number };
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'gezel-bundle-root-'));
+    tarballPath = join(root, 'service-bundle.tar.gz');
+    metaPath = join(root, 'service-bundle.meta.json');
+    installDir = join(root, 'install');
+    // The fixture cannot run as root, so the account running Vitest stands in
+    // for the one the installer publishes as.
+    installer = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  posixOnly('never hands extracted entries to the owner recorded in the archive', async () => {
+    // Release archives recorded the CI runner's uid, and node-tar restores
+    // recorded owners by default when it runs as root. Model root for node-tar
+    // with an archive naming an account this process cannot chown to: had the
+    // extractor preserved owners, every entry would fail with EPERM.
+    const source = join(root, 'foreign-src');
+    await mkdir(join(source, 'dist', 'bin'), { recursive: true });
+    await writeFile(
+      join(source, 'package.json'),
+      JSON.stringify({ name: '@bendyline/gezel-service', version: '0.1.0' }),
+    );
+    await writeFile(join(source, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
+    const foreign = installer.uid + 4242;
+    await tar.create(
+      {
+        gzip: true,
+        file: tarballPath,
+        cwd: source,
+        onWriteEntry: (entry) => {
+          if (!entry.stat) return;
+          entry.stat.uid = foreign;
+          entry.stat.gid = foreign;
+        },
+      },
+      ['.'],
+    );
+    await writeFile(
+      metaPath,
+      JSON.stringify({
+        version: '0.1.0',
+        sha256: createHash('sha256')
+          .update(await readFile(tarballPath))
+          .digest('hex'),
+        sizeBytes: (await stat(tarballPath)).size,
+        fileCount: 2,
+      }),
+    );
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+
+    const res = await extractBundleIfNeeded({
+      tarballPath,
+      metaPath,
+      installDir,
+      force: true,
+      trustedOwner: installer,
+    });
+
+    expect(res.action).toBe('forced');
+    for (const path of [installDir, join(installDir, 'package.json')]) {
+      expect((await stat(path)).uid).toBe(installer.uid);
+    }
+    // Private until the installer publishes it with its own modes.
+    expect((await stat(installDir)).mode & 0o777).toBe(0o700);
+  });
+
+  posixOnly('trusts a matching sentinel in a tree only its owner could write', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', { path: 'keep.txt', content: 'untouched' }, sha);
+
+    const res = await extractBundleIfNeeded({
+      tarballPath,
+      metaPath,
+      installDir,
+      force: true,
+      trustedOwner: installer,
+    });
+
+    expect(res.action).toBe('up-to-date');
+    expect(await readFile(join(installDir, 'keep.txt'), 'utf8')).toBe('untouched');
+  });
+
+  posixOnly(
+    'replaces a tree with a matching sentinel that another account could write',
+    async () => {
+      // The machine-service home belongs to the service account, which can put a
+      // tree of its own where the installer's was and copy the sentinel from the
+      // world-readable shipped meta. Reported up to date, that tree would have
+      // been re-owned to root and published to every account.
+      const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+      await seedInstalledTree(installDir, '0.1.0', { path: 'planted.txt', content: 'x' }, sha);
+      await chmod(join(installDir, 'dist'), 0o777);
+
+      const res = await extractBundleIfNeeded({
+        tarballPath,
+        metaPath,
+        installDir,
+        force: true,
+        trustedOwner: installer,
+      });
+
+      expect(res.action).toBe('forced');
+      expect(existsSync(join(installDir, 'planted.txt'))).toBe(false);
+    },
+  );
+
+  posixOnly('does not restore an interrupted backup another account could write', async () => {
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    const backup = `${installDir}.previous`;
+    await seedInstalledTree(backup, '0.1.0', { path: 'planted.txt', content: 'x' }, sha);
+    await chmod(backup, 0o777);
+
+    const res = await extractBundleIfNeeded({
+      tarballPath,
+      metaPath,
+      installDir,
+      force: true,
+      trustedOwner: installer,
+    });
+
+    expect(res.action).toBe('forced');
+    expect(existsSync(join(installDir, 'planted.txt'))).toBe(false);
+    expect(existsSync(backup)).toBe(false);
   });
 });

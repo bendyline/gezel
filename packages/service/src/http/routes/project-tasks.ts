@@ -22,6 +22,7 @@ import {
   createLogger,
   docFromCraftbook,
   formatCraftbookDocErrors,
+  isOwnerStep,
   nowIso,
   parseCraftbookDoc,
   resolveSteps,
@@ -225,6 +226,22 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = CompleteStepRequestSchema.parse(await c.req.json().catch(() => ({})));
+    // An owner step (review, approval, sign-off) moves only on the owner's
+    // say-so. A gezel that reached it — a stale dispatch, a model reading
+    // "Owner Review" as its own job — gets told to hand it over, not to do it.
+    if (c.get('auth')?.scopes.includes('session')) {
+      const current = await ctx.tasks.get(projectId, num).catch(() => null);
+      const step = current?.craftbook.steps.find((s) => s.id === c.req.param('stepId'));
+      if (current && isOwnerStep(step)) {
+        return c.json(
+          {
+            error: `task ${current.ref}: "${step?.name ?? c.req.param('stepId')}" is the user's own step to approve. Do not complete it or do its work. Tell the user it is ready for their review and stop; they have a card to approve it.`,
+            code: 'owner_step',
+          },
+          409,
+        );
+      }
+    }
     // An explicit jump target that is not one of this task's steps used to
     // surface as an unhandled 500. A model reaching for a step it read about
     // elsewhere (a fanout child naming its host's `collect`) gets the step

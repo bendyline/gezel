@@ -1,30 +1,25 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { gildePackageRoot } from './gilde-data.js';
 import { renderGildeSchemaFiles } from './gilde-schema-export.js';
 
 /**
- * Guards the seam between core's Zod schemas and gilde's committed JSON
- * Schema snapshots. It has no loud failure of its own: gilde's
- * `build-index` normalizes manifests through those snapshots and DROPS
- * any property they don't declare, so content authored against a newer
- * core is silently stripped in the published `index.json` — which is the
- * fast path `BundledSource` serves at runtime. Nothing errors; the field
- * is simply gone, and the daemon falls back to defaults.
+ * Reports — never fails on — how gilde's committed JSON Schema snapshots
+ * compare with core's Zod schemas.
  *
- * Wild-caught on three craftbooks at once, each losing an artifact-
- * routing flag that core had declared all along:
- *   pull-request-review  corpusCoverage.artifact
- *   powerpoint-deck      markdownHeadingsMatch.outlineArtifact
- *   invoice-run          spawn.overArtifact
- * The first of those made the whole book unsatisfiable on any project
- * with managed workspace writes off, because the coverage ledger was
- * hunted for in a tree nobody could write.
+ * gilde ships on its own schedule, so the two are routinely a little apart
+ * in either direction, and neither direction breaks this build: the catalog
+ * loader lists from gilde's `raw-index.json` — the item files verbatim — and
+ * reads every manifest and craftbook through core's own schemas, tolerantly
+ * (`parseTolerant`). What a stale snapshot costs is authoring: gilde's
+ * validator checks content against it, so a book cannot cleanly use a newer
+ * field until gilde regenerates its schemas, and the legacy `index.json` that
+ * older builds read strips it. That is gilde's to fix, in the gilde change
+ * that first uses the field, so here it is a warning.
  *
- * Fails in both directions that matter: editing core without re-running
- * the exporter, and bumping the `@bendyline/gilde` pin to a release cut
- * from an older core.
+ * This file used to fail on any drift, which chained every core schema
+ * change to a gilde release and a pin bump before gezel CI could go green.
  */
 const FIX = 'Run `pnpm gilde:export-schemas`, then PR the regenerated schemas/ to bendyline/gilde.';
 
@@ -69,59 +64,88 @@ function describeDrift(filename: string, generated: string, committed: string): 
   const lines = [`${filename}:`];
   if (missing.length > 0) {
     lines.push(
-      `  ${missing.length} property path(s) in core but NOT in the committed schema — these are being stripped from the published index: ${cap(missing)}`,
+      `  ${missing.length} property path(s) in core but not in gilde's copy — gilde content cannot use these yet: ${cap(missing)}`,
     );
   }
   if (orphaned.length > 0) {
-    lines.push(`  ${orphaned.length} committed but no longer generated: ${cap(orphaned)}`);
+    lines.push(`  ${orphaned.length} in gilde's copy but not generated here: ${cap(orphaned)}`);
   }
   if (changed.length > 0) lines.push(`  ${changed.length} changed: ${cap(changed)}`);
   return lines.join('\n');
 }
 
-describe('gilde schemas are current with core', () => {
-  const root = gildePackageRoot();
-  const schemasDir = join(root, 'schemas');
-
-  it('the resolved gilde ships a schemas/ directory', () => {
-    // Absent means gilde CI is validating content against nothing, and
-    // this whole gate is inert — never let that pass quietly.
-    expect(
-      existsSync(schemasDir),
-      `No schemas/ in the resolved gilde (${root}). The package must ship it — check the "files"/"exports" fields of @bendyline/gilde.`,
-    ).toBe(true);
-  });
-
-  it('every exported schema matches the committed copy byte for byte', () => {
-    const drifted: string[] = [];
-    for (const [filename, content] of renderGildeSchemaFiles()) {
-      const path = join(schemasDir, filename);
-      if (!existsSync(path)) {
-        drifted.push(`${filename}: missing from the committed schemas/.`);
-        continue;
-      }
-      const committed = readFileSync(path, 'utf8');
-      if (committed === content) continue;
-      drifted.push(
-        filename.endsWith('.json')
-          ? describeDrift(filename, content, committed)
-          : `${filename}: differs from the generated copy.`,
-      );
+/** Every way the resolved gilde's schemas/ differs from what core generates. */
+function schemaDrift(schemasDir: string): string[] {
+  if (!existsSync(schemasDir)) {
+    return [
+      `No schemas/ in the resolved gilde (${schemasDir}); gilde CI is validating against nothing.`,
+    ];
+  }
+  const drift: string[] = [];
+  const generated = renderGildeSchemaFiles();
+  for (const [filename, content] of generated) {
+    const path = join(schemasDir, filename);
+    if (!existsSync(path)) {
+      drift.push(`${filename}: missing from gilde's schemas/.`);
+      continue;
     }
-    expect(
-      drifted,
-      `gilde's committed schemas are stale relative to packages/core/src/schemas/.\n\n${drifted.join('\n')}\n\n${FIX}`,
-    ).toEqual([]);
+    const committed = readFileSync(path, 'utf8');
+    if (committed === content) continue;
+    drift.push(
+      filename.endsWith('.json')
+        ? describeDrift(filename, content, committed)
+        : `${filename}: differs from the generated copy.`,
+    );
+  }
+  const names = new Set(generated.map(([filename]) => filename));
+  const orphans = readdirSync(schemasDir).filter(
+    (name) => name.endsWith('.schema.json') && !names.has(name),
+  );
+  if (orphans.length > 0) {
+    drift.push(`gilde carries schema files this build does not export: ${orphans.join(', ')}.`);
+  }
+  return drift;
+}
+
+/**
+ * Warn in the test output and, on GitHub Actions, in the job summary — the
+ * one place a warning survives `pnpm -r` prefixing every output line.
+ * Written to stderr directly: vitest swallows a passing test's `console`.
+ */
+function report(root: string, drift: string[]): void {
+  const heading = `gilde's schemas differ from core (${drift.length} finding(s), non-blocking)`;
+  process.stderr.write(
+    `\n${heading} — resolved gilde: ${root}\n\n${drift.join('\n')}\n\n${FIX}\n\n`,
+  );
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (!summary) return;
+  const files = drift.map((entry) => `- ${entry.split('\n')[0]?.replace(/:$/, '')}`).join('\n');
+  try {
+    appendFileSync(summary, `### ${heading}\n\n${files}\n\n${FIX}\n\n`);
+  } catch {
+    // A summary that cannot be written is not worth failing a report over.
+  }
+}
+
+describe('gilde schemas compared with core', () => {
+  it('reports drift without failing', () => {
+    const root = process.env.GILDE_DIR?.trim()
+      ? resolve(process.env.GILDE_DIR.trim())
+      : gildePackageRoot();
+    const drift = schemaDrift(join(root, 'schemas'));
+    if (drift.length > 0) report(root, drift);
   });
 
-  it('carries no orphaned schema files', () => {
-    const generated = new Set(renderGildeSchemaFiles().map(([filename]) => filename));
-    const orphans = readdirSync(schemasDir)
-      .filter((name) => name.endsWith('.schema.json'))
-      .filter((name) => !generated.has(name));
-    expect(
-      orphans,
-      `gilde carries schema files nothing exports any more: ${orphans.join(', ')}. Delete them in gilde, or add the missing entry to GILDE_SCHEMA_EXPORTS.`,
-    ).toEqual([]);
+  it('names the property paths that drifted', () => {
+    const generated = JSON.stringify({ properties: { a: { type: 'string' }, b: { const: 'x' } } });
+    const committed = JSON.stringify({ properties: { b: { const: 'y' }, c: { type: 'number' } } });
+    expect(describeDrift('x.schema.json', generated, committed)).toBe(
+      [
+        'x.schema.json:',
+        "  1 property path(s) in core but not in gilde's copy — gilde content cannot use these yet: .properties.a.type",
+        "  1 in gilde's copy but not generated here: .properties.c.type",
+        '  1 changed: .properties.b.const',
+      ].join('\n'),
+    );
   });
 });

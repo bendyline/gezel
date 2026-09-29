@@ -7,7 +7,8 @@ that review — re-measure with `GEZEL_PROMPT_BREAKDOWN=1` (per-section token ta
 ## The mental model
 
 Every provider gets a real system prompt from us. There is one builder —
-`buildInstructions` in [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
+`buildInstructions` in [chat/instructions.ts](../packages/service/src/chat/instructions.ts),
+called from [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
 runs for every session on every provider. The differences between local and cloud are not
 "local has no system prompt"; they are:
 
@@ -43,7 +44,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large), the deep pass has produced summaries, AND the role gets specialist workspace orientation | ≤ ~300 tok |
 | 7 | Role-scoped `### Workspace files` listing (cap 100): developer-family roles see code/config, writers see prose sources, researchers see prose/text data, designers see editable design sources, and reviewers see their union. Coordinators, generalists, generators, and unknown roles get no standing inventory. Dependency/build/cache directories, lockfiles, minified/source-map output, and binary formats are removed before the cap. With `prompt.retrieval-first` on the profile (tier-default tiny/small/medium), a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface. | project has relevant files and role is eligible | varies |
 | 8 | Shared documents library listing | documents exist, not executor-trimmed | varies |
-| 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
+| 9 | `### Current task` + `#### Reference material found at launch` + `#### Step procedure` + `#### Phase gate` | task-scoped session (references only on a book launched with a subject) | varies; procedures can be large, references ≤5 citations |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
 | 11 | `### Recalled from prior sessions` legacy compatibility block | only when ChatManager is embedded without the scoped SearchService wiring | ~4–7 bullets |
 | 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
@@ -107,28 +108,99 @@ The intent stays capability-inverse — **the coddling budget scales inversely w
 the model can carry** — but the dial is per-model curation in the manifest; tier defaults
 are the conservative floor for models nobody has curated.
 
-### Minimal-context mode: when the standing prompt doesn't fit at all
+### Prompt footprints: how much prompt a small model gets
 
-The whole layer stack above assumes the model can *hold* it. `talkie-1930-13b-q4` (a
-2048-token period-writing model) can't: the standing prompt needed ~2,681 tokens against
-its 2,048 window, so the engine rejected even "hi there" before generating a token. The
-`prompt.minimal-context` behavior handles this class. It's a marker (like
-`prompt.executor-context-trim`) resolved into a `minimalContext` flag in
-`buildInstructions`, and it **auto-activates** when the model's catalog `contextWindow`
-is at/below `MINIMAL_CONTEXT_MAX_WINDOW` (4096) — no per-manifest opt-in required, though
-a manifest may declare it explicitly (talkie does).
+The whole layer stack above assumes the model can *hold* it, and can read it quickly.
+Neither holds for every model gezel runs, so one decision sizes the prompt on every
+host: the **prompt footprint** in
+[core/src/prompt-footprint.ts](../packages/core/src/prompt-footprint.ts).
+`resolvePromptFootprint` picks it and `PROMPT_FOOTPRINT_POLICY` says what each allows.
+Hosts read the policy instead of keeping their own numbers, so "a small model" means the
+same thing on the desktop daemon and on a phone.
 
-When active, `buildInstructions` early-returns a stripped prompt — **header + the gezel's
-about.md (capped to ~900 chars) + one short "you have no tools, just converse" line** —
-and drops every other layer (guardrail, project context, workspace/documents, task blocks,
-recall, the full conduct core, the tools block). The floor falls from ~2.7K tokens to
-~350, leaving the window for the conversation. This is deliberately lossy: a model in this
-mode does conversation and short writing, not tool-driven or project work — pair it with
-the `just-chat` project type, which hides the work-oriented tabs to match. Tests:
-[chat/manager-minimal-context.test.ts](../packages/service/src/chat/manager-minimal-context.test.ts).
+| Footprint | Chosen when | about.md | Project brief | Text tool listing starts at | Native tools start at |
+|---|---|---|---|---|---|
+| `standard` | the default | whole | whole | `full` (JSON schemas) | `full` |
+| `compact` | phone or tablet hardware | ~1,500 chars | ~1,200 chars | `compact` (signatures + one sentence) | `compact` |
+| `minimal` | window at/below `MINIMAL_FOOTPRINT_MAX_WINDOW` (4096), or asked for | ~900 chars | ~600 chars | `compact` | `compact` |
+
+An explicit request wins over the window: the `prompt.minimal-context` behavior asks for
+`minimal`. A listing only says where the tool ladder *starts*; a provider that still
+refuses the prompt narrows it further (`full → compact → signatures → none` for text,
+`full → compact → core → none` for native tools) and the conversation remembers the fit.
+Caps cut at a sentence and say they did, so the model knows the text is partial.
+
+**Why `compact` exists (prefill, not fit).** A Galaxy S20 FE running Qwen 3.5 2B spent
+**142 s** reading gezel's ~3,000-token standard mobile prompt before writing a word
+(2026-09-26). The prompt fit in the window; it was simply too slow to read. On phone
+hardware every prompt token is prefill time, so the portable runtime
+([runtime/product-service.ts](../packages/core/src/runtime/product-service.ts)) always
+resolves with `constrainedDevice: true`.
+Across the mobile prompt-budget audit's cases
+([evals/src/mobile/prompt-budget.ts](../evals/src/mobile/prompt-budget.ts)), the phone
+system message fell from 12.6–18.9 KB to 3.8–6.2 KB, most of it the tool listing
+(9.7–13.8 KB of JSON down to 2.4–3.4 KB of signatures).
+
+A phone's window is the device's to size. The native runtime measures what each window
+would take with llama.cpp's own dry-run accounting (`gezel_llama_estimate_memory`) and
+reports 16K or 8K when that fits with room to spare, else 4K, on the selected model
+(`MobileModel.contextTokens`); the product runtime uses it unless the person set one. So
+a phone model resolves `compact` at 8K–16K and `minimal` at 4K. ML Kit and Apple's
+on-device model stay at their fixed 4K.
+
+**Why `minimal` exists (fit).** `talkie-1930-13b-q4` (a 2048-token period-writing model)
+needed ~2,681 tokens of standing prompt against its 2,048 window, so the engine rejected
+even "hi there" before generating a token. On the desktop,
+`buildInstructions` resolves the footprint from the model's catalog `contextWindow` (or
+the provider's reported window for native-tool providers) and, when it is `minimal`,
+early-returns a stripped prompt instead of the layer stack. There are two forms:
+
+- **Text-only** (talkie): header + capped about.md + one "you have no tools, just
+  converse" line. Everything else is dropped: guardrail, project context,
+  workspace/documents, task blocks, recall, the full conduct core, and the tools block.
+  The floor falls from ~2.7K tokens to ~350. This is deliberately lossy; pair it with the
+  `just-chat` project type, which hides the work-oriented tabs to match.
+- **Native tools** (Apple's on-device model): the same header and capped about, then the
+  tool-restraint note (`NATIVE_TOOL_NOTE`: most messages need no tool, never claim an
+  action without a result), the project name with a condensed brief, and the task
+  context and anchor. The tool definitions travel through the provider's own API, not
+  the prompt. A model that can act on the project keeps a brief of it; the text-only form
+  has no workspace, so a brief would only cost prefill.
+
+Tests: [prompt-footprint.test.ts](../packages/core/src/prompt-footprint.test.ts),
+[chat/manager-minimal-context.test.ts](../packages/service/src/chat/manager-minimal-context.test.ts),
+and the phone cases in
+[tests/portable-product.test.ts](../packages/core/tests/portable-product.test.ts).
+
+**Tool calls in a fence.** Small models often wrap a tool call in a Markdown fence. The
+text protocol accepts a reply that is *only* a fenced envelope
+(`parseToolEnvelopeReply` in [tools/envelope.ts](../packages/core/src/tools/envelope.ts)).
+A fenced envelope inside prose is still an example, never a call. A reply that ended on
+its own with the call's last one or two `}`/`]` missing is closed and run; the same
+reply cut off by the token limit never is. The S20 FE computed a correct answer twice
+and lost it first to the fence rule, then to a missing final brace. A reply that is exactly
+one Python-style call, `[read_file(path='brief.md')]`, also runs
+([tools/pythonic-call.ts](../packages/core/src/tools/pythonic-call.ts)): LFM2 models
+call tools that way whatever the prompt says, and none of LFM2.5's calls ran on a
+Galaxy S26+ until it was accepted. Keyword arguments and Python literals only;
+prose around the call, or a second call, is still not a call. Gemma 4's own
+format, `<|tool_call>call:list_dir{}<tool_call|>` with `<|"|>`-delimited strings,
+runs under the same whole-reply rule ([tools/gemma-call.ts](../packages/core/src/tools/gemma-call.ts));
+Gemma 4 E4B switched between it and the JSON envelope within one run. Reasoning blocks
+(`<think>…</think>`) are stripped before the envelope is parsed, and are held off screen
+while they stream.
 
 ## Channel two: the user-message channel
 
+- **Current date and time** ([prompt-clock.ts](../packages/core/src/prompt-clock.ts)): one
+  line, `[Current date and time: Monday, September 28, 2026, 10:44 AM (America/Los_Angeles,
+  UTC-07:00)]`, placed first on the first provider send of every turn. `ChatManager.runSend`
+  adds it at the provider seam only (`providerPrompt()`), so the stored user message, the
+  prefix-anchored turn classifiers, and continuation nudges never see it. It sits outside
+  the system prompt because a clock there would change every minute and invalidate the
+  cached prefix. Without it, models dated plans from their training data: a Meester
+  planned "the week of May 20th" in September 2026, and that date ended up in craftbook
+  params, filenames and a customer quote. Guarded by the `date-grounding` eval.
 - **Turn intent plan** (`chat/turn-intent-plan.ts`): a deterministic first pass shared by
   the service, typed client, and composer. Exact requested formats (PPTX, DOCX, PDF, and
   animated slideshow outputs) resolve to one existing craftbook id before the model runs;
@@ -183,6 +255,7 @@ user channel. The system prompt is for standing facts and standing conduct.
 | copilot (SDK) | session config `systemMessage: { mode: 'replace' }` | SDK default text **replaced**; SDK harness still owns tools/permissions | applied at create and on every resume | rebuild on drift |
 | anthropic-cli (Claude Code) | `--append-system-prompt-file` | full Claude Code agent prompt, ours **appended** | per spawn | rebuild on drift |
 | codex-cli | `instructions` key in per-session `config.toml` (AGENTS.md auto-discovery disabled via `project_doc_max_bytes = 0`) | Codex base agent prompt, ours layered on | per session | rebuild on drift |
+| apple-foundation-models | `instructions` entry of the Foundation Models transcript, tool definitions beside it (via the `gezel-apple-fm` helper) | Apple's own system framing, not replaceable | every turn (stateless; history re-sent) | rebuild on drift |
 
 Incident worth remembering (found and fixed during this review): the
 OpenAI provider originally sent `instructions` only when there was no

@@ -329,6 +329,25 @@ export const ModelTierSchema = z.enum(MODEL_TIER_ORDER);
 export const CraftbookStepPromptProfileSchema = z.enum(['focused']);
 export type CraftbookStepPromptProfile = z.infer<typeof CraftbookStepPromptProfileSchema>;
 
+/**
+ * Run a step only when an earlier answer from the owner asked for it. The
+ * runtime checks it when the step activates, against the answered question
+ * the `answerOf` step asked; a step the answer did not call for completes
+ * with a note and no model turn. "Queue to Bluesky (only when asked)" spent a
+ * two-minute, 19K-token model turn working out that nobody had asked.
+ */
+export const StepRunWhenSchema = z.object({
+  /** The step whose `ask_user_question` answer decides. */
+  answerOf: z.string().min(1),
+  /** Run when the owner picked any of these choices (case-insensitive). */
+  choiceAnyOf: z.array(z.string().min(1)).min(1).optional(),
+  /** Run when the owner's written reply matches this case-insensitive regex. */
+  writeInMatches: z.string().min(1).optional(),
+  /** No answer on record: run the step (the default) or skip it. */
+  onMissing: z.enum(['run', 'skip']).optional(),
+});
+export type StepRunWhen = z.infer<typeof StepRunWhenSchema>;
+
 export const CraftbookStepSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -386,6 +405,8 @@ export const CraftbookStepSchema = z.object({
     ),
   /** See {@link AdvanceWhenSchema}. */
   advanceWhen: AdvanceWhenSchema.optional(),
+  /** See {@link StepRunWhenSchema}. */
+  runWhen: StepRunWhenSchema.optional(),
   /** The end-of-step decision. See {@link StepGateSchema} (current) / {@link GateSpecSchema} (legacy). */
   gate: StepGateUnionSchema.optional(),
   next: z.string().optional(),
@@ -1108,6 +1129,8 @@ export const NewCraftbookStepSchema = z.object({
       'Files this step must open before working. Artifact inputs also require an explicit `read_artifact` call in the step prompt.',
     ),
   advanceWhen: AdvanceWhenSchema.optional(),
+  /** See {@link StepRunWhenSchema}. */
+  runWhen: StepRunWhenSchema.optional(),
   gate: StepGateUnionSchema.optional(),
   /** See {@link StepDeliverableSchema} — one field attaches the enforced gate. */
   deliverable: StepDeliverableSchema.optional(),
@@ -1333,6 +1356,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.onExit ? { onExit: s.onExit } : {}),
       ...(s.consumes && s.consumes.length > 0 ? { consumes: s.consumes } : {}),
       ...(s.advanceWhen ? { advanceWhen: s.advanceWhen } : {}),
+      ...(s.runWhen ? { runWhen: s.runWhen } : {}),
       ...(s.gate ? { gate: s.gate } : {}),
       ...(s.next ? { next: s.next } : {}),
       ...(s.branches && s.branches.length > 0 ? { branches: s.branches } : {}),
@@ -1462,6 +1486,7 @@ export interface StepPatch {
   onExit?: ScriptRefList | null;
   consumes?: CraftbookStepInput[] | null;
   advanceWhen?: AdvanceWhen | null;
+  runWhen?: StepRunWhen | null;
   gate?: StepGateUnion | null;
   next?: string | null;
   branches?: CraftbookBranch[] | null;
@@ -1532,6 +1557,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
   if (patch.advanceWhen !== undefined) {
     if (patch.advanceWhen === null) delete updated.advanceWhen;
     else updated.advanceWhen = patch.advanceWhen;
+  }
+  if (patch.runWhen !== undefined) {
+    if (patch.runWhen === null) delete updated.runWhen;
+    else updated.runWhen = patch.runWhen;
   }
   if (patch.gate !== undefined) {
     if (patch.gate === null) delete updated.gate;

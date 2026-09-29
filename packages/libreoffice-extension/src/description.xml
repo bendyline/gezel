@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<description xmlns="http://openoffice.org/extensions/description/2006"
+             xmlns:d="http://openoffice.org/extensions/description/2006"
+             xmlns:lo="http://libreoffice.org/extensions/description/2011"
+             xmlns:xlink="http://www.w3.org/1999/xlink">
+  <identifier value="com.bendyline.gezel"/>
+  <version value="__VERSION__"/>
+  <platform value="all"/>
+  <display-name>
+    <name lang="en">Gezel</name>
+  </display-name>
+  <publisher>
+    <name xlink:href="https://github.com/bendyline/gezel" lang="en">Bendyline</name>
+  </publisher>
+  <extension-description>
+    <src xlink:href="registration/description_en.txt" lang="en"/>
+  </extension-description>
+  <icon>
+    <default xlink:href="icons/gezel_42.png"/>
+  </icon>
+  <dependencies>
+    <lo:LibreOffice-minimal-version value="7.2" d:name="LibreOffice 7.2"/>
+  </dependencies>
+</description>

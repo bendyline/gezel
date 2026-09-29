@@ -40,7 +40,10 @@ export function terminalToolClosingText(
 ): string | null {
   if (output.trimStart().startsWith('ERROR:')) return null;
   if (BUILTIN_TERMINAL_TOOLS.has(toolName)) {
-    return compactClosing(output, 'Step completed and handed off.', 280);
+    // Only the first paragraph is for a person; the rest (refs, the active
+    // step, handoff instructions) is for the model and read like a log.
+    const firstParagraph = output.trim().split(/\n\s*\n/)[0] ?? '';
+    return compactClosing(firstParagraph, 'Step completed and handed off.', 280);
   }
   if (!policy?.toolNames.includes(toolName)) return null;
   if (policy.onlyWhenArgEquals) {

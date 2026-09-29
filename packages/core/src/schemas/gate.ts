@@ -84,6 +84,31 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     verifyImageBytes: z.boolean().optional(),
     artifact: z.boolean().optional(),
   }),
+  /**
+   * Every value a deliverable lists has its own file: each entry of the
+   * frontmatter list `key` in `file` names `pathTemplate` with `{value}`
+   * replaced by the entry's lowercase slug, and each must hold at least
+   * `minBytes` (default 1). A draft whose `platforms` names Instagram and
+   * ships no Instagram variant fails here; a size floor alone passed it.
+   */
+  z.object({
+    kind: z.literal('listedFiles'),
+    file: z.string().min(1),
+    key: z.string().min(1),
+    pathTemplate: z.string().min(1).includes('{value}'),
+    minBytes: z.number().int().positive().optional(),
+    artifact: z.boolean().optional(),
+  }),
+  /**
+   * The figures in `file` hold up: subtotals match their items, quantity ×
+   * unit price matches each line, weekdays match their dates, and no date
+   * with a year has clearly passed. For quotes, invoices and schedules.
+   */
+  z.object({
+    kind: z.literal('figures'),
+    file: z.string().min(1),
+    artifact: z.boolean().optional(),
+  }),
   /** Inline `<style>` + linked `.css` in `file` (default index.html) clears `bytes`. */
   z.object({
     kind: z.literal('cssMinBytes'),
@@ -308,9 +333,10 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minSuccessful: z.number().int().positive().optional(),
     externalOptional: z.boolean().optional(),
   }),
-  /** Require actual image delivery for each {path} in a workspace JSON manifest. */
+  /** Require image delivery for each {path}; artifact selects the manifest and image surface. */
   z.object({
     kind: z.literal('imageEvidence'),
+    artifact: z.boolean().optional(),
     file: z.string().min(1),
     imagesKey: z.string().min(1).default('images'),
     baseDir: z.string().min(1),

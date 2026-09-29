@@ -23,10 +23,12 @@ import type { CraftbookInputValue } from './craftbook-input/CraftbookInputField.
 
 export type LaunchOrigin = PromptDraftTaskLaunch['origin'];
 
-/** A suggestion the person dismissed; the same text must not resuggest it. */
+/**
+ * A suggestion the person dismissed. Keyed on the book, not the text: they
+ * turned down that task, and a word typed after it is not a change of mind.
+ */
 export interface SuppressedSuggestion {
   craftbookId: string;
-  text: string;
 }
 
 export interface LaunchReadiness {
@@ -86,6 +88,8 @@ export function inputValuesFromLaunch(
   return out;
 }
 
+const WRITE_THE_MESSAGE = 'Write what this task should be about.';
+
 function isBlank(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
@@ -94,13 +98,23 @@ function isBlank(value: unknown): boolean {
  * The same required-input and required-param checks the dialog runs before
  * "Create & start", so Send and the dialog cannot disagree about whether a
  * launch is complete. No manifest yet means the catalog has not answered;
- * Send waits rather than guessing.
+ * Send waits rather than guessing — unless the catalog answered without the
+ * book. The message fills the book's main content param only when there is
+ * one: an empty composer leaves that param to the launch's own params.
  */
 export function launchReadiness(
   launch: PromptDraftTaskLaunch,
   manifest: CraftbookTemplateManifest | null,
+  options: { hasMessage?: boolean; missing?: boolean } = {},
 ): LaunchReadiness {
-  if (!manifest) return { ready: false, reason: 'Loading the craftbook…' };
+  if (!manifest) {
+    return options.missing
+      ? {
+          ready: false,
+          reason: 'This craftbook is not available here any more. Remove it or pick another.',
+        }
+      : { ready: false, reason: 'Loading the craftbook…' };
+  }
   for (const input of craftbookInputParams(manifest.paramSchema)) {
     if (input.required && !launch.inputs?.[input.key]) {
       return {
@@ -112,7 +126,7 @@ export function launchReadiness(
   // The message being sent is the book's main content, so that param is
   // never a reason to hold Send.
   const mainKey = mainContentParamKey(manifest.paramSchema);
-  const messageFills = mainKey ? [mainKey] : [];
+  const messageFills = mainKey && options.hasMessage !== false ? [mainKey] : [];
   const schema = launchFormParamSchema(manifest.paramSchema, messageFills) as
     | { required?: unknown }
     | undefined;
@@ -120,12 +134,18 @@ export function launchReadiness(
     ? schema.required.filter((key): key is string => typeof key === 'string')
     : [];
   const missing = required.find((key) => isBlank(launch.params[key]));
+  if (missing === mainKey) return { ready: false, reason: WRITE_THE_MESSAGE };
   if (missing) return { ready: false, reason: `"${missing}" is required.` };
   const unmet = unmetParamAlternatives(manifest.paramSchema, launch.params, [
     ...messageFills,
     ...Object.keys(launch.inputs ?? {}),
   ]);
-  if (unmet) return { ready: false, reason: paramAlternativesMessage(manifest.paramSchema, unmet) };
+  if (unmet) {
+    if (mainKey && options.hasMessage === false && unmet.some((keys) => keys.includes(mainKey))) {
+      return { ready: false, reason: WRITE_THE_MESSAGE };
+    }
+    return { ready: false, reason: paramAlternativesMessage(manifest.paramSchema, unmet) };
+  }
   return { ready: true };
 }
 
@@ -179,7 +199,7 @@ export function formatTaskLaunchPreview(
   const allProperties = (manifest?.paramSchema?.properties ?? {}) as Record<string, unknown>;
   const unasked = new Set(
     Object.entries(allProperties)
-      .filter(([, property]) => !paramAsksUser(property))
+      .filter(([key, property]) => !paramAsksUser(property, key))
       .map(([key]) => key),
   );
   const declared = Object.keys(properties);
@@ -218,12 +238,11 @@ export function formatTaskLaunchPreview(
  * always wins. A suggestion attaches only when the plan already satisfies
  * the book (an incomplete suggestion would make Send a dead key), replaces
  * an earlier suggestion, and clears when the plan goes quiet. A dismissed
- * suggestion stays dismissed for the same text.
+ * book stays dismissed however the text changes.
  */
 export function mergeSuggestedLaunch(args: {
   current: PromptDraftTaskLaunch | null;
   plan: TurnIntentPlan | null;
-  text: string;
   suppressed: SuppressedSuggestion | null;
   manifest: CraftbookTemplateManifest | null;
 }): PromptDraftTaskLaunch | null {
@@ -231,11 +250,7 @@ export function mergeSuggestedLaunch(args: {
   if (current?.origin === 'user') return current;
   const craftbook = plan?.visible && plan.route === 'craftbook' ? plan.craftbook : undefined;
   if (!craftbook) return current?.origin === 'suggested' ? null : current;
-  if (
-    args.suppressed &&
-    args.suppressed.craftbookId === craftbook.id &&
-    args.suppressed.text === args.text.trim()
-  ) {
+  if (args.suppressed?.craftbookId === craftbook.id) {
     return current?.origin === 'suggested' ? null : current;
   }
   const params = craftbook.invocation.params ?? {};

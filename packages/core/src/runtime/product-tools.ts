@@ -9,6 +9,7 @@ import type { ScriptScope } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import { type CreateTaskRequest, CreateTaskRequestSchema } from '../schemas/task.js';
 import { roleHasTeamScope, roleToolNames } from '../tools/access.js';
+import { describeToolArgumentError } from '../tools/argument-errors.js';
 import { TOOL_DESCRIPTIONS } from '../tools/descriptions.js';
 import {
   AddGezelToProjectInputSchema,
@@ -240,7 +241,10 @@ export async function executePortableTool(
   );
   if (!grants.has(name as PortableToolName))
     throw new Error(`Tool ${name} is unavailable to this gezel`);
-  const args = definitions[name as PortableToolName].input.parse(raw) as Record<string, unknown>;
+  const schema = definitions[name as PortableToolName].input;
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new Error(describeToolArgumentError(name, parsed.error, schema));
+  const args = parsed.data as Record<string, unknown>;
   const team = roleHasTeamScope(context.gezel.role, context.project.mode);
   const target = typeof args.project === 'string' ? args.project : session.projectId;
   if (target !== session.projectId && !team)

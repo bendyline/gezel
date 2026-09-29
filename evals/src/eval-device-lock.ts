@@ -25,7 +25,7 @@ import {
   type EvalSleepGuardLease,
   acquireEvalSleepGuard,
 } from './eval-sleep-guard.ts';
-import { type ChatProvider, isLocalEngine } from './providers.ts';
+import { type ChatProvider, isLocalEngine, runsOnThisDevice } from './providers.ts';
 import type { EvalScenario } from './types.ts';
 
 export const EVAL_DEVICE_LOCK_BYPASS_ENV = 'GEZEL_EVAL_ALLOW_CONCURRENT';
@@ -305,7 +305,7 @@ export function evalNeedsDeviceLock(input: {
   imageModelId?: string;
 }): boolean {
   return (
-    isLocalEngine(input.provider) ||
+    runsOnThisDevice(input.provider) ||
     Boolean(input.imageModelId) ||
     Boolean(input.scenarios?.some((scenario) => scenario.defaultImageModelId))
   );

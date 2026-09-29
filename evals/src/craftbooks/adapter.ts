@@ -25,7 +25,20 @@ export function evalSpecFromTestSpec(
     ? (override.mode ?? 'artifact-task')
     : loaded.hasSpawn
       ? 'workflow'
-      : (override?.mode ?? 'artifact-task');
+      : (override?.mode ?? spec.mode ?? 'artifact-task');
+  const recordedCoverage = override?.coverage;
+  const coverage =
+    spec.mode !== undefined &&
+    recordedCoverage?.status === 'validated' &&
+    override?.validatedSpecVersion !== loaded.version
+      ? {
+          status: 'implemented' as const,
+          notes: `The explicit ${spec.mode} sidecar changed at ${craftbookId}@${loaded.version}; prior validation evidence does not identify this test version and must be rerun.`,
+        }
+      : (recordedCoverage ?? {
+          status: 'implemented' as const,
+          notes: 'Adapted from the catalog test.json sidecar; no local validation recorded yet.',
+        });
   return {
     craftbookId,
     mode,
@@ -89,10 +102,7 @@ export function evalSpecFromTestSpec(
         ? { unchangedFixtures: spec.success.unchangedFixtures }
         : {}),
     },
-    coverage: override?.coverage ?? {
-      status: 'implemented',
-      notes: 'Adapted from the catalog test.json sidecar; no local validation recorded yet.',
-    },
+    coverage,
     qualityFocus: spec.qualityFocus,
     ...(override?.gaps && override.gaps.length > 0 ? { gaps: override.gaps } : {}),
     rubric: spec.rubric,

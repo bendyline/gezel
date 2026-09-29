@@ -79,6 +79,18 @@ describe('craftbook blueprint output media', () => {
       'workspace',
     ]);
   });
+
+  it('recognizes an implementation plus regression-test phase as workspace mutation', () => {
+    const step = blueprint({
+      name: 'Implement the smallest fix and verify it',
+      prompt:
+        'Implement the smallest maintainable change that breaks the causal chain. Add or strengthen a regression test that fails on the old behavior and passes with the fix. Write the completed report with write_artifact.',
+      advanceWhen: { file: 'reports/root-cause-investigation.md', artifact: true },
+    });
+
+    expect(additionalOutputMediaForStep(step, 'artifact')).toEqual(['workspace']);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['artifact', 'workspace']);
+  });
 });
 
 describe('persisted craftbook step output media', () => {

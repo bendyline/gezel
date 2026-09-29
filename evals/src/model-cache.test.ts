@@ -11,11 +11,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  EVAL_MODEL_ROOTS_ENV,
   adoptHistoricalLlamaCppAlias,
   assertMlxSourceComplete,
+  cloneModelDirIntoTrial,
   ensureWarmModel,
+  findReadOnlyModelDir,
   isModelInstalled,
   linkModelIntoTrial,
+  readOnlyModelRoots,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
@@ -156,6 +160,61 @@ describe('ensureWarmModel', () => {
       }),
     ).rejects.toMatchObject({ name: 'AbortError' });
     expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+  });
+
+  it('fails closed offline when the requested model is not installed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-offline-missing-'));
+    try {
+      await expect(
+        ensureWarmModel({
+          cacheRoot: root,
+          engine: 'llama-cpp',
+          modelId: 'offline-missing-model',
+          llamaBin: 'fake-llama-server',
+          offline: true,
+          log: () => {},
+        }),
+      ).rejects.toThrow('offline mode requires a complete current local install');
+      expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed offline without evicting a stale installed model', async () => {
+    const modelId = 'offline-stale-model';
+    useSyntheticIndex([
+      {
+        id: modelId,
+        name: 'Offline Stale Model',
+        version: '2.0.0',
+        llamaCpp: {
+          huggingfaceRepo: 'example/offline-stale-model',
+          filename: 'current.gguf',
+          sha256: 'a'.repeat(64),
+          approxSizeBytes: 7,
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-offline-stale-'));
+    const modelDir = writeInstall(root, modelId, { weightsFilename: 'old.gguf' });
+    const oldWeightsPath = join(modelDir, 'old.gguf');
+    try {
+      await expect(
+        ensureWarmModel({
+          cacheRoot: root,
+          engine: 'llama-cpp',
+          modelId,
+          llamaBin: 'fake-llama-server',
+          offline: true,
+          log: () => {},
+        }),
+      ).rejects.toThrow('offline mode refuses to refresh stale');
+      expect(existsSync(oldWeightsPath)).toBe(true);
+      expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('tops up a missing sidecar without evicting the weights already on disk', async () => {
@@ -593,6 +652,15 @@ describe('staleInstallReason', () => {
     ).resolves.toMatch(/catalogVersion 1\.0\.0 != catalog 2\.0\.0/);
   });
 
+  it('accepts catalog-version drift when the precise payload hash still matches', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', { ...install, catalogVersion: '1.0.0' });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
+  });
+
   it('never reports stale for a model the catalog does not index', async () => {
     useSyntheticIndex([]);
     const r = root();
@@ -746,5 +814,81 @@ describe('adoptHistoricalLlamaCppAlias', () => {
         log: () => {},
       }),
     ).resolves.toBe(false);
+  });
+});
+
+describe('read-only model sourcing', () => {
+  function writeInstall(dir: string, weights = 'model.gguf'): void {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ weightsFilename: weights }));
+    writeFileSync(join(dir, weights), 'weights');
+  }
+
+  it('searches the source home first, then absolute overlay roots for the same engine', () => {
+    const env = {
+      [EVAL_MODEL_ROOTS_ENV]: JSON.stringify({
+        'llama-cpp': ['/machine/models/llama-cpp', 'relative/ignored'],
+        mlx: ['/machine/models/mlx'],
+      }),
+    };
+    expect(readOnlyModelRoots('/home/u/.gezel', 'llama-cpp', env)).toEqual([
+      join('/home/u/.gezel', 'engines', 'llama-cpp', 'models'),
+      '/machine/models/llama-cpp',
+    ]);
+    expect(readOnlyModelRoots('/home/u/.gezel', 'ds4', env)).toEqual([
+      join('/home/u/.gezel', 'engines', 'ds4', 'models'),
+    ]);
+    expect(readOnlyModelRoots('/h', 'mlx', { [EVAL_MODEL_ROOTS_ENV]: '{not json' })).toEqual([
+      join('/h', 'engines', 'mlx', 'models'),
+    ]);
+  });
+
+  it('finds a complete install in an overlay root and skips incomplete ones', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'gezel-ro-home-'));
+    const overlay = mkdtempSync(join(tmpdir(), 'gezel-ro-overlay-'));
+    // Incomplete in the home (weights missing), complete in the overlay.
+    const homeDir = join(home, 'engines', 'llama-cpp', 'models', 'm');
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(join(homeDir, 'manifest.json'), JSON.stringify({ weightsFilename: 'w.gguf' }));
+    writeInstall(join(overlay, 'm'), 'w.gguf');
+    const env = { [EVAL_MODEL_ROOTS_ENV]: JSON.stringify({ 'llama-cpp': [overlay] }) };
+    await expect(
+      findReadOnlyModelDir({ sourceHome: home, engine: 'llama-cpp', modelId: 'm', env }),
+    ).resolves.toBe(join(overlay, 'm'));
+    await expect(
+      findReadOnlyModelDir({ sourceHome: home, engine: 'llama-cpp', modelId: 'absent', env }),
+    ).resolves.toBeNull();
+  });
+
+  it('applies the MLX completeness contract to MLX sources', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'gezel-ro-mlx-'));
+    const dir = join(home, 'engines', 'mlx', 'models', 'q');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.json'), '{}');
+    writeFileSync(join(dir, 'model.safetensors.partial'), 'x');
+    await expect(
+      findReadOnlyModelDir({ sourceHome: home, engine: 'mlx', modelId: 'q', env: {} }),
+    ).resolves.toBeNull();
+    rmSync(join(dir, 'model.safetensors.partial'));
+    writeFileSync(join(dir, 'model.safetensors'), 'x');
+    await expect(
+      findReadOnlyModelDir({ sourceHome: home, engine: 'mlx', modelId: 'q', env: {} }),
+    ).resolves.toBe(dir);
+  });
+
+  it('clones an exact source directory into the trial home layout, leaving the source intact', async () => {
+    const source = mkdtempSync(join(tmpdir(), 'gezel-ro-src-'));
+    writeInstall(join(source, 'm'));
+    const trialHome = mkdtempSync(join(tmpdir(), 'gezel-ro-trial-'));
+    await cloneModelDirIntoTrial({
+      sourceDir: join(source, 'm'),
+      trialHome,
+      engine: 'sd-cpp',
+      modelId: 'm',
+    });
+    const cloned = join(trialHome, 'engines', 'sd-cpp', 'models', 'm');
+    expect(readFileSync(join(cloned, 'model.gguf'), 'utf8')).toBe('weights');
+    expect(lstatSync(cloned).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(source, 'm', 'model.gguf'))).toBe(true);
   });
 });

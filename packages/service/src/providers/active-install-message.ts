@@ -28,6 +28,17 @@ export function installPercent(install: ActiveInstallLike): number | null {
 }
 
 /**
+ * The Settings tab that lists this machine's models, named the way the UI's
+ * `deviceLabel` names it. llama.cpp runs everywhere, so its errors must not
+ * send a Windows owner to a "This Mac" tab that does not exist.
+ */
+export function localDeviceSettingsLabel(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') return 'This Mac';
+  if (platform === 'win32') return 'This PC';
+  return 'This Device';
+}
+
+/**
  * Compose the user-facing message for a chat turn that found no model.
  *
  * `active` is whichever install is in flight for this engine, or null. The

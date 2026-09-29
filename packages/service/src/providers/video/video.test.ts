@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseVideoProgress, parseVideoWarmupStatus } from './diffusers-video.js';
+import { buildVideoServerArgs } from './factory.js';
 import { MockVideoProvider } from './mock.js';
 import { detectVideoAccelerator, resetAcceleratorCache, videoVenvSpec } from './venv.js';
 
@@ -25,6 +26,77 @@ describe('videoVenvSpec', () => {
     const spec = videoVenvSpec('cpu');
     expect(spec.packages).toContain('torch==2.5.1+cpu');
     expect(spec.extraIndexUrls).toEqual(['https://download.pytorch.org/whl/cpu']);
+  });
+
+  it('floors diffusers and transformers at the LTX-2.3-capable releases on every accelerator', () => {
+    for (const accel of ['mps', 'cuda', 'cpu'] as const) {
+      const { packages } = videoVenvSpec(accel);
+      expect(packages).toContain('diffusers>=0.39.0');
+      expect(packages).toContain('transformers>=4.50.0');
+    }
+  });
+});
+
+describe('buildVideoServerArgs', () => {
+  const base = {
+    serverPath: '/srv/gezel_video_server.py',
+    accelerator: 'mps' as const,
+    port: 9123,
+  };
+
+  it('passes only the core flags for a plain diffusers tree', () => {
+    const args = buildVideoServerArgs({
+      ...base,
+      model: { modelDir: '/models/wan', family: 'wan' },
+    });
+    expect(args).toEqual([
+      '/srv/gezel_video_server.py',
+      '--model',
+      '/models/wan',
+      '--family',
+      'wan',
+      '--accelerator',
+      'mps',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '9123',
+    ]);
+  });
+
+  it('forwards the load descriptor, including a distilled sigma schedule', () => {
+    const args = buildVideoServerArgs({
+      ...base,
+      model: {
+        modelDir: '/models/ltx-2.3-22b-distilled',
+        family: 'ltx2',
+        load: {
+          strategy: 'diffusers-tree',
+          pipelineClass: 'LTX2Pipeline',
+          vaeDtype: 'float32',
+          audio: true,
+          sigmas: [1, 0.99375, 0.421875],
+        },
+      },
+    });
+    const flag = (name: string) => args[args.indexOf(name) + 1];
+    expect(flag('--load-strategy')).toBe('diffusers-tree');
+    expect(flag('--pipeline-class')).toBe('LTX2Pipeline');
+    expect(flag('--vae-dtype')).toBe('float32');
+    expect(args).toContain('--audio');
+    expect(flag('--sigmas')).toBe('1,0.99375,0.421875');
+  });
+
+  it('omits --sigmas when the model uses its scheduler', () => {
+    const args = buildVideoServerArgs({
+      ...base,
+      model: {
+        modelDir: '/models/ltx-2.3-22b',
+        family: 'ltx2',
+        load: { strategy: 'diffusers-tree', audio: true },
+      },
+    });
+    expect(args).not.toContain('--sigmas');
   });
 });
 

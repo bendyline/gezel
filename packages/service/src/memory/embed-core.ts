@@ -14,7 +14,11 @@
  */
 
 import { createHash } from 'node:crypto';
-import { type KnowledgeEmbeddingProfile, createLogger } from '@bendyline/gezel';
+import {
+  type KnowledgeEmbeddingProfile,
+  createLogger,
+  embeddingProfileArtifacts,
+} from '@bendyline/gezel';
 import {
   EmbedderUnavailableError,
   KNOWLEDGE_EMBEDDING_PROFILES,
@@ -26,7 +30,11 @@ import {
 } from '@bendyline/gezel-knowledge';
 import {
   HF_CACHE_DIR_ENV,
+  ModelFileDownloadError,
+  type PinnedModelFile,
   TRANSFORMERS_MODULE,
+  ensureVerifiedModelFile,
+  isCorruptTransformersCacheFailure,
   isMissingModule,
   loadTransformersModelWithCacheRecovery,
   pinTransformersCacheDir,
@@ -206,12 +214,36 @@ export function isRetryablePipelineLoadFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * Whether a load died on a download it made itself — bytes that were cut
+ * short, or a graph that failed to parse right after being fetched. Those
+ * clear on a fresh attempt. A graph already proven against its pin that still
+ * will not parse is a runtime problem instead, and retrying cannot fix it.
+ */
+export function isFreshDownloadFailure(error: unknown, graphVerified: boolean): boolean {
+  if (error instanceof ModelFileDownloadError) return true;
+  return !graphVerified && isCorruptTransformersCacheFailure(error);
+}
+
+/** Fresh starts after a failed download, per process, before vector memory is switched off. */
+const MAX_FRESH_DOWNLOAD_RETRIES = 3;
+let freshDownloadFailures = 0;
+
+/** The daemon pin's ONNX graph, when it names one with a digest. */
+function pinnedGraph(): PinnedModelFile | null {
+  const pin = daemonEmbedderPin();
+  if (!pin) return null;
+  const { onnxFile, onnxDigest } = embeddingProfileArtifacts(pin);
+  return onnxDigest ? { file: onnxFile, digest: onnxDigest, revision: pin.model.revision } : null;
+}
+
 let pipelinePromise: Promise<Pipeline> | null = null;
 
 /** Lazily create the feature-extraction pipeline; cached for the process. */
 export async function loadPipeline(): Promise<Pipeline> {
   if (!pipelinePromise) {
     pipelinePromise = (async () => {
+      let graphVerified = false;
       try {
         // Pin transformers.js to gezel's writable managed cache dir before
         // the first load. Without it, a bundled runtime's default (module-
@@ -221,16 +253,29 @@ export async function loadPipeline(): Promise<Pipeline> {
         // inherits `process.env` but has no other view of the gezel home.
         const cacheDir = process.env[HF_CACHE_DIR_ENV];
         if (cacheDir) await pinTransformersCacheDir(cacheDir);
-        const { pipeline } = await import('@huggingface/transformers');
+        const { pipeline, env } = await import('@huggingface/transformers');
         const modelId = embedModelId();
         if (modelId !== DEFAULT_EMBED_MODEL) log.info(`[embed] using model ${modelId}`);
         const createPipeline = () =>
           pipeline('feature-extraction', modelId, daemonLoadOptions()) as Promise<Pipeline>;
         if (!cacheDir) return await createPipeline();
+        const graph = pinnedGraph();
         return await loadTransformersModelWithCacheRecovery(
           cacheDir,
           modelId,
-          createPipeline,
+          async () => {
+            // The graph is the one file onnxruntime opens by path, so it
+            // must never be read while transformers is still writing it.
+            if (graph) {
+              const outcome = await ensureVerifiedModelFile(cacheDir, modelId, graph, {
+                remoteHost: env.remoteHost,
+                remotePathTemplate: env.remotePathTemplate,
+              });
+              graphVerified = true;
+              if (outcome === 'downloaded') log.info(`[embed] downloaded ${modelId}/${graph.file}`);
+            }
+            return await createPipeline();
+          },
           () => {
             log.warn(`[embed] discarded corrupt cached model files for ${modelId}; retrying once`);
           },
@@ -242,11 +287,12 @@ export async function loadPipeline(): Promise<Pipeline> {
           : err instanceof Error
             ? err.message
             : String(err);
-        throw new PipelineLoadError(
-          message,
-          missing,
-          !missing && isRetryablePipelineLoadFailure(err),
-        );
+        let retryable = !missing && isRetryablePipelineLoadFailure(err);
+        if (!missing && !retryable && isFreshDownloadFailure(err, graphVerified)) {
+          freshDownloadFailures += 1;
+          retryable = freshDownloadFailures <= MAX_FRESH_DOWNLOAD_RETRIES;
+        }
+        throw new PipelineLoadError(message, missing, retryable);
       }
     })();
     // A transient load failure (e.g. network blip during the first download)

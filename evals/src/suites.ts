@@ -169,8 +169,10 @@ export const SUITES: Record<string, EvalSuite> = {
     description:
       'Grounding + precision deep-dive: constraint-bound comms, records consolidation, ' +
       'transcript-to-action-register reconciliation, tool-sourced cited research, ' +
-      'distractor-resistant research, and the three research-verify trust tiers.',
+      'distractor-resistant research, the three research-verify trust tiers, and ' +
+      "today's date from the clock rather than training data.",
     scenarios: [
+      'date-grounding',
       'constrained-comms',
       'records-intake',
       // Both also sit in `productivity`. This is where their AXIS lives,

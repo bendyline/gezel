@@ -246,16 +246,21 @@
   opacity: 0.6;
 }
 
-.primary-navigation-touch .app-sidebar-item,
-.primary-navigation-touch .app-sidebar-group-toggle {
-  min-height: 44px;
-}
+/* Finger-sized targets only where there is a finger. A narrow desktop window
+   still gets the compact presentation below, but a mouse keeps the desktop
+   row rhythm and the caret column that lines group icons up with their rows. */
+@media (any-pointer: coarse) {
+  .primary-navigation-touch .app-sidebar-item,
+  .primary-navigation-touch .app-sidebar-group-toggle {
+    min-height: 44px;
+  }
 
-.primary-navigation-touch .app-sidebar-caret-btn,
-.primary-navigation-touch .app-sidebar-add {
-  min-width: 44px;
-  min-height: 44px;
-  margin: 0;
+  .primary-navigation-touch .app-sidebar-caret-btn,
+  .primary-navigation-touch .app-sidebar-add {
+    min-width: 44px;
+    min-height: 44px;
+    margin: 0;
+  }
 }
 
 .primary-navigation-touch .app-sidebar-item.active,

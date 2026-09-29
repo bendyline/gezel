@@ -95,6 +95,7 @@ import {
   expandStepDeliverable,
   formatReviewProvenance,
   inferDeliverableKind,
+  isOwnerStep,
   isReservedShadowArtifactPath,
   isSafeEntityId,
   isTrustedConstrainedToolset,
@@ -106,6 +107,7 @@ import {
   resolveRoleId,
   resolveSteps,
   stepInsertionIndex,
+  stepOwnerGezelId,
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
@@ -115,7 +117,7 @@ import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { advanceHandoffNote } from './advance-note.js';
+import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 import {
   ASSIGNEE_ARG_DESCRIPTION,
   type AssigneeArg,
@@ -313,11 +315,7 @@ async function staleStepMutationResult() {
       if (activeStep && activeStepId === sessionStepId) {
         sessionStepCompletion = activeStep.advanceWhen ? 'automatic' : 'manual';
       }
-      const owner =
-        activeStep?.assignee?.kind === 'gezel'
-          ? activeStep.assignee.gezelId
-          : (activeStep?.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      const owner = activeStep ? stepOwnerGezelId(task, activeStep) : undefined;
       activeStepOwnedBySession = !!gezelId && owner === gezelId;
     } catch {
       // Let the mutation's own API request enforce scope after a transient read failure.
@@ -4569,13 +4567,16 @@ server.tool(
         ...(params ? { params } : {}),
       });
       const gz = applied.gezelsCreated
-        .map((g) => `${g.name}${g.voorman ? ' (voorman)' : ''}`)
+        .map(
+          (g) =>
+            `${g.name}${g.voorman ? ' (voorman)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
+        )
         .join(', ');
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Created: ${gz || 'no new gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
+            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
           },
         ],
       };
@@ -9286,8 +9287,19 @@ server.tool(
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
       active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;
-    const handoffNote = advanceHandoffNote({ status: task.status, assigneeId });
-    const text = `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
+    const handoffNote = advanceHandoffNote({
+      status: task.status,
+      assigneeId,
+      ownerStep: isOwnerStep(active),
+    });
+    const statusLine = advanceStatusLine({
+      completedName: task.craftbook.steps.find((s) => s.id === stepId)?.name ?? stepId,
+      nextName: active?.name,
+      status: task.status,
+      taskTitle: task.title,
+      ownerStep: isOwnerStep(active),
+    });
+    const text = `${statusLine}\n\nCompleted step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
     return okResult(
       TaskToolOutputSchema,
       {
@@ -9409,7 +9421,18 @@ server.tool(
 
     if (action === 'cancel') {
       if (settled) return done(`${taskRef} is already ${current.status}.`);
-      const updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'canceled');
+      let updated: Awaited<ReturnType<typeof api.setTaskStatus>>;
+      try {
+        updated = await api.setTaskStatus(parsed.projectId, parsed.num, 'canceled');
+      } catch (err) {
+        if (/\b403\b/.test(err instanceof Error ? err.message : String(err))) {
+          return errorResult(
+            `Only the user can cancel ${taskRef}, and canceling cannot be undone. Ask them first — "should I cancel it?" — and cancel it when they say so. Pause it instead if it needs to stop now.`,
+            { code: 'needs_user', retryable: false },
+          );
+        }
+        throw err;
+      }
       await leaveNote('Canceled');
       return done(`Canceled ${taskRef}.`, updated);
     }
@@ -10931,11 +10954,17 @@ server.tool(
       // which is how a cold reference-catalog model read as "the food
       // catalog has nothing on quiche".
       const incomplete = res.sourcesIncomplete === true;
+      // Off-topic matches the relevance model left out. Named, so "nothing
+      // relevant" never reads as "nothing indexed".
+      const weak = res.hiddenBelowRelevanceFloor ?? 0;
+      const weakNote = weak > 0 ? ` (${weak} weak match${weak === 1 ? '' : 'es'} hidden)` : '';
       const resultSummary = modelResults.length
-        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}`
+        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}${weakNote}`
         : incomplete
           ? 'Nothing returned yet: some sources did not answer in time, so this is not evidence the topic is absent. Repeat the same search once before concluding there is no indexed material'
-          : 'No indexed project knowledge matched';
+          : weak > 0
+            ? `No closely relevant results${weakNote}`
+            : 'No indexed project knowledge matched';
       const summary = res.craftbooks.length
         ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
         : `${resultSummary}.`;

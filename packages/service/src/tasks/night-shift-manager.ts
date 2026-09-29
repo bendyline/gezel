@@ -19,6 +19,7 @@ import type { Store } from '../fs/store.js';
 import type { ProviderName } from '../providers/types.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
+import { isOwnerStep } from './step-runtime.js';
 
 const log = createLogger('night-shift');
 
@@ -506,6 +507,8 @@ export class NightShiftManager {
     const allowsAmbient = new Map<string, boolean>();
     for (const t of tasks) {
       if (!isPendingNightShiftTask(t, todayKey)) continue;
+      // A step that waits on the owner is not work the shift can do.
+      if (isOwnerStep(t.craftbook.steps.find((s) => s.id === t.activeStepId))) continue;
       let ok = allowsAmbient.get(t.projectId);
       if (ok === undefined) {
         const project = await this.store.getProject(t.projectId).catch(() => null);

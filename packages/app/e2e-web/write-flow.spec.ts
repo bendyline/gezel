@@ -21,9 +21,12 @@ test.describe('write flow', () => {
     await editor.fill(msg);
     await editor.press('Enter');
 
-    // The mock provider echoes "Mock reply: <prompt>".
+    // The mock provider echoes its whole prompt as "Mock reply: <prompt>", and
+    // the prompt opens with any indexed context retrieved for the message (the
+    // seeded handboek matches "spec"), so the echo and the message are matched
+    // separately.
     await expect(
-      chat.locator('.msg-assistant').filter({ hasText: `Mock reply: ${msg}` }),
+      chat.locator('.msg-assistant').filter({ hasText: 'Mock reply:' }).filter({ hasText: msg }),
     ).toBeVisible({ timeout: 20_000 });
   });
 });

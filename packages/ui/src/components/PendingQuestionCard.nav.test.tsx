@@ -115,6 +115,40 @@ describe('PendingQuestionCard navigation', () => {
     expect(screen.queryByRole('button', { name: 'Show full document' })).toBeNull();
   });
 
+  // The document tab is the shared-library editor; its autosave once copied
+  // a project artifact into the library, where it shadowed the original.
+  it('opens an attached artifact in its project, never as a library document', async () => {
+    vi.mocked(api.readDocument).mockResolvedValueOnce({
+      path: 'reviews/weekly.md',
+      content: '# Weekly review\n',
+      kind: 'artifact',
+      resolvedFrom: { projectId: 'learning', relativePath: 'reviews/weekly.md' },
+    });
+    const events: Array<{ type: string; detail: unknown }> = [];
+    const record = (e: Event) => events.push({ type: e.type, detail: (e as CustomEvent).detail });
+    window.addEventListener('gezel:open-tab', record);
+    window.addEventListener('gezel:open-file', record);
+    render(<PendingQuestionCard question={question({ documentPath: 'reviews/weekly.md' })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open artifact' }));
+    window.removeEventListener('gezel:open-tab', record);
+    window.removeEventListener('gezel:open-file', record);
+
+    expect(events).toEqual([
+      { type: 'gezel:open-tab', detail: { kind: 'project', id: 'learning' } },
+      {
+        type: 'gezel:open-file',
+        // The viewer offers the way back to the question it came from.
+        detail: {
+          projectId: 'learning',
+          path: 'reviews/weekly.md',
+          source: 'artifacts',
+          fromQuestion: true,
+        },
+      },
+    ]);
+  });
+
   // The collapsed one-line "Answered" form has nothing to sit beside.
   it('keeps an answered card single-column', async () => {
     const { container } = render(

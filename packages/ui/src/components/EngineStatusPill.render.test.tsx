@@ -1024,6 +1024,33 @@ describe('EngineStatusPill — crowded titlebar', () => {
     expect(await screen.findByText('Talkie 1930 13B')).toBeInTheDocument();
   });
 
+  // A fresh install's popover said "Idle — waiting for a message" with no
+  // model on disk to answer one.
+  it('says no chat model is installed instead of idling', async () => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'qwen3.8-27b-q4' },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: { 'llama-cpp': queueState(0) },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    } as QueueStatusResponse);
+    vi.mocked(api.listInflightTurns).mockResolvedValue({ inflight: [] } as never);
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] });
+
+    const user = userEvent.setup();
+    const { container } = render(<EngineStatusPill />);
+    await waitFor(() => expect(container.querySelector('.engine-pill')).toBeInTheDocument());
+    await user.click(container.querySelector<HTMLElement>('.engine-pill')!);
+    expect(await screen.findByText('No chat model installed yet')).toBeInTheDocument();
+    expect(screen.queryByText('Idle — waiting for a message')).not.toBeInTheDocument();
+  });
+
   it('keeps the machine name on an idle pill, its only word', async () => {
     mockLiveTurns = new Map();
     vi.mocked(api.getConfig).mockResolvedValue({

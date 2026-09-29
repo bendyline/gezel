@@ -2,12 +2,18 @@ import { CRAFTBOOK_AUTHORING_SCENARIOS } from '../craftbooks/authoring/index.ts'
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { runnableGenericCraftbookSpecs } from '../craftbooks/specs.ts';
 import type { EvalScenario } from '../types.ts';
+import {
+  annotatedChatPolicyClosedScenario,
+  annotatedChatPolicyScenario,
+  annotatedDeckScenarios,
+} from './annotated-work.ts';
 import { arcadeDeluxeScenario } from './arcade-deluxe.ts';
 import { bookstoreOpenapiScenario } from './bookstore-openapi.ts';
 import { codebaseEvolutionScenario } from './codebase-evolution.ts';
 import { conflictSynthesisScenario } from './conflict-synthesis.ts';
 import { constrainedCommsScenario } from './constrained-comms.ts';
 import { dataWrangleScenario } from './data-wrangle.ts';
+import { dateGroundingScenario } from './date-grounding.ts';
 import { decoyResearchScenario } from './decoy-research.ts';
 import { docblocksIntegrationScenarios } from './docblocks-integration.ts';
 import { docblocksThemeRoundtripScenario } from './docblocks-theme-roundtrip.ts';
@@ -41,6 +47,7 @@ import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflo
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
 import { researchVerifyT1, researchVerifyT2, researchVerifyT3 } from './research-verify.ts';
+import { retrievalBenchScenario } from './retrieval-bench.ts';
 import { schemaMigrationScenario } from './schema-migration.ts';
 import { selfCorrectionScenario } from './self-correction.ts';
 import { squisqBroadRefactorScenario } from './squisq-broad-refactor.ts';
@@ -69,9 +76,14 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [molenStructureAssetsScenario.id]: molenStructureAssetsScenario,
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
-  [ticTacToeScenario.id]: ticTacToeScenario,
-  [petShopScenario.id]: petShopScenario,
-  [tankCombatScenario.id]: tankCombatScenario,
+  ...Object.fromEntries(annotatedDeckScenarios().map((scenario) => [scenario.id, scenario])),
+  [annotatedChatPolicyScenario.id]: annotatedChatPolicyScenario,
+  [annotatedChatPolicyClosedScenario.id]: annotatedChatPolicyClosedScenario,
+  // The anchors' source files are hash-pinned (anchored.test.ts), so their
+  // Chromium-graded runtime layer is declared here rather than in-file.
+  [ticTacToeScenario.id]: { ...ticTacToeScenario, requires: ['chromium'] },
+  [petShopScenario.id]: { ...petShopScenario, requires: ['chromium'] },
+  [tankCombatScenario.id]: { ...tankCombatScenario, requires: ['chromium'] },
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
   ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
@@ -107,6 +119,9 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [researchVerifyT1.id]: researchVerifyT1,
   [researchVerifyT2.id]: researchVerifyT2,
   [researchVerifyT3.id]: researchVerifyT3,
+  // Clock grounding: today's date and a relative weekday, graded against the
+  // host clock. Guards the per-turn date line (core/prompt-clock.ts).
+  [dateGroundingScenario.id]: dateGroundingScenario,
   // Office-shaped source work, hand-authored because each contract is
   // stronger than a generic craftbook `test.json` sidecar can express:
   //   - theme round-trip: cited values must equal what the DocBlocks tools
@@ -128,6 +143,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // own embedder (Phase-4 gate: p95 < 750 ms; injection budgets are
   // CI-guarded in the service suite).
   [knowledgeBenchScenario.id]: knowledgeBenchScenario,
+  [retrievalBenchScenario.id]: retrievalBenchScenario,
   // Index-leverage agent probes on the same pinned corpus:
   // a 34-file mechanical rename and a 6-question "where does X live" Q&A.
   // Run warm-vs-cold via the ab-index bin (GEZEL_INDEX_ARM).

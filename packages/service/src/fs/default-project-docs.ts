@@ -57,13 +57,13 @@ description: What the shared document library is and how gezels use it.
 
 # About this library
 
-This is the shared document library. Everything filed here is readable by every gezel you work with, in every project — so it is the right home for the things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, reference material worth keeping.
+This is the shared document library. Everything filed here is readable by every gezel you work with, in every project. That makes it the right home for things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, and reference material worth keeping.
 
 ## How your gezels use it
 
-Gezels see a listing of this library in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
+Gezels see a list of this library's documents in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
 
-Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text becomes searchable alongside your markdown.
+Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text becomes searchable alongside your Markdown.
 
 ## Filing suggestions
 
@@ -71,7 +71,7 @@ Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text be
 - Put knowledge that only matters to one project in a folder named after it.
 - A short, plain title beats a clever one — it is what a gezel sees first.
 
-You can delete this document once the library has content of its own; nothing re-creates it.
+You can delete this document once the library has content of its own; it will not come back.
 `;
 
 export const SHARED_PROJECT_MISSION_MD = `- Keep the library trustworthy: what it says should be true, current, and consistent with itself.

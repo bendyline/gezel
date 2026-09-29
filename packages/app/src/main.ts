@@ -49,6 +49,7 @@ import {
 } from './ambient-display/runtime.js';
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
+import { devToolsAllowed } from './devtools-policy.js';
 import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
@@ -67,6 +68,10 @@ import { createLoopbackCertificatePin } from './loopback-certificate-pin.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
+import {
+  createOfficeVerifyScheduler,
+  registerOfficeIntegrationIpc,
+} from './office-integration/ipc.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
@@ -221,6 +226,7 @@ const packagedSmokeExpectedVersion =
   process.argv
     .find((arg) => arg.startsWith('--gezel-expected-version='))
     ?.slice('--gezel-expected-version='.length) || process.env.GEZEL_EXPECTED_VERSION;
+const allowDevTools = devToolsAllowed({ isPackaged: app.isPackaged, env: process.env });
 
 // Electron otherwise turns these into its stock "A JavaScript error occurred
 // in the main process" dialog, including a raw stack and internal paths. Keep
@@ -634,6 +640,9 @@ async function createWindow(): Promise<void> {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // Enforced on the window, not just hidden from the menu, so no
+      // accelerator or later call path can open them. See devtools-policy.ts.
+      devTools: allowDevTools,
       // An off-screen / occluded window otherwise gets its requestAnimationFrame
       // and timers throttled by Chromium, which slows and flakes E2E. Prod keeps
       // the default (throttle in the background) to save power.
@@ -1218,6 +1227,11 @@ ipcMain.handle('gezel:autostart:uninstall', async () => {
     return { ok: false as const, error: (err as Error).message };
   }
 });
+
+registerOfficeIntegrationIpc(ipcMain, () => apiClient?.officeIntegrations ?? null);
+const scheduleOfficeIntegrationVerify = createOfficeVerifyScheduler(
+  () => apiClient?.officeIntegrations ?? null,
+);
 
 // macOS PKG installs own a machine LaunchDaemon, service account, and shared
 // storage, so moving the .app to Trash is not a complete uninstall. The
@@ -2053,7 +2067,8 @@ ipcMain.handle(
 
 /**
  * Install a minimal application menu so the platform's standard shortcuts
- * work: Cmd+R reload, Cmd+Opt+I DevTools, the usual edit-menu clipboard
+ * work: Cmd+R reload, Cmd+Opt+I DevTools (development or GEZEL_DEVTOOLS=1
+ * only), the usual edit-menu clipboard
  * shortcuts, and (on macOS) Cmd+Q. Without this, Electron still ships a
  * default menu but some shortcuts — notably reload — don't reliably bind
  * on macOS when the menu isn't explicitly installed.
@@ -2887,7 +2902,9 @@ function installMenu(): void {
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        ...(allowDevTools
+          ? ([{ role: 'toggleDevTools' }] as Electron.MenuItemConstructorOptions[])
+          : []),
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -3171,6 +3188,7 @@ app.whenReady().then(async () => {
   apiClient = buildApiClient();
   invalidateRendererNetworkPermission();
   startAmbientMonitoring();
+  scheduleOfficeIntegrationVerify();
 
   // Reload the BrowserWindow when the supervisor swaps the child or falls
   // back to embedded. The preload re-runs on reload, re-reads the token via
@@ -3185,6 +3203,7 @@ app.whenReady().then(async () => {
     invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     startAmbientMonitoring();
+    scheduleOfficeIntegrationVerify();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
     // Load the (possibly rotated) baseUrl rather than `reload()`: an embedded

@@ -202,7 +202,7 @@
   {
     "id": "failing-tests-spec",
     "sourceFile": "failing-tests-spec",
-    "sourceSha256": "72967fe5ddf90a0f59c4fd4e530f636c330e77f52e4308a9f6d31110c6cec536",
+    "sourceSha256": "6b8ae9790b33d38869d7f0dfbd85cd6c66646012d63d79a6a71d51de1a2f2604",
     "timeoutMs": 1500000,
     "kind": "specialist",
     "project": {

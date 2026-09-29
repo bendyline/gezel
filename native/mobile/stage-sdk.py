@@ -140,8 +140,9 @@ def stage_android(build, output, manifest, version, ndk, javac, work):
     spec.loader.exec_module(driver)
     host = "darwin-x86_64" if platform.system() == "Darwin" else "linux-x86_64"
     readelf = ndk / "toolchains/llvm/prebuilt" / host / "bin/llvm-readelf"
-    required = {f"lib{name}.so" for name in ("gezel-llama", "llama", "ggml", "ggml-base", "ggml-cpu", "c++_shared")}
     for abi in abis:
+        cpu = [f"ggml-cpu-{variant}" for variant in driver.ANDROID_CPU_VARIANTS] if abi == "arm64-v8a" else ["ggml-cpu"]
+        required = {f"lib{name}.so" for name in ("gezel-llama", "llama", "ggml", "ggml-base", "c++_shared", *cpu)}
         libraries = {Path(name).name: build / name for name in manifest["files"] if name.startswith(f"jniLibs/{abi}/")}
         if set(libraries) != required:
             raise ValueError(f"Unexpected or missing native dependency in {abi}")

@@ -110,6 +110,15 @@ describe('resultToActions', () => {
     ]);
   });
 
+  it('opens Handboek name hits as documents in the bundled Knowledge catalog', () => {
+    const intent = { catalogId: 'handboek', documentId: 'welcome' };
+    expect(resultToActions(result({ kind: 'handboek', id: 'handboek:welcome' }))).toEqual([
+      { kind: 'open-knowledge', intent },
+      { kind: 'event', type: 'gezel:open-tab', detail: { kind: 'area', area: 'knowledge' } },
+      { kind: 'event', type: 'gezel:open-knowledge-document', detail: intent },
+    ]);
+  });
+
   it('drops a knowledge result without a catalogId', () => {
     expect(resultToActions(result({ kind: 'knowledge', id: 'knowledge:x' }))).toEqual([]);
   });

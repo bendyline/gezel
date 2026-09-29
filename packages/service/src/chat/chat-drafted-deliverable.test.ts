@@ -74,6 +74,72 @@ describe('detectProseDeliverableWithoutWrite (L3)', () => {
     expect(r?.path).toBe('reports/ops-review.md');
   });
 
+  it('prefers the file the request named over a heading-derived guess', () => {
+    const ask = 'Write the complete relocation plan as `plan.md` in this project workspace.';
+    expect(detectProseDeliverableWithoutWrite(report, [], undefined, ask)?.path).toBe('plan.md');
+    expect(
+      detectProseDeliverableWithoutWrite(report, [], undefined, 'Save it to notes/summary.md.')
+        ?.path,
+    ).toBe('notes/summary.md');
+    expect(detectProseDeliverableWithoutWrite(report, [], 'reports/ops-review.md', ask)?.path).toBe(
+      'reports/ops-review.md',
+    );
+  });
+
+  it('never redirects the write onto a file the request only reads', () => {
+    const ask = 'Write a summary of `notes.md` for the team.';
+    expect(detectProseDeliverableWithoutWrite(report, [], undefined, ask)?.path).toBe(
+      'quarterly-operations-review.md',
+    );
+  });
+
+  it('takes a filename the reply opened with when the request named none', () => {
+    for (const opener of ['plan.md', '**plan.md**', '`plan.md`:']) {
+      expect(detectProseDeliverableWithoutWrite(`${opener}\n${report}`, [])?.path).toBe('plan.md');
+    }
+  });
+
+  it('fires on a text-fenced draft that opens with the file the request asked for', () => {
+    // MiniCPM5 1B, 2026-09-28: no headings, 760 non-whitespace chars.
+    const rows = Array.from(
+      { length: 8 },
+      (_, i) => `| T${i + 1} | task number ${i + 1} | Owner${i + 1} | No | reviewed |`,
+    ).join('\n');
+    const draft = [
+      '```text',
+      'plan.md',
+      '---',
+      'objective:',
+      '- move the 18-person studio to Harbourview',
+      '- floor plan, seating, meeting rooms, workshop corner',
+      'assumptions:',
+      '- full team roster, no external dependencies',
+      'work plan:',
+      '| ID | Task | Owner | Depends on | Done when |',
+      rows,
+      'risks:',
+      '- vendor coordination and scheduling conflicts',
+      '```',
+    ].join('\n');
+    const ask = 'Write the complete relocation plan as `plan.md` in this project workspace.';
+    expect(detectProseDeliverableWithoutWrite(draft, [], undefined, ask)?.path).toBe('plan.md');
+    expect(detectProseDeliverableWithoutWrite(draft, [], undefined, 'Plan the move.')).toBeNull();
+    expect(
+      detectProseDeliverableWithoutWrite(
+        '```text\nplan.md\nobjective: move\n```',
+        [],
+        undefined,
+        ask,
+      ),
+    ).toBeNull();
+  });
+
+  it('never unwraps a code fence into prose', () => {
+    const code = `\`\`\`js\nplan.md\n${'const step = 1;\n'.repeat(80)}\`\`\``;
+    const ask = 'Write the complete relocation plan as `plan.md`.';
+    expect(detectProseDeliverableWithoutWrite(code, [], undefined, ask)).toBeNull();
+  });
+
   it('falls back to report.md for a structured doc (>=2 headings) with no H1 title', () => {
     const noH1 = [
       '## Overview',

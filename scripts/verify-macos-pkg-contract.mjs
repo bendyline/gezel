@@ -4,6 +4,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  BUILDER_CONFIG,
+  compareVersions,
+  declaredMacFloor,
+} from './verify-macos-version-floor.mjs';
+
 const EXPECTED_COMPONENT_ID = 'com.bendyline.gezel';
 const EXPECTED_SCRIPT_FILE = './component-postinstall';
 const EXPECTED_TIMEOUT_SECONDS = '1800';
@@ -39,6 +45,34 @@ export function validateMacPkgPackageInfo(packageInfoDocuments) {
   }
 }
 
+/**
+ * Installer refuses a product archive whose Distribution allows only a newer
+ * macOS than the one running. electron-builder writes that minimum from
+ * `mac.minimumSystemVersion`; it is what keeps a Mac below the floor from
+ * installing the PKG however it got there, so the release checks it rather
+ * than trusting the config.
+ */
+export function validateMacPkgDistribution(distribution, expectedFloor) {
+  const blocks = Array.from(
+    distribution.matchAll(/<allowed-os-versions\b[^>]*>([\s\S]*?)<\/allowed-os-versions>/g),
+    (match) => match[1],
+  );
+  if (blocks.length !== 1) {
+    throw new Error(
+      `expected one allowed-os-versions block in the PKG Distribution, found ${blocks.length}`,
+    );
+  }
+  const minima = Array.from(
+    blocks[0].matchAll(/<os-version\b[^>]*\bmin="([^"]+)"/g),
+    (match) => match[1],
+  );
+  if (minima.length !== 1 || compareVersions(minima[0], expectedFloor) !== 0) {
+    throw new Error(
+      `PKG Distribution allows macOS ${minima.join(', ') || '(no minimum)'}; expected minimum ${expectedFloor}`,
+    );
+  }
+}
+
 async function findPackageInfoFiles(root) {
   const found = [];
   const pending = [root];
@@ -54,7 +88,8 @@ async function findPackageInfoFiles(root) {
   return found;
 }
 
-export async function verifyMacPkgContract(pkgPath) {
+export async function verifyMacPkgContract(pkgPath, expectedFloor) {
+  const floor = expectedFloor ?? declaredMacFloor(await readFile(BUILDER_CONFIG, 'utf8'));
   if (process.platform !== 'darwin') {
     throw new Error('macOS PKG inspection requires macOS pkgutil');
   }
@@ -71,6 +106,7 @@ export async function verifyMacPkgContract(pkgPath) {
     }
     const documents = await Promise.all(packageInfoPaths.map((path) => readFile(path, 'utf8')));
     validateMacPkgPackageInfo(documents);
+    validateMacPkgDistribution(await readFile(join(expanded, 'Distribution'), 'utf8'), floor);
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
@@ -86,7 +122,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     try {
       await verifyMacPkgContract(pkgPath);
       console.log(
-        `verified macOS PKG component postinstall timeout (${EXPECTED_TIMEOUT_SECONDS}s)`,
+        `verified macOS PKG component postinstall timeout (${EXPECTED_TIMEOUT_SECONDS}s) and minimum macOS`,
       );
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));

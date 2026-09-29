@@ -747,6 +747,29 @@
   font-weight: 500;
 }
 
+/* Unreviewed community-tier entry. The neutral badge recipe (search's
+   `related`, chat's `automatic`) — provenance, not alarm. See
+   CommunityBadge.tsx and docs/ux.md. */
+.catalog-item-community {
+  display: inline-block;
+  margin-left: 0.4rem;
+  vertical-align: 1px;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.catalog-community-notice {
+  margin: 0 0 0.5rem;
+}
+
 .catalog-item-attribution {
   margin-top: 0.1rem;
   color: var(--text-muted);
@@ -1238,6 +1261,17 @@ a.license-button:hover {
 .new-gezel-dialog .catalog-browser {
   flex: 1;
   min-height: 0;
+}
+
+/* The card grid is the scroll region. Squeezed to min-height 0 without its
+   own overflow, it spilled past its box and the dialog's Cancel was drawn on
+   top of the card text. */
+.template-picker-dialog .catalog-grid,
+.new-gezel-dialog .catalog-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
 }
 
 .toolsets-notice {

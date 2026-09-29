@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PORT } from '../service-options.js';
 import { type RunningEngineService, startService } from '../service.js';
+import * as loopback from './loopback-listener.js';
 
 // Construction is forbidden, even if an implementation later guards starts.
 // Also prohibit importing the product composition root: role dispatch is first.
@@ -85,6 +87,7 @@ afterEach(async () => {
   for (const service of running.splice(0).reverse()) await service.stop();
   for (const dir of temporaryHomes.splice(0)) await rm(dir, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 async function start(dir = home, port?: number) {
   const service = await startService({
@@ -193,5 +196,38 @@ describe('engine-only composition and lifecycle', () => {
     await retry.stop();
     await assertNoProductState(retry, otherHome);
     expect(await readdir(join(otherHome, 'runtime'))).toEqual([]);
+  });
+
+  it('publishes a healthy ephemeral endpoint when the preferred port is occupied', async () => {
+    const occupying = await start();
+    const otherHome = await mkdtemp(join(tmpdir(), 'gezel-engine-port-fallback-'));
+    temporaryHomes.push(otherHome);
+    const realListen = loopback.listenLoopback;
+    // Reproduce a real bind collision without taking port 6228 from another
+    // test or the developer's daemon. Only redirect the initial bind attempt.
+    const listener = vi
+      .spyOn(loopback, 'listenLoopback')
+      .mockImplementationOnce((handler, cert, port) => {
+        expect(port).toBe(DEFAULT_PORT);
+        return realListen(handler, cert, occupying.port);
+      });
+    const broker = await startService({
+      home: otherHome,
+      role: 'machine-engine',
+      preferCanonicalPort: true,
+    });
+    running.push(broker);
+    expect(listener.mock.calls.map((args) => args[2])).toEqual([DEFAULT_PORT, 0]);
+    expect(broker.port).not.toBe(occupying.port);
+    expect((await readFile(join(otherHome, 'runtime', 'port'), 'utf8')).trim()).toBe(
+      String(broker.port),
+    );
+    const http = broker.cert ? createTrustingFetch({ cert: broker.cert.certPem }) : fetch;
+    const base = `${broker.cert ? 'https' : 'http'}://127.0.0.1:${broker.port}`;
+    expect(await (await http(`${base}/api/health`)).json()).toMatchObject({
+      ok: true,
+      serviceRole: 'machine-engine',
+    });
+    await assertNoProductState(broker, otherHome);
   });
 });

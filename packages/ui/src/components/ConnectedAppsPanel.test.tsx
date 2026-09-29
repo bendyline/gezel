@@ -47,7 +47,22 @@ vi.mock('../api.js', () => ({
   },
 }));
 
-vi.mock('./ConfirmDialog.js', () => ({ ConfirmDialog: () => null }));
+vi.mock('./ConfirmDialog.js', () => ({
+  ConfirmDialog: ({
+    open,
+    title,
+    message,
+  }: {
+    open: boolean;
+    title: string;
+    message?: React.ReactNode;
+  }) =>
+    open ? (
+      <div role="alertdialog" aria-label={title}>
+        {message}
+      </div>
+    ) : null,
+}));
 
 const { ConnectedAppsPanel } = await import('./ConnectedAppsPanel.js');
 
@@ -127,6 +142,21 @@ describe('ConnectedAppsPanel', () => {
     expect(within(desktopRow!).getByText('ui')).toBeInTheDocument();
     expect(within(desktopRow!).getByText('openai')).toBeInTheDocument();
     expect(within(desktopRow!).getByLabelText('Revoke Gezel Desktop')).toBeInTheDocument();
+  });
+
+  it('says a Gezel add-in reconnects on its own when revoked, and how to remove it', async () => {
+    render(<ConnectedAppsPanel />);
+    fireEvent.click(await screen.findByLabelText('Revoke Visual Studio Code'));
+    const addIn = screen.getByRole('alertdialog', { name: 'Revoke Visual Studio Code?' });
+    expect(addIn).toHaveTextContent('connects again on its own the next time it opens');
+    expect(addIn).toHaveTextContent('uninstall the Gezel extension in VS Code');
+  });
+
+  it('keeps the consent wording for every other app', async () => {
+    render(<ConnectedAppsPanel />);
+    fireEvent.click(await screen.findByLabelText('Revoke Gezel Desktop'));
+    const other = screen.getByRole('alertdialog', { name: 'Revoke Gezel Desktop?' });
+    expect(other).toHaveTextContent('going through the consent flow again');
   });
 
   it('describes a pending CLI grant as command-line control', async () => {

@@ -91,6 +91,32 @@ describe('MessageBubble turn-aborted salvage record', () => {
     expect(screen.getByText(/timed out after 14400s/)).toBeInTheDocument();
   });
 
+  // A copywriter's whole visible output was "(continued in the next turn)".
+  it('says what a recovered tool-only turn did instead of a bare stub', () => {
+    render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        content=""
+        authorLabel="Kylian"
+        authorIcon={null}
+        recoveredInNextTurn
+        toolCalls={[
+          {
+            id: 'c1',
+            name: 'write_file',
+            path: 'social/drafts/week.md',
+            success: true,
+            durationMs: 40,
+            at: '2026-09-28T10:00:00.000Z',
+          } as never,
+        ]}
+      />,
+    );
+    expect(screen.queryByText('(continued in the next turn)')).not.toBeInTheDocument();
+    expect(screen.getByText(/^Last action: .*social\/drafts\/week\.md\.$/)).toBeInTheDocument();
+  });
+
   it('leaves a normal reasoning-only turn on its existing copy', () => {
     render(
       // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.

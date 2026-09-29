@@ -252,6 +252,81 @@ describe('local native app connection', () => {
       daemon: { mode: 'spawned', pid: 4242, cert: 'loopback-cert' },
     });
   });
+
+  it('lets a Gezel add-in trade the owner credential for its own grant, without a code', async () => {
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'adopted',
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = new URL(String(input));
+      const auth = new Headers(init?.headers).get('authorization');
+      calls.push(`${init?.method ?? 'GET'} ${url.pathname} ${auth}`);
+      if (url.pathname === '/v1/apps/local-connect') {
+        expect(JSON.parse(String(init?.body))).toEqual({ appId: 'vscode' });
+        return jsonResponse({ appId: 'vscode', token: 'add-in-token' });
+      }
+      return jsonResponse({});
+    }) as unknown as typeof fetch;
+    const saved = new Map<string, string>();
+    const onVerificationCode = vi.fn();
+
+    const authorized = await authorizeLocal({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+      fetch: fetchImpl,
+      onVerificationCode,
+      gezelAddIn: true,
+      tokenStorage: { save: (id, token) => void saved.set(id, token) },
+      daemon: { daemonEntry: '/bundled/gezeld.js', spawnIfMissing: true },
+    });
+
+    expect(authorized.token).toBe('add-in-token');
+    expect(saved.get('vscode')).toBe('add-in-token');
+    expect(onVerificationCode).not.toHaveBeenCalled();
+    expect(calls).toEqual([
+      'POST /v1/apps/local-connect Bearer owner-token',
+      'GET /api/config Bearer add-in-token',
+      'GET /v1/models Bearer add-in-token',
+    ]);
+    expect(JSON.stringify(authorized)).not.toContain('owner-token');
+  });
+
+  it('asks for a code when the daemon will not exchange', async () => {
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'adopted',
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'not_found' }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
+      ) as unknown as typeof fetch;
+
+    const authorized = await authorizeLocal({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+      fetch: fetchImpl,
+      onVerificationCode: () => {},
+      gezelAddIn: true,
+      daemon: { daemonEntry: '/bundled/gezeld.js' },
+    });
+
+    expect(authorized.token).toBe('app-token');
+    expect(String(vi.mocked(fetchImpl).mock.calls[1]?.[0])).toContain('/v1/apps/register');
+  });
 });
 
 function restoreEnv(name: string, value: string | undefined): void {

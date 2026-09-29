@@ -1,4 +1,11 @@
-import type { CreateTaskRequest, Task } from '@bendyline/gezel';
+import {
+  CraftbookParamsError,
+  type CreateTaskRequest,
+  type Task,
+  type TaskReferences,
+  craftbookCategoryFamily,
+  craftbookReferenceSubject,
+} from '@bendyline/gezel';
 import { ConnectorPrepError } from '../connectors/task-prep.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
@@ -26,10 +33,19 @@ import type { TaskRunner } from './runner.js';
  * milliseconds and the durable check alone would let both through.
  */
 export interface TaskLaunchDeps {
-  tasks: Pick<TaskManager, 'create' | 'list'>;
-  store: Pick<Store, 'getProject' | 'getGezel'>;
+  tasks: Pick<TaskManager, 'create' | 'list' | 'describeCraftbook'>;
+  store: Pick<Store, 'getProject' | 'getGezel' | 'readConfig'>;
   taskRunner: Pick<TaskRunner, 'enqueueHandoff'>;
   history?: Pick<HistoryManager, 'log'>;
+  /**
+   * Search the reference corpora for a craftbook launch's subject (see
+   * `gatherTaskReferences`). Unset → tasks launch without a reference list.
+   */
+  gatherReferences?: (args: {
+    projectId: string;
+    subject: string;
+    craftbookName: string;
+  }) => Promise<TaskReferences | null>;
 }
 
 export interface TaskLaunchOptions {
@@ -71,8 +87,9 @@ export class TaskLauncher {
       const inflightKey = `${projectId}:${key}`;
       const pending = this.inflight.get(inflightKey);
       if (pending) return { task: await pending, reused: true };
-      const create = this.deps.tasks.create(projectId, body, {
-        origin: { kind: 'craftbook-invocation', key },
+      const create = this.create(projectId, body, options, {
+        kind: 'craftbook-invocation',
+        key,
       });
       this.inflight.set(inflightKey, create);
       let task: Task;
@@ -83,8 +100,59 @@ export class TaskLauncher {
       }
       return this.finish(task, options);
     }
-    const task = await this.deps.tasks.create(projectId, body);
+    const task = await this.create(projectId, body, options);
     return this.finish(task, options);
+  }
+
+  /**
+   * Create the task, with its reference list when this is a book started
+   * from the get-go. Gathered before create so the list lands in the same
+   * write as the task and is in place before the entry step is dispatched;
+   * inside the coalesced create, so a repeated launch searches once.
+   */
+  private async create(
+    projectId: string,
+    body: TaskLaunchRequest,
+    options: TaskLaunchOptions,
+    origin?: Task['origin'],
+  ): Promise<Task> {
+    const references = options.dispatchEntry ? await this.referencesFor(projectId, body) : null;
+    return this.deps.tasks.create(projectId, body, {
+      ...(origin ? { origin } : {}),
+      ...(references ? { references } : {}),
+    });
+  }
+
+  private async referencesFor(
+    projectId: string,
+    body: TaskLaunchRequest,
+  ): Promise<TaskReferences | null> {
+    const gather = this.deps.gatherReferences;
+    if (!gather || !body.craftbookId || body.status === 'draft') return null;
+    if (body.cron || body.nightShift) return null;
+    const config = await this.deps.store.readConfig().catch(() => null);
+    if (config?.taskReferences?.enabled === false) return null;
+    const book = await this.deps.tasks
+      .describeCraftbook(projectId, body.craftbookId, {
+        ...(body.craftbookSourceId ? { sourceId: body.craftbookSourceId } : {}),
+        ...(body.craftbookVersion ? { version: body.craftbookVersion } : {}),
+      })
+      .catch(() => null);
+    if (!book) return null;
+    // A code book's material is the repository, which per-turn retrieval and
+    // the code tools already reach; its description searched against the
+    // reference catalogs finds namesakes ("cart" → Shopping cart) that would
+    // then ride every step. Only a subject it declares is looked up.
+    const codeWork =
+      book.category !== undefined && craftbookCategoryFamily(book.category) === 'code';
+    const subject = craftbookReferenceSubject({
+      paramSchema: book.paramSchema,
+      ...(body.craftbookParams ? { params: body.craftbookParams } : {}),
+      ...(body.inputs ? { inputs: body.inputs } : {}),
+      ...(body.description && !codeWork ? { description: body.description } : {}),
+    });
+    if (!subject) return null;
+    return gather({ projectId, subject, craftbookName: book.name }).catch(() => null);
   }
 
   /** A live task already carrying this invocation key, if any. */
@@ -154,5 +222,21 @@ export function launchErrorResponse(
     };
   }
   if (err instanceof TaskInputError) return { status: 422, body: taskInputErrorBody(err) };
+  if (err instanceof CraftbookParamsError) {
+    return {
+      status: 422,
+      body: {
+        error: `Fill in ${joinTitles(err.titles, err.needs === 'all' ? 'and' : 'or')} to start this task.`,
+        code: err.code,
+        craftbookId: err.craftbookId,
+        params: err.params,
+      },
+    };
+  }
   return null;
+}
+
+function joinTitles(items: string[], conjunction: 'and' | 'or'): string {
+  if (items.length <= 2) return items.join(` ${conjunction} `);
+  return `${items.slice(0, -1).join(', ')}, ${conjunction} ${items[items.length - 1]}`;
 }

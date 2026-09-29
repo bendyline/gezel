@@ -166,7 +166,7 @@ async function realpathSafe(p: string): Promise<string | null> {
  * This gives us a meaningful symlink-resolved path even for files that
  * don't exist yet (common during `write_file`).
  */
-async function realpathNearest(p: string): Promise<string | null> {
+export async function realpathNearest(p: string): Promise<string | null> {
   const direct = await realpathSafe(p);
   if (direct) return direct;
   const parent = dirname(p);

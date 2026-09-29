@@ -18,7 +18,6 @@ import {
   buildFailedToolRecoveryNudge,
   consultationIdleTimeoutMsForModel,
   describeDelegateFailureForAsker,
-  detectUnsavedFileClaim,
   isNoopConfirmationResponse,
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
@@ -535,6 +534,42 @@ describe('ChatManager — send + persistence', () => {
 
     const disk = await store.getSession('ada', session.id);
     expect(disk!.title).toBe('Meaning life');
+  });
+
+  // The dispatch seed is the machinery's sentence; the extractor turned one
+  // into "Default/2 Bakery Weekly Admin Relief 20th craftbook".
+  it('titles a task thread after its task, not after the dispatch seed', async () => {
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'default',
+      num: 2,
+      ref: 'default/2',
+      title: 'Bakery weekly admin',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        id: 'admin',
+        name: 'Bakery Weekly Admin Relief',
+        steps: [{ id: 'scope', name: 'Scope', createdAt: now }],
+        entryStepId: 'scope',
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'scope',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    const session = await manager.createSession({ gezelId: 'ada', taskRef: 'default/2' });
+    mock.script('On it.');
+    await manager.send(
+      session.id,
+      'Task default/2 ("Bakery Weekly Admin Relief - May 20th") was just created from the **Bakery Weekly Admin Relief** craftbook.',
+      { messageOrigin: 'system' },
+    );
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk?.title).toBe('Bakery weekly admin');
   });
 
   it('names a passive-CC-only session from the later direct user starter', async () => {
@@ -4808,10 +4843,16 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(synthCount).toBe(1);
       const synth = rec?.messages.find((m) => m.synthetic === 'compaction-summary');
       expect(synth?.content).toContain('compacted bullet');
+      // The pending turn carries the date line, whose length varies with the
+      // day and time zone, so read it back rather than hardcoding it.
+      const sentPrompt =
+        mock.calls.find((call) => call.kind === 'send' && call.prompt === 'continue please')
+          ?.rawPrompt ?? '';
+      expect(sentPrompt).toMatch(/^\[Current date and time: .*continue please$/s);
       expect(synth?.contextCompaction).toEqual({
         removedCount: 15,
         contextWindow: 1000,
-        estimatedTokensBefore: 1129,
+        estimatedTokensBefore: Math.ceil((4500 + sentPrompt.length) / 4),
         compactionCount: 1,
         autoCompactRatio: 0.7,
       });
@@ -5588,6 +5629,28 @@ describe('ChatManager — per-turn shared-library recall', () => {
 
     const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
     expect(prompt).not.toContain('notes/misc.md');
+  });
+
+  it('stays silent when indexed context is Off', async () => {
+    await store.ensureSharedProject();
+    await store.writeConfig({ retrieval: { mode: 'off' } });
+    const calls: string[] = [];
+    manager.setContentIndex(
+      libraryIndex(
+        [
+          {
+            path: 'policies/refunds.md',
+            snippet: 'Refunds are issued within 30 days.',
+            score: 0.82,
+          },
+        ],
+        calls,
+      ),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).not.toContain('policies/refunds.md');
+    expect(calls).toEqual([]);
   });
 
   it('does not search on a message with no retrievable topic', async () => {
@@ -7063,114 +7126,6 @@ describe('describeDelegateFailureForAsker', () => {
   });
 });
 
-describe('detectUnsavedFileClaim — completion, modify, and draft-save claims', () => {
-  // The exact phrasings Laxmi used that the write-verb patterns missed.
-  it('catches "The deliverable `workspace/index.html` is in place"', () => {
-    const r = detectUnsavedFileClaim(
-      'The deliverable `workspace/index.html` is in place and fully playable.',
-      [],
-    );
-    expect(r).toEqual({ claimedPath: 'workspace/index.html', kind: 'exists' });
-  });
-
-  it('catches "`index.html` exists and meets all mission objectives"', () => {
-    const r = detectUnsavedFileClaim('`index.html` exists and meets all mission objectives.', []);
-    expect(r?.kind).toBe('exists');
-    expect(r?.claimedPath).toBe('index.html');
-  });
-
-  it('catches "delivered `index.html`"', () => {
-    const r = detectUnsavedFileClaim('I have delivered `index.html` to the workspace.', []);
-    expect(r?.claimedPath).toBe('index.html');
-  });
-
-  it('still catches the original write-verb claims as kind "wrote"', () => {
-    const r = detectUnsavedFileClaim('I saved the report to `review.md` just now.', []);
-    expect(r).toEqual({ claimedPath: 'review.md', kind: 'wrote' });
-  });
-
-  it('does NOT fire on a retraction ("the file was NOT created")', () => {
-    expect(
-      detectUnsavedFileClaim('The file `index.html` was NOT created — I could not write it.', []),
-    ).toBeNull();
-  });
-
-  it('does NOT fire when a successful write_file landed this turn', () => {
-    expect(
-      detectUnsavedFileClaim('`index.html` is complete and ready.', [
-        { id: '1', name: 'write_file', success: true } as never,
-      ]),
-    ).toBeNull();
-  });
-
-  it('does NOT fire when a Codex native shell edit landed this turn', () => {
-    expect(
-      detectUnsavedFileClaim('Updated `index.html` for Phase 2.', [
-        { id: '1', name: 'shell', success: true } as never,
-      ]),
-    ).toBeNull();
-  });
-
-  it('does NOT fire when write_file saved an invalid first draft for repair', () => {
-    expect(
-      detectUnsavedFileClaim('I wrote `index.html` to the workspace.', [
-        {
-          name: 'write_file',
-          durationMs: 12,
-          success: false,
-          errorMessage:
-            'inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it with replace_in_file(...) instead of starting over.',
-        } as never,
-      ]),
-    ).toBeNull();
-  });
-
-  it('does not match bare completion prose without a quoted file path', () => {
-    expect(detectUnsavedFileClaim('The project is complete and ready to play.', [])).toBeNull();
-  });
-
-  // Modify/edit claims — the family save + completion patterns miss. The
-  // load-bearing case (qwen3.6 developer "Space Shooter Arcade"):
-  // "I have updated the game logic in `index.html`" after only a read_file.
-  it('catches "I have updated the game logic in `workspace/index.html`" as kind "modified"', () => {
-    const r = detectUnsavedFileClaim(
-      'I have updated the game logic in `workspace/index.html`.\n\nThe file is located at `workspace/index.html`.',
-      [{ id: '1', name: 'read_file', success: true } as never],
-    );
-    expect(r).toEqual({ claimedPath: 'workspace/index.html', kind: 'modified' });
-  });
-
-  it('catches "applied the change to `index.html`" as kind "modified"', () => {
-    const r = detectUnsavedFileClaim('I applied the change to `index.html` as requested.', []);
-    expect(r?.kind).toBe('modified');
-    expect(r?.claimedPath).toBe('index.html');
-  });
-
-  it('does NOT fire on a modify claim backed by a successful replace_in_file', () => {
-    expect(
-      detectUnsavedFileClaim('I modified the scoring logic in `index.html`.', [
-        { id: '1', name: 'replace_in_file', success: true } as never,
-      ]),
-    ).toBeNull();
-  });
-
-  it('DOES fire on a modify claim when the replace_in_file FAILED', () => {
-    const r = detectUnsavedFileClaim('I updated `index.html` with the new penalty.', [
-      { id: '1', name: 'replace_in_file', success: false } as never,
-    ]);
-    expect(r?.kind).toBe('modified');
-  });
-
-  it('does NOT fire on a modify retraction ("could not apply the change")', () => {
-    expect(
-      detectUnsavedFileClaim(
-        'I was unable to update `index.html` — the snippet to replace was not found.',
-        [],
-      ),
-    ).toBeNull();
-  });
-});
-
 describe('ChatManager — modify-claim re-prompt (false "I updated X")', () => {
   it('re-prompts when the model claims it edited an EXISTING file but no write landed', async () => {
     // The wild-caught failure (qwen3.6 developer "Space Shooter Arcade"):
@@ -7208,6 +7163,86 @@ describe('ChatManager — modify-claim re-prompt (false "I updated X")', () => {
     // Before the fix this was 1 (the existence check swallowed the claim).
     const completes = eventTypes.filter((t) => t === 'complete');
     expect(completes.length).toBe(2);
+  });
+});
+
+describe('ChatManager — current date and time', () => {
+  // With no date anywhere in the prompt stack, a Meester planned "the week of
+  // May 20th" in September and the invented date reached a customer quote.
+  it('starts every turn with the current date, keeps the ask last, and stays out of the system prompt', async () => {
+    const localMock = new MockProvider({ name: 'copilot' });
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', localMock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const session = await localManager.createSession({ gezelId: 'ada' });
+      await localManager.send(session.id, 'what is the date this Thursday?');
+
+      const sends = localMock.calls.filter((c) => c.kind === 'send');
+      const raw = sends.at(-1)?.rawPrompt ?? '';
+      expect(raw.startsWith('[Current date and time: ')).toBe(true);
+      expect(raw).toContain(String(new Date().getFullYear()));
+      expect(raw.endsWith('what is the date this Thursday?')).toBe(true);
+      expect(sends.at(-1)?.prompt).toBe('what is the date this Thursday?');
+
+      const created = localMock.calls.find((c) => c.kind === 'create');
+      expect(created?.opts?.systemMessage ?? '').not.toContain('Current date and time');
+
+      // The stored transcript keeps the user's own words.
+      const stored = await store.getSession('ada', session.id);
+      expect(stored?.messages.find((m) => m.role === 'user')?.content).toBe(
+        'what is the date this Thursday?',
+      );
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
+  });
+});
+
+describe('ChatManager — served model', () => {
+  // The thread label read the model stamped at creation while another one
+  // answered every turn ("This PC (qwen3.6-27b-q8)" over Gemma 4 31B).
+  it('records the model that actually runs the turn', async () => {
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', new MockProvider({ name: 'copilot' })]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const session = await localManager.createSession({ gezelId: 'ada' });
+      const record = await store.getSession('ada', session.id);
+      record!.model = 'model-at-creation';
+      await store.writeSession(record!);
+      await store.writeConfig({ defaultModel: { copilot: 'model-that-runs' } });
+
+      await localManager.send(session.id, 'hello');
+
+      const after = await store.getSession('ada', session.id);
+      expect(after?.model).toBe('model-at-creation');
+      expect(after?.servedModel).toBe('model-that-runs');
+      const summary = (await store.listSessions({ gezelId: 'ada' })).find(
+        (s) => s.id === session.id,
+      );
+      expect(summary?.servedModel).toBe('model-that-runs');
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
   });
 });
 

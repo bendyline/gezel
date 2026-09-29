@@ -29,7 +29,7 @@ import type {
  * the machine engine broker for port 6228.
  */
 export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAuthorizedConnection> {
-  const { daemon, tlsCertPath, ...connectInput } = input;
+  const { daemon, tlsCertPath, gezelAddIn, ...connectInput } = input;
 
   if (connectInput.baseUrl) {
     const configured = await configuredTransport(
@@ -99,8 +99,21 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
   }
 
   const transport = createSdkTransport(resolved.cert, connectInput.fetch);
+  const addInToken = gezelAddIn
+    ? await exchangeOwnerForAddInGrant(
+        resolved.baseUrl,
+        resolved.token,
+        connectInput.appId,
+        transport.fetch,
+      )
+    : null;
+  if (addInToken) await connectInput.tokenStorage?.save(connectInput.appId, addInToken);
   const authorized = await authorizeTransport(
-    { ...connectInput, baseUrl: resolved.baseUrl },
+    {
+      ...connectInput,
+      baseUrl: resolved.baseUrl,
+      ...(addInToken ? { existingToken: addInToken } : {}),
+    },
     transport,
   );
   return {
@@ -111,6 +124,31 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
       cert: resolved.cert,
     },
   };
+}
+
+/**
+ * `POST /v1/apps/local-connect` with the owner credential: the add-in's own
+ * grant, the existing one when it still has the right scopes. Null when the
+ * daemon predates the route or refuses (it names only Gezel's add-ins); the
+ * caller then consents as before.
+ */
+async function exchangeOwnerForAddInGrant(
+  baseUrl: string,
+  ownerToken: string,
+  appId: string,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/v1/apps/local-connect`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appId }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { token?: unknown };
+    return res.ok && typeof body.token === 'string' ? body.token : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

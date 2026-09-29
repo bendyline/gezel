@@ -28,6 +28,7 @@ export function MeesterConversation({
   meesterPoppetje,
   meesterIconOverride,
   emptyPlaceholder,
+  onTurnStarted,
 }: {
   meesterGezelId: string;
   meesterName: string;
@@ -35,6 +36,8 @@ export function MeesterConversation({
   meesterPoppetje: PoppetjeStruct | null;
   meesterIconOverride: boolean;
   emptyPlaceholder?: string;
+  /** The person sent a message from here. */
+  onTurnStarted?: () => void;
 }) {
   // Home is swapped out wholesale when the user opens any other area, so this
   // component's local state cannot be the whole record of where they were.
@@ -193,6 +196,9 @@ export function MeesterConversation({
               onSessionCreated={(sid) => {
                 setSessionId(sid);
                 setSessionRefreshKey((k) => k + 1);
+              }}
+              onTurnStateChange={(state) => {
+                if (state === 'streaming') onTurnStarted?.();
               }}
               onToolActivity={onToolActivity}
               recentReferences={recentReferences}

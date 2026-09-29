@@ -136,6 +136,30 @@ describe('manage_task', () => {
     expect(text(result)).toContain('Retryable: false');
   });
 
+  it('tells the model to ask the user when the service refuses an unrequested cancel', async () => {
+    handler = (url, method) => {
+      if (method === 'GET' && url.pathname === '/api/projects/default/tasks/11') {
+        return { body: task('active') };
+      }
+      if (method === 'POST' && url.pathname === '/api/projects/default/tasks/11/status') {
+        return {
+          status: 403,
+          body: { error: 'canceling a task needs the user to ask for it in this turn' },
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const result = await client.callTool({
+      name: 'manage_task',
+      arguments: { ref: 'default/11', action: 'cancel' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain('Only the user can cancel default/11');
+    expect(text(result)).toContain('Retryable: false');
+  });
+
   it('pauses and cancels through the status route', async () => {
     let status = 'active';
     handler = (url, method, body) => {

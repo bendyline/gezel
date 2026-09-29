@@ -17,7 +17,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { GezelConfig } from '@bendyline/gezel';
+import type { GezelConfig, VideoAccelerator } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
@@ -26,9 +26,10 @@ import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
 import { DiffusersVideoProvider } from './diffusers-video.js';
 import { MockVideoProvider } from './mock.js';
-import { VideoModelManager, VideoModelSelector } from './models.js';
+import { type InstalledVideoModel, VideoModelManager, VideoModelSelector } from './models.js';
 import type { VideoProvider } from './types.js';
 import { VIDEO_VENV_NAME, detectVideoAccelerator, videoVenvSpec } from './venv.js';
+import { estimateVideoWorkingSet } from './working-set.js';
 
 export interface VideoProviderFactoryOptions {
   home: string;
@@ -73,7 +74,23 @@ export async function createVideoProvider(
   // Bundled engine: provision the venv + spawn the python server lazily.
   let cachedPort: number | undefined;
   const supervisor = new NativeEngineSupervisor({
-    capacity: { home: opts.home, exclusive: true },
+    capacity: {
+      home: opts.home,
+      exclusive: true,
+      // Price the bound model from its own weights at load precision; the
+      // generic disk-size estimate refuses every LTX-2.x model on a 128 GB Mac.
+      requirement: async () => {
+        const model = selector.launchedId ? await models.resolveModel(selector.launchedId) : null;
+        if (!model) return undefined;
+        const { bytes } = await estimateVideoWorkingSet({
+          modelDir: model.modelDir,
+          family: model.family,
+          accelerator,
+          ...(model.load?.vaeDtype ? { vaeDtype: model.load.vaeDtype } : {}),
+        });
+        return { bytes };
+      },
+    },
     logPrefix: '[video-server]',
     // The server serves a real 200 at /health once listening; the model
     // loads lazily on the first generate, so readiness is fast.
@@ -115,35 +132,15 @@ export async function createVideoProvider(
         preferredPythonVersion: '3.12',
       });
       const venvPython = venv.binPath('python');
-      const serverPath = resolveVideoServerPath();
-
-      // Translate the catalog-driven load descriptor into engine flags.
-      // Absent fields let the server fall back to its family defaults, so
-      // a plain diffusers-tree model needs none of these.
-      const load = model.load;
-      const args = [
-        serverPath,
-        '--model',
-        model.modelDir,
-        '--family',
-        model.family,
-        '--accelerator',
-        accelerator,
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(port),
-      ];
-      if (load?.strategy) args.push('--load-strategy', load.strategy);
-      if (load?.pipelineClass) args.push('--pipeline-class', load.pipelineClass);
-      if (load?.singleFileName) args.push('--single-file-name', load.singleFileName);
-      if (load?.transformerClass) args.push('--transformer-class', load.transformerClass);
-      if (load?.vaeDtype) args.push('--vae-dtype', load.vaeDtype);
-      if (load?.audio) args.push('--audio');
 
       return {
         command: venvPython,
-        args,
+        args: buildVideoServerArgs({
+          serverPath: resolveVideoServerPath(),
+          model,
+          accelerator,
+          port,
+        }),
         env: {
           HF_HUB_OFFLINE: '1',
           TRANSFORMERS_OFFLINE: '1',
@@ -163,6 +160,43 @@ export async function createVideoProvider(
     fetchImpl: patientFetch(),
     ...(opts.arbiter ? { arbiter: opts.arbiter } : {}),
   });
+}
+
+/**
+ * The `gezel_video_server.py` argv for one installed model. Translates the
+ * catalog-driven load descriptor into engine flags; absent fields let the
+ * server fall back to its family defaults, so a plain diffusers-tree model
+ * needs none of them.
+ */
+export function buildVideoServerArgs(opts: {
+  serverPath: string;
+  model: Pick<InstalledVideoModel, 'modelDir' | 'family' | 'load'>;
+  accelerator: VideoAccelerator;
+  port: number;
+}): string[] {
+  const { model } = opts;
+  const load = model.load;
+  const args = [
+    opts.serverPath,
+    '--model',
+    model.modelDir,
+    '--family',
+    model.family,
+    '--accelerator',
+    opts.accelerator,
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(opts.port),
+  ];
+  if (load?.strategy) args.push('--load-strategy', load.strategy);
+  if (load?.pipelineClass) args.push('--pipeline-class', load.pipelineClass);
+  if (load?.singleFileName) args.push('--single-file-name', load.singleFileName);
+  if (load?.transformerClass) args.push('--transformer-class', load.transformerClass);
+  if (load?.vaeDtype) args.push('--vae-dtype', load.vaeDtype);
+  if (load?.audio) args.push('--audio');
+  if (load?.sigmas?.length) args.push('--sigmas', load.sigmas.join(','));
+  return args;
 }
 
 /**

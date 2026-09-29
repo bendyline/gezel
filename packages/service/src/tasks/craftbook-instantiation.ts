@@ -8,6 +8,7 @@ import {
   type TaskAssignee,
   type TaskCraftbook,
   type TaskCraftbookStep,
+  assignOwnerApprovalSteps,
   expandStepDeliverables,
   nowIso,
 } from '@bendyline/gezel';
@@ -115,7 +116,7 @@ export function inlineStepsToCraftbook(
     scripts?: Record<string, string>;
   },
 ): Craftbook {
-  const resolved: CraftbookStep[] = expandStepDeliverables(steps);
+  const resolved: CraftbookStep[] = expandStepDeliverables(assignOwnerApprovalSteps(steps));
   const ids = new Set(resolved.map((s) => s.id));
   const entry = opts.entryStepId && ids.has(opts.entryStepId) ? opts.entryStepId : resolved[0]!.id;
   const now = nowIso();

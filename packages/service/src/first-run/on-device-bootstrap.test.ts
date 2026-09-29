@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isRecommendedModel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
@@ -20,13 +21,26 @@ import {
  *
  * `detectModelTier` itself isn't stubbed — on the test host it runs
  * for real (reads os.totalmem + the catalog, probes GPU VRAM). That's
- * fine; we only assert "the pin is SOME recommended id" (Gemma 4 or
- * Qwen 3.6), not which specific one. The ranking is tested separately
- * in `hardware-tier.test.ts` + core `recommendation.test.ts`.
+ * fine; we only assert "the pin is SOME recommended id", not which
+ * specific one. The ranking is tested separately in
+ * `hardware-tier.test.ts` + core `recommendation.test.ts`.
  */
 
 let home: string;
 let store: Store;
+
+/**
+ * Asked through the same gate the picker uses, not a model-family pattern:
+ * which family ranks first is gilde curation, and a new recoScore there
+ * changes this host's pick without changing any behavior under test.
+ */
+async function recommendedChatModelIds(): Promise<string[]> {
+  const items = await new CatalogService().list('chat-model');
+  return items
+    .map((i) => i.manifest)
+    .filter((m) => m.kind === 'chat-model' && isRecommendedModel(m))
+    .map((m) => m.id);
+}
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-first-run-test-'));
@@ -159,7 +173,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
     // existing E2B for this host's actual hardware) or was rewritten
     // to a different tier. Either way, no error stamped.
     expect(config.firstRunInstallError).toBeUndefined();
-    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.['llama-cpp']);
   });
 
   it('re-evaluates hardware instead of adopting an unrelated installed model when the pin is missing', async () => {
@@ -183,7 +197,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       archOverride: 'x64',
     });
     const config = await store.readConfig();
-    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.['llama-cpp']);
     expect(config.defaultModel?.['llama-cpp']).not.toMatch(/^shared-custom-/);
     expect(config.firstRunInstallError).toBeUndefined();
     expect(llamaCalls).toEqual([]);
@@ -271,7 +285,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
     const config = await store.readConfig();
     expect(config.provider).toBe('llama-cpp');
     expect(config.firstRunCompleted).toBe(true);
-    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.['llama-cpp']);
     // The bootstrap no longer fires the install — the user must click
     // "Download recommended model" in the Home banner.
     expect(calls).toEqual([]);
@@ -290,7 +304,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
 
     const config = await store.readConfig();
     expect(config.provider).toBe('llama-cpp');
-    expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.['llama-cpp']);
     expect(config.defaultModel?.['llama-cpp']).not.toBe('shared-model-not-in-catalog');
     expect(config.firstRunCompleted).toBe(true);
     expect(calls).toEqual([]);
@@ -323,7 +337,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
     await run;
 
     expect(provisional.provider).toBe('llama-cpp');
-    expect(provisional.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(provisional.defaultModel?.['llama-cpp']);
     expect((await store.readConfig()).defaultModel?.['llama-cpp']).toBe(
       provisional.defaultModel?.['llama-cpp'],
     );
@@ -343,7 +357,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
     const config = await store.readConfig();
     expect(config.provider).toBe('mlx');
     expect(config.firstRunCompleted).toBe(true);
-    expect(config.defaultModel?.mlx).toMatch(/^(gemma4|qwen3\.6)-/);
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.mlx);
     expect(llamaCalls).toEqual([]);
     expect(mlxCalls).toEqual([]);
   });

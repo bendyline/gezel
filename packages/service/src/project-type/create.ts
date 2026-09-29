@@ -309,12 +309,22 @@ async function bestEffortHistory(
       summary: `Created project "${project.name}"`,
       details: { name: project.name, description: project.description },
     },
-    ...applied.gezelsCreated.map((gezel) => ({
-      kind: 'gezel.created' as const,
-      gezelId: gezel.id,
-      summary: `Created "${gezel.name}"`,
-      details: { name: gezel.name, templateId: gezel.templateId },
-    })),
+    ...applied.gezelsCreated.map((gezel) =>
+      gezel.reused
+        ? {
+            kind: 'project.gezel.joined' as const,
+            projectId: project.id,
+            gezelId: gezel.id,
+            summary: `${gezel.name} joined "${project.name}"`,
+            details: { source: 'project-type' },
+          }
+        : {
+            kind: 'gezel.created' as const,
+            gezelId: gezel.id,
+            summary: `Created "${gezel.name}"`,
+            details: { name: gezel.name, templateId: gezel.templateId },
+          },
+    ),
     {
       kind: 'project.updated',
       projectId: project.id,
@@ -402,9 +412,16 @@ export async function createTypedProject(
         { id: projectId },
       );
       const applied = await applyProjectType(
-        { store: stageStore, catalog, home: stageHome },
+        {
+          store: stageStore,
+          catalog,
+          home: stageHome,
+          installGezels: await store.listGezels().catch(() => []),
+        },
         { projectId, ...input.projectType },
       );
+      // A reused gezel already lives on the install; only new hires publish.
+      const hired = applied.gezelsCreated.filter((gezel) => !gezel.reused);
       const stagedProject = await stageStore.getProject(projectId);
       if (!stagedProject || stagedProject.projectType?.id !== applied.typeId) {
         throw new Error(`typed project ${projectId} did not finish staging`);
@@ -422,7 +439,7 @@ export async function createTypedProject(
       if (normalize(actualExternalProject) !== normalize(actualLocalProject)) {
         await assertAbsent(actualExternalProject, `external project ${projectId}`);
       }
-      for (const gezel of applied.gezelsCreated) {
+      for (const gezel of hired) {
         await assertAbsent(
           gezelDir(store.homePath, gezel.id, store.externalFolders),
           `gezel ${gezel.id}`,
@@ -437,7 +454,7 @@ export async function createTypedProject(
       }
 
       const steps: CommitStep[] = [];
-      for (const gezel of applied.gezelsCreated) {
+      for (const gezel of hired) {
         const hidden = join(hiddenGezelsRoot, gezel.id);
         await copyDirectory(gezelDir(stageHome, gezel.id), hidden);
         await writeOwnershipMarker(hidden, operationId);

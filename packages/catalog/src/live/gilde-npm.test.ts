@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CommunitySource } from '../community-source.js';
+import { CONTENT_PACK_FILENAME } from '../content-pack.js';
 import {
   GILDE_PACKAGE_NAME,
   type GildeReleaseInfo,
@@ -13,6 +15,8 @@ import {
   pickGildePatchUpdate,
   stageGildeVersion,
 } from './gilde-npm.js';
+
+const COMMUNITY_ID = 'community-tool';
 
 let home: string;
 
@@ -34,6 +38,40 @@ async function gildeTarball(version: string, name = GILDE_PACKAGE_NAME): Promise
   await writeFile(
     join(fixture, 'package', 'data', 'toolsets', 'index.json'),
     `${JSON.stringify({ schemaVersion: 1, kind: 'toolset', count: 0, entries: [] })}\n`,
+  );
+  const communityItem = join(
+    fixture,
+    'package',
+    'data',
+    'community',
+    'toolsets',
+    'co',
+    COMMUNITY_ID,
+  );
+  await mkdir(join(communityItem, 'versions', '1.0.0'), { recursive: true });
+  await writeFile(
+    join(communityItem, 'manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: 'toolset',
+      id: COMMUNITY_ID,
+      name: 'Community Tool',
+      description: 'from the registry',
+      tags: [],
+      maintainer: { name: 'Test' },
+      yankedVersions: [],
+    }),
+  );
+  await writeFile(
+    join(communityItem, 'versions', '1.0.0', 'manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      version: '1.0.0',
+      releasedAt: '2026-04-22T00:00:00Z',
+      runtime: { kind: 'http-mcp', url: 'https://example.com/mcp' },
+      tools: [],
+      config: [],
+    }),
   );
   const archive = join(fixture, 'package.tgz');
   await tar.create({ cwd: fixture, file: archive, gzip: true }, ['package']);
@@ -212,6 +250,12 @@ describe('stageGildeVersion', () => {
       expect(index.kind).toBe('toolset');
       // The tarball itself is cleaned up after extraction.
       expect(await readdir(staging)).toEqual(['package']);
+      // The community tier is staged packed, the way the packaged bundle
+      // ships it, and still resolves.
+      const community = join(packageDir, 'data', 'community');
+      expect(await readdir(community)).toEqual([CONTENT_PACK_FILENAME]);
+      const resolved = await new CommunitySource(community).get('toolset', COMMUNITY_ID);
+      expect(resolved?.manifest.version).toBe('1.0.0');
     } finally {
       await registry.close();
     }

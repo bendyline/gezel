@@ -37,6 +37,57 @@ const task = {
 const step = task.craftbook.steps[1]!;
 
 describe('renderTaskContextBlock', () => {
+  describe('the launch reference list', () => {
+    const withReferences = {
+      ...task,
+      references: {
+        subject: 'quiche',
+        gatheredAt: '2026-09-26T00:10:53.000Z',
+        items: [
+          {
+            source: 'knowledge',
+            title: 'Quiche',
+            uri: 'knowledge://bendyline/wikipedia-food-drink/290627#chunk=abc',
+            catalogId: 'wikipedia-food-drink',
+            catalogVersion: '2026.5.0',
+            snippet: 'A French tart with a pastry case and a savoury `custard`\nfilling.',
+          },
+          { source: 'shared', title: 'recipes.md', path: 'recipes.md' },
+        ],
+      },
+    } as unknown as Task;
+
+    it('lists each reference as untrusted evidence', () => {
+      const block = renderTaskContextBlock({ task: withReferences, step });
+      expect(block).toContain('#### Reference material found at launch');
+      expect(block).toContain('subject ("quiche")');
+      expect(block).toContain('untrusted evidence');
+      expect(block).toContain(
+        '- [knowledge] Quiche `knowledge://bendyline/wikipedia-food-drink/290627#chunk=abc` · wikipedia-food-drink@2026.5.0 — "A French tart with a pastry case and a savoury \'custard\' filling."',
+      );
+      expect(block).toContain('- [shared] recipes.md `recipes.md`');
+      expect(block).not.toContain('2026-09-26');
+    });
+
+    it('names read_document only when the turn wired it', () => {
+      const wired = renderTaskContextBlock(
+        { task: withReferences, step },
+        { availableToolNames: new Set(['read_document']) },
+      );
+      expect(wired).toContain('Open one with `read_document`');
+      const unwired = renderTaskContextBlock(
+        { task: withReferences, step },
+        { availableToolNames: new Set(['write_artifact']) },
+      );
+      expect(unwired).toContain('#### Reference material found at launch');
+      expect(unwired).not.toContain('read_document');
+    });
+
+    it('renders nothing for a task without references', () => {
+      expect(renderTaskContextBlock({ task, step })).not.toContain('Reference material');
+    });
+  });
+
   it('renders the task, the outline, the procedure, the handoff and the gate', () => {
     const block = renderTaskContextBlock({ task, step });
     expect(block).toContain('### Current task: default/3 — "Ship the launch page"');

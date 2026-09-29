@@ -54,7 +54,18 @@ vi.mock('@bendyline/gezel-client', async () => {
 // are pulled in by HomeWorkshop's conversation, not by HomeView directly —
 // the module-level mocks apply regardless of the importer.
 vi.mock('../components/ChatComposer.js', () => ({
-  ChatComposer: () => <div data-testid="chat-composer">composer</div>,
+  ChatComposer: ({
+    onTurnStateChange,
+  }: {
+    onTurnStateChange?: (state: 'idle' | 'streaming') => void;
+  }) => (
+    <div data-testid="chat-composer">
+      composer
+      <button type="button" onClick={() => onTurnStateChange?.('streaming')}>
+        mock send
+      </button>
+    </div>
+  ),
 }));
 vi.mock('../components/ChatReferences.js', () => ({
   ChatReferences: ({
@@ -572,6 +583,89 @@ describe('HomeView', () => {
     expect(screen.queryByText('Helicopter lift feels floaty')).not.toBeInTheDocument();
   });
 
+  it('does not count the shared library indexing job on a new Home', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'default', name: 'Default' },
+        {
+          id: 'shared',
+          name: 'Shared Library',
+          properties: { 'gezel.sharedLibrary': '1' },
+        },
+      ],
+    } as never);
+    vi.mocked(api.listProjectTasks).mockImplementation(
+      async (projectId) =>
+        ({
+          tasks:
+            projectId === 'shared'
+              ? [
+                  {
+                    ref: 'shared/1',
+                    projectId: 'shared',
+                    status: 'active',
+                    assignee: { kind: 'user' },
+                    origin: { kind: 'system-job', jobId: 'boekwachter-indexing' },
+                  },
+                ]
+              : [],
+        }) as never,
+    );
+
+    render(<HomeView />);
+    await waitFor(() => expect(api.listProjectTasks).toHaveBeenCalledWith('default'));
+    expect(api.listProjectTasks).not.toHaveBeenCalledWith('shared');
+    expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
+  });
+
+  it('does not count a legacy system job kept in Default as pending user work', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({
+      tasks: [
+        {
+          ref: 'default/1',
+          projectId: 'default',
+          status: 'active',
+          assignee: { kind: 'user' },
+          origin: { kind: 'system-job', jobId: 'boekwachter-indexing' },
+        },
+        {
+          ref: 'default/2',
+          projectId: 'default',
+          status: 'active',
+          assignee: { kind: 'user' },
+        },
+      ],
+    } as never);
+
+    render(<HomeView />);
+    await waitFor(() => expect(screen.getByText('1 waiting on you')).toBeInTheDocument());
+    expect(screen.queryByText('2 waiting on you')).not.toBeInTheDocument();
+  });
+
+  it('recognizes the shared library by marker when its ID collides with a user project', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      hasGithubToken: true,
+      meesterGezelId: 'gz-meester',
+      recentTabs: [{ kind: 'project', id: 'shared-library', at: Date.now() }],
+    } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'default', name: 'Default' },
+        { id: 'shared', name: 'My shared project' },
+        {
+          id: 'shared-library',
+          name: 'Shared Library',
+          properties: { 'gezel.sharedLibrary': '1' },
+        },
+      ],
+    } as never);
+
+    render(<HomeView />);
+    await waitFor(() => expect(api.listProjectTasks).toHaveBeenCalledWith('shared'));
+    expect(api.listProjectTasks).not.toHaveBeenCalledWith('shared-library');
+  });
+
   it('does not render the workshop side rail', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [
@@ -608,6 +702,87 @@ describe('HomeView', () => {
     });
     expect(screen.queryByText('Awaiting your nod')).not.toBeInTheDocument();
     expect(screen.queryByText('Run npx tsx to check the frame timing?')).not.toBeInTheDocument();
+  });
+
+  // The chip looked like a button and did nothing; the only way to the
+  // question was the titlebar or scrolling the thread.
+  it('opens the Updates drawer from the chip when a question waits', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q1',
+          projectId: 'default',
+          gezelId: 'gz-meester',
+          sessionId: 's1',
+          prompt: 'Approve?',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-updates', opened);
+    try {
+      render(<HomeView />);
+      const chip = await screen.findByRole('button', { name: /1 waiting on you/ });
+      fireEvent.click(chip);
+      expect(opened).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('gezel:open-updates', opened);
+    }
+  });
+
+  // Finished work used to leave nothing to click once Updates emptied.
+  it('shows finished work as ready, not as waiting, and opens Updates', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q-ready',
+          projectId: 'default',
+          gezelId: 'gz-meester',
+          sessionId: 's1',
+          prompt: '**Weekly posts** is finished.',
+          taskRef: 'default/2',
+          intent: { kind: 'task-finished', taskRef: 'default/2' },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-updates', opened);
+    try {
+      render(<HomeView />);
+      fireEvent.click(await screen.findByRole('button', { name: /1 ready for you/ }));
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener('gezel:open-updates', opened);
+    }
+  });
+
+  it('opens the owner task from the chip when only a task waits', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({
+      tasks: [
+        {
+          ref: 'default/4',
+          projectId: 'default',
+          num: 4,
+          title: 'Sign the lease',
+          status: 'active',
+          assignee: { kind: 'user' },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const tabs: unknown[] = [];
+    const onTab = (e: Event) => tabs.push((e as CustomEvent).detail);
+    window.addEventListener('gezel:open-tab', onTab);
+    try {
+      render(<HomeView />);
+      fireEvent.click(await screen.findByRole('button', { name: /1 waiting on you/ }));
+      expect(tabs).toContainEqual({ kind: 'task', ref: 'default/4' });
+    } finally {
+      window.removeEventListener('gezel:open-tab', onTab);
+    }
   });
 
   // The chip counted questions fetched once at mount. Dismissing them from
@@ -682,6 +857,25 @@ describe('HomeView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
     expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: false });
+  });
+
+  // At full height the band squeezed the conversation to a third of the
+  // window until the owner found the collapse control.
+  it('steps the greeting aside once the owner starts talking, without saving it', async () => {
+    render(<HomeView />);
+    await waitFor(() => {
+      expect(screen.getByText('Tip of the day')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    });
+    expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+
+    // Reopened by hand, it stays open through the next message.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
+    fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
+    expect(screen.getByText('Tip of the day')).toBeInTheDocument();
   });
 
   it('starts collapsed when the saved preference says so', async () => {

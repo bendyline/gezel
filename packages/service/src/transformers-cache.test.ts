@@ -1,11 +1,18 @@
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { type Server, createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ModelFileDownloadError,
+  type PinnedModelFile,
   TRANSFORMERS_MODULE,
   type TransformersEnv,
+  ensureVerifiedModelFile,
   isCorruptTransformersCacheFailure,
   isMissingModule,
   loadTransformersModelWithCacheRecovery,
@@ -256,6 +263,182 @@ describe('transformers model cache coordination', () => {
     expect(loaded).toBe('loaded');
     expect(calls).toBe(2);
     expect(corruptNotices).toBe(1);
+  });
+
+  it('takes over a lock whose holder died mid-download', async () => {
+    // A quit during first run kills the holder before its `finally`, and the
+    // age limit alone would keep the model locked for hours.
+    const dir = await freshCacheDir();
+    const deadPid = await new Promise<number>((resolve, reject) => {
+      const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      child.once('error', reject);
+      child.once('exit', () => resolve(child.pid ?? 0));
+    });
+    const first = withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => {
+      const locks = join(dir, '.gezel-locks');
+      const [lock] = await readdir(locks);
+      return join(locks, lock!);
+    });
+    const lockDir = await first;
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, 'owner.json'), JSON.stringify({ pid: deadPid }));
+
+    await expect(
+      withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => 'acquired', {
+        timeoutMs: 2_000,
+        pollMs: 5,
+      }),
+    ).resolves.toBe('acquired');
+  });
+
+  it('keeps waiting on a lock whose holder is alive', async () => {
+    const dir = await freshCacheDir();
+    const lockDir = await withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => {
+      const locks = join(dir, '.gezel-locks');
+      return join(locks, (await readdir(locks))[0]!);
+    });
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid }));
+
+    await expect(
+      withTransformersModelCacheLock(dir, 'Xenova/test-model', async () => 'acquired', {
+        timeoutMs: 60,
+        pollMs: 5,
+      }),
+    ).rejects.toThrow(/timed out waiting/);
+  });
+});
+
+describe('ensureVerifiedModelFile', () => {
+  const MODEL = 'Xenova/test-model';
+  const BYTES = Buffer.alloc(256 * 1024, 7);
+  const DIGEST = `sha256:${createHash('sha256').update(BYTES).digest('hex')}`;
+  const pinned: PinnedModelFile = { file: 'onnx/model.onnx', digest: DIGEST, revision: 'abc123' };
+
+  let server: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
+    server = undefined;
+  });
+
+  /**
+   * Serves `body` in slow 16 KiB slices, declaring `declaredLength`, and
+   * optionally drops the connection after `cutAfter` bytes.
+   */
+  async function serve(opts: {
+    body?: Buffer;
+    declaredLength?: number;
+    cutAfter?: number;
+    status?: number;
+  }): Promise<{ host: string; requests: string[] }> {
+    const body = opts.body ?? BYTES;
+    const requests: string[] = [];
+    server = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      if (opts.status) {
+        res.writeHead(opts.status);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'content-length': String(opts.declaredLength ?? body.length) });
+      const end = opts.cutAfter ?? body.length;
+      let offset = 0;
+      const tick = () => {
+        if (offset >= end) {
+          if (opts.cutAfter !== undefined) res.destroy();
+          else res.end();
+          return;
+        }
+        const next = Math.min(end, offset + 16 * 1024);
+        res.write(body.subarray(offset, next));
+        offset = next;
+        setTimeout(tick, 2);
+      };
+      tick();
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const { port } = server!.address() as AddressInfo;
+    return { host: `http://127.0.0.1:${port}/`, requests };
+  }
+
+  const source = (host: string) => ({
+    remoteHost: host,
+    remotePathTemplate: '{model}/resolve/{revision}/',
+  });
+  const targetOf = (dir: string) => join(dir, 'Xenova', 'test-model', 'onnx', 'model.onnx');
+
+  it('never exposes a partial file at the path onnxruntime reads', async () => {
+    const dir = await freshCacheDir();
+    const { host, requests } = await serve({});
+    const target = targetOf(dir);
+    let sawPartial = false;
+    let polling = true;
+    const poll = (async () => {
+      while (polling) {
+        const info = await stat(target).catch(() => null);
+        if (info && info.size !== BYTES.length) sawPartial = true;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    })();
+
+    const outcome = await ensureVerifiedModelFile(dir, MODEL, pinned, source(host));
+    polling = false;
+    await poll;
+
+    expect(outcome).toBe('downloaded');
+    expect(sawPartial).toBe(false);
+    expect(await readFile(target)).toEqual(BYTES);
+    expect(requests).toEqual(['/Xenova/test-model/resolve/abc123/onnx/model.onnx']);
+    expect((await readdir(join(dir, 'Xenova', 'test-model', 'onnx'))).sort()).toEqual([
+      'model.onnx',
+      'model.onnx.gezel-verified',
+    ]);
+  });
+
+  it('leaves nothing behind when the connection drops mid-file', async () => {
+    const dir = await freshCacheDir();
+    const { host } = await serve({ cutAfter: 64 * 1024 });
+
+    await expect(ensureVerifiedModelFile(dir, MODEL, pinned, source(host))).rejects.toThrow();
+
+    expect(await readdir(join(dir, 'Xenova', 'test-model', 'onnx'))).toEqual([]);
+  });
+
+  it('refuses bytes that end early or do not match the pin', async () => {
+    const dir = await freshCacheDir();
+    const short = await serve({ body: BYTES.subarray(0, 1024), declaredLength: 1024 });
+    await expect(ensureVerifiedModelFile(dir, MODEL, pinned, source(short.host))).rejects.toThrow(
+      ModelFileDownloadError,
+    );
+    await expect(stat(targetOf(dir))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('replaces a partial file an earlier run left at the cache path', async () => {
+    const dir = await freshCacheDir();
+    const target = targetOf(dir);
+    await mkdir(join(dir, 'Xenova', 'test-model', 'onnx'), { recursive: true });
+    await writeFile(target, BYTES.subarray(0, 4096));
+    await writeFile(`${target}.download-99999-deadbeef`, 'orphaned temp');
+    const { host } = await serve({});
+
+    expect(await ensureVerifiedModelFile(dir, MODEL, pinned, source(host))).toBe('downloaded');
+
+    expect(await readFile(target)).toEqual(BYTES);
+    expect(await readdir(join(dir, 'Xenova', 'test-model', 'onnx'))).not.toContain(
+      'model.onnx.download-99999-deadbeef',
+    );
+  });
+
+  it('keeps a complete cached file without touching the network', async () => {
+    const dir = await freshCacheDir();
+    const target = targetOf(dir);
+    await mkdir(join(dir, 'Xenova', 'test-model', 'onnx'), { recursive: true });
+    await writeFile(target, BYTES);
+    const { host, requests } = await serve({ status: 500 });
+
+    expect(await ensureVerifiedModelFile(dir, MODEL, pinned, source(host))).toBe('cached');
+    expect(await ensureVerifiedModelFile(dir, MODEL, pinned, source(host))).toBe('cached');
+    expect(requests).toEqual([]);
   });
 });
 

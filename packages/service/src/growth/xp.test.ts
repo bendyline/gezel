@@ -6,8 +6,19 @@ import {
   computeSignals,
   countTaskWork,
   ratchetSignals,
+  stepCreditedGezelId,
   totalXp,
 } from './xp.js';
+
+describe('stepCreditedGezelId', () => {
+  it('credits the assignee, else the suggested gezel, and never a user step', () => {
+    expect(stepCreditedGezelId({ assignee: { kind: 'gezel', gezelId: 'ada' } })).toBe('ada');
+    expect(stepCreditedGezelId({ suggestedGezelId: 'bo' })).toBe('bo');
+    expect(
+      stepCreditedGezelId({ assignee: { kind: 'user' }, suggestedGezelId: 'bo' }),
+    ).toBeUndefined();
+  });
+});
 
 describe('computeSignals', () => {
   it('weights memories by kind — prefs and decisions over facts over status', () => {

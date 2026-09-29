@@ -68,6 +68,19 @@ function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * A fresh home whose turns carry no indexed context. The mock provider echoes
+ * the prompt it was given, and per-turn retrieval legitimately prepends hits
+ * from the bundled Handboek catalog, which an empty workspace cwd cannot keep
+ * out. The stdout cases assert the CLI's stdout/stderr boundary, not what
+ * retrieval finds.
+ */
+async function mkdtempHomeWithoutRetrieval(prefix: string): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), prefix));
+  await writeFile(join(home, 'config.json'), `${JSON.stringify({ retrieval: { mode: 'off' } })}\n`);
+  return home;
+}
+
 async function runCliAtHome(
   home: string,
   ...args: string[]
@@ -635,7 +648,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
   });
 
   it('keeps stdout reply-only when run owns an in-process service', async () => {
-    const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-output-'));
+    const runHome = await mkdtempHomeWithoutRetrieval('gezel-cli-run-output-');
     const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-workspace-'));
     const prompt = 'Reply exactly with: cli-stdout-only';
     try {
@@ -685,7 +698,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
    * `run` only owns an in-process service when nothing is already running.
    */
   it('adopts an already-running daemon for run instead of asking for desktop approval', async () => {
-    const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-adopt-'));
+    const runHome = await mkdtempHomeWithoutRetrieval('gezel-cli-run-adopt-');
     const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-adopt-workspace-'));
     const prompt = 'Reply exactly with: cli-adopted-daemon';
     const env = childEnv({

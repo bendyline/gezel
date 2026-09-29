@@ -9,8 +9,8 @@ import type {
   UnifiedSearchRequest,
   UpdateProjectRequest,
 } from '../schemas/api.js';
-import type { GezelFrontmatter, GezelSummary } from '../schemas/gezel.js';
-import { ProjectSchema } from '../schemas/project.js';
+import type { GezelDetail, GezelFrontmatter, GezelSummary } from '../schemas/gezel.js';
+import { type ProjectDetail, ProjectSchema } from '../schemas/project.js';
 import type {
   CreatePromptDraftRequest,
   DuplicatePromptDraftRequest,
@@ -19,6 +19,7 @@ import type {
 import type { ScriptRun } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import type { RestoreConfirm } from '../schemas/storage.js';
+import type { CompleteStepResponse, Task } from '../schemas/task.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import * as backup from './backup.js';
 import { promptDraftFiles, promptDraftHost } from './drafts-portable.js';
@@ -52,7 +53,7 @@ export class PortableStore {
   ensureLayout() {
     return this.run(ensureLayout);
   }
-  readConfig() {
+  readConfig(): Promise<GezelConfig> {
     return this.run(projects.readConfig);
   }
   listQuestions(filter: questions.PortableQuestionFilter = {}) {
@@ -121,7 +122,9 @@ export class PortableStore {
   cancelRestore(id: string) {
     return this.run((repo) => backup.cancelRestore(repo, id));
   }
-  writeConfig(patch: Partial<{ [K in keyof GezelConfig]: GezelConfig[K] | null }>) {
+  writeConfig(
+    patch: Partial<{ [K in keyof GezelConfig]: GezelConfig[K] | null }>,
+  ): Promise<GezelConfig> {
     return this.run((repo) => projects.writeConfig(repo, patch));
   }
   sharedProjectId() {
@@ -185,7 +188,7 @@ export class PortableStore {
   listGezels() {
     return this.run(gezels.listGezels);
   }
-  getGezel(id: string) {
+  getGezel(id: string): Promise<GezelDetail | null> {
     return this.run((repo) => gezels.getGezel(repo, id));
   }
   getGezelPoppetje(id: string) {
@@ -197,19 +200,19 @@ export class PortableStore {
   rerollGezelPoppetje(id: string, options: { seed?: number } = {}) {
     return this.run((repo) => gezels.rerollGezelPoppetje(repo, id, options));
   }
-  createGezel(input: gezels.PortableCreateGezelInput) {
+  createGezel(input: gezels.PortableCreateGezelInput): Promise<GezelDetail> {
     return this.run((repo) => gezels.createGezel(repo, input));
   }
-  updateGezelAbout(id: string, about: string) {
+  updateGezelAbout(id: string, about: string): Promise<GezelDetail> {
     return this.run((repo) => gezels.updateGezelAbout(repo, id, about));
   }
-  updateGezelMarkdown(id: string, source: string) {
+  updateGezelMarkdown(id: string, source: string): Promise<GezelDetail> {
     return this.run((repo) => gezels.updateGezelMarkdown(repo, id, source));
   }
   updateGezelSettings(
     id: string,
     patch: Partial<{ [K in keyof GezelFrontmatter]: GezelFrontmatter[K] | null }>,
-  ) {
+  ): Promise<GezelDetail> {
     return this.run((repo) => gezels.updateGezelSettings(repo, id, patch));
   }
   deleteGezel(id: string) {
@@ -254,7 +257,15 @@ export class PortableStore {
       return [];
     });
   }
-  getProjectContext(projectId: string, gezelId: string) {
+  getProjectContext(
+    projectId: string,
+    gezelId: string,
+  ): Promise<{
+    project: ProjectDetail;
+    gezel: GezelDetail;
+    crew: GezelSummary[];
+    sharedProjectId: string | null;
+  }> {
     return this.run(async (repo) => {
       const project = await projects.requireProject(repo, projectId);
       const gezel = await gezels.requireGezel(repo, gezelId);
@@ -264,10 +275,10 @@ export class PortableStore {
       return { project, gezel, crew, sharedProjectId: await projects.sharedProjectId(repo) };
     });
   }
-  createSession(input: sessions.CreatePortableSession) {
+  createSession(input: sessions.CreatePortableSession): Promise<ChatSession> {
     return this.run((repo) => sessions.createSession(repo, input));
   }
-  getSession(gezelId: string, id: string) {
+  getSession(gezelId: string, id: string): Promise<ChatSession | null> {
     return this.run((repo) => sessions.getSession(repo, gezelId, id));
   }
   writeSession(session: ChatSession, options: { sentDraftId?: string } = {}) {
@@ -434,45 +445,49 @@ export class PortableStore {
     return this.run((repo) => scriptSources.deleteScriptSource(repo, scope, name));
   }
 
-  listTasks(filter: tasks.PortableTaskFilter = {}) {
+  listTasks(filter: tasks.PortableTaskFilter = {}): Promise<Task[]> {
     return this.run((repo) => tasks.listTasks(repo, filter));
   }
-  getTask(ref: string) {
+  getTask(ref: string): Promise<Task | null> {
     return this.run((repo) => tasks.getTask(repo, ref));
   }
   createTask(
     projectId: string,
     input: Parameters<typeof tasks.createTask>[2],
     resolved?: Parameters<typeof tasks.createTask>[3],
-  ) {
+  ): Promise<Task> {
     return this.run((repo) => tasks.createTask(repo, projectId, input, resolved));
   }
   updateTask(
     ref: string,
     patch: Parameters<typeof tasks.updateTask>[2],
     expectedActiveStepId?: string,
-  ) {
+  ): Promise<Task> {
     return this.run((repo) => tasks.updateTask(repo, ref, patch, expectedActiveStepId));
   }
-  setTaskStatus(ref: string, status: Parameters<typeof tasks.setTaskStatus>[2]) {
+  setTaskStatus(ref: string, status: Parameters<typeof tasks.setTaskStatus>[2]): Promise<Task> {
     return this.run((repo) => tasks.setTaskStatus(repo, ref, status));
   }
-  pauseTaskIfActive(ref: string) {
+  pauseTaskIfActive(ref: string): Promise<Task> {
     return this.run((repo) => tasks.pauseTaskIfActive(repo, ref));
   }
-  completeTaskStep(ref: string, stepId: string, options: tasks.PortableTaskCompletion = {}) {
+  completeTaskStep(
+    ref: string,
+    stepId: string,
+    options: tasks.PortableTaskCompletion = {},
+  ): Promise<CompleteStepResponse> {
     return this.run((repo) => tasks.completeTaskStep(repo, ref, stepId, options));
   }
-  resolveTaskStepRole(ref: string, stepId: string, gezelId: string) {
+  resolveTaskStepRole(ref: string, stepId: string, gezelId: string): Promise<Task> {
     return this.run((repo) => tasks.resolveTaskStepRole(repo, ref, stepId, gezelId));
   }
-  beginTaskRun(ref: string) {
+  beginTaskRun(ref: string): Promise<{ task: Task; runId: string }> {
     return this.run((repo) => tasks.beginTaskRun(repo, ref));
   }
-  finishTaskRun(ref: string, runId: string, error?: string) {
+  finishTaskRun(ref: string, runId: string, error?: string): Promise<Task> {
     return this.run((repo) => tasks.finishTaskRun(repo, ref, runId, error));
   }
-  recoverTasks() {
+  recoverTasks(): Promise<Task[]> {
     return this.run(tasks.recoverTasks);
   }
   listTaskNotes(ref: string) {
@@ -489,7 +504,7 @@ export class PortableStore {
       tasks.appendTaskNote(repo, ref, text, stepId, actorGezelId, expectedActiveStepId),
     );
   }
-  startProject(input: tasks.PortableStartProject) {
+  startProject(input: tasks.PortableStartProject): Promise<{ project: ProjectDetail; task: Task }> {
     return this.run((repo) => tasks.startProject(repo, input));
   }
 
@@ -500,22 +515,25 @@ export class PortableStore {
     ref: string,
     stepId: string,
     patch: Parameters<typeof taskEditing.updateTaskStep>[3],
-  ) {
+  ): Promise<Task> {
     return this.run((repo) => taskEditing.updateTaskStep(repo, ref, stepId, patch));
   }
-  addTaskStep(ref: string, input: unknown) {
+  addTaskStep(ref: string, input: unknown): Promise<Task> {
     return this.run((repo) => taskEditing.addTaskStep(repo, ref, input));
   }
-  removeTaskStep(ref: string, stepId: string) {
+  removeTaskStep(ref: string, stepId: string): Promise<Task> {
     return this.run((repo) => taskEditing.removeTaskStep(repo, ref, stepId));
   }
-  reorderTaskSteps(ref: string, order: string[]) {
+  reorderTaskSteps(ref: string, order: string[]): Promise<Task> {
     return this.run((repo) => taskEditing.reorderTaskSteps(repo, ref, order));
   }
-  updateTaskCraftbook(ref: string, patch: Parameters<typeof taskEditing.updateTaskCraftbook>[2]) {
+  updateTaskCraftbook(
+    ref: string,
+    patch: Parameters<typeof taskEditing.updateTaskCraftbook>[2],
+  ): Promise<Task> {
     return this.run((repo) => taskEditing.updateTaskCraftbook(repo, ref, patch));
   }
-  activateTaskStep(ref: string, stepId: string) {
+  activateTaskStep(ref: string, stepId: string): Promise<Task> {
     return this.run((repo) => taskEditing.activateTaskStep(repo, ref, stepId));
   }
   updateTaskNote(ref: string, noteId: string, input: unknown) {

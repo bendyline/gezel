@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -77,6 +78,7 @@ vi.mock('../components/ModelPicker.js', async () => {
 vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: () => null }));
 
 const { SettingsView } = await import('./SettingsView.js');
+const { peekPendingSettingsSection, requestSettingsSection } = await import('../settings-nav.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 const { refreshCopilotAvailability } = await import('../components/useCopilotAvailability.js');
@@ -823,6 +825,26 @@ describe('SettingsView', () => {
     await waitFor(() => expect(pills.queryByRole('button', { name: 'GitHub Copilot' })).toBeNull());
   });
 
+  // Apple's own model needs no download, only the helper on an Apple silicon
+  // Mac; the service reports that passively, without running the helper.
+  it('offers Apple Intelligence as a provider only when its helper is installed', async () => {
+    const hidden = render(<SettingsView />);
+    let pills = await defaultProviderSwitch();
+    expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
+    expect(pills.queryByRole('button', { name: 'Apple Intelligence' })).toBeNull();
+    hidden.unmount();
+
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      appleFoundationModelsStatus: { installed: true },
+    } as never);
+    render(<SettingsView />);
+    pills = await defaultProviderSwitch();
+    expect(await pills.findByRole('button', { name: 'Apple Intelligence' })).toBeInTheDocument();
+  });
+
   // The API-key OpenAI and Anthropic surfaces are hidden until they've been
   // tested; the CLI-driven variants are untouched.
   it('hides the API-key OpenAI and Anthropic pills but keeps the CLI ones', async () => {
@@ -1266,5 +1288,19 @@ describe('generalist mode switch', () => {
     await waitFor(() =>
       expect(tray.getByRole('radio', { name: 'On' })).toHaveAttribute('aria-checked', 'true'),
     );
+  });
+});
+
+describe('SettingsView deep links', () => {
+  // SettingsView is lazy(), so React may render it, discard that render, and
+  // render again. Consuming the section in the discarded pass made the chat's
+  // "Choose a model" button land on General instead of the models page.
+  it('does not spend a requested section on a render that never commits', async () => {
+    requestSettingsSection('llamaCpp');
+    renderToStaticMarkup(<SettingsView />);
+    expect(peekPendingSettingsSection()).toBe('llamaCpp');
+
+    render(<SettingsView />);
+    await waitFor(() => expect(peekPendingSettingsSection()).toBeNull());
   });
 });

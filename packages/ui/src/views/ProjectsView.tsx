@@ -52,7 +52,7 @@ import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
-import { ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
+import { type ProjectSectionTab, ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   type OutsideInLayout,
@@ -112,8 +112,8 @@ import {
   formatRelativeFileTime,
   sortAggregates,
 } from '../components/file-view-modes.js';
-import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
-import { navigateToTab } from '../components/nav-actions.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
+import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import {
@@ -527,6 +527,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     size?: number;
     outsideIn?: OutsideInOpenFile;
   } | null>(null);
+  // A file opened from a pending question: its viewer offers the way back,
+  // which a person reviewing a quote otherwise had to hunt for.
+  const [questionReturnPath, setQuestionReturnPath] = useState<string | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus | null>(
     null,
   );
@@ -1206,8 +1209,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // `openProject` whose `setSelected` hasn't flushed yet (the search quick-open
   // path). Switches to the right file panel, then loads the file.
   const focusFile = useCallback(
-    async (projectId: string, path: string, source: FileTab, line?: number) => {
+    async (
+      projectId: string,
+      path: string,
+      source: FileTab,
+      line?: number,
+      fromQuestion?: boolean,
+    ) => {
       setTab(source);
+      setQuestionReturnPath(fromQuestion ? path : null);
       const name = path.slice(path.lastIndexOf('/') + 1);
       const media = mediaSentinel(name);
       if (media) {
@@ -1264,12 +1274,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   useEffect(() => {
     const onOpenFile = (e: Event) => {
       const d = (
-        e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab; line?: number }>
+        e as CustomEvent<{
+          projectId?: string;
+          path?: string;
+          source?: FileTab;
+          line?: number;
+          fromQuestion?: boolean;
+        }>
       ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source, d.line);
+        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1282,7 +1298,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (!forceProjectId) return;
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
-      if (intent) void focusFile(forceProjectId, intent.path, intent.source, intent.line);
+      if (intent) {
+        void focusFile(
+          forceProjectId,
+          intent.path,
+          intent.source,
+          intent.line,
+          intent.fromQuestion,
+        );
+      }
     });
   }, [forceProjectId, openProject, focusFile]);
 
@@ -2357,17 +2381,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
-            {effectiveCompact && (
+            {/* The row exists for the back button. In a single-project tab it
+                would hold only the name, and a phone can't spare the height. */}
+            {effectiveCompact && !detailOnly && (
               <div className="project-compact-heading">
-                {!detailOnly && (
-                  <button
-                    type="button"
-                    className="project-list-back"
-                    onClick={() => setBrowsingProjects(true)}
-                  >
-                    Projects
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="project-list-back"
+                  onClick={() => setBrowsingProjects(true)}
+                >
+                  Projects
+                </button>
                 <h2>{selected.name}</h2>
               </div>
             )}
@@ -2419,58 +2443,74 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 onValueChange={(value) => setTab(value as ProjectTab)}
                 onPreload={(value) => preloadProjectTab(value as ProjectTab)}
                 compact={effectiveCompact}
-                items={[
-                  {
-                    value: 'output',
-                    label: 'Output',
-                    show: runtimeCapabilities().htmlPreview && compactOutputAvailable,
-                  },
-                  { value: 'chat', label: 'Chat', show: true },
-                  {
-                    value: 'overview',
-                    label: 'Overview',
-                    show: projectTabIsVisible(selected, 'overview'),
-                  },
-                  {
-                    value: 'tasks',
-                    label: 'Tasks',
-                    show: projectTabIsVisible(selected, 'tasks'),
-                  },
-                  {
-                    value: 'packages',
-                    label: 'Tools',
-                    show: projectTabIsVisible(selected, 'approvals'),
-                  },
-                  {
-                    value: 'workspace',
-                    label: 'Workspace',
-                    show: projectTabIsVisible(selected, 'workspace'),
-                  },
-                  {
-                    value: 'artifacts',
-                    label: 'Artifacts',
-                    show: projectTabIsVisible(selected, 'artifacts'),
-                  },
-                  // Shown only once the project has proposals: a tab that is
-                  // empty for every project that never ran a fix is noise.
-                  {
-                    value: 'proposals',
-                    label: 'Proposals',
-                    show: diffpackCount > 0,
-                  },
-                  { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
-                  {
-                    value: 'mail',
-                    label: 'Mail',
-                    show: showWorkInProgressFeatures && isEmailProject(selected),
-                  },
-                  {
-                    value: 'map',
-                    label: 'Village',
-                    show: projectTabIsVisible(selected, 'map'),
-                  },
-                  { value: 'about', label: 'Settings', show: true },
-                ].filter((item) => item.show && supportsProjectSection(item.value))}
+                items={(
+                  [
+                    {
+                      value: 'output',
+                      label: 'Output',
+                      icon: 'output',
+                      show: runtimeCapabilities().htmlPreview && compactOutputAvailable,
+                    },
+                    { value: 'chat', label: 'Chat', icon: 'chat', show: true },
+                    {
+                      value: 'overview',
+                      label: 'Overview',
+                      icon: 'overview',
+                      show: projectTabIsVisible(selected, 'overview'),
+                    },
+                    {
+                      value: 'tasks',
+                      label: 'Tasks',
+                      icon: 'tasks',
+                      show: projectTabIsVisible(selected, 'tasks'),
+                    },
+                    {
+                      value: 'packages',
+                      label: 'Tools',
+                      icon: 'tools',
+                      show: projectTabIsVisible(selected, 'approvals'),
+                    },
+                    {
+                      value: 'workspace',
+                      label: 'Workspace',
+                      icon: 'workspace',
+                      show: projectTabIsVisible(selected, 'workspace'),
+                    },
+                    {
+                      value: 'artifacts',
+                      label: 'Artifacts',
+                      icon: 'artifacts',
+                      show: projectTabIsVisible(selected, 'artifacts'),
+                    },
+                    // Shown only once the project has proposals: a tab that is
+                    // empty for every project that never ran a fix is noise.
+                    {
+                      value: 'proposals',
+                      label: 'Proposals',
+                      icon: 'proposals',
+                      show: diffpackCount > 0,
+                    },
+                    {
+                      value: 'github',
+                      label: 'GitHub',
+                      icon: 'github',
+                      show: Boolean(selected.github?.url),
+                    },
+                    {
+                      value: 'mail',
+                      label: 'Mail',
+                      icon: 'mail',
+                      show: showWorkInProgressFeatures && isEmailProject(selected),
+                    },
+                    {
+                      value: 'map',
+                      label: 'Village',
+                      icon: 'village',
+                      show: projectTabIsVisible(selected, 'map'),
+                    },
+                    { value: 'about', label: 'Settings', icon: 'settings', show: true },
+                  ] satisfies Array<ProjectSectionTab & { show: boolean }>
+                ).filter((item) => item.show && supportsProjectSection(item.value))}
               />
               {selected.archived && (
                 <span className="project-archived-badge" title="Hidden from primary navigation">
@@ -3309,6 +3349,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           />
                         ) : undefined
                       }
+                      viewerNotice={
+                        openFile && questionReturnPath === openFile.path ? (
+                          <div className="file-viewer-return">
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => {
+                                setQuestionReturnPath(null);
+                                openUpdates();
+                              }}
+                            >
+                              ← Back to the question
+                            </button>
+                            <span title={openFile.path}>{openFile.path.split('/').at(-1)}</span>
+                          </div>
+                        ) : undefined
+                      }
                       viewer={
                         openFile ? (
                           openFile.outsideIn ? (
@@ -3413,7 +3470,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                   {tab === 'map' && (
                     <ProjectPaneBoundary>
-                      <FileMapView projectId={selected.id} />
+                      <FileMapView projectId={selected.id} hasGitHub={!!selected.github} />
                     </ProjectPaneBoundary>
                   )}
                   {tab === 'overview' && (
@@ -3540,10 +3597,11 @@ function ProjectFileEditor({
   const versionBasename = useMemo(() => documentVersionBasename(file.path), [file.path]);
   const autosave = useSerializedAutosave({
     resourceKey: `file:${file.source}:${file.path}`,
-    initialValue: markdown ? normalizeMarkdownBaseline(file.content) : file.content,
+    initialValue: file.content,
     save: async (content) => {
       await onSave(content);
     },
+    isEquivalent: markdown ? markdownEquivalent : undefined,
   });
   const handleChange = useCallback(
     (content: string) => {
@@ -3951,15 +4009,14 @@ function ProjectDocEditor({
   onSave: (value: string) => Promise<unknown>;
 }) {
   const editorTheme = useEffectiveTheme();
-  // Baseline on the editor-canonical form: Squisq re-emits its own
-  // serialization of unchanged content at mount, and a raw-text baseline
-  // reads that as an edit (false "unsaved changes" + a spurious write on
-  // open). See markdown-baseline.ts.
-  const normalizedInitial = useMemo(() => normalizeMarkdownBaseline(initial), [initial]);
+  // Squisq re-emits its own serialization of unchanged content at mount;
+  // `markdownEquivalent` keeps that from reading as an edit (false "unsaved
+  // changes" + a spurious write on open). See markdown-baseline.ts.
   const autosave = useSerializedAutosave({
     resourceKey,
-    initialValue: normalizedInitial,
+    initialValue: initial,
     save: onSave,
+    isEquivalent: markdownEquivalent,
   });
 
   const handleDocChange = useCallback(

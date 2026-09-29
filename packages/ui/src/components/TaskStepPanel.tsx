@@ -219,7 +219,7 @@ export function TaskStepPanel({
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__none">— inherit from task —</Select.Item>
+              <Select.Item value="__none">Same as the task</Select.Item>
               <Select.Item value="__user">→ You</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>

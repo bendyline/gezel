@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   type ActiveInstallLike,
   installPercent,
+  localDeviceSettingsLabel,
   noModelYetMessage,
 } from './active-install-message.js';
+
+describe('localDeviceSettingsLabel', () => {
+  it('names the Settings tab the way each platform shows it', () => {
+    expect(localDeviceSettingsLabel('darwin')).toBe('This Mac');
+    expect(localDeviceSettingsLabel('win32')).toBe('This PC');
+    expect(localDeviceSettingsLabel('linux')).toBe('This Device');
+  });
+});
 
 const downloading = (bytesWritten: number, totalBytes: number): ActiveInstallLike => ({
   catalogId: 'gemma4-e4b-q4',

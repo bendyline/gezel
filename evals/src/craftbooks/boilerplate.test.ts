@@ -77,21 +77,14 @@ describe('findBoilerplateEvalSpecs', () => {
   describe('against the bundled specs', () => {
     const found = findBoilerplateEvalSpecs(CRAFTBOOK_EVAL_SPECS);
 
-    it('finds the generated family-template specs', () => {
-      // Guards the ratio, not an exact count: the point is that a large slice
-      // of the library is measured by a family smoke test rather than by its
-      // own job. A content release that fixes them should move this DOWN.
-      expect(found.length).toBeGreaterThan(50);
-      expect(found.length).toBeLessThan(CRAFTBOOK_EVAL_SPECS.length / 2);
+    it('keeps the active corpus free of generated family-template specs', () => {
+      expect(found).toEqual([]);
     });
 
-    it('includes the wild-caught exemplars', () => {
+    it('keeps the wild-caught exemplars repaired', () => {
       const ids = new Set(found.map((f) => f.craftbookId));
-      // db-index-tuning is a query-plan recipe measured by "analyze
-      // records.csv"; version-bump is a semver recipe measured by "write a
-      // small Node helper". Both were recorded as validated.
-      expect(ids.has('db-index-tuning')).toBe(true);
-      expect(ids.has('version-bump')).toBe(true);
+      expect(ids.has('db-index-tuning')).toBe(false);
+      expect(ids.has('version-bump')).toBe(false);
     });
 
     it('never flags a spec that has no prompt at all', () => {

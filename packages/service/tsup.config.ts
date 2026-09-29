@@ -1,8 +1,77 @@
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig } from 'tsup';
+import { build, defineConfig } from 'tsup';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
+
+/**
+ * Compile the eval harness (`evals/`) into `dist/evals/`, so every install —
+ * packaged app, npm, CLI — can run in-app evals without a source checkout.
+ *
+ * Built after the daemon because it resolves everything it imports from the
+ * service's own dependencies at runtime (`@bendyline/gezel-service` itself
+ * through the package self-reference, for `evaluateGate` and the trial
+ * daemon entry). Only the harness's code and `js-yaml` are inlined; the
+ * `playwright` and `vitest` imports stay external and resolve only in a
+ * checkout — installed, the harness drives the product's managed Chromium
+ * through `playwright-core` and reports a missing Vitest as ungradable.
+ *
+ * Split into shared chunks inside `dist/evals/`, so `import.meta.url` of the
+ * harness code is that directory and the sidecar assets below resolve.
+ */
+async function buildEvalHarness(): Promise<void> {
+  const evalsSrc = resolve(__dirname, '..', '..', 'evals', 'src');
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+  const runtimeDeps = [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+  ];
+  await build({
+    config: false,
+    entry: {
+      all: resolve(evalsSrc, 'bin', 'all.ts'),
+      catalog: resolve(evalsSrc, 'bin', 'catalog.ts'),
+    },
+    outDir: 'dist/evals',
+    format: ['esm'],
+    platform: 'node',
+    target: 'es2022',
+    splitting: true,
+    sourcemap: false,
+    clean: true,
+    dts: false,
+    silent: true,
+    external: [
+      ...runtimeDeps,
+      '@bendyline/gezel-service',
+      '@github/copilot-sdk',
+      'playwright',
+      'vitest',
+    ],
+  });
+  cpSync(
+    resolve(evalsSrc, 'scenarios', 'failing-tests-spec.vitest.config.mjs'),
+    'dist/evals/failing-tests-spec.vitest.config.mjs',
+  );
+  cpSync(resolve(evalsSrc, 'index-bench', 'corpora'), 'dist/evals/corpora', { recursive: true });
+  // js-yaml is the one third-party module inlined above; carry its notice.
+  const jsYamlLicense = resolve(
+    __dirname,
+    '..',
+    '..',
+    'evals',
+    'node_modules',
+    'js-yaml',
+    'LICENSE',
+  );
+  if (existsSync(jsYamlLicense)) {
+    mkdirSync('dist/evals/licenses', { recursive: true });
+    cpSync(jsYamlLicense, 'dist/evals/licenses/js-yaml.LICENSE');
+  }
+}
 
 export default defineConfig({
   entry: {
@@ -33,6 +102,10 @@ export default defineConfig({
     // synchronous (node:sqlite), so shard scans must run off the daemon
     // loop (docs/gezk-format.md).
     'knowledge/search-worker': 'src/knowledge/search-worker.ts',
+    // Relevance-model (cross-encoder) inference. Its own worker so ONNX runs
+    // never stall text embedding and its crashes never count against the
+    // embed worker's limit.
+    'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
     // Portable guest execution must never occupy the daemon/Electron event loop.
     'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
@@ -138,6 +211,13 @@ export default defineConfig({
       recursive: true,
       filter: (source) => resolve(source) !== authoringGuide,
     });
+    const handboekGezk = resolve(__dirname, 'assets', 'handboek', 'handboek.gezk');
+    if (!existsSync(handboekGezk)) {
+      throw new Error(
+        `bundled Handboek knowledge catalog missing at ${handboekGezk} — run pnpm --filter @bendyline/gezel-service build:handboek-gezk`,
+      );
+    }
+    cpSync(handboekGezk, 'dist/handboek.gezk');
     // The bundled diffusers video server (`gezel_video_server.py`),
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.
@@ -172,9 +252,32 @@ export default defineConfig({
         `[tsup] no UI bundle at ${uiSrc} — run \`pnpm --filter @bendyline/gezel-ui build\` before building the service to ship the browser UI (\`gezel start --web\`). The daemon still runs headless without it.`,
       );
     }
+    // The Office task pane (packages/ui vite.office.config.ts) and the
+    // LibreOffice extension, staged beside the UI: the daemon finds both as
+    // siblings of its UI directory (office-host/assets.ts). Best-effort like
+    // the UI; tests/published/bundledAssets.test.ts fails a tarball that
+    // lacks them.
+    const officeSrc = resolve(__dirname, '..', 'ui', 'dist-office');
+    if (existsSync(officeSrc)) {
+      cpSync(officeSrc, 'dist/office', { recursive: true });
+    } else {
+      console.warn(
+        `[tsup] no Office pane at ${officeSrc} — run \`pnpm --filter @bendyline/gezel-ui build:office\` to ship the Word/Excel/PowerPoint add-in.`,
+      );
+    }
+    const oxtSrc = resolve(__dirname, '..', 'libreoffice-extension', 'dist', 'gezel.oxt');
+    if (existsSync(oxtSrc)) {
+      mkdirSync('dist/libreoffice', { recursive: true });
+      cpSync(oxtSrc, 'dist/libreoffice/gezel.oxt');
+    } else {
+      console.warn(
+        `[tsup] no LibreOffice extension at ${oxtSrc} — run \`pnpm --filter @bendyline/gezel-libreoffice-extension build\` to ship it.`,
+      );
+    }
     // npm publishes this dist/ui copy independently of Electron's staged
     // resources/licenses tree. Keep the notice and every font's canonical
     // legal text beside it so that distribution channel is self-contained.
+    await buildEvalHarness();
     await stageServiceFontLegalBundle();
     await stripSourcemapCommentsFromBuild();
   },

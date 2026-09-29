@@ -24,6 +24,7 @@ vi.mock('@bendyline/squisq-react', () => ({
     <div
       data-testid="linear-doc-view"
       data-show-cover={String(showCover ?? true)}
+      data-doc={JSON.stringify(doc)}
       className={className}
     >
       {doc ? 'doc' : 'no-doc'}
@@ -47,13 +48,10 @@ const { api } = await import('../../api.js');
 describe('IntroHandboekArticle', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    vi.mocked(api.getHandboekArticle).mockResolvedValue({
+    vi.mocked(api.readKnowledgeDocument).mockResolvedValue({
       id: 'welcome',
       title: 'What is gezel?',
-      area: 'conceptual',
       markdown: '# What is gezel?\n\nA crew of AI companions that works for you.',
-      figures: [],
-      generated: false,
     } as never);
   });
 
@@ -63,7 +61,7 @@ describe('IntroHandboekArticle', () => {
       expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
     });
     expect(screen.getByTestId('linear-doc-view')).toHaveClass('gezel-article-view');
-    expect(api.getHandboekArticle).toHaveBeenCalledWith('welcome');
+    expect(api.readKnowledgeDocument).toHaveBeenCalledWith('handboek', 'welcome');
     expect(screen.queryByTestId('doc-player')).not.toBeInTheDocument();
   });
 
@@ -75,6 +73,22 @@ describe('IntroHandboekArticle', () => {
     render(<IntroHandboekArticle />);
     const view = await screen.findByTestId('linear-doc-view');
     expect(view).toHaveAttribute('data-show-cover', 'false');
+  });
+
+  // squisq paints an unresolved relative image before the media provider
+  // answers, so the catalog path reached the network as /assets/gezel-mark.png
+  // and 404ed on every Home load.
+  it('points the brand mark at the bundled image before the first paint', async () => {
+    vi.mocked(api.readKnowledgeDocument).mockResolvedValue({
+      id: 'welcome',
+      title: 'What is gezel?',
+      markdown: '# What is gezel?\n\n![gezel-mark](assets/gezel-mark.png)\n\nA crew.',
+    } as never);
+    render(<IntroHandboekArticle />);
+    const view = await screen.findByTestId('linear-doc-view');
+    const doc = view.getAttribute('data-doc') ?? '';
+    expect(doc).toContain('gezel-mark');
+    expect(doc).not.toContain('"assets/gezel-mark.png"');
   });
 
   it('switches to the synthetic-clock video player and back', async () => {
@@ -89,38 +103,36 @@ describe('IntroHandboekArticle', () => {
     expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
   });
 
-  it('routes "Open in Handboek" to the handboek view, landing on the article', async () => {
+  it('routes "Open in Handboek" to its Knowledge catalog', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];
     const handler = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:navigate', handler);
+    window.addEventListener('gezel:open-knowledge-document', handler);
 
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
     await user.click(screen.getByRole('button', { name: /Open in Handboek/ }));
-    window.removeEventListener('gezel:navigate', handler);
+    window.removeEventListener('gezel:open-knowledge-document', handler);
 
-    expect(events.at(-1)?.detail).toEqual({ view: 'handboek' });
-    expect(window.localStorage.getItem('gezel:handboek:article')).toBe('welcome');
+    expect(events.at(-1)?.detail).toEqual({ catalogId: 'handboek', documentId: 'welcome' });
   });
 
   it('sends intra-article links to the Handboek on the linked article', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];
     const handler = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:navigate', handler);
+    window.addEventListener('gezel:open-knowledge-document', handler);
 
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
     await user.click(screen.getByText('crew link'));
-    window.removeEventListener('gezel:navigate', handler);
+    window.removeEventListener('gezel:open-knowledge-document', handler);
 
-    expect(events.at(-1)?.detail).toEqual({ view: 'handboek' });
-    expect(window.localStorage.getItem('gezel:handboek:article')).toBe('the-crew');
+    expect(events.at(-1)?.detail).toEqual({ catalogId: 'handboek', documentId: 'the-crew' });
   });
 
   it('falls back to a Handboek link when the article fetch fails', async () => {
-    vi.mocked(api.getHandboekArticle).mockRejectedValue(new Error('boom'));
+    vi.mocked(api.readKnowledgeDocument).mockRejectedValue(new Error('boom'));
     render(<IntroHandboekArticle />);
     await waitFor(() => {
       expect(screen.getByTestId('home-intro-handboek-fallback')).toBeInTheDocument();

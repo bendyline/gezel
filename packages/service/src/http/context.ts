@@ -60,6 +60,9 @@ import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 
+import type { EvalService } from '../eval/service.js';
+import type { LibreOfficeSetupManager } from '../libreoffice-setup/manager.js';
+import type { OfficeSetupManager } from '../office-setup/manager.js';
 import type { EngineContext } from './engine-context.js';
 
 export interface ServiceContext extends EngineContext {
@@ -109,6 +112,8 @@ export interface ServiceContext extends EngineContext {
    * and the SearchService knowledge arm. Absent on the machine-engine role.
    */
   knowledge?: KnowledgeManager;
+  /** The on-device relevance model (cross-encoder): lifecycle, status, scoring. */
+  relevance: import('../relevance/manager.js').RelevanceModelManager;
   /**
    * App-serve sites: per-site visitor listeners serving an applied AI App
    * as a shareable mini-site. Absent on the machine-engine role.
@@ -170,7 +175,13 @@ export interface ServiceContext extends EngineContext {
   piSetup: PiSetupManager;
   /** VS Code custom endpoint, scoped credential, profile merge, and bridge lifecycle. */
   vscodeSetup: VSCodeSetupManager;
+  /** Word / Excel / PowerPoint: per-user CA, stable HTTPS listener, add-in manifests. */
+  officeSetup: OfficeSetupManager;
+  /** LibreOffice: the shipped `.oxt` and the desktop app's install report. */
+  libreofficeSetup: LibreOfficeSetupManager;
   uiDir?: string;
+  /** Office task-pane pages (`dist/office`), served at `/office/*` when present. */
+  officeDir?: string;
   /** In-memory job tracker for folder externalization moves. Lives only
    *  for the current service process — moves don't survive a restart
    *  (the worker writes a sentinel file so the next boot can detect a
@@ -180,6 +191,8 @@ export interface ServiceContext extends EngineContext {
    *  may run at a time. Same lifetime as `folderJobs`, and mutually
    *  exclusive with it — both rewrite the same directories. */
   storageJobs: StorageJobManager;
+  /** In-app evals: harness catalog, runnable targets, queued jobs, trial index. */
+  evals: EvalService;
   /** Drop the cached model inventory after cleanup deletes model files, so
    *  listings stop advertising models that are no longer on disk. */
   invalidateModelsCache?: (provider?: ProviderName) => void;

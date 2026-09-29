@@ -10,7 +10,6 @@ import {
   loadDocumentsViewModule,
   loadGezelDetailModule,
   loadGezellenViewModule,
-  loadHandboekViewModule,
   loadHistoryViewModule,
   loadKnowledgeViewModule,
   loadProjectsViewModule,
@@ -49,9 +48,6 @@ const GezelDetail = lazy(() =>
 );
 const GezellenView = lazy(() =>
   loadGezellenViewModule().then(({ GezellenView }) => ({ default: GezellenView })),
-);
-const HandboekView = lazy(() =>
-  loadHandboekViewModule().then(({ HandboekView }) => ({ default: HandboekView })),
 );
 const HistoryView = lazy(() =>
   loadHistoryViewModule().then(({ HistoryView }) => ({ default: HistoryView })),
@@ -134,7 +130,7 @@ export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: Tab
         case 'history':
           return <HistoryView />;
         case 'handboek':
-          return <HandboekView />;
+          return <KnowledgeView initialCatalogId="handboek" />;
         case 'knowledge':
           // The view itself renders an install pointer when no catalog is
           // registered (a restored selection can outlive the last catalog),

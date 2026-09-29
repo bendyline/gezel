@@ -354,6 +354,48 @@ describe('gezels API', () => {
 });
 
 describe('projects API', () => {
+  it('infers a project for a path, and refuses what it must not create', async () => {
+    const bad = await api('POST', '/api/projects/infer-for-path', { path: 'relative/x.docx' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { code?: string }).code).toBe('invalid_path');
+
+    // A document in the temp dir never becomes a folder project.
+    const scratch = await realpath(await mkdtemp(join(tmpdir(), 'lv-infer-')));
+    try {
+      const doc = await api('POST', '/api/projects/infer-for-path', {
+        path: join(scratch, 'x.docx'),
+      });
+      expect(doc.status).toBe(200);
+      const body = (await doc.json()) as { matchedBy: string; project: { id: string } };
+      expect(body.matchedBy).toBe('default');
+      expect(body.project.id).toBe('default');
+
+      // Naming the folder is a choice, so a temp subfolder is allowed then.
+      const chosen = await api('POST', '/api/projects/infer-for-path', {
+        path: scratch,
+        kind: 'folder',
+        create: false,
+      });
+      expect(chosen.status).toBe(200);
+      expect(((await chosen.json()) as { matchedBy: string }).matchedBy).toBe('parent');
+
+      // The temp dir itself is too broad to be anyone's project.
+      const folder = await api('POST', '/api/projects/infer-for-path', {
+        path: await realpath(tmpdir()),
+        kind: 'folder',
+      });
+      expect(folder.status).toBe(403);
+      expect(((await folder.json()) as { code?: string }).code).toBe('forbidden_root');
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+
+    const known = await api('GET', '/api/projects/well-known-folders');
+    expect(known.status).toBe(200);
+    const { folders } = (await known.json()) as { folders: Array<{ kind: string }> };
+    expect(folders.some((f) => f.kind === 'documents')).toBe(true);
+  });
+
   it('default project exists from boot', async () => {
     const res = await api('GET', '/api/projects');
     const data = (await res.json()) as { projects: Array<{ id: string }> };
@@ -646,6 +688,66 @@ describe('tasks API', () => {
     expect(reloadRes.status).toBe(200);
     expect(((await reloadRes.json()) as { description?: string }).description).toBeUndefined();
     expect(await svc.context.store.readTaskAbout('taskclearproj', created.num)).toBe('');
+  });
+
+  // A Meester-authored "Owner Review" once went to a gezel, which reviewed
+  // its crew's work and advanced the task.
+  it('holds an owner step for the owner, refuses a gezel, and moves on their approval', async () => {
+    await api('POST', '/api/gezels', { name: 'OwnerAgent' });
+    await api('POST', '/api/projects', {
+      name: 'OwnerProj',
+      about: 'Integration test project for steps that only the owner can approve.',
+      missionObjectives: 'An owner step waits for the owner and moves only on their answer.',
+    });
+    const createRes = await api('POST', '/api/projects/ownerproj/tasks', {
+      title: 'Weekly posts',
+      description: 'Draft the week of posts, have the owner approve them, then finish up.',
+      assignee: { kind: 'gezel', gezelId: 'owneragent' },
+      steps: [
+        { name: 'Draft' },
+        { name: 'Owner Review', assignee: { kind: 'user' } },
+        { name: 'Finish', terminal: true },
+      ],
+    });
+    expect(createRes.status).toBe(201);
+    const task = (await createRes.json()) as {
+      num: number;
+      craftbook: { steps: Array<{ id: string }> };
+    };
+    const [draftId, reviewId] = task.craftbook.steps.map((s) => s.id);
+
+    await api('POST', `/api/projects/ownerproj/tasks/${task.num}/steps/${draftId}/complete`, {});
+    const questions = (await (
+      await api('GET', '/api/questions?project=ownerproj&pending=true')
+    ).json()) as { questions: Array<{ id: string; intent?: Record<string, unknown> }> };
+    const card = questions.questions.find((q) => q.intent?.kind === 'step-awaits-owner');
+    expect(card?.intent).toMatchObject({ stepId: reviewId, returnToStepId: draftId });
+
+    const session = svc.context.tokenStore.issueSession({
+      appId: 'session:owner-step-test',
+      projectId: 'ownerproj',
+      gezelId: 'owneragent',
+      team: false,
+    });
+    const refused = await httpFetch(
+      `${baseUrl}/api/projects/ownerproj/tasks/${task.num}/steps/${reviewId}/complete`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    );
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code?: string }).code).toBe('owner_step');
+
+    const answer = await api('POST', `/api/questions/${card!.id}/answer`, {
+      selectedChoices: [0],
+    });
+    expect(answer.status).toBe(200);
+    const after = (await (
+      await api('GET', `/api/projects/ownerproj/tasks/${task.num}`)
+    ).json()) as { activeStepId?: string };
+    expect(after.activeStepId).toBe(task.craftbook.steps[2]!.id);
   });
 
   it('dispatchEntry: true enqueues the entry handoff and logs task.entry.dispatched', async () => {

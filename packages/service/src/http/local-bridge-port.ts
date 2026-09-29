@@ -99,11 +99,28 @@ export function piBridgePortForHome(home: string): number {
  * deterministic address may already be present in a published config file.
  */
 export function vscodeBridgePortForHome(home: string): number {
-  const path = canonicalPath(home);
+  return vscodePort(canonicalPath(home));
+}
+
+function vscodePort(path: string): number {
   return firstFreePort(
     path,
     'vscode',
     new Set([codexPort(path), opencodePort(path), piPort(path)]),
+  );
+}
+
+/**
+ * The Office host listener's stable port. An Office add-in manifest bakes in
+ * one URL and the pane's origin keys its token in localStorage, so this port
+ * must not move between launches. Newest, so it yields to every bridge.
+ */
+export function officeHostPortForHome(home: string): number {
+  const path = canonicalPath(home);
+  return firstFreePort(
+    path,
+    'office',
+    new Set([codexPort(path), opencodePort(path), piPort(path), vscodePort(path)]),
   );
 }
 

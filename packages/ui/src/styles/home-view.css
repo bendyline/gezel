@@ -56,10 +56,10 @@
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Break out of .app-main's 1rem 1.25rem padding for a full-bleed
-     workshop. The negative margins exactly cancel the parent padding. */
-  margin: -1rem -1.25rem;
-  height: calc(100% + 2rem);
+  /* Break out of .app-main's padding for a full-bleed workshop. The
+     negative margins exactly cancel the parent padding. */
+  margin: calc(-1 * var(--app-main-pad-block, 1rem)) calc(-1 * var(--app-main-pad-inline, 1.25rem));
+  height: calc(100% + 2 * var(--app-main-pad-block, 1rem));
   display: flex;
   flex-direction: column;
   color: var(--ink);
@@ -214,6 +214,20 @@
   height: 6px;
   border-radius: 50%;
   flex: 0 0 auto;
+}
+/* A chip that goes somewhere ("1 waiting on you" opens the owner's
+   questions): same small-radius face, a button's font and cursor, and the
+   hover the collapse button uses. */
+.home-workshop-chip-action {
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.home-workshop-chip-action:hover,
+.home-workshop-chip-action:focus-visible {
+  border-color: var(--rule);
+  background: var(--home-surf2);
+  color: var(--ink);
 }
 
 /* Collapsed greeting — single status row */
@@ -818,6 +832,21 @@
   flex: 0 0 auto;
   margin-top: 0.2rem;
   accent-color: var(--accent);
+}
+/* `.gz-dialog label` and `.gz-dialog label input` outrank the plain classes
+   (the plan dialog is a gz-dialog), which stacked each checkbox full-width
+   above a grey, disabled-looking label. Claim the row and the checkbox
+   explicitly, as `.gz-ntd-header-project` does. */
+.gz-dialog .home-media-plan-item {
+  display: flex;
+  margin-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.gz-dialog .home-media-plan-item input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin: 0.2rem 0 0;
 }
 .home-media-plan-copy {
   display: flex;

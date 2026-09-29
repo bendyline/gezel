@@ -15,7 +15,7 @@
  * Forgetting to rerun this is not a loud failure — gilde's build-index
  * strips undeclared properties out of the published index instead. The
  * payload lives in `src/gilde-schema-export.ts` so
- * `gilde-schema-freshness.test.ts` can gate exactly that drift.
+ * `gilde-schema-freshness.test.ts` can report exactly that drift.
  *
  * Usage: pnpm --filter @bendyline/gezel-catalog export-gilde-schemas
  *        (or from the repo root: pnpm gilde:export-schemas)

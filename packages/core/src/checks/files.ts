@@ -19,6 +19,82 @@ export async function fileMinBytes(
     : { ok: false, detail: `${file} is ${n} bytes, need ≥ ${bytes}` };
 }
 
+/**
+ * The entries of a YAML frontmatter list field — `key: [a, b]`, `key: a, b`,
+ * or `key:` followed by `- a` lines — or null when the file has no
+ * frontmatter or no such key.
+ */
+export function frontmatterList(content: string, key: string): string[] | null {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!block) return null;
+  const lines = (block[1] ?? '').split(/\r?\n/);
+  const at = lines.findIndex((line) => line.trimStart().startsWith(`${key}:`));
+  if (at < 0) return null;
+  const clean = (value: string) =>
+    value
+      .trim()
+      .replace(/^['"]|['"]$/g, '')
+      .trim();
+  const line = lines[at] ?? '';
+  const inline = line.slice(line.indexOf(':') + 1).trim();
+  if (inline) {
+    return inline
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map(clean)
+      .filter(Boolean);
+  }
+  const items: string[] = [];
+  for (const next of lines.slice(at + 1)) {
+    const item = /^\s*-\s+(.*)$/.exec(next);
+    if (!item) break;
+    const value = clean(item[1] ?? '');
+    if (value) items.push(value);
+  }
+  return items;
+}
+
+/**
+ * Every value a deliverable lists has its own file: each entry of the
+ * frontmatter list `key` in `file` names `pathTemplate` with `{value}`
+ * replaced by the entry's lowercase slug ("Instagram" → `instagram`), and each
+ * of those must hold at least `minBytes`.
+ */
+export async function listedFiles(
+  ws: WorkspaceLike,
+  file: string,
+  key: string,
+  pathTemplate: string,
+  minBytes = 1,
+): Promise<CheckResult & { missing: string[] }> {
+  const content = await ws.read(file);
+  if (content === null) return { ok: false, detail: `${file} not found`, missing: [] };
+  const values = frontmatterList(content, key);
+  if (!values || values.length === 0) {
+    return {
+      ok: false,
+      detail: `${file} lists no \`${key}\` in its frontmatter — add the list this step produces a file for.`,
+      missing: [],
+    };
+  }
+  const missing: string[] = [];
+  for (const value of values) {
+    const slug = value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const path = pathTemplate.split('{value}').join(slug);
+    if (((await ws.read(path))?.length ?? 0) < minBytes) missing.push(path);
+  }
+  return missing.length === 0
+    ? { ok: true, detail: `every ${key} entry in ${file} has its file`, missing }
+    : {
+        ok: false,
+        detail: `${file} lists ${key} ${values.join(', ')}, but ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing or empty — write ${missing.length === 1 ? 'it' : 'each one'} before advancing.`,
+        missing,
+      };
+}
+
 export async function fileMinLines(
   ws: WorkspaceLike,
   file: string,

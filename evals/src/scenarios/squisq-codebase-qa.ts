@@ -115,6 +115,7 @@ async function setup(ctx: EvalContext): Promise<void> {
 
 export const squisqCodebaseQaScenario: EvalScenario = {
   id: 'squisq-codebase-qa',
+  requires: ['external-checkout'],
   description:
     'Six sequential "where does X live" questions on the pinned squisq corpus, graded against golden file paths. The warm-vs-cold delta measures index-backed orientation.',
   prompt: 'Questions are driven from successCheck; this prompt is never sent.',

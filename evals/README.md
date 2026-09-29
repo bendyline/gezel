@@ -281,13 +281,44 @@ analysis:
 }
 ```
 
+## The in-app runner (Settings → Benchmarks)
+
+The app runs this same harness; it does not have its own copy of any scenario,
+grader, or score. `packages/service/tsup.config.ts` compiles `bin/all.ts` and
+`bin/catalog.ts` into the service's `dist/evals/`, so every install can run
+evals. In a source checkout the daemon runs the live TypeScript through the same
+dependency-lease wrapper `pnpm eval:all` uses (`GEZEL_EVAL_HARNESS=compiled`
+forces the shipped copy). See `packages/service/src/eval/`.
+
+A job is one selection × a trial count × one or more models. Each model is one
+`eval:all` invocation, and the jobs run one at a time. Runs live under
+`<gezel home>/eval-runs/jobs/<jobId>/`, each with a `job.json` and a
+`harness.log`. The daemon launches the harness with:
+
+| Flag / env | Why |
+|---|---|
+| `--source-home <home>` + `GEZEL_EVAL_MODEL_ROOTS` | Read the person's installed models, never download. A missing or stale install fails the trial with the fix in its reason. |
+| `--write-reports` | Write `score.json` + `postmortem.md` as each trial ends. |
+| `--events` | Print `[eval-event] {json}` progress lines (`EvalHarnessEventSchema` in core). |
+| `--preflight-dir` | Keep the preflight cache beside the runs, not in a checkout. |
+| `GEZEL_EVAL_REQUIRE_RUNTIME_LAYER=1` | A page Chromium could not open is a `grader` failure, not a pass. |
+| `GEZEL_EVAL_CHROMIUM_PATH` | Drive the product's managed Chromium through `playwright-core`. |
+| `GEZEL_EVAL_UV_CACHE` | One shared MLX venv when the source home has none. |
+| `GEZEL_EVAL_VITEST_BIN` | The Vitest CLI for `failing-tests-spec`. Without one, that scenario ends as `grader`. |
+
+`pnpm eval:all … --events --write-reports` works the same from a terminal, and
+`tsx src/bin/catalog.ts --out catalog.json` prints the registry the app reads.
+
 ## Add a scenario
 
 1. Create `evals/src/scenarios/<name>.ts` exporting an `EvalScenario`.
 2. Register it in `evals/src/scenarios/index.ts`.
 
 The scenario provides a `prompt` (sent to the Meester), a `successCheck` that the runner
-polls every 5s, and a `timeoutMs`.
+polls every 5s, and a `timeoutMs`. If its grader needs something beyond a chat model —
+Chromium, Vitest, the internet, a sibling checkout — declare it in `requires` so a runner
+can say so before the trial starts. Image models, embeddings, and DocBlocks are read from
+their own fields.
 
 ## Driving non-local providers
 
@@ -349,7 +380,8 @@ real model work.
   `npx --prefix evals playwright install chromium` (one-time, ~100 MB).
   Without it, game-scenario trials fall back to sniff-only verification — the trial
   logs `BOOTSTRAP_FAIL` and the trial may be promoted despite the page being broken
-  on actual interaction. Verify with `ls ~/.cache/ms-playwright/chromium_headless_shell-*/`.
+  on actual interaction (`GEZEL_EVAL_REQUIRE_RUNTIME_LAYER=1` files it as a `grader`
+  failure instead). Verify with `ls ~/.cache/ms-playwright/chromium_headless_shell-*/`.
 - **For local-engine trials, GPU perf data** on Linux/Windows: `nvidia-smi`
   must be on `PATH`. Without it the `perf.gpu.available` field on every trial
   reads `false` and tokens/sec / VRAM peaks are blank in the postmortem (the

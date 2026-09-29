@@ -1397,6 +1397,23 @@ export class IndexStore {
     });
   }
 
+  /**
+   * The chunk text starting at each (path, line), keyed `path:line`. A keyword
+   * hit carries a twelve-token snippet; the relevance model judges the chunk.
+   */
+  chunkTextsAt(refs: ReadonlyArray<{ path: string; lineStart: number }>): Map<string, string> {
+    const out = new Map<string, string>();
+    if (refs.length === 0) return out;
+    const stmt = this.db.prepare(
+      'SELECT text FROM chunks WHERE collection_id = ? AND file_path = ? AND line_start = ? ORDER BY id LIMIT 1',
+    );
+    for (const ref of refs) {
+      const row = stmt.get<{ text: string }>(this.collectionId, ref.path, ref.lineStart);
+      if (row?.text) out.set(`${ref.path}:${ref.lineStart}`, row.text);
+    }
+    return out;
+  }
+
   /** All chunks for a file (for embedding during enrichment). */
   chunksForFile(
     filePath: string,

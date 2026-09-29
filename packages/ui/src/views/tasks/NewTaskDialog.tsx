@@ -21,6 +21,7 @@ import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
+import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { MarkdownField } from '../../components/MarkdownField.js';
 import {
@@ -385,10 +386,19 @@ export function NewTaskDialog({
     );
   const explicitPullNumber = String((params as { number?: unknown }).number ?? '').trim();
 
+  const projectHasGitHub = !!projects.find((p) => p.id === projectId)?.github;
   useEffect(() => {
     const sequence = ++pullHintSequence.current;
     setPullHint(null);
     if (!runtimeCapabilities().git || !open || !resolvesPullAtLaunch || !projectId) return;
+    // The pull list answers 400 for a project with no GitHub link; say so
+    // instead of probing.
+    if (!projectHasGitHub) {
+      setPullHint(
+        'This recipe reads GitHub pull requests, and this project is not linked to a GitHub repository.',
+      );
+      return;
+    }
     void (async () => {
       try {
         const [status, openPulls] = await Promise.all([
@@ -413,7 +423,7 @@ export function NewTaskDialog({
         // real reason itself.
       }
     })();
-  }, [open, resolvesPullAtLaunch, projectId]);
+  }, [open, resolvesPullAtLaunch, projectId, projectHasGitHub]);
 
   const selectGeneral = useCallback(() => {
     setSelectedBookId(null);
@@ -915,15 +925,12 @@ export function NewTaskDialog({
                         </Select.Root>
                       </label>
                     )}
-                    <label className="gz-npd-search">
-                      <span className="sr-only">Search craftbooks</span>
-                      <input
-                        type="search"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search craftbooks…"
-                      />
-                    </label>
+                    <GallerySearch
+                      label="Search craftbooks"
+                      placeholder="Search craftbooks…"
+                      value={query}
+                      onChange={setQuery}
+                    />
                   </div>
                 </header>
                 <div className="gz-npd-body">

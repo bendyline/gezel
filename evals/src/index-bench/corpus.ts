@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { defaultCacheRoot } from '../model-cache.ts';
-import { repoRoot } from '../native-bin.ts';
+import { tryRepoRoot } from '../native-bin.ts';
 
 /**
  * Benchmark corpus tooling. A corpus is a pinned-SHA subset of a real local
@@ -90,11 +90,12 @@ export function corpusSourceCandidates(
   const explicit = opts.sourceDir ?? env[CORPUS_SOURCE_DIR_ENV];
   if (explicit?.trim()) return [absoluteCandidate(explicit.trim(), cwd)];
 
-  const root = opts.repoDir ?? repoRoot();
+  const root = opts.repoDir ?? tryRepoRoot();
   const home = opts.homeDir ?? homedir();
   const candidates = [
-    absoluteCandidate(manifest.sourceDir, root),
-    resolve(root, '..', manifest.id),
+    ...(root
+      ? [absoluteCandidate(manifest.sourceDir, root), resolve(root, '..', manifest.id)]
+      : []),
     resolve(home, 'gh', manifest.id),
     resolve(home, 'src', manifest.id),
   ];

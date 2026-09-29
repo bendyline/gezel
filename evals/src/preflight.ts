@@ -362,7 +362,16 @@ function readdirNamesSync(dir: string): string[] {
 }
 
 export interface PreflightOptions
-  extends Pick<TrialOptions, 'modelId' | 'engine' | 'mlxSourceHome' | 'cacheRoot' | 'llamaBin'> {
+  extends Pick<
+    TrialOptions,
+    | 'modelId'
+    | 'engine'
+    | 'mlxSourceHome'
+    | 'modelSourceHome'
+    | 'cacheRoot'
+    | 'llamaBin'
+    | 'offline'
+  > {
   /** Where preflight trial dirs + cached reports live. */
   preflightRunsDir?: string;
   minGenTokensPerSec?: number;
@@ -492,7 +501,11 @@ export function preflightPolicyFingerprint(opts: PreflightOptions): string {
     launch: launch ?? null,
     launchEnv,
     cacheRoot: opts.cacheRoot ?? null,
+    offline: opts.offline ?? false,
     mlxSourceHome: opts.mlxSourceHome ?? null,
+    // Undefined when unset, which canonicalJson drops: an ordinary CLI run
+    // keeps the fingerprint (and its 24h cache) it had before this field.
+    modelSourceHome: opts.modelSourceHome,
     llamaBinary: binaryIdentity(effectiveLlamaBinaryPath(opts, engine)),
     runtimeEntries: {
       daemon: packageEntryIdentity('@bendyline/gezel-service/dist/bin/gezeld.js'),
@@ -533,8 +546,10 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
     engine,
     runsDir,
     ...(opts.mlxSourceHome ? { mlxSourceHome: opts.mlxSourceHome } : {}),
+    ...(opts.modelSourceHome ? { modelSourceHome: opts.modelSourceHome } : {}),
     ...(opts.cacheRoot ? { cacheRoot: opts.cacheRoot } : {}),
     ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
+    ...(opts.offline ? { offline: true } : {}),
   });
 
   // Captured after the probe, so the memory figures reflect the state the

@@ -9,7 +9,7 @@ import type {
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
 import { queueComposerPrefill } from '../components/composer-prefill.js';
@@ -18,11 +18,13 @@ import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { inlineBundledAssets } from './handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
 import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
 const DOCUMENT_KEY = 'gezel:knowledge:document';
+const EXPANDED_KEY_PREFIX = 'gezel:knowledge:expanded:';
 const PAGE_SIZE = 50;
 
 interface TopicTreeNode extends KnowledgeTopicNode {
@@ -42,6 +44,24 @@ function foldTopics(topics: KnowledgeTopicNode[]): TopicTreeNode[] {
   return roots;
 }
 
+function readExpandedTopics(catalogId: string): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_KEY_PREFIX + catalogId);
+    const ids: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeExpandedTopics(catalogId: string, ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(EXPANDED_KEY_PREFIX + catalogId, JSON.stringify([...ids]));
+  } catch {
+    /* private mode */
+  }
+}
+
 /**
  * The Knowledge browser — installed reference catalogs, browsable through
  * the table of contents every `.gezk` ships. Catalog + topic rail on the
@@ -50,9 +70,10 @@ function foldTopics(topics: KnowledgeTopicNode[]): TopicTreeNode[] {
  * Document selection stays internal to the view: encyclopedia articles
  * never flood the global navigation model.
  */
-export function KnowledgeView() {
+export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string } = {}) {
   const [catalogs, setCatalogs] = useState<KnowledgeCatalogStatus[] | null>(null);
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(() => {
+    if (initialCatalogId) return initialCatalogId;
     try {
       return window.localStorage.getItem(CATALOG_KEY);
     } catch {
@@ -61,16 +82,23 @@ export function KnowledgeView() {
   });
   const [topics, setTopics] = useState<KnowledgeTopicNode[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
+  const topicIdPrefix = useId();
   const [documents, setDocuments] = useState<KnowledgeDocumentSummary[] | null>(null);
   const [documentsTotal, setDocumentsTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
+    if (initialCatalogId === 'handboek') return 'welcome';
     try {
       return window.localStorage.getItem(DOCUMENT_KEY);
     } catch {
       return null;
     }
   });
+  const [mobilePane, setMobilePane] = useState<'topics' | 'list' | 'reader'>(
+    selectedDocId ? 'reader' : 'topics',
+  );
+  const lastCatalogRef = useRef<string | null>(null);
   const [doc, setDoc] = useState<KnowledgeDocumentRead | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
@@ -89,7 +117,10 @@ export function KnowledgeView() {
     const intent = consumeOpenKnowledge();
     if (intent) {
       setSelectedCatalogId(intent.catalogId);
-      if (intent.documentId) setSelectedDocId(intent.documentId);
+      if (intent.documentId) {
+        setSelectedDocId(intent.documentId);
+        setMobilePane('reader');
+      }
     }
     const refresh = () => {
       api
@@ -98,12 +129,6 @@ export function KnowledgeView() {
           if (!alive) return;
           const mounted = r.catalogs.filter((c) => c.mounted);
           setCatalogs(mounted);
-          setSelectedCatalogId(
-            (prev) =>
-              (prev && mounted.some((c) => c.ref.catalogId === prev) ? prev : null) ??
-              mounted[0]?.ref.catalogId ??
-              null,
-          );
         })
         .catch(() => {
           if (alive) setCatalogs([]);
@@ -118,7 +143,10 @@ export function KnowledgeView() {
       const detail = (e as CustomEvent<{ catalogId?: string; documentId?: string }>).detail;
       if (!detail?.catalogId) return;
       setSelectedCatalogId(detail.catalogId);
-      if (detail.documentId) setSelectedDocId(detail.documentId);
+      if (detail.documentId) {
+        setSelectedDocId(detail.documentId);
+        setMobilePane('reader');
+      }
     };
     window.addEventListener('gezel:open-knowledge-document', onOpenDocument);
     return () => {
@@ -129,6 +157,16 @@ export function KnowledgeView() {
   }, []);
 
   useEffect(() => {
+    if (!catalogs || catalogs.some((catalog) => catalog.ref.catalogId === selectedCatalogId))
+      return;
+    const next = catalogs[0]?.ref.catalogId ?? null;
+    if (next === selectedCatalogId) return;
+    setSelectedCatalogId(next);
+    setSelectedDocId(null);
+    setMobilePane('topics');
+  }, [catalogs, selectedCatalogId]);
+
+  useEffect(() => {
     try {
       if (selectedCatalogId) window.localStorage.setItem(CATALOG_KEY, selectedCatalogId);
     } catch {
@@ -136,12 +174,22 @@ export function KnowledgeView() {
     }
   }, [selectedCatalogId]);
 
+  useEffect(() => {
+    if (selectedCatalogId === lastCatalogRef.current) return;
+    lastCatalogRef.current = selectedCatalogId;
+    if (selectedCatalogId === 'handboek' && !selectedDocId) {
+      setSelectedDocId('welcome');
+      setMobilePane('reader');
+    }
+  }, [selectedCatalogId, selectedDocId]);
+
   // Topic tree per catalog.
   useEffect(() => {
     if (!selectedCatalogId) return;
     let alive = true;
     setTopics([]);
     setSelectedTopicId(null);
+    setExpandedTopics(readExpandedTopics(selectedCatalogId));
     api
       .knowledgeCatalogTopics(selectedCatalogId)
       .then((r) => {
@@ -241,6 +289,7 @@ export function KnowledgeView() {
     [catalogs, selectedCatalogId],
   );
   const topicTree = useMemo(() => foldTopics(topics), [topics]);
+  const topicTreeNests = useMemo(() => topicTree.some((n) => n.children.length > 0), [topicTree]);
   const topicNames = useMemo(() => new Map(topics.map((t) => [t.id, t.name])), [topics]);
 
   // Catalog images resolve through the daemon (bearer-authed, so never a
@@ -276,6 +325,7 @@ export function KnowledgeView() {
       event.stopPropagation();
       if (target.catalogId === selectedCatalogId) {
         setSelectedDocId(target.documentId);
+        setMobilePane('reader');
         return;
       }
       const installed = catalogs?.find(
@@ -284,18 +334,21 @@ export function KnowledgeView() {
       if (installed) {
         setSelectedCatalogId(installed.ref.catalogId);
         setSelectedDocId(target.documentId);
+        setMobilePane('reader');
       }
     },
     [catalogs, selectedCatalogId],
   );
   const renderedDoc = useMemo(() => {
     if (!doc) return null;
+    const markdown =
+      selectedCatalogId === 'handboek' ? inlineBundledAssets(doc.markdown) : doc.markdown;
     try {
-      return markdownToDoc(parseMarkdown(doc.markdown), { articleId: doc.id });
+      return markdownToDoc(parseMarkdown(markdown), { articleId: doc.id });
     } catch {
       return null;
     }
-  }, [doc]);
+  }, [doc, selectedCatalogId]);
 
   const citation = useMemo(() => {
     if (!selectedCatalogId || !doc) return null;
@@ -322,6 +375,15 @@ export function KnowledgeView() {
     navigateToTab({ kind: 'project', id: 'default' });
   }, [citation, doc]);
 
+  const setTopicExpanded = (topicId: string, expanded: boolean) => {
+    if (!selectedCatalogId || expandedTopics.has(topicId) === expanded) return;
+    const next = new Set(expandedTopics);
+    if (expanded) next.add(topicId);
+    else next.delete(topicId);
+    setExpandedTopics(next);
+    writeExpandedTopics(selectedCatalogId, next);
+  };
+
   const openSettings = useCallback(() => {
     requestSettingsSection('knowledge');
     navigateToTab({ kind: 'area', area: 'settings' });
@@ -344,28 +406,72 @@ export function KnowledgeView() {
     );
   }
 
-  const renderTopic = (node: TopicTreeNode, depth: number) => (
-    <li key={node.id}>
-      <button
-        type="button"
-        className="knowledge-topic-row"
-        aria-current={selectedTopicId === node.id ? 'true' : undefined}
-        onClick={() => {
-          setSelectedTopicId((prev) => (prev === node.id ? null : node.id));
-          setQuery('');
-        }}
-      >
-        <span>{node.name}</span>
-        <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
-      </button>
-      {node.children.length > 0 && (
-        <ul>{node.children.map((child) => renderTopic(child, depth + 1))}</ul>
-      )}
-    </li>
-  );
+  // A topic's name selects it (and opens it, since picking a shelf is a
+  // request to see what is on it); only the chevron folds it back up.
+  const renderTopic = (node: TopicTreeNode, path: string) => {
+    const hasChildren = node.children.length > 0;
+    const expanded = hasChildren && expandedTopics.has(node.id);
+    const childrenId = `${topicIdPrefix}-topic-${path}`;
+    return (
+      <li key={node.id}>
+        <div
+          className={`knowledge-topic-line${
+            selectedTopicId === node.id ? ' knowledge-topic-line--current' : ''
+          }`}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              className="knowledge-topic-toggle"
+              aria-expanded={expanded}
+              aria-controls={expanded ? childrenId : undefined}
+              aria-label={expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+              onClick={() => setTopicExpanded(node.id, !expanded)}
+            >
+              <svg
+                width={12}
+                height={12}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+                aria-hidden="true"
+              >
+                <polyline points="9 6 15 12 9 18" />
+              </svg>
+            </button>
+          ) : (
+            topicTreeNests && <span className="knowledge-topic-toggle-spacer" />
+          )}
+          <button
+            type="button"
+            className="knowledge-topic-row"
+            aria-current={selectedTopicId === node.id ? 'true' : undefined}
+            onClick={() => {
+              setSelectedTopicId((prev) => (prev === node.id ? null : node.id));
+              if (hasChildren) setTopicExpanded(node.id, true);
+              setQuery('');
+              setMobilePane('list');
+            }}
+          >
+            <span>{node.name}</span>
+            <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
+          </button>
+        </div>
+        {expanded && (
+          <ul id={childrenId}>
+            {node.children.map((child, i) => renderTopic(child, `${path}-${i}`))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
-    <div className="knowledge-view" data-testid="knowledge-view">
+    <div className={`knowledge-view knowledge-view--${mobilePane}`} data-testid="knowledge-view">
       <nav className="knowledge-rail" aria-label="Knowledge catalogs and topics">
         {catalogs && catalogs.length > 1 && (
           <select
@@ -374,6 +480,7 @@ export function KnowledgeView() {
             onChange={(e) => {
               setSelectedCatalogId(e.target.value);
               setSelectedDocId(null);
+              setMobilePane('topics');
             }}
           >
             {catalogs.map((c) => (
@@ -398,12 +505,35 @@ export function KnowledgeView() {
           placeholder="Search this catalog…"
           aria-label="Search knowledge"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (e.target.value.trim()) setMobilePane('list');
+          }}
         />
-        <ul className="knowledge-topics">{topicTree.map((node) => renderTopic(node, 0))}</ul>
+        <button
+          type="button"
+          className="knowledge-topic-row knowledge-mobile-all"
+          onClick={() => {
+            setSelectedTopicId(null);
+            setQuery('');
+            setMobilePane('list');
+          }}
+        >
+          All documents
+        </button>
+        <ul className="knowledge-topics">
+          {topicTree.map((node, i) => renderTopic(node, String(i)))}
+        </ul>
       </nav>
 
       <section className="knowledge-list" aria-label="Documents">
+        <button
+          type="button"
+          className="knowledge-nav-back knowledge-mobile-topics"
+          onClick={() => setMobilePane('topics')}
+        >
+          ← Topics
+        </button>
         {query.trim() ? (
           <>
             <div className="knowledge-list-header">Search results</div>
@@ -425,7 +555,10 @@ export function KnowledgeView() {
                     className="knowledge-doc-row"
                     aria-current={r.documentId === selectedDocId ? 'true' : undefined}
                     onClick={() => {
-                      if (r.documentId) setSelectedDocId(r.documentId);
+                      if (r.documentId) {
+                        setSelectedDocId(r.documentId);
+                        setMobilePane('reader');
+                      }
                     }}
                   >
                     <span className="knowledge-doc-title">{r.title}</span>
@@ -452,7 +585,10 @@ export function KnowledgeView() {
                     type="button"
                     className="knowledge-doc-row"
                     aria-current={d.id === selectedDocId ? 'true' : undefined}
-                    onClick={() => setSelectedDocId(d.id)}
+                    onClick={() => {
+                      setSelectedDocId(d.id);
+                      setMobilePane('reader');
+                    }}
                   >
                     <span className="knowledge-doc-title">{d.title}</span>
                     {d.summary && <span className="knowledge-doc-summary">{d.summary}</span>}
@@ -478,6 +614,16 @@ export function KnowledgeView() {
       </section>
 
       <section className="knowledge-reader" aria-label="Article">
+        <button
+          type="button"
+          className="knowledge-nav-back"
+          onClick={() => {
+            setSelectedDocId(null);
+            setMobilePane('list');
+          }}
+        >
+          ← Documents
+        </button>
         {doc ? (
           <>
             <header className="knowledge-reader-header">
@@ -497,6 +643,7 @@ export function KnowledgeView() {
                     {...(surface ? { surface } : {})}
                     imageDisplayMode="inline"
                     showCover={false}
+                    linkSchemes={['knowledge']}
                   />
                 </MediaContext.Provider>
               ) : (

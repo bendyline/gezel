@@ -44,13 +44,15 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Roughly 1.5x the measured size at the time of writing, so ordinary
   // feature work has room without a ratchet.        measured (packed)
   '@bendyline/gezk': 100_000, //                     ~30 KB
-  // Deliberately tighter than the 1.5x rule below: at 2.3 MB this package is
-  // already oversized, and the cause is known. Its `.d.ts` output re-emits the
-  // whole Zod schema surface into several chunks — dist/runtime/index.d.ts and
-  // the shared offline-speech chunk are ~3.9 MB and ~3.0 MB of declarations
-  // between them — so the fix is shared declaration chunking, not more budget.
-  // Keep this close to the measurement so the next growth reopens that.
-  '@bendyline/gezel': 2_600_000, //                    2.30 MB
+  // Deliberately tighter than the 1.5x rule below: this package is already
+  // oversized, and the cause is known — its `.d.ts` output writes inferred
+  // types out in full. dist/runtime/index.d.ts was 4.2 MB until the portable
+  // store and task runner declared their return types (`Promise<Task>` rather
+  // than a 130 KB expansion per method); what remains is the shared schema
+  // chunk (~3.2 MB), where every schema that embeds TaskSchema repeats its
+  // whole type. Fix that, not the budget, when this trips again. Keep this
+  // close to the measurement so the next growth reopens it.
+  '@bendyline/gezel': 2_600_000, //                    2.42 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

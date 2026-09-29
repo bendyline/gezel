@@ -5,7 +5,12 @@ import type {
   RecentTab,
   RecentTabArea,
 } from '@bendyline/gezel';
-import { SHARED_PROJECT_ID, displayName, isOutsideInInternalPath } from '@bendyline/gezel';
+import {
+  SHARED_PROJECT_ID,
+  displayName,
+  isOutsideInInternalPath,
+  isSharedLibraryProject,
+} from '@bendyline/gezel';
 import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -166,7 +171,6 @@ const AREA_LINKS: RecentTabArea[] = [
   'scripts',
   'history',
   'knowledge',
-  'handboek',
   'settings',
 ];
 
@@ -234,7 +238,11 @@ export function Sidebar({
   const visibleProjects = useMemo(
     () =>
       projects.filter(
-        (p) => !p.archived && (p.id === selectedProjectId || !HIDDEN_PROJECT_IDS.has(p.id)),
+        (p) =>
+          !p.archived &&
+          (p.id === selectedProjectId ||
+            // The library can live on a fallback id; the marker is authoritative.
+            (!HIDDEN_PROJECT_IDS.has(p.id) && !isSharedLibraryProject(p))),
       ),
     [projects, selectedProjectId],
   );
@@ -929,7 +937,11 @@ export function Sidebar({
           addTitle="New project"
         >
           {visibleProjects.length === 0 ? (
-            <li className="app-sidebar-empty">No projects yet.</li>
+            // "No projects yet." sat beside a Projects area that listed
+            // Default and the Shared Library, and read as a contradiction.
+            <li className="app-sidebar-empty">
+              None of your own yet. Everything else lives in Default.
+            </li>
           ) : (
             visibleProjects.map((p) => {
               const projectTab = toRecentTab({ kind: 'project', id: p.id });

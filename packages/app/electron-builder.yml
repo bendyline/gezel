@@ -71,9 +71,14 @@ files:
   - dist/node-bundle/**/*
   - dist/duckdb-bundle/**/*
   - dist/ui/**/*
+  # The Office task pane and the LibreOffice extension, served and handed out
+  # by the daemon beside the UI (packages/service/src/office-host/assets.ts).
+  - dist/office/**/*
+  - dist/libreoffice/**/*
   # Vite source maps are useful in the build tree but not loaded by the
   # packaged renderer. The RC shipped 215 of them (70.8 MiB) as loose files.
   - '!dist/ui/**/*.map'
+  - '!dist/office/**/*.map'
   # Keep Electron-process source maps available to local builds without
   # carrying them in every installer. In particular, main.js.map alone is
   # several MiB and the packaged main process never loads it.
@@ -152,6 +157,10 @@ asarUnpack:
   - dist/node-bundle/**/*
   - dist/duckdb-bundle/**/*
   - dist/ui/**/*
+  # Same reason as dist/ui: the daemon reads the pane pages and the .oxt with
+  # plain fs, and unopkg needs the .oxt as a real file.
+  - dist/office/**/*
+  - dist/libreoffice/**/*
   - native-bin/**/*
 
 # afterPack chains two jobs (see scripts/after-pack.cjs):
@@ -165,6 +174,39 @@ asarUnpack:
 #      preserves the already-valid native signatures and their manifest-
 #      pinned bytes while this sweep covers DLLs its pass does not reach.
 afterPack: scripts/after-pack.cjs
+
+# Electron fuses, flipped in the packaged binary by electron-builder itself
+# (PlatformPackager.doAddElectronFuses) after afterPack and before any code
+# signing, so the Authenticode and Developer ID signatures cover the flipped
+# bytes. The MAS config inherits this block through `extends`.
+#
+# runAsNode stays ON: gezeld, the installers' extract/migrate CLIs, the macOS
+#   LaunchDaemon, the Linux unit, and gezel-service-host all run the Electron
+#   binary as Node through ELECTRON_RUN_AS_NODE.
+# enableNodeOptionsEnvironmentVariable OFF: Electron then ignores and unsets
+#   NODE_OPTIONS and NODE_EXTRA_CA_CERTS in the app and in every
+#   Electron-as-Node process, so an environment variable can no longer load code
+#   into the signed app. Nothing we ship sets either for the Electron binary:
+#   the Playwright import hook and the evals' mock CA reach real Node
+#   (GEZEL_NODE_PATH or a system node), which this fuse does not touch.
+# enableNodeCliInspectArguments OFF: the app's main process, which holds the
+#   renderer's daemon token and the app's macOS privacy grants, no longer opens
+#   an inspector for --inspect (or SIGUSR1). Electron 43 still honors --inspect
+#   under ELECTRON_RUN_AS_NODE, which runAsNode already concedes. Playwright's
+#   _electron.launch depends on that inspector, so it can no longer drive a
+#   packaged build; CI's packaged smokes use --gezel-packaged-smoke instead.
+#
+# Left at Electron's defaults on purpose: asar integrity and onlyLoadAppFromAsar
+# cannot turn on while dist/main.js and preload.cjs load from
+# app.asar.unpacked (the asarUnpack workaround above), and cookie encryption is
+# a one-way migration of the renderer's cookie store.
+#
+# scripts/verify-electron-fuses.mjs reads the wire back out of every packaged
+# binary in release CI; its test pins this block.
+electronFuses:
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
 
 # electron-builder's built-in @electron/notarize integration notarizes both
 # the signed .app and the final .pkg when APPLE_ID,
@@ -274,10 +316,18 @@ nsis:
 # .app and final .pkg, gated on APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID.
 mac:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
-  # The native engines deliberately target the Accelerate ILP64 API introduced
-  # in macOS 13.3, while the pinned official Node 24 runtime declares 13.5.
-  # The product floor must be the highest requirement in the complete payload.
-  minimumSystemVersion: '13.5'
+  # The product floor must be the highest requirement in the complete payload,
+  # including the Mach-Os sealed inside service-bundle.tar.gz. The native
+  # engines target the Accelerate ILP64 API from macOS 13.3 and the pinned
+  # Node 24 runtime declares 13.5, but the service tree's sqlite-vec
+  # (vec0.dylib) and ONNX Runtime prebuilds, which back memory and embeddings,
+  # declare 14.0. v1.26270.76 shipped 13.5 while those required 14.0.
+  #
+  # Also written into the PKG's allowed-os-versions (Installer refuses an older
+  # macOS) and, by scripts/stamp-mac-update-floor.mjs, into latest-mac.yml so
+  # an installed Gezel on an older macOS never downloads this release.
+  # scripts/verify-macos-version-floor.mjs enforces the payload side.
+  minimumSystemVersion: '14.0'
   target:
     - target: pkg
       arch:
@@ -322,6 +372,13 @@ mac:
   # Narrate action records microphone-only audio and sends short takes to the
   # user's configured speech-to-text engine. Camera, screen capture, Bluetooth,
   # WebUSB, and Web Serial still have no product surface and remain absent.
+  # Apple Events is the one non-media key: the ambient wallpaper asks System
+  # Events to read and set the desktop picture.
+  #
+  # A usage string is half of the contract under hardened runtime; each needs
+  # its resource entitlement in entitlements.mac.plist too, or macOS refuses
+  # the access without ever showing this text. scripts/macos-entitlements.test.mjs
+  # pins the pairing.
   #
   # `null` is the documented removal: extendInfo is deep-assigned over the
   # generated plist, then app-builder-lib deletes every null/undefined key
@@ -333,6 +390,7 @@ mac:
   # appears without one, so this cannot rot silently.
   extendInfo:
     NSMicrophoneUsageDescription: Gezel records your voice when you choose Narrate so your configured speech-to-text engine can add it to the chat prompt.
+    NSAppleEventsUsageDescription: Gezel asks System Events to set your desktop picture when you turn on the ambient display wallpaper, and to put your own picture back when you turn it off.
     NSCameraUsageDescription: null
     NSAudioCaptureUsageDescription: null
     NSBluetoothAlwaysUsageDescription: null

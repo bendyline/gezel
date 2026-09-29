@@ -263,6 +263,8 @@ final class MobileBridgeTests: XCTestCase {
             const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
             const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
             editor.focus(); document.execCommand('insertText', false, 'Say hello.');
+            // Send reads the composer's draft, which Squisq reports a task after the edit.
+            await until(async () => (await api('/api/projects/' + projectId + '/prompt-drafts')).drafts.some(item => item.title.includes('Say hello.')), 'editor change saved before Send');
             let streamed = '';
             const listener = await plugin.addListener('chatDelta', event => { streamed += event.delta; });
             try {

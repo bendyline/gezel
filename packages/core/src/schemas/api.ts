@@ -1071,7 +1071,7 @@ export const GezelConfigSchema = z.object({
   /**
    * Per-model native vision (`--mmproj` at launch), keyed by catalog id.
    *
-   * **Absent means ON**; `false` is an explicit opt-out. The projector now
+   * **Absent means ON** (MLX aside, below); `false` is an explicit opt-out. The projector now
    * ships with the model and memory planning prices it in, so a model that
    * can see does, without the user first finding a switch. Resolve it only
    * through `nativeVisionEnabledFor` — three layers read this and a default
@@ -1094,8 +1094,13 @@ export const GezelConfigSchema = z.object({
    * cost lands on cold starts, not on every turn.
    *
    * The cold-start trade applies to llama.cpp's mmproj path. ds4 uses this
-   * same per-model preference for its `--vision` encoder, while MLX has no
-   * vision path yet — see `MLX_VISION_SUPPORTED`.
+   * same per-model preference for its `--vision` encoder.
+   *
+   * MLX reads it differently, because its vision tower slows every text turn:
+   * absent means the engine starts text-only and reloads with vision the
+   * first time a request carries an image; `true` keeps vision loaded from
+   * launch; `false` never loads it. See `nativeVisionPreferenceFor` and the
+   * service's `mlx/vision-mode.ts`.
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —
@@ -2126,6 +2131,28 @@ export const GezelConfigSchema = z.object({
   faceRecognition: z
     .object({
       enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * The launch reference list (`Task.references`): when a craftbook is
+   * started with a subject, search knowledge catalogs and the shared library
+   * for it and name what matched in every step's prompt. Default on.
+   */
+  taskReferences: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * The relevance model: a small on-device cross-encoder that checks each
+   * indexed passage against the request before it reaches a prompt. Default
+   * off; enabling downloads the selected model (pinned in the service's
+   * relevance registry) when app network access is allowed.
+   */
+  relevanceModel: z
+    .object({
+      enabled: z.boolean().optional(),
+      modelId: z.string().min(1).optional(),
     })
     .optional(),
   /**
@@ -4175,9 +4202,10 @@ export const ApplyProjectTypeRequestSchema = z.object({
    */
   seedPolicy: z.enum(['overwrite', 'preserve']).optional(),
   /**
-   * Reuse a roster gezel with the same `templateId` instead of minting a
-   * fresh one — makes re-apply idempotent for non-lean types. Lean types
-   * always reuse from the global pool regardless.
+   * Fill the type's crew with gezels the user already has — this project's
+   * roster first, then the rest of the install — matched by template, then by
+   * role title. Defaults to true; `false` hires a fresh gezel per slot
+   * (lean types reuse regardless).
    */
   reuseRosterGezels: z.boolean().optional(),
 });
@@ -4205,12 +4233,15 @@ export const AppliedProjectTypeSchema = z.object({
   typeId: z.string(),
   version: z.string(),
   source: z.string(),
+  /** The type's crew, in manifest order: newly hired gezels and reused ones. */
   gezelsCreated: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
       templateId: z.string(),
       voorman: z.boolean(),
+      /** An existing gezel filled this slot instead of a new hire. */
+      reused: z.boolean().optional(),
     }),
   ),
   scriptsInstalled: z.array(z.string()),
@@ -5688,6 +5719,8 @@ export type ProjectSearchCraftbookSuggestion = z.infer<
 export const ProjectSearchResponseSchema = UnifiedSearchResponseSchema.extend({
   /** Strong, applicable Gilde or local procedures that may help execute the query. */
   craftbooks: z.array(ProjectSearchCraftbookSuggestionSchema),
+  /** Results the relevance model scored as off-topic and left out of this page. */
+  hiddenBelowRelevanceFloor: z.number().int().positive().optional(),
 });
 export type ProjectSearchResponse = z.infer<typeof ProjectSearchResponseSchema>;
 
@@ -6794,6 +6827,8 @@ export const SessionDebugSnapshotSchema = z.object({
           'growth-announcement',
           'keurmeester-notice',
           'craftbook-launch',
+          'task-wrapup',
+          'crew-introduction',
         ])
         .optional(),
       /**

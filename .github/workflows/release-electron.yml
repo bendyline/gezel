@@ -409,6 +409,11 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
+      # `electronFuses` in electron-builder.yml is only intent; the wire in
+      # the signed binary is what ships.
+      - name: Verify Electron fuses (Windows)
+        run: node scripts/verify-electron-fuses.mjs packages/app/dist/installers/win-unpacked/gezel.exe
+
       # Exercise the artifact users actually run, including the elevated NSIS
       # hook, bundled-Node migration/extraction, ProgramData ACLs, SCM
       # registration, LocalService startup, and the install breadcrumb. The
@@ -859,6 +864,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           UV_THREADPOOL_SIZE: 16
 
+      # Installed releases decide whether to offer this update with
+      # electron-updater, which skips a feed whose minimumSystemVersion is
+      # above the running Darwin release. electron-builder does not write it.
+      - name: Stamp the macOS floor into the update feed
+        run: node scripts/stamp-mac-update-floor.mjs packages/app/dist/installers/latest-mac.yml
+
       - name: Verify macOS signing and notarization
         run: |
           set -euo pipefail
@@ -878,7 +889,8 @@ jobs:
           test -n "$app"
           codesign --verify --strict --deep --verbose=2 "$app"
           node scripts/verify-macos-entitlements.mjs "$app"
-          node scripts/verify-macos-version-floor.mjs "$app" 13.5
+          node scripts/verify-electron-fuses.mjs "$app"
+          node scripts/verify-macos-version-floor.mjs "$app" 14.0
           # electron-builder hardcodes a blanket NSAllowsArbitraryLoads that
           # `mac.extendInfo` cannot override; an afterPack hook narrows it just
           # before codesign. Dropping that hook still packs, signs and
@@ -951,6 +963,8 @@ jobs:
           runtime_dir="$data_dir/runtime"
           uninstaller="/Applications/Gezel.app/Contents/Resources/uninstall.sh"
           user_agent="$HOME/Library/LaunchAgents/com.bendyline.gezel.plist"
+          port_blocker_pid=""
+          port_blocker_log=$(mktemp)
 
           dump_pkg_diagnostics() {
             set +e
@@ -998,6 +1012,11 @@ jobs:
 
           cleanup() {
             set +e
+            if [[ -n "$port_blocker_pid" ]]; then
+              kill "$port_blocker_pid" 2>/dev/null || true
+              wait "$port_blocker_pid" 2>/dev/null || true
+            fi
+            rm -f "$port_blocker_log"
             if [[ -f "$uninstaller" ]]; then
               sudo /bin/bash "$uninstaller" --remove-machine-data --remove-shared-data
             else
@@ -1053,8 +1072,27 @@ jobs:
             return 1
           }
 
-          install_pkg "installing PKG from a clean machine state"
+          # A user's daemon can own 6228 while the machine broker is stopped
+          # during an upgrade. Exercise the actual shipped plist + portfile
+          # discovery with that port unavailable through both install passes.
+          node -e 'require("node:net").createServer().listen(6228, "127.0.0.1", () => console.log("ready"))' >"$port_blocker_log" 2>&1 &
+          port_blocker_pid=$!
+          for attempt in {1..30}; do
+            grep -q '^ready$' "$port_blocker_log" && break
+            kill -0 "$port_blocker_pid"
+            sleep 1
+          done
+          grep -q '^ready$' "$port_blocker_log"
+
+          install_pkg "installing PKG with the canonical port occupied"
           assert_installed_health
+          [[ "$port" -ne 6228 ]]
+          kill -0 "$port_blocker_pid"
+          # The extractor must publish root-owned, non-group/world-writable
+          # code directly; user adoption cannot depend on a later repair walk.
+          test -r "$data_dir/service/.gezel-bundle.shared-readonly-v1"
+          unsafe_code=$(sudo find -x "$data_dir/service" ! -type l \( ! -user root -o -perm -002 -o -perm -020 \) -print -quit)
+          [[ -z "$unsafe_code" ]]
 
           abandoned_staging="$data_dir/service.staging-999999999-11111111-2222-3333-4444-555555555555"
           echo "seeding an abandoned partial extraction to exercise retry cleanup"
@@ -1062,6 +1100,8 @@ jobs:
           sudo touch "$abandoned_staging/node_modules/partial/incomplete.js"
           install_pkg "reinstalling the same PKG to prove idempotency"
           assert_installed_health
+          [[ "$port" -ne 6228 ]]
+          kill -0 "$port_blocker_pid"
           [[ ! -e "$abandoned_staging" ]]
 
           echo "persistently disabling the service to exercise recovery"
@@ -1115,6 +1155,10 @@ jobs:
           test -f "$metadata"
           if ! grep -Fq "$(basename "$zip")" "$metadata"; then
             echo "::error::$metadata does not reference $(basename "$zip")"
+            exit 1
+          fi
+          if ! grep -Eq "^minimumSystemVersion: '[0-9]+\.[0-9]+\.[0-9]+'$" "$metadata"; then
+            echo "::error::$metadata has no minimumSystemVersion; Macs below the floor would be offered this update"
             exit 1
           fi
           echo "verified PKG first-install artifact and ZIP-based macOS update feed"
@@ -1237,6 +1281,13 @@ jobs:
 
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
+
+      - name: Verify Electron fuses (Linux)
+        run: |
+          set -euo pipefail
+          executable=$(find packages/app/dist/installers -mindepth 2 -maxdepth 2 -type f -path '*-unpacked/gezel' -print -quit)
+          test -n "$executable"
+          node scripts/verify-electron-fuses.mjs "$executable"
 
       # Asserted rather than assumed, because every way of getting deb
       # compression wrong looks correct in electron-builder.yml. fpm passes

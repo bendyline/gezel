@@ -2,6 +2,11 @@ export { CatalogService } from './service.js';
 export { gildeDataDir, gildePackageRoot } from './gilde-data.js';
 export { BundledSource, type BundledSourceOptions, type CatalogSource } from './source.js';
 export { CommunitySource } from './community-source.js';
+export {
+  CONTENT_PACK_FILENAME,
+  collapseToContentPack,
+  type ContentPackStats,
+} from './content-pack.js';
 export { LocalCatalogSource } from './local-source.js';
 export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 export { categorizeToolset } from './categorize.js';

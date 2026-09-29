@@ -122,6 +122,14 @@ export const ChatSessionSchema = z.object({
    * selected model. Optional so pre-routing session files remain valid.
    */
   modelSource: z.enum(['capability-routing']).optional(),
+  /**
+   * The model that actually answered the most recent turn. `model` is stamped
+   * when the session is created and never moves, while a pinned model that
+   * is not installed is served by a stand-in every turn — so the thread label
+   * read "This PC (qwen3.6-27b-q8)" while Gemma 4 31B answered. Labels read
+   * this first.
+   */
+  servedModel: z.string().optional(),
   /** True only when this session was dispatched as deferred Night Shift work. */
   nightShift: z.boolean().optional(),
   /**
@@ -453,6 +461,7 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   projectId: true,
   providerName: true,
   model: true,
+  servedModel: true,
   title: true,
   createdAt: true,
   lastActivityAt: true,
@@ -664,6 +673,17 @@ export const UpdateQueuedMessageResponseSchema = z.object({
 export type UpdateQueuedMessageResponse = z.infer<typeof UpdateQueuedMessageResponseSchema>;
 
 /**
+ * Optional body for `POST /api/sessions/:id/cancel`. `stopTask` marks the
+ * person's explicit Stop: when the session is working a task step, that task
+ * is paused so nothing restarts the step until they resume it. Callers that
+ * cancel in order to carry on (re-engage, clearing a wedged turn) omit it.
+ */
+export const CancelSessionTurnRequestSchema = z.object({
+  stopTask: z.boolean().optional(),
+});
+export type CancelSessionTurnRequest = z.infer<typeof CancelSessionTurnRequestSchema>;
+
+/**
  * Body for `POST /api/sessions/:id/interrupt` — cancel the in-progress
  * turn (partial reply salvaged exactly like a plain cancel) and send
  * `message` immediately, ahead of any queued entries. Response reuses
@@ -863,6 +883,8 @@ export const TimelineMessageSchema = z.object({
       'growth-announcement',
       'keurmeester-notice',
       'craftbook-launch',
+      'task-wrapup',
+      'crew-introduction',
     ])
     .optional(),
   /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */

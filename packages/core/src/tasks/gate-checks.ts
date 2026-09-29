@@ -9,18 +9,21 @@
  * could not examine.
  */
 import {
+  checkFigures,
   cssMinBytes,
   csvShape,
   explainSniff,
   fileCountByExt,
   fileMinBytes,
   jsonPathEquals,
+  listedFiles,
   recordSchema,
   runSniff,
   tableShape,
   totalMinBytes,
 } from '../checks/index.js';
 import type { WorkspaceLike } from '../checks/types.js';
+import { todayIso } from '../prompt-clock.js';
 import type { GateCheck } from '../schemas/gate.js';
 
 /**
@@ -39,6 +42,8 @@ export const SHARED_GATE_CHECK_KINDS = [
   'minBytes',
   'totalMinBytes',
   'fileCount',
+  'listedFiles',
+  'figures',
   'cssMinBytes',
   'sniff',
   'jsonPathEquals',
@@ -113,6 +118,32 @@ export async function evaluateDeclarativeCheck(
         ok: r.ok,
         detail: r.detail,
         ...(matched ? { evidence: { matched: capList(matched) } } : {}),
+      };
+    }
+    case 'listedFiles': {
+      const r = await listedFiles(reader, c.file, c.key, c.pathTemplate, c.minBytes);
+      return {
+        ok: r.ok,
+        detail: r.detail,
+        ...(r.missing.length > 0 ? { evidence: { missing: capList(r.missing) } } : {}),
+      };
+    }
+    case 'figures': {
+      const content = await reader.read(c.file);
+      if (content === null) {
+        return { ok: false, detail: `${c.file} not found (needed for the figures check)` };
+      }
+      // Prices need the owner's own numbers, which a gate does not have.
+      const findings = checkFigures(content, { today: todayIso() }).findings;
+      if (findings.length === 0) {
+        return { ok: true, detail: `${c.file}: sums, line totals and dates check out` };
+      }
+      return {
+        ok: false,
+        detail: `${c.file} has figures that don't hold up — fix them before advancing: ${findings
+          .map((f) => `line ${f.line}: ${f.message}`)
+          .join(' ')}`,
+        evidence: { findings: capList(findings.map((f) => `line ${f.line}: ${f.message}`)) },
       };
     }
     case 'cssMinBytes': {
@@ -210,6 +241,10 @@ export function gateCheckLabel(c: GateCheck): string {
       return `totalMinBytes ${c.files.join('+')}`;
     case 'fileCount':
       return `fileCount ${c.ext.join(',')}${c.dir ? ` ${c.dir}` : ''}`;
+    case 'listedFiles':
+      return `listedFiles ${c.file} ${c.key}`;
+    case 'figures':
+      return `figures ${c.file}`;
     case 'cssMinBytes':
       return `cssMinBytes ${c.file ?? 'index.html'}`;
     case 'sniff':

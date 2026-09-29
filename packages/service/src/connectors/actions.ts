@@ -191,6 +191,7 @@ export class ConnectorActionManager {
         input,
       });
       if (!verdict.ok) throw new Error(`commit denied: ${verdict.reason}`);
+      const committedInput = verdict.input !== undefined ? verdict.input : input;
 
       if (this.opts.isNightShiftActive?.()) {
         const { abs, rel } = await this.paths(
@@ -217,7 +218,7 @@ export class ConnectorActionManager {
       try {
         await adapter.ensureAuth();
         if (!adapter.runAction) throw new Error(`connector '${binding.type}' has no write actions`);
-        const result = await adapter.runAction(action, input);
+        const result = await adapter.runAction(action, committedInput);
         const { abs, rel } = await this.paths(
           project,
           found.bindingId,
@@ -229,7 +230,7 @@ export class ConnectorActionManager {
           abs,
           withFrontmatter(
             { ...found.data, status: 'sent', committed_at: new Date().toISOString() },
-            found.body,
+            verdict.input !== undefined ? JSON.stringify(committedInput, null, 2) : found.body,
           ),
         );
         if (found.abs !== abs) await rm(found.abs, { force: true });

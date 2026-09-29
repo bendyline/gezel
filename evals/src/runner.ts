@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -22,11 +22,14 @@ import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
 import {
   assertMlxSourceComplete,
+  cloneModelDirIntoTrial,
   defaultCacheRoot,
   ensureWarmModel,
+  findReadOnlyModelDir,
   isModelInstalled,
   linkDrafterIntoTrial,
   linkModelIntoTrial,
+  readOnlyModelRoots,
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
@@ -44,11 +47,14 @@ import {
 import { captureFingerprint, digestFingerprint } from './progress-fingerprint.ts';
 import {
   type ChatProvider,
+  appleFmHelperPath,
   buildProviderConfig,
   categorizeProvider,
+  isChatProvider,
   isLocalEngine,
   isSelfOrchestratingProvider,
   probeProviderAuth,
+  providerCredentialConfig,
 } from './providers.ts';
 import { captureRecordingState, writeRecordingManifest } from './recording/capture.ts';
 import { distillRunDir } from './recording/distill-io.ts';
@@ -79,6 +85,7 @@ import type {
   TrialFinalSniff,
   TrialOptions,
   TrialResult,
+  TrialRetrievalArm,
   TrialStatus,
 } from './types.ts';
 
@@ -161,21 +168,35 @@ function defaultMlxSourceHome(): string {
  * rather than copying — copying a 3-4 GB venv would defeat the speed
  * win we're after.
  */
-async function linkUvTreeIntoTrial(opts: {
+/**
+ * A persistent uv tree for trials whose source home has none — an install
+ * whose machine service runs the engines keeps its venv in the service's
+ * private home. Linking every trial to one cache means the first trial pays
+ * the several-GB provision and the rest reuse it, instead of each trial
+ * provisioning (and deleting) its own.
+ */
+export const EVAL_UV_CACHE_ENV = 'GEZEL_EVAL_UV_CACHE';
+
+export async function linkUvTreeIntoTrial(opts: {
   mlxSourceHome: string;
   trialHome: string;
   log: (line: string) => void;
 }): Promise<void> {
-  const sourceUv = join(opts.mlxSourceHome, 'engines', 'uv');
+  let sourceUv = join(opts.mlxSourceHome, 'engines', 'uv');
   if (!existsSync(sourceUv)) {
-    opts.log(
-      `[trial] uv venv tree not present at ${sourceUv} — trial daemon will provision a fresh venv (slow)`,
-    );
-    return;
+    const cache = process.env[EVAL_UV_CACHE_ENV]?.trim();
+    if (!cache) {
+      opts.log(
+        `[trial] uv venv tree not present at ${sourceUv} — trial daemon will provision a fresh venv (slow)`,
+      );
+      return;
+    }
+    await mkdir(cache, { recursive: true });
+    opts.log(`[trial] uv venv tree not present at ${sourceUv}; sharing the eval cache at ${cache}`);
+    sourceUv = cache;
   }
   const trialUv = join(opts.trialHome, 'engines', 'uv');
   if (existsSync(trialUv)) return; // already linked / created
-  const { mkdir, symlink } = await import('node:fs/promises');
   await mkdir(join(opts.trialHome, 'engines'), { recursive: true });
   const type = process.platform === 'win32' ? 'junction' : 'dir';
   await symlink(sourceUv, trialUv, type);
@@ -275,12 +296,55 @@ export function modelWarmFailure(
  * even on spawn errors, timeouts, or scenario failures — and always
  * leaves the run directory populated for postmortem.
  */
+/**
+ * Resolve one model from a read-only source home, or throw the sentence a
+ * person needs: install it, or update it. Never downloads — the source is
+ * someone's own install, and a harness that "helpfully" refetched into it
+ * would be writing to state it was only lent.
+ */
+async function requireReadOnlyModel(opts: {
+  sourceHome: string;
+  engine: 'llama-cpp' | 'ds4' | 'mlx' | 'sd-cpp';
+  modelId: string;
+  log: (line: string) => void;
+}): Promise<string> {
+  const dir = await findReadOnlyModelDir({
+    sourceHome: opts.sourceHome,
+    engine: opts.engine,
+    modelId: opts.modelId,
+  });
+  if (!dir) {
+    throw new Error(
+      `${opts.modelId} is not installed for ${opts.engine} on this computer. Install it from Settings, then run the eval again.`,
+    );
+  }
+  const stale = await staleInstallReason({
+    cacheRoot: opts.sourceHome,
+    engine: opts.engine,
+    modelId: opts.modelId,
+    modelDir: dir,
+  });
+  if (stale) {
+    throw new Error(
+      `${opts.modelId} is out of date with the catalog (${stale}). Update it from Settings, then run the eval again.`,
+    );
+  }
+  opts.log(`[trial] ${opts.engine} source=${dir} (read-only)`);
+  return dir;
+}
+
 export async function runTrial(
   scenarioInput: EvalScenario,
   opts: TrialOptions,
 ): Promise<TrialResult> {
   const scenario = withRepairPolicy(scenarioInput, opts.repairPolicy);
   const engine = opts.engine ?? 'llama-cpp';
+  const category = categorizeProvider(engine);
+  if (opts.offline && category !== 'local-engine' && category !== 'system-model') {
+    throw new Error(
+      `offline mode refuses provider "${engine}" (${category}); choose an on-device provider`,
+    );
+  }
   const evalLlamaSpecType = evalLlamaSpecTypeOverride();
   const evalLlamaKvCache = evalLlamaKvCacheOverride();
   // Capability tier of the model under test (Theme E / E1-B) — stamped
@@ -293,7 +357,7 @@ export async function runTrial(
     engine === 'llama-cpp'
       ? llamaCppEvalLaunchOverridesForModel(opts.modelId)
       : engine === 'ds4'
-        ? ds4EvalLaunchOverridesForModel(opts.modelId)
+        ? ds4EvalLaunchOverridesForModel(opts.modelId, opts.modelSourceHome)
         : undefined;
   const llamaEvalLaunch = mergeLlamaCppEvalLaunchOverrides(
     defaultLlamaEvalLaunch,
@@ -334,14 +398,15 @@ export async function runTrial(
   // died at 901s of its authored 900s window while llama-server logged
   // `prompt processing, progress = 0.36`, and symptom-debug at 603s of 600s;
   // the same model+engine scored 10/11 on a fast box and 8/11 here, inverting
-  // capability into a hardware artifact. Same failure shape as the MLX
-  // soft-window lift below, and the same proper long-term fix: make the
-  // watchdog streaming-aware rather than time-only.
-  const hardProgressTimeoutMs = Math.max(
-    scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
-    llamaEvalLaunch?.hardProgressTimeoutMs ?? 0,
-    envHardProgressFloorMs(),
-  );
+  // capability into a hardware artifact. We preserve the watchdog's
+  // deliberate requirement for product-visible progress, but scale its wall
+  // window by the preflight decode rate just like the scenario ceiling.
+  const hardProgressTimeoutMs = trialHardProgressTimeoutMs({
+    authoredProgressTimeoutMs: scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
+    decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    minProgressTimeoutMs: llamaEvalLaunch?.hardProgressTimeoutMs,
+    envProgressFloorMs: envHardProgressFloorMs(),
+  });
   // Soft progress watchdog: fires when the daemon shows no activity
   // across our fingerprint signals (turns, tools, slot updates, stream
   // pulses) for this long. Default 5 min covers normal "model thinking
@@ -373,6 +438,12 @@ export async function runTrial(
   let imageModelHome: string | undefined;
 
   await mkdir(runDir, { recursive: true });
+  if (scenario.retrievalOracle) {
+    await writeFile(
+      join(runDir, 'retrieval-oracle.json'),
+      `${JSON.stringify(scenario.retrievalOracle, null, 2)}\n`,
+    );
+  }
   const trialHome = await mkdtemp(join(tmpdir(), `gezel-eval-${scenario.id}-`));
 
   const startedAt = new Date();
@@ -390,6 +461,7 @@ export async function runTrial(
     startedAt: startedAt.toISOString(),
     status: 'running',
   });
+  opts.onTrialStart?.({ trialId, runDir, startedAt: startedAt.toISOString() });
 
   const logger = new TrialLogger({ runDir, gezelHome: trialHome });
   await logger.init();
@@ -402,7 +474,6 @@ export async function runTrial(
 
   // `engine` was resolved at the top of the function so the trial id
   // can encode the provider; pull category here for the gates below.
-  const category = categorizeProvider(engine);
   log(`[trial] provider=${engine} category=${category}`);
 
   // Pre-flight auth probe for non-local providers. Catches "you forgot
@@ -412,6 +483,7 @@ export async function runTrial(
   if (!authProbe.ok) {
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -429,6 +501,8 @@ export async function runTrial(
       client: null,
     });
   }
+  // The trial daemon inherits this env; point it at the helper the probe found.
+  if (engine === 'apple-foundation-models') process.env.GEZEL_APPLE_FM_BIN = appleFmHelperPath()!;
 
   let llamaBin: string | undefined;
   let sdBin: string | undefined;
@@ -462,6 +536,7 @@ export async function runTrial(
   } catch (err) {
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -491,8 +566,32 @@ export async function runTrial(
   // model would otherwise surface an hour in as a wedged enrichment drive.
   const secondModelId =
     opts.enrichModelId && opts.enrichModelId !== opts.modelId ? opts.enrichModelId : null;
+  // Read-only sourcing (`modelSourceHome`): exact directories to clone from,
+  // resolved here so a missing or stale install fails before any daemon work.
+  const sourcedModelDirs = new Map<string, string>();
+  let sourcedImageDir: string | undefined;
   try {
-    if (engine === 'llama-cpp') {
+    if (opts.modelSourceHome) {
+      const sourceHome = opts.modelSourceHome;
+      if (engine === 'llama-cpp' || engine === 'ds4' || engine === 'mlx') {
+        for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
+          sourcedModelDirs.set(
+            modelId,
+            await requireReadOnlyModel({ sourceHome, engine, modelId, log }),
+          );
+        }
+      } else {
+        log(`[trial] ${engine} is ${category} — no local weights to source`);
+      }
+      if (imageModelId && sdBin) {
+        sourcedImageDir = await requireReadOnlyModel({
+          sourceHome,
+          engine: 'sd-cpp',
+          modelId: imageModelId,
+          log,
+        });
+      }
+    } else if (engine === 'llama-cpp') {
       if (!llamaBin) throw new Error('llama-cpp engine selected but llamaBin is unresolved');
       for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
         await ensureWarmModel({
@@ -500,6 +599,7 @@ export async function runTrial(
           engine: 'llama-cpp',
           modelId,
           llamaBin,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
@@ -510,6 +610,7 @@ export async function runTrial(
           cacheRoot,
           engine: 'ds4',
           modelId,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
@@ -547,7 +648,7 @@ export async function runTrial(
     } else {
       log(`[trial] ${engine} is ${category} — skipping warm-cache phase`);
     }
-    if (imageModelId && sdBin) {
+    if (imageModelId && sdBin && !opts.modelSourceHome) {
       // Same source-home shortcut we use for MLX chat models: if the
       // user already has the image model installed under
       // `<mlxSourceHome>/engines/sd-cpp/models/<id>` (i.e. their dev
@@ -574,6 +675,7 @@ export async function runTrial(
           modelId: imageModelId,
           ...(llamaBin ? { llamaBin } : {}),
           sdBin,
+          ...(opts.offline ? { offline: true } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
@@ -584,6 +686,7 @@ export async function runTrial(
     const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -607,7 +710,23 @@ export async function runTrial(
   // where the filesystem supports them. Llama-cpp clones from the eval cache;
   // MLX clones from the user's existing `engines/mlx/models/<id>` tree.
   // CLI-wrapper and cloud providers have nothing to materialize.
-  if (engine === 'llama-cpp' || engine === 'ds4') {
+  if (
+    sourcedModelDirs.size > 0 &&
+    (engine === 'llama-cpp' || engine === 'ds4' || engine === 'mlx')
+  ) {
+    for (const [modelId, sourceDir] of sourcedModelDirs) {
+      await cloneModelDirIntoTrial({ sourceDir, trialHome, engine, modelId });
+      log(`[trial] cloned ${engine}/${modelId} from ${sourceDir} into ${trialHome}`);
+    }
+    if (engine === 'mlx' && opts.modelSourceHome) {
+      for (const modelId of sourcedModelDirs.keys()) {
+        if (await linkDrafterIntoTrial({ sourceHome: opts.modelSourceHome, trialHome, modelId })) {
+          log(`[trial] linked mlx drafter for ${modelId} (speculative decoding armed)`);
+        }
+      }
+      await linkUvTreeIntoTrial({ mlxSourceHome: opts.modelSourceHome, trialHome, log });
+    }
+  } else if (engine === 'llama-cpp' || engine === 'ds4') {
     for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
       await linkModelIntoTrial({
         cacheRoot,
@@ -642,7 +761,15 @@ export async function runTrial(
     // ensureVenv call short-circuits to an O(ms) no-op.
     await linkUvTreeIntoTrial({ mlxSourceHome, trialHome, log });
   }
-  if (imageModelId) {
+  if (imageModelId && sourcedImageDir) {
+    await cloneModelDirIntoTrial({
+      sourceDir: sourcedImageDir,
+      trialHome,
+      engine: 'sd-cpp',
+      modelId: imageModelId,
+    });
+    log(`[trial] cloned sd-cpp/${imageModelId} from ${sourcedImageDir} into ${trialHome}`);
+  } else if (imageModelId) {
     // Reuse the exact complete install selected during the warm phase.
     // A merely-present source directory may hold only `.partial` files.
     const linkFrom = imageModelHome ?? cacheRoot;
@@ -687,17 +814,28 @@ export async function runTrial(
     ...(opts.forceBehaviors ?? []),
     ...(opts.keurmeester ? ['supervision.keurmeester'] : []),
   ];
+  // A retrieval arm owns what reaches the prompt from the indexes: the
+  // shared-library recall prelude is a second road in, so it is removed in
+  // every arm unless the arm says otherwise.
+  const removeBehaviors = [
+    ...(opts.removeBehaviors ?? []),
+    ...(opts.retrieval && !opts.retrieval.libraryRecall ? ['prompt.library-recall-prelude'] : []),
+  ];
   const mergedExtraEnv = evalDaemonEnvForTrial({
     ...(llamaEvalLaunch ? { launch: llamaEvalLaunch } : {}),
     providerLock: engine,
     ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
-    ...(opts.removeBehaviors ? { removeBehaviors: opts.removeBehaviors } : {}),
+    ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
     ...(opts.craftbookDocFormat ? { craftbookDocFormat: opts.craftbookDocFormat } : {}),
     ...(opts.toolNaming ? { toolNaming: opts.toolNaming } : {}),
     ...(opts.disableBackgroundEnrich ? { disableBackgroundEnrich: true } : {}),
     ...(opts.enrichModelId ? { enrichModelId: opts.enrichModelId } : {}),
     ...(opts.enableModelRouting ? { enableModelRouting: true } : {}),
-    ...(scenario.requiresEmbeddings ? { enableEmbeddings: true } : {}),
+    ...(scenario.requiresEmbeddings || opts.retrieval?.embeddings
+      ? { enableEmbeddings: true }
+      : {}),
+    ...(opts.retrieval ? { retrievalTrace: true } : {}),
+    ...(opts.retrieval ? { relevanceModel: opts.retrieval.relevanceModel ?? null } : {}),
   });
   // Live mock services (craftbook test.json `mocks[]`): boot BEFORE the
   // daemon so its env can carry the trial CA + credential seed file. The
@@ -718,6 +856,7 @@ export async function runTrial(
     } catch (err) {
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -775,6 +914,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -801,6 +941,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
         trialId,
@@ -845,6 +986,7 @@ export async function runTrial(
     await mockRuntime?.close().catch(() => {});
     return finalize({
       generalistMode: opts.generalistMode,
+      retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
       trialId,
@@ -934,6 +1076,10 @@ export async function runTrial(
     // tool — the two pipelines are decoupled.
     await client.updateConfig({
       ...buildProviderConfig(engine, opts.modelId),
+      ...providerCredentialConfig(engine),
+      ...(opts.keurmeester && isChatProvider(opts.keurmeester.providerName)
+        ? providerCredentialConfig(opts.keurmeester.providerName)
+        : {}),
       // Eval prompts must be deterministic. Retrieval scenarios may enable
       // the embedding engine above, but no trial gets unsolicited recall.
       autoRecall: { enabled: false },
@@ -967,6 +1113,17 @@ export async function runTrial(
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
+      // A retrieval arm's policy outranks the `autoRecall: false` above:
+      // config.retrieval is read before the legacy switch.
+      ...(opts.retrieval
+        ? {
+            retrieval: {
+              mode: opts.retrieval.mode,
+              ...(opts.retrieval.maxTokens ? { maxTokens: opts.retrieval.maxTokens } : {}),
+            },
+            taskReferences: { enabled: opts.retrieval.references },
+          }
+        : {}),
       // The daemon installs a bundled Meester oversight task at boot and the
       // night shift dispatches it within a minute whenever the wall clock is
       // inside the night window. Every trial run at night then spends one or
@@ -1008,6 +1165,13 @@ export async function runTrial(
     // Phase 5: ensure Meester exists.
     const meesterId = await ensureMeester(client);
     log(`[trial] meester=${meesterId}`);
+
+    // A relevance arm installs (once, into the shared cache) and loads its
+    // model before any work starts: a cold model passes every result
+    // through, so the first turns would silently run as the model-off arm.
+    if (opts.retrieval?.relevanceModel) {
+      await prepareRelevanceModel(client, opts.retrieval.relevanceModel.modelId, log);
+    }
 
     // Phase 5.5: optional scenario setup hook. Runs after daemon boot
     // and before the kickoff prompt — gives scenarios like
@@ -1224,6 +1388,7 @@ export async function runTrial(
 
   return finalize({
     generalistMode: opts.generalistMode,
+    retrievalArm: opts.retrieval,
     repairPolicy: scenario.repairPolicy,
     engine,
     trialId,
@@ -1265,7 +1430,7 @@ export async function ensureMeester(client: GezelClient): Promise<string> {
  * thorough overnight reviews are valid; runaway processes consuming a
  * full day are not.
  */
-const DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000;
+export const DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 
 /**
  * Default soft no-progress window. If the SOFT digest (engine-alive
@@ -1387,6 +1552,39 @@ export function runawaySessionFailure(
 const HARD_FAIL_IDLE_SOFT_THRESHOLD_MS = 60_000;
 
 /**
+ * Install a relevance model into the shared cache and load it, so a
+ * relevance arm's first turn is scored rather than passed through cold.
+ */
+async function prepareRelevanceModel(
+  client: GezelClient,
+  modelId: string,
+  log: (line: string) => void,
+): Promise<void> {
+  const started = await client.retrieval.installRelevanceModel(modelId);
+  if (!started.installed && !started.started) {
+    throw new Error(`relevance model ${modelId} did not start installing: ${started.reason ?? ''}`);
+  }
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    const status = await client.retrieval.relevanceModelStatus();
+    if (status.models.find((model) => model.id === modelId)?.installed) break;
+    if (status.error) throw new Error(`relevance model ${modelId} install failed: ${status.error}`);
+    if (Date.now() > deadline) throw new Error(`relevance model ${modelId} install timed out`);
+    await wait(2_000);
+  }
+  const probe = await client.retrieval.scoreRelevance({
+    modelId,
+    query: 'warm up',
+    passages: ['warm up'],
+    waitForLoad: true,
+  });
+  if (probe.status !== 'scored') {
+    throw new Error(`relevance model ${modelId} did not load (status ${probe.status})`);
+  }
+  log(`[trial] relevance model ${modelId} installed and loaded`);
+}
+
+/**
  * Build the daemon env fragment carrying per-run behavior overrides
  * (the A/B toggle). `forceBehaviors` → `GEZEL_FORCE_BEHAVIORS`,
  * `removeBehaviors` → `GEZEL_REMOVE_BEHAVIORS` (comma-joined). Exported
@@ -1424,10 +1622,38 @@ export function evalDaemonEnvForTrial(opts: {
   providerLock?: ChatProvider;
   /** Opt into embeddings only for dedicated semantic-retrieval scenarios. */
   enableEmbeddings?: boolean;
+  /** Per-candidate retrieval decision rows in history (`GEZEL_RETRIEVAL_TRACE`). */
+  retrievalTrace?: boolean;
+  /** A retrieval arm's relevance model; `null` pins it off. Absent leaves the daemon default. */
+  relevanceModel?: TrialRetrievalArm['relevanceModel'] | null;
 }): NodeJS.ProcessEnv {
   return {
     GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+    // A few workflow evals seed the exact connector corpus they grade before
+    // launching the craftbook. Let the trial daemon verify and reuse those
+    // local files instead of requiring credentials or touching the network.
+    // Production never sets this seam.
+    GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
     ...(opts.enableEmbeddings ? {} : { GEZEL_DISABLE_EMBEDDINGS: '1' }),
+    ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),
+    ...(opts.relevanceModel === null ? { GEZEL_RELEVANCE_MODEL: 'off' } : {}),
+    ...(opts.relevanceModel
+      ? {
+          GEZEL_RELEVANCE_MODEL: opts.relevanceModel.modelId,
+          // One verified copy across trials, like the embedder cache.
+          GEZEL_RELEVANCE_MODELS_DIR:
+            process.env.GEZEL_RELEVANCE_MODELS_DIR ?? join(defaultCacheRoot(), 'relevance-models'),
+          ...(opts.relevanceModel.thresholds
+            ? {
+                GEZEL_RELEVANCE_THRESHOLDS: [
+                  opts.relevanceModel.thresholds.drop,
+                  opts.relevanceModel.thresholds.keep,
+                  opts.relevanceModel.thresholds.strong,
+                ].join(','),
+              }
+            : {}),
+        }
+      : {}),
     // Capability-floor model routing is default-ON in the product but
     // MUST be off in trials: a trial home links up to three models
     // (chat + image + enrich/keurmeester), so routing would swap
@@ -1509,6 +1735,32 @@ export function throughputScaledMaxDurationMs(args: {
     MAX_CEILING_THROUGHPUT_SCALE,
   );
   return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
+}
+
+/**
+ * Resolve the hard no-progress window with the same hardware invariance as
+ * the overall ceiling. This watchdog intentionally ignores engine-only
+ * pulses so endless generation cannot keep a broken workflow alive, but a
+ * first-turn prompt prefill has no task/tool/file progress to report. On the
+ * 4.5 t/s CPU Gemma rail, real 9k-12k-token prompts took 8-20 minutes to
+ * prefill and were killed by 8m/20m authored windows while llama.cpp was
+ * steadily processing them. Those windows were calibrated on the same
+ * ~20 t/s reference machine as scenario ceilings, so scale them together.
+ */
+export function trialHardProgressTimeoutMs(args: {
+  authoredProgressTimeoutMs: number;
+  decodeRateTokensPerSec?: number | null;
+  minProgressTimeoutMs?: number;
+  envProgressFloorMs?: number;
+}): number {
+  return Math.max(
+    throughputScaledMaxDurationMs({
+      authoredMaxDurationMs: args.authoredProgressTimeoutMs,
+      decodeRateTokensPerSec: args.decodeRateTokensPerSec,
+    }),
+    args.minProgressTimeoutMs ?? 0,
+    args.envProgressFloorMs ?? 0,
+  );
 }
 
 /** Explicit operator budgets also take precedence over engine startup presets. */
@@ -1770,7 +2022,7 @@ export function ds4EvalPayloadFromModelDir(dir: string): Ds4EvalPayloadPaths {
   };
 }
 
-function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
+function resolveDs4EvalPayload(modelId: string, sourceHome?: string): Ds4EvalPayloadPaths {
   const envModel = process.env.GEZEL_DS4_MODEL?.trim();
   const envVision = process.env.GEZEL_DS4_VISION_ENCODER?.trim();
   if (envModel && existsSync(envModel)) {
@@ -1779,8 +2031,15 @@ function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
       ...(envVision && existsSync(envVision) ? { visionEncoderPath: envVision } : {}),
     };
   }
-  for (const home of [join(homedir(), '.gezel-eval-cache'), join(homedir(), '.gezel-dev')]) {
-    const dir = join(home, 'engines', 'ds4', 'models', modelId);
+  // A read-only source home is authoritative: the trial clones its weights
+  // from there, so sizing the launch from some other copy would describe a
+  // different payload than the one that runs.
+  const dirs = sourceHome
+    ? readOnlyModelRoots(sourceHome, 'ds4').map((root) => join(root, modelId))
+    : [join(homedir(), '.gezel-eval-cache'), join(homedir(), '.gezel-dev')].map((home) =>
+        join(home, 'engines', 'ds4', 'models', modelId),
+      );
+  for (const dir of dirs) {
     if (!existsSync(dir)) continue;
     const payload = ds4EvalPayloadFromModelDir(dir);
     if (payload.modelPath) return payload;
@@ -1832,8 +2091,9 @@ export function ds4EvalCapacityBudgetGb(totalRamBytes: number): 56 | 72 | 104 {
 
 export function ds4EvalLaunchOverridesForModel(
   modelId: string,
+  sourceHome?: string,
 ): LlamaCppEvalLaunchOverrides | undefined {
-  const payload = resolveDs4EvalPayload(modelId);
+  const payload = resolveDs4EvalPayload(modelId, sourceHome);
   const model = payload.modelPath;
   const visionEncoder = payload.visionEncoderPath;
   const bin = resolveDs4Binary({ requireVision: visionEncoder !== undefined });
@@ -4256,6 +4516,7 @@ async function finalize(args: {
   modelId: string;
   modelTier: import('@bendyline/gezel').ModelTier;
   generalistMode?: TrialOptions['generalistMode'];
+  retrievalArm?: TrialOptions['retrieval'];
   repairPolicy?: TrialOptions['repairPolicy'];
   engine?: TrialOptions['engine'];
   startedAt: Date;
@@ -4327,6 +4588,7 @@ async function finalize(args: {
     modelId: args.modelId,
     modelTier: args.modelTier,
     ...(args.generalistMode ? { generalistMode: args.generalistMode } : {}),
+    ...(args.retrievalArm ? { retrievalArm: args.retrievalArm } : {}),
     ...(args.repairPolicy ? { repairPolicy: args.repairPolicy } : {}),
     ...(args.engine ? { engine: args.engine } : {}),
     startedAt: args.startedAt.toISOString(),

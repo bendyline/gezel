@@ -11,6 +11,7 @@ import type {
   CreateTaskRequest,
   IndexReadinessReport,
   ScriptCapability,
+  ScriptRunTrigger,
   UpdateTaskRequest,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
@@ -61,6 +62,21 @@ export interface DispatcherContext {
    * strings — only known secret values.
    */
   knownSecretValues: Set<string>;
+  /**
+   * The run acts for a gezel, so artifact writes meet the same gezel-only
+   * denials as `write_artifact`: a script must not be the way around them.
+   */
+  initiatedByGezel?: boolean;
+}
+
+/**
+ * Chat and step runs act for a gezel. A nested run cannot see its parent's
+ * trigger, so it counts as one too: the paths that denies are task inputs,
+ * prompt drafts and connector corpora, which a user's own script never needs
+ * to reach through a child.
+ */
+export function scriptRunActsForGezel(trigger: ScriptRunTrigger): boolean {
+  return trigger.kind === 'chat' || trigger.kind === 'step' || trigger.kind === 'nested';
 }
 
 export type DispatchHandler = (ctx: DispatcherContext, params: unknown) => Promise<unknown>;
@@ -215,6 +231,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
           ctx.projectId,
           requireParam<string>(params, 'path'),
           requireParam<string>(params, 'content'),
+          { initiatedByGezel: ctx.initiatedByGezel === true },
         );
       },
     },
@@ -237,7 +254,9 @@ export function buildDispatcher(deps: DispatcherDeps): {
     'artifact.delete': {
       capability: 'artifacts.write',
       handler: async (ctx, params) => {
-        await store.deleteProjectArtifact(ctx.projectId, requireParam<string>(params, 'path'));
+        await store.deleteProjectArtifact(ctx.projectId, requireParam<string>(params, 'path'), {
+          initiatedByGezel: ctx.initiatedByGezel === true,
+        });
       },
     },
 
@@ -336,6 +355,14 @@ export function buildDispatcher(deps: DispatcherDeps): {
       handler: async (ctx, params) => {
         if (!deps.tasks) throw new Error('task.create is not available (no task manager wired)');
         const req = requireParam<Record<string, unknown>>(params, 'req');
+        // Trust is the owner's or the CLI's word about a recipe's scripts. A
+        // script cannot give it, even in a run the user started: the script
+        // may be one a gezel wrote.
+        if (req.trustScripts) {
+          throw new Error(
+            'task.create cannot trust custom scripts; launch from the app or the CLI',
+          );
+        }
         return deps.tasks.create(ctx.projectId, req as CreateTaskRequest);
       },
     },

@@ -11,7 +11,7 @@ import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
-import { navigateToTab } from './nav-actions.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
 import { questionChatTarget } from './question-nav.js';
 import { toolDisplayName } from './tool-display.js';
 
@@ -164,6 +164,11 @@ function QuestionBody({
   if (question.intent?.kind === 'task-paused') {
     return <TaskPausedCard question={question} onAnswered={onAnswered} />;
   }
+  if (question.intent?.kind === 'task-finished') {
+    return (
+      <TaskFinishedCard question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />
+    );
+  }
   return <PendingForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />;
 }
 
@@ -271,10 +276,10 @@ function TaskLifecycleActions({
 
   if (!ref) return null;
   return (
-    <>
+    <span className="pending-question-task-steer">
       <button
         type="button"
-        className="pending-question-skip pending-question-task-steer subtle"
+        className="pending-question-skip subtle"
         onClick={() => void steer('paused')}
         disabled={disabled || busy !== null}
         title="Stop the task here. It keeps its progress and can be resumed later."
@@ -283,14 +288,14 @@ function TaskLifecycleActions({
       </button>
       <button
         type="button"
-        className="pending-question-skip subtle"
+        className="pending-question-skip pending-question-cancel-task subtle"
         onClick={() => void steer('canceled')}
         disabled={disabled || busy !== null}
         title="End the task. It stops for good — its notes and artifacts stay."
       >
         {busy === 'canceled' ? 'Canceling…' : 'Cancel task'}
       </button>
-    </>
+    </span>
   );
 }
 
@@ -426,10 +431,13 @@ function NightShiftReviewCard({
               // hunting the artifacts drawer for the file we just named is
               // a step the user shouldn't have to take.
               onClick={() =>
-                navigateToTab({
-                  kind: 'document',
-                  path: `projects/${r.projectId}/artifacts/${r.path}`,
-                })
+                runNavActions(
+                  openProjectFileActions({
+                    projectId: r.projectId,
+                    path: r.path,
+                    source: 'artifacts',
+                  }),
+                )
               }
             >
               <span className="pending-question-night-row-title">{r.title ?? r.path}</span>
@@ -575,6 +583,59 @@ function TaskPausedCard({
           disabled={submitting !== null}
         >
           {submitting === 'dismiss' ? 'Saving…' : 'Dismiss'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Task finished ("ready for you") ───────────────────────────────
+//
+// Filed beside the Meester's wrap-up when work the owner launched from a
+// chat finishes. The context strip carries "Open task" and the preview;
+// "Open in chat" lands on the wrap-up; Dismiss only collapses the card.
+
+function TaskFinishedCard({
+  question,
+  onAnswered,
+  onOpenInChat,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+  onOpenInChat?: (question: Question) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const dismiss = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updated = await api.answerQuestion(question.id, { selectedChoices: [0] });
+      onAnswered?.(updated);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to dismiss.');
+      setSubmitting(false);
+    }
+  }, [question.id, submitting, onAnswered]);
+
+  return (
+    <div className="pending-question pending-question-pending">
+      <ContextStrip question={question} />
+      <div className="pending-question-prompt">
+        <RenderedMarkdown markdown={question.prompt} />
+      </div>
+      {error && <p className="pending-question-error">{error}</p>}
+      <div className="pending-question-actions">
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} disabled={submitting} />
+        <button
+          type="button"
+          className="pending-question-skip subtle"
+          onClick={() => void dismiss()}
+          disabled={submitting}
+        >
+          {submitting ? 'Saving…' : 'Dismiss'}
         </button>
       </div>
     </div>
@@ -1556,12 +1617,17 @@ function DocumentContext({
   const [resolvedKind, setResolvedKind] = useState<
     'document' | 'project-document' | 'artifact' | null
   >(null);
+  const [resolvedFrom, setResolvedFrom] = useState<{
+    projectId: string;
+    relativePath: string;
+  } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setContent(null);
     setResolvedKind(null);
+    setResolvedFrom(null);
     setError(null);
     // The server resolves library → project docs → artifacts, which is
     // the order the ask_user_question contract promises the model.
@@ -1571,6 +1637,7 @@ function DocumentContext({
         if (cancelled) return;
         setContent(res.content);
         setResolvedKind(res.kind ?? 'document');
+        setResolvedFrom(res.resolvedFrom ?? null);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1607,23 +1674,34 @@ function DocumentContext({
       : resolvedKind === 'project-document'
         ? 'Project doc'
         : 'Document';
-  // The document tab reads without project context, so a project hit opens
-  // by its qualified path and a library hit by its own.
-  const openPath =
-    resolvedKind && resolvedKind !== 'document' && !documentPath.startsWith('projects/')
-      ? `projects/${projectId}/${documentPath}`
-      : documentPath;
+  // Only a library hit opens as a document tab. That tab is the shared-library
+  // editor, and its autosave writes into the library folder: opening a project
+  // artifact there once copied a lossy duplicate into the user's library,
+  // which then shadowed the real artifact on every later read.
+  const openResolved = () => {
+    const owner = resolvedFrom?.projectId ?? projectId;
+    if (resolvedKind === 'artifact') {
+      const path =
+        resolvedFrom?.relativePath ??
+        documentPath.replace(/^projects\/[^/]+\//, '').replace(/^artifacts\//, '');
+      runNavActions(
+        openProjectFileActions({ projectId: owner, path, source: 'artifacts', fromQuestion: true }),
+      );
+      return;
+    }
+    if (resolvedKind === 'project-document') {
+      navigateToTab({ kind: 'project', id: owner });
+      return;
+    }
+    navigateToTab({ kind: 'document', path: documentPath });
+  };
 
   return (
     <div className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}`}>
       <div className="pending-question-context-row">
         <span className="muted">{kindLabel}</span>
         <span className="pending-question-context-title">{documentPath.split('/').pop()}</span>
-        <button
-          type="button"
-          className="pending-question-context-link"
-          onClick={() => navigateToTab({ kind: 'document', path: openPath })}
-        >
+        <button type="button" className="pending-question-context-link" onClick={openResolved}>
           Open {kindLabel.toLowerCase()}
         </button>
       </div>

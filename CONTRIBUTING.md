@@ -23,9 +23,8 @@ implemented. For requests that do not need a full proposal, you may instead
 
 ## Commit Messages
 
-Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org/)
-and are checked by the `commitlint` job in CI on pull requests and on pushes to
-`main`. There is no local git hook.
+Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org/).
+Nothing checks them — there is no local git hook and no CI job.
 
 This is not a style preference: `multi-semantic-release` derives every published
 npm version bump and changelog entry from these messages, so a malformed subject

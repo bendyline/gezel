@@ -1,0 +1,1 @@
+Gezel adds a panel to Writer, Calc, and Impress where your gezels chat with you about the document you have open, and can read it and make the edits you ask for. It connects to the Gezel app running on this computer; nothing leaves it.

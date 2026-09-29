@@ -78,6 +78,56 @@ describe('evaluateDeclarativeCheck', () => {
     expect(missing.detail).toBe('nope.md not found (needed for the nonempty check)');
   });
 
+  // The review's draft targeted Instagram, shipped no Instagram variant, and
+  // its size-only gate passed.
+  it('requires a file for every value a deliverable lists', async () => {
+    const check = {
+      kind: 'listedFiles',
+      file: 'posts/_drafting/post.md',
+      key: 'platforms',
+      pathTemplate: 'posts/_drafting/variants/{value}.md',
+    } as GateCheck as never;
+    const post = (platforms: string) =>
+      `---\nstatus: in-review\n${platforms}\ntitle: Pumpkin loaf\n---\n\nBase copy.\n`;
+    const variants = {
+      'posts/_drafting/variants/bluesky.md': 'Bluesky copy',
+      'posts/_drafting/variants/instagram.md': 'Instagram copy',
+    };
+
+    const inline = reader({
+      'posts/_drafting/post.md': post('platforms: [Bluesky, Instagram]'),
+      ...variants,
+    });
+    expect((await evaluateDeclarativeCheck(check, inline)).ok).toBe(true);
+
+    const block = reader({
+      'posts/_drafting/post.md': post('platforms:\n  - bluesky\n  - instagram\n  - LinkedIn'),
+      ...variants,
+    });
+    const missing = await evaluateDeclarativeCheck(check, block);
+    expect(missing.ok).toBe(false);
+    expect(missing.detail).toContain('posts/_drafting/variants/linkedin.md');
+    expect(missing.evidence).toEqual({ missing: ['posts/_drafting/variants/linkedin.md'] });
+
+    const unlisted = reader({ 'posts/_drafting/post.md': post('title2: none'), ...variants });
+    expect((await evaluateDeclarativeCheck(check, unlisted)).ok).toBe(false);
+  });
+
+  // A quote said $297 for items adding up to $197, and nothing checked it.
+  it('fails a deliverable whose figures do not hold up', async () => {
+    const check = { kind: 'figures', file: 'quote.md', artifact: true } as GateCheck as never;
+    const quote = (total: string) =>
+      `## Option 2\n\n- Fruit platter: $85\n- Coffee: $45\n- Pastries: $42\n- Delivery: $25\n\n**Subtotal: ${total}**\n`;
+
+    const wrong = await evaluateDeclarativeCheck(check, reader({}, { 'quote.md': quote('$297') }));
+    expect(wrong.ok).toBe(false);
+    expect(wrong.detail).toContain('says $297.00, but the items above it add up to $197.00');
+
+    const right = await evaluateDeclarativeCheck(check, reader({}, { 'quote.md': quote('$197') }));
+    expect(right.ok).toBe(true);
+    expect(isSharedGateCheck(check)).toBe(true);
+  });
+
   it('labels a check by its configuration, never its observed values', () => {
     expect(gateCheckLabel({ kind: 'minBytes', file: 'a.md', bytes: 9 } as GateCheck)).toBe(
       'minBytes a.md',

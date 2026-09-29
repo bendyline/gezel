@@ -1,4 +1,8 @@
-import type { Craftbook, CraftbookTemplateManifest } from '@bendyline/gezel';
+import {
+  type Craftbook,
+  type CraftbookTemplateManifest,
+  resolveCraftbookCategory,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
 import { readBundledCraftbookScripts } from '../scripts/install.js';
@@ -114,6 +118,7 @@ export function makeCraftbookResolver(store: Store, catalog: CatalogService): Cr
         craftbook: runtimeCraftbookFromTemplate(m, detail.about, scripts),
         sourceId: detail.sourceId,
         version: m.version,
+        category: resolveCraftbookCategory(m),
       };
     },
   };

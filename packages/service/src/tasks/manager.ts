@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type ChatSessionSummary,
   type Craftbook,
+  type CraftbookCategory,
   type CraftbookConnectorNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
@@ -25,6 +26,7 @@ import {
   type TaskFanout,
   type TaskNote,
   type TaskNoteAuthor,
+  type TaskReferences,
   type TaskStatus,
   type TaskVariation,
   type UpdateTaskRequest,
@@ -32,6 +34,7 @@ import {
   applyGateRejection,
   applyStepPatch,
   assertCraftbookGraph,
+  assignOwnerApprovalSteps,
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
@@ -49,6 +52,7 @@ import {
   resolveNextStep,
   resolveSecurityPolicy,
   resolveSteps,
+  runWhenVerdict,
   stampGateHandoff,
   stepInsertionIndex,
   summarizePlanDocument,
@@ -108,7 +112,14 @@ import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './i
 import type { InputStagingManager } from './inputs/staging.js';
 import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
+import { referencesHistoryDetails } from './references.js';
 import { isExactLocalSourceRead, normalizeSourcePath } from './research-evidence-match.js';
+import {
+  buildSpawnedChildTask,
+  inheritedChildAssignee,
+  instanceContextNoteText,
+  snapshotSpawnCraftbook,
+} from './spawn-child.js';
 import {
   StepCompletionBlockedError,
   formatGateScriptDiagnostics,
@@ -118,6 +129,7 @@ export { StepCompletionBlockedError };
 import {
   bumpStepActivation,
   findBranchGoto,
+  isOwnerStep,
   mainBookSource,
   shouldAutoAdvance,
   stepOwnerGezelId,
@@ -141,6 +153,8 @@ export interface CraftbookResolver {
     craftbook: Craftbook;
     sourceId: string;
     version?: string;
+    /** The catalog shelf; unknown for project and local books. */
+    category?: CraftbookCategory;
   } | null>;
 }
 
@@ -657,17 +671,26 @@ export class TaskManager {
 
   /**
    * What a launcher needs before creating a task from a craftbook: its name
-   * for the default title and the paramSchema its params and inputs resolve
-   * against. Null when the book does not resolve for this project.
+   * for the default title, the paramSchema its params and inputs resolve
+   * against, and its catalog shelf when it has one. Null when the book does
+   * not resolve for this project.
    */
   async describeCraftbook(
     projectId: string,
     craftbookId: string,
     opts: { version?: string; sourceId?: string } = {},
-  ): Promise<{ name: string; paramSchema: Craftbook['paramSchema'] } | null> {
+  ): Promise<{
+    name: string;
+    paramSchema: Craftbook['paramSchema'];
+    category?: CraftbookCategory;
+  } | null> {
     const resolved = await this.craftbookResolver?.resolve(craftbookId, { ...opts, projectId });
     if (!resolved) return null;
-    return { name: resolved.craftbook.name, paramSchema: resolved.craftbook.paramSchema ?? {} };
+    return {
+      name: resolved.craftbook.name,
+      paramSchema: resolved.craftbook.paramSchema ?? {},
+      ...(resolved.category ? { category: resolved.category } : {}),
+    };
   }
 
   /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
@@ -773,8 +796,9 @@ export class TaskManager {
     const step = craftbook.steps.find((s) => s.id === stepId);
     if (!step || !step.suggestedRole) return;
     // Explicit override: caller already pinned an assignee (either via
-    // step.assignee or step.suggestedGezelId). Respect it.
-    if (step.assignee?.kind === 'gezel' || step.suggestedGezelId) return;
+    // step.assignee or step.suggestedGezelId). Respect it. An owner step is
+    // pinned to the person; its role only says who would help them.
+    if (step.assignee || step.suggestedGezelId) return;
     try {
       const resolved = await this.roleResolver(step.suggestedRole, projectId);
       if (resolved?.gezelId) {
@@ -816,6 +840,12 @@ export class TaskManager {
        * capability boundary, not something a prompt should be able to set.
        */
       draftsDiffpack?: boolean;
+      /**
+       * The reference list gathered for a book started from the get-go (see
+       * `TaskLauncher`). Service-only: a caller that could set it could put
+       * arbitrary text into every step's prompt.
+       */
+      references?: TaskReferences;
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1139,7 +1169,14 @@ export class TaskManager {
       craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
-    const requestedExecutionMode = input.executionMode ?? 'auto';
+    // A system job's step is a control surface the service runs itself; no
+    // model ever takes it. Under `auto` the resolver still minted the
+    // Generalist and pinned it on that step, and a pinned step is one the
+    // stuck-step sweep re-drives and then pauses. The 1.26270 release
+    // candidate paused the Boekwachter's indexing job 34 minutes after first
+    // boot that way (2026-09-26).
+    const requestedExecutionMode =
+      extras?.origin?.kind === 'system-job' ? 'stepwise' : (input.executionMode ?? 'auto');
     // A draft resolves nothing yet (like roles) — `activate()` does, reading
     // an explicit request back off the stamp. Everything else resolves now.
     let executionMode: TaskExecutionMode | undefined =
@@ -1208,6 +1245,7 @@ export class TaskManager {
         ? { craftbookParams: effectiveCraftbookParams }
         : {}),
       ...(inputsPlan ? { inputs: inputsPlan.records } : {}),
+      ...(extras?.references ? { references: extras.references } : {}),
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
@@ -1254,6 +1292,7 @@ export class TaskManager {
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
         ...(task.inputs ? { inputs: inputsHistoryDetails(task.inputs) } : {}),
+        ...(task.references ? { references: referencesHistoryDetails(task.references) } : {}),
       },
     });
 
@@ -1679,7 +1718,7 @@ export class TaskManager {
     // via the shared resolver, then mint a unique id against this task.
     // Deliverable expansion happens AFTER the mint — the expanded gate
     // loops back with `onReject: <id>`, so it must see the final id.
-    const base = resolveSteps([input])[0]!;
+    const base = resolveSteps(assignOwnerApprovalSteps([input]))[0]!;
     const id = uniqueStepId(task.craftbook.steps, base.name, base.id);
     const expanded = input.deliverable
       ? expandStepDeliverable({ ...base, id }, input.deliverable)
@@ -2126,6 +2165,8 @@ export class TaskManager {
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const adv = step?.advanceWhen;
     if (!step || step.terminal || !adv || adv.requireChange) return 'not-ready';
+    // A file existing is not the owner's approval.
+    if (isOwnerStep(step)) return 'not-ready';
 
     const content = await (adv.artifact
       ? this.store.readProjectArtifact(projectId, adv.file)
@@ -2553,6 +2594,31 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         details: { ref: updated.ref, stepId: newActive },
       });
 
+      // A step that runs only when the owner asked for it is decided from
+      // their recorded answer, before any hook or model turn. "Queue to
+      // Bluesky (only when asked)" used to spend a two-minute turn finding
+      // out nobody had asked.
+      if (newStep?.runWhen && cascadeDepth + 1 <= STEP_CASCADE_CAP) {
+        const questions = await this.store.listProjectQuestions(projectId).catch(() => []);
+        const verdict = runWhenVerdict(newStep.runWhen, questions, updated.ref);
+        if (!verdict.run) {
+          await this.appendNote(projectId, num, {
+            text: `Skipped "${newStep.name}": ${verdict.reason}.`,
+            author: { kind: 'user' },
+            stepId: newStep.id,
+          }).catch(() => {});
+          log.info(`[tasks] ${updated.ref} skipped "${newStep.id}" (runWhen): ${verdict.reason}`);
+          return this.completeStepInternal(
+            projectId,
+            num,
+            newStep.id,
+            undefined,
+            cascadeDepth + 1,
+            { force: true, cause: 'auto' },
+          );
+        }
+      }
+
       if (newStep) {
         const entrance = await this.runActivatedStepOnEnter(
           projectId,
@@ -2849,11 +2915,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         // verdict. Consult before pausing; an applied verdict earns a
         // fresh ladder (budget + trail reset), stand_down/misses pause
         // with the diagnosis exactly as before.
-        const plateauAssignee =
-          step.assignee?.kind === 'gezel'
-            ? step.assignee.gezelId
-            : (step.suggestedGezelId ??
-              (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+        const plateauAssignee = stepOwnerGezelId(task, step);
         if (this.keurmeester && plateauAssignee) {
           const consult = await this.keurmeester
             .consultTaskStall({
@@ -3011,7 +3073,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           this.judgeCallCounts.set(budgetKey, used + 1);
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
-        imageEvidence: async () => {
+        imageEvidence: async (artifact = false) => {
           if (!this.history) return { observable: false, paths: [] };
           const events = await this.history.listEvents({
             projectId,
@@ -3022,7 +3084,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             const d = event.details;
             return d?.success === true &&
               d.name === 'read_image_as_base64' &&
-              d.imageArtifact === false &&
+              d.imageArtifact === artifact &&
               d.taskRef === task.ref &&
               // Generalist sessions survive graph transitions; their bridge's
               // step tag can name the previous step after a repair back-edge.
@@ -3461,11 +3523,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       // (corrective message, step/craftbook rewrite, or takeover) keeps
       // the task active with a fresh gate budget; stand_down, predicate
       // misses, and consult failures pause exactly as before.
-      const gateAssignee =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : (step.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      const gateAssignee = stepOwnerGezelId(task, step);
       if (this.keurmeester && gateAssignee) {
         // Stage-3 before the attempt budget is spent = a busy plateau
         // (same failing checks, content churning) — a distinct trigger
@@ -4311,62 +4369,15 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const now = nowIso();
     const num = await this.store.nextProjectTaskNum(parent.projectId);
 
-    // Re-snapshot the spawn craftbook so child step lifecycle fields are
-    // fresh and the child can mutate without rippling back to the host.
-    const childCraftbook = snapshotCraftbookForTask(
-      {
-        ...parent.spawnsCraftbook,
-        steps: parent.spawnsCraftbook.steps.map((s) => {
-          // Strip per-instance lifecycle off the host's spawn snapshot
-          // so the child gets a clean recipe view.
-          const {
-            createdAt: _ca,
-            completedAt: _co,
-            attemptCount: _ac,
-            lastActivatedAt: _la,
-            onEnterCompletedAt: _entered,
-            ...recipe
-          } = s;
-          void _ca;
-          void _co;
-          void _ac;
-          void _la;
-          void _entered;
-          return recipe;
-        }),
-      },
+    const { craftbook: childCraftbook, entryStep: firstStep } = snapshotSpawnCraftbook(
+      parent,
+      parent.spawnsCraftbook,
+      num,
+      variation,
       now,
     );
-    // Land the per-child context in the recipe itself: {{client}} etc. in
-    // step prompts and gate/advanceWhen file paths become the concrete
-    // values BEFORE the child is written + dispatched, so the child's turn
-    // and its gate both see the resolved per-item data.
-    // A shard of a proposal-drafting host writes into its OWN proposal, whose
-    // id is this child's task number. `{{task.num}}` cannot express that:
-    // `create()` already interpolated the spawn template with the HOST's
-    // context, so every shard would silently target the host's pack. Hence a
-    // dedicated token resolved here, where the child's number is known.
-    const shardContext: Record<string, string> = {
-      ...(variation?.context ?? {}),
-      ...(parent.diffpackId
-        ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` }
-        : {}),
-    };
-    if (Object.keys(shardContext).length > 0) {
-      interpolateStepsContext(childCraftbook.steps, shardContext);
-    }
     const activeStepId = childCraftbook.entryStepId;
-    // First activation of the child's entry step → attemptCount 1.
-    childCraftbook.steps = bumpStepActivation(childCraftbook.steps, activeStepId, now);
-    const firstStep = childCraftbook.steps.find((s) => s.id === activeStepId)!;
-
-    // Inherited assignee: explicit step assignee → suggestedGezelId →
-    // craftbook default → parent's assignee.
-    const inheritedAssignee: TaskAssignee =
-      firstStep.assignee ??
-      (firstStep.suggestedGezelId
-        ? { kind: 'gezel', gezelId: firstStep.suggestedGezelId }
-        : (childCraftbook.defaultAssignee ?? parent.assignee));
+    const inheritedAssignee = inheritedChildAssignee(firstStep, childCraftbook, parent);
 
     // A child dispatches off its ENTRY STEP's binding — `onStepActivated`
     // reads the step's assignee/suggestedGezelId, never the task assignee.
@@ -4381,84 +4392,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       firstStep.suggestedGezelId = inheritedAssignee.gezelId;
     }
 
-    const title = variation?.title ?? parent.title;
-    const description = variation?.description ?? childCraftbook.description ?? parent.description;
-    const plan = variation?.plan ?? childCraftbook.plan ?? parent.plan;
-
-    // Carry the spawn-source provenance forward as the child's main role.
-    const parentSpawnSource = parent.sourceCraftbookIds?.find((s) => s.role === 'spawn');
-    const childSources: TaskCraftbookSource[] = parentSpawnSource
-      ? [
-          {
-            role: 'main',
-            catalogId: parentSpawnSource.catalogId,
-            ...(parentSpawnSource.version ? { version: parentSpawnSource.version } : {}),
-            ...(parentSpawnSource.sourceId ? { sourceId: parentSpawnSource.sourceId } : {}),
-          },
-        ]
-      : [];
-
-    const child: Task = {
-      projectId: parent.projectId,
+    const child = buildSpawnedChildTask({
+      parent,
       num,
-      ref: buildTaskRef(parent.projectId, num),
-      title,
-      ...(description ? { description } : {}),
-      ...(plan ? { plan } : {}),
-      status: 'active',
-      assignee: inheritedAssignee,
-      // Same run, same mode — never re-resolved for a child.
-      ...(parent.executionMode ? { executionMode: parent.executionMode } : {}),
       craftbook: childCraftbook,
-      ...(parent.cliTrustedScriptHashes
-        ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }
-        : {}),
-      ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
-      ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
-      // A shard works on its host's input; its template already carries those paths.
-      ...(parent.inputs ? { inputs: parent.inputs } : {}),
-      // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
-      // a shard that carries one drafts into that change proposal, so its
-      // workspace-write tools re-root at the pack instead of the workspace.
-      // Per-child, because a fanout exists precisely to give each cluster of
-      // issues its own reviewable proposal.
-      // A shard of a proposal-drafting host drafts its OWN proposal — one per
-      // cluster, which is why the fanout exists. Derived from the child's task
-      // number rather than passed in: if this were model-supplied, a mangled
-      // value would silently unbind the child and send its edits to the real
-      // workspace, which is the one outcome this whole feature exists to
-      // prevent. Fail-safe, not fail-open.
-      ...(parent.diffpackId ? { diffpackId: String(num) } : {}),
-      // A child of a night-shift host is itself night-shift work — the
-      // runner gates its dispatch to an active shift. The child is a plain
-      // task (no cron/spawn), so `onceADay` doesn't carry over.
-      ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
-      activeStepId,
-      parentTaskRef: parent.ref,
-      // Shards share the HOST's folder: the host's collect-barrier gates
-      // were interpolated with the host's number, and per-child files are
-      // already namespaced by the variation context ({{batchNumber}}, …).
-      artifactDir: parent.artifactDir ?? `tasks/${parent.num}`,
-      ...(parent.roleBasedNameOnlyMode !== undefined
-        ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
-        : {}),
-      createdAt: now,
-      updatedAt: now,
-      createdBy: parent.createdBy,
-    };
+      assignee: inheritedAssignee,
+      variation,
+      now,
+    });
     await this.store.writeTask(child);
 
-    // If the variation includes context, append it as a step-0 note so
-    // the gezel receiving the handoff can see per-child parameters.
-    if (variation?.context && Object.keys(variation.context).length > 0) {
-      const lines = ['# Instance context', ''];
-      for (const [k, v] of Object.entries(variation.context)) {
-        lines.push(`- **${k}**: ${v}`);
-      }
-      lines.push('');
+    const contextNote = instanceContextNoteText(variation);
+    if (contextNote) {
       try {
         await this.appendNote(child.projectId, child.num, {
-          text: lines.join('\n'),
+          text: contextNote,
           author: { kind: 'user' },
           stepId: activeStepId,
         });

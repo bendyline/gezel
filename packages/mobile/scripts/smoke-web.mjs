@@ -90,10 +90,12 @@ try {
       }
     }
     assert.deepEqual(unnamed, [], `${name} has visible controls without accessible names`);
+    // A narrow composer's thread picker is an editor-toolbar key and takes the
+    // toolbar's size, like the attach keys beside it (docs/ux.md).
     for (const control of await page
       .locator('.app-compact')
       .locator(
-        '.task-detail-actions button, .task-step-panel .gz-select-trigger, .gezel-chat-project-select, .gezel-chat-session-select',
+        '.task-detail-actions button, .task-step-panel .gz-select-trigger, .gezel-chat-project-select, .gezel-chat-session-select:not(.squisq-toolbar-button)',
       )
       .all()) {
       if (!(await control.isVisible())) continue;
@@ -153,8 +155,10 @@ try {
       // estimate lands, about 100ms later, for as long as no model is ready —
       // which is the whole run here. A rail opened before that settles is
       // closed underneath the next step, and which side of the close a run
-      // lands on moves with bundle size, so wait it out.
-      await open.waitFor();
+      // lands on moves with bundle size, so wait it out. The header button is
+      // mounted while the rail is still open, so only its pressed state marks
+      // the close.
+      await page.getByRole('button', { name: 'Navigation', exact: true, pressed: false }).waitFor();
       booted = true;
     }
     // The rail is either already open or sits behind the header button, and
@@ -163,7 +167,9 @@ try {
     // mounted, and committing to one path waits out the whole timeout on a
     // page that was always going to show the other.
     await nav.or(open).first().waitFor();
-    if (await open.isVisible()) await open.click();
+    // The button stays in the compact header and toggles, so pressing it over
+    // an open rail closes it.
+    if (!(await nav.isVisible())) await open.click();
     await nav.waitFor();
     return nav;
   }

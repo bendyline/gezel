@@ -48,32 +48,46 @@ function evaluateStep(
 /**
  * Does this step's gate route a rejection back into the book at RUNTIME?
  *
- * A gate script may emit `goto` — `checkFixReview` sends a well-formed
- * `Verdict: REVISE` back to the step named by its `fixStepId` input — and that
- * edge exists nowhere in the declarative graph. Reading only `step.next` therefore
- * reports the twenty books carrying an enforceable review script as having "no
- * repair loop", when they have the STRONGEST one in the library: the others rely
- * on the model choosing to jump, these are routed by the runtime whatever the
- * model does. Penalizing them inverted the ranking the audit exists to produce.
+ * A completion gate's `onReject` may route directly to repair. A gate script may
+ * also emit `goto` — `checkFixReview` sends a well-formed `Verdict: REVISE` back
+ * to the step named by its `fixStepId` input — and that second edge exists nowhere
+ * in the declarative graph. Reading only `step.next` therefore reports books with
+ * enforceable repair routing as having "no repair loop", when the runtime routes
+ * rejection whatever the model does. Penalizing them inverted the ranking the
+ * audit exists to produce.
  *
  * Evidence, not a script-name allowlist: a gate script input whose value is
  * another step's id in this same book is a repair edge, whatever the script is
  * called.
  */
-function gateScriptRoutesToAnotherStep(
+function gateRoutesToAnotherStep(
   step: CraftbookTemplateStepSummary,
   template: CraftbookTemplateSummary,
 ): boolean {
   const gate = parseGate(step);
   if (!gate) return false;
   const stepIds = new Set(template.steps.map((s) => s.id));
-  for (const script of normalizeStepGate(gate).scripts) {
+  const normalized = normalizeStepGate(gate);
+  if (normalized.onReject && normalized.onReject !== step.id && stepIds.has(normalized.onReject)) {
+    return true;
+  }
+  for (const script of normalized.scripts) {
     const inputs = (script as { inputs?: Record<string, unknown> }).inputs ?? {};
     for (const value of Object.values(inputs)) {
       if (typeof value === 'string' && value !== step.id && stepIds.has(value)) return true;
     }
   }
   return false;
+}
+
+function hasReviewerRole(step: CraftbookTemplateStepSummary): boolean {
+  return /review|qa|verify|evaluate|audit|editor|critic|assess|inspect/i.test(
+    step.suggestedRole ?? '',
+  );
+}
+
+function isRoleExempt(step: CraftbookTemplateStepSummary): boolean {
+  return !!(step as { spawnFanout?: unknown }).spawnFanout;
 }
 
 /**
@@ -173,7 +187,7 @@ export function auditCraftbookTemplate(
       issue('warn', 'graph.no-edge', 'Non-terminal step has no explicit next edge.', step.id),
     );
   }
-  for (const step of nonTerminal.filter((s) => !s.suggestedRole)) {
+  for (const step of nonTerminal.filter((s) => !s.suggestedRole && !isRoleExempt(s))) {
     issues.push(issue('warn', 'role.missing', 'Non-terminal step has no suggestedRole.', step.id));
   }
   for (const step of steps.filter((s) => !hasSubstantivePrompt(s))) {
@@ -262,7 +276,8 @@ export function auditCraftbookTemplate(
     }
   } else {
     const prompt = evaluator.prompt ?? '';
-    if (!/review|qa|verify|evaluate/i.test(evaluator.suggestedRole ?? '')) {
+    const deterministicRepairRoute = gateRoutesToAnotherStep(evaluator, template);
+    if (!hasReviewerRole(evaluator)) {
       issues.push(
         issue(
           'warn',
@@ -272,7 +287,7 @@ export function auditCraftbookTemplate(
         ),
       );
     }
-    if (evaluator.next === 'finish' && !gateScriptRoutesToAnotherStep(evaluator, template)) {
+    if (evaluator.next === 'finish' && !deterministicRepairRoute) {
       issues.push(
         issue(
           'warn',
@@ -282,7 +297,10 @@ export function auditCraftbookTemplate(
         ),
       );
     }
-    if (!/advance_task_step/.test(prompt) || !/finish/.test(prompt)) {
+    if (
+      (!/advance_task_step/.test(prompt) && !deterministicRepairRoute) ||
+      !/finish/.test(prompt)
+    ) {
       issues.push(
         issue(
           'warn',
@@ -306,7 +324,9 @@ export function auditCraftbookTemplate(
     nonTerminal.length === 0
       ? 15
       : Math.round(
-          (nonTerminal.filter((step) => !!step.suggestedRole).length / nonTerminal.length) * 15,
+          (nonTerminal.filter((step) => !!step.suggestedRole || isRoleExempt(step)).length /
+            nonTerminal.length) *
+            15,
         );
   const promptScore =
     steps.length === 0
@@ -338,10 +358,11 @@ export function auditCraftbookTemplate(
               gates.length) *
               7,
         );
+  const evaluatorHasRepairRoute = evaluator ? gateRoutesToAnotherStep(evaluator, template) : false;
   const reviewerScore = evaluator
-    ? (/(review|qa|verify|evaluate)/i.test(evaluator.suggestedRole ?? '') ? 4 : 0) +
-      (evaluator.next && evaluator.next !== 'finish' ? 4 : 0) +
-      (/advance_task_step/.test(evaluator.prompt ?? '') ? 4 : 0) +
+    ? (hasReviewerRole(evaluator) ? 4 : 0) +
+      ((evaluator.next && evaluator.next !== 'finish') || evaluatorHasRepairRoute ? 4 : 0) +
+      (/advance_task_step/.test(evaluator.prompt ?? '') || evaluatorHasRepairRoute ? 4 : 0) +
       (/finish/.test(evaluator.prompt ?? '') ? 3 : 0)
     : hookDriven
       ? 15

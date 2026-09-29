@@ -16,9 +16,7 @@ import {
   effectiveGeneralistModeSetting,
   formatNightShiftSummary,
   formatSuspension,
-  isEngagementAllowed,
   isTaskWorkAllowed,
-  normalizeStepGate,
   nowIso,
   onSuspension,
   parseTaskRef,
@@ -31,7 +29,9 @@ import {
 import {
   type ExternalFolders,
   KeyedLock,
+  type Task,
   type TaskAssignee,
+  type TaskCraftbookStep,
   resolveDistributionProfile,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -84,8 +84,11 @@ import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
+import { createFirstPartyAppTokens } from './grants/first-party-apps.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
+import { createXpRefresher } from './growth/xp-refresher.js';
+import { stepCreditedGezelId } from './growth/xp.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { generateLoopbackCert } from './http/cert.js';
@@ -160,6 +163,7 @@ import { InputStagingManager } from './tasks/inputs/staging.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
@@ -168,6 +172,7 @@ import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
 import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
 import { UvRuntime } from './python/uv-runtime.js';
+import { RelevanceModelManager } from './relevance/manager.js';
 import { loadOrCreateDeviceIdentity, signCertFingerprint } from './remotes/identity.js';
 import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
@@ -187,25 +192,31 @@ import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { DEFAULT_PORT, type RunningService, type StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
-import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
+import { runSystemBootstrap, stopSystemBootstraps } from './system-toolsets/bootstrap.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
+import { loadTaskOutputs } from './tasks/completion-wrapup.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
-import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
-import type { GateWorkspaceReader } from './tasks/gate-eval.js';
+import { reviewTaskFigures } from './tasks/figure-review.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
+import { ownerStepQuestion } from './tasks/owner-step.js';
+import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
+import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
 import { TaskScheduler } from './tasks/scheduler.js';
-import { extractSpawnItems } from './tasks/spawn-items.js';
-import { evaluateStepGate } from './tasks/step-gate.js';
+import {
+  type TaskStepRef,
+  pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
+} from './tasks/step-pause.js';
+import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
@@ -349,8 +360,8 @@ export async function startProductService(
   const store = new Store({ home, history, external, serviceRole, privateUserHome });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();
-  // The runner persists after every host call, so a daemon that died mid-run
-  // leaves records saying `running`. Settle them; never replay them.
+  // Settle the runs a dead daemon left `running`, found by in-flight marker
+  // alone (never a history scan), before any new run can start; never replay.
   await recoverInterruptedScriptRuns(
     home,
     (await store.listProjects()).map((p) => p.id),
@@ -417,6 +428,9 @@ export async function startProductService(
     tokenStore,
     autoApproveAppIds: parseAutoApproveAppIds(process.env.GEZEL_AUTOAPPROVE_APPS),
   });
+  // Gezel's own Office, LibreOffice and VS Code add-ins connect without a
+  // code once they prove they run as this user; see grants/first-party-apps.ts.
+  const firstPartyApps = createFirstPartyAppTokens(tokenStore);
   // The EnsureModel orchestrator construction happens after the local
   // model managers + catalog are built — see the assignment below the
   // `catalog`/`llamaCppModels`/`ds4Models`/`mlxModels` lines.
@@ -754,47 +768,10 @@ export async function startProductService(
   // Late-bound: IndexEnrichmentManager is constructed after the runner; the
   // closure reads through this ref so night dispatch can hold on catch-up.
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
-  // One exit for a handoff the runtime could not carry: the runner reaches it
-  // when the dispatch itself rejects, the chat manager when the detached sends
-  // spend their bounded retries. Both re-check the step is still the live one
-  // so a task that moved on (or was paused by a person) is left alone.
-  const pauseTaskAfterFailedHandoff = async ({
-    projectId,
-    num,
-    stepId,
-    taskRef,
-    detail,
-  }: {
-    projectId: string;
-    num: number;
-    stepId: string;
-    taskRef: string;
-    detail: string;
-  }): Promise<void> => {
-    const current = await tasks.get(projectId, num);
-    if (!current || current.status !== 'active' || current.activeStepId !== stepId) return;
-    await tasks
-      .appendNote(projectId, num, {
-        text: `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`,
-        author: { kind: 'user' },
-        stepId,
-      })
-      .catch(() => {});
-    await tasks.setStatus(projectId, num, 'paused');
-    const paused = await tasks.get(projectId, num);
-    if (paused) {
-      await tasks.emitNeedsHelp({
-        projectId,
-        task: paused,
-        stepId,
-        reason: 'step_stalled',
-        detail: `Handoff for step "${stepId}" failed after bounded retries: ${detail}`,
-      });
-    }
-    log.warn(
-      `[tasks] ${taskRef} step "${stepId}": handoff failed after bounded retries — paused for help`,
-    );
-  };
+  // Set first thing in `stop()`; see pauseTaskAfterFailedHandoff.
+  let stopping = false;
+  const pauseTaskAfterFailedHandoff = (args: TaskStepRef & { detail: string }) =>
+    pauseAfterFailedHandoff(tasks, args, () => stopping);
   chat.setHandoffExhaustedHandler(async ({ taskRef, stepId, detail }) => {
     const [projectId, numText] = taskRef.split('/');
     const num = Number(numText);
@@ -861,8 +838,11 @@ export async function startProductService(
   // TaskRunner's live dispatch to the new activation timestamp immediately so
   // its stale-dispatch pruning does not cancel that same recovery turn.
   tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
-    const gezelId =
-      newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+    const gezelId = isOwnerStep(newStep)
+      ? undefined
+      : newStep.assignee?.kind === 'gezel'
+        ? newStep.assignee.gezelId
+        : newStep.suggestedGezelId;
     if (!gezelId || !newStep.lastActivatedAt) return;
     taskRunner.adoptActiveDispatchActivation({
       taskRef: task.ref,
@@ -981,6 +961,18 @@ export async function startProductService(
   // off cleanly. Errors are swallowed inside TaskManager — a
   // misconfigured wiring falls back to the task-level assignee.
   const { ensureGezel } = await import('./gezels/ensure.js');
+  // Gezels the resolver hired (not reused) wait here until their first step
+  // starts, when the owner's thread introduces them.
+  const freshHires = new Set<string>();
+  const introduceFreshHire = (task: Task, step: TaskCraftbookStep | undefined): void => {
+    const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
+    if (!step || !gezelId || !freshHires.delete(gezelId)) return;
+    void chat
+      .postCrewIntroduction(task, gezelId, step)
+      .catch((err) =>
+        log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
+      );
+  };
   // Named so the craftbook command launcher (below) can reuse the exact
   // same role→gezel resolution the step-activation path uses.
   const roleResolverClosure = async (
@@ -1005,6 +997,7 @@ export async function startProductService(
       await store.addGezelToProject(projectId, res.gezelId, { source: 'task' }).catch(() => {
         /* roster add is best-effort */
       });
+      if (res.action !== 'reused') freshHires.add(res.gezelId);
       return { gezelId: res.gezelId };
     } catch (err) {
       log.warn(
@@ -1083,7 +1076,52 @@ export async function startProductService(
   const { installCraftbookScripts, installLocalCraftbookScripts } = await import(
     './scripts/install.js'
   );
+  // Owner-step card: one unanswered card per (task, step), attributed to the
+  // gezel whose work is under review so the card reads as their hand-over.
+  const fileOwnerStepCard = async (
+    task: Task,
+    step: TaskCraftbookStep,
+    reviewed: TaskCraftbookStep | undefined,
+  ): Promise<void> => {
+    const existing = await store.listProjectQuestions(task.projectId).catch(() => []);
+    if (
+      existing.some(
+        (q) =>
+          q.intent?.kind === 'step-awaits-owner' &&
+          q.intent.taskRef === task.ref &&
+          q.intent.stepId === step.id &&
+          !q.answer,
+      )
+    ) {
+      return;
+    }
+    const returnTo = reviewed && reviewed.id !== step.id ? reviewed : undefined;
+    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+    const asker =
+      (returnTo ? stepOwnerGezelId(task, returnTo) : undefined) ?? config.meesterGezelId ?? '';
+    const outputs = await loadTaskOutputs(store, task);
+    const question = ownerStepQuestion({
+      task,
+      step,
+      ...(returnTo ? { returnTo } : {}),
+      askerGezelId: asker,
+      outputs,
+      figures: await reviewTaskFigures(store, task, outputs).catch(() => null),
+    });
+    await store.writeQuestion(question);
+    chatEvents.publishProjectEvent(task.projectId, { type: 'question_asked', question });
+    log.info(`[tasks] ${task.ref} step "${step.id}" waits for the owner; filed a card`);
+  };
   tasks.setTaskCreatedHook(async ({ projectId, task, sources }) => {
+    // A task that opens on an owner step (approve the plan first) never
+    // passes through the activation hook, so its card is filed here.
+    const entry = task.craftbook.steps.find((s) => s.id === task.activeStepId);
+    if (task.status === 'active' && entry && isOwnerStep(entry)) {
+      await fileOwnerStepCard(task, entry, undefined).catch((err) =>
+        log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
+      );
+    }
+    if (task.status === 'active') introduceFreshHire(task, entry);
     // A book that verifies its work by running project commands
     // (`commandEvidence` gates) declares them as `commands` needs; raise
     // their first-use approval questions NOW so the user answers at
@@ -1237,220 +1275,25 @@ export async function startProductService(
   // state. Kept out of the `TaskManager` constructor to avoid a circular
   // dep — and kept here (not inline in chat/) so the wiring is visible
   // alongside the other cross-manager plumbing.
+  // XP follows finished work (growth/xp-refresher.ts). The growth engine is
+  // built further down, so the refresher reaches it through this ref.
+  const growthRef: { engine?: GrowthEngine } = {};
+  const xpRefresher = createXpRefresher({
+    refresh: async (gezelId) => {
+      if (!growthRef.engine) throw new Error('growth engine not ready');
+      return growthRef.engine.refresh(gezelId, { allowKlerk: false, createPending: false });
+    },
+    onRefreshed: (gezelId, xp) =>
+      chatEvents.publishGlobalEvent({ type: 'growth_updated', gezelId, xp }),
+  });
+  const runtimeActivation = { store, tasks, scriptRunner, history };
   tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
-    // ── Automated ACTIVATION gate ───────────────────────────────────────
-    // When the newly-activated step declares an activation-moment gate
-    // (legacy GateSpec, or a StepGate with `at: 'activation'`), the
-    // RUNTIME evaluates it against the workspace and routes the task —
-    // with NO model turn. This is what carries a small model through the
-    // loop: it only ever has to `write_file`; the runtime judges + routes
-    // + loops. Completion-moment gates are NOT handled here — they fire
-    // inside TaskManager.completeStep as a guard.
-    if (newStep.gate) {
-      const gate = normalizeStepGate(newStep.gate);
-      if (gate.at === 'activation') {
-        const gateProject = await store.getProject(projectId).catch(() => null);
-        if (gateProject && !projectAllowsAmbientWork(gateProject)) return;
-        const attempt = newStep.attemptCount ?? 1;
-        const onFail = gate.onReject ?? task.craftbook.entryStepId;
-        // Shared with completion gates: for a drafting task this reader is
-        // the diffpack overlay, so activation gates judge the proposed tree.
-        const reader: GateWorkspaceReader = tasks.gateWorkspaceReader(projectId, task);
-        const outcome = await evaluateStepGate({
-          gate,
-          ws: reader,
-          // Activation gates run with no session in flight; standard-scope
-          // scripts are trusted, everything else respects engagement mode.
-          runScript: async (ref) => {
-            if (ref.scope !== 'standard') {
-              const config = await store.readConfig();
-              if (!isEngagementAllowed(config)) return 'skipped';
-            }
-            return scriptRunner.run({
-              projectId,
-              scriptName: ref.name,
-              ...(ref.scope ? { scope: ref.scope } : {}),
-              inputs: ref.inputs,
-              trigger: { kind: 'step', taskRef: task.ref, stepId: newStep.id, moment: 'gate' },
-            });
-          },
-        });
-
-        // Mirror of TaskManager.logStepGated for the legacy activation
-        // moment — without this the per-book gate stats silently miss
-        // every activation-gated (legacy GateSpec) book.
-        const logActivationGated = (decision: 'approve' | 'reject', paused: boolean) => {
-          const failedKinds = (outcome.checkResults ?? [])
-            .filter((c) => !c.ok)
-            .map((c) => c.kind as string);
-          const book = task.sourceCraftbookIds?.find((s) => s.role === 'main');
-          const gezelId =
-            newStep.assignee?.kind === 'gezel'
-              ? newStep.assignee.gezelId
-              : (newStep.suggestedGezelId ??
-                (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
-          return history
-            .log({
-              kind: 'task.step.gated',
-              projectId,
-              ...(gezelId ? { gezelId } : {}),
-              summary:
-                decision === 'approve'
-                  ? `Gate approved ${task.ref} step "${newStep.name}"`
-                  : `Gate rejected ${task.ref} step "${newStep.name}" (attempt ${attempt}/${gate.maxAttempts})`,
-              details: {
-                ref: task.ref,
-                stepId: newStep.id,
-                decision,
-                gateAt: 'activation',
-                attempt,
-                maxAttempts: gate.maxAttempts,
-                paused,
-                bookCatalogId: book?.catalogId ?? task.craftbook.id,
-                ...(book?.version ? { bookVersion: book.version } : {}),
-                ...(decision === 'reject' && failedKinds.length > 0
-                  ? { firstFailKind: failedKinds[0], failedKinds }
-                  : {}),
-                ...(outcome.skipped.length > 0 ? { skippedScripts: outcome.skipped } : {}),
-              },
-            })
-            .catch(() => {});
-        };
-
-        if (outcome.decision === 'approve' && !gate.reviewer) {
-          // Floor cleared and no dynamic reviewer to consult → advance.
-          await logActivationGated('approve', false);
-          const onPass = outcome.goto ?? gate.onApprove ?? newStep.next;
-          if (onPass) {
-            await tasks
-              .completeStep(projectId, task.num, newStep.id, onPass, { cause: 'gate' })
-              .catch((err) => log.error('[gate] pass-advance failed:', err));
-          }
-          return;
-        }
-        if (outcome.decision === 'reject') {
-          // Write the concrete gaps so the builder fixes THOSE, then loop
-          // back — unless we've looped too many times, then pause + surface.
-          await tasks
-            .appendNote(projectId, task.num, {
-              text: `# Evaluation gate — not yet met (attempt ${attempt})\n\n${outcome.message ?? ''}\n\nAddress these, then the gate re-checks automatically.`,
-              author: { kind: 'user' },
-              stepId: outcome.goto ?? onFail,
-            })
-            .catch(() => {});
-          if (attempt >= gate.maxAttempts) {
-            await tasks.setStatus(projectId, task.num, 'paused').catch(() => {});
-            log.warn(
-              `[gate] ${task.ref} step "${newStep.id}" not met after ${attempt} attempts — pausing for help`,
-            );
-            await logActivationGated('reject', true);
-            return;
-          }
-          await logActivationGated('reject', false);
-          await tasks
-            .completeStep(projectId, task.num, newStep.id, outcome.goto ?? onFail, {
-              cause: 'gate',
-            })
-            .catch((err) => log.error('[gate] fail-loop failed:', err));
-          return;
-        }
-        // approve && gate.reviewer → fall through to start a session for
-        // the reviewer role (Layer 2): the dynamic Playwright pass.
-      }
+    if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
+      xpRefresher.note(stepCreditedGezelId(completedStep));
     }
-
-    // ── Declarative per-item fanout ─────────────────────────────────────
-    // A step marked `spawnFanout` on a spawn-host task (one carrying a
-    // `spawnsCraftbook`) fans out one child task per item in the parent
-    // craftbook's `spawn.overFile` JSON array on its declared surface — the runtime does
-    // the spawning, with NO model tool call. Each child inherits the item's
-    // fields as `variation.context` (string-substituted into its step
-    // prompt + gate paths) and dispatches through its own entry-step binding
-    // (the existing spawnChild → onStepActivated path). Placed BEFORE the
-    // single-gezel dispatch: after fanning out we stamp the step's
-    // advanceWhen deliverable and advance to the next (collect) step, then
-    // return — the crew (children) ARE the work, so no redundant parent
-    // worker turn is started. The collect step's fileCount gate is the
-    // barrier that waits on the children's files. Fail-safe: every
-    // read/parse/spawn error is logged and swallowed so a malformed run
-    // never throws into the lifecycle. Idempotent: we skip spawning when the
-    // parent already has children (a loop-back re-activation must not
-    // double-spawn).
-    const spawn = task.craftbook.spawn;
-    if (newStep.spawnFanout && task.spawnsCraftbook && spawn) {
-      // Ambient-work guard, same as the single-gezel dispatch below: a
-      // read-only / inactive / stable project pauses all autonomous work,
-      // and a fanout spawns child turns, so honor it here too.
-      const fanoutProject = await store.getProject(projectId).catch(() => null);
-      if (fanoutProject && !projectAllowsAmbientWork(fanoutProject)) return;
-      try {
-        const existing = await tasks.listChildren(task.ref).catch(() => []);
-        if (existing.length === 0) {
-          const raw = await (spawn.overArtifact
-            ? store.readProjectArtifact(projectId, spawn.overFile)
-            : store.readProjectWorkspaceFile(projectId, spawn.overFile)
-          ).catch(() => null);
-          const items = raw ? extractSpawnItems(raw, spawn.itemsPath) : [];
-          if (items.length === 0) {
-            log.warn(
-              `[fanout] ${task.ref} step "${newStep.id}": no items in ${spawn.overFile} — skipping fanout`,
-            );
-          } else {
-            for (const item of items) {
-              const context: Record<string, string> = {};
-              for (const [k, v] of Object.entries(item)) {
-                // Scalars substitute as themselves; anything structural is
-                // JSON so the child can parse it. `String(['a','b'])` gives
-                // `a,b` — readable in a prompt, but a child whose slice of
-                // work IS that array (a batch's `paths`) then has no way to
-                // recover the items, and any path built from it is junk.
-                context[k] =
-                  v == null
-                    ? ''
-                    : typeof v === 'string'
-                      ? v
-                      : typeof v === 'object'
-                        ? JSON.stringify(v)
-                        : String(v);
-              }
-              const title = deriveFanoutChildTitle(context);
-              await tasks
-                .spawnChild(task.ref, { context, ...(title ? { title } : {}) })
-                .catch((err) =>
-                  log.error(`[fanout] ${task.ref}: spawnChild failed for one item:`, err),
-                );
-            }
-            log.info(
-              `[fanout] ${task.ref} step "${newStep.id}": spawned ${items.length} child(ren) from ${spawn.overFile}`,
-            );
-          }
-        }
-        // Stamp the step's advanceWhen deliverable (a machine manifest of the
-        // fanned-out items) so the produced-deliverable record exists, then
-        // advance to the next step. The children draft in parallel; the
-        // collect step's fileCount gate waits on their files.
-        const advanceFile = newStep.advanceWhen?.file;
-        if (advanceFile) {
-          const kids = await tasks.listChildren(task.ref).catch(() => []);
-          const manifest = `# Fanned out ${kids.length} draft(s)\n\n${kids
-            .map((k) => `- ${k.ref}: ${k.title}`)
-            .join('\n')}\n`;
-          await (newStep.advanceWhen?.artifact
-            ? store.writeProjectArtifact(projectId, advanceFile, manifest)
-            : store.writeProjectWorkspaceFile(projectId, advanceFile, manifest)
-          ).catch((err) => log.warn(`[fanout] ${task.ref}: could not write ${advanceFile}:`, err));
-        }
-        const nextStep = newStep.advanceWhen?.goto ?? newStep.next;
-        if (nextStep) {
-          await tasks
-            .completeStep(projectId, task.num, newStep.id, nextStep, { cause: 'gate' })
-            .catch((err) => log.error(`[fanout] ${task.ref}: advance after fanout failed:`, err));
-        }
-      } catch (err) {
-        log.error(`[fanout] ${task.ref} step "${newStep.id}" fanout crashed (non-fatal):`, err);
-      }
-      return;
-    }
+    introduceFreshHire(task, newStep);
+    if (await runActivationGate(runtimeActivation, { projectId, task, newStep })) return;
+    if (await runSpawnFanout(runtimeActivation, { projectId, task, newStep })) return;
 
     // ── Fanout barrier ──────────────────────────────────────────────────
     // The step after a fanout is a barrier: its gate waits on shards the
@@ -1480,6 +1323,15 @@ export async function startProductService(
         );
         return;
       }
+    }
+
+    // An owner step waits for the owner: nobody is dispatched, and a card
+    // tells them it is their turn.
+    if (isOwnerStep(newStep)) {
+      await fileOwnerStepCard(task, newStep, completedStep).catch((err) =>
+        log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
+      );
+      return;
     }
 
     // The same three-level resolution entry dispatch uses. A task created
@@ -1629,6 +1481,19 @@ export async function startProductService(
   const folderJobs = new FolderJobManager();
   const { StorageJobManager } = await import('./storage/job-manager.js');
   const storageJobs = new StorageJobManager();
+  // In-app evals: the compiled harness beside this daemon (or a checkout's
+  // live source), queued jobs under <home>/eval-runs/, and the trial index.
+  const { EvalService } = await import('./eval/service.js');
+  const evals = new EvalService({
+    home,
+    readConfig: () => store.readConfig(),
+    secrets,
+    engineBinaries,
+    llamaCppModels,
+    mlxModels,
+    ds4Models,
+    history,
+  });
   const { detectInterruptedMove } = await import('./folders/recovery.js');
   void detectInterruptedMove(home);
 
@@ -1792,6 +1657,20 @@ export async function startProductService(
   // the linked finding (cancel reopens it); code reviews flip their
   // record to complete/canceled.
   tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
+    // The terminal step activates nothing, so its XP (and the task's) is
+    // noted here rather than in the step hook.
+    if (outcome === 'complete') {
+      if (task.assignee.kind === 'gezel') xpRefresher.note(task.assignee.gezelId);
+      for (const step of task.craftbook.steps) {
+        if (step.completedAt) xpRefresher.note(stepCreditedGezelId(step));
+      }
+    }
+    // The owner's wrap-up. Detached: this hook runs inside the worker's
+    // final `advance_task_step` call, and the wrap-up reads every session
+    // the task used — the worker's tool result must not wait on that.
+    void chat
+      .postTaskWrapUp(task, outcome)
+      .catch((err) => log.warn(`[service] task wrap-up failed for ${task.ref}: ${String(err)}`));
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
@@ -1898,6 +1777,10 @@ export async function startProductService(
       return project?.knowledgeCatalogs ?? null;
     },
   });
+  // The on-device relevance model (cross-encoder). Off by default; a turn
+  // never waits for its load, so construction is free.
+  const relevance = new RelevanceModelManager({ home, readConfig: () => store.readConfig() });
+  search.setRelevanceProvider(relevance);
   if (knowledge) {
     await knowledge.start();
     search.setKnowledgeSearch({
@@ -2162,6 +2045,26 @@ export async function startProductService(
               config: {},
             });
           },
+          ...(process.env.GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA === '1'
+            ? {
+                reusePreparedCorpus: async (project, need, preparedParams) => {
+                  const corpusScope = preparedParams.corpusScope
+                    ?.trim()
+                    .replace(/^artifacts\//, '')
+                    .replace(/\/+$/, '');
+                  if (!corpusScope) return null;
+                  const listing = await store.listProjectArtifactsRecursiveDetailed(project.id, {
+                    subpath: corpusScope,
+                  });
+                  const fileCount = listing.entries.filter((entry) => !entry.isDirectory).length;
+                  if (fileCount === 0) return null;
+                  return {
+                    params: { corpusScope },
+                    summary: `Reused ${fileCount}${listing.truncated ? '+' : ''} locally seeded ${need.typeId} record(s) from \`${corpusScope}/\` (eval fixture; no source sync).`,
+                  };
+                },
+              }
+            : {}),
         },
         { projectId, craftbookId, connectors: needs, params },
       );
@@ -2230,6 +2133,7 @@ export async function startProductService(
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
     announce: (gezelId, toLevel) => chat.announceGrowth(gezelId, toLevel),
   });
+  growthRef.engine = growth;
 
   const remoteFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
   const remoteServing = createRemoteServingController({
@@ -2365,6 +2269,8 @@ export async function startProductService(
     },
     port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
   });
+  // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
+  const officeIntegrations = createOfficeIntegrations(home, opts, firstPartyApps);
   const vscodeSetup = createVSCodeSetupManager({
     home,
     ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
@@ -2483,7 +2389,14 @@ export async function startProductService(
     history,
     growth,
     tasks,
-    taskLauncher: new TaskLauncher({ tasks, store, taskRunner, history }),
+    taskLauncher: new TaskLauncher({
+      tasks,
+      store,
+      taskRunner,
+      history,
+      gatherReferences: ({ projectId, subject, craftbookName }) =>
+        gatherTaskReferences({ search, projectId, subject, craftbookName }),
+    }),
     taskRunner,
     taskScheduler: scheduler,
     nightShift,
@@ -2530,6 +2443,7 @@ export async function startProductService(
     token,
     tokenStore,
     grants,
+    firstPartyApps,
     deviceIdentity,
     signIdentityCertificate: () =>
       cert ? signCertFingerprint(secrets, home, cert.sha256Hex) : Promise.resolve(null),
@@ -2542,6 +2456,7 @@ export async function startProductService(
     opencodeSetup,
     piSetup,
     vscodeSetup,
+    ...officeIntegrations.contextFields(),
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2549,12 +2464,14 @@ export async function startProductService(
     uiDir: opts.uiDir,
     folderJobs,
     storageJobs,
+    evals,
     invalidateModelsCache,
     workspaceIndex,
     contentIndex,
     globalIndex,
     indexingJob,
     search,
+    relevance,
     systemIdle,
     terminals,
     terminalEvents,
@@ -2586,6 +2503,7 @@ export async function startProductService(
   piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
   const vscodeBridgeApp = buildVSCodeBridgeApp(context);
   vscodeBridgeFetchRef.value = vscodeBridgeApp.fetch.bind(vscodeBridgeApp);
+  officeIntegrations.bindFetch(app.fetch.bind(app));
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2832,6 +2750,7 @@ export async function startProductService(
         `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await officeIntegrations.reconcile();
     scheduler.start();
     nightShift.start();
     await ensureNightShiftOversightTask(store, tasks).catch((err) => {
@@ -3022,6 +2941,7 @@ export async function startProductService(
       void warmEmbeddings().then((warmed) => {
         if (warmed) log.debug('[memory] embedding pipeline warmed');
       });
+      void relevance.bootWarm().catch(() => {});
     }, 20_000).unref();
   }
 
@@ -3041,6 +2961,7 @@ export async function startProductService(
         }
       : {}),
     async stop() {
+      stopping = true;
       const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
         observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
       log.info('[service] shutdown started');
@@ -3048,6 +2969,10 @@ export async function startProductService(
       stopSuspendMonitor();
       scheduler.stop();
       nightShift.stop();
+      // Issued first: an owning supervisor force-stops this process a few
+      // seconds into shutdown, and a first-run Chromium download must not
+      // outlive it as an orphan.
+      const systemBootstrapsStopped = stopSystemBootstraps();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
@@ -3056,6 +2981,7 @@ export async function startProductService(
       await shutdownStep('task runner', () => taskRunner.stop());
       memoryHealth.stop();
       memoryCompactor.stop();
+      xpRefresher.dispose();
       digestGenerator.stop();
       promptDraftSweeper.stop();
       inputStaging.stopSweeping();
@@ -3069,6 +2995,8 @@ export async function startProductService(
         clearTimeout(libraryRefreshTimer);
         libraryRefreshTimer = null;
       }
+      // First: a running eval harness owns a trial daemon and its engines.
+      await shutdownStep('eval jobs', () => evals.shutdown());
       await shutdownStep('workspace index', () => workspaceIndex.stop());
       workspaceWatch.stop();
       await shutdownStep('index enrichment', () => indexEnrichment.stop());
@@ -3084,6 +3012,7 @@ export async function startProductService(
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();
+      await shutdownStep('system toolsets', () => systemBootstrapsStopped);
       await shutdownStep('image provider', () => imageProvider.shutdown());
       await shutdownStep('video provider', () => videoProvider.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());
@@ -3097,6 +3026,7 @@ export async function startProductService(
       await shutdownStep('OpenCode setup', () => opencodeSetup.stop());
       await shutdownStep('pi setup', () => piSetup.stop());
       await shutdownStep('VS Code setup', () => vscodeSetup.stop());
+      await shutdownStep('Office host', () => officeIntegrations.stop());
       await shutdownStep('machine engine', async () => machineEngine?.stop());
       await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       if (previewServer) {

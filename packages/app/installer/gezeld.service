@@ -74,6 +74,10 @@ ReadWritePaths=/var/lib/gezel
 # Shared projects/gezels belong to interactive user daemons. Hide this child
 # even though the broker's private home is otherwise writable.
 InaccessiblePaths=/var/lib/gezel/shared
+# Root-owned product code that every account's daemon executes. Ownership keeps
+# its contents out of this account's reach; the read-only mount also stops it
+# renaming the tree aside inside its own writable home.
+ReadOnlyPaths=/var/lib/gezel/service
 
 [Install]
 WantedBy=multi-user.target

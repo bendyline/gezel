@@ -23,6 +23,8 @@
 import { createHash } from 'node:crypto';
 import { isSharedLibraryProject } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { runtimeLayerRequired } from '../chromium.ts';
+import { RUNTIME_LAYER_UNAVAILABLE } from '../grader-unavailable.ts';
 import { type RuntimeAssertion, type RuntimeReport, renderAndAssert } from '../html-validation.ts';
 import { postRuntimeFeedback } from '../runtime-feedback.ts';
 import {
@@ -598,11 +600,21 @@ export async function pollHtmlSniff<TExtra>(opts: {
           runtimeFailed: report.ran ? report.failed.length : 0,
         });
         if (!report.ran) {
-          // Chromium couldn't boot — treat as advisory; don't fail the
-          // trial for a Playwright infra issue.
           opts.ctx.log(
             `[scenario] runtime check skipped for ${key} (bootstrapError="${report.bootstrapError ?? 'unknown'}")`,
           );
+          // A strict runner (the in-app one) must not publish "passed" for a
+          // page nobody clicked. The reason carries RUNTIME_LAYER_UNAVAILABLE
+          // so the classifier files it as a grader failure, which leaves the
+          // model's attributable pass rate untouched in either direction.
+          if (runtimeLayerRequired()) {
+            return {
+              done: true,
+              success: false,
+              reason: `${ref.projectId}/${ref.surface}/${ref.filePath} passed sniff but could not be graded: ${RUNTIME_LAYER_UNAVAILABLE} (${report.bootstrapError ?? 'unknown'})`,
+            };
+          }
+          // Otherwise advisory: don't fail the trial for a Playwright infra issue.
           return {
             done: true,
             success: true,

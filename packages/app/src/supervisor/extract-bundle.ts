@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import {
+  chmod,
+  chown,
   lstat,
   mkdir,
   readFile,
@@ -13,6 +16,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import * as tar from 'tar';
 
 /**
@@ -23,6 +27,7 @@ import * as tar from 'tar';
  * rebuilds with the same `package.json` version).
  */
 const SHA_SENTINEL = '.gezel-bundle.sha256';
+const SHARED_MODE_SENTINEL = '.gezel-bundle.shared-readonly-v1';
 
 /**
  * What `installTarball` appends to the install dir to name a staging tree:
@@ -108,6 +113,26 @@ export interface ExtractOptions {
    * for nothing.
    */
   force?: boolean;
+  /**
+   * Installer-only POSIX policy: create product code as 0644/0755, owned by
+   * the extracting account (root), without restoring archive owners/mtimes.
+   * The standalone CLI supplies umask 022; never change the daemon's umask.
+   * This avoids a second chown/ACL/chmod walk over ~52k extracted files.
+   */
+  sharedReadOnly?: boolean;
+  /**
+   * The account every tree this call publishes must belong to, and the only
+   * one whose tree may be trusted on its sentinel. Defaults to root when the
+   * process runs as root — the machine-service installers — and to none for a
+   * per-user extraction, whose install dir is the caller's own. Injectable so
+   * tests can model an installer without running as root.
+   */
+  trustedOwner?: TreeOwner | null;
+}
+
+export interface TreeOwner {
+  uid: number;
+  gid: number;
 }
 
 export interface ExtractResult {
@@ -202,7 +227,11 @@ export async function readBundleMeta(metaPath: string): Promise<BundleMeta | nul
  *         tarball had been completely rebuilt with new deps.
  */
 export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<ExtractResult> {
-  const { installDir, tarballPath, metaPath, logger, force } = opts;
+  const { installDir, tarballPath, metaPath, logger, force, sharedReadOnly = false } = opts;
+  if (sharedReadOnly && (process.platform === 'win32' || (process.umask() & 0o755) !== 0)) {
+    throw new Error('Shared read-only extraction requires POSIX and umask 022 (installer CLI)');
+  }
+  const owner = opts.trustedOwner === undefined ? defaultTrustedOwner() : opts.trustedOwner;
   const startedAt = Date.now();
   const done = (
     action: ExtractResult['action'],
@@ -220,7 +249,7 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
     return { action, installedVersion, shippedVersion, elapsedMs, filesExtracted };
   };
 
-  await recoverInterruptedInstall(installDir);
+  await recoverInterruptedInstall(installDir, owner);
   // Before the bundle checks below, so an orphan is reclaimed on the
   // up-to-date fast path too — otherwise the one case that leaves a staging
   // tree behind (a launch that never completes) is also the case that never
@@ -241,12 +270,30 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
   const shippedVersion = meta.version;
   const shippedSha = meta.sha256.toLowerCase();
 
-  const installedVersion = existsSync(join(installDir, 'package.json'))
-    ? await readPackageVersion(join(installDir, 'package.json'))
-    : null;
+  // A tree another account could have written is treated as absent: nothing
+  // in it — version, sentinel, or bytes — is evidence of what root installed.
+  const distrust =
+    owner && existsSync(installDir) ? await untrustedTreeReason(installDir, owner) : null;
+  if (distrust) {
+    logger?.warn?.(`[supervisor] replacing the service tree at ${installDir}: ${distrust}`);
+  }
+  const installedVersion =
+    !distrust && existsSync(join(installDir, 'package.json'))
+      ? await readPackageVersion(join(installDir, 'package.json'))
+      : null;
+  // An older extraction can have the right bytes but private modes. Require
+  // a policy marker committed with the tree before skipping permission work.
+  const permissionsMatch =
+    !sharedReadOnly ||
+    (await readFile(join(installDir, SHARED_MODE_SENTINEL), 'utf8').catch(() => null)) ===
+      `${shippedSha}\n`;
 
   if (force) {
-    if (installedVersion !== null && (await readShaSentinel(installDir)) === shippedSha) {
+    if (
+      installedVersion !== null &&
+      permissionsMatch &&
+      (await readShaSentinel(installDir)) === shippedSha
+    ) {
       logger?.info?.(
         `[supervisor] service bundle v${shippedVersion} is already extracted at ${installDir}`,
       );
@@ -255,18 +302,32 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
     logger?.info?.(
       `[supervisor] force-extracting service bundle v${shippedVersion} to ${installDir}`,
     );
-    const files = await installTarball(tarballPath, installDir, meta, logger);
+    const files = await installTarball(
+      tarballPath,
+      installDir,
+      meta,
+      owner,
+      logger,
+      sharedReadOnly,
+    );
     return done('forced', shippedVersion, shippedVersion, files);
   }
 
   if (installedVersion === null) {
     logger?.info?.(`[supervisor] extracting service bundle v${shippedVersion} to ${installDir}`);
-    const files = await installTarball(tarballPath, installDir, meta, logger);
+    const files = await installTarball(
+      tarballPath,
+      installDir,
+      meta,
+      owner,
+      logger,
+      sharedReadOnly,
+    );
     return done('fresh-install', shippedVersion, shippedVersion, files);
   }
 
   const installedSha = await readShaSentinel(installDir);
-  if (installedSha !== null && installedSha === shippedSha) {
+  if (permissionsMatch && installedSha !== null && installedSha === shippedSha) {
     return done('up-to-date', installedVersion, shippedVersion, null);
   }
 
@@ -295,7 +356,7 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
       `[supervisor] re-extracting service bundle v${shippedVersion} (content drift: shipped sha=${shippedSha.slice(0, 12)} installed sha=${installedSha.slice(0, 12)})`,
     );
   }
-  const files = await installTarball(tarballPath, installDir, meta, logger);
+  const files = await installTarball(tarballPath, installDir, meta, owner, logger, sharedReadOnly);
   return done('upgraded', shippedVersion, shippedVersion, files);
 }
 
@@ -325,7 +386,9 @@ async function installTarball(
   tarballPath: string,
   dest: string,
   meta: BundleMeta,
+  owner: TreeOwner | null,
   logger?: ExtractOptions['logger'],
+  sharedReadOnly = false,
 ): Promise<number> {
   const tarballStat = await stat(tarballPath);
   if (tarballStat.size !== meta.sizeBytes) {
@@ -336,18 +399,48 @@ async function installTarball(
   const staging = `${dest}.staging-${process.pid}-${randomUUID()}`;
   const backup = `${dest}.previous`;
   await mkdir(dirname(dest), { recursive: true });
-  await mkdir(staging, { recursive: true });
+  await mkdir(staging, { mode: 0o700 });
+  if (owner) {
+    // Everything below inherits from this directory: its owner and group on
+    // BSD-derived systems, where a new file takes the parent's group rather
+    // than the creator's, and its privacy for as long as the bytes are
+    // unverified. The machine-service homes are owned by the service account,
+    // so without this the published code would carry that account's group.
+    await chown(staging, owner.uid, owner.gid);
+    await chmod(staging, 0o700);
+  }
 
   const hash = createHash('sha256');
   let extractedFileCount = 0;
   let bytesRead = 0;
   let loggedPercent = 0;
   try {
+    if (sharedReadOnly && process.platform === 'darwin') {
+      // Remove inherited ACLs once, before any descendants exist. node-tar
+      // writes modes, not ACLs; no per-file ACL repair is needed afterward.
+      await promisify(execFile)('/bin/chmod', ['-N', staging]);
+    }
     const extractor = tar.extract({
       cwd: staging,
       strict: true,
       preservePaths: false,
+      // node-tar preserves archive owners by default when running as root.
+      // Release archives used to record the CI runner's uid, so a root install
+      // chowned tens of thousands of daemon-code entries to whichever local
+      // account held that uid. The tree belongs to whoever extracts it.
+      preserveOwner: false,
+      ...(sharedReadOnly ? { noMtime: true, dmode: 0o755 } : {}),
       onentry: (entry) => {
+        if (sharedReadOnly) {
+          // Do not restore CI uid/gid, writable/special bits, or private
+          // archive modes. Keep the staging root private until verification.
+          entry.mode =
+            resolve(staging, entry.path) === staging
+              ? 0o700
+              : entry.type === 'Directory' || ((entry.mode ?? 0) & 0o111) !== 0
+                ? 0o755
+                : 0o644;
+        }
         // Directories are the one entry kind that leaves nothing countable
         // behind — the same rule `inventoryBundleArchivePaths` applies when
         // the release build computes `meta.fileCount`, so the two agree by
@@ -428,7 +521,6 @@ async function installTarball(
     const gezeldBin = join(staging, 'dist', 'bin', 'gezeld.js');
     if (existsSync(gezeldBin)) {
       try {
-        const { chmod } = await import('node:fs/promises');
         await chmod(gezeldBin, 0o755);
       } catch {
         /* best-effort */
@@ -445,6 +537,12 @@ async function installTarball(
       );
     }
     await writeShaSentinel(staging, meta.sha256.toLowerCase());
+    if (sharedReadOnly) {
+      await writeFile(join(staging, SHARED_MODE_SENTINEL), `${meta.sha256.toLowerCase()}\n`, {
+        mode: 0o644,
+      });
+      await chmod(staging, 0o755);
+    }
     logger?.info?.('[supervisor] service bundle staging tree verified; publishing');
   } catch (err) {
     await rm(staging, { recursive: true, force: true });
@@ -488,9 +586,57 @@ function describeRate(files: number, ms: number): string {
   return `${Math.round(files / (ms / 1000))} files/s`;
 }
 
-async function recoverInterruptedInstall(dest: string): Promise<void> {
+async function recoverInterruptedInstall(dest: string, owner: TreeOwner | null): Promise<void> {
   const backup = `${dest}.previous`;
-  if (!existsSync(dest) && existsSync(backup)) await rename(backup, dest);
+  if (existsSync(dest) || !existsSync(backup)) return;
+  // Left in place, an untrusted backup is simply deleted by the next publish.
+  if (owner && (await untrustedTreeReason(backup, owner))) return;
+  await rename(backup, dest);
+}
+
+function defaultTrustedOwner(): TreeOwner | null {
+  return process.getuid?.() === 0 ? { uid: 0, gid: 0 } : null;
+}
+
+/**
+ * The paths whose ownership decides whether an existing tree is the one an
+ * installer published. The root, `dist`, and `dist/bin` are directories:
+ * owning them is what stops anyone else renaming the entries beneath.
+ */
+const TRUST_PATHS = [
+  '',
+  SHA_SENTINEL,
+  'package.json',
+  'dist',
+  join('dist', 'bin'),
+  join('dist', 'bin', 'gezeld.js'),
+] as const;
+
+/**
+ * Why an existing tree must not be taken at its word, or null when it may be.
+ *
+ * Only asked by an installer running as root. The sentinel is evidence that a
+ * complete extraction committed the tree only while no less-privileged account
+ * could have written it, and the machine-service homes that hold these trees
+ * are owned by the service account. That account can move `service` aside and
+ * put a tree of its own in its place, with a sentinel copied from the
+ * world-readable shipped meta — which the installer would otherwise have
+ * reported up to date, re-owned to root, and published to every account.
+ */
+async function untrustedTreeReason(dir: string, owner: TreeOwner): Promise<string | null> {
+  for (const rel of TRUST_PATHS) {
+    const path = rel ? join(dir, rel) : dir;
+    const info = await lstat(path).catch(() => null);
+    // Absence is not evidence either way: a tree without a sentinel or a
+    // version is already re-extracted by the checks that read them.
+    if (!info) continue;
+    if (info.isSymbolicLink()) return `${path} is a symlink`;
+    if (info.uid !== owner.uid) return `${path} belongs to uid ${info.uid}, not ${owner.uid}`;
+    if ((info.mode & 0o022) !== 0) {
+      return `${path} is group- or world-writable (mode ${(info.mode & 0o7777).toString(8)})`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -591,7 +737,10 @@ async function readShaSentinel(installDir: string): Promise<string | null> {
 }
 
 async function writeShaSentinel(installDir: string, sha: string): Promise<void> {
-  await writeFile(join(installDir, SHA_SENTINEL), `${sha}\n`, 'utf8');
+  await writeFile(join(installDir, SHA_SENTINEL), `${sha}\n`, {
+    encoding: 'utf8',
+    mode: 0o644,
+  });
 }
 
 async function readPackageVersion(path: string): Promise<string> {

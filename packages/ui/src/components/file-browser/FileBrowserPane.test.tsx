@@ -97,3 +97,40 @@ describe('FileBrowserPane narrow navigation', () => {
     expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('1');
   });
 });
+
+describe('FileBrowserPane viewer notice', () => {
+  // A person who opened a quote from a review question had no way back to it.
+  it('renders the notice above the viewer at full width', () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      render(
+        <FileBrowserPane
+          source={source}
+          entries={[entry]}
+          selectedPath="notes.md"
+          onSelect={() => {}}
+          viewMode="tree-alpha"
+          modes={['tree-alpha']}
+          onViewModeChange={() => {}}
+          showHidden={false}
+          onShowHiddenChange={() => {}}
+          emptyMessage="No files"
+          mutations={mutations}
+          viewerNotice={<button type="button">Back to the question</button>}
+          viewer={<textarea aria-label="Document draft" defaultValue="Original" />}
+        />,
+      );
+      const back = screen.getByRole('button', { name: 'Back to the question' });
+      const viewer = screen.getByLabelText('Document draft');
+      expect(back.compareDocumentPosition(viewer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

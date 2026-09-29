@@ -47,6 +47,8 @@ const allowed = new Set([
   '--report-only',
   '--native-build-dir',
   '--contracts-only',
+  '--physical-device',
+  '--cooldown-ms',
 ]);
 for (const key of flags.keys()) if (!allowed.has(key)) throw new Error(`Unknown flag: ${key}`);
 const platform = flags.get('--platform');
@@ -56,6 +58,10 @@ if (platform === 'ios' && (flags.has('--trained-model') || flags.has('--model-id
   throw new Error(
     'Model import/selection flags currently target Android; iOS evaluates its selected native provider.',
   );
+if (platform === 'ios' && flags.has('--cooldown-ms'))
+  throw new Error('--cooldown-ms reads Android thermal status; iOS has no equivalent here.');
+if (flags.has('--cooldown-ms') && !/^\d+$/.test(flags.get('--cooldown-ms')!))
+  throw new Error('--cooldown-ms must be a whole number of milliseconds');
 if (flags.has('--build-only') && flags.has('--contracts-only'))
   throw new Error('Choose either --build-only or --contracts-only.');
 const runId =
@@ -271,18 +277,27 @@ if (flags.has('--report-only')) {
           .map((line) => line.trim().split(/\s+/))
           .filter(([serial]) => serial);
         const expectedAvd = process.env.GEZEL_ANDROID_TEST_AVD ?? 'gezel-api36-tests';
+        // A phone is opted into explicitly and must be the only device
+        // attached, so the installs below cannot land on anything else.
+        const physical = flags.has('--physical-device');
         if (
           devices.length !== 1 ||
           devices[0]?.[0] !== device ||
-          !device.startsWith('emulator-') ||
+          device.startsWith('emulator-') === physical ||
           devices[0]?.[1] !== 'device'
         )
-          throw new Error(`Connect only the dedicated ${expectedAvd} emulator (${device}).`);
-        const avd = (await required(adb, ['-s', device, 'emu', 'avd', 'name']))
-          .split('\n')[0]
-          ?.trim();
-        if (avd !== expectedAvd)
-          throw new Error(`Expected test emulator ${expectedAvd}, found ${avd}.`);
+          throw new Error(
+            physical
+              ? `Connect only the phone ${device}, with USB debugging authorized.`
+              : `Connect only the dedicated ${expectedAvd} emulator (${device}).`,
+          );
+        if (!physical) {
+          const avd = (await required(adb, ['-s', device, 'emu', 'avd', 'name']))
+            .split('\n')[0]
+            ?.trim();
+          if (avd !== expectedAvd)
+            throw new Error(`Expected test emulator ${expectedAvd}, found ${avd}.`);
+        }
         const abi = await required(adb, ['-s', device, 'shell', 'getprop', 'ro.product.cpu.abi']);
         if (abi !== 'arm64-v8a')
           throw new Error(`The current Android app requires arm64-v8a, found ${abi}.`);
@@ -330,6 +345,7 @@ if (flags.has('--report-only')) {
         ['--context', 'evalContext'],
         ['--max-tokens', 'evalMaxTokens'],
         ['--trial-timeout-ms', 'evalTrialTimeoutMs'],
+        ['--cooldown-ms', 'evalCooldownMs'],
         ['--model-id', 'evalModelId'],
       ]) {
         const value = flags.get(flag!);

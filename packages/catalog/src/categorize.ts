@@ -5,10 +5,10 @@ import type { ToolsetCategory } from '@bendyline/gezel';
  *
  * Maps a toolset to one of `ToolsetCategorySchema`'s buckets via
  * keyword heuristics over its name + description + tags + maintainer
- * + id. Used at catalog index-build time to backfill the 3,800+
- * community manifests that ship with no manual category, and at
- * runtime by the `BundledSource` slow-path when no `index.json` is
- * present.
+ * + id. `BundledSource` applies it whenever a toolset identity pins no
+ * category — thousands of community manifests ship without one — on the
+ * index and folder paths alike. gilde keeps a port for its legacy
+ * `index.json`, which older builds read.
  *
  * The heuristic is intentionally simple — token overlap with a small
  * keyword dictionary, with categories tried in priority order. It

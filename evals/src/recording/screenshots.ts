@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { launchEvalChromium } from '../chromium.ts';
 
 /**
  * Per-trial screenshot pass for the run recording: render the HTML the
@@ -61,20 +62,17 @@ export async function captureRecordingScreenshots(args: {
     log(`[recording] screenshots capped at ${MAX_FILES} of ${htmls.length} HTML file(s)`);
   }
 
-  let chromium: typeof import('playwright').chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch (err) {
-    return `failed: playwright unavailable (${err instanceof Error ? err.message : String(err)})`;
-  }
-
   const outDir = join(runDir, 'recording', 'screenshots');
-  await mkdir(outDir, { recursive: true });
   const deadline = Date.now() + TIME_BUDGET_MS;
   const entries: RecordingScreenshotEntry[] = [];
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browser: Awaited<ReturnType<typeof launchEvalChromium>> | undefined;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await launchEvalChromium();
+  } catch (err) {
+    return `failed: chromium unavailable (${err instanceof Error ? err.message : String(err)})`;
+  }
+  await mkdir(outDir, { recursive: true });
+  try {
     const context = await browser.newContext({ viewport: VIEWPORT });
     for (const [index, html] of picked.entries()) {
       if (Date.now() > deadline) {

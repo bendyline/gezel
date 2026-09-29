@@ -10,6 +10,7 @@ import {
   packagedPnpmRuntimePackages,
   pnpmReleaseTargets,
 } from './pnpm-runtime-inventory.mjs';
+import { loadSupplementalLicenses } from './supplemental-licenses.mjs';
 
 function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
@@ -52,6 +53,35 @@ export async function verifyPnpmComponentInventory(pnpmComponents, expectedCount
   return expectedPnpmPackages;
 }
 
+/**
+ * The bundle carries legal/licenses as `standards/`, manifest included, so it
+ * can prove on its own that each package the manifest covers was staged with
+ * every text assigned to it — DirectML's terms on onnxruntime-node, above all.
+ */
+export async function verifySupplementalAssignments(root, npmManifest) {
+  const supplemental = await loadSupplementalLicenses(join(root, 'standards'));
+  for (const pkg of npmManifest.packages) {
+    const entry = supplemental.npmPackages.get(pkg.name);
+    if (!entry) continue;
+    if (entry.version !== pkg.version) {
+      throw new Error(
+        `dependency ${pkg.name}@${pkg.version} shipped, but its supplemental licenses were reviewed for ${entry.version}`,
+      );
+    }
+    const staged = new Set(pkg.texts.map((text) => text.sha256));
+    for (const component of entry.components) {
+      for (const file of component.texts) {
+        if (!staged.has(supplemental.texts.get(file).sha256)) {
+          throw new Error(
+            `dependency ${pkg.name}@${pkg.version} ships ${component.name} without ${file}`,
+          );
+        }
+      }
+    }
+  }
+  return supplemental;
+}
+
 export async function verifyLicenseBundle(rootInput) {
   const root = resolve(rootInput);
   const manifestPath = join(root, 'manifest.json');
@@ -80,6 +110,7 @@ export async function verifyLicenseBundle(rootInput) {
     'native/manifest.json',
     'runtimes/manifest.json',
     'runtimes/pnpm-components.json',
+    'standards/manifest.json',
   ];
   for (const path of required) {
     if (!existsSync(join(root, path))) throw new Error(`legal bundle is missing ${path}`);
@@ -130,6 +161,7 @@ export async function verifyLicenseBundle(rootInput) {
       }
     }
   }
+  await verifySupplementalAssignments(root, npmManifest);
 
   const runtimeManifest = JSON.parse(
     await readFile(join(root, 'runtimes', 'manifest.json'), 'utf8'),

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CURRENT_DATE_TIME_PREFIX, stripCurrentDateTimeLine } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
@@ -117,7 +118,11 @@ describe('chat recovery after local engine eviction', () => {
     });
     expect(generations).toHaveLength(2);
     expect(requests).toHaveLength(2);
-    expect(requests[1]?.messages.filter((m) => m.role !== 'system')).toEqual([
+    const sent = requests[1]?.messages.filter((m) => m.role !== 'system') ?? [];
+    // Only the turn being sent carries the clock line; rebuilt history is
+    // the stored transcript.
+    expect(sent.at(-1)?.content.startsWith(CURRENT_DATE_TIME_PREFIX)).toBe(true);
+    expect(sent.map((m) => ({ ...m, content: stripCurrentDateTimeLine(m.content) }))).toEqual([
       { role: 'user', content: 'First review' },
       { role: 'assistant', content: 'Review complete.' },
       { role: 'user', content: 'Second review' },
@@ -148,9 +153,11 @@ describe('chat recovery after local engine eviction', () => {
     });
     expect(generations).toHaveLength(2);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.messages.filter((m) => m.role === 'user')).toEqual([
-      { role: 'user', content: 'Review this' },
-    ]);
+    expect(
+      requests[0]?.messages
+        .filter((m) => m.role === 'user')
+        .map((m) => ({ ...m, content: stripCurrentDateTimeLine(m.content) })),
+    ).toEqual([{ role: 'user', content: 'Review this' }]);
     const saved = await store.findSessionById(record.id);
     expect(saved?.messages).toHaveLength(2);
     expect(saved?.resumeFailed).not.toBe(true);

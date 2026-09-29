@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestBackupRestore } from '../components/BackupRestoreDialog.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { takePendingSettingsSection } from '../settings-nav.js';
+import {
+  clearPendingSettingsSection,
+  peekPendingSettingsSection,
+  takePendingSettingsSection,
+} from '../settings-nav.js';
 import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
 
 /** Model management is supplied by the host; navigation and preferences stay shared. */
 export function HostModelSettings() {
-  const [section, setSection] = useState(() => hostSection(takePendingSettingsSection()));
+  const [section, setSection] = useState(() => hostSection(peekPendingSettingsSection()));
+  // Clear only once this mount has committed — see settings-nav.ts.
+  useEffect(() => clearPendingSettingsSection(), []);
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');

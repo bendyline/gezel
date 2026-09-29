@@ -38,7 +38,7 @@ import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
-import { takePendingSettingsSection } from '../settings-nav.js';
+import { clearPendingSettingsSection, peekPendingSettingsSection } from '../settings-nav.js';
 import {
   type EngagementMode,
   EngagementModePanel,
@@ -47,6 +47,7 @@ import {
 import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsLegalSection } from './SettingsLegal.js';
 import {
   AutostartToggle,
   BackgroundServiceStatus,
@@ -67,6 +68,7 @@ import {
 const loadAmbientDashboardModule = () => import('../components/AmbientDashboardCard.js');
 const loadConnectedAppsModule = () => import('../components/ConnectedAppsPanel.js');
 const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCard.js');
+const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
 const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
 const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
 const loadRemoteServersModule = () => import('../components/RemoteServersPanel.js');
@@ -93,6 +95,9 @@ const AmbientDashboardCard = lazy(() =>
 );
 const ConnectedAppsPanel = lazy(() =>
   loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
+);
+const RelevanceModelCard = lazy(() =>
+  loadRelevanceModelModule().then(({ RelevanceModelCard }) => ({ default: RelevanceModelCard })),
 );
 const FaceRecognitionCard = lazy(() =>
   loadFaceRecognitionModule().then(({ FaceRecognitionCard }) => ({ default: FaceRecognitionCard })),
@@ -395,11 +400,14 @@ function DaemonSettingsView() {
   // Keurmeester section) instead of saving on click.
   const [keurmeesterConsentOpen, setKeurmeesterConsentOpen] = useState(false);
   // A caller (e.g. the first-run Home "manage on-device models" link) can
-  // request a section before this view mounts; consume it as the initial
-  // section so the deep link doesn't race the event listener below.
+  // request a section before this view mounts; read it as the initial
+  // section so the deep link doesn't race the event listener below. The
+  // read is non-destructive and the clear waits for a committed mount: a
+  // lazy view's first render can be discarded — see settings-nav.ts.
   const [section, setSection] = useState<SectionId>(
-    () => (takePendingSettingsSection() as SectionId | null) ?? 'general',
+    () => (peekPendingSettingsSection() as SectionId | null) ?? 'general',
   );
+  useEffect(() => clearPendingSettingsSection(), []);
   // Collapsed nav groups (expanded by default → empty set). The "Artificial
   // Intelligence" and "Workloads" headers toggle membership here.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<SettingsGroup>>(() => new Set());
@@ -1354,6 +1362,17 @@ function DaemonSettingsView() {
     [config],
   );
 
+  const setTaskReferences = useCallback(async (enabled: boolean) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ taskReferences: { enabled } });
+      setConfig(res);
+      setStatus('reference lookup saved');
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
+
   const setSummarization = useCallback(
     async (patch: Partial<NonNullable<ConfigResponse['summarization']>>) => {
       setStatus('saving…');
@@ -1428,6 +1447,11 @@ function DaemonSettingsView() {
   // so a configured user is never stranded without a way to change it.
   const showOpenaiProvider =
     provider === 'openai' || nightShiftProvider === 'openai' || hasOpenaiKey;
+  // Apple's own on-device model needs no download, only an Apple silicon Mac
+  // with the helper installed; a chosen provider stays on offer regardless.
+  const showAppleProvider =
+    provider === 'apple-foundation-models' ||
+    config?.appleFoundationModelsStatus?.installed === true;
   const showAnthropicProvider =
     provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
@@ -1572,7 +1596,7 @@ function DaemonSettingsView() {
   ]);
 
   // Landing on a hidden tab is reachable two ways: the posture drops to Super
-  // Lockdown while one is open, or a deep link (`takePendingSettingsSection`)
+  // Lockdown while one is open, or a deep link (`peekPendingSettingsSection`)
   // points at one. Send those to the Artificial Intelligence tab, where the
   // greyed pill explains why the provider is gone. Deliberately narrower than
   // "any section missing from `sections`" — config loads async, and a blanket
@@ -2660,6 +2684,16 @@ function DaemonSettingsView() {
                       {ds4TabLabel}
                     </button>
                   )}
+                  {showAppleProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'apple-foundation-models' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('apple-foundation-models')}
+                      title="Apple's own on-device model (Apple Intelligence). Nothing to download and very little memory; a small model with a short context, best for chat, notes and short tasks."
+                    >
+                      {providerLabel('apple-foundation-models', uiPlatform)}
+                    </button>
+                  )}
                   {showCopilotProvider && (
                     <button
                       type="button"
@@ -3132,6 +3166,7 @@ function DaemonSettingsView() {
               <MemorySection
                 config={config}
                 onRetrievalChange={setRetrieval}
+                onTaskReferencesChange={setTaskReferences}
                 onSummarizationChange={setSummarization}
               />
             </>
@@ -4163,6 +4198,7 @@ function DaemonSettingsView() {
                   />
                 </p>
               </section>
+              <SettingsLegalSection />
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Updates</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
@@ -4514,12 +4550,18 @@ interface MemorySectionProps {
       maxTokens?: number | null;
     },
   ) => Promise<void>;
+  onTaskReferencesChange: (enabled: boolean) => Promise<void>;
   onSummarizationChange: (
     patch: Partial<NonNullable<ConfigResponse['summarization']>>,
   ) => Promise<void>;
 }
 
-function MemorySection({ config, onRetrievalChange, onSummarizationChange }: MemorySectionProps) {
+function MemorySection({
+  config,
+  onRetrievalChange,
+  onTaskReferencesChange,
+  onSummarizationChange,
+}: MemorySectionProps) {
   const retrievalMode =
     config?.retrieval?.mode ?? (config?.autoRecall?.enabled === false ? 'off' : 'balanced');
   const summarizeEnabled = config?.summarization?.enabled !== false;
@@ -4540,12 +4582,20 @@ function MemorySection({ config, onRetrievalChange, onSummarizationChange }: Mem
           Higher settings provide more direct evidence. Lower settings preserve context space on
           memory-constrained models. The gezel can still call <code>search</code> when this is Off.
         </p>
-        <div className="provider-switch" style={{ marginTop: '0.5rem' }}>
+        <div
+          className="gz-tray"
+          role="radiogroup"
+          aria-label="Indexed context per turn"
+          style={{ marginTop: '0.5rem' }}
+        >
           {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
-              className={`provider-pill${retrievalMode === mode ? ' provider-pill-active' : ''}`}
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={retrievalMode === mode}
+              className={`gz-key${retrievalMode === mode ? ' gz-key-active' : ''}`}
               onClick={() => void onRetrievalChange({ mode })}
             >
               {mode[0]!.toUpperCase() + mode.slice(1)}
@@ -4572,6 +4622,25 @@ function MemorySection({ config, onRetrievalChange, onSummarizationChange }: Mem
             disabled={retrievalMode === 'off'}
           />
         </div>
+      </div>
+
+      <Suspense fallback={null}>
+        <RelevanceModelCard />
+      </Suspense>
+
+      <div style={{ marginBottom: '1.25rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={config?.taskReferences?.enabled !== false}
+            onChange={(e) => void onTaskReferencesChange(e.target.checked)}
+          />
+          <strong>Look up references when a task starts.</strong>
+        </label>
+        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
+          A task started from a request searches your knowledge catalogs and shared documents for
+          its subject once, and gives every step what it found.
+        </p>
       </div>
 
       <div>

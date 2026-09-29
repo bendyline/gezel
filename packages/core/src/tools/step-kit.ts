@@ -216,6 +216,19 @@ export function stepToolKit(
   >,
 ): StepKit | null {
   const kind = deliverableKindForStep(step);
+  // A task-note step is still a concrete output step even though it has no
+  // file path. Treating it as pure routing leaves reviewer/evaluator turns on
+  // the role's full tool surface (54 tools in the Gemma 4 craftbook sweep),
+  // spending most of a medium model's prompt budget on tools it cannot use.
+  // The task-progression floor restores write_task_note/advance_task_step;
+  // this kit supplies only the read side needed to inspect the work.
+  if (!kind && step.toolPolicy?.outputMedium === 'task-note') {
+    return {
+      kind: 'markdown-doc',
+      path: null,
+      tools: new Set([...WORKSPACE_READ_CORE, ...ARTIFACT_READ_TOOLS]),
+    };
+  }
   if (!kind) return null;
   const path = stepDeliverablePath(step);
   const media = outputMediaForStep(step);

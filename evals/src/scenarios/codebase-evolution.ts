@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { launchEvalChromium } from '../chromium.ts';
 import type { RuntimeReport } from '../html-validation.ts';
 import { extractInlineScripts, validateScriptSyntax } from '../html-validation.ts';
 import { postRuntimeFeedback } from '../runtime-feedback.ts';
@@ -644,15 +645,6 @@ export async function checkCodebaseRuntime(
     pageErrors: [],
   };
 
-  let chromium: typeof import('playwright').chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch (err) {
-    report.bootstrapError = `playwright import failed: ${err instanceof Error ? err.message : String(err)}`;
-    runtimeCache.set(ctx, { hash, report });
-    return report;
-  }
-
   const tmp = await mkdtemp(`${tmpdir()}/gezel-eval-codebase-evolution-runtime-`);
   // biome-ignore lint/suspicious/noExplicitAny: keep Playwright optional at type level
   let browser: any = null;
@@ -662,7 +654,13 @@ export async function checkCodebaseRuntime(
       include: /\.(?:html|js)$/i,
     });
     staticServer = await startStaticServer(tmp);
-    browser = await chromium.launch({ headless: true });
+    try {
+      browser = await launchEvalChromium();
+    } catch (err) {
+      report.bootstrapError = `chromium unavailable: ${err instanceof Error ? err.message : String(err)}`;
+      runtimeCache.set(ctx, { hash, report });
+      return report;
+    }
     const context = await browser.newContext();
     const page = await context.newPage();
     page.on('pageerror', (err: Error) => {
@@ -985,6 +983,7 @@ export function feedbackPathForPhase(phase: CodebasePhase, check: PhaseCheck): s
 
 export const codebaseEvolutionScenario: EvalScenario = {
   id: 'codebase-evolution',
+  requires: ['chromium'],
   description:
     'Phased codebase iteration: build a monolithic Launch Board app, add priority filtering, add due-date summaries, then refactor the inline JS into src/state.js, src/render.js, and src/app.js without losing features.',
   prompt: [

@@ -133,7 +133,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     'the Linux release smoke must exercise Chromium sandbox startup',
   );
 
-  assert.match(builder, /minimumSystemVersion: '13\.5'/);
+  assert.match(builder, /minimumSystemVersion: '14\.0'/);
   assert.match(
     builder,
     /^\s+- '!dist\/\*\.map'$/m,
@@ -342,8 +342,8 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const dependencyFloor of [
     /"dompurify@>=3 <4": "3\.4\.13"/,
-    /"js-yaml@<4": "3\.15\.1"/,
-    /"js-yaml@>=4 <5": "4\.3\.1"/,
+    /"js-yaml@<4": "3\.15\.2"/,
+    /"js-yaml@>=4 <5": "4\.3\.2"/,
     /"mermaid@>=11 <12": "11\.16\.1"/,
   ]) {
     assert.match(workspace, dependencyFloor);
@@ -351,15 +351,15 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
 
   for (const patchedResolution of [
     /dompurify@3\.4\.13:/,
-    /js-yaml@3\.15\.1:/,
-    /js-yaml@4\.3\.1:/,
+    /js-yaml@3\.15\.2:/,
+    /js-yaml@4\.3\.2:/,
     /mermaid@11\.16\.1:/,
   ]) {
     assert.match(lockfile, patchedResolution);
   }
   assert.doesNotMatch(
     lockfile,
-    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.0|4\.3\.0)|mermaid@11\.16\.0):/,
+    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.[01]|4\.3\.[01])|mermaid@11\.16\.0):/,
     'the lockfile must not reintroduce a B3-vulnerable resolution',
   );
 });
@@ -510,6 +510,11 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /sudo dscl \. -read \/Users\/_gezeld/);
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
+  assert.match(macPkgSmoke, /createServer\(\)\.listen\(6228, "127\.0\.0\.1"/);
+  assert.match(macPkgSmoke, /\[\[ "\$port" -ne 6228 \]\]/);
+  assert.match(macPkgSmoke, /kill -0 "\$port_blocker_pid"/);
+  assert.match(macPkgSmoke, /\.gezel-bundle\.shared-readonly-v1/);
+  assert.match(macPkgSmoke, /! -user root -o -perm -002 -o -perm -020/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
   assert.match(macPkgSmoke, /service\.staging-999999999-/);
   assert.match(macPkgSmoke, /\[\[ ! -e "\$abandoned_staging" \]\]/);

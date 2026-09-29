@@ -20,6 +20,12 @@ export const HistoryEventKindSchema = z.enum([
   'poppetje.updated',
   'poppetje.rerolled',
   'project.created',
+  /**
+   * A project was created (or adopted) for a folder gezel inferred from a
+   * document path or a first-run pick. `details` carries
+   * `{ matchedBy, root, source, created, wellKnownKind? }`.
+   */
+  'project.inferred',
   'project.deleted',
   'project.updated',
   'project.about.updated',

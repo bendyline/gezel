@@ -193,11 +193,18 @@ export class AmbientDashboardGenerator {
     const inputHash = hashDashboardInputs(candidates, config);
     if (inputHash === state.inputHash) return false;
 
-    return this.generate(config, meesterId, candidates, {
-      trigger: 'auto',
-      state,
-      inputHash,
-    });
+    // A manual run can claim the slot while this sweep was gating.
+    if (this.running) return false;
+    this.running = true;
+    try {
+      return await this.generate(config, meesterId, candidates, {
+        trigger: 'auto',
+        state,
+        inputHash,
+      });
+    } finally {
+      this.running = false;
+    }
   }
 
   /**
@@ -206,26 +213,36 @@ export class AmbientDashboardGenerator {
    */
   async runNow(): Promise<boolean> {
     if (this.running) return false;
-    const config = await this.store.readConfig().catch(() => null);
-    const meesterId = config?.meesterGezelId;
-    if (!config || config.ambientDashboard?.enabled !== true || !meesterId) return false;
-    if (!isEngagementAllowed(config)) return false;
-    const state = await this.readState();
-    const candidates = await this.collectCandidates();
-    return this.generate(config, meesterId, candidates, {
-      trigger: 'manual',
-      state,
-      inputHash: hashDashboardInputs(candidates, config),
-    });
+    // Claimed before the first await: the route answers 202 as soon as this
+    // call returns its promise, and the Settings card's first status poll
+    // must already see the run. Claiming inside `generate` left the slow
+    // candidate collection uncovered, so the card saw `running: false`,
+    // re-enabled Generate now, and the next click hit a 409.
+    this.running = true;
+    try {
+      const config = await this.store.readConfig().catch(() => null);
+      const meesterId = config?.meesterGezelId;
+      if (!config || config.ambientDashboard?.enabled !== true || !meesterId) return false;
+      if (!isEngagementAllowed(config)) return false;
+      const state = await this.readState();
+      const candidates = await this.collectCandidates();
+      return await this.generate(config, meesterId, candidates, {
+        trigger: 'manual',
+        state,
+        inputHash: hashDashboardInputs(candidates, config),
+      });
+    } finally {
+      this.running = false;
+    }
   }
 
+  /** Callers hold the `running` claim for the whole call. */
   private async generate(
     config: GezelConfig,
     meesterId: string,
     candidates: ProjectContext[],
     opts: { trigger: 'auto' | 'manual'; state: AmbientDashboardState; inputHash: string },
   ): Promise<boolean> {
-    this.running = true;
     this.events?.publishGlobalEvent({ type: 'ambient_dashboard', state: 'started' });
     try {
       const now = this.now();
@@ -310,8 +327,6 @@ export class AmbientDashboardGenerator {
       }).catch(() => undefined);
       this.events?.publishGlobalEvent({ type: 'ambient_dashboard', state: 'failed' });
       return false;
-    } finally {
-      this.running = false;
     }
   }
 

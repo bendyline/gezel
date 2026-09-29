@@ -15,6 +15,7 @@
  * Usage:
  *   pnpm --filter @bendyline/gezel-catalog generate-craftbooks
  *   pnpm --filter @bendyline/gezel-catalog generate-craftbooks -- --only=foo,bar
+ *   pnpm --filter @bendyline/gezel-catalog generate-craftbooks -- --dry-run
  *   # then refresh the index so the new books are discoverable:
  *   pnpm --filter @bendyline/gezel-catalog build-index --kind=craftbook-template
  */
@@ -23,6 +24,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { CraftbookDocSchema, parseCraftbookTestSpec } from '@bendyline/gezel';
 import type { ArchetypeSpec } from '../src/archetype.js';
 import { archetypeToFiles } from '../src/archetype.js';
 import { SEED_ARCHETYPES } from './craftbook-archetypes.js';
@@ -83,16 +85,8 @@ function compareSemver(a: string, b: string): number {
  * This prevents catalog-wide compiler migrations from silently dropping
  * evaluation coverage.
  */
-async function inheritLatestTestSidecar(bookDir: string, targetVersion: string): Promise<void> {
+async function latestTestSidecar(bookDir: string, targetVersion: string): Promise<Buffer | null> {
   const versionsDir = join(bookDir, 'versions');
-  const target = join(versionsDir, targetVersion, 'test.json');
-  try {
-    await readFile(target);
-    return;
-  } catch {
-    // Expected for a new immutable release.
-  }
-
   let versions: string[];
   try {
     versions = (await readdir(versionsDir, { withFileTypes: true }))
@@ -102,23 +96,84 @@ async function inheritLatestTestSidecar(bookDir: string, targetVersion: string):
       .sort(compareSemver)
       .reverse();
   } catch {
-    return;
+    return null;
   }
 
   for (const version of versions) {
     try {
-      const bytes = await readFile(join(versionsDir, version, 'test.json'));
-      await writeFile(target, bytes);
-      return;
+      return await readFile(join(versionsDir, version, 'test.json'));
     } catch {
       // Keep looking for the newest release that carries an eval sidecar.
     }
+  }
+  return null;
+}
+
+function resolveWorkflowDocument(
+  craftbookJson: string,
+  craftbookParams: Record<string, string> | undefined,
+): string {
+  const doc = CraftbookDocSchema.parse(JSON.parse(craftbookJson) as unknown);
+  const schema = doc.paramSchema as
+    | { properties?: Record<string, { default?: unknown }> }
+    | undefined;
+  const params: Record<string, string> = { workPath: '{{task.dir}}' };
+  for (const [key, property] of Object.entries(schema?.properties ?? {})) {
+    if (typeof property.default === 'string') params[key] = property.default;
+  }
+  Object.assign(params, craftbookParams ?? {});
+  let document = JSON.stringify(doc);
+  for (let pass = 0; pass < 6; pass++) {
+    const next = document.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, key: string) =>
+      params[key] !== undefined ? params[key] : whole,
+    );
+    if (next === document) break;
+    document = next;
+  }
+  return document;
+}
+
+/**
+ * Explicit workflow sidecars are a release contract, not inert baggage. A
+ * generated craftbook version may inherit one only when it still proves task
+ * attribution/terminal progress and every non-fixture deliverable remains
+ * named by the newly generated document. This turns generator output drift
+ * into a pre-write failure instead of another silently inverted eval.
+ */
+function validateInheritedWorkflowSidecar(
+  id: string,
+  craftbookJson: string,
+  testBytes: Buffer,
+): void {
+  const parsed = parseCraftbookTestSpec(JSON.parse(testBytes.toString('utf8')) as unknown, {
+    mode: 'strict',
+  });
+  if (!parsed.ok) throw new Error(`${id}: inherited test.json is invalid: ${parsed.errors[0]}`);
+  if (parsed.spec.mode !== 'workflow') return;
+  if (
+    parsed.spec.success.taskGraph?.requireCraftbookTask !== true ||
+    parsed.spec.success.taskGraph.requireTerminalStep !== true
+  ) {
+    throw new Error(
+      `${id}: explicit workflow test must require craftbook task + terminal progress`,
+    );
+  }
+  const document = resolveWorkflowDocument(craftbookJson, parsed.spec.setup.craftbookParams);
+  const seeded = new Set(parsed.spec.setup.files.map((file) => file.path));
+  const drifted = (parsed.spec.success.deliverables ?? [])
+    .map((deliverable) => deliverable.path)
+    .filter((path) => !seeded.has(path) && !document.includes(path));
+  if (drifted.length > 0) {
+    throw new Error(
+      `${id}: refusing to inherit workflow test with output drift (${drifted.join(', ')}); author a sidecar for the new release`,
+    );
   }
 }
 
 async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const root = join(requireGildeCheckout().dataDir, 'craftbook-templates');
+  const dryRun = process.argv.slice(2).includes('--dry-run');
 
   // Curated, hand-authored bundled craftbooks that are NOT generated from a
   // SEED_ARCHETYPE — the generic loop, the QA/ship/review books, etc. Gallery
@@ -202,28 +257,86 @@ async function main(): Promise<void> {
       throw new Error(`unknown --only craftbook id(s): ${missing.join(', ')}`);
     }
   }
-  let written = 0;
+  const plans: Array<{
+    spec: ArchetypeSpec;
+    generated: ReturnType<typeof archetypeToFiles>;
+    bookDir: string;
+    version: string;
+    targetExists: boolean;
+    testSidecar: Buffer | null;
+  }> = [];
   const failures: { id: string; error: string }[] = [];
   for (const spec of selected) {
     try {
-      const gen = archetypeToFiles(spec, RELEASED_AT);
-      const bookDir = join(root, gen.shard, gen.id);
-      for (const f of gen.files) {
-        const dest = join(bookDir, f.relPath);
-        await mkdir(dirname(dest), { recursive: true });
-        await writeFile(dest, f.content, 'utf8');
-      }
+      const generated = archetypeToFiles(spec, RELEASED_AT);
+      const bookDir = join(root, generated.shard, generated.id);
       const version = spec.release?.version ?? '1.0.0';
-      await inheritLatestTestSidecar(bookDir, version);
-      written++;
+      const versionFile = generated.files.find(
+        (file) => file.relPath === join('versions', version, 'craftbook.json'),
+      );
+      if (!versionFile) {
+        throw new Error(`generated release ${version} has no craftbook payload`);
+      }
+      let targetExists = false;
+      try {
+        const current = await readFile(join(bookDir, versionFile.relPath), 'utf8');
+        targetExists = true;
+        if (current !== versionFile.content) {
+          throw new Error(
+            `refusing to rewrite immutable release ${generated.id}@${version}; bump the spec release version`,
+          );
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw error;
+      }
+      const testSidecar = targetExists ? null : await latestTestSidecar(bookDir, version);
+      if (testSidecar)
+        validateInheritedWorkflowSidecar(generated.id, versionFile.content, testSidecar);
+      plans.push({ spec, generated, bookDir, version, targetExists, testSidecar });
     } catch (err) {
       // One malformed agent-authored spec must not block the other ~200.
       failures.push({ id: spec?.id ?? '<no-id>', error: (err as Error).message });
     }
   }
 
+  // Validate every selected release before the first write. A stale source
+  // version must never partially rewrite hundreds of immutable payloads and
+  // manifests before the conflict is noticed.
+  const immutableConflicts = failures.filter((failure) =>
+    failure.error.startsWith('refusing to rewrite immutable release'),
+  );
+  if (immutableConflicts.length > 0) {
+    const preview = immutableConflicts
+      .slice(0, 20)
+      .map((failure) => `  - ${failure.error}`)
+      .join('\n');
+    const remainder =
+      immutableConflicts.length > 20 ? `\n  …and ${immutableConflicts.length - 20} more` : '';
+    throw new Error(
+      `append-only preflight found ${immutableConflicts.length} immutable release conflict(s):\n${preview}${remainder}`,
+    );
+  }
+
+  const toWrite = plans.filter((plan) => !plan.targetExists);
+  if (!dryRun) {
+    for (const plan of toWrite) {
+      for (const file of plan.generated.files) {
+        const dest = join(plan.bookDir, file.relPath);
+        await mkdir(dirname(dest), { recursive: true });
+        await writeFile(dest, file.content, 'utf8');
+      }
+      if (plan.testSidecar) {
+        await writeFile(
+          join(plan.bookDir, 'versions', plan.version, 'test.json'),
+          plan.testSidecar,
+        );
+      }
+    }
+  }
+
   console.log(
-    `\nGenerated ${written} craftbook(s)${onlyIds ? ` selected by --only (${[...onlyIds].join(', ')})` : ` (${authored.length} authored + ${galleryToWrite.length} gallery; ${skippedDup} dup-id skipped)`} into ${root}`,
+    `\n${dryRun ? 'Would generate' : 'Generated'} ${toWrite.length} craftbook(s); ${plans.length - toWrite.length} existing release(s) unchanged${onlyIds ? ` selected by --only (${[...onlyIds].join(', ')})` : ` (${authored.length} authored + ${galleryToWrite.length} gallery; ${skippedDup} dup-id skipped)`} into ${root}`,
   );
   if (failures.length > 0) {
     console.warn(`\n${failures.length} spec(s) failed validation and were skipped:`);

@@ -499,6 +499,49 @@ describe('knowledge injection ceilings', () => {
     expect(paths).not.toContain('tasks/8/sources.md');
   });
 
+  it('traces one decision per candidate, with the reason it was dropped', async () => {
+    const kept = workspaceHit(1);
+    const search = {
+      searchProject: async () => ({
+        results: [
+          kept,
+          { ...workspaceHit(1, 0.7), id: 'content:p1:src/file1.ts:40', line: 40 },
+          { ...workspaceHit(2, 0.01) },
+          { ...workspaceHit(3), arm: 'fts', title: 'misc.ts', path: 'src/misc.ts' },
+          { ...workspaceHit(4), retrievalSource: undefined },
+          knowledgeHit(1),
+          knowledgeHit(2),
+          knowledgeHit(3),
+        ],
+        truncated: false,
+      }),
+    } as unknown as SearchService;
+    let trace: import('@bendyline/gezel').RetrievalDecisionTrace | null = null;
+    await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+      onDecisionTrace: (t) => {
+        trace = t;
+      },
+    });
+    const finished = trace as unknown as import('@bendyline/gezel').RetrievalDecisionTrace;
+    const reasonOf = (id: string) => finished.candidates.find((c) => c.id === id)?.reason;
+    expect(reasonOf(kept.id)).toBe('kept');
+    expect(reasonOf('content:p1:src/file1.ts:40')).toBe('duplicate-path');
+    expect(reasonOf('content:p1:src/file2.ts:1')).toBe('floor');
+    expect(reasonOf('content:p1:src/file3.ts:1')).toBe('grounding');
+    expect(reasonOf('content:p1:src/file4.ts:1')).toBe('source-policy');
+    expect(reasonOf(knowledgeHit(3).id)).toBe('knowledge-cap');
+    expect(finished.candidates).toHaveLength(8);
+    const total = Object.values(finished.counts).reduce((sum, n) => sum + n, 0);
+    expect(total).toBe(8);
+  });
+
   describe('a craftbook step query', () => {
     const outlineStep = {
       id: 'outline',
@@ -542,6 +585,50 @@ describe('knowledge injection ceilings', () => {
     it('searches for the subject the person named, not the book prose', async () => {
       const queries = await stepQuery({ topic: 'quiche', outputDir: 'powerpoint/task-20' });
       expect(queries).toEqual(['quiche']);
+    });
+
+    it('does not re-inject a document already on the launch reference list', async () => {
+      const listed = knowledgeHit(1);
+      const search = {
+        searchProject: async () => ({
+          results: [
+            { ...listed, uri: listed.uri!.replace(/#.*$/, '#chunk=another-passage') },
+            {
+              ...knowledgeHit(2),
+              documentId: 'mortise',
+              uri: 'knowledge://gezel-tests/shop-notes/mortise#chunk=x',
+            },
+          ],
+          truncated: false,
+        }),
+      } as unknown as SearchService;
+      const result = await retrieveProjectContext({
+        store: {
+          ...STORE,
+          readTask: async () => ({
+            ref: 'p1/20',
+            craftbookParams: { topic: 'joinery' },
+            references: {
+              subject: 'joinery',
+              gatheredAt: 't',
+              items: [{ source: 'knowledge', title: 'Dovetail Joints', uri: listed.uri }],
+            },
+            craftbook: {
+              paramSchema: { type: 'object', properties: { topic: { type: 'string' } } },
+              steps: [outlineStep],
+            },
+          }),
+        } as unknown as Store,
+        search,
+        record: { ...RECORD, taskRef: 'p1/20', stepId: 'outline' } as unknown as ChatSession,
+        gezel: GEZEL,
+        config: CONFIG,
+        userText: 'Anita has handed step `outline` of task p1/20 to you.',
+        messageOrigin: 'cross-gezel',
+      });
+      expect(result?.hits.map((hit) => hit.uri)).toEqual([
+        'knowledge://gezel-tests/shop-notes/mortise#chunk=x',
+      ]);
     });
 
     it('falls back to the step prose when the task names no subject', async () => {

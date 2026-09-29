@@ -31,6 +31,9 @@ export default defineConfig({
     // Parser-backed, presentation-only SVG sanitizer shared by service,
     // catalog ingestion, and the UI's final rendering boundary.
     'src/svg/index.ts',
+    // `./eval` — the in-app eval runner's contract. Kept off the main entry
+    // so its schemas stay out of the UI's startup bundle (see src/eval/index.ts).
+    'src/eval/index.ts',
   ],
   format: ['esm'],
   dts: true,

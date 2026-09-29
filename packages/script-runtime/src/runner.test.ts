@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ScriptExecutionOptions } from './index.js';
 import {
   MAX_RUN_CHARS,
+  MISSING_OUTPUT_WARNING,
   PortableScriptRunner,
   type PortableScriptRunnerOptions,
   abridgeRun,
@@ -122,6 +123,8 @@ describe('portable script runner', () => {
         await options.onRequest('artifact.write', { path: 'second.md', content: 'Denied' });
       });
       host.resolve = async () => ({ source: '', scope: 'project', meta });
+      // Write every intent, so the change can land while the second one saves.
+      host.checkpointIntervalMs = 0;
       const persist = host.persistRun;
       host.persistRun = async (run) => {
         await persist(run);
@@ -210,15 +213,36 @@ describe('portable script runner', () => {
     await expect(runner.run(request)).rejects.toThrow('different scope');
   });
 
-  it.each([undefined, { ok: 'yes' }])(
-    'rejects missing or invalid declared outputs: %s',
-    async (value) => {
-      const { runner } = setup(async (options) => {
-        if (value) options.onNotification('script.output', { value });
-      });
-      expect(await runner.run(request)).toMatchObject({ status: 'error' });
-    },
-  );
+  it('rejects an invalid declared output', async () => {
+    const { runner } = setup(async (options) => {
+      options.onNotification('script.output', { value: { ok: 'yes' } });
+    });
+    expect(await runner.run(request)).toMatchObject({ status: 'error' });
+  });
+
+  it('finishes a script that never stamps its declared output, with a warning', async () => {
+    const { runner, saved } = setup(async () => {});
+    const run = await runner.run(request);
+    expect(run).toMatchObject({ status: 'ok' });
+    expect(run.output).toBeUndefined();
+    expect(run.error).toBeUndefined();
+    expect(run.logs).toContain(MISSING_OUTPUT_WARNING);
+    expect(saved.at(-1)).toEqual(run);
+  });
+
+  it.each([
+    [
+      'a gate trigger',
+      {},
+      { kind: 'step', taskRef: 'default/1', stepId: 'review', moment: 'gate' },
+    ],
+    ['a gate script', { kind: 'gate' }, request.trigger],
+  ] as const)('fails %s that stamps no verdict', async (_label, extra, trigger) => {
+    const { host, runner } = setup(async () => {});
+    host.resolve = async () => ({ source: '', scope: 'standard', meta: { ...meta, ...extra } });
+    const run = await runner.run({ ...request, trigger });
+    expect(run).toMatchObject({ status: 'error', error: expect.stringContaining('gezel.output') });
+  });
 
   it('does not execute after cancellation and persists the cancelled run', async () => {
     let executed = false;

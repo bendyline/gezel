@@ -310,7 +310,7 @@ describe('craftbook document routes — end to end', () => {
       }),
     });
     expect(result.status).toBe(403);
-    expect(await result.text()).toContain('Only an explicit owner');
+    expect(await result.text()).toContain('trusting custom scripts requires the owner or the CLI');
   });
 
   it.runIf(process.platform !== 'darwin')(
@@ -413,5 +413,27 @@ describe('craftbook document routes — end to end', () => {
     expect(res.status).toBe(422);
     const body = (await res.json()) as { formatted: string };
     expect(body.formatted).toContain('scripts');
+  });
+
+  // craftbook_create / craftbook_replace send JSON steps, not a document; an
+  // "Owner Review" authored that way must reach the owner all the same.
+  it('hands an owner review to the user on the JSON step routes too', async () => {
+    const steps = [
+      { id: 'draft', name: 'Draft posts', suggestedRole: 'writer', next: 'owner-review' },
+      { id: 'owner-review', name: 'Owner Review', suggestedRole: 'omroeper', terminal: true },
+    ];
+    type Book = { craftbook: { id: string; steps: Array<{ id: string; assignee?: unknown }> } };
+    const assigneeOf = (book: Book, id: string) =>
+      book.craftbook.steps.find((s) => s.id === id)?.assignee;
+
+    const created = await api('POST', '/api/craftbooks', { name: 'Owner review JSON', steps });
+    expect(created.status).toBe(201);
+    const book = (await created.json()) as Book;
+    expect(assigneeOf(book, 'owner-review')).toEqual({ kind: 'user' });
+    expect(assigneeOf(book, 'draft')).toBeUndefined();
+
+    const replaced = await api('PATCH', `/api/craftbooks/${book.craftbook.id}`, { steps });
+    expect(replaced.status).toBe(200);
+    expect(assigneeOf((await replaced.json()) as Book, 'owner-review')).toEqual({ kind: 'user' });
   });
 });

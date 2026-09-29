@@ -42,7 +42,13 @@ export async function verifyNativeBuild(repo, build, target) {
     if (!pin[name] || manifest.upstream?.[name] !== pin[name])
       throw new Error(`Cached mobile engine has an old ${name}; rebuild the native engine.`);
   }
-  for (const name of ['gezel_llama.h', 'gezel_llama.cpp', 'utf8_stream.h', 'CMakeLists.txt']) {
+  for (const name of [
+    'gezel_llama.h',
+    'gezel_llama.cpp',
+    'utf8_stream.h',
+    'chat_formats.h',
+    'CMakeLists.txt',
+  ]) {
     if (manifest.bridgeSources?.[name] !== (await digest(path.join(repo, 'native/mobile', name))))
       throw new Error(`Cached native bridge differs from ${name}; rebuild the native engine.`);
   }

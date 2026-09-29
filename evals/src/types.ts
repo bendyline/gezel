@@ -201,6 +201,12 @@ export interface EvalScenario {
    */
   requiresEmbeddings?: boolean;
   /**
+   * Golden and decoy documents for retrieval exposure facts. The runner
+   * writes it to `<runDir>/retrieval-oracle.json`; `facts.retrieval.exposure`
+   * reports which channel (reference list, injection, tool read) reached each.
+   */
+  retrievalOracle?: import('./retrieval-facts.ts').RetrievalOracle;
+  /**
    * Grader-lint contract: for every signal the scenario's grader hard-
    * REQUIRES, the pattern that must be satisfiable from the prompt text
    * itself. `grader-lint.test.ts` asserts `pattern.test(prompt)` for each
@@ -327,6 +333,14 @@ export interface EvalScenario {
    * `--image-model <id>` on the CLI overrides this.
    */
   defaultImageModelId?: string;
+  /**
+   * What the scenario's grader needs beyond a chat model, when the scenario
+   * cannot say it through a field above (`defaultImageModelId`,
+   * `requiresEmbeddings`, `requiresDocblocks` are read directly). The
+   * in-app runner uses this to name a requirement the install lacks before
+   * a trial spends an hour discovering it.
+   */
+  requires?: ReadonlyArray<'chromium' | 'vitest' | 'network' | 'external-checkout'>;
 }
 
 export interface TrialOptions {
@@ -358,6 +372,21 @@ export interface TrialOptions {
    */
   mlxSourceHome?: string;
   /**
+   * A gezel home whose installed models this trial may read but never
+   * write. When set, every local engine (llama-cpp, ds4, mlx, sd-cpp)
+   * sources weights from it — plus any extra read-only roots in
+   * `GEZEL_EVAL_MODEL_ROOTS` — and the eval warm cache is bypassed
+   * entirely: nothing is downloaded, and a missing or stale install fails
+   * the trial with a message naming the fix. This is how the in-app runner
+   * evaluates the models a person already has, without a second copy.
+   */
+  modelSourceHome?: string;
+  /**
+   * Called once the trial has an id and a run directory, before any
+   * model or daemon work. The batch runner uses it for progress events.
+   */
+  onTrialStart?: (info: { trialId: string; runDir: string; startedAt: string }) => void;
+  /**
    * Catalog id of a SECOND local model to warm + link in and route index
    * enrichment to (`GEZEL_ENRICH_MODEL` in the daemon env, read by
    * `buildEnrichDeps`). Decouples the enricher from the executor for
@@ -386,6 +415,12 @@ export interface TrialOptions {
    * The A/B lever for generalist mode v2; arms should force `on`/`off`.
    */
   generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Retrieval arm for the annotated-work A/B (`bin/ab-retrieval.ts`).
+   * Omitted ⇒ the eval default every scorecard was measured under: no
+   * per-turn indexed context, no embeddings unless the scenario needs them.
+   */
+  retrieval?: TrialRetrievalArm;
   /**
    * Override a craftbook scenario's repair policy for this trial. `runtime`
    * silences every harness-injected repair turn (sniff nudges, missing-
@@ -419,6 +454,11 @@ export interface TrialOptions {
   runsDir?: string;
   /** Shared model cache root. Defaults to `<HOME>/.gezel-eval-cache`. */
   cacheRoot?: string;
+  /**
+   * Fail closed when a model is absent or stale instead of downloading or
+   * topping it up. Non-device providers are also refused by the runner.
+   */
+  offline?: boolean;
   /** Override the resolved llama-server binary path. */
   llamaBin?: string;
   /** Override the resolved sd-server binary path. */
@@ -557,6 +597,8 @@ export interface TrialResult {
    * parsing `log.txt`. Absent when the run left the daemon default.
    */
   generalistMode?: 'auto' | 'on' | 'off';
+  /** The retrieval arm the trial ran under (`--retrieval` and friends). */
+  retrievalArm?: TrialRetrievalArm;
   /**
    * Repair policy the trial actually ran under (the scenario's own or the
    * `--repair-policy` override). Absent for scenarios outside the protocol.
@@ -688,6 +730,16 @@ export interface TriageCluster {
 export interface BatchOptions extends TrialOptions {
   count: number;
   /**
+   * Write the fixed-rubric `score.json` + deterministic `postmortem.md`
+   * beside each trial as it finishes, instead of leaving that to a later
+   * `eval:postmortems` pass. The in-app runner always sets it.
+   */
+  writeReports?: boolean;
+  /** Structured progress channel (`--events`). */
+  events?: import('./eval-events.ts').EvalEventSink;
+  /** Where the preflight probe keeps its reports and 24h cache. */
+  preflightRunsDir?: string;
+  /**
    * Honor `count` exactly, ignoring each scenario's `suggestedTrials`
    * saturation cap. `--count` is a required flag, so every count is an
    * explicit operator ask — yet the cap silently reduced it (wild-caught
@@ -810,4 +862,32 @@ export interface MatrixSummary {
   overallSuccessRate: number;
   /** Preflight admission provenance for the matrix's model (Theme E / E4). */
   preflight?: BatchPreflight;
+}
+
+/**
+ * What a trial's retrieval arm switches. Every lever lands in the daemon's
+ * config or env, and the trial's `facts.retrieval` block must prove it was
+ * applied — a silent default would read as "no effect".
+ */
+export interface TrialRetrievalArm {
+  /** Per-turn indexed context → `config.retrieval.mode`. */
+  mode: 'off' | 'lean' | 'balanced' | 'deep';
+  maxTokens?: number;
+  /** The launch reference list → `config.taskReferences.enabled`. */
+  references: boolean;
+  /**
+   * Load embeddings in the daemon. They also change the model's own
+   * `search` tool, so hold this equal across arms of one comparison.
+   */
+  embeddings: boolean;
+  /** Keep the shared-library recall prelude; removed in every arm unless set. */
+  libraryRecall?: boolean;
+  /**
+   * The relevance model on this arm (off when absent). Thresholds default to
+   * the registry's; `null` scores and reorders without dropping.
+   */
+  relevanceModel?: {
+    modelId: string;
+    thresholds?: { drop: number; keep: number; strong: number } | null;
+  };
 }

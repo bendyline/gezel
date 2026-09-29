@@ -14,6 +14,7 @@ import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import '../styles/history.css';
 
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },
@@ -25,6 +26,7 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'icon.generated', label: 'Icon generated' },
   { value: 'icon.reverted', label: 'Icon reverted' },
   { value: 'project.created', label: 'Project created' },
+  { value: 'project.inferred', label: 'Project found for a folder' },
   { value: 'project.updated', label: 'Project updated' },
   { value: 'project.about.updated', label: 'Project about updated' },
   { value: 'project.mission.updated', label: 'Project mission updated' },
@@ -868,6 +870,7 @@ const KIND_LABELS: Record<string, string> = {
   'gezel.renamed': 'Gezel renamed',
   'gezel.settings.updated': 'Gezel settings',
   'project.created': 'Project created',
+  'project.inferred': 'Folder project',
   'project.updated': 'Project updated',
   'project.about.updated': 'Project brief',
   'project.mission.updated': 'Mission updated',

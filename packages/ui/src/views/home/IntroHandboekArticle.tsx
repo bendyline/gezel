@@ -1,31 +1,26 @@
-import type { HandboekArticle } from '@bendyline/gezel';
+import { parseKnowledgeUri } from '@bendyline/gezel';
+import type { KnowledgeDocumentRead } from '@bendyline/gezel-client';
 import { DocPlayer, LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../../components/chat-theme.js';
+import { navigateToTab } from '../../components/nav-actions.js';
+import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
 import { useEffectiveTheme } from '../../theme.js';
-import {
-  createHandboekMediaProvider,
-  inlineBundledAssets,
-} from '../handboek/HandboekMediaProvider.js';
+import { inlineBundledAssets } from '../handboek/HandboekMediaProvider.js';
+import { createKnowledgeMediaProvider } from '../knowledge/KnowledgeMediaProvider.js';
 
 const ARTICLE_ID = 'welcome';
-
-/** HandboekView's persisted selection — set before navigating so the
- * Handboek opens on the article the user clicked. */
-const HANDBOEK_SELECTED_KEY = 'gezel:handboek:article';
 
 type ViewMode = 'doc' | 'video';
 
 function openHandboek(articleId: string) {
-  try {
-    window.localStorage.setItem(HANDBOEK_SELECTED_KEY, articleId);
-  } catch {
-    // localStorage unavailable — the Handboek just opens on its default.
-  }
-  window.dispatchEvent(new CustomEvent('gezel:navigate', { detail: { view: 'handboek' } }));
+  const intent = { catalogId: 'handboek', documentId: articleId };
+  queueOpenKnowledge(intent);
+  navigateToTab({ kind: 'area', area: 'knowledge' });
+  window.dispatchEvent(new CustomEvent('gezel:open-knowledge-document', { detail: intent }));
 }
 
 /**
@@ -33,7 +28,7 @@ function openHandboek(articleId: string) {
  * embedded as a live page — readable as a document or playable as a
  * captioned video — instead of prose hardcoded into the Home view. The
  * article is the single source of that copy; this is just a small frame
- * around the same engine HandboekView uses.
+ * around the document exposed by the bundled Knowledge catalog.
  *
  * Two variants:
  *   - `toggle` (default): one page with a Read/Watch key tray — the
@@ -51,7 +46,7 @@ export function IntroHandboekArticle({
   variant?: 'toggle' | 'stacked';
 } = {}) {
   const stacked = variant === 'stacked';
-  const [article, setArticle] = useState<HandboekArticle | null>(null);
+  const [article, setArticle] = useState<KnowledgeDocumentRead | null>(null);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<ViewMode>('doc');
   // In light mode overlay the shared warm-paper reading surface (the
@@ -63,7 +58,7 @@ export function IntroHandboekArticle({
   useEffect(() => {
     let alive = true;
     api
-      .getHandboekArticle(ARTICLE_ID)
+      .readKnowledgeDocument('handboek', ARTICLE_ID)
       .then((a) => {
         if (!alive) return;
         if (a && typeof a.markdown === 'string') setArticle(a);
@@ -76,7 +71,7 @@ export function IntroHandboekArticle({
   }, []);
 
   const mediaProvider = useMemo(
-    () => (article ? createHandboekMediaProvider(article.figures ?? []) : null),
+    () => (article ? createKnowledgeMediaProvider({ catalogId: 'handboek' }) : null),
     [article],
   );
   const providerRef = useRef(mediaProvider);
@@ -89,10 +84,10 @@ export function IntroHandboekArticle({
   // durations — durations turn LinearDocView into a timed reader that
   // dims all but the active block, wrong for a static embed. The player
   // doc keeps them so the synthetic clock paces the video.
-  const markdown = useMemo(
-    () => (article ? inlineBundledAssets(article.markdown) : null),
-    [article],
-  );
+  // The brand mark is bundled; pointing at it before the first paint keeps
+  // the browser from requesting the catalog-relative path (a 404 on every
+  // Home load) while the media provider is still resolving it.
+  const markdown = article?.markdown ? inlineBundledAssets(article.markdown) : null;
   const doc = useMemo(() => {
     if (!markdown) return null;
     try {
@@ -106,24 +101,31 @@ export function IntroHandboekArticle({
     try {
       return markdownToDoc(parseMarkdown(markdown), {
         articleId: article.id,
-        defaultDuration: article.defaultDuration ?? 6,
+        defaultDuration: 6,
       });
     } catch {
       return null;
     }
   }, [article, markdown]);
 
-  // Intra-article links (`the-crew.md`, `projects-and-threads.md`) can't
-  // resolve inside the Home card — send them to the Handboek, landing on
-  // the linked article (curated ids equal their file stems; HandboekView
-  // falls back to its default when a stem doesn't match the TOC).
+  // Intra-article links can't resolve inside the Home card, so open the
+  // linked Handboek document in Knowledge. The relative-link fallback also
+  // handles older articles saved before the catalog conversion.
   const onDocClickCapture = (e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest('a');
     if (!anchor) return;
     const raw = anchor.getAttribute('href');
-    if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//') || raw.startsWith('#')) {
+    if (!raw || raw.startsWith('//') || raw.startsWith('#')) {
       return;
     }
+    const knowledge = parseKnowledgeUri(raw);
+    if (knowledge?.catalogId === 'handboek') {
+      e.preventDefault();
+      e.stopPropagation();
+      openHandboek(knowledge.documentId);
+      return;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return;
     e.preventDefault();
     e.stopPropagation();
     const stem = raw
@@ -232,6 +234,7 @@ export function IntroHandboekArticle({
                 thinMargins
                 imageDisplayMode="inline"
                 showCover={false}
+                linkSchemes={['knowledge']}
               />
             </div>
           </div>

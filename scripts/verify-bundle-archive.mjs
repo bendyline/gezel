@@ -93,6 +93,15 @@ export async function inventoryBundleTree(root) {
  * collide after rounding and causing one archive entry to link to unrelated
  * content. The service runtime does not rely on hardlink identity, so storing
  * each pathname as a full file is the portable and deterministic contract.
+ *
+ * `portable` keeps the build machine's identity out of the headers. Without it
+ * every entry carried the CI runner's uid/gid (501/20 on macOS, 1001 on Linux)
+ * and user name, and any extractor running as root that preserves owners —
+ * node-tar's default for root, GNU tar's `--same-owner` — handed the machine
+ * service's code tree to whatever local account holds that uid until the
+ * installer re-owned it. Empty owner fields decode as uid/gid 0 in GNU tar and
+ * libarchive. It also clears group/other write from every mode, so no entry
+ * arrives writable by anyone but its owner.
  */
 export function createBundleArchive({ sourceDir, archivePath }) {
   const disabledHardlinkCache = new (class extends Map {
@@ -111,6 +120,7 @@ export function createBundleArchive({ sourceDir, archivePath }) {
       file: archivePath,
       gzip: true,
       linkCache: disabledHardlinkCache,
+      portable: true,
       strict: true,
       sync: true,
     },
@@ -226,6 +236,7 @@ export async function verifyBundleArchiveRoundTrip({
       cwd: extractedDir,
       strict: true,
       preservePaths: false,
+      preserveOwner: false,
     });
     const extracted = await inventoryBundleTree(extractedDir);
     const differences = describeDifferences(source, extracted);

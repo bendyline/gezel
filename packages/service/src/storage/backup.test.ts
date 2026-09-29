@@ -175,6 +175,15 @@ describe('runBackup', () => {
     expect((await entriesOf(without)).some((e) => e.endsWith('workspace/notes.md'))).toBe(false);
   });
 
+  it('records in the manifest when working files were left out', async () => {
+    // A replace restore of this archive must keep the working files it lacks.
+    await store.createProject({ name: 'Roof Survey' });
+    const without = await backupTo(join(out, 'without.zip'), { excludeWorkspaces: true });
+    const withFiles = await backupTo(join(out, 'with.zip'));
+    expect(without.result.manifest.excludedWorkspaces).toBe(true);
+    expect(withFiles.result.manifest.excludedWorkspaces).toBe(false);
+  });
+
   it('backs up only what the request selected', async () => {
     const keep = await store.createGezel({ name: 'Keep' });
     const skip = await store.createGezel({ name: 'Skip' });

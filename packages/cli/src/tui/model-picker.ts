@@ -56,6 +56,7 @@ const PROVIDER_ORDER: readonly ProviderName[] = [
   'mlx',
   'llama-cpp',
   'ds4',
+  'apple-foundation-models',
   'ollama',
   'copilot',
   'openai',
@@ -120,6 +121,7 @@ export function configuredModelProviders(
     opts.totalRamBytes === null ||
     opts.totalRamBytes >= 45 * 1024 ** 3;
   if (ds4PlatformAvailable && ds4MemoryAvailable) providers.push('ds4');
+  if (config.appleFoundationModelsStatus?.installed) providers.push('apple-foundation-models');
   providers.push('ollama');
 
   // null means an older daemon did not expose the availability endpoint.

@@ -10,6 +10,7 @@ import type {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
@@ -74,6 +75,12 @@ export function HomeWorkshop({
       void api.updateConfig({ homeGreetingCollapsed: next }).catch(() => {});
       return next;
     });
+  }, []);
+  // Once the person is talking, the greeting steps aside for this visit: at
+  // full height it squeezed the conversation to a third of the window. Not
+  // persisted, and a manual toggle always wins.
+  const collapseForConversation = useCallback(() => {
+    if (!userToggledCollapse.current) setCollapsed(true);
   }, []);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
@@ -210,19 +217,50 @@ export function HomeWorkshop({
     api.runMeesterStatus().catch(() => setStatusRunning(false));
   }, []);
 
-  const visibleTasks = useMemo(() => tasks.filter((t) => t.status !== 'canceled'), [tasks]);
+  // System jobs use a user assignee to keep TaskRunner from launching a model,
+  // but they are service controls, not work waiting on the person at Home.
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => t.status !== 'canceled' && t.origin?.kind !== 'system-job'),
+    [tasks],
+  );
 
-  const pendingQuestions = useMemo(() => questions.filter((q) => !q.answer), [questions]);
+  // "Ready" cards (finished work) ask nothing, so they get their own chip
+  // rather than inflating "waiting on you".
+  const pendingQuestions = useMemo(
+    () => questions.filter((q) => !q.answer && q.intent?.kind !== 'task-finished'),
+    [questions],
+  );
+  const readyForYou = useMemo(
+    () => questions.filter((q) => !q.answer && q.intent?.kind === 'task-finished').length,
+    [questions],
+  );
 
-  const waitingOnYou =
-    pendingQuestions.length +
-    visibleTasks.filter((t) => t.assignee.kind === 'user' && t.status !== 'complete').length;
+  const ownerTasks = visibleTasks.filter(
+    (t) => t.assignee.kind === 'user' && t.status !== 'complete',
+  );
+  const waitingOnYou = pendingQuestions.length + ownerTasks.length;
 
   const chips: HomeChip[] = [];
   if (waitingOnYou > 0) {
+    // The count is a to-do list, so it opens one: the Updates drawer when a
+    // question is waiting, else the task that is.
+    const firstTask = ownerTasks[0];
     chips.push({
       dot: 'var(--ochre)',
       label: `${waitingOnYou} waiting on you`,
+      actionLabel: pendingQuestions.length > 0 ? 'Open your updates' : 'Open the task',
+      onClick: () => {
+        if (pendingQuestions.length > 0) openUpdates();
+        else if (firstTask) navigateToTab({ kind: 'task', ref: firstTask.ref });
+      },
+    });
+  }
+  if (readyForYou > 0) {
+    chips.push({
+      dot: 'var(--sage)',
+      label: `${readyForYou} ready for you`,
+      actionLabel: 'Open your updates',
+      onClick: openUpdates,
     });
   }
 
@@ -254,6 +292,7 @@ export function HomeWorkshop({
               meesterIcon={meesterIcon}
               meesterPoppetje={meesterPoppetje}
               meesterIconOverride={meesterIconOverride}
+              onTurnStarted={collapseForConversation}
             />
           ) : (
             <section className="home-workshop-conversation">

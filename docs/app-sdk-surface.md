@@ -19,14 +19,26 @@ act; its diff is the review.
 | Entry | For | Needs |
 |---|---|---|
 | `.` | Software running beside a Gezel the user installed. Discovery, consent, OpenAI-shaped inference. | Node |
-| `./browser` | A renderer handed a `baseUrl` and token by its own host process. | Nothing |
+| `./browser` | A renderer handed a `baseUrl` and token by its own host process. Chat, models, embeddings, and `registerAppTools`. | Nothing |
 | `./host` | Running a daemon inside the consuming app. | Node, plus `@bendyline/gezel-service` as an optional peer |
 | `./advanced` | The escape hatch. Unsupported. | Node |
 
 `./browser` is deliberately the smallest: discovery, consent and hosting all
-need the filesystem. A browser cannot do the consent handshake at all — the
-daemon refuses app registration from any request carrying an `Origin` — so a
-browser consumer's desktop half performs consent and passes the result in.
+need the filesystem. A browser cannot do the consent handshake — the daemon
+refuses app registration from any request carrying an `Origin` — so a browser
+consumer's desktop half performs consent and passes the result in.
+
+The one exception is a page the daemon serves itself on its Office listener
+(`https://localhost:<port>/office/…`): registration from exactly that origin,
+same-origin, is admitted, and the user still types the verification code into
+Gezel for a `product` grant. That code, not the origin check, is what protects
+the grant — loopback is reachable by every local account — while the origin
+check keeps every other page out. See
+[ADR 0016](decisions/0016-office-host.md). A pane Gezel set up skips that
+fallback by presenting the enrollment key from its manifest, and native Gezel
+add-ins pass `gezelAddIn` to `authorizeLocal`; see
+[ADR 0018](decisions/0018-local-add-in-grants.md). Neither is available to
+third-party apps: the daemon names only Gezel's own add-ins.
 
 ## Stability
 

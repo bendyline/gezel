@@ -170,6 +170,16 @@ The requester receives and displays the plaintext once; the daemon persists only
 hash, and the Gezel approval surface never displays the code. Inference-only scopes may opt
 into the same handshake.
 
+One exception, for Gezel's own local add-ins (Office, LibreOffice, VS Code): an add-in that
+proves it runs as the daemon's owner gets its fixed grant without the code
+([ADR 0018](decisions/0018-local-add-in-grants.md)). The proof is possession of something
+only that account can read: the owner credential in `runtime/auth-token`, exchanged through
+first-party-authenticated `POST /v1/apps/local-connect`; a token file Settings provisions
+at 0600; or the Office enrollment key in the add-in's 0600 manifest, presented to
+`POST /v1/apps/office/enroll`. Other local accounts and web pages can read none of these,
+which is exactly what the code was proving. The routes name only those three app ids, and
+the code flow stays their fallback.
+
 ### 4.2 Internal and session scope guards
 
 The MCP subprocess used to receive the **root** token; it now receives a **session token
@@ -181,8 +191,14 @@ actually offered. `requireInternalApiAccess` first keeps inference-only app/devi
 `/v1`, while admitting explicitly approved `product` and `cli` credentials.
 `sessionRouteGuard` then denies session tokens by default, admitting only explicitly classified
 MCP routes and rejecting config, raw sessions/tool invocation, events, terminals, engine/admin
-routes, foreign project-document fallbacks, and body/query scope spoofing. Three ownership/
-role middlewares provide additional defense-in-depth:
+routes, foreign project-document fallbacks, and body/query scope spoofing. It also keeps the
+user's own moves off session tokens: applying or dismissing a change proposal (apply is the
+only `userInitiated` workspace write), firing or dismissing report actions, forcing a step past
+its gate, and creating a task that trusts custom scripts are denied outright; retrying or
+resuming a paused task (and, for a coordinator, canceling one) is admitted only inside a turn
+the user started (`ChatManager.isUserDirectedTurn`). A session-token `/scripts/run` is recorded
+as a `chat` run, never `manual`, so the script-execution policy and gezel-only artifact denials
+apply. Three ownership/role middlewares provide additional defense-in-depth:
 
 | Guard | Confines a **non-team session** token to… | Env flag | Default |
 |---|---|---|---|

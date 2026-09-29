@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { MobileNativeToolSchema } from '../mobile/inference.js';
-import { decodeNativeToolArguments, nativeToolParameters } from './native-tools.js';
+import {
+  type NativeToolSchema,
+  decodeNativeToolArguments,
+  nativeToolParameters,
+  nativeToolSpecs,
+} from '../tools/native-tools.js';
 import { portableToolSurface } from './product-tools.js';
 import { portableFixture } from './test-files.js';
-import { nativeToolSpecs } from './tool-loop.js';
 
 describe('native tool argument schemas', () => {
   it('keeps property order and maps unions, enums, nullables and open objects', () => {
@@ -130,7 +133,7 @@ describe('native tool argument schemas', () => {
       'object',
       'anyOf',
     ]);
-    const walk = (node: MobileNativeToolSchema, path: string): void => {
+    const walk = (node: NativeToolSchema, path: string): void => {
       expect(kinds.has(node.kind), path).toBe(true);
       if (node.kind === 'array') walk(node.items, `${path}[]`);
       if (node.kind === 'anyOf') node.choices.forEach((choice, i) => walk(choice, `${path}|${i}`));

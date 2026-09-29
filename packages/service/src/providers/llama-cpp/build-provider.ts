@@ -11,7 +11,7 @@ import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
-import { noModelYetMessage } from '../active-install-message.js';
+import { localDeviceSettingsLabel, noModelYetMessage } from '../active-install-message.js';
 import {
   resolveCatalogLlamaCppEngineConfig,
   resolveCatalogReasoningBudget,
@@ -341,7 +341,7 @@ export async function buildLlamaCppProvider(opts: {
       const installed = opts.llamaCppModels ? await opts.llamaCppModels.listInstalled() : [];
       message = installed.length
         ? `Local model: the selected model "${defaultModelId}" is no longer available. ` +
-          `Pick a local model in Settings → This Mac (${installed
+          `Pick a local model in Settings → ${localDeviceSettingsLabel()} (${installed
             .map((m) => m.id)
             .join(', ')}), or download "${defaultModelId}" again.`
         : noModelYetMessage('Local model', activeInstall());

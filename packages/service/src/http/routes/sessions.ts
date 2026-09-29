@@ -1,4 +1,5 @@
 import {
+  CancelSessionTurnRequestSchema,
   type ChatSessionSource,
   CreateChatSessionRequestSchema,
   InterruptSessionRequestSchema,
@@ -12,12 +13,14 @@ import {
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
+  parseTaskRef,
   rewritePromptDraftFileRefs,
   stringifyCraftbookParamValues,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { chatLaunchInvocationKey } from '../../tasks/chat-launch-key.js';
 import { launchErrorResponse } from '../../tasks/launcher.js';
+import { pauseTaskStoppedByUser } from '../../tasks/step-pause.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -517,10 +520,25 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:id/cancel', async (c) => {
     const id = c.req.param('id');
+    const body = CancelSessionTurnRequestSchema.parse(await c.req.json().catch(() => ({})));
     const source = await externalReadOnlySource(ctx, id);
     if (source) return c.json(externalReadOnlyError(source), 409);
     const res = await ctx.chat.cancelInflight(id, 'user-stop');
-    return c.json(res);
+    // Ending the turn is not enough to stop a task: the stuck-step sweep and
+    // a restart both pick an active step back up. Pause it instead.
+    let taskPaused = false;
+    if (body.stopTask) {
+      const record = await ctx.chat.getSessionRecord(id).catch(() => null);
+      const ref = record?.taskRef ? parseTaskRef(record.taskRef) : null;
+      if (ref && record?.taskRef && record.stepId) {
+        taskPaused = await pauseTaskStoppedByUser(ctx.tasks, {
+          ...ref,
+          stepId: record.stepId,
+          taskRef: record.taskRef,
+        });
+      }
+    }
+    return c.json({ ...res, ...(taskPaused ? { taskPaused } : {}) });
   });
 
   // Interrupt: cancel the in-flight turn (salvaged exactly like

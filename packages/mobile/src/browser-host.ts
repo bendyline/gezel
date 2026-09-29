@@ -27,7 +27,7 @@ export function createBrowserHost(): MobileHost {
           locality: 'on-device',
           availability: 'unavailable',
           reason: 'Open the installed mobile app to use a model on this device.',
-          contextTokens: 8192,
+          contextTokens: 16384,
           maxOutputTokens: 4096,
           capabilities: {
             text: true,

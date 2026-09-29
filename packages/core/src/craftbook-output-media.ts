@@ -9,6 +9,9 @@ import type { TaskCraftbookStep } from './schemas/task.js';
 const TASK_NOTE_OUTPUT_SIGNAL =
   /\bwrite_task_note\b|\b(?:write|record|append|summarize)[^.!?\n]{0,100}\b(?:task\s+)?notes?\b|\bwrite\s+PASS\s*\/\s*FAIL\b/i;
 
+const WORKSPACE_MUTATION_SIGNAL =
+  /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b|\b(?:edit|change|patch|fix)\b[^.!?\n]{0,80}\b(?:actual|workspace|source|project)\s+files?\b|\b(?:add|create|implement|modify|strengthen|update|write)\b[^.!?\n]{0,100}\b(?:regression\s+tests?|tests?\s+(?:case|file|suite)|source\s+(?:code|files?)|code\s+(?:fix|change|implementation))\b/i;
+
 function procedureText(step: NewCraftbookStep): string {
   return [step.name, step.description, step.prompt, step.suggestedRole].filter(Boolean).join('\n');
 }
@@ -85,11 +88,7 @@ export function additionalOutputMediaForStep(
   const text = procedureText(step);
   const out = new Set(step.toolPolicy?.additionalOutputMedia ?? []);
   for (const medium of requiredOutputMediaForGate(step.gate)) out.add(medium);
-  if (
-    /\b(?:write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker)\b|\b(?:edit|change|patch|fix)\b[^.!?\n]{0,80}\b(?:actual|workspace|source|project)\s+files?\b/i.test(
-      text,
-    )
-  ) {
+  if (WORKSPACE_MUTATION_SIGNAL.test(text)) {
     out.add('workspace');
   }
   if (/\bwrite_artifact\b/i.test(text)) out.add('artifact');

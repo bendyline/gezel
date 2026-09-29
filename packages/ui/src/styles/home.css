@@ -536,6 +536,63 @@
   stroke: #c0392b;
 }
 
+/* A narrow composer carries the thread bar in the editor toolbar instead of
+   its own row (ChatComposer's `threadBarInToolbar`). The picker becomes an
+   icon key that also wears `.squisq-toolbar-button`, so its ink and hover
+   come from the same theme rules as the image and attach keys beside it;
+   these rules only strip the select's own box. New thread and New draft
+   live in the picker there. */
+.chat-composer-toolbar-thread {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.gezel-chat-session-header-toolbar {
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border-bottom: 0;
+  background: none;
+}
+
+/* Specific enough to beat the compact layout's 44px floor for this select,
+   which ties at one class fewer and loads later. The row keeps squisq's key
+   size, as the image and attach keys do. */
+.chat-composer-toolbar-thread
+  .gezel-chat-session-header-toolbar
+  .gz-select-trigger.gezel-chat-session-select.squisq-toolbar-button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  height: 28px;
+  min-height: 0;
+  gap: 2px;
+  padding: 2px 4px 0 6px;
+  border: none;
+  border-radius: 4px;
+}
+
+.chat-composer-toolbar-thread
+  .gz-select-trigger.gezel-chat-session-select.squisq-toolbar-button:not(:hover) {
+  background: transparent;
+}
+
+/* Beats the select's own background; the dark editor theme's hover rule is
+   more specific still and wins over this, as it does for the other keys. */
+.gezel-chat-session-select.squisq-toolbar-button:hover {
+  background: var(--squisq-surface-raised);
+}
+
+.gezel-chat-session-header-toolbar .context-meter {
+  height: 28px;
+}
+
+.gezel-chat-session-header-toolbar .context-meter:not(:hover):not([data-state="open"]) {
+  border-color: transparent;
+}
+
 .context-meter-popover {
   width: 19rem;
 }

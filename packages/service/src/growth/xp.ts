@@ -10,7 +10,7 @@
  * memory compaction merging/discarding old entries never lowers XP.
  */
 
-import type { GrowthSignals, Task } from '@bendyline/gezel';
+import type { GrowthSignals, Task, TaskCraftbookStep } from '@bendyline/gezel';
 import type { MemoryKind } from '../memory/daily-markdown.js';
 
 export const XP_WEIGHTS = {
@@ -92,15 +92,16 @@ export function countTaskWork(
       completedTasks++;
     }
     for (const step of task.craftbook.steps) {
-      if (!step.completedAt) continue;
-      const assignedTo =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : step.assignee === undefined
-            ? step.suggestedGezelId
-            : undefined;
-      if (assignedTo === gezelId) completedSteps++;
+      if (step.completedAt && stepCreditedGezelId(step) === gezelId) completedSteps++;
     }
   }
   return { completedSteps, completedTasks };
+}
+
+/** The gezel a completed step's XP goes to: its assignee, else its suggested gezel. */
+export function stepCreditedGezelId(
+  step: Pick<TaskCraftbookStep, 'assignee' | 'suggestedGezelId'>,
+): string | undefined {
+  if (step.assignee?.kind === 'gezel') return step.assignee.gezelId;
+  return step.assignee === undefined ? step.suggestedGezelId : undefined;
 }

@@ -50,6 +50,7 @@ export class SerializedAutosaveController<Result> {
   private desired: string;
   private acknowledged: string;
   private save: (value: string) => Promise<Result>;
+  private isEquivalent: ((a: string, b: string) => boolean) | undefined;
   private readonly debounceMs: number;
   private phase: AutosavePhase = 'idle';
   private error: Error | null = null;
@@ -64,16 +65,22 @@ export class SerializedAutosaveController<Result> {
     initialValue: string;
     save: (value: string) => Promise<Result>;
     debounceMs?: number;
+    isEquivalent?: (a: string, b: string) => boolean;
   }) {
     this.resourceKey = options.resourceKey;
     this.desired = options.initialValue;
     this.acknowledged = options.initialValue;
     this.save = options.save;
+    this.isEquivalent = options.isEquivalent;
     this.debounceMs = options.debounceMs ?? 1000;
   }
 
-  configure(save: (value: string) => Promise<Result>): void {
+  configure(
+    save: (value: string) => Promise<Result>,
+    isEquivalent?: (a: string, b: string) => boolean,
+  ): void {
     this.save = save;
+    this.isEquivalent = isEquivalent;
   }
 
   getSnapshot(): AutosaveSnapshot {
@@ -102,6 +109,7 @@ export class SerializedAutosaveController<Result> {
   }
 
   update(value: string): void {
+    if (this.rebaseIfEquivalent(value)) return;
     this.desired = value;
     this.error = null;
     this.phase =
@@ -127,6 +135,24 @@ export class SerializedAutosaveController<Result> {
         });
       }, this.debounceMs);
     }
+  }
+
+  /**
+   * An editor re-serializing content nobody changed is not an edit, so a
+   * clean lane takes the new form as its watermark without writing. A lane
+   * with a pending edit never rebases: an edit that reverts to an equivalent
+   * form must still reach disk.
+   */
+  private rebaseIfEquivalent(value: string): boolean {
+    if (!this.isEquivalent || value === this.acknowledged) return false;
+    if (this.desired !== this.acknowledged || this.activeValue !== null || this.needsWrite) {
+      return false;
+    }
+    if (!this.isEquivalent(value, this.acknowledged)) return false;
+    this.desired = value;
+    this.acknowledged = value;
+    this.emit();
+    return true;
   }
 
   /** Replace local state with a value known to be authoritative. */
@@ -255,6 +281,12 @@ export interface UseSerializedAutosaveOptions<Result> {
   save: (value: string) => Promise<Result>;
   debounceMs?: number;
   onLatestSaved?: (result: Result, value: string) => void;
+  /**
+   * Values that mean the same thing as the last saved one — an editor's
+   * canonical re-serialization — are adopted without a write while nothing
+   * is pending. Markdown lanes pass `markdownEquivalent`.
+   */
+  isEquivalent?: (a: string, b: string) => boolean;
 }
 
 export interface SerializedAutosave<Result> extends AutosaveSnapshot {
@@ -282,6 +314,7 @@ export function useSerializedAutosave<Result>(
         initialValue: options.initialValue,
         save: options.save,
         debounceMs: options.debounceMs,
+        isEquivalent: options.isEquivalent,
       }) as unknown as SerializedAutosaveController<unknown>,
       users: 0,
     };
@@ -289,7 +322,7 @@ export function useSerializedAutosave<Result>(
     return created;
   }, [options.resourceKey]);
   const controller = entry.controller as SerializedAutosaveController<Result>;
-  controller.configure(options.save);
+  controller.configure(options.save, options.isEquivalent);
 
   const latestSavedRef = useRef(options.onLatestSaved);
   latestSavedRef.current = options.onLatestSaved;

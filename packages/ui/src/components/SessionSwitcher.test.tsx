@@ -48,6 +48,7 @@ vi.mock('../shared-chat-events.js', () => ({
 }));
 
 const { SessionSwitcher } = await import('./SessionSwitcher.js');
+const { ComposerToolbarContext } = await import('./composer-toolbar-context.js');
 const { resetComposerDrafts, writeDraftText } = await import('./composer-drafts.js');
 const { api } = await import('../api.js');
 
@@ -982,6 +983,35 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(values.indexOf('draft:2026-09-03-0031')).toBeLessThan(values.indexOf('s-sent'));
   });
 
+  // The label read the model stamped at creation while a stand-in answered.
+  it('names the model that answered, not the one the thread was created with', async () => {
+    mockSessions([
+      {
+        id: 's-served',
+        gezelId: 'g1',
+        title: 'Catering quote',
+        lastActivityAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        providerName: 'llama-cpp',
+        model: 'qwen3.6-27b-q8',
+        servedModel: 'gemma4-31b-q4',
+        archived: false,
+      },
+    ]);
+    mockDrafts({ fresh: [], onThread: [] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-served"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    const row = await screen.findByRole('option', { name: /Catering quote/ });
+    expect(row.textContent).toContain('gemma4-31b-q4');
+    expect(row.textContent).not.toContain('qwen3.6-27b-q8');
+  });
+
   it('files "Draft" under the open thread, not as a new thread starter', async () => {
     mockSessions([
       {
@@ -1066,6 +1096,52 @@ describe('SessionSwitcher prompt drafts', () => {
       />,
     );
     expect(screen.getByRole('button', { name: 'New draft' })).toBeInTheDocument();
+  });
+
+  it('in a composer toolbar, keeps the picker and meter and offers both starts as rows', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({});
+    vi.mocked(api.createPromptDraft).mockResolvedValue(
+      draft({
+        id: '2026-09-03-0042',
+        sessionId: 's-1',
+        title: 'second note',
+        content: 'second note',
+      }) as never,
+    );
+    const onDraftSelect = vi.fn();
+    render(
+      <ComposerToolbarContext.Provider value>
+        <SessionSwitcher
+          gezelId="g1"
+          projectId="p1"
+          sessionId="s-1"
+          onSessionIdChange={vi.fn()}
+          onDraftSelect={onDraftSelect}
+        />
+      </ComposerToolbarContext.Provider>,
+    );
+    expect(screen.queryByRole('button', { name: 'New thread' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New draft' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'New thread' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__NEW_DRAFT__' } });
+    await waitFor(() =>
+      expect(api.createPromptDraft).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ sessionId: 's-1' }),
+      ),
+    );
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0042');
   });
 
   it('removes a draft from its own row, wherever that row sits', async () => {

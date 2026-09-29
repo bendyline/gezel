@@ -22,6 +22,12 @@ android {
 dependencies {
     api "com.bendyline.gezel:gezel-llama:${version}"
     implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
+    // ML Kit GenAI beta4 calls Job.cancel$default, which kotlinx-coroutines
+    // first provides in 1.11. ML Kit speech's BOM pins 1.8.1, and that
+    // resolution crashed the app the first time a Gemini Nano reply was
+    // stopped (Galaxy S26+, 2026-09-26).
+    implementation platform('org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.11.0')
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core'
 }
 afterEvaluate {
     publishing {

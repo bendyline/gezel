@@ -70,6 +70,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
     EditorShell: ({
       initialMarkdown = '',
       placeholder,
+      toolbarSlotAfterActions,
       toolbarSlotRight,
       onChange,
       submitOnEnter,
@@ -78,6 +79,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
     }: {
       initialMarkdown?: string;
       placeholder?: string;
+      toolbarSlotAfterActions?: React.ReactNode;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
       submitOnEnter?: () => void;
@@ -126,6 +128,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             >
               Fill draft
             </button>
+            <div data-testid="editor-toolbar-after-actions">{toolbarSlotAfterActions}</div>
             {toolbarSlotRight}
           </div>
         </EditorTestContext.Provider>
@@ -278,6 +281,69 @@ describe('ChatComposer To line', () => {
   });
 });
 
+describe('ChatComposer thread bar placement', () => {
+  let width = 0;
+  const realClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    roleBasedNameOnly.value = false;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => width,
+    });
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly cb: ResizeObserverCallback) {}
+        observe(): void {
+          queueMicrotask(() => this.cb([], this as unknown as ResizeObserver));
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (realClientWidth) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', realClientWidth);
+    }
+  });
+
+  const composer = () => (
+    <ChatComposer
+      gezelId="tomas"
+      gezelName="Tomas"
+      projectId="default"
+      sessionId="session-1"
+      belowAddressLine={<div data-testid="thread-bar">threads</div>}
+    />
+  );
+
+  it('keeps the thread bar on its own row in a wide composer', async () => {
+    width = 900;
+    render(composer());
+    await act(async () => {});
+    expect(screen.getByTestId('editor-toolbar-after-actions')).not.toContainElement(
+      screen.getByTestId('thread-bar'),
+    );
+  });
+
+  it('moves the thread bar into the editor toolbar in a narrow composer', async () => {
+    width = 380;
+    render(composer());
+    await waitFor(() =>
+      expect(screen.getByTestId('editor-toolbar-after-actions')).toContainElement(
+        screen.getByTestId('thread-bar'),
+      ),
+    );
+    expect(screen.getAllByTestId('thread-bar')).toHaveLength(1);
+  });
+});
+
 describe('ChatComposer attached task', () => {
   const powerpointPlan = {
     schemaVersion: 1,
@@ -386,7 +452,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -404,7 +470,6 @@ describe('ChatComposer attached task', () => {
       message: 'Please make a PowerPoint about Mongolia.',
       gezelId: 'tomas',
       projectId: 'default',
-      sessionId: 'session-1',
     });
     await waitFor(() =>
       expect(api.patchPromptDraft).toHaveBeenCalledWith(
@@ -430,7 +495,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -447,8 +512,9 @@ describe('ChatComposer attached task', () => {
     await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
   });
 
-  it('dismissing a suggestion keeps it away for that text and opts the send out of the route', async () => {
+  it('dismissing a suggestion keeps it away while the message is edited, and opts the send out of the route', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-1' } as never);
     vi.mocked(api.sendToChatSession).mockResolvedValue({ accepted: true, sessionId: 'session-1' });
     vi.mocked(streamChatEvents).mockImplementation(async function* () {
       yield { type: 'done' } as never;
@@ -458,7 +524,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={taskLaunch}
       />,
     );
@@ -475,6 +541,12 @@ describe('ChatComposer attached task', () => {
       }),
     );
 
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia and its steppes.' },
+    });
+    await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
+
     pressSendShortcut();
     await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
     expect(api.sendToChatSession).toHaveBeenCalledWith(
@@ -486,6 +558,7 @@ describe('ChatComposer attached task', () => {
 
   it('sending with an attached task creates it instead of a chat turn', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-1' } as never);
     vi.mocked(api.launchTaskFromChatSession).mockResolvedValue({
       task: { ref: 'default/7', num: 7, projectId: 'default', title: 'Deck' },
       userMessage: { role: 'user', content: 'x', at: '2026-09-24T00:00:01.000Z' },
@@ -498,7 +571,7 @@ describe('ChatComposer attached task', () => {
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={undefined}
         taskLaunch={{ ...taskLaunch, onLaunched }}
       />,
     );
@@ -527,6 +600,26 @@ describe('ChatComposer attached task', () => {
     // The stale plan must not resurrect the suggestion onto a fresh draft
     // after the message went out: exactly one draft was ever created.
     expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('suggests nothing in an ongoing thread, where the words are a reply', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        taskLaunch={taskLaunch}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please turn this into a PowerPoint.' },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(api.previewTurnIntent).not.toHaveBeenCalled();
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
   });
 
   /** Mount empty, then pick a task-bearing draft — the way the thread picker hands one over. */
@@ -772,7 +865,7 @@ describe('ChatComposer lossless draft submission', () => {
     expect(api.sendToChatSession).not.toHaveBeenCalled();
   });
 
-  it('shows the model setup explanation and opens Settings without losing the unsent draft', async () => {
+  it('shows the model setup explanation and opens setup without losing the unsent draft', async () => {
     const explanation =
       'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.';
     vi.mocked(api.createChatSession).mockRejectedValueOnce(
@@ -791,11 +884,11 @@ describe('ChatComposer lossless draft submission', () => {
     const navigate = vi.fn();
     window.addEventListener('gezel:navigate', navigate);
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Choose a model' }));
-      expect(navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ detail: { view: 'settings', section: 'defaults' } }),
-      );
-      expect(takePendingSettingsSection()).toBe('defaults');
+      // With nothing installed, Home's first-run setup offers the one-click
+      // download; Settings → General (where this used to land) offered nothing.
+      fireEvent.click(screen.getByRole('button', { name: 'Set up a model' }));
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ detail: { view: 'home' } }));
+      expect(takePendingSettingsSection()).toBeNull();
       expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
     } finally {
       window.removeEventListener('gezel:navigate', navigate);
@@ -1000,7 +1093,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 
@@ -1013,7 +1106,7 @@ describe('ChatComposer server-authoritative cancellation', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     await waitFor(() => {
-      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1');
+      expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('session-1', { stopTask: true });
     });
   });
 

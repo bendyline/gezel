@@ -1,20 +1,16 @@
 import { realpathSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Project } from '@bendyline/gezel';
-import type { GezelClient } from '@bendyline/gezel-client/node';
+import { type GezelClient, ensureProjectForFolder } from '@bendyline/gezel-client/node';
 import type * as vscode from 'vscode';
 import type { Logger } from './log.js';
 
 /**
- * Lookup-or-create a project for a workspace folder. Idempotent.
- *
- * Match precedence:
- *   1. Existing project whose `workingDir` equals this folder (case-insensitive
- *      on Windows, symlink-resolved). Reuse it.
- *   2. Existing project whose `name === basename(folder)` but has no
- *      `workingDir` set. Adopt it by patching its `workingDir`. This recovers
- *      from folder renames in the OS while VSCode is open.
- *   3. Otherwise create a fresh folder-backed project.
+ * Lookup-or-create a project for a workspace folder. Idempotent. Delegates to
+ * the shared `ensureProjectForFolder` (the daemon's folder inference): reuse
+ * the project bound to this folder, adopt a same-name project with no
+ * folder, else create one. The daemon refuses folders gezel must not own
+ * (the home folder, a drive root) with 403 `forbidden_root`.
  */
 export async function ensureProjectForWorkspace(
   folder: vscode.WorkspaceFolder,
@@ -22,32 +18,16 @@ export async function ensureProjectForWorkspace(
   logger: Logger,
 ): Promise<string> {
   const wd = canonicalizePath(folder.uri.fsPath);
-  const list = await client.listProjects();
-
-  const exact = list.projects.find((p) => p.workingDir && pathsEqual(p.workingDir, wd));
-  if (exact) {
-    logger.info(`adopted project ${exact.id} for ${wd}`);
-    return exact.id;
-  }
-
   const name = basename(wd) || 'workspace';
-  const orphan = list.projects.find((p) => !p.workingDir && p.name === name);
-  if (orphan) {
-    await client.setProjectWorkingDir(orphan.id, wd);
-    logger.info(`linked existing project ${orphan.id} (${name}) → ${wd}`);
-    return orphan.id;
-  }
-
-  const created = await client.createProject({
-    name,
+  const result = await ensureProjectForFolder(client, wd, {
+    mode: 'crew',
+    source: 'vscode',
     description: `VSCode workspace at ${wd}`,
     about: defaultAbout(name, wd),
     missionObjectives: defaultMission(name),
-    mode: 'crew',
-    workingDir: wd,
   });
-  logger.info(`created project ${created.id} for ${wd}`);
-  return created.id;
+  logger.info(`${result.created ? 'created' : 'using'} project ${result.projectId} for ${wd}`);
+  return result.projectId;
 }
 
 /**

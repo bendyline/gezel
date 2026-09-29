@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type TaskStatusLookup,
   type TokenScopeMode,
   gezelScopeGuard,
   isTeamRoute,
@@ -351,6 +352,7 @@ function sessionPolicyApp(
   auth: Auth | null,
   isProjectLinked?: (source: string, target: string) => Promise<boolean>,
   isUserDirectedTurn?: (sessionId: string) => boolean,
+  taskStatus?: TaskStatusLookup,
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -360,6 +362,7 @@ function sessionPolicyApp(
   const guard = sessionRouteGuard({
     ...(isProjectLinked ? { isProjectLinked } : {}),
     ...(isUserDirectedTurn ? { isUserDirectedTurn } : {}),
+    ...(taskStatus ? { taskStatus } : {}),
   });
   app.use('/api/*', guard);
   app.use('/events/*', guard);
@@ -446,6 +449,17 @@ describe('sessionRouteGuard', () => {
     expect((await ui.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(200);
   });
 
+  it('keeps retrieval previews first-party: they can read any gezel’s memory', async () => {
+    const app = sessionPolicyApp(session('proj-a'));
+    expect((await app.request('/api/projects/proj-a/retrieval/preview', jsonPost({}))).status).toBe(
+      403,
+    );
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/projects/proj-a/retrieval/preview', jsonPost({}))).status).toBe(
+      200,
+    );
+  });
+
   it('lets coordinator sessions cross projects but still blocks UI/admin capabilities', async () => {
     const app = sessionPolicyApp(session('proj-a', true));
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(200);
@@ -466,6 +480,15 @@ describe('sessionRouteGuard', () => {
     ).toBe(403);
     expect((await app.request('/api/projects/preview-about', jsonPost({}))).status).toBe(403);
     expect((await app.request('/api/projects/poisoned')).status).toBe(403);
+    // Folder inference creates projects for host paths: first-party only,
+    // even for a coordinator whose own project id would otherwise match.
+    expect(
+      (await app.request('/api/projects/infer-for-path', jsonPost({ path: '/Users/me/x.docx' })))
+        .status,
+    ).toBe(403);
+    expect((await app.request('/api/projects/well-known-folders')).status).toBe(403);
+    const own = sessionPolicyApp(session('infer-for-path', true));
+    expect((await own.request('/api/projects/infer-for-path', jsonPost({}))).status).toBe(403);
   });
 
   it('lets a session GET only its own record under /api/sessions', async () => {
@@ -529,6 +552,144 @@ describe('sessionRouteGuard', () => {
 
     const worker = sessionPolicyApp(session('default'), undefined, () => true);
     expect((await worker.request(retry, jsonPost({}))).status).toBe(403);
+  });
+
+  // Canceling cannot be undone, so the Meester's manage_task may do it only
+  // when the user asked this turn. Pausing, the honest exit, stays open.
+  it('lets a coordinator cancel a task only inside a user-started turn', async () => {
+    const status = '/api/projects/default/tasks/11/status';
+    const userTurn = sessionPolicyApp(session('default', true), undefined, () => true);
+    expect((await userTurn.request(status, jsonPost({ status: 'canceled' }))).status).toBe(200);
+
+    const ownInitiative = sessionPolicyApp(session('default', true), undefined, () => false);
+    expect((await ownInitiative.request(status, jsonPost({ status: 'canceled' }))).status).toBe(
+      403,
+    );
+    expect((await ownInitiative.request(status, jsonPost({ status: 'paused' }))).status).toBe(200);
+
+    // A worker's own status writes are unchanged.
+    const worker = sessionPolicyApp(session('default'), undefined, () => false);
+    expect((await worker.request(status, jsonPost({ status: 'canceled' }))).status).toBe(200);
+  });
+
+  // set_task_status active on a paused task is a retry without the budget
+  // reset. The prompt tells a session to do it when the user asks to resume,
+  // and that is the only turn in which it may.
+  it('lets a session resume a paused task only inside a user-started turn', async () => {
+    const statuses: Record<number, string> = { 3: 'paused', 4: 'active', 5: 'complete' };
+    const lookup: TaskStatusLookup = async (_projectId, num) => statuses[num] ?? null;
+    const resume = (num: number | string) =>
+      [`/api/projects/proj-a/tasks/${num}/status`, jsonPost({ status: 'active' })] as const;
+    for (const team of [false, true]) {
+      const ownInitiative = sessionPolicyApp(
+        session('proj-a', team),
+        undefined,
+        () => false,
+        lookup,
+      );
+      expect((await ownInitiative.request(...resume(3))).status).toBe(403);
+      // Not a resume: already active, a reopen, a missing task, or a num the
+      // route rejects itself.
+      expect((await ownInitiative.request(...resume(4))).status).toBe(200);
+      expect((await ownInitiative.request(...resume(5))).status).toBe(200);
+      expect((await ownInitiative.request(...resume(99))).status).toBe(200);
+      expect((await ownInitiative.request(...resume('03'))).status).toBe(200);
+      expect(
+        (
+          await ownInitiative.request(
+            '/api/projects/proj-a/tasks/3/status',
+            jsonPost({ status: 'paused' }),
+          )
+        ).status,
+      ).toBe(200);
+
+      const userTurn = sessionPolicyApp(session('proj-a', team), undefined, () => true, lookup);
+      expect((await userTurn.request(...resume(3))).status).toBe(200);
+    }
+
+    // No lookup, or a failed one, fails closed.
+    const unwired = sessionPolicyApp(session('proj-a'), undefined, () => false);
+    expect((await unwired.request(...resume(4))).status).toBe(403);
+    const failing = sessionPolicyApp(
+      session('proj-a'),
+      undefined,
+      () => false,
+      async () => {
+        throw new Error('disk');
+      },
+    );
+    expect((await failing.request(...resume(4))).status).toBe(403);
+
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request(...resume(3))).status).toBe(200);
+  });
+
+  // `force` is the user's "Complete anyway": it skips the gate and records
+  // the completion as the user's. advance_task_step never sends it.
+  it('keeps forced step completion first-party', async () => {
+    const complete = '/api/projects/proj-a/tasks/3/steps/build/complete';
+    for (const team of [false, true]) {
+      const app = sessionPolicyApp(session('proj-a', team), undefined, () => true);
+      expect((await app.request(complete, jsonPost({ force: true }))).status).toBe(403);
+      expect((await app.request(complete, jsonPost({ force: true, next: 'x' }))).status).toBe(403);
+      expect((await app.request(complete, jsonPost({}))).status).toBe(200);
+      expect((await app.request(complete, jsonPost({ next: 'review' }))).status).toBe(200);
+      expect((await app.request(complete, jsonPost({ force: false }))).status).toBe(200);
+    }
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request(complete, jsonPost({ force: true }))).status).toBe(200);
+  });
+
+  it('never lets a session create a task that trusts custom scripts', async () => {
+    const create = '/api/projects/proj-a/tasks';
+    const coordinator = sessionPolicyApp(session('proj-a', true), undefined, () => true);
+    expect(
+      (await coordinator.request(create, jsonPost({ title: 't', trustScripts: true }))).status,
+    ).toBe(403);
+    expect((await coordinator.request(create, jsonPost({ title: 't' }))).status).toBe(200);
+    const worker = sessionPolicyApp(session('proj-a'));
+    expect(
+      (await worker.request(create, jsonPost({ title: 't', trustScripts: true }))).status,
+    ).toBe(403);
+    const cli = sessionPolicyApp({ appId: 'gezel-cli', scopes: ['cli'] });
+    expect((await cli.request(create, jsonPost({ title: 't', trustScripts: true }))).status).toBe(
+      200,
+    );
+  });
+
+  // Apply is the one route that passes `userInitiated` to the workspace
+  // write gate: the click is the write. Dismiss is the user's verdict, and
+  // report-action cards are model-authored text the user fires.
+  it('keeps change-proposal review and report actions first-party', async () => {
+    const denied = [
+      '/api/projects/proj-a/diffpacks/12/apply',
+      '/api/projects/proj-a/diffpacks/12/apply/',
+      '/api/projects/proj-a/diffpacks/12/dismiss',
+      '/api/projects/proj-a/report-actions/fire',
+      '/api/projects/proj-a/report-actions/dismiss',
+    ];
+    for (const team of [false, true]) {
+      const app = sessionPolicyApp(session('proj-a', team), undefined, () => true);
+      for (const path of denied) {
+        expect((await app.request(path, jsonPost({ path: 'r.md', actionId: 'a' }))).status).toBe(
+          403,
+        );
+      }
+      // Reading proposals and drafting into one stay on the MCP surface.
+      expect((await app.request('/api/projects/proj-a/diffpacks')).status).toBe(200);
+      expect((await app.request('/api/projects/proj-a/diffpacks/12')).status).toBe(200);
+      expect(
+        (await app.request('/api/projects/proj-a/diffpacks/12/draft/read?path=a.ts')).status,
+      ).toBe(200);
+      expect(
+        (await app.request('/api/projects/proj-a/diffpacks/12/draft/replace', jsonPost({}))).status,
+      ).toBe(200);
+      expect((await app.request('/api/projects/proj-a/report-actions?path=r.md')).status).toBe(200);
+    }
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    for (const path of denied) {
+      expect((await ui.request(path, jsonPost({}))).status).toBe(200);
+    }
   });
 
   it('keeps shared documents available without the foreign-project fallback', async () => {

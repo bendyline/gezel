@@ -5,6 +5,7 @@ import {
   type TaskInputRecord,
   type TaskInputSource,
 } from './schemas/task-inputs.js';
+import { artifactSegments } from './shadow-paths.js';
 import { isSyncJunkName } from './sync-junk.js';
 
 /**
@@ -68,13 +69,16 @@ function schemaRequired(paramSchema: Craftbook['paramSchema']): string[] {
     : [];
 }
 
-/** Every input param a craftbook declares, in declaration order. */
+/**
+ * Every input param a craftbook declares, in declaration order. A key that
+ * cannot be a folder name ({@link isSafeInputKey}) is not an input.
+ */
 export function craftbookInputParams(paramSchema: Craftbook['paramSchema']): CraftbookInputParam[] {
   const required = new Set(schemaRequired(paramSchema));
   const out: CraftbookInputParam[] = [];
   for (const [key, property] of Object.entries(schemaProperties(paramSchema))) {
     const spec = paramInputSpec(property);
-    if (!spec) continue;
+    if (!spec || !isSafeInputKey(key)) continue;
     const prop = property as { title?: unknown; description?: unknown };
     out.push({
       key,
@@ -102,7 +106,7 @@ export function withoutInputParams(
   const properties = schemaProperties(paramSchema);
   const inputKeys = new Set(
     Object.entries(properties)
-      .filter(([, property]) => paramInputSpec(property))
+      .filter(([key, property]) => paramInputSpec(property) && isSafeInputKey(key))
       .map(([key]) => key),
   );
   if (inputKeys.size === 0) return paramSchema;
@@ -190,13 +194,32 @@ export function taskInputReadTools(
   ];
 }
 
+const SAFE_INPUT_KEY = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,62}[A-Za-z0-9_-])?$/;
+const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|com\d|lpt\d)(?:\..*)?$/i;
+
+/**
+ * An input's param key becomes a folder and a file name under
+ * `tasks/<num>/inputs/`, so only a plain name may be one. `../../notes` or
+ * `a/../../4/inputs/b` would otherwise point a launch at the rest of the
+ * drawer or at another task's inputs.
+ */
+export function isSafeInputKey(key: string): boolean {
+  return SAFE_INPUT_KEY.test(key) && !WINDOWS_DEVICE_NAME.test(key);
+}
+
+function assertSafeInputKey(param: string): void {
+  if (!isSafeInputKey(param)) throw new Error(`"${param}" cannot name a task input folder`);
+}
+
 /** Artifacts-relative folder an uploaded input is adopted into. */
 export function taskInputArtifactDir(taskDir: string, param: string): string {
+  assertSafeInputKey(param);
   return `${taskDir}/inputs/${param}`;
 }
 
 /** Artifacts-relative manifest path for one input. */
 export function taskInputManifestPath(taskDir: string, param: string): string {
+  assertSafeInputKey(param);
   return `${taskDir}/inputs/${param}.json`;
 }
 
@@ -206,9 +229,7 @@ export function taskInputManifestPath(taskDir: string, param: string): string {
  * gate, but the user may still edit what they supplied.
  */
 export function isTaskInputArtifactPath(path: string): boolean {
-  const segments = normalizeInputPath(path)
-    .split('/')
-    .filter((s) => s.length > 0);
+  const segments = artifactSegments(path);
   return (
     segments.length >= 3 &&
     segments[0]?.toLowerCase() === 'tasks' &&
@@ -223,9 +244,7 @@ export function isTaskInputArtifactPath(path: string): boolean {
  * creating the task folder is harmless.
  */
 export function touchesTaskInputArtifactPath(path: string): boolean {
-  const segments = normalizeInputPath(path)
-    .split('/')
-    .filter((s) => s.length > 0);
+  const segments = artifactSegments(path);
   if (segments[0]?.toLowerCase() !== 'tasks') return false;
   return segments.length <= 2 || segments[2]?.toLowerCase() === 'inputs';
 }

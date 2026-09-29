@@ -20,6 +20,18 @@ describe('terminalToolClosingText', () => {
     ).toBe('Completed step "research" on default/10. Active step is now "Lock the slide outline".');
   });
 
+  // The owner read the model-facing bookkeeping as the gezel's last word.
+  it('replies with only the plain first paragraph of a task-step handoff', () => {
+    expect(
+      terminalToolClosingText(
+        undefined,
+        'advance_task_step',
+        { ref: 'default/2', stepId: 'finish' },
+        'Finished "Finish". "Weekly posts" is complete.\n\nCompleted step "finish" on default/2. Active step is now "(none)". Task is now complete (terminal step).',
+      ),
+    ).toBe('Finished "Finish". "Weekly posts" is complete.');
+  });
+
   it('keeps a rejected task-step handoff in the repair loop', () => {
     expect(
       terminalToolClosingText(

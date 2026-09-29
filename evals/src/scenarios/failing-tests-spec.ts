@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { GRADER_TOOL_UNAVAILABLE } from '../grader-unavailable.ts';
 import { postSniffFeedback } from '../sniff-feedback.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import {
@@ -185,9 +187,20 @@ const CONTROLLED_VITEST_CONFIG = join(
   dirname(fileURLToPath(import.meta.url)),
   'failing-tests-spec.vitest.config.mjs',
 );
-function resolveVitestBin(): string {
-  const vitestPkg = requireFromHere.resolve('vitest/package.json');
-  return join(dirname(vitestPkg), 'vitest.mjs');
+/**
+ * The Vitest CLI the grader runs: `GEZEL_EVAL_VITEST_BIN` when set, else the
+ * harness's own dependency. Null when neither exists — a compiled harness
+ * inside an installed service ships no test runner.
+ */
+function resolveVitestBin(): string | null {
+  const explicit = process.env.GEZEL_EVAL_VITEST_BIN?.trim();
+  if (explicit) return existsSync(explicit) ? explicit : null;
+  try {
+    const vitestPkg = requireFromHere.resolve('vitest/package.json');
+    return join(dirname(vitestPkg), 'vitest.mjs');
+  } catch {
+    return null;
+  }
 }
 
 function resolveTscBin(): string {
@@ -654,9 +667,11 @@ export async function runVitestInDir(dir: string): Promise<VitestRunResult | nul
     // this harness rather than inside the materialized workspace: on Windows,
     // Vitest/esbuild can fail to bundle a config on another drive or inside a
     // permission-restricted temp root before it ever discovers the tests.
+    const vitestBin = resolveVitestBin();
+    if (!vitestBin) return null;
     const result = await spawnAndAwait(
       process.execPath,
-      [resolveVitestBin(), 'run', TEST_PATH, '--config', CONTROLLED_VITEST_CONFIG],
+      [vitestBin, 'run', TEST_PATH, '--config', CONTROLLED_VITEST_CONFIG],
       {
         // Keep config bundling on the harness drive. `root` in the controlled
         // config still points discovery at the materialized workspace.
@@ -945,8 +960,18 @@ export const failingTestsSpecScenario: EvalScenario = {
   progressTimeoutMs: 12 * 60_000,
   setup,
   skipInitialPrompt: true,
+  requires: ['vitest'],
   successCheck: async (ctx): Promise<SuccessCheckResult> => {
     const { client, log, logChanged, recordSniff } = ctx;
+    // Without a test runner this trial can only ever time out, and a timeout
+    // is scored against the model. End it now as ungradable instead.
+    if (resolveVitestBin() === null) {
+      return {
+        done: true,
+        success: false,
+        reason: `${GRADER_TOOL_UNAVAILABLE}: the Vitest runner that grades this scenario is not installed where the harness can reach it (set GEZEL_EVAL_VITEST_BIN)`,
+      };
+    }
     const projectId = await findProjectId(client);
     if (!projectId) {
       logChanged('project', '[scenario] machine-kata project not present yet');

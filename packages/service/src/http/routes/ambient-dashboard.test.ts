@@ -8,7 +8,7 @@ import {
   ambientDashboardStateFile,
   ambientDir,
 } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
 
 /**
@@ -144,6 +144,20 @@ describe('POST /api/ambient-dashboard/run', () => {
     });
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ started: true });
+  });
+
+  // The Settings card reads this 409 as "join the run in flight", not a failure.
+  it('answers 409 while a run holds the slot', async () => {
+    const isRunning = vi.spyOn(svc.context.ambientDashboard, 'isRunning').mockReturnValue(true);
+    try {
+      const res = await httpFetch(`${baseUrl}/api/ambient-dashboard/run`, {
+        method: 'POST',
+        headers: auth(),
+      });
+      expect(res.status).toBe(409);
+    } finally {
+      isRunning.mockRestore();
+    }
   });
 });
 

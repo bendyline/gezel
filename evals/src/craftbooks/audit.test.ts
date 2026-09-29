@@ -223,6 +223,18 @@ describe('craftbook eval audit', () => {
       expect(codes(bookWithEvaluate(gate))).not.toContain('reviewer.safe-loop');
     });
 
+    it('recognizes declarative onReject routing without demanding a model tool call', () => {
+      const book = bookWithEvaluate({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'verdict.md', bytes: 20 }],
+        onReject: 'fix',
+        maxAttempts: 3,
+      });
+      const issueCodes = codes(book);
+      expect(issueCodes).not.toContain('reviewer.safe-loop');
+      expect(issueCodes).not.toContain('reviewer.routing-prompt');
+    });
+
     it('still flags when the gate script names no step in this book', () => {
       const gate = {
         at: 'completion',
@@ -242,6 +254,75 @@ describe('craftbook eval audit', () => {
         expect(byId.get(id)?.issues.map((i) => i.code) ?? []).not.toContain('reviewer.safe-loop');
       }
     });
+  });
+
+  it('accepts common reviewer-role synonyms and exempts a fanout host from role routing', () => {
+    const reviewerAliases = ['findings auditor', 'technical editor'];
+    for (const suggestedRole of reviewerAliases) {
+      const template: CraftbookTemplateSummary = {
+        id: `sample-${suggestedRole.replace(/ /g, '-')}`,
+        name: 'Sample',
+        triggers: ['sample'],
+        entryStepId: 'fix',
+        steps: [
+          {
+            id: 'fix',
+            name: 'Fix',
+            suggestedRole: 'engineer',
+            prompt:
+              'Apply the requested fixes carefully, record the evidence, and send the result to evaluation.',
+            next: 'evaluate',
+          },
+          {
+            id: 'evaluate',
+            name: 'Evaluate',
+            suggestedRole,
+            prompt:
+              'Review the result. Call advance_task_step to finish only when every acceptance criterion passes.',
+            next: 'fix',
+          },
+          {
+            id: 'finish',
+            name: 'Finish',
+            suggestedRole: 'lead',
+            prompt:
+              'Summarize the completed work, name the evidence, and report the final result to the user.',
+            terminal: true,
+          },
+        ],
+      };
+      expect(
+        auditCraftbookTemplate(template, 'implemented').issues.map((i) => i.code),
+      ).not.toContain('reviewer.role');
+    }
+
+    const fanout = {
+      id: 'sample-fanout',
+      name: 'Sample Fanout',
+      triggers: ['sample fanout'],
+      entryStepId: 'fanout',
+      steps: [
+        {
+          id: 'fanout',
+          name: 'Fan out',
+          prompt:
+            'Spawn one bounded child task per input shard and wait for the runtime to collect their outputs.',
+          spawnFanout: { over: 'items.json' },
+          next: 'finish',
+        },
+        {
+          id: 'finish',
+          name: 'Finish',
+          suggestedRole: 'lead',
+          prompt:
+            'Summarize the collected child outputs and report the final result with concrete evidence.',
+          terminal: true,
+        },
+      ],
+    } as unknown as CraftbookTemplateSummary;
+    expect(auditCraftbookTemplate(fanout, 'implemented').issues.map((i) => i.code)).not.toContain(
+      'role.missing',
+    );
   });
 
   describe('gate.js-check-on-non-js', () => {

@@ -100,7 +100,13 @@ const PAGE_SIZE = 100;
 // long, opaque, and uninteresting at a glance, so we never surface them
 // as a drift pill in the bubble header — the model is available on hover
 // via the author-name tooltip instead. Cloud providers still show drift.
-const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set(['ollama', 'llama-cpp', 'mlx', 'ds4']);
+const LOCAL_PROVIDERS: ReadonlySet<ProviderName> = new Set([
+  'ollama',
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+]);
 /**
  * Gap past which a reply inside a thread is "late": it keeps its
  * author header and gains a relative timestamp instead of merging into
@@ -3350,6 +3356,9 @@ export function ChatTimelineView({
   const unclaimedQuestionsBySession = new Map<string, Question>();
   for (const q of questionsById.values()) {
     if (claimedQuestionIds.has(q.id)) continue;
+    // A "your work is ready" card names the wrap-up's thread only so Updates
+    // can open it; the wrap-up message already says it in the thread.
+    if (q.intent?.kind === 'task-finished') continue;
     const existing = unclaimedQuestionsBySession.get(q.sessionId);
     if (!existing || q.createdAt > existing.createdAt) {
       unclaimedQuestionsBySession.set(q.sessionId, q);

@@ -97,6 +97,8 @@ function providerLabelFor(provider: ProviderName): string {
       // separate engine with its own narrow model set, so its models get their
       // own row.
       return 'DwarfStar (ds4)';
+    case 'apple-foundation-models':
+      return 'Apple Intelligence';
     default:
       return provider;
   }
@@ -190,6 +192,9 @@ export function ProviderModelSelect({
       // chat attempt; gating up front turns it into a non-option.
       if (cfg.anthropicCliStatus?.installed) candidates.push('anthropic-cli');
       if (cfg.codexCliStatus?.installed) candidates.push('codex-cli');
+      // Apple's own model lists itself only once the helper reports Apple
+      // Intelligence ready; a failed probe drops the entry below.
+      if (cfg.appleFoundationModelsStatus?.installed) candidates.push('apple-foundation-models');
       candidates.push('ollama');
       // On-device — listProviderModels returns only DOWNLOADED
       // models for these, so an empty list means "nothing to show"
@@ -235,6 +240,7 @@ export function ProviderModelSelect({
         'mlx',
         'llama-cpp',
         'ds4',
+        'apple-foundation-models',
         'ollama',
         'copilot',
         'openai',
@@ -258,7 +264,17 @@ export function ProviderModelSelect({
   }, [globalProvider]);
 
   if (loading) {
-    return <span className="muted small">loading providers…</span>;
+    // The current choice is known before any provider answers, and the
+    // slowest probe (Ollama, Copilot) can take seconds; a header reading
+    // "Model: loading providers…" said nothing a person could use.
+    const current = provider
+      ? `${providerLabelFor(provider)}${model ? ` · ${model}` : ''}`
+      : inheritLabel;
+    return (
+      <span className="muted small" aria-busy="true">
+        {current}
+      </span>
+    );
   }
   if (!entries || entries.length === 0) {
     // No configured providers at all — degenerate case (fresh install,

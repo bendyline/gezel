@@ -74,6 +74,7 @@ const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
   'device-health': 'GEZEL_DEVICE_HEALTH_BIN',
   uv: 'GEZEL_UV_BIN',
   duckdb: 'GEZEL_DUCKDB_BIN',
+  'apple-fm': 'GEZEL_APPLE_FM_BIN',
 };
 
 /**

@@ -2,9 +2,15 @@ import { z } from 'zod';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
 import { checkHandoffChain } from '../handoff-limits.js';
-import type { PortableInference } from '../mobile/inference.js';
+import type { PortableInference, PortableSampling } from '../mobile/inference.js';
 import { pickRandomNameWithGender } from '../names.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
+import {
+  PROMPT_FOOTPRINT_POLICY,
+  capAboutForFootprint,
+  renderProjectBrief,
+  resolvePromptFootprint,
+} from '../prompt-footprint.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { resolveRoleId } from '../roles/index.js';
 import { type AnswerQuestionRequest, AskQuestionRequestSchema } from '../schemas/api.js';
@@ -21,6 +27,7 @@ import {
 } from '../schemas/api.js';
 import type { ChatEvent, ChatMessage } from '../schemas/gezel.js';
 import {
+  type MobileModelInventory,
   type MobileProviderId,
   MobileProviderIdSchema,
   resolveMobileInferenceBudget,
@@ -43,6 +50,7 @@ import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { roleHasTeamScope } from '../tools/access.js';
+import type { NativeToolBinding } from '../tools/native-tools.js';
 import { ChatEventBus } from './chat-events.js';
 import type { PortableContent } from './content.js';
 import { portableConversationHistory } from './conversation-history.js';
@@ -64,6 +72,7 @@ import {
   preparePortableMessage,
   validatePortableMessageHints,
 } from './message-delivery.js';
+import { portableSampling } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
 import { answeredQuestion } from './questions.js';
 import type { PortableScripts } from './script-host.js';
@@ -78,7 +87,6 @@ import { evaluatePortableTaskGate } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
-  type NativeToolBinding,
   type PortableToolListing,
   type PortableToolSpec,
   runPortableToolLoop,
@@ -86,7 +94,7 @@ import {
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
 import type { PortableTransformTarget } from './transform.js';
 
-export type { PortableInference } from '../mobile/inference.js';
+export type { PortableInference, PortableSampling } from '../mobile/inference.js';
 const requiredString = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || !value.trim()) throw new ProductError(`${name} is required`);
   return value;
@@ -486,13 +494,41 @@ export class PortableProductService {
         409,
       );
     const budget = resolveMobileInferenceBudget(provider, {
-      contextSize: config.modelContextOverrides?.[`${providerId}:${modelId}`],
+      contextSize:
+        config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
+        fittedContext(inventory, modelId),
       maxTokens:
         gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
         config.modelTuning?.[modelId]?.sampling?.maxTokens,
     });
+    const sampling =
+      providerId === 'llama-cpp'
+        ? portableSampling({
+            catalog: this.catalogModelFor(inventory, modelId),
+            installDefault: config.modelTuning?.[modelId],
+            override: gezel.parsed.frontmatter.tuning,
+            tuningProfileId: gezel.parsed.frontmatter.tuningProfile,
+            installDefaultProfileId: config.modelTuningProfile?.[modelId],
+            suggestedProfileId: gezel.parsed.frontmatter.suggestedTuningProfile,
+          })
+        : undefined;
     signal.throwIfAborted();
-    return { gezelId: gezel.id, about: gezel.about, providerId, modelId, ...budget };
+    return {
+      gezelId: gezel.id,
+      about: gezel.about,
+      providerId,
+      modelId,
+      ...budget,
+      ...(sampling ? { sampling } : {}),
+    };
+  }
+
+  /** The catalog entry of a downloaded model; an imported file has none. */
+  private catalogModelFor(inventory: MobileModelInventory | undefined, modelId: string) {
+    const catalogId = inventory?.models.find((model) => model.id === modelId)?.source?.catalogId;
+    return catalogId
+      ? this.content.models?.find((model) => model.source.catalogId === catalogId)
+      : undefined;
   }
 
   private async startTurn(
@@ -597,17 +633,36 @@ export class PortableProductService {
           409,
         );
       const limits = resolveMobileInferenceBudget(provider, {
-        contextSize: config.modelContextOverrides?.[`${providerId}:${modelId}`],
+        contextSize:
+          config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
+          fittedContext(inventory, modelId),
         maxTokens:
           context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
           config.modelTuning?.[modelId]?.sampling?.maxTokens,
       });
+      const sampling =
+        providerId === 'llama-cpp'
+          ? portableSampling({
+              catalog: this.catalogModelFor(inventory, modelId),
+              installDefault: config.modelTuning?.[modelId],
+              override: context.gezel.parsed.frontmatter.tuning,
+              tuningProfileId: context.gezel.parsed.frontmatter.tuningProfile,
+              installDefaultProfileId: config.modelTuningProfile?.[modelId],
+              suggestedProfileId: context.gezel.parsed.frontmatter.suggestedTuningProfile,
+            })
+          : undefined;
       session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
       const inventoryTools = await portableToolSurface(this.store, session, !!this.scripts);
+      // Only phones and tablets host this runtime, and every prompt token is
+      // prefill time there.
+      const footprint =
+        PROMPT_FOOTPRINT_POLICY[
+          resolvePromptFootprint({ contextWindow: limits.contextSize, constrainedDevice: true })
+        ];
       const instructions = [
-        context.gezel.about,
+        capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
         activeTask &&
           renderTaskContextBlock(
             { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
@@ -619,9 +674,7 @@ export class PortableProductService {
         context.project.voormanGezelId &&
           context.crew.some((member) => member.id === context.project.voormanGezelId) &&
           `The voorman of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
-        context.project.about && `### About this project\n${context.project.about}`,
-        context.project.missionObjectives &&
-          `### Mission objectives\n${context.project.missionObjectives}`,
+        renderProjectBrief(context.project, footprint.projectBriefMaxChars),
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -731,6 +784,10 @@ export class PortableProductService {
         {
           modelId,
           ...limits,
+          ...(sampling ? { sampling } : {}),
+          startListing: provider.capabilities.tools
+            ? footprint.nativeToolListing
+            : footprint.textToolListing,
           nativeTools: provider.capabilities.tools
             ? {
                 teamScope: roleHasTeamScope(context.gezel.role, context.project.mode),
@@ -786,6 +843,8 @@ export class PortableProductService {
       modelId: string;
       contextSize: number;
       maxTokens: number;
+      sampling?: PortableSampling;
+      startListing: PortableToolListing;
       nativeTools?: NativeToolBinding;
     },
     inventory: readonly PortableToolSpec[],
@@ -800,6 +859,7 @@ export class PortableProductService {
       limits.contextSize,
       limits.maxTokens,
     ].join(':');
+    const { startListing, ...loopLimits } = limits;
     try {
       const result = await runPortableToolLoop({
         store: this.store,
@@ -807,11 +867,11 @@ export class PortableProductService {
         session,
         requestId: turn.requestId,
         providerId,
-        ...limits,
+        ...loopLimits,
         messages,
         tools: {
           inventory,
-          listing: this.toolListings.get(listingKey),
+          listing: this.toolListings.get(listingKey) ?? startListing,
           narrowed: (listing) => {
             this.toolListings.delete(listingKey);
             this.toolListings.set(listingKey, listing);
@@ -2035,6 +2095,14 @@ export class PortableProductService {
     throw new ProductError('This file operation is not available on this host', 501);
   }
 }
+/** The window the device reported it can hold for this model, when it did. */
+function fittedContext(
+  inventory: MobileModelInventory | undefined,
+  modelId: string,
+): number | undefined {
+  return inventory?.models.find((model) => model.id === modelId)?.contextTokens;
+}
+
 function mimeFor(path: string): string {
   const extension = path.split('.').at(-1)?.toLowerCase();
   const types: Record<string, string> = {

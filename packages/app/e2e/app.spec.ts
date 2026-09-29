@@ -89,11 +89,9 @@ test('02 - header shows the brand and the left sidebar lists every area', async 
   expect(sidebarText).not.toContain('Agents');
 });
 
-// The native window-control overlay paints a flat sage patch that the
-// header's wood-grain texture cannot reach, and it paints only its own
-// height and width. Any drift between the header band and that patch shows
-// up as a seam — texture peeking out below the buttons, or the cordon rule
-// landing a pixel off the boundary. Both are easy to introduce (a vertical
+// The native window-control overlay paints only its own height, so a header
+// band taller than it leaves the buttons and their hover fills floating above
+// a strip of bar — a mis-sized titlebar. That is easy to introduce (a vertical
 // margin on any header pill grew the band 6px past the overlay once) and
 // invisible without measuring, so assert the geometry directly.
 test('02b - the header band matches the native window-control overlay', async () => {
@@ -104,16 +102,9 @@ test('02b - the header band matches the native window-control overlay', async ()
     if (!wco?.visible) return null;
     const header = document.querySelector('.app-header');
     if (!header) return null;
-    const rect = wco.getTitlebarAreaRect();
-    const after = getComputedStyle(header, '::after');
     return {
       headerHeight: header.getBoundingClientRect().height,
-      overlayHeight: rect.height,
-      // Distance from the right window edge to the inner edge of the
-      // buttons, and to the cordon rule that is supposed to sit on it.
-      overlayInset: header.getBoundingClientRect().width - (rect.x + rect.width),
-      ruleInset: Number.parseFloat(after.right),
-      ruleWidth: Number.parseFloat(after.width),
+      overlayHeight: wco.getTitlebarAreaRect().height,
     };
   });
 
@@ -122,8 +113,6 @@ test('02b - the header band matches the native window-control overlay', async ()
   if (!geometry) return;
 
   expect(geometry.headerHeight).toBeCloseTo(geometry.overlayHeight, 0);
-  expect(geometry.ruleInset).toBeCloseTo(geometry.overlayInset, 0);
-  expect(geometry.ruleWidth).toBe(1);
 });
 
 async function openArea(area: string): Promise<void> {
@@ -206,8 +195,9 @@ test('07 - projects group hides the built-in default project', async () => {
   await captureScreenshot(page, { path: join(screenshotDir, '07-projects.png'), fullPage: true });
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
-  await expect(sidebar).toContainText('No projects yet');
-  await expect(sidebar).not.toContainText('Default');
+  await expect(sidebar).toContainText('None of your own yet');
+  // The empty state names Default in its prose; what must be absent is a row.
+  await expect(sidebar.locator('.app-sidebar-proj-row', { hasText: 'Default' })).toHaveCount(0);
 });
 
 test('08 - brand routes to the meester home', async () => {

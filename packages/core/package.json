@@ -77,6 +77,10 @@
       "types": "./dist/checks/index.d.ts",
       "import": "./dist/checks/index.js"
     },
+    "./eval": {
+      "types": "./dist/eval/index.d.ts",
+      "import": "./dist/eval/index.js"
+    },
     "./svg": {
       "types": "./dist/svg/index.d.ts",
       "import": "./dist/svg/index.js"
@@ -92,7 +96,7 @@
   },
   "dependencies": {
     "@bendyline/gezk": "workspace:*",
-    "@xmldom/xmldom": "^0.9.10",
+    "@xmldom/xmldom": "^0.9.12",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },

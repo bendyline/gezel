@@ -226,6 +226,9 @@ export async function runBackup(
       createdAt: new Date().toISOString(),
       gezelVersion: deps.version,
       platform: process.platform,
+      // A replace restore reads this to keep the working files this backup
+      // left out, rather than deleting them.
+      excludedWorkspaces: request.excludeWorkspaces === true,
       // Recorded for diagnosis only. Restore never applies another machine's
       // paths — they mean nothing here.
       externalFolders: deps.store.externalFolders ? { ...deps.store.externalFolders } : null,

@@ -4,6 +4,7 @@ import type { DebugFlag } from '../debug/flag.js';
 import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { ConfigStore } from '../fs/config-store.js';
+import type { FirstPartyAppTokens } from '../grants/first-party-apps.js';
 import type { GrantManager } from '../grants/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
 import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
@@ -35,6 +36,16 @@ export interface EngineContext {
   serviceRole: ServiceRole;
   distribution: ResolvedDistributionPolicy;
   home: string;
+  /**
+   * The Office listener's live origin (`https://localhost:<port>`), or null
+   * when it is not listening. The one browser origin allowed to register an
+   * app grant; see `routes/v1-apps.ts`. Unset on the machine engine.
+   */
+  officeHostOrigin?: () => string | null;
+  /** Checks the Office pane's enrollment key; see `routes/v1-apps.ts`. Unset on the machine engine. */
+  verifyOfficeEnrollmentKey?: (key: string) => Promise<boolean>;
+  /** Code-free grants for Gezel's own local add-ins. Unset on the machine engine. */
+  firstPartyApps?: FirstPartyAppTokens;
   catalog: CatalogService;
   imageProvider: ImageProviderManager;
   imagePulls: ImageModelPullRegistry;

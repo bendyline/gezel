@@ -49,8 +49,8 @@ Use this skill to close the loop from audit or eval evidence back into better cr
 
    ```sh
    pnpm --filter @bendyline/gezel-catalog test -- craftbook
-   pnpm --filter @bendyline/gezel-evals test -- craftbooks
-   pnpm --filter @bendyline/gezel-evals run craftbook:coverage
+   pnpm --filter @bendyline/gezel-evals run test:craftbooks
+   pnpm --filter @bendyline/gezel-evals run craftbook:coverage -- --strict-quality
    ```
 
 ## Quality Bar

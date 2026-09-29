@@ -274,6 +274,7 @@ async function successCheck(
 
 export const molenStructureWorkshopScenario: EvalScenario = {
   id: 'molen-structure-workshop',
+  requires: ['external-checkout'],
   description:
     'Actual Molen project craftbook: frozen reference photos → per-building fanout → model-authored geometry → textured GLB → visual review and bounded repair. Requires built sibling molen-internal; no live research in this repeatable probe.',
   prompt: TITLE,

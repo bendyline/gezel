@@ -64,6 +64,44 @@ describe('classifyDeliverableReachability', () => {
     expect(classifyDeliverableReachability(spec([{ path: 'Dockerfile' }]), book)).toBeNull();
   });
 
+  it('passes concrete eval paths declared through authored path variables', () => {
+    const dynamicBook = template([
+      {
+        id: 'build',
+        prompt:
+          'Write characters/<name>/sheet.json and posts/<created>-<slug>/variants/bluesky.md.',
+      },
+    ]);
+    expect(
+      classifyDeliverableReachability(
+        spec([
+          { path: 'characters/pip/sheet.json' },
+          { path: 'posts/2026-08-12-returns-desk/variants/bluesky.md' },
+        ]),
+        dynamicBook,
+      ),
+    ).toBeNull();
+  });
+
+  it('passes named children under a separately declared symbolic destination folder', () => {
+    const dynamicBook = template([
+      {
+        id: 'finalize',
+        prompt:
+          'Commit the draft to posts/<created>-<slug>/. Recreate post.md at the root and every variants/ file, including x.md.',
+      },
+    ]);
+    expect(
+      classifyDeliverableReachability(
+        spec([
+          { path: 'posts/2026-08-12-returns-desk/post.md' },
+          { path: 'posts/2026-08-12-returns-desk/variants/x.md' },
+        ]),
+        dynamicBook,
+      ),
+    ).toBeNull();
+  });
+
   it('flags a deliverable the book never names as unreachable', () => {
     // dockerize-app: the book writes Dockerfile, the eval grades src/solution.mjs.
     const finding = classifyDeliverableReachability(spec([{ path: 'src/solution.mjs' }]), book);
@@ -103,6 +141,23 @@ describe('classifyDeliverableReachability', () => {
     expect(finding).toBeNull();
   });
 
+  it('accepts user-directed outputs for a real terminal workflow with no static file contract', () => {
+    const genericWorkflow = template([{ id: 'active', terminal: true }]);
+    const workflowSpec = spec([{ path: 'brief.md' }]);
+    workflowSpec.mode = 'workflow';
+    workflowSpec.success.taskGraph = {
+      requireCraftbookTask: true,
+      requireTerminalStep: true,
+    };
+    expect(classifyDeliverableReachability(workflowSpec, genericWorkflow)).toBeNull();
+  });
+
+  it('does not excuse user-directed outputs without workflow attribution and terminal proof', () => {
+    const genericWorkflow = template([{ id: 'active', terminal: true }]);
+    const finding = classifyDeliverableReachability(spec([{ path: 'brief.md' }]), genericWorkflow);
+    expect(finding?.verdict).toBe('unreachable');
+  });
+
   it('reports unreachable ahead of drift when a spec has both', () => {
     const mixed = template([
       { id: 'a', advanceWhen: { file: '{{workPath}}/report.md' } },
@@ -123,19 +178,15 @@ describe('against the bundled library', () => {
     const summary = auditDeliverableReachability(CRAFTBOOK_EVAL_SPECS, templates);
     expect(summary.checked).toBeGreaterThan(200);
     expect(summary.reachable + summary.folderDrift + summary.unreachable).toBe(summary.checked);
-    // A ratchet, not a target: this is the largest known gap in the craftbook
-    // eval suite, and a content release that repairs specs should move it DOWN.
-    // Raise this bound only with a deliberate reason.
-    expect(summary.unreachable).toBeLessThanOrEqual(127);
+    expect(summary.folderDrift).toBe(0);
+    expect(summary.unreachable).toBe(0);
   });
 
-  it('names the wild-caught exemplars', async () => {
+  it('keeps the wild-caught inverted exemplars repaired', async () => {
     const templates = await loadCraftbookTemplates();
     const { findings } = auditDeliverableReachability(CRAFTBOOK_EVAL_SPECS, templates);
     const byId = new Map(findings.map((f) => [f.craftbookId, f]));
-    // The book writes migrations/add_indexes.sql; the eval grades analysis.md.
-    expect(byId.get('db-index-tuning')?.verdict).toBe('unreachable');
-    // The book writes email.html; the eval grades index.html.
-    expect(byId.get('email-template')?.verdict).toBe('unreachable');
+    expect(byId.has('db-index-tuning')).toBe(false);
+    expect(byId.has('email-template')).toBe(false);
   });
 });

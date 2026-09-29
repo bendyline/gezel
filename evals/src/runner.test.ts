@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { repoRoot } from './native-bin.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
+  EVAL_UV_CACHE_ENV,
   PoisonedSessionRecoveryTracker,
   attachableDeliverable,
   behaviorEnvForTrial,
@@ -26,6 +27,7 @@ import {
   incompleteTranscripts,
   inflightDeferMsForEngine,
   isHarnessInterventionSettling,
+  linkUvTreeIntoTrial,
   llamaCppEvalLaunchOverridesForModel,
   llamaCppReasoningEffortEvalConfig,
   llamaCppReasoningEvalLaunchOverrides,
@@ -57,6 +59,7 @@ import {
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  trialHardProgressTimeoutMs,
   trialMaxDurationMs,
   workspacePathSignature,
 } from './runner.ts';
@@ -453,6 +456,7 @@ describe('evalDaemonEnvForTrial', () => {
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
       GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
+      GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
     });
   });
 
@@ -502,6 +506,7 @@ describe('evalDaemonEnvForTrial', () => {
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
       GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
+      GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
       GEZEL_CRAFTBOOK_DOC_FORMAT: 'json',
     });
     expect(evalDaemonEnvForTrial({ craftbookDocFormat: 'md' }).GEZEL_CRAFTBOOK_DOC_FORMAT).toBe(
@@ -1814,6 +1819,30 @@ describe('trialMaxDurationMs', () => {
   });
 });
 
+describe('trialHardProgressTimeoutMs', () => {
+  const MINUTE = 60_000;
+
+  it('scales an authored no-progress window for a slow local decode rate', () => {
+    expect(
+      trialHardProgressTimeoutMs({
+        authoredProgressTimeoutMs: 8 * MINUTE,
+        decodeRateTokensPerSec: 4.54,
+      }),
+    ).toBeGreaterThan(35 * MINUTE);
+  });
+
+  it('preserves engine and operator floors', () => {
+    expect(
+      trialHardProgressTimeoutMs({
+        authoredProgressTimeoutMs: 8 * MINUTE,
+        decodeRateTokensPerSec: 20,
+        minProgressTimeoutMs: 30 * MINUTE,
+        envProgressFloorMs: 45 * MINUTE,
+      }),
+    ).toBe(45 * MINUTE);
+  });
+});
+
 describe('throughputScaledMaxDurationMs', () => {
   const MINUTE = 60_000;
 
@@ -2536,5 +2565,52 @@ describe('stall-path write-counter wording', () => {
 
   it('reports the count when the counter moved', () => {
     expect(wording(true, true)).toBe('re-writes');
+  });
+});
+
+describe('linkUvTreeIntoTrial', () => {
+  const made: string[] = [];
+  afterEach(async () => {
+    delete process.env[EVAL_UV_CACHE_ENV];
+    await Promise.all(made.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it('shares one persistent venv cache when the source home has none', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-uv-link-'));
+    made.push(root);
+    const sourceHome = join(root, 'source');
+    const trialHome = join(root, 'trial');
+    await mkdir(sourceHome, { recursive: true });
+    const cache = join(root, 'eval-runs', '.cache', 'uv');
+    process.env[EVAL_UV_CACHE_ENV] = cache;
+    const lines: string[] = [];
+    await linkUvTreeIntoTrial({ mlxSourceHome: sourceHome, trialHome, log: (l) => lines.push(l) });
+    // Writes through the trial's link land in the shared cache.
+    await writeFile(join(trialHome, 'engines', 'uv', 'marker'), 'x');
+    expect(await readFile(join(cache, 'marker'), 'utf8')).toBe('x');
+    expect(lines.some((l) => l.includes('sharing the eval cache'))).toBe(true);
+  });
+
+  it('prefers the source home’s own venv and leaves the trial alone without either', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-uv-link-'));
+    made.push(root);
+    const sourceHome = join(root, 'source');
+    await mkdir(join(sourceHome, 'engines', 'uv'), { recursive: true });
+    await writeFile(join(sourceHome, 'engines', 'uv', 'venv-marker'), 'source');
+    await linkUvTreeIntoTrial({
+      mlxSourceHome: sourceHome,
+      trialHome: join(root, 'trial-a'),
+      log: () => {},
+    });
+    expect(await readFile(join(root, 'trial-a', 'engines', 'uv', 'venv-marker'), 'utf8')).toBe(
+      'source',
+    );
+
+    await linkUvTreeIntoTrial({
+      mlxSourceHome: join(root, 'no-venv'),
+      trialHome: join(root, 'trial-b'),
+      log: () => {},
+    });
+    await expect(readFile(join(root, 'trial-b', 'engines', 'uv', 'x'))).rejects.toThrow();
   });
 });

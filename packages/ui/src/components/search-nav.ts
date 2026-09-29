@@ -1,7 +1,11 @@
 import type { UnifiedSearchResult, UnifiedSearchResultKind } from '@bendyline/gezel';
-import { type NavAction, openTabAction as openTab } from './nav-actions.js';
+import {
+  type NavAction,
+  openHandboekArticleActions,
+  openProjectFileActions,
+  openTabAction as openTab,
+} from './nav-actions.js';
 import type { OpenFileIntent } from './pending-open-file.js';
-import type { OpenHandboekIntent } from './pending-open-handboek.js';
 import type { OpenKnowledgeIntent } from './pending-open-knowledge.js';
 import type { OpenSessionIntent } from './pending-open-session.js';
 
@@ -106,13 +110,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
           ...(r.line ? { line: r.line } : {}),
           ...(r.lineEnd ? { lineEnd: r.lineEnd } : {}),
         };
-        return [
-          // Queue first so the freshly-remounted ProjectsView can consume it.
-          { kind: 'open-file', intent },
-          openTab({ kind: 'project', id: r.projectId }),
-          // Live event for the already-open-project case (no remount).
-          { kind: 'event', type: 'gezel:open-file', detail: intent },
-        ];
+        return openProjectFileActions(intent);
       }
       return r.projectId ? [openTab({ kind: 'project', id: r.projectId })] : [];
     case 'session': {
@@ -157,15 +155,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
     }
     case 'handboek': {
       const articleId = r.id.slice('handboek:'.length);
-      if (!articleId) return [];
-      const intent: OpenHandboekIntent = { articleId };
-      return [
-        // Queue first so the freshly-mounted Handboek view can consume it.
-        { kind: 'open-handboek', intent },
-        openTab({ kind: 'area', area: 'handboek' }),
-        // Live event for the already-open case (no remount).
-        { kind: 'event', type: 'gezel:open-handboek-article', detail: intent },
-      ];
+      return articleId ? openHandboekArticleActions(articleId) : [];
     }
     case 'knowledge': {
       if (!r.catalogId) return [];

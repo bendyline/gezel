@@ -10,11 +10,11 @@
  * package, computes sha256s, and rewrites this file. The PR diff is the
  * audit trail. Never hand-edit a sha.
  */
-export const PNPM_VERSION = '11.15.1';
+export const PNPM_VERSION = '11.27.1';
 
 /** sha256 of the exact ordinary `pnpm` package tarball from the npm registry. */
 export const PNPM_PACKAGE_SHA256 =
-  '27460629b10111604e7f98882753b53398986820c20e0a065f3a4a5e9e7db71f';
+  'd50f8841e67ef0b1d82e7c90b240656c7ca04d5f1aa33f06108007c81fd76766';
 
 /** sha256 of `package/LICENSE` embedded in that package tarball. */
 export const PNPM_LICENSE_SHA256 =

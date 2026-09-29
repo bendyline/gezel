@@ -34,8 +34,9 @@ describe('published surface', () => {
 
   it('browser entry stays free of anything that needs Node', () => {
     // A browser app supplies its own baseUrl and token: discovery, consent and
-    // hosting all need the filesystem and are deliberately absent here.
-    expect(Object.keys(browser).sort()).toEqual(['GezelApp', 'GezelSdkError']);
+    // hosting all need the filesystem and are deliberately absent here. App
+    // tools need only fetch and streams, so a token-holding renderer gets them.
+    expect(Object.keys(browser).sort()).toEqual(['GezelApp', 'GezelSdkError', 'registerAppTools']);
   });
 
   it('host entry', () => {

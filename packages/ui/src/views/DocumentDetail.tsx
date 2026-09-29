@@ -19,7 +19,8 @@ import {
 } from '../components/SquisqIntegration/index.js';
 import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
-import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from '../components/nav-actions.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -66,6 +67,11 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   const [content, setContent] = useState<string | null>(null);
   const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [projectFile, setProjectFile] = useState<{
+    kind: 'artifact' | 'project-document';
+    projectId: string;
+    relativePath: string;
+  } | null>(null);
 
   const saveDocument = useCallback(
     async (source: string) => {
@@ -78,6 +84,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
     resourceKey: `document:${path}`,
     initialValue: content ?? '',
     save: saveDocument,
+    isEquivalent: isMarkdown(path) ? markdownEquivalent : undefined,
   });
 
   // Container + link provider are stable for the life of one open doc;
@@ -142,17 +149,24 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
     setContent(null);
     setSizeBytes(undefined);
     setLoadError(null);
+    setProjectFile(null);
     void (async () => {
       try {
         const res = await api.readDocument(path);
         if (cancelled) return;
+        // The read route falls back to a project's documents and artifacts
+        // for `projects/<id>/...` paths. Such a file must never hydrate this
+        // editor: its autosave writes into the shared library, which would
+        // copy the project file into the library and shadow the original.
+        if (res.kind && res.kind !== 'document' && res.resolvedFrom) {
+          setProjectFile({ kind: res.kind, ...res.resolvedFrom });
+          return;
+        }
         setSizeBytes(res.size);
-        // Markdown goes through the Squisq editor, which re-emits its own
-        // canonical serialization at mount — baseline on that form so mere
-        // open never reads as an edit (or rewrites the file). Non-markdown
-        // stays verbatim.
-        const baseline = isMarkdown(path) ? normalizeMarkdownBaseline(res.content) : res.content;
-        setContent(autosave.hydrate(baseline));
+        // The editor gets the file exactly as stored; its re-serialization at
+        // mount is recognized by the lane's `markdownEquivalent`, so mere open
+        // never reads as an edit (or rewrites the file).
+        setContent(autosave.hydrate(res.content));
       } catch (err) {
         if (!cancelled) setLoadError((err as Error).message);
       }
@@ -169,6 +183,32 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
     [autosave.update],
   );
 
+  if (projectFile) {
+    const openInProject = () => {
+      if (projectFile.kind === 'artifact') {
+        runNavActions(
+          openProjectFileActions({
+            projectId: projectFile.projectId,
+            path: projectFile.relativePath,
+            source: 'artifacts',
+          }),
+        );
+      } else {
+        navigateToTab({ kind: 'project', id: projectFile.projectId });
+      }
+    };
+    return (
+      <div className="placeholder" data-testid="document-detail-project-file">
+        <p>
+          <code>{projectFile.relativePath}</code> belongs to a project, so it opens there rather
+          than in the shared library.
+        </p>
+        <button type="button" onClick={openInProject}>
+          Open in project
+        </button>
+      </div>
+    );
+  }
   if (loadError) {
     return (
       <div className="placeholder">

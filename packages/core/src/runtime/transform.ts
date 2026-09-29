@@ -16,7 +16,7 @@ import {
 } from '../transform/index.js';
 import { encodeText } from './files.js';
 import { portableInputLimitError } from './inference-limits.js';
-import type { PortableInference } from './product-service.js';
+import type { PortableInference, PortableSampling } from './product-service.js';
 
 export interface PortableTransformTarget {
   gezelId: string;
@@ -25,6 +25,7 @@ export interface PortableTransformTarget {
   modelId: string;
   contextSize: number;
   maxTokens: number;
+  sampling?: PortableSampling;
 }
 
 export interface PortableTransformOptions {
@@ -132,7 +133,14 @@ async function complete(
     generation = Promise.resolve().then(() => {
       check();
       return inference.generate(
-        { requestId, providerId, modelId: target.modelId, ...budget, messages },
+        {
+          requestId,
+          providerId,
+          modelId: target.modelId,
+          ...budget,
+          ...(target.sampling ? { sampling: target.sampling } : {}),
+          messages,
+        },
         (event) => {
           if (controller.signal.aborted || settled || event.requestId !== requestId) return;
           outputBytes += encodeText(event.delta).byteLength;

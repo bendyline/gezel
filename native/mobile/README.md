@@ -59,11 +59,27 @@ required to build these libraries. The final application still needs ordinary
 Apple signing/provisioning.
 
 **Android:** `jniLibs/<abi>/` contains `libllama.so`, `libggml.so`,
-`libggml-base.so`, `libggml-cpu.so`, `libgezel-llama.so`, and the matching NDK's `libc++_shared.so`;
-public headers are in `include/`. The initial baseline is API 28, arm64-v8a, CPU.
+`libggml-base.so`, `libgezel-llama.so`, the matching NDK's `libc++_shared.so`, and
+the CPU backend. On arm64-v8a that backend is four libraries,
+`libggml-cpu-android_armv8.0_1.so`, `_armv8.2_1`, `_armv8.2_2` and `_armv8.6_1`,
+one per instruction-set level; x86_64 keeps a single `libggml-cpu.so`. Public
+headers are in `include/`. The initial baseline is API 28, CPU.
+
+At first use the bridge opens each arm64 CPU library by name, asks it for
+ggml's CPU score, and registers the highest; an ARMv8.0 phone gets the baseline
+and a newer one gets dot-product or i8mm code. ggml's SVE/SME variants are not
+shipped: on a Galaxy S26+ they scored highest and ran slowest (Gemma 4 E2B
+replied at 2.9 tok/s on armv9.2 against 41 on armv8.6), so a device that has
+them still gets the armv8.6 build. The app keeps its
+native libraries inside the APK, so this cannot be ggml's directory scan. A
+single ARMv8.0 build read prompts 6x slower on a Galaxy S20 FE and 8x slower on
+a Galaxy S26+ (2026-09-26). The JNI binding also uses one thread per
+performance core (cores within 70% of the fastest clock, 2 to 6) instead of the
+bridge default of 2.
+
 The mobile app must package every library and use the same C++ runtime for its
-JNI bridge. GPU backends, OpenMP, network dependencies, runtime backend loading,
-and host-specific instruction selection are disabled. The NDK and every packaged
+JNI bridge. GPU backends, OpenMP, network dependencies, and host-specific
+instruction selection are disabled. The NDK and every packaged
 ELF library are checked for 16 KB page compatibility. APK/AAB zip alignment and
 device startup remain application-level checks; these library checks do not
 establish that the eventual APK supports 16 KB devices.
@@ -138,21 +154,62 @@ safe point. Native timeouts use the platform's steady clock.
 
 Every generation writes status, finish reason, and partial prompt/generated-token
 and output-byte counts. Errors have a bounded message and numeric status. After
-failure or cancellation, the context is cleared before it can be reused. A failed
+failure or cancellation, the context is cleared before it can be reused.
+
+A request whose transcript starts the way the previous one did keeps that prefix
+instead of decoding it again, which is what makes a multi-step tool loop usable
+on a phone. Plain attention models drop the rest of their KV cache and continue.
+Recurrent and hybrid models (Qwen 3.5, LFM2, Granite 4) cannot drop a suffix, and
+a sliding window (Gemma) has already evicted the positions a longer prompt needs,
+so the engine keeps one checkpoint of the state attention memory cannot rebuild,
+taken one token before the end of each prompt, and resumes from it when the next
+transcript extends that prompt. It is 19 MiB for Qwen 3.5 2B whatever the prompt
+length.
+
+Prompts are formatted with llama.cpp's built-in chat templates. A template it
+does not know is refused, except Gemma 4's turn format (`<|turn>role … <turn|>`),
+which [chat_formats.h](chat_formats.h) renders for the text-only transcripts the
+bridge accepts. It matches the model's own Jinja template byte for byte on
+system, user and assistant turns, thinking stripped from replies, and
+consecutive assistant turns.
+Reused output can differ from a fresh prefill only where two tokens are nearly
+tied, because single-token and batched kernels round differently. A failed
 load releases the previously loaded model once admitted; validation/BUSY errors
 preserve it. Unload is idempotent. Destroy requires
 exclusive lifetime ownership: first finish loading/generation and stop concurrent
 cancel callers. Backend registration is process-wide and outlives engine handles;
 individual model/context allocations are released on unload/destroy.
 
-Version 1 admits 256–8,192 context tokens (also bounded by the model's trained
+Version 1 admits 256–16,384 context tokens (also bounded by the model's trained
 context), 1–512 batch tokens, 1–8 threads, up to 128 messages/256 KiB transcript,
 up to 4,096 generated tokens, and up to 4 MiB output. Defaults are conservative;
 the caller must reserve prompt plus requested output within the context. Model
 file limits default to 4 GiB and cannot exceed 8 GiB; split GGUF models are rejected.
 These are allocation/input bounds, **not a hard resident-memory budget**: model
 architecture, KV cache, backend buffers, and app/UI memory still require measured
-device admission. Models must be app-owned immutable files; the opened file
+device admission.
+
+Generation options carry a model's sampling: `temperature` (0 = greedy),
+`top_k`, `top_p`, `min_p`, and a repetition penalty over the last
+`repeat_last_n` tokens, which also applies to greedy decoding. The defaults keep
+the historical greedy behaviour. The product runtime resolves the values from
+the model's catalog tuning with the same resolver as the desktop
+(`resolveTuning` in core) and clamps them to these ranges. An imported file with
+no catalog identity keeps the defaults. Until 2026-09-27 no host set them, so
+every phone reply was greedy whatever the catalog said.
+
+`gezel_llama_estimate_memory` is that measurement's input. It performs a
+metadata-only load (llama.cpp's `no_alloc`, the way upstream `--fit` sizes a
+context) with the same options and reports the weight, KV and compute bytes as
+llama.cpp places them on this device, including the CPU backend's repacked weight
+copies, plus the part of the weights a real load maps from the file. The runtimes
+admit a load against it and size each model's conversation window from it: 16K or
+8K when that fits with room to spare, else a 4K floor. Android charges only
+allocated bytes, since its available memory counts mapped file pages as
+reclaimable. iOS charges everything. The flat charge it replaced (weights,
+256 MiB, 64 KiB per token) was four times the real KV of hybrid models such as
+Qwen 3.5 2B, which made a Galaxy S20 FE refuse a model it ran well, and was under
+the real KV of dense models such as Llama 3.2 3B. Models must be app-owned immutable files; the opened file
 descriptor remains with the engine until unload. No API here provides downloads,
 filesystem tools, network access, or script execution.
 

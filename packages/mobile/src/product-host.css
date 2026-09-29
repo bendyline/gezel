@@ -60,6 +60,33 @@ html #root:has(.app-main:not([hidden]) .chat-composer) {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 }
+/* The UA marker sits flush against the label and gives a one-line tap target;
+   a full-height row with its own open-V reads like the rest of the app. */
+.mobile-models > summary {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-height: 44px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.mobile-models > summary::-webkit-details-marker {
+  display: none;
+}
+.mobile-models > summary::before {
+  content: "";
+  flex: none;
+  width: .4rem;
+  height: .4rem;
+  margin-inline: .15rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+.mobile-models[open] > summary::before {
+  transform: translateY(-.15rem) rotate(45deg);
+}
 .mobile-model-label {
   display: grid;
   gap: .5rem;
@@ -71,12 +98,47 @@ html #root:has(.app-main:not([hidden]) .chat-composer) {
   width: 100%;
   min-height: 44px;
 }
+/* Android's web view paints a dark-scheme native select as a flat grey slab
+   that matches nothing on the dark canvas. Recast the closed control like the
+   desktop select trigger; a tap still opens the system picker. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.mobile-model-label select, .mobile-models > select) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0 2rem 0 .75rem;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right .75rem center;
+    background-size: .75rem;
+  }
+}
+:root[data-theme="dark"] :is(.mobile-model-label select, .mobile-models > select) {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 2rem 0 .75rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right .75rem center;
+  background-size: .75rem;
+}
+:is(.mobile-model-label select, .mobile-models > select):disabled {
+  opacity: 0.5;
+}
 .mobile-model-download progress {
   width: 100%;
 }
 .mobile-models .gz-key {
   min-height: 44px;
-  margin: .25rem;
+  /* Trailing space only, so a lone key lines up with the field above it. */
+  margin: .25rem .5rem .25rem 0;
 }
 .mobile-models p {
   overflow-wrap: anywhere;

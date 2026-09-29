@@ -4,6 +4,7 @@ import { OutputRingBuffer } from '../fs/ring.js';
 import { winShellSafe } from '../packages/win-shell.js';
 import { runUnderMacSandbox } from '../sandbox/macos.js';
 import { canApplyMacSandbox, sandboxEnv } from '../sandbox/runner.js';
+import { killProcessTree } from '../utils/kill-process-tree.js';
 
 /**
  * Run an approved workspace/package command (pnpm for `npm run`, a
@@ -121,7 +122,7 @@ export async function runWorkspaceCommand(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      killTree(child);
+      killProcessTree(child);
     }, timeout);
     timer.unref?.();
 
@@ -191,41 +192,6 @@ function clampTimeout(raw?: number): number {
   if (raw < 30_000) return 30_000;
   if (raw > 30 * 60_000) return 30 * 60_000;
   return Math.floor(raw);
-}
-
-function killTree(child: import('node:child_process').ChildProcess): void {
-  if (process.platform === 'win32') {
-    const pid = child.pid;
-    if (typeof pid !== 'number') {
-      child.kill('SIGKILL');
-      return;
-    }
-    // Node's ChildProcess.kill() terminates only the immediate process on
-    // Windows. taskkill /T walks the descendant tree (watchers and compiler
-    // workers included) before force-terminating it.
-    // taskkill is itself a short-lived console executable; hide its window
-    // while retaining ownership long enough to observe failure.
-    const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      stdio: 'ignore',
-      ...windowsHeadlessSpawnOptions(),
-    });
-    killer.once('error', () => child.kill('SIGKILL'));
-    killer.once('close', (code) => {
-      if (code !== 0 && child.exitCode === null) child.kill('SIGKILL');
-    });
-    killer.unref();
-    return;
-  }
-  const pid = child.pid;
-  if (typeof pid !== 'number') {
-    child.kill('SIGKILL');
-    return;
-  }
-  try {
-    process.kill(-pid, 'SIGKILL');
-  } catch {
-    child.kill('SIGKILL');
-  }
 }
 
 async function wrapForPlatform(

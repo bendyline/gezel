@@ -1,6 +1,6 @@
 /**
  * Gallery frames for the surfaces the original tour skipped: the remaining
- * project IDE tabs (Overview, Tools, Village) and the Handboek area.
+ * project IDE tabs (Overview, Tools, Village) and the bundled Handboek catalog.
  */
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
@@ -34,7 +34,7 @@ test.describe('audit extras', () => {
 
   test('handboek home', async ({ page }) => {
     await gotoHome(page);
-    await openArea(page, 'handboek');
+    await openArea(page, 'knowledge');
     await expectHandboekArticle(page);
     await shot(page, 'home', { area: 'handboek', description: 'Handboek — in-app manual home' });
   });

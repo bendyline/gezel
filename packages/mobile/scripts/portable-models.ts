@@ -27,6 +27,12 @@ export function portableCatalogModels(items: CatalogItemSummary[]): PortableCata
           approxSizeBytes: source.approxSizeBytes,
           contextWindow: manifest.contextWindow,
           source: identity.data,
+          // Phones resolve sampling from this like the desktop does; without
+          // it every phone reply was greedy (2026-09-27).
+          ...(manifest.tuning ? { tuning: manifest.tuning } : {}),
+          ...(manifest.style?.reasoningFormat
+            ? { reasoningFormat: manifest.style.reasoningFormat }
+            : {}),
         },
       ];
     })

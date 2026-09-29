@@ -199,6 +199,19 @@ function run(command, args, options = {}) {
   return result;
 }
 
+/**
+ * A fresh home whose turns carry no indexed context. The mock provider echoes
+ * the prompt it was given, and per-turn retrieval legitimately prepends hits
+ * from the bundled Handboek catalog — "Reply exactly with: …" matched its
+ * Inbox Triage & Reply Drafts craftbook. The stdout checks assert the CLI's
+ * stdout/stderr boundary, not what retrieval finds.
+ */
+function mkdtempHomeWithoutRetrieval(prefix) {
+  const home = mkdtempSync(join(tmpdir(), prefix));
+  writeFileSync(join(home, 'config.json'), `${JSON.stringify({ retrieval: { mode: 'off' } })}\n`);
+  return home;
+}
+
 function findOnPath(fileName) {
   for (const rawDir of (process.env.PATH ?? '').split(delimiter)) {
     const pathDir = rawDir.replace(/^"(.*)"$/, '$1');
@@ -589,7 +602,7 @@ try {
   // A fresh-home one-shot owns an in-process daemon. Its structured startup
   // and shutdown logs must stay off stdout so shell pipelines receive exactly
   // the reply and trailing newline.
-  const cliRunHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-run-'));
+  const cliRunHome = mkdtempHomeWithoutRetrieval('gezel-packed-cli-run-');
   const cliRunPrompt = 'Reply exactly with: packed-cli-stdout-only';
   try {
     const result = run(
@@ -630,7 +643,7 @@ try {
   // and block for five minutes on a code that can only be typed into the
   // desktop app, which this install does not have. The cold case above cannot
   // see that: `run` only owns an in-process service when nothing is running.
-  const cliWarmHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-warm-'));
+  const cliWarmHome = mkdtempHomeWithoutRetrieval('gezel-packed-cli-warm-');
   const cliWarmPrompt = 'Reply exactly with: packed-cli-adopted-daemon';
   const cliWarmEnv = {
     ...process.env,

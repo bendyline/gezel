@@ -49,6 +49,11 @@ describe('PromptMeesterCraftbookPrelude', () => {
     expect(out).toContain('craftbook_write');
     expect(out).toContain('suggest_craftbook');
     expect(out).toContain('Do NOT delegate the authoring');
+    // A Meester-authored book gated a multi-platform draft on size alone and
+    // gave its review step to a gezel; a missing variant went through.
+    expect(out).toContain('"listedFiles"');
+    expect(out).toContain('{ kind: "figures", file }');
+    expect(out).toContain('approval steps belong to the user');
   });
 
   it('fires the SELECT note when the user points at the recipe library', () => {

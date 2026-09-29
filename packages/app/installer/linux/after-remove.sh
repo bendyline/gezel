@@ -50,6 +50,12 @@ if ! is_final_removal "${1:-}"; then
   exit 0
 fi
 
+# The LibreOffice extension is installed per user (`unopkg add -s`, never
+# `--shared`), so no system-wide copy exists to remove here. It stays in each
+# user's LibreOffice profile until they remove it from Tools > Extensions or
+# from Settings > Connected Apps before uninstalling; without Gezel it only
+# reports that Gezel is not running.
+
 # The package payload containing com.bendyline.gezel.desktop and gezel.png has
 # already been removed when this hook runs. Rebuild the public indexes with a
 # deliberately public umask so they forget Gezel without making unrelated

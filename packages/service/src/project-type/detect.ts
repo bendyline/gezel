@@ -1,4 +1,4 @@
-import { PROJECT_TYPES, type ProjectType } from '@bendyline/gezel';
+import { PROJECT_TYPES, type ProjectType, isUserCreatedProject } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { scanFolderProfile } from './scan-folder.js';
@@ -154,7 +154,16 @@ export async function detectAndPersistProjectType(
 ): Promise<{ id: string; score: number } | null> {
   try {
     const project = await deps.store.getProject(projectId);
-    if (project?.projectTypeId) return null;
+    if (!project || project.projectTypeId) return null;
+    // Default and the shared library hold a bit of every kind of work. A
+    // detected type there titled Default's recipe shelf "Recommended for
+    // Email / Inbox" and gave it an envelope; clear any left from before.
+    if (!isUserCreatedProject(project)) {
+      if (project.detectedProjectType) {
+        await deps.store.updateProject(projectId, { detectedProjectType: null });
+      }
+      return null;
+    }
     const ranked = await detectProjectType(deps, projectId);
     const top = ranked[0];
     if (!top || top.score < PROJECT_TYPE_MIN_SCORE) return null;
