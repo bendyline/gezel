@@ -124,6 +124,15 @@ describe('task wait', () => {
     };
     expect((await waitForTask(client, 'p/1', { timeoutMs: 1, pollMs: 2 })).exitCode).toBe(3);
   });
+  it('observes the task once even when the budget lapsed before the first read', async () => {
+    const client = {
+      getTaskByRef: vi.fn().mockResolvedValue(task('active')),
+      listTaskChildren: vi.fn(),
+    };
+    const result = await waitForTask(client, 'p/1', { timeoutMs: 0 });
+    expect(result).toMatchObject({ outcome: 'timeout', exitCode: 3 });
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
   it('exits when a task is waiting for a user answer', async () => {
     const client = {
       getTaskByRef: vi.fn().mockResolvedValue(task('active')),

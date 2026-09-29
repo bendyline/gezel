@@ -110,7 +110,11 @@ async function readTaskObservation<T>(
 ): Promise<T> {
   for (let retries = 0; ; retries++) {
     signal.throwIfAborted();
-    if (budget.expired()) throw new CliError('Task observation timed out.');
+    // The budget bounds retries, never the first attempt: a wait whose budget
+    // lapsed before any read would otherwise throw instead of reporting the
+    // task as timed out. `Date.now()` ticks in whole milliseconds, so a 1 ms
+    // budget lapses about 1% of the time before the first read even starts.
+    if (retries > 0 && budget.expired()) throw new CliError('Task observation timed out.');
     try {
       return await read();
     } catch (error) {
