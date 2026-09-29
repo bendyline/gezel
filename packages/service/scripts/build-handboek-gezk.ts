@@ -1,5 +1,5 @@
 /** Rebuild the immutable Handboek knowledge catalog shipped by gezeld. */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -14,7 +14,6 @@ import {
   HANDBOEK_KNOWLEDGE_PUBLISHER,
   createHandboekEngine,
   findHandboekContent,
-  handboekKnowledgeFingerprint,
   handboekKnowledgeSource,
   siteDeviceInfo,
 } from '@bendyline/gezel-service/handboek';
@@ -73,11 +72,6 @@ try {
   });
   process.stdout.write(
     `Wrote ${outputPath}: ${report.documents} documents, ${report.chunks} chunks, ${report.archiveBytes} bytes\n`,
-  );
-  await writeFile(
-    join(root, 'packages/service/assets/handboek/handboek-source.sha256'),
-    `${handboekKnowledgeFingerprint(source)}\n`,
-    'utf8',
   );
 } finally {
   await embedder.dispose();

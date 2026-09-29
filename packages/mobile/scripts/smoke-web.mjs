@@ -90,10 +90,12 @@ try {
       }
     }
     assert.deepEqual(unnamed, [], `${name} has visible controls without accessible names`);
+    // A narrow composer's thread picker is an editor-toolbar key and takes the
+    // toolbar's size, like the attach keys beside it (docs/ux.md).
     for (const control of await page
       .locator('.app-compact')
       .locator(
-        '.task-detail-actions button, .task-step-panel .gz-select-trigger, .gezel-chat-project-select, .gezel-chat-session-select',
+        '.task-detail-actions button, .task-step-panel .gz-select-trigger, .gezel-chat-project-select, .gezel-chat-session-select:not(.squisq-toolbar-button)',
       )
       .all()) {
       if (!(await control.isVisible())) continue;

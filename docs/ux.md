@@ -387,7 +387,8 @@ and each tile's accessible name still carries the full summary.
 A narrow composer (under 480px) moves its thread bar into the editor toolbar
 beside the attach keys, as an icon-only picker plus the context meter. New
 thread and New draft are rows in that picker, which lists them at every width,
-so their separate keys drop out there.
+so their separate keys drop out there. The picker takes the toolbar's key
+size, like the attach keys beside it, a deliberate exception to the 44px rule.
 Compact chat composers extend to both edges of their pane, with no outer
 desktop gutter. Only the text and controls keep a small inner inset. Native
 shells reserve the system's safe rectangle for content, including landscape
