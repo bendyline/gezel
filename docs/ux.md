@@ -370,10 +370,11 @@ desktop window driven by a mouse keeps the desktop navigation's row heights
 and caret column. Project and conversation tabs drop to icons only when
 their labels no longer fit (see [Tab rows fit by shedding labels](#patterns)),
 and narrow file browsers use list → detail/back while keeping editors mounted.
-The titlebar never wraps. In the compact header, menu, brand, and search
-keep their width, and the Updates key gives way instead: it drops its word
-(which stays in the accessible name) when the full row no longer fits, then
-clips. Compact layouts spend no row on a heading that only repeats a name: a
+The titlebar never wraps. The compact header shows the navigation button in
+place of the brand mark, because the navigation leads with Home and one
+place gets one key. Updates becomes a 44px bell key like the menu and search
+keys beside it, with its count raised onto the key's top-right corner as a
+notification badge. The word stays in its accessible name. Compact layouts spend no row on a heading that only repeats a name: a
 single-project tab has no project title row. The Projects area keeps its row
 for the back button. The chat's thread-and-task strip shrinks to one-line
 tiles, 60px wide and 24px tall (WCAG's minimum target), that show the status

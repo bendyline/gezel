@@ -7,11 +7,9 @@ Iteratively tune a specific local chat model to convergence — baseline it acro
 > `@bendyline/gilde` package; refresh generated indexes with
 > `pnpm --filter @bendyline/gezel-catalog build-index`. **If a lever adds
 > or changes a value in a core Zod schema — a new `style.family`, a new
-> behavior id, a new tool-grammar format — run `pnpm gilde:export-schemas`
-> BEFORE `build-index`**, or the manifest fails gilde's *generated*
-> `schemas/*.schema.json` ajv identity check and the model is **silently
-> dropped from the index** (`build-index --verbose` → `skip …
-> invalid-identity`). When the loop
+> behavior id, a new tool-grammar format — land it in core and rebuild the
+> service first, then run `pnpm gilde:export-schemas`** so gilde's
+> validation accepts it (see the core-enum gotcha below). When the loop
 > lands: PR the gilde changes, publish, bump the pin in
 > `packages/catalog/package.json` (+ its `minimumReleaseAgeExclude` entry
 > in `pnpm-workspace.yaml`), then `pnpm unlink:gilde`.

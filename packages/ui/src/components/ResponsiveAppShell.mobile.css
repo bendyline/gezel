@@ -121,8 +121,7 @@
 }
 
 /* One row at every width: a wrapped titlebar drops search onto a second
-   band and doubles the header's height. When the full row stops fitting,
-   the Updates key gives way instead (below). */
+   band and doubles the header's height. */
 .app.app-compact .app-header {
   min-height: 52px;
   gap: 0.5rem;
@@ -130,40 +129,56 @@
   align-items: center;
 }
 
-/* Menu, brand, and search hold their width. The Updates key is the only
-   one that may shrink. First it sheds its word, and past that it clips
-   rather than push search off the bar. Electron sets no minimum window
-   width, so that last case is reachable. */
-.app.app-compact .app-header > :not(.app-header-questions) {
+/* Every key holds its width. Three 44px keys fit any phone; only a desktop
+   window narrower than about 250px can overflow them. */
+.app.app-compact .app-header > * {
   flex-shrink: 0;
 }
 
+/* Updates becomes a key like its neighbours: a bell, with the count raised
+   onto its top-right corner as a notification badge. The word stays in the
+   accessible name. */
 .app.app-compact .app-header-questions {
-  min-width: 0;
-  overflow: hidden;
+  position: relative;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  margin-bottom: 0;
+  padding: 0;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  opacity: 1;
 }
 
-/* The query measures the header's content box, which excludes the macOS
-   traffic-light reservation, so one threshold holds on every platform. The
-   full row needs about 302px there with a one-digit count. The word stays
-   in the accessible name, so the key never reads as a bare number. */
-@container app-header (max-width: 320px) {
-  .app.app-compact .app-header-questions {
-    padding-inline: 0.6rem;
-  }
+.app.app-compact .app-header-questions:hover,
+.app.app-compact .app-header-questions[aria-expanded="true"] {
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
 
-  .app.app-compact .app-header-questions .app-nav-badge {
-    margin-left: 0;
-  }
+.app-header-questions-icon {
+  width: 19px;
+  height: 19px;
+}
 
-  .app.app-compact .app-header-questions-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+.app.app-compact .app-header-questions .app-nav-badge {
+  position: absolute;
+  /* Straddles the key's corner. The key sits 4px below the header's top,
+     so -2px keeps the badge's 2px separating ring inside the bar. */
+  top: -2px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  transform: none;
+  box-shadow: 0 0 0 2px var(--titlebar);
 }
 
 :root[data-layout="mobile"] .app.app-compact .app-header {
@@ -192,10 +207,6 @@
 
 .app.app-compact .app-header-right {
   display: none;
-}
-
-.app.app-compact .app-header-brand {
-  min-height: 44px;
 }
 
 .app-header-navigation {

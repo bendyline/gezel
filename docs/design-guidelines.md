@@ -234,13 +234,13 @@ the alpha in dark.
 
 ### Texture
 
-Exactly one texture ships in the product: a **faint wood grain** screened over
-the sage masthead and then knocked back to a whisper by a near-opaque veil. It
-should be felt, not noticed. If a visitor can identify it as "a wood texture,"
-it is too strong.
+No textures ship in the product. The sage masthead is a flat color, so it meets
+the flat colors around it without a seam: the native window-control patch on
+Windows and Linux, and a phone's system-bar insets. (It once carried a faint
+wood grain, which neither of those could continue.)
 
-Do not add paper grain, noise overlays, or scanlines elsewhere. The warmth comes
-from color and proportion.
+Do not add wood grain, paper grain, noise overlays, or scanlines. The warmth
+comes from color and proportion.
 
 ---
 

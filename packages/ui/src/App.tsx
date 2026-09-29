@@ -10,7 +10,6 @@ import type {
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
-import woodtexUrl from './assets/woodtex.png';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
@@ -168,16 +167,6 @@ function FullApp() {
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
   const toggleNavigation = useCallback(() => setNavigationOpen((open) => !open), []);
   useBackNavigation(compact, navigationOpen, openNavigation);
-  // Random vertical slice into the wood texture, picked once per app
-  // launch so each session shows a different band of grain across the
-  // titlebar. The CSS renders the 1024-tall source compressed to
-  // 512px (background-size: auto 512px) so the visible strip shows
-  // ~2× as many grain lines as native; the random offset has to
-  // range over that *rendered* height — `Math.random() * 512`, not
-  // 1024. `background-repeat: repeat` wraps naturally. Negated
-  // because CSS `background-position` is measured from the top-left
-  // of the painted area inward.
-  const [titlebarBgPosY] = useState(() => -Math.floor(Math.random() * 512));
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
@@ -778,22 +767,13 @@ function FullApp() {
       )}
       {/* The top bar remains the OS title bar (drag region + native
           window-control reservations via CSS padding). The brand mark routes
-          to the Meester home; compact layouts also keep their way back to the
-          navigation beside it instead of spending a separate content row. */}
+          to the Meester home. Compact layouts trade it for the navigation
+          button instead of spending a separate content row: the navigation
+          leads with Home, so the brand would be a second key for one place. */}
       <HeaderDensityContext.Provider value={headerDensity}>
-        <header
-          ref={headerRef}
-          className="app-header"
-          data-testid="app-header"
-          style={
-            {
-              ['--titlebar-bg-url' as string]: `url(${woodtexUrl})`,
-              ['--titlebar-bg-pos-y' as string]: `${titlebarBgPosY}px`,
-            } as React.CSSProperties
-          }
-        >
+        <header ref={headerRef} className="app-header" data-testid="app-header">
           {/* Leads the bar, where a phone's menu button sits, and stays while
-              the navigation is open so the brand beside it never shifts. */}
+              the navigation is open so the keys beside it never shift. */}
           {compact && (
             <button
               type="button"
@@ -806,7 +786,9 @@ function FullApp() {
               <NavigationMenuIcon />
             </button>
           )}
-          <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
+          {!compact && (
+            <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
+          )}
           {pendingQuestionCount > 0 && (
             <button
               type="button"
@@ -819,9 +801,16 @@ function FullApp() {
               title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
               aria-expanded={questionsOpen}
             >
-              <span className="app-header-questions-label">Updates</span>
+              {compact ? (
+                <>
+                  <UpdatesIcon />
+                  <span className="sr-only">Updates</span>
+                </>
+              ) : (
+                'Updates'
+              )}
               <span className="app-nav-badge">{pendingQuestionCount}</span>
-              <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
+              {!compact && <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>}
             </button>
           )}
           {/* Unified search is anchored near the brand so changing status-pill
@@ -1006,6 +995,25 @@ function NavigationMenuIcon() {
       focusable="false"
     >
       <path d="M3 5.25h14M3 10h14M3 14.75h14" />
+    </svg>
+  );
+}
+
+function UpdatesIcon() {
+  return (
+    <svg
+      className="app-header-questions-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M10 3a4.5 4.5 0 0 0-4.5 4.5v3.2L4 13.5h12l-1.5-2.8V7.5A4.5 4.5 0 0 0 10 3Z" />
+      <path d="M8.3 16.2a1.8 1.8 0 0 0 3.4 0" />
     </svg>
   );
 }

@@ -96,6 +96,26 @@ describe('Responsive navigation in the desktop app', () => {
     vi.unstubAllGlobals();
   });
 
+  it('shows Updates as a bell key on a phone and as a labelled tab when wide', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        { id: 'q1', projectId: 'p1' },
+        { id: 'q2', projectId: 'p1' },
+      ],
+    } as never);
+    render(<App />);
+    const key = await screen.findByRole('button', { name: /^Updates\s*2$/ });
+    expect(key.querySelector('.app-header-questions-icon')).toBeInTheDocument();
+
+    act(() => {
+      narrow = false;
+      mediaEvents.dispatchEvent(new Event('change'));
+    });
+    const tab = screen.getByRole('button', { name: /^Updates\s*2$/ });
+    expect(tab.querySelector('.app-header-questions-icon')).not.toBeInTheDocument();
+    expect(tab).toHaveTextContent('Updates');
+  });
+
   it('opens navigation on a phone, routes through the same project view, and keeps drafts on resize', async () => {
     render(<App />);
     expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
@@ -115,7 +135,7 @@ describe('Responsive navigation in the desktop app', () => {
     expect(navigation.querySelector('.app-header-navigation-icon')).toBeInTheDocument();
     expect(document.querySelector('.app-compact-navigation')).not.toBeInTheDocument();
     expect(navigation).toHaveAttribute('aria-pressed', 'false');
-    expect(navigation.nextElementSibling).toHaveClass('app-header-brand');
+    expect(screen.queryByRole('button', { name: 'Meester home' })).not.toBeInTheDocument();
     fireEvent.click(navigation);
     expect(draft).not.toBeVisible();
     expect(navigation).toHaveAttribute('aria-pressed', 'true');
@@ -133,6 +153,7 @@ describe('Responsive navigation in the desktop app', () => {
     expect(screen.getByRole('button', { name: 'Open mobile project' })).toBeVisible();
     expect(draft).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Meester home' })).toBeVisible();
     act(() => {
       narrow = true;
       mediaEvents.dispatchEvent(new Event('change'));

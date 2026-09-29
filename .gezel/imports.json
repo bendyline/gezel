@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": {
-    "hash": "d0fae0a7714756478d6bdb91553f321983f7fe9a697e43e76714e07a6180fd50",
+    "hash": "e151eb96d3c06a8ebc29aa50ed3c965024130637ed212cf7ba4b10915ea194b1",
     "sourceFile": "AGENTS.md"
   },
   "craftbooks": {
@@ -51,7 +51,7 @@
       "scriptNames": []
     },
     ".claude/skills/tune-model/SKILL.md": {
-      "hash": "20e3ee2d24c28c9cebd7cda17f9a84663aecd01972ee325f87b43cb03ec1ca45",
+      "hash": "b53a96a8eb5f04688429d2d7b2848c5bdd9e21b91260243273563c2839a7561e",
       "craftbookId": "proj-skill-tune-model",
       "scriptNames": []
     },

@@ -133,12 +133,6 @@
   /* Brand palette */
   --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
-  /* Veil alpha that mutes the wood-grain titlebar texture. The grain is
-     screened over --titlebar, then this near-opaque sage green is laid on
-     top at `normal` blend so only a whisper of grain shows through across
-     the whole bar — a quiet texture, not a feature. Raise the alpha for
-     fainter grain, lower it for stronger. */
-  --titlebar-tex-veil: rgba(102, 127, 98, 0.88);
   /* Fill colour the home-tab gezel logotype flips to when active.
      Light mode: dark forest green that complements the sage titlebar
      and contrasts strongly with the cream-tan tab background. Dark
