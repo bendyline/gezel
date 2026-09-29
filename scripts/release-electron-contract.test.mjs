@@ -421,6 +421,41 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
+test('PR CI runs the full browser suite the Electron release gates on', async () => {
+  const [quality, release] = await Promise.all([
+    readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
+  ]);
+
+  const webStart = quality.indexOf('  web-e2e:');
+  const webEnd = quality.indexOf('\n  desktop-smoke:', webStart);
+  assert.notEqual(webStart, -1, 'quality must retain a browser E2E job');
+  assert.notEqual(webEnd, -1, 'the browser E2E job must remain a distinct job');
+  const web = quality.slice(webStart, webEnd);
+  assert.match(
+    web,
+    /run: pnpm test:e2e:web:run/,
+    'PR CI must run every browser spec the release runs, not a subset',
+  );
+  assert.match(web, /if: failure\(\)[\s\S]*packages\/app\/test-results\//);
+
+  const releaseQualityStart = release.indexOf('  quality:');
+  const releaseQualityEnd = release.indexOf('\n  build-windows:', releaseQualityStart);
+  const releaseQuality = release.slice(releaseQualityStart, releaseQualityEnd);
+  assert.match(releaseQuality, /run: pnpm test:e2e:web:run/);
+  const electronIndex = releaseQuality.indexOf('run: xvfb-run -a pnpm test:e2e:run');
+  const diagnosticsIndex = releaseQuality.indexOf('name: release-e2e-diagnostics', electronIndex);
+  assert.ok(electronIndex >= 0, 'the release must run the full Electron suite');
+  assert.ok(
+    diagnosticsIndex > electronIndex,
+    'a failed release E2E run must upload its traces and screenshots',
+  );
+  assert.match(
+    releaseQuality.slice(electronIndex, diagnosticsIndex + 400),
+    /if: failure\(\)[\s\S]*packages\/app\/test-results\//,
+  );
+});
+
 test('PR artifact checks compile the same release-stamped source shape as Electron release', async () => {
   const quality = await readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8');
   const packagedStart = quality.indexOf('  packaged-bundle:');

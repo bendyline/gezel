@@ -152,4 +152,4 @@ Do not publish until every applicable item passes.
 - [ ] On clean x64 and arm64 Fedora-compatible systems, repeat the service and desktop checks with the matching RPM installed through `dnf`.
 - [ ] Install the previous Windows release, publish the new release in a controlled test window, and confirm the in-app updater discovers the new version. Verify macOS installer-update and Linux package-manager upgrade behavior through their eventual distribution channels separately.
 
-If a gate or smoke test fails, leave the release in draft, fix the source or workflow, and dispatch a new run. Do not work around production signing or artifact-verification failures by publishing local unsigned files.
+If a gate or smoke test fails, leave the release in draft, fix the source or workflow, and dispatch a new run. When a browser or Electron E2E test fails, download the run's `release-e2e-diagnostics` artifact for its Playwright traces, failure screenshots, and browser diagnostics. Do not work around production signing or artifact-verification failures by publishing local unsigned files.

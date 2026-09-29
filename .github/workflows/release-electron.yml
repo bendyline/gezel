@@ -205,6 +205,19 @@ jobs:
         run: pnpm test:e2e:web:run
       - name: Full Electron E2E
         run: xvfb-run -a pnpm test:e2e:run
+      - name: Preserve E2E failure diagnostics
+        # Traces, failure screenshots, and browser diagnostics. Without them a
+        # red release run leaves only the line reporter's summary to debug from.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-e2e-diagnostics
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+            packages/app/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Generate production SBOM
         run: pnpm audit:sbom
       - name: Verify release version propagation
