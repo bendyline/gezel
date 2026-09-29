@@ -66,7 +66,9 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
 
   await project.click();
   await expect(page.getByTestId('project-tab-chat')).toBeVisible();
-  await expect(page.locator('.project-compact-heading h2')).toHaveText('Fixture Project');
+  // A single-project tab spends no row on a name-only heading; the seeded
+  // conversation below is what proves this is Fixture Project.
+  await expect(page.locator('.project-compact-heading')).toHaveCount(0);
   await expect(sidebar).not.toBeVisible();
   const editor = page.getByTestId('chat-composer').locator('[contenteditable="true"]').first();
   await expect(editor).toBeVisible();

@@ -134,10 +134,14 @@ export async function seed(
     /* craftbook is optional for most frames */
   }
 
-  // Project-scoped chat with deterministic content.
+  // Project-scoped chat with deterministic content. The mock echoes its whole
+  // prompt, so indexed context injected into this turn (the mounted Handboek
+  // matches "web") would put live catalog text into the seeded reply.
+  await client.updateGezelSettings(ada.id, { retrieval: { mode: 'off' } });
   const session = await client.createChatSession({ gezelId: ada.id, projectId: project.id });
   await client.sendToChatSession(session.id, SEED_PROMPT);
   await waitForReply(client, session.id);
+  await client.updateGezelSettings(ada.id, { retrieval: null });
 
   // The chat worker extracts memories in the background. Seed one visible
   // gezel-scoped memory through the Store so the fixture does not deliberately

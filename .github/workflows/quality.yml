@@ -307,10 +307,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  web-smoke:
-    name: Browser smoke E2E
+  web-e2e:
+    name: Browser E2E
     needs: workflow-policy
     runs-on: ubuntu-latest
+    # ~9 min green: build 2.5, full suite 3, smoke repeats 1.3.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -321,22 +322,19 @@ jobs:
       - run: pnpm build
       - name: Install Chromium
         run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
-      - name: Exercise shell and write flows
+      - name: Run the full browser suite
+        # Every spec, not a subset. The Electron release gates on this same
+        # suite, and a spec left out here first fails on a release candidate:
+        # PR #71 changed three behaviors the unrun specs still asserted, and
+        # the first run to notice was the release, 30 s after the merge.
+        run: pnpm test:e2e:web:run
+      - name: Repeat shell and write flows without retries
         run: pnpm test:e2e:web:smoke
-      - name: Guard chat and terminal composer geometry
-        run: >-
-          pnpm --filter @bendyline/gezel-app exec playwright test
-          --config playwright.web.config.ts
-          e2e-web/terminal.spec.ts
-          --grep "keeps terminal composer geometry aligned with chat"
-          --reporter=line
-          --retries=0
-          --workers=1
       - name: Preserve failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: web-smoke-diagnostics
+          name: web-e2e-diagnostics
           path: |
             packages/app/test-results/
             packages/app/playwright-report/

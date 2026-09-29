@@ -29,8 +29,12 @@ test.beforeEach(async ({ world, daemon }) => {
 test.afterEach(async ({ world, daemon }) => {
   const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
   // `null` clears the override rather than pinning a non-coding type, so the
-  // project goes back to being unclassified the way the seed left it.
-  await client.updateProject(world!.projectId, { projectTypeId: null }).catch(() => {});
+  // project goes back to being unclassified the way the seed left it. The
+  // output-pane choice is cleared too: the split-grip test opens the pane, and
+  // a persisted open pane narrows every later test's chat rail into compact.
+  await client
+    .updateProject(world!.projectId, { projectTypeId: null, outputPaneVisible: null })
+    .catch(() => {});
   await client.updateConfig({ showAdvancedFeatures: false }).catch(() => {});
 });
 
@@ -334,8 +338,12 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await expect(page.locator('.terminal-editor-placeholder')).toHaveCount(0);
   await page.keyboard.press('Enter');
   // Optimistic clear → placeholder returns; the command ran (output bubble).
+  // Scoped to the output: the thread pill above it also shows the command,
+  // and a compact rail hides that preview.
   await expect(page.locator('.terminal-editor-placeholder')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('hi-terminal').first()).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.locator('.terminal-output-body').filter({ hasText: 'hi-terminal' }).first(),
+  ).toBeVisible({ timeout: 15_000 });
 
   await page.keyboard.type('a');
   await page.keyboard.press('Shift+Enter');

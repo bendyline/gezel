@@ -531,7 +531,7 @@ public final class MobileUiSmokeTest {
             await openNavigation();
             await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
             await until(() => visible(document.querySelector('[data-testid="project-tab-chat"]')), 'ordinary project Chat tab');
-            check(document.querySelector('.project-compact-heading h2')?.textContent === 'Native workshop', 'Current project name is missing');
+            check(!document.querySelector('.project-compact-heading'), 'A single-project tab must not spend a row on a name-only heading');
             const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
             const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
             editor.focus();
