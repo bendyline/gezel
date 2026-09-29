@@ -30,9 +30,13 @@ Pure modules (`discovery`, `client`, `consent`, `relay`, `chat`, `project`,
 
 1. Reads `~/.gezel/runtime/port` and `runtime/cert.pem` (`GEZEL_HOME` is
    honored) and verifies TLS against that per-launch certificate.
-2. Asks for a `product` grant as app `libreoffice`. The first time, the panel
-   shows a connection code; the user approves it in Gezel. The token is kept
-   at `~/.gezel/integrations/libreoffice/token` (0600).
+2. Holds a `product` grant as app `libreoffice`, kept at
+   `~/.gezel/integrations/libreoffice/token` (0600). Setting LibreOffice up
+   in Gezel writes that file; failing that, the extension trades the owner
+   credential in `runtime/auth-token` for the grant
+   (`POST /v1/apps/local-connect`). Neither shows a code (ADR 0018). Only when
+   both fail does the panel show a connection code for the user to approve
+   in Gezel.
 3. Maps the document to a project through the daemon's folder inference
    (`POST /api/projects/infer-for-path`), chats through `/api/sessions`, and
    registers its document tools through the app-tool relay while the panel is
@@ -62,8 +66,11 @@ The UNO layer can only be exercised inside LibreOffice. With Gezel running:
    ```
 2. Open a Writer document saved in a folder, then **Tools > Gezel**. The
    sidebar opens on the Gezel deck.
-3. Click **Connect to Gezel**. A connection code appears; approve it in Gezel
-   under Connected Apps. The panel shows the project and a gezel picker.
+3. The panel connects on its own when Gezel is running (click **Connect to
+   Gezel** otherwise); no connection code appears. The panel shows the
+   project and a gezel picker. To see the fallback, run with a `GEZEL_HOME`
+   whose `runtime/auth-token` is unreadable: a code appears, to approve in
+   Gezel under Connected Apps.
 4. Select a paragraph and send "Summarize my selection". The transcript shows
    a `[doc_read_selection]` line, then the reply.
 5. Ask for an insertion ("Add a heading 'Next steps' at the end"). The text

@@ -77,6 +77,10 @@
       "types": "./dist/checks/index.d.ts",
       "import": "./dist/checks/index.js"
     },
+    "./eval": {
+      "types": "./dist/eval/index.d.ts",
+      "import": "./dist/eval/index.js"
+    },
     "./svg": {
       "types": "./dist/svg/index.d.ts",
       "import": "./dist/svg/index.js"

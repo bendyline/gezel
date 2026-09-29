@@ -1,9 +1,11 @@
 /**
- * The pane's connection to gezel: a `product` grant for app id `office`,
- * requested from the pane itself. The daemon admits registration from this
- * page because it serves it on its own Office origin; the user approves by
- * typing the connection code into Gezel. The token lives in this origin's
- * localStorage, which only pages gezel ships can read.
+ * The pane's connection to gezel: a `product` grant for app id `office`.
+ * A pane Gezel set up connects on its own: its manifest URL carries an
+ * enrollment key the pane trades for the grant. Without a working key (a
+ * manifest registered by hand, or a setup since removed) the pane requests
+ * the grant itself and the user approves it by typing the connection code
+ * into Gezel. The token lives in this origin's localStorage, which only
+ * pages gezel ships can read.
  */
 
 export const OFFICE_APP_ID = 'office';
@@ -56,6 +58,24 @@ export async function probeToken(deps: HttpDeps, token: string): Promise<ProbeRe
   } catch {
     return 'down';
   }
+}
+
+export type EnrollResult = { kind: 'ok'; token: string } | { kind: 'refused' } | { kind: 'down' };
+
+/** Trade the manifest's enrollment key for the grant. Refused means: ask for a code instead. */
+export async function enrollPane(deps: HttpDeps, key: string): Promise<EnrollResult> {
+  let res: Response;
+  try {
+    res = await deps.fetch(`${deps.baseUrl}/v1/apps/office/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+  } catch {
+    return { kind: 'down' };
+  }
+  const body = (await res.json().catch(() => ({}))) as { token?: string };
+  return res.ok && body.token ? { kind: 'ok', token: body.token } : { kind: 'refused' };
 }
 
 export type RegisterResult =

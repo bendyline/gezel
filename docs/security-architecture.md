@@ -170,6 +170,16 @@ The requester receives and displays the plaintext once; the daemon persists only
 hash, and the Gezel approval surface never displays the code. Inference-only scopes may opt
 into the same handshake.
 
+One exception, for Gezel's own local add-ins (Office, LibreOffice, VS Code): an add-in that
+proves it runs as the daemon's owner gets its fixed grant without the code
+([ADR 0018](decisions/0018-local-add-in-grants.md)). The proof is possession of something
+only that account can read: the owner credential in `runtime/auth-token`, exchanged through
+first-party-authenticated `POST /v1/apps/local-connect`; a token file Settings provisions
+at 0600; or the Office enrollment key in the add-in's 0600 manifest, presented to
+`POST /v1/apps/office/enroll`. Other local accounts and web pages can read none of these,
+which is exactly what the code was proving. The routes name only those three app ids, and
+the code flow stays their fallback.
+
 ### 4.2 Internal and session scope guards
 
 The MCP subprocess used to receive the **root** token; it now receives a **session token

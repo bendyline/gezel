@@ -24,3 +24,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0015](0015-project-inference.md) | Accepted | Document path → project folder inference (well-known folders, forbidden roots, the climb) |
 | [0016](0016-office-host.md) | Accepted | Office host: a per-user local CA, a stable HTTPS listener, and same-origin consent |
 | [0017](0017-relevance-model.md) | Accepted | A relevance model: an on-device cross-encoder, calibrated or reorder-only |
+| [0018](0018-local-add-in-grants.md) | Accepted | Gezel's own local add-ins connect without a connection code |

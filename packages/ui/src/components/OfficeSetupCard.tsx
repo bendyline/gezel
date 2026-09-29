@@ -1,6 +1,7 @@
 import type { OfficeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Dialog } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { harnessStateLabel } from './harness-setup/useHarnessSetupCard.js';
 
@@ -22,6 +23,55 @@ function errorText(err: unknown): string {
 }
 
 /**
+ * Office on a Mac lists a newly registered add-in under Home → Add-ins and
+ * adds its ribbon button only after the user opens it from there once, so a
+ * Mac setup that stops at "choose Gezel on the Home tab" leaves them looking
+ * at a ribbon with no Gezel on it.
+ */
+function MacFirstOpenDialog({ apps, onClose }: { apps: string[]; onClose: () => void }) {
+  const one = apps.length === 1;
+  const names = new Intl.ListFormat('en', { type: 'conjunction' }).format(apps);
+  return (
+    <Dialog.Root open={apps.length > 0} onOpenChange={(next) => !next && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay />
+        <Dialog.Content>
+          <Dialog.Title asChild>
+            <h3>One more step in {one ? apps[0] : 'Office'}</h3>
+          </Dialog.Title>
+          <Dialog.Description className="muted small">
+            On a Mac, Office doesn&apos;t show Gezel&apos;s button until you open Gezel once from
+            the Add-ins menu.
+          </Dialog.Description>
+          <ol className="office-first-open-steps">
+            <li>
+              If {names} {one ? 'is' : 'are'} open, quit and reopen {one ? 'it' : 'them'}.
+            </li>
+            <li>
+              On the <strong>Home</strong> tab, choose <strong>Add-ins</strong>.
+            </li>
+            <li>
+              Choose <strong>Gezel</strong>.
+            </li>
+          </ol>
+          <p className="muted small">
+            The Gezel pane opens and connects on its own. From then on, Gezel has its own button on
+            the Home tab.
+          </p>
+          <Dialog.Actions>
+            <Dialog.Close asChild>
+              <button type="button" className="primary">
+                Got it
+              </button>
+            </Dialog.Close>
+          </Dialog.Actions>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/**
  * Settings → Connected Apps: add a Gezel button to Word, Excel and
  * PowerPoint. The desktop app does the per-user steps (trust Gezel's local
  * certificate, register the add-in with each app); the daemon owns the
@@ -32,12 +82,14 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
   const bridge = window.__GEZEL__?.officeHost;
   const localDesktop = isLocalDesktopMode() && Boolean(bridge);
   const remoteMode = window.__GEZEL__?.mode === 'remote';
+  const onMac = window.__GEZEL__?.platform === 'darwin';
   const [status, setStatus] = useState<OfficeSetupStatusResponse | null>(null);
   const [selected, setSelected] = useState<Set<OfficeApp>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [firstOpenApps, setFirstOpenApps] = useState<string[]>([]);
 
   const apply = useCallback((next: OfficeSetupStatusResponse) => {
     setStatus(next);
@@ -73,15 +125,18 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
       { ok: true; status: OfficeSetupStatusResponse } | { ok: false; error: string }
     >,
     prefix: string,
+    onSuccess?: (next: OfficeSetupStatusResponse) => void,
   ) => {
     setBusy(true);
     setError(null);
     setNotice(null);
+    let succeeded: OfficeSetupStatusResponse | null = null;
     try {
       const result = await action();
       if (!result.ok) throw new Error(result.error);
       apply(result.status);
       if (result.status.message) setNotice(result.status.message);
+      succeeded = result.status;
       await onChanged?.();
     } catch (err) {
       setError(`${prefix}: ${errorText(err)}`);
@@ -89,6 +144,21 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
       setBusy(false);
       setConfirmation(null);
     }
+    if (succeeded) onSuccess?.(succeeded);
+  };
+
+  const enable = () => {
+    const before = new Set(status?.apps.filter((a) => a.selected).map((a) => a.app));
+    void run(
+      () => bridge!.enable([...selected]),
+      'Could not set up Office',
+      (next) => {
+        if (!onMac || next.state !== 'configured') return;
+        setFirstOpenApps(
+          next.apps.filter((a) => a.selected && !before.has(a.app)).map((a) => a.label),
+        );
+      },
+    );
   };
 
   const configuredApps = status?.apps.filter((a) => a.selected).map((a) => a.app) ?? [];
@@ -194,9 +264,18 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
 
           {configured && (
             <p className="muted small">
-              Restart Word, Excel, or PowerPoint if it was open, then choose <strong>Gezel</strong>{' '}
-              on the Home tab. The first time, the pane shows a connection code; approve it here
-              under Connected Apps. If the button does not appear, turn on{' '}
+              Restart Word, Excel, or PowerPoint if it was open, then{' '}
+              {onMac ? (
+                <>
+                  choose <strong>Add-ins</strong> on the Home tab and pick <strong>Gezel</strong>.
+                  From then on, Gezel has its own button on the Home tab.
+                </>
+              ) : (
+                <>
+                  choose <strong>Gezel</strong> on the Home tab.
+                </>
+              )}{' '}
+              The pane connects to Gezel on its own. If Gezel does not appear, turn on{' '}
               <strong>optional connected experiences</strong> in Office&apos;s privacy settings.
             </p>
           )}
@@ -275,8 +354,8 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
             certificate for this computer and asks your system to trust it. The certificate is
             limited to this computer (localhost), is trusted for your account only, and is removed
             when you remove this setup. Your system will ask you to confirm
-            {navigator.userAgent.includes('Mac') ? ' with your password' : ''}.
-            {navigator.userAgent.includes('Mac') && (
+            {onMac ? ' with your password' : ''}.
+            {onMac && (
               <>
                 {' '}
                 macOS may also ask whether Gezel may access data from other apps; allow it so Gezel
@@ -286,9 +365,11 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
           </>
         }
         confirmLabel={notConfigured ? 'Set up Office' : 'Update'}
-        onConfirm={() => void run(() => bridge!.enable([...selected]), 'Could not set up Office')}
+        onConfirm={enable}
         onCancel={() => setConfirmation(null)}
       />
+
+      <MacFirstOpenDialog apps={firstOpenApps} onClose={() => setFirstOpenApps([])} />
 
       <ConfirmDialog
         open={confirmation === 'remove'}

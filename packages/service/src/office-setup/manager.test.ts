@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { request } from 'node:https';
 import { type Server, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -177,14 +177,69 @@ describe('office setup manager', () => {
     expect(status.state).toBe('configured');
   });
 
-  it('removes everything and stops listening', async () => {
-    const { manager } = makeManager();
+  it('removes everything, stops listening, and revokes the pane grant', async () => {
+    const disconnected: string[] = [];
+    const { manager } = makeManager({
+      firstPartyApps: { disconnect: async (appId) => void disconnected.push(appId) },
+    });
     await manager.configure({ apps: ['word'] });
     const status = await manager.remove();
     expect(status.state).toBe('not-configured');
     expect(status.listener.state).toBe('stopped');
     expect(manager.origin()).toBeNull();
     await expect(readFile(join(home, 'integrations', 'office', 'setup.json'))).rejects.toThrow();
+    expect(disconnected).toEqual(['office']);
+  });
+
+  it('writes an owner-only enrollment key into every manifest, and checks it', async () => {
+    const { manager } = makeManager();
+    const status = await manager.configure({ apps: ['word', 'excel'] });
+    const keys = new Set<string>();
+    for (const app of status.apps.filter((a) => a.selected)) {
+      const xml = await readFile(app.manifestPath!, 'utf8');
+      const key = xml.match(/taskpane\.html\?enroll=([^"&]+)"/)?.[1];
+      expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      keys.add(key!);
+      if (process.platform !== 'win32') {
+        expect((await stat(app.manifestPath!)).mode & 0o777).toBe(0o600);
+      }
+    }
+    expect(keys.size).toBe(1);
+    const [key] = [...keys];
+    if (process.platform !== 'win32') {
+      const dir = join(home, 'integrations', 'office', 'manifests');
+      expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    }
+    expect(await manager.verifyEnrollmentKey(key!)).toBe(true);
+    const oneCharOff = `${key!.slice(0, -1)}${key!.endsWith('A') ? 'B' : 'A'}`;
+    expect(await manager.verifyEnrollmentKey(oneCharOff)).toBe(false);
+    expect(await manager.verifyEnrollmentKey('')).toBe(false);
+
+    await manager.configure({ apps: ['word'] });
+    expect(await manager.verifyEnrollmentKey(key!)).toBe(true);
+    await manager.remove();
+    expect(await manager.verifyEnrollmentKey(key!)).toBe(false);
+  });
+
+  it('adds a key to a setup made before keys existed, asking Office to re-register', async () => {
+    const { manager } = makeManager();
+    await manager.configure({ apps: ['word'] });
+    await manager.recordHostReport({
+      trust: { installed: true },
+      apps: { word: { registered: true } },
+    });
+    const statePath = join(home, 'integrations', 'office', 'setup.json');
+    const legacy = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>;
+    delete legacy.enrollmentKey;
+    await writeFile(statePath, JSON.stringify(legacy));
+    await rm(`${statePath}.bak`, { force: true });
+
+    await manager.reconcile();
+    const record = JSON.parse(await readFile(statePath, 'utf8')) as { enrollmentKey?: string };
+    expect(record.enrollmentKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(await manager.verifyEnrollmentKey(record.enrollmentKey!)).toBe(true);
+    const word = (await manager.status()).apps.find((a) => a.app === 'word')!;
+    expect(word.registered).toBeNull();
   });
 
   it('refuses unsupported platforms and builds without the pane', async () => {

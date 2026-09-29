@@ -247,12 +247,29 @@ export class BoundedDaemonLogSink extends Writable {
  * a log path it's still piped (can't be ignored, the daemon may produce a
  * lot of output) but discarded.
  */
+/**
+ * Variables that describe the daemon a harness was launched FROM — its port,
+ * its role, its scope. A trial daemon inheriting them is not isolated: an
+ * inherited `GEZEL_PORT` makes it bind the launcher's own port and die with
+ * EADDRINUSE, which surfaces two minutes later as a spawn timeout. The in-app
+ * runner launches the harness from a live daemon, and a terminal can export
+ * any of these too.
+ */
+export const LAUNCHER_DAEMON_ENV = [
+  'GEZEL_PORT',
+  'GEZEL_SERVICE_ROLE',
+  'GEZEL_SYSTEM_SCOPE',
+  'GEZEL_WEB',
+] as const;
+
 export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<TrialDaemon> {
   const daemonEntry = opts.daemonEntry ?? resolveDaemonEntry(import.meta.url);
   assertServiceDistArtifact(daemonEntry);
 
+  const inherited: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of LAUNCHER_DAEMON_ENV) delete inherited[key];
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...inherited,
     GEZEL_HOME: opts.home,
     ...(opts.llamaBin ? { GEZEL_LLAMA_SERVER_BIN: opts.llamaBin } : {}),
     ...(opts.sdBin ? { GEZEL_SD_SERVER_BIN: opts.sdBin } : {}),

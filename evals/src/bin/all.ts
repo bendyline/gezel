@@ -43,6 +43,14 @@
  *   --llama-bin <path>   override the auto-resolved llama-server binary
  *   --image-bin <path>   override the auto-resolved sd-server binary
  *   --list               list scenarios and exit
+ *   --source-home <dir>  read every local model from this gezel home (plus any
+ *                        GEZEL_EVAL_MODEL_ROOTS overlay) and never download;
+ *                        a missing or stale install fails the trial
+ *   --preflight-dir <p>  where the preflight probe keeps reports + its cache
+ *   --write-reports      write score.json + postmortem.md as each trial ends
+ *   --events             print `[eval-event] {json}` progress lines
+ *   --retrieval <mode>   retrieval arm (off|lean|balanced|deep), with
+ *                        --references/--embeddings/--library-recall on|off
  *   --ignore-gpu-panic   proceed even if macOS recorded a recent GPU-driver
  *                        kernel panic (MLX engine only). Default: refuse to
  *                        auto-relaunch after a panic (crash-loop prevention).
@@ -50,6 +58,7 @@
  */
 import { isSuccessfulMatrix, runMatrix } from '../batch.ts';
 import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
+import { createEvalEventSink } from '../eval-events.ts';
 import { checkGpuPanicGate } from '../gpu-panic-guard.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { PreflightExcludedError } from '../preflight.ts';
@@ -78,25 +87,33 @@ async function main() {
     'cache-root',
     'count',
     'count-strict',
+    'embeddings',
+    'events',
     'force-behaviors',
     'ignore-gpu-panic',
     'image-bin',
     'image-model',
     'list',
     'llm-judge',
+    'library-recall',
     'llama-bin',
     'mlx-source-home',
     'model',
     'no-triage',
     'offline',
     'parallel',
+    'preflight-dir',
+    'references',
     'remove-behaviors',
+    'retrieval',
     'runs-dir',
     'scenarios',
     'skip-preflight',
+    'source-home',
     'suite',
     'timeout',
     'triage-k',
+    'write-reports',
   ]);
 
   // parseArgs represents a bare long flag as boolean `true`. For flags
@@ -263,6 +280,14 @@ async function main() {
       ...(args.flags['mlx-source-home']
         ? { mlxSourceHome: String(args.flags['mlx-source-home']) }
         : {}),
+      ...(typeof args.flags['source-home'] === 'string'
+        ? { modelSourceHome: args.flags['source-home'] }
+        : {}),
+      ...(typeof args.flags['preflight-dir'] === 'string'
+        ? { preflightRunsDir: args.flags['preflight-dir'] }
+        : {}),
+      ...(args.flags['write-reports'] ? { writeReports: true } : {}),
+      ...(args.flags.events ? { events: createEvalEventSink() } : {}),
       ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),

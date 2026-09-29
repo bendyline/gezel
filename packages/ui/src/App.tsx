@@ -819,7 +819,7 @@ function FullApp() {
               title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
               aria-expanded={questionsOpen}
             >
-              Updates
+              <span className="app-header-questions-label">Updates</span>
               <span className="app-nav-badge">{pendingQuestionCount}</span>
               <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
             </button>

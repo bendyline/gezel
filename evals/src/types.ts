@@ -333,6 +333,14 @@ export interface EvalScenario {
    * `--image-model <id>` on the CLI overrides this.
    */
   defaultImageModelId?: string;
+  /**
+   * What the scenario's grader needs beyond a chat model, when the scenario
+   * cannot say it through a field above (`defaultImageModelId`,
+   * `requiresEmbeddings`, `requiresDocblocks` are read directly). The
+   * in-app runner uses this to name a requirement the install lacks before
+   * a trial spends an hour discovering it.
+   */
+  requires?: ReadonlyArray<'chromium' | 'vitest' | 'network' | 'external-checkout'>;
 }
 
 export interface TrialOptions {
@@ -363,6 +371,21 @@ export interface TrialOptions {
    * `~/.gezel-dev` (the dev-mode home `pnpm app` writes to).
    */
   mlxSourceHome?: string;
+  /**
+   * A gezel home whose installed models this trial may read but never
+   * write. When set, every local engine (llama-cpp, ds4, mlx, sd-cpp)
+   * sources weights from it — plus any extra read-only roots in
+   * `GEZEL_EVAL_MODEL_ROOTS` — and the eval warm cache is bypassed
+   * entirely: nothing is downloaded, and a missing or stale install fails
+   * the trial with a message naming the fix. This is how the in-app runner
+   * evaluates the models a person already has, without a second copy.
+   */
+  modelSourceHome?: string;
+  /**
+   * Called once the trial has an id and a run directory, before any
+   * model or daemon work. The batch runner uses it for progress events.
+   */
+  onTrialStart?: (info: { trialId: string; runDir: string; startedAt: string }) => void;
   /**
    * Catalog id of a SECOND local model to warm + link in and route index
    * enrichment to (`GEZEL_ENRICH_MODEL` in the daemon env, read by
@@ -706,6 +729,16 @@ export interface TriageCluster {
 
 export interface BatchOptions extends TrialOptions {
   count: number;
+  /**
+   * Write the fixed-rubric `score.json` + deterministic `postmortem.md`
+   * beside each trial as it finishes, instead of leaving that to a later
+   * `eval:postmortems` pass. The in-app runner always sets it.
+   */
+  writeReports?: boolean;
+  /** Structured progress channel (`--events`). */
+  events?: import('./eval-events.ts').EvalEventSink;
+  /** Where the preflight probe keeps its reports and 24h cache. */
+  preflightRunsDir?: string;
   /**
    * Honor `count` exactly, ignoring each scenario's `suggestedTrials`
    * saturation cap. `--count` is a required flag, so every count is an

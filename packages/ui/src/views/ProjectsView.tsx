@@ -2381,17 +2381,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
-            {effectiveCompact && (
+            {/* The row exists for the back button. In a single-project tab it
+                would hold only the name, and a phone can't spare the height. */}
+            {effectiveCompact && !detailOnly && (
               <div className="project-compact-heading">
-                {!detailOnly && (
-                  <button
-                    type="button"
-                    className="project-list-back"
-                    onClick={() => setBrowsingProjects(true)}
-                  >
-                    Projects
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="project-list-back"
+                  onClick={() => setBrowsingProjects(true)}
+                >
+                  Projects
+                </button>
                 <h2>{selected.name}</h2>
               </div>
             )}

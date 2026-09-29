@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ExecFailure, type ExecFn, defaultExec, isProcessRunning, system32Tool } from './exec.js';
@@ -138,7 +138,11 @@ export async function registerOfficeAddin(
     }
     try {
       await mkdir(macWefDir(reg.app, home), { recursive: true });
-      await copyFile(reg.manifestPath, macManifestCopyPath(reg.app, reg.manifestId, home));
+      const target = macManifestCopyPath(reg.app, reg.manifestId, home);
+      await copyFile(reg.manifestPath, target);
+      // The manifest carries the pane's enrollment key: owner-only, like the
+      // daemon's own copy, even where a copy would not keep the source mode.
+      await chmod(target, 0o600);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'EPERM' || code === 'EACCES') {

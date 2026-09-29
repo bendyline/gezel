@@ -1,4 +1,4 @@
-import type { OfficeApp } from '@bendyline/gezel';
+import { OFFICE_ENROLL_PARAM, type OfficeApp } from '@bendyline/gezel';
 
 /**
  * The XML "add-in only" manifest Word, Excel and PowerPoint accept from a
@@ -53,12 +53,19 @@ export interface OfficeManifestInput {
   id: string;
   version: string;
   displayName?: string;
+  /** Rides on the task-pane URL so the pane connects without a code. */
+  enrollmentKey?: string;
 }
 
 export function buildOfficeManifest(input: OfficeManifestInput): string {
   const { hostName, requirementSet } = HOSTS[input.app];
   const origin = input.origin.replace(/\/+$/, '');
   const url = (path: string) => escapeXml(`${origin}${path}`);
+  const taskpane = url(
+    input.enrollmentKey
+      ? `${officeTaskpanePath(input.app)}?${OFFICE_ENROLL_PARAM}=${encodeURIComponent(input.enrollmentKey)}`
+      : officeTaskpanePath(input.app),
+  );
   const name = escapeXml(input.displayName ?? 'Gezel');
   const icon = (size: number) => url(`/office/icons/icon-${size}.png`);
   const iconSet = (indent: string) =>
@@ -89,7 +96,7 @@ export function buildOfficeManifest(input: OfficeManifestInput): string {
     </Sets>
   </Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="${url(officeTaskpanePath(input.app))}"/>
+    <SourceLocation DefaultValue="${taskpane}"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -130,7 +137,7 @@ ${[16, 32, 80].map((size) => `        <bt:Image id="Gezel.Icon.${size}" DefaultV
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Gezel.Commands.Url" DefaultValue="${url('/office/commands.html')}"/>
-        <bt:Url id="Gezel.Taskpane.Url" DefaultValue="${url(officeTaskpanePath(input.app))}"/>
+        <bt:Url id="Gezel.Taskpane.Url" DefaultValue="${taskpane}"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Gezel.Group.Label" DefaultValue="${name}"/>

@@ -80,13 +80,88 @@
   cursor: pointer;
 }
 
-.knowledge-topic-row:hover {
+/* A topic line is the chevron column plus the row button, and the line —
+   not the button — carries hover and selection, so the highlight spans the
+   chevron the way it does in the file tree. */
+.knowledge-topic-line {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius-md);
+}
+
+.knowledge-topic-line:hover,
+.knowledge-topic-row.knowledge-mobile-all:hover {
   background: color-mix(in srgb, var(--panel) 70%, transparent);
 }
 
-.knowledge-topic-row[aria-current="true"] {
+.knowledge-topic-line--current {
   background: var(--panel);
+}
+
+.knowledge-topic-line > .knowledge-topic-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-topic-toggle + .knowledge-topic-row,
+.knowledge-topic-toggle-spacer + .knowledge-topic-row {
+  padding-left: 0.15rem;
+}
+
+.knowledge-topic-row[aria-current="true"] {
   font-weight: 600;
+}
+
+.knowledge-topic-toggle,
+.knowledge-topic-toggle-spacer {
+  flex: 0 0 1.25rem;
+}
+
+.knowledge-topic-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.knowledge-topic-toggle:hover {
+  color: var(--text);
+}
+
+.knowledge-topic-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.knowledge-topic-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.knowledge-topic-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-topic-toggle svg {
+    transition: none;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .knowledge-topic-row {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .knowledge-topic-toggle,
+  .knowledge-topic-toggle-spacer {
+    flex-basis: 44px;
+  }
 }
 
 .knowledge-topic-count {

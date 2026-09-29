@@ -3,6 +3,7 @@ import {
   type HttpDeps,
   type KeyValueStorage,
   clearToken,
+  enrollPane,
   loadToken,
   probeToken,
   registerPane,
@@ -51,6 +52,8 @@ export type BootState =
 export interface BootDeps extends HttpDeps {
   storage: KeyValueStorage;
   documentPath: string | null;
+  /** From the manifest's task-pane URL; see `OFFICE_ENROLL_PARAM`. */
+  enrollmentKey?: string | null;
   signal?: AbortSignal;
   grantTimeoutMs?: number;
 }
@@ -159,6 +162,17 @@ async function obtainToken(
       return null;
     }
     clearToken(deps.storage);
+  }
+  if (deps.enrollmentKey) {
+    const enrolled = await enrollPane(deps, deps.enrollmentKey);
+    if (enrolled.kind === 'ok') {
+      saveToken(deps.storage, enrolled.token);
+      return enrolled.token;
+    }
+    if (enrolled.kind === 'down') {
+      onState({ kind: 'daemon-down' });
+      return null;
+    }
   }
   let registered: Awaited<ReturnType<typeof registerPane>>;
   try {

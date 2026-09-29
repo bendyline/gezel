@@ -6,11 +6,13 @@ import {
   type LibreOfficeHostReport,
   type LibreOfficeSetupStatusResponse,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '../fs/atomic.js';
 import {
   SecurityStateCorruptionError,
   readSecurityJson,
   writeSecurityJson,
 } from '../fs/security-json.js';
+import type { FirstPartyAppTokens } from '../grants/first-party-apps.js';
 import { HarnessSetupError, createMutationQueue, ensurePrivateDir } from '../local-harness/base.js';
 import { type LibreOfficeDetection, detectLibreOffice } from './detect.js';
 
@@ -19,7 +21,13 @@ import { type LibreOfficeDetection, detectLibreOffice } from './detect.js';
  * ships lives and what the desktop app last reported; the desktop app runs
  * `unopkg` in the user's context. No listener and no certificate: the
  * extension is a native process that discovers the daemon from
- * `runtime/port` + `runtime/cert.pem` and asks for a grant like the CLI.
+ * `runtime/port` + `runtime/cert.pem`.
+ *
+ * Setting it up also writes the extension's token to `token` in this
+ * folder, owner-only, where the extension already looks, so it connects
+ * without a code. Only an explicit setup writes it: a token the user
+ * revoked in Connected Apps is not quietly replaced, and the extension then
+ * falls back to asking for a code.
  */
 
 const STATE_VERSION = 1;
@@ -53,6 +61,8 @@ export interface CreateLibreOfficeSetupManagerOptions {
   home: string;
   /** Path of the `.oxt` this build ships, if any. */
   oxtPath: () => string | undefined;
+  /** Issues the extension's grant at setup and revokes it on removal. */
+  firstPartyApps?: Pick<FirstPartyAppTokens, 'connect' | 'disconnect'>;
   detect?: () => Promise<LibreOfficeDetection>;
   now?: () => Date;
 }
@@ -72,6 +82,7 @@ export function createLibreOfficeSetupManager(
 ): LibreOfficeSetupManager {
   const integrationDir = join(opts.home, 'integrations', 'libreoffice');
   const statePath = join(integrationDir, 'setup.json');
+  const tokenPath = join(integrationDir, 'token');
   const now = opts.now ?? (() => new Date());
   const detect = opts.detect ?? (() => detectLibreOffice());
   const serialize = createMutationQueue();
@@ -172,6 +183,10 @@ export function createLibreOfficeSetupManager(
           createdAt: prior?.createdAt ?? stamp,
           updatedAt: stamp,
         });
+        if (opts.firstPartyApps) {
+          const token = await opts.firstPartyApps.connect('libreoffice');
+          await writeFileAtomic(tokenPath, token, { durable: true, mode: 0o600 });
+        }
         return buildStatus();
       }),
     recordHostReport: (report) =>
@@ -201,6 +216,7 @@ export function createLibreOfficeSetupManager(
     remove: () =>
       serialize(async () => {
         await rm(integrationDir, { recursive: true, force: true });
+        await opts.firstPartyApps?.disconnect('libreoffice');
         return buildStatus();
       }),
   };

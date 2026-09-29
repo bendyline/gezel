@@ -34,6 +34,7 @@ describe('VS Code app authorization', () => {
         appId: 'vscode',
         appName: 'Visual Studio Code',
         scopes: ['product', 'openai'],
+        gezelAddIn: true,
         daemon: {
           spawnIfMissing: true,
           timeoutMs: 20_000,
@@ -94,6 +95,8 @@ describe('VS Code app authorization', () => {
         existingToken: 'CONFIGURED-TOKEN',
       });
       expect(input.daemon).toBeUndefined();
+      // A remote daemon is not this user's own: it keeps the code.
+      expect(input.gezelAddIn).toBeUndefined();
       return {
         baseUrl: input.baseUrl,
         token: input.existingToken,

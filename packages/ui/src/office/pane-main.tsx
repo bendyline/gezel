@@ -1,3 +1,4 @@
+import { OFFICE_ENROLL_PARAM } from '@bendyline/gezel';
 import { StrictMode } from 'react';
 import { type Root, createRoot } from 'react-dom/client';
 import '../assets/fonts/fonts.css';
@@ -25,6 +26,22 @@ function restoreHistory(): void {
   if (typeof window.history.pushState !== 'function') window.history.pushState = saved.pushState;
   if (typeof window.history.replaceState !== 'function')
     window.history.replaceState = saved.replaceState;
+}
+
+/**
+ * Drop the enrollment key from the address once the pane holds a token, so
+ * nothing later on the page carries it. Kept until then: Retry reloads this
+ * URL and needs the key again.
+ */
+function forgetEnrollmentKey(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(OFFICE_ENROLL_PARAM)) return;
+  url.searchParams.delete(OFFICE_ENROLL_PARAM);
+  try {
+    window.history.replaceState(window.history.state, '', url);
+  } catch {
+    /* Office replaced history: the key stays in this pane's address only */
+  }
 }
 
 function renderBoot(root: Root, state: BootState): void {
@@ -63,12 +80,14 @@ async function main(): Promise<void> {
       baseUrl: window.location.origin,
       storage: window.localStorage,
       documentPath: documentPath(),
+      enrollmentKey: new URLSearchParams(window.location.search).get(OFFICE_ENROLL_PARAM),
     },
     (state) => {
       if (state.kind !== 'ready') renderBoot(root, state);
     },
   );
   if (!ready) return;
+  forgetEnrollmentKey();
   try {
     window.localStorage.setItem(UI_TOKEN_KEY, ready.token);
   } catch {

@@ -9,7 +9,7 @@ export const WELCOME_ARTICLE = {
 export async function expectHandboekArticle(page: Page, article = WELCOME_ARTICLE): Promise<void> {
   const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
-  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Handboek');
+  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Handboek');
   await expect(
     view.getByRole('heading', { name: article.title, exact: true }).first(),
   ).toBeVisible();

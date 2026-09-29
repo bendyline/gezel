@@ -2364,6 +2364,47 @@ body.chat-rail-resizing webview {
   }
 }
 
+/* Compact rail (phones, narrow windows): one-line tiles at half the desktop
+   height, so the strip stops eating the conversation's vertical space. The
+   banner sits outside the `chat-rail` container, which is why this keys on
+   the compact body rather than the container query above. The status dot
+   leads; participants, preview, and timestamp drop out, and the tile's
+   accessible name and tooltip still carry all of it. The band no longer
+   matches the output toolbar's height, because that pane is a tab here. */
+.chat-rail-body-compact .chat-pill-row {
+  min-height: 0;
+  padding-block: 0.25rem;
+}
+.chat-rail-body-compact .chat-pill {
+  min-height: 1.5rem;
+  max-width: 60px;
+  padding: 0.15rem 0.4rem;
+  white-space: nowrap;
+}
+.chat-rail-body-compact .chat-pill-thread {
+  width: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+}
+.chat-rail-body-compact .chat-pill-thread-update {
+  flex: 0 0 auto;
+  order: -1;
+}
+.chat-rail-body-compact
+  :is(
+    .chat-pill-thread-context,
+    .chat-pill-task-icon,
+    .chat-pill-thread-update > :not(.chat-pill-thread-status),
+    .chat-pill-status-label,
+    .chat-pill-terminal .chat-pill-thread-update
+  ) {
+  display: none;
+}
+.chat-rail-body-compact :is(.chat-pill-thread-title, .chat-pill-task-title) {
+  flex: 1 1 auto;
+}
+
 /* The viewport is the positioning context for the floating pin
    toggle. The `.chat-timeline` inside stays the actual scroll
    container — this wrapper only exists so the button can sit above

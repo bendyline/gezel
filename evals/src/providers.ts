@@ -257,6 +257,34 @@ export function buildProviderConfig(provider: ChatProvider, modelId: string): Pa
   return base;
 }
 
+/**
+ * The API key a cloud-SDK trial needs, read from the harness's environment
+ * and handed to the trial daemon through its ordinary config endpoint.
+ *
+ * The daemon keeps provider keys in its secret store and never reads them
+ * from the environment, so `export ANTHROPIC_API_KEY=…` used to satisfy
+ * `probeProviderAuth` and then reach nothing: the trial daemon started with
+ * no key and every `anthropic` / `openai` trial failed its first turn. The
+ * trial home uses the file secret backend and is deleted with the trial.
+ */
+export function providerCredentialConfig(
+  provider: ChatProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): Partial<GezelConfig> {
+  if (provider === 'anthropic') {
+    const key = env.ANTHROPIC_API_KEY?.trim();
+    return key ? { anthropicApiKey: key } : {};
+  }
+  if (provider === 'openai') {
+    const key = env.OPENAI_API_KEY?.trim();
+    const organization = (env.OPENAI_ORG_ID ?? env.OPENAI_ORGANIZATION)?.trim();
+    return key
+      ? { openaiApiKey: key, ...(organization ? { openaiOrganization: organization } : {}) }
+      : {};
+  }
+  return {};
+}
+
 export interface ProviderAuthProbeResult {
   ok: boolean;
   /** Human-readable message — surfaced verbatim on failure, ignored on success. */

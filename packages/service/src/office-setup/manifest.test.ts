@@ -37,6 +37,22 @@ describe('buildOfficeManifest', () => {
     expect(xml).not.toContain('AppDomains');
   });
 
+  it('carries the enrollment key on both task-pane URLs and nowhere else', () => {
+    const xml = buildOfficeManifest({
+      app: 'word',
+      origin: ORIGIN,
+      id: ID,
+      version: '1.0.0',
+      enrollmentKey: 'k3y_with-url+chars/=',
+    });
+    expect(parse(xml).errors).toEqual([]);
+    const keyed = `${ORIGIN}/office/word/taskpane.html?enroll=k3y_with-url%2Bchars%2F%3D`;
+    expect(xml).toContain(`<SourceLocation DefaultValue="${keyed}"/>`);
+    expect(xml).toContain(`<bt:Url id="Gezel.Taskpane.Url" DefaultValue="${keyed}"/>`);
+    expect(xml.match(/enroll=/g)).toHaveLength(2);
+    expect(xml).toContain(`DefaultValue="${ORIGIN}/office/commands.html"`);
+  });
+
   it('keeps top-level elements in schema order', () => {
     const { doc } = parse(
       buildOfficeManifest({ app: 'word', origin: ORIGIN, id: ID, version: '1.0.0' }),

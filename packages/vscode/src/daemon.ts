@@ -22,9 +22,9 @@ export interface Connection {
 }
 
 /**
- * Code-verified, third-party-style connection used by the complete VS Code
- * extension. The extension receives only its revocable app token; daemon
- * discovery credentials never leave the shared SDK bootstrap.
+ * The complete VS Code extension's connection. The extension receives only
+ * its revocable app token; daemon discovery credentials never leave the
+ * shared SDK bootstrap.
  */
 export interface AppConnection {
   app: GezelApp;
@@ -36,14 +36,16 @@ export interface AppConnection {
  * Discover/start the per-user daemon and acquire one per-app token for the
  * complete VS Code integration through the public app SDK.
  *
- * Uses the SDK's consent flow (`POST /v1/apps/register` → poll grant)
- * with `tokenStorage` backed by VS Code's secret store so the user
- * only sees the approval dialog once per machine.
+ * On this user's own daemon the extension connects without a code: as a
+ * Gezel add-in (`gezelAddIn`) the SDK trades the owner credential it reads
+ * during discovery for the `vscode` grant. A configured `gezel.daemonUrl`
+ * still goes through the consent flow (`POST /v1/apps/register` → poll
+ * grant), and so does any daemon that declines the exchange. Either way
+ * `tokenStorage` is VS Code's secret store.
  *
  * The SDK owns runtime discovery, pinned TLS, safe optional user-daemon
- * startup, persisted-token scope validation, and consent polling. Keeping
- * that protocol here to a single call makes VS Code the reference integration
- * other native third-party clients can follow.
+ * startup, persisted-token scope validation, and consent polling. Third-party
+ * native clients follow the same single call without `gezelAddIn`.
  */
 export async function acquireAppConnection(
   config: ResolvedConfig,
@@ -57,7 +59,7 @@ export async function acquireAppConnection(
     appId,
     appName: 'Visual Studio Code',
     scopes: ['product', 'openai'],
-    ...(config.daemonUrl ? { baseUrl: config.daemonUrl } : {}),
+    ...(config.daemonUrl ? { baseUrl: config.daemonUrl } : { gezelAddIn: true }),
     ...(config.daemonUrl && config.daemonToken ? { existingToken: config.daemonToken } : {}),
     ...(process.env.GEZEL_CERT_PATH ? { tlsCertPath: process.env.GEZEL_CERT_PATH } : {}),
     onVerificationCode,
@@ -96,7 +98,7 @@ export async function acquireAppConnection(
   logger.info(
     `daemon ${connection.mode}${connection.pid ? ` pid=${connection.pid}` : ''} url=${connection.baseUrl}`,
   );
-  logger.info('acquired code-verified product + inference token for Visual Studio Code');
+  logger.info('acquired product + inference token for Visual Studio Code');
   return { app, appToken, connection };
 }
 

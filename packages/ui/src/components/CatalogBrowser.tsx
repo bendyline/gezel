@@ -315,7 +315,10 @@ export function CatalogBrowser({
                       )}
                     </div>
                   )}
-                  {item.manifest.tags.length > 0 && (
+                  {/* A knowledge catalog's tags are its topic slugs — dozens per
+                      catalog and meaningless to a reader, so they stay filterable
+                      but unshown. */}
+                  {item.manifest.kind !== 'knowledge-catalog' && item.manifest.tags.length > 0 && (
                     <div className="catalog-item-tags">
                       {item.manifest.tags.map((t) => {
                         const normalizedTag = t.trim().toLowerCase();

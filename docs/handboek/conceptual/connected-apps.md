@@ -16,7 +16,7 @@ Everything described here lives in **Settings → Connected Apps**.
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
 1. **An address.** The address panel in **Settings → Connected Apps** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
-2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel.
+2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel. Gezel's own add-ins for Word, Excel, PowerPoint, LibreOffice, and VS Code are the exception: they can prove they run as you on this computer, so they connect without asking. Revoking one of them only resets it; to disconnect it for good, remove the add-in.
 
 ## Codex and other agent harnesses
 
@@ -112,7 +112,7 @@ Office only opens add-ins over a secure connection that your computer trusts. So
 
 Your system asks you to confirm once. On a Mac that means your password, and macOS may also ask whether Gezel may access data from other apps; allow it so Gezel can add itself to Office.
 
-After setup, restart any Office app that was open and choose **Gezel** on the Home tab. The first time, the pane shows a connection code: approve **Microsoft Office** in Gezel and type the code. After that the pane connects on its own.
+After setup, restart any Office app that was open and choose **Gezel** on the Home tab. On a Mac, the first time, choose **Add-ins** on the Home tab and then **Gezel**: Office shows the button only after an add-in has been opened once from that menu. The pane connects to Gezel on its own, with no connection code to type, because Gezel set it up for your account.
 
 The pane works in the project that owns the document's folder. If there isn't one yet, Gezel creates one for that folder. It picks the folder sensibly: your Documents folder for a loose document there, a folder like `engineeringdocs` when the document sits in one of several work folders inside it, or the Default project for a document saved directly in your home folder. Projects created this way are **read-only**: gezels cannot change files in the folder, only the document you have open, through the pane. You can allow file changes later in the project's settings.
 
@@ -124,7 +124,7 @@ If the Gezel button does not appear, check that **optional connected experiences
 
 **Use Gezel in LibreOffice** installs Gezel's extension into LibreOffice Writer, Calc, and Impress for your account, using LibreOffice's own installer. Close LibreOffice before installing. Afterwards choose **Tools > Gezel**, or open the Gezel panel in the sidebar.
 
-The first time, the panel shows a connection code: approve **LibreOffice** in Gezel and type it. The panel then works like the Office pane: it finds the project for the document's folder, lets you pick which gezel to talk to, and offers the same document tools, with an **Allow edits** switch.
+The panel connects to Gezel on its own, with no connection code to type. It then works like the Office pane: it finds the project for the document's folder, lets you pick which gezel to talk to, and offers the same document tools, with an **Allow edits** switch.
 
 LibreOffice needs no certificate setup, because the extension runs inside LibreOffice and connects to Gezel directly. On Linux, some distributions ship LibreOffice's Python support separately; install it if the panel does not appear.
 

@@ -24,6 +24,15 @@ export const OFFICE_APP_LABELS: Record<OfficeApp, string> = {
 /** App id the task pane registers under; one grant covers all three hosts (they share an origin). */
 export const OFFICE_PANE_APP_ID = 'office';
 
+/**
+ * Query parameter on each manifest's task-pane URL that carries the Office
+ * enrollment key. The pane trades the key for its grant, so a pane Gezel set
+ * up connects without a code; only this account can read the manifest, which
+ * is all that protects the key. The manifest writer and the pane read this
+ * one constant so a rename cannot land on one side.
+ */
+export const OFFICE_ENROLL_PARAM = 'enroll';
+
 export const OfficeListenerStatusSchema = z.object({
   state: z.enum(['stopped', 'listening', 'port-in-use', 'error']),
   port: z.number().int().nonnegative(),

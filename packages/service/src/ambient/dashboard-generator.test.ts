@@ -216,6 +216,38 @@ describe('AmbientDashboardGenerator', () => {
     });
   });
 
+  it('claims the run before its first await and refuses a concurrent run', async () => {
+    await seedActiveProject();
+    let release: (markdown: string) => void = () => {};
+    const oneShot = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const gen = makeGenerator(oneShot);
+
+    const manual = gen.runNow();
+    expect(gen.isRunning()).toBe(true);
+    expect(await gen.runNow()).toBe(false);
+    expect(await gen.sweep()).toBe(false);
+
+    await vi.waitFor(() => expect(oneShot).toHaveBeenCalledTimes(1));
+    release(DASHBOARD_MD);
+    expect(await manual).toBe(true);
+    expect(gen.isRunning()).toBe(false);
+    expect(oneShot).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the claim when a manual run is gated off', async () => {
+    await store.writeConfig({ ambientDashboard: { enabled: false } });
+    const gen = makeGenerator(vi.fn(async () => DASHBOARD_MD));
+    const manual = gen.runNow();
+    expect(gen.isRunning()).toBe(true);
+    expect(await manual).toBe(false);
+    expect(gen.isRunning()).toBe(false);
+  });
+
   it('is idempotent on an unchanged workshop', async () => {
     await seedActiveProject();
     const oneShot = vi.fn(async () => DASHBOARD_MD);

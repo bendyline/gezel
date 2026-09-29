@@ -22,6 +22,7 @@ intermediate render.
 | `../views/GezelDetail.css` | **On demand:** Gezel appearance and accessory customization (owned by `GezelDetail`) |
 | `settings-and-status.css` | Settings navigation/panels, machine policy, and project status/index controls |
 | `history.css` | **On demand:** History master/detail view (owned by `HistoryView`) |
+| `../views/BenchmarksView.css` | **On demand:** Settings → Benchmarks run planner, live job, and results (owned by `BenchmarksView`) |
 | `tasks.css` | Task lists, detail, status controls, step tracker, and phase editor |
 | `home.css` | Shared article, provider/status, session, and settings recipes |
 | `home-view.css` | **On demand:** Home workshop, first-run setup, media downloads, and intro surface (owned by `HomeView`) |

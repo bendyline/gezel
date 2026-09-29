@@ -1,6 +1,9 @@
 """The extension's own connection to Gezel: a `product` grant for app id
-`libreoffice`, approved by the user typing a connection code into Gezel.
-The token is kept 0600 under the Gezel home, beside the other integrations."""
+`libreoffice`. Gezel's setup writes it to the token file below; failing
+that, the extension trades the daemon's owner credential for it, which
+only this account can read. Only when neither works does the user approve
+a grant by typing a connection code into Gezel. The token is kept 0600
+under the Gezel home, beside the other integrations."""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import urllib.parse
 
 from . import APP_ID, APP_NAME
 from .client import HttpError
+from .discovery import read_owner_token
 
 
 class ConsentError(Exception):
@@ -67,14 +71,34 @@ def token_works(http, token):
         raise
 
 
-def ensure_token(http, store, on_code, cancel=None, timeout=300.0, clock=time.monotonic):
-    """A working token: the stored one, or a new grant the user approves.
-    `on_code(code)` is called with the connection code to show."""
+def claim_add_in_grant(http, home):
+    """Trade the owner credential for this extension's grant, without a
+    code. None when it cannot be read or the daemon declines."""
+    owner = read_owner_token(home)
+    if not owner:
+        return None
+    try:
+        body = http.request_json("POST", "/v1/apps/local-connect", {"appId": APP_ID}, token=owner)
+    except (HttpError, OSError):
+        return None
+    token = body.get("token")
+    return token if isinstance(token, str) and token else None
+
+
+def ensure_token(http, store, on_code, cancel=None, timeout=300.0, clock=time.monotonic, home=None):
+    """A working token: the stored one, one claimed as the owner (when
+    `home` is given), or a new grant the user approves. `on_code(code)` is
+    called with the connection code to show."""
     token = store.load()
     if token and token_works(http, token):
         return token
     if token:
         store.clear()
+    if home is not None:
+        claimed = claim_add_in_grant(http, home)
+        if claimed:
+            store.save(claimed)
+            return claimed
     try:
         registered = http.request_json(
             "POST",

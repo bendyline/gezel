@@ -44,6 +44,9 @@ describe('/office static pages', () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('cache-control')).toBe('no-cache');
+    // The pane's URL carries its enrollment key while it loads office.js from
+    // Microsoft's CDN; the daemon-wide policy is what keeps it off the wire.
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
   });
 
   it('caches hashed assets forever', async () => {

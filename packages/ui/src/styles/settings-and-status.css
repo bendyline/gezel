@@ -650,6 +650,22 @@
   color: var(--text-muted);
 }
 
+/* The one-time Mac step after Office setup. Portaled into a dialog, so it
+   cannot be scoped under the card. */
+.office-first-open-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-sm);
+}
+
+.office-first-open-steps li::marker {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .harness-setup-error {
   margin-bottom: 0;
 }

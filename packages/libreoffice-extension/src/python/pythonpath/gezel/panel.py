@@ -17,7 +17,7 @@ from com.sun.star.ui.UIElementType import TOOLPANEL
 from .chat import ChatThread
 from .client import GezelHttp, HttpError
 from .consent import ConsentError, TokenStore, ensure_token
-from .discovery import DaemonNotRunning, gezel_home
+from .discovery import DaemonNotRunning, gezel_home, read_owner_token
 from .dispatch import MainThread
 from .log import get_logger
 from .project import infer_project, list_gezels, pick_default_gezel
@@ -203,7 +203,7 @@ class PanelSession:
         if self.kind is None:
             view.set_status("Open Gezel from Writer, Calc, or Impress.")
             view.show("connect", False)
-        elif self.store.load():
+        elif self.store.load() or read_owner_token(self.home):
             self.connect()
 
     # ── states ──────────────────────────────────────────────────────────
@@ -242,6 +242,7 @@ class PanelSession:
                 token = ensure_token(
                     self.http,
                     self.store,
+                    home=self.home,
                     on_code=lambda code: self.main.post(lambda: self._show_code(code)),
                     cancel=self.cancel,
                 )

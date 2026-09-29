@@ -1,8 +1,77 @@
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig } from 'tsup';
+import { build, defineConfig } from 'tsup';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
+
+/**
+ * Compile the eval harness (`evals/`) into `dist/evals/`, so every install —
+ * packaged app, npm, CLI — can run in-app evals without a source checkout.
+ *
+ * Built after the daemon because it resolves everything it imports from the
+ * service's own dependencies at runtime (`@bendyline/gezel-service` itself
+ * through the package self-reference, for `evaluateGate` and the trial
+ * daemon entry). Only the harness's code and `js-yaml` are inlined; the
+ * `playwright` and `vitest` imports stay external and resolve only in a
+ * checkout — installed, the harness drives the product's managed Chromium
+ * through `playwright-core` and reports a missing Vitest as ungradable.
+ *
+ * Split into shared chunks inside `dist/evals/`, so `import.meta.url` of the
+ * harness code is that directory and the sidecar assets below resolve.
+ */
+async function buildEvalHarness(): Promise<void> {
+  const evalsSrc = resolve(__dirname, '..', '..', 'evals', 'src');
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+  const runtimeDeps = [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+  ];
+  await build({
+    config: false,
+    entry: {
+      all: resolve(evalsSrc, 'bin', 'all.ts'),
+      catalog: resolve(evalsSrc, 'bin', 'catalog.ts'),
+    },
+    outDir: 'dist/evals',
+    format: ['esm'],
+    platform: 'node',
+    target: 'es2022',
+    splitting: true,
+    sourcemap: false,
+    clean: true,
+    dts: false,
+    silent: true,
+    external: [
+      ...runtimeDeps,
+      '@bendyline/gezel-service',
+      '@github/copilot-sdk',
+      'playwright',
+      'vitest',
+    ],
+  });
+  cpSync(
+    resolve(evalsSrc, 'scenarios', 'failing-tests-spec.vitest.config.mjs'),
+    'dist/evals/failing-tests-spec.vitest.config.mjs',
+  );
+  cpSync(resolve(evalsSrc, 'index-bench', 'corpora'), 'dist/evals/corpora', { recursive: true });
+  // js-yaml is the one third-party module inlined above; carry its notice.
+  const jsYamlLicense = resolve(
+    __dirname,
+    '..',
+    '..',
+    'evals',
+    'node_modules',
+    'js-yaml',
+    'LICENSE',
+  );
+  if (existsSync(jsYamlLicense)) {
+    mkdirSync('dist/evals/licenses', { recursive: true });
+    cpSync(jsYamlLicense, 'dist/evals/licenses/js-yaml.LICENSE');
+  }
+}
 
 export default defineConfig({
   entry: {
@@ -208,6 +277,7 @@ export default defineConfig({
     // npm publishes this dist/ui copy independently of Electron's staged
     // resources/licenses tree. Keep the notice and every font's canonical
     // legal text beside it so that distribution channel is self-contained.
+    await buildEvalHarness();
     await stageServiceFontLegalBundle();
     await stripSourcemapCommentsFromBuild();
   },

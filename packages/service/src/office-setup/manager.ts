@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type ConfigureOfficeRequest,
@@ -17,6 +17,7 @@ import {
   readSecurityJson,
   writeSecurityJson,
 } from '../fs/security-json.js';
+import type { FirstPartyAppTokens } from '../grants/first-party-apps.js';
 import { HarnessSetupError, createMutationQueue, ensurePrivateDir } from '../local-harness/base.js';
 import type { OfficeHostListener } from '../office-host/listener.js';
 import {
@@ -46,6 +47,13 @@ interface SetupState {
   manifestIds: Record<OfficeApp, string>;
   /** sha256 of each selected app's manifest as last written. */
   manifestDigests: Partial<Record<OfficeApp, string>>;
+  /**
+   * Written into every manifest's task-pane URL; the pane trades it for its
+   * grant instead of asking for a connection code. Kept in the clear because
+   * the manifests are regenerated from it, and they carry it in the clear
+   * anyway. Absent on records written before it existed; reconcile adds it.
+   */
+  enrollmentKey?: string;
   caSha256: string;
   trust: { installed: boolean | null; reportedAt?: string; error?: string };
   registrations: Partial<Record<OfficeApp, Registration>>;
@@ -70,6 +78,8 @@ export interface OfficeSetupManager {
   reconcile(): Promise<void>;
   /** The live Office origin, or null. */
   origin(): string | null;
+  /** Whether `key` is this setup's enrollment key. False when Office is not set up. */
+  verifyEnrollmentKey(key: string): Promise<boolean>;
   stop(): Promise<void>;
 }
 
@@ -78,6 +88,8 @@ export interface CreateOfficeSetupManagerOptions {
   listener: OfficeHostListener;
   /** Whether this build ships the task-pane pages (`dist/office`). */
   paneAvailable: () => boolean;
+  /** Revokes the pane's grant when the setup is removed. */
+  firstPartyApps?: Pick<FirstPartyAppTokens, 'disconnect'>;
   version?: string;
   platform?: NodeJS.Platform;
   detect?: () => Promise<OfficeDetection>;
@@ -115,20 +127,30 @@ export function createOfficeSetupManager(
     return identity;
   }
 
-  /** Write each selected app's manifest; drop the rest. Returns the new digests. */
+  /**
+   * Write each selected app's manifest; drop the rest. Returns the new digests.
+   * Owner-only: the enrollment key in each manifest is what lets the pane
+   * connect without a code, so no other account may read them.
+   */
   async function writeManifests(
-    state: Pick<SetupState, 'apps' | 'manifestIds'>,
+    state: Pick<SetupState, 'apps' | 'manifestIds' | 'enrollmentKey'>,
     origin: string,
   ): Promise<Partial<Record<OfficeApp, string>>> {
-    await mkdir(manifestsDir, { recursive: true });
+    await ensurePrivateDir(manifestsDir);
     const digests: Partial<Record<OfficeApp, string>> = {};
     for (const app of OFFICE_APPS) {
       if (!state.apps.includes(app)) {
         await rm(manifestPath(app), { force: true });
         continue;
       }
-      const xml = buildOfficeManifest({ app, origin, id: state.manifestIds[app], version });
-      await writeFileAtomic(manifestPath(app), xml, { durable: true });
+      const xml = buildOfficeManifest({
+        app,
+        origin,
+        id: state.manifestIds[app],
+        version,
+        ...(state.enrollmentKey ? { enrollmentKey: state.enrollmentKey } : {}),
+      });
+      await writeFileAtomic(manifestPath(app), xml, { durable: true, mode: 0o600 });
       digests[app] = createHash('sha256').update(xml).digest('hex');
     }
     return digests;
@@ -315,8 +337,9 @@ export function createOfficeSetupManager(
             );
           }
           const manifestIds = { ...fillManifestIds(prior?.manifestIds) };
+          const enrollmentKey = prior?.enrollmentKey ?? newEnrollmentKey();
           const apps = OFFICE_APPS.filter((app) => input.apps.includes(app));
-          const digests = await writeManifests({ apps, manifestIds }, origin);
+          const digests = await writeManifests({ apps, manifestIds, enrollmentKey }, origin);
           const caChanged = !prior || prior.caSha256 !== id.ca.sha256Hex;
           const stamp = now().toISOString();
           await writeState({
@@ -324,6 +347,7 @@ export function createOfficeSetupManager(
             apps,
             manifestIds,
             manifestDigests: digests,
+            enrollmentKey,
             caSha256: id.ca.sha256Hex,
             trust: caChanged ? { installed: null } : prior.trust,
             registrations: carryRegistrations(prior, apps, digests),
@@ -373,6 +397,9 @@ export function createOfficeSetupManager(
       serialize(async () => {
         await opts.listener.stop();
         await rm(integrationDir, { recursive: true, force: true });
+        // The listener is down and the key is gone, so nothing can enroll
+        // between these steps; a later setup mints a new key.
+        await opts.firstPartyApps?.disconnect('office');
         identity = null;
         if (poller) clearInterval(poller);
         poller = undefined;
@@ -397,14 +424,18 @@ export function createOfficeSetupManager(
         const listen = await opts.listener.start(id.leaf);
         const origin = opts.listener.origin();
         if (listen.state !== 'listening' || !origin) return;
-        const digests = await writeManifests(state, origin);
+        const enrollmentKey = state.enrollmentKey ?? newEnrollmentKey();
+        const digests = await writeManifests({ ...state, enrollmentKey }, origin);
         const caChanged = state.caSha256 !== id.ca.sha256Hex;
         const changed =
-          caChanged || OFFICE_APPS.some((app) => digests[app] !== state!.manifestDigests[app]);
+          caChanged ||
+          enrollmentKey !== state.enrollmentKey ||
+          OFFICE_APPS.some((app) => digests[app] !== state!.manifestDigests[app]);
         if (changed) {
           const next: SetupState = {
             ...state,
             manifestDigests: digests,
+            enrollmentKey,
             caSha256: id.ca.sha256Hex,
             trust: caChanged ? { installed: null } : state.trust,
             registrations: carryRegistrations(state, state.apps, digests),
@@ -417,6 +448,13 @@ export function createOfficeSetupManager(
 
     origin: () => opts.listener.origin(),
 
+    verifyEnrollmentKey: async (key) => {
+      const state = await readState().catch(() => null);
+      if (!state?.enrollmentKey) return false;
+      const digest = (value: string) => createHash('sha256').update(value).digest();
+      return timingSafeEqual(digest(key), digest(state.enrollmentKey));
+    },
+
     stop: async () => {
       closing = true;
       if (poller) clearInterval(poller);
@@ -425,6 +463,10 @@ export function createOfficeSetupManager(
     },
   };
   return manager;
+}
+
+function newEnrollmentKey(): string {
+  return randomBytes(32).toString('base64url');
 }
 
 function fillManifestIds(
@@ -451,6 +493,7 @@ function decodeSetupState(raw: string): SetupState {
     typeof parsed.registrations !== 'object' ||
     parsed.registrations === null ||
     typeof parsed.manifestDigests !== 'object' ||
+    (parsed.enrollmentKey !== undefined && typeof parsed.enrollmentKey !== 'string') ||
     typeof parsed.createdAt !== 'string' ||
     typeof parsed.updatedAt !== 'string'
   ) {

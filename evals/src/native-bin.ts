@@ -9,12 +9,24 @@ import { fileURLToPath } from 'node:url';
  * `pnpm-workspace.yaml`). Robust to ever moving the evals package.
  */
 export function repoRoot(): string {
+  const root = tryRepoRoot();
+  if (!root) throw new Error('could not locate repo root');
+  return root;
+}
+
+/**
+ * The gezel checkout this harness runs from, or null when it runs compiled
+ * inside an installed service (the in-app runner). Callers that only use the
+ * checkout as one lookup location among several take this form, so an
+ * installed harness skips the checkout instead of failing.
+ */
+export function tryRepoRoot(): string | null {
   let dir = dirname(fileURLToPath(import.meta.url));
   while (dir !== dirname(dir)) {
     if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
     dir = dirname(dir);
   }
-  throw new Error('could not locate repo root');
+  return null;
 }
 
 const LLAMA_BACKEND_PRECEDENCE = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
@@ -108,7 +120,8 @@ function exeCandidates(binaryName: string): string[] {
  * fallback, without importing Electron deps.
  */
 function lookupRoots(): string[] {
-  const root = repoRoot();
+  const root = tryRepoRoot();
+  if (!root) return [];
   return [join(root, 'packages', 'app', 'native-bin'), join(root, 'native', 'build')];
 }
 

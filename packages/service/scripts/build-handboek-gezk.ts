@@ -43,7 +43,7 @@ try {
     catalog: {
       id: HANDBOEK_KNOWLEDGE_CATALOG,
       version: servicePackage.version,
-      name: 'Handboek',
+      name: 'Gezel Handboek',
       description: 'The guide to gezel, its crew, projects, craftbooks, and tools.',
       language: 'en',
       publisher: { id: HANDBOEK_KNOWLEDGE_PUBLISHER, name: 'Bendyline', url: 'https://gezel.com' },

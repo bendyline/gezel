@@ -1,7 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createFirstPartyAppTokens } from '../grants/first-party-apps.js';
+import { createTokenStore } from '../http/token-store.js';
 import { createLibreOfficeSetupManager } from './manager.js';
 
 let home: string;
@@ -86,5 +88,34 @@ describe('libreoffice setup manager', () => {
     const m = createLibreOfficeSetupManager({ home, oxtPath: () => oxt, detect: installed });
     await m.configure();
     expect((await m.remove()).state).toBe('not-configured');
+  });
+
+  it('writes the extension an owner-only token at setup and revokes it on removal', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const m = createLibreOfficeSetupManager({
+      home,
+      oxtPath: () => oxt,
+      detect: installed,
+      firstPartyApps: createFirstPartyAppTokens(tokenStore),
+    });
+    await m.configure();
+    const tokenPath = join(home, 'integrations', 'libreoffice', 'token');
+    const token = await readFile(tokenPath, 'utf8');
+    expect(tokenStore.lookup(token)).toMatchObject({
+      appId: 'libreoffice',
+      appName: 'LibreOffice',
+      scopes: ['product'],
+    });
+    if (process.platform !== 'win32') {
+      expect((await stat(tokenPath)).mode & 0o777).toBe(0o600);
+    }
+
+    // Setting up again (an update) keeps the extension's grant.
+    await m.configure();
+    expect(await readFile(tokenPath, 'utf8')).toBe(token);
+
+    await m.remove();
+    expect(tokenStore.lookup(token)).toBeNull();
+    await expect(readFile(tokenPath)).rejects.toThrow();
   });
 });

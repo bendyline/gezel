@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
+import { FIRST_PARTY_LOCAL_APPS, isFirstPartyLocalAppId } from '../../grants/first-party-apps.js';
 import {
   GrantExpiredError,
   type GrantRequest,
@@ -40,6 +41,12 @@ import {
  *                                                 tokens). Settings UI.
  *   POST /v1/apps/grant/:id/approve     (root/ui) User-driven approval.
  *   POST /v1/apps/grant/:id/deny        (root/ui) User-driven denial.
+ *   POST /v1/apps/office/enroll         (key)     The Office pane trades the
+ *                                                 enrollment key from its
+ *                                                 manifest for its grant.
+ *   POST /v1/apps/local-connect         (root/ui) A same-user add-in trades
+ *                                                 the owner credential for its
+ *                                                 own narrower grant.
  *   DELETE /v1/apps/:appId/token        (root/ui  Revoke an issued token.
  *                                        own app) An app can revoke
  *                                                 itself; the UI can
@@ -65,6 +72,10 @@ const RegisterRequestSchema = z.object({
 const ApproveRequestSchema = z.object({
   verificationCode: z.string().max(32).optional(),
 });
+
+const OfficeEnrollRequestSchema = z.object({ key: z.string().min(16).max(256) });
+
+const LocalConnectRequestSchema = z.object({ appId: z.string().min(1).max(64) });
 
 /**
  * Public projection of a grant returned to the polling app. Mirrors the
@@ -98,6 +109,32 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
   const auth = bearerAuth(ctx.tokenStore);
   const firstParty = requireFirstParty();
   const registerAttempts: number[] = [];
+  const enrollAttempts: number[] = [];
+
+  /** Sliding one-minute window; true when `attempts` is already at `limit`. */
+  const rateLimited = (attempts: number[], limit: number): boolean => {
+    const now = Date.now();
+    while (attempts.length > 0 && attempts[0]! <= now - 60_000) attempts.shift();
+    if (attempts.length >= limit) return true;
+    attempts.push(now);
+    return false;
+  };
+
+  const openaiEndpointsDisabled = async (): Promise<boolean> => {
+    const config = await ctx.store
+      .readConfig()
+      .catch(() => ({}) as { openaiEndpoints?: { enabled?: boolean } });
+    return config.openaiEndpoints?.enabled === false;
+  };
+
+  const openaiEndpointsDisabledBody = {
+    error: {
+      message:
+        'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Connected Apps.',
+      type: 'invalid_request_error',
+      code: 'openai_endpoints_disabled',
+    },
+  };
 
   /**
    * Open a new grant request. The app supplies its identity (`appId`,
@@ -137,17 +174,12 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
       if (mediaType !== 'application/json') {
         return c.json({ error: 'content_type_must_be_application_json' }, 415);
       }
-      const now = Date.now();
-      while (registerAttempts.length > 0 && registerAttempts[0]! <= now - 60_000) {
-        registerAttempts.shift();
-      }
-      if (registerAttempts.length >= 20) {
+      if (rateLimited(registerAttempts, 20)) {
         return c.json({ error: 'registration_rate_limited', retryAfterSeconds: 60 }, 429, {
           'Retry-After': '60',
         });
       }
-      registerAttempts.push(now);
-      await ctx.grants.sweepExpired(now);
+      await ctx.grants.sweepExpired();
       const body = RegisterRequestSchema.parse(await c.req.json());
 
       // Only grantable scopes may be requested — reject reserved (`root`,
@@ -181,23 +213,8 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
       // clients, so gating the whole route makes those unrelated clients
       // disappear with the inference switch. Reject only grants that would
       // authorize the disabled facade.
-      if (body.scopes.includes('openai')) {
-        const config = await ctx.store
-          .readConfig()
-          .catch(() => ({}) as { openaiEndpoints?: { enabled?: boolean } });
-        if (config.openaiEndpoints?.enabled === false) {
-          return c.json(
-            {
-              error: {
-                message:
-                  'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Connected Apps.',
-                type: 'invalid_request_error',
-                code: 'openai_endpoints_disabled',
-              },
-            },
-            403,
-          );
-        }
+      if (body.scopes.includes('openai') && (await openaiEndpointsDisabled())) {
+        return c.json(openaiEndpointsDisabledBody, 403);
       }
 
       if (ctx.tokenStore.list().some((r) => r.appId === body.appId)) {
@@ -373,6 +390,73 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
       }
       unsubscribe();
     });
+  });
+
+  /**
+   * The Office pane's code-free connection. Gezel wrote an enrollment key
+   * into each manifest's task-pane URL; the pane sends it here and receives
+   * the `office` grant, the same one every Office host shares. No bearer:
+   * the key is the credential, and only this account can read the manifests
+   * that carry it, which is exactly what the connection code would have
+   * established. Browser requests are admitted only from the Office origin,
+   * as for registration. A wrong key gets the ordinary code flow as fallback.
+   */
+  app.post(
+    '/office/enroll',
+    bodyLimit({
+      maxSize: 4 * 1024,
+      onError: (c) => c.json({ error: 'request_too_large' }, 413),
+    }),
+    async (c) => {
+      if (!ctx.verifyOfficeEnrollmentKey || !ctx.firstPartyApps) {
+        return c.json({ error: 'not_found' }, 404);
+      }
+      if (
+        (c.req.header('origin') || c.req.header('sec-fetch-site')) &&
+        !isOfficePaneRequest(c.req.header('origin'), c.req.header('sec-fetch-site'), ctx)
+      ) {
+        return c.json({ error: 'browser_enrollment_not_allowed' }, 403);
+      }
+      const mediaType = (c.req.header('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        return c.json({ error: 'content_type_must_be_application_json' }, 415);
+      }
+      if (rateLimited(enrollAttempts, 10)) {
+        return c.json({ error: 'enrollment_rate_limited', retryAfterSeconds: 60 }, 429, {
+          'Retry-After': '60',
+        });
+      }
+      const body = OfficeEnrollRequestSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) return c.json({ error: 'invalid_enrollment_request' }, 400);
+      if (!(await ctx.verifyOfficeEnrollmentKey(body.data.key))) {
+        return c.json({ error: 'enrollment_key_invalid' }, 403);
+      }
+      const token = await ctx.firstPartyApps.connect('office');
+      return c.json({ appId: 'office', scopes: FIRST_PARTY_LOCAL_APPS.office.scopes, token });
+    },
+  );
+
+  /**
+   * A same-user native add-in (the VS Code extension) that could read the
+   * daemon's owner credential from this account's `runtime/` trades it for
+   * its own grant: narrower, revocable, and named in Connected Apps. The
+   * rule is the CLI's: reading that directory already makes the caller the
+   * owner, so a code would protect nothing. Only Gezel's own add-ins.
+   */
+  app.post('/local-connect', auth, firstParty, async (c) => {
+    if (!ctx.firstPartyApps) return c.json({ error: 'not_found' }, 404);
+    const body = LocalConnectRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_local_connect_request' }, 400);
+    const appId = body.data.appId;
+    if (!isFirstPartyLocalAppId(appId)) {
+      return c.json({ error: 'not_a_gezel_add_in' }, 400);
+    }
+    const scopes: readonly string[] = FIRST_PARTY_LOCAL_APPS[appId].scopes;
+    if (scopes.includes('openai') && (await openaiEndpointsDisabled())) {
+      return c.json(openaiEndpointsDisabledBody, 403);
+    }
+    const token = await ctx.firstPartyApps.connect(appId);
+    return c.json({ appId, scopes, token });
   });
 
   /**

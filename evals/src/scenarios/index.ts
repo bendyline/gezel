@@ -79,9 +79,11 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   ...Object.fromEntries(annotatedDeckScenarios().map((scenario) => [scenario.id, scenario])),
   [annotatedChatPolicyScenario.id]: annotatedChatPolicyScenario,
   [annotatedChatPolicyClosedScenario.id]: annotatedChatPolicyClosedScenario,
-  [ticTacToeScenario.id]: ticTacToeScenario,
-  [petShopScenario.id]: petShopScenario,
-  [tankCombatScenario.id]: tankCombatScenario,
+  // The anchors' source files are hash-pinned (anchored.test.ts), so their
+  // Chromium-graded runtime layer is declared here rather than in-file.
+  [ticTacToeScenario.id]: { ...ticTacToeScenario, requires: ['chromium'] },
+  [petShopScenario.id]: { ...petShopScenario, requires: ['chromium'] },
+  [tankCombatScenario.id]: { ...tankCombatScenario, requires: ['chromium'] },
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
   ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),

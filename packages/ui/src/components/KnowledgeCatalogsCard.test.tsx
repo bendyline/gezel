@@ -243,6 +243,7 @@ describe('KnowledgeCatalogsCard', () => {
     const changed = announcedKnowledgeChange();
     render(<KnowledgeCatalogsCard />);
     expect(await screen.findByText('Wikipedia: Physics')).toBeInTheDocument();
+    expect(screen.queryByText('wikipedia')).not.toBeInTheDocument();
     expect(screen.getByText('Published by')).toBeInTheDocument();
     expect(screen.getByText(/57,210 documents/)).toBeInTheDocument();
 

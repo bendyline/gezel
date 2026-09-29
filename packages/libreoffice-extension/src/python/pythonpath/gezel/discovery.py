@@ -31,6 +31,18 @@ def gezel_home(env=None) -> str:
     return os.path.join(os.path.expanduser("~"), ".gezel")
 
 
+def read_owner_token(home=None):
+    """The daemon's owner credential from this account's runtime directory,
+    or None. Only this account can read it, which is what makes the reader
+    the owner."""
+    home = home or gezel_home()
+    try:
+        with open(os.path.join(home, "runtime", "auth-token"), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def discover(home=None) -> Endpoint:
     """Read runtime/port and runtime/cert.pem. No cert means plain HTTP
     (a daemon started with GEZEL_INSECURE_TRANSPORT)."""

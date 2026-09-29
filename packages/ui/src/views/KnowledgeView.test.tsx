@@ -95,6 +95,7 @@ describe('KnowledgeView', () => {
     render(<KnowledgeView />);
     expect(await screen.findByText('Shop Notes')).toBeInTheDocument();
     expect(await screen.findByText('Joinery')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand Joinery' }));
     expect(await screen.findByText('Dovetail work')).toBeInTheDocument();
 
     fireEvent.click(await screen.findByText('Dovetail Joints'));
@@ -135,8 +136,50 @@ describe('KnowledgeView', () => {
     render(<KnowledgeView />);
     const joinery = (await screen.findByText('Joinery')).closest('button');
     expect(joinery).toHaveTextContent('2');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Joinery' }));
     const shelf = (await screen.findByText('Dovetail work')).closest('button');
     expect(shelf).toHaveTextContent('1');
+  });
+
+  it('folds parent topics behind a chevron and remembers what was open', async () => {
+    const { unmount } = render(<KnowledgeView />);
+    await screen.findByText('Joinery');
+    expect(screen.queryByText('Dovetail work')).not.toBeInTheDocument();
+
+    const expand = screen.getByRole('button', { name: 'Expand Joinery' });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(expand);
+    expect(await screen.findByText('Dovetail work')).toBeInTheDocument();
+    const collapse = screen.getByRole('button', { name: 'Collapse Joinery' });
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById(collapse.getAttribute('aria-controls') ?? '')).toContainElement(
+      screen.getByText('Dovetail work'),
+    );
+    expect(screen.queryByRole('button', { name: 'Expand Dovetail work' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<KnowledgeView />);
+    expect(await screen.findByText('Dovetail work')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Joinery' }));
+    expect(screen.queryByText('Dovetail work')).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem('gezel:knowledge:expanded:shop-notes') ?? ''),
+    ).toEqual([]);
+  });
+
+  it('opens a parent topic when its name is picked, and only the chevron closes it', async () => {
+    render(<KnowledgeView />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Joinery/ }));
+    expect(await screen.findByText('Dovetail work')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.knowledgeCatalogDocuments).toHaveBeenCalledWith(
+        'shop-notes',
+        expect.objectContaining({ topicId: 'joinery' }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Joinery/ }));
+    expect(screen.getByText('Dovetail work')).toBeInTheDocument();
   });
 
   it('follows a knowledge:// link inside a document and leaves other links alone', async () => {
@@ -169,7 +212,7 @@ describe('KnowledgeView', () => {
         {
           ...CATALOG,
           ref: { ...CATALOG.ref, publisherId: 'bendyline', catalogId: 'handboek' },
-          name: 'Handboek',
+          name: 'Gezel Handboek',
           source: 'bundled',
         },
       ],

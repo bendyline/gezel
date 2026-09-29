@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chatModelInstallIdentity } from './model-sources.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
@@ -29,24 +29,30 @@ export function assertMlxSourceComplete(sourceDir: string, modelId: string): voi
       `MLX model not found at ${sourceDir}. Install ${modelId} via the app first, or pass --mlx-source-home <path>.`,
     );
   }
+  const problem = mlxSourceProblem(sourceDir);
+  if (!problem) return;
+  throw new Error(
+    `MLX model "${modelId}" at ${sourceDir} looks like an incomplete download (${problem}). Re-download it via the app (delete the dir first to clear partials), then re-run.`,
+  );
+}
+
+/** Why an MLX model dir is not a complete install, or null when it is. */
+function mlxSourceProblem(sourceDir: string): string | null {
   let entries: string[];
   try {
     entries = readdirSync(sourceDir);
   } catch (err) {
-    throw new Error(`MLX model dir ${sourceDir} is unreadable: ${String(err)}`);
+    return `unreadable: ${String(err)}`;
   }
   const partials = entries.filter((e) => e.endsWith('.partial'));
   const hasManifest = entries.includes('manifest.json');
   const hasWeights = entries.some((e) => e.endsWith('.safetensors'));
-  if (partials.length === 0 && hasManifest && hasWeights) return;
-
+  if (partials.length === 0 && hasManifest && hasWeights) return null;
   const reasons: string[] = [];
   if (partials.length > 0) reasons.push(`${partials.length} unfinished .partial file(s)`);
   if (!hasManifest) reasons.push('no manifest.json install marker');
   if (!hasWeights) reasons.push('no .safetensors weights');
-  throw new Error(
-    `MLX model "${modelId}" at ${sourceDir} looks like an incomplete download (${reasons.join(', ')}). Re-download it via the app (delete the dir first to clear partials), then re-run.`,
-  );
+  return reasons.join(', ');
 }
 
 /**
@@ -134,6 +140,79 @@ function modelDirInHome(home: string, engine: EngineKey, modelId: string): strin
 }
 
 /**
+ * Extra read-only model roots, per engine, that a caller may hand the
+ * harness beside `--source-home`: `{"llama-cpp": ["/abs/root", …], …}`,
+ * where each root holds `<modelId>/` directories. The in-app runner passes
+ * the product's own overlay here (the machine asset store), so a model the
+ * person installed machine-wide is found without guessing at its layout.
+ * Relative entries are ignored — a model root is a machine location.
+ */
+export const EVAL_MODEL_ROOTS_ENV = 'GEZEL_EVAL_MODEL_ROOTS';
+
+export function readOnlyModelRoots(
+  sourceHome: string,
+  engine: EngineKey,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const roots = [join(sourceHome, 'engines', engine, 'models')];
+  const raw = env[EVAL_MODEL_ROOTS_ENV]?.trim();
+  if (!raw) return roots;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const extra = parsed[engine];
+    if (Array.isArray(extra)) {
+      for (const root of extra) {
+        if (typeof root === 'string' && isAbsolute(root) && !roots.includes(root)) {
+          roots.push(root);
+        }
+      }
+    }
+  } catch {
+    // A malformed overlay only narrows the search to the source home.
+  }
+  return roots;
+}
+
+/**
+ * The first complete install of `modelId` among the read-only roots, or
+ * null. Completeness uses the same contract as the warm cache: a manifest
+ * naming weights that exist (MLX: a manifest, safetensors, no partials).
+ */
+export async function findReadOnlyModelDir(opts: {
+  sourceHome: string;
+  engine: EngineKey;
+  modelId: string;
+  env?: NodeJS.ProcessEnv;
+}): Promise<string | null> {
+  for (const root of readOnlyModelRoots(opts.sourceHome, opts.engine, opts.env)) {
+    const dir = join(root, opts.modelId);
+    if (!existsSync(dir)) continue;
+    if (opts.engine === 'mlx') {
+      if (mlxSourceProblem(dir) === null) return dir;
+      continue;
+    }
+    if (await isModelDirInstalled(dir)) return dir;
+  }
+  return null;
+}
+
+/**
+ * Clone an exact source model directory into a trial home. Used for
+ * read-only sourcing, where the source root need not be laid out as a home.
+ */
+export async function cloneModelDirIntoTrial(opts: {
+  sourceDir: string;
+  trialHome: string;
+  engine: EngineKey;
+  modelId: string;
+}): Promise<void> {
+  const link = modelDirInHome(opts.trialHome, opts.engine, opts.modelId);
+  await mkdir(dirname(link), { recursive: true });
+  if (existsSync(link)) return;
+  await cloneDirectory(opts.sourceDir, link);
+}
+
+/**
  * Catalog ids were made quantization-explicit after some eval/app caches
  * already held the exact same weights under shorter ids. Keep this bridge
  * deliberately narrow: these are historical renames of the same shipped
@@ -171,7 +250,10 @@ export async function isModelInstalled(
   engine: EngineKey,
   modelId: string,
 ): Promise<boolean> {
-  const dir = modelDirInHome(home, engine, modelId);
+  return isModelDirInstalled(modelDirInHome(home, engine, modelId));
+}
+
+async function isModelDirInstalled(dir: string): Promise<boolean> {
   const manifestPath = join(dir, 'manifest.json');
   if (!existsSync(manifestPath)) return false;
   try {
@@ -237,13 +319,15 @@ export async function staleInstall(opts: {
    * slug is no longer in the catalog index.
    */
   expectedId?: string;
+  /** Inspect this exact directory instead of the home layout under `cacheRoot`. */
+  modelDir?: string;
 }): Promise<StaleInstall | null> {
   // sd-cpp image models aren't in the chat-model index; nothing to check.
   if (opts.engine === 'sd-cpp') return null;
   const expected = chatModelInstallIdentity(opts.expectedId ?? opts.modelId, opts.engine);
   if (!expected) return null;
 
-  const dir = modelDirInHome(opts.cacheRoot, opts.engine, opts.modelId);
+  const dir = opts.modelDir ?? modelDirInHome(opts.cacheRoot, opts.engine, opts.modelId);
   let installed: {
     catalogVersion?: string;
     sha256?: string;
@@ -334,6 +418,7 @@ export async function staleInstallReason(opts: {
   engine: EngineKey;
   modelId: string;
   expectedId?: string;
+  modelDir?: string;
 }): Promise<string | null> {
   return (await staleInstall(opts))?.reason ?? null;
 }

@@ -473,6 +473,7 @@ export function pickBestSquisqReviewCandidate(
 
 export const squisqReviewScenario: EvalScenario = {
   id: 'squisq-review',
+  requires: ['network'],
   description:
     'Clone https://github.com/bendyline/squisq via `fetch_repo`, walk the source, and write a structured architecture + code review at `review.md` at the workspace root. Strict signals: explicit ## Architecture / ## Major issues / ## Minor issues / ## Recommendations sections, ≥ 5 cited source filenames, ≥ 5 KB.',
   prompt: [

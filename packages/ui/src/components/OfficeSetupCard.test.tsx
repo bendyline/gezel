@@ -78,8 +78,22 @@ afterEach(() => {
   if (window.__GEZEL__) {
     delete window.__GEZEL__.officeHost;
     delete window.__GEZEL__.mode;
+    window.__GEZEL__.platform = 'linux';
   }
 });
+
+function configuredWith(apps: OfficeApp[]): OfficeSetupStatusResponse {
+  return status({
+    state: 'configured',
+    apps: status().apps.map((a) =>
+      apps.includes(a.app as OfficeApp) ? { ...a, selected: true, registered: true } : a,
+    ),
+    trust: { installed: true },
+    canRemove: true,
+  });
+}
+
+type OfficeApp = 'word' | 'excel' | 'powerpoint';
 
 describe('OfficeSetupCard', () => {
   it('preselects the Office apps found on this computer and sets them up', async () => {
@@ -105,6 +119,66 @@ describe('OfficeSetupCard', () => {
     await waitFor(() => expect(bridge.enable).toHaveBeenCalledWith(['word', 'excel']));
     await screen.findByText('Configured');
     expect(screen.getByText(/choose/)).toHaveTextContent(/Home tab/);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('on a Mac, explains the one-time Add-ins step after setup', async () => {
+    window.__GEZEL__!.platform = 'darwin';
+    const bridge = installBridge(status(), configuredWith(['word', 'excel']));
+    render(<OfficeSetupCard />);
+    await screen.findByText('Not configured');
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Office…' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Set up Office' }),
+    );
+    await waitFor(() => expect(bridge.enable).toHaveBeenCalled());
+
+    const dialog = await screen.findByRole('dialog', { name: 'One more step in Office' });
+    expect(dialog).toHaveTextContent('If Word and Excel are open, quit and reopen them.');
+    expect(dialog).toHaveTextContent('On the Home tab, choose Add-ins.');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Got it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText(/Restart Word/)).toHaveTextContent(
+      /choose Add-ins on the Home tab and pick Gezel/,
+    );
+  });
+
+  it('on a Mac, names only the apps an update added', async () => {
+    window.__GEZEL__!.platform = 'darwin';
+    installBridge(configuredWith(['word']), configuredWith(['word', 'excel']));
+    render(<OfficeSetupCard />);
+    await screen.findByText('Configured');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Excel/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update Office setup…' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update' }),
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'One more step in Excel' });
+    expect(dialog).toHaveTextContent('If Excel is open, quit and reopen it.');
+  });
+
+  it('on a Mac, says nothing more when setup is not finished', async () => {
+    window.__GEZEL__!.platform = 'darwin';
+    const bridge = installBridge(
+      status(),
+      status({
+        state: 'update-needed',
+        reasons: ["Open the Gezel desktop app to trust Gezel's Office certificate."],
+        apps: status().apps.map((a) => (a.app === 'word' ? { ...a, selected: true } : a)),
+      }),
+    );
+    render(<OfficeSetupCard />);
+    await screen.findByText('Not configured');
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Office…' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Set up Office' }),
+    );
+    await waitFor(() => expect(bridge.enable).toHaveBeenCalled());
+    await screen.findByText(/trust Gezel's Office certificate/);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('lists what is left and offers to finish setup', async () => {

@@ -34,7 +34,11 @@ same-origin, is admitted, and the user still types the verification code into
 Gezel for a `product` grant. That code, not the origin check, is what protects
 the grant — loopback is reachable by every local account — while the origin
 check keeps every other page out. See
-[ADR 0016](decisions/0016-office-host.md).
+[ADR 0016](decisions/0016-office-host.md). A pane Gezel set up skips that
+fallback by presenting the enrollment key from its manifest, and native Gezel
+add-ins pass `gezelAddIn` to `authorizeLocal`; see
+[ADR 0018](decisions/0018-local-add-in-grants.md). Neither is available to
+third-party apps: the daemon names only Gezel's own add-ins.
 
 ## Stability
 

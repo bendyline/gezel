@@ -34,6 +34,7 @@
 
 import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
 import type { SessionTelemetry } from '@bendyline/gezel';
+import { GRADER_UNAVAILABLE_PATTERN } from './grader-unavailable.ts';
 import { parseDaemonActivityText } from './progress-fingerprint.ts';
 import type { FailureClass, NativeEngineIncidentSummary } from './types.ts';
 
@@ -212,6 +213,15 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
 
   if (input.failureMode === 'interrupted' || /interrupted \(SIG(INT|TERM)/.test(reason)) {
     return { failureClass: 'operator', rule: 'operator-interrupt', evidence: reason.slice(0, 140) };
+  }
+
+  const ungraded = reason.match(GRADER_UNAVAILABLE_PATTERN);
+  if (ungraded && ungraded.index !== undefined) {
+    return {
+      failureClass: 'grader',
+      rule: 'grader-unavailable',
+      evidence: excerpt(reason, 0, 240),
+    };
   }
 
   const capacity = findInReasonOrLog(input, CAPACITY_DENIAL);

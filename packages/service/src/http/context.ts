@@ -60,6 +60,7 @@ import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 
+import type { EvalService } from '../eval/service.js';
 import type { LibreOfficeSetupManager } from '../libreoffice-setup/manager.js';
 import type { OfficeSetupManager } from '../office-setup/manager.js';
 import type { EngineContext } from './engine-context.js';
@@ -190,6 +191,8 @@ export interface ServiceContext extends EngineContext {
    *  may run at a time. Same lifetime as `folderJobs`, and mutually
    *  exclusive with it — both rewrite the same directories. */
   storageJobs: StorageJobManager;
+  /** In-app evals: harness catalog, runnable targets, queued jobs, trial index. */
+  evals: EvalService;
   /** Drop the cached model inventory after cleanup deletes model files, so
    *  listings stop advertising models that are no longer on disk. */
   invalidateModelsCache?: (provider?: ProviderName) => void;

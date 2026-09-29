@@ -460,7 +460,7 @@ function ThreadSummaryLines({
         </span>
         <span className="chat-pill-thread-status">
           <span className="chat-pill-dot" aria-hidden="true" />
-          {threadStatusLabel(pill.state)}
+          <span className="chat-pill-status-label">{threadStatusLabel(pill.state)}</span>
         </span>
       </span>
     </>
@@ -591,7 +591,7 @@ function TaskPillButton({
           ) : (
             <span className="task-status-dot task-status-active" aria-hidden="true" />
           )}
-          {status}
+          <span className="chat-pill-status-label">{status}</span>
         </span>
       </span>
     </button>

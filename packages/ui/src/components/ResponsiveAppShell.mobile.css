@@ -120,11 +120,50 @@
   overflow: hidden;
 }
 
+/* One row at every width: a wrapped titlebar drops search onto a second
+   band and doubles the header's height. When the full row stops fitting,
+   the Updates key gives way instead (below). */
 .app.app-compact .app-header {
   min-height: 52px;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+}
+
+/* Menu, brand, and search hold their width. The Updates key is the only
+   one that may shrink. First it sheds its word, and past that it clips
+   rather than push search off the bar. Electron sets no minimum window
+   width, so that last case is reachable. */
+.app.app-compact .app-header > :not(.app-header-questions) {
+  flex-shrink: 0;
+}
+
+.app.app-compact .app-header-questions {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The query measures the header's content box, which excludes the macOS
+   traffic-light reservation, so one threshold holds on every platform. The
+   full row needs about 302px there with a one-digit count. The word stays
+   in the accessible name, so the key never reads as a bare number. */
+@container app-header (max-width: 320px) {
+  .app.app-compact .app-header-questions {
+    padding-inline: 0.6rem;
+  }
+
+  .app.app-compact .app-header-questions .app-nav-badge {
+    margin-left: 0;
+  }
+
+  .app.app-compact .app-header-questions-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 
 :root[data-layout="mobile"] .app.app-compact .app-header {

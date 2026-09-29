@@ -63,6 +63,43 @@ class ConsentTests(unittest.TestCase):
             ensure_token(self.http, self.store, lambda _c: None)
         self.assertEqual(ctx.exception.kind, "already-connected")
 
+    def write_owner_token(self, token="OWNER"):
+        with open(os.path.join(self.home, "runtime", "auth-token"), "w") as f:
+            f.write(token + "\n")
+
+    def test_owner_credential_connects_without_a_code(self):
+        self.write_owner_token()
+        codes = []
+        self.daemon.routes[("POST", "/v1/apps/local-connect")] = lambda body, _p, headers: (
+            (200, {"appId": "libreoffice", "token": "claimed"})
+            if headers.get("Authorization") == "Bearer OWNER" and body == {"appId": "libreoffice"}
+            else (400, {"error": "unexpected"})
+        )
+        token = ensure_token(self.http, self.store, codes.append, home=self.home)
+        self.assertEqual(token, "claimed")
+        self.assertEqual(self.store.load(), "claimed")
+        self.assertEqual(codes, [])
+        self.assertFalse(any(r[1] == "/v1/apps/register" for r in self.daemon.requests))
+
+    def test_a_revoked_token_reconnects_as_the_owner(self):
+        self.store.save("revoked")
+        self.write_owner_token()
+        self.daemon.routes[("GET", "/api/config")] = lambda *_: (401, {"error": "unauthorized"})
+        self.daemon.routes[("POST", "/v1/apps/local-connect")] = lambda *_: (200, {"token": "fresh"})
+        self.assertEqual(ensure_token(self.http, self.store, lambda _c: None, home=self.home), "fresh")
+
+    def test_falls_back_to_the_code_when_the_daemon_declines(self):
+        self.write_owner_token()
+        codes = []
+        self.daemon.routes[("POST", "/v1/apps/local-connect")] = lambda *_: (404, {"error": "not_found"})
+        self.daemon.routes[("POST", "/v1/apps/register")] = lambda *_: (
+            202,
+            {"grantRequestId": "g", "status": "pending", "verificationCode": "XYZ789"},
+        )
+        self.daemon.routes[("GET", "/v1/apps/grant/g")] = lambda *_: (200, {"status": "approved", "token": "coded"})
+        self.assertEqual(ensure_token(self.http, self.store, codes.append, home=self.home), "coded")
+        self.assertEqual(codes, ["XYZ789"])
+
     def test_infers_the_project(self):
         self.daemon.routes[("POST", "/api/projects/infer-for-path")] = lambda body, _p, _h: (
             200,

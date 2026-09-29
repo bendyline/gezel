@@ -59,6 +59,7 @@ async function run(
   routes: Record<string, Route>,
   storage = memoryStorage(),
   path: string | null = '/Users/me/Documents/a.docx',
+  enrollmentKey: string | null = null,
 ) {
   const { fetchImpl, calls } = fakeFetch(routes);
   const states: BootState[] = [];
@@ -69,6 +70,7 @@ async function run(
       storage,
       documentPath: path,
       grantTimeoutMs: 5_000,
+      enrollmentKey,
     },
     (s) => states.push(s),
   );
@@ -87,6 +89,74 @@ describe('bootPane', () => {
     });
     expect(ready?.project).toMatchObject({ id: 'docs', readOnly: true });
     expect(calls).not.toContain('POST /v1/apps/register');
+  });
+
+  it('connects with the manifest key on first run, without a code', async () => {
+    const { ready, states, calls, storage } = await run(
+      {
+        ...HAPPY,
+        'POST /v1/apps/office/enroll': (init) => {
+          expect(JSON.parse(String(init?.body))).toEqual({ key: 'the-key' });
+          return json({ appId: 'office', scopes: ['product'], token: 'enrolled' });
+        },
+      },
+      memoryStorage(),
+      '/Users/me/Documents/a.docx',
+      'the-key',
+    );
+    expect(ready?.token).toBe('enrolled');
+    expect(storage.map.get(TOKEN_KEY)).toBe('enrolled');
+    expect(states.some((s) => s.kind === 'code')).toBe(false);
+    expect(calls).not.toContain('POST /v1/apps/register');
+  });
+
+  it('reconnects on its own when the stored token was revoked', async () => {
+    let probes = 0;
+    const { ready, states } = await run(
+      {
+        ...HAPPY,
+        'GET /api/config': () => (probes++ === 0 ? json({ error: 'unauthorized' }, 401) : json({})),
+        'POST /v1/apps/office/enroll': () => json({ token: 'again' }),
+      },
+      memoryStorage({ [TOKEN_KEY]: 'revoked' }),
+      '/Users/me/Documents/a.docx',
+      'the-key',
+    );
+    expect(ready?.token).toBe('again');
+    expect(states.some((s) => s.kind === 'code')).toBe(false);
+  });
+
+  it('falls back to a connection code when the key is refused', async () => {
+    const { ready, states } = await run(
+      {
+        ...HAPPY,
+        'POST /v1/apps/office/enroll': () => json({ error: 'enrollment_key_invalid' }, 403),
+        'POST /v1/apps/register': () =>
+          json({ grantRequestId: 'g9', status: 'pending', verificationCode: 'K9' }, 202),
+        'GET /v1/apps/grant/g9': () => json({ status: 'approved', token: 'coded' }),
+      },
+      memoryStorage(),
+      '/Users/me/Documents/a.docx',
+      'a-stale-key',
+    );
+    expect(states).toContainEqual({ kind: 'code', code: 'K9' });
+    expect(ready?.token).toBe('coded');
+  });
+
+  it('reports Gezel as not running when the key cannot be delivered', async () => {
+    const { ready, states } = await run(
+      {
+        ...HAPPY,
+        'POST /v1/apps/office/enroll': () => {
+          throw new TypeError('fetch failed');
+        },
+      },
+      memoryStorage(),
+      '/Users/me/Documents/a.docx',
+      'the-key',
+    );
+    expect(ready).toBeNull();
+    expect(states).toContainEqual({ kind: 'daemon-down' });
   });
 
   it('asks for a connection code on first run and stores the approved token', async () => {

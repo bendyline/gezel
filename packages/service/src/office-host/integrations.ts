@@ -1,4 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
+import type { FirstPartyAppTokens } from '../grants/first-party-apps.js';
 import { officeHostPortForHome } from '../http/local-bridge-port.js';
 import {
   type LibreOfficeSetupManager,
@@ -26,6 +27,7 @@ export interface OfficeIntegrations {
     libreofficeSetup: LibreOfficeSetupManager;
     officeDir?: string;
     officeHostOrigin: () => string | null;
+    verifyOfficeEnrollmentKey: (key: string) => Promise<boolean>;
   };
   /** Hand the listener the product app once it exists; the listener starts later. */
   bindFetch(fetch: Fetch): void;
@@ -37,6 +39,7 @@ export interface OfficeIntegrations {
 export function createOfficeIntegrations(
   home: string,
   opts: Pick<StartServiceOptions, 'officeDir' | 'uiDir' | 'officeHostPort'>,
+  firstPartyApps: FirstPartyAppTokens,
 ): OfficeIntegrations {
   const officeDir = resolveOfficeDir({ officeDir: opts.officeDir, uiDir: opts.uiDir });
   let appFetch: Fetch | undefined;
@@ -51,11 +54,13 @@ export function createOfficeIntegrations(
     home,
     listener,
     paneAvailable: () => officeDir !== undefined,
+    firstPartyApps,
   });
   const oxtPath = resolveLibreOfficeOxt({ uiDir: opts.uiDir });
   const libreofficeSetup = createLibreOfficeSetupManager({
     home,
     oxtPath: () => oxtPath,
+    firstPartyApps,
   });
 
   return {
@@ -66,6 +71,7 @@ export function createOfficeIntegrations(
       libreofficeSetup,
       ...(officeDir ? { officeDir } : {}),
       officeHostOrigin: () => listener.origin(),
+      verifyOfficeEnrollmentKey: (key) => officeSetup.verifyEnrollmentKey(key),
     }),
     bindFetch(fetch) {
       appFetch = fetch;

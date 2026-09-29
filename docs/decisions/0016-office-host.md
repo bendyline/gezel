@@ -1,6 +1,6 @@
 # 0016 — Office host: a per-user local CA, a stable HTTPS listener, and same-origin consent
 
-Status: Accepted (2026-09)
+Status: Accepted (2026-09). Same-origin consent amended by [0018](0018-local-add-in-grants.md).
 
 ## Context
 
@@ -69,13 +69,16 @@ absent or `same-origin`. The pane asks for `product` scope only, so the user
 still types the verification code into Gezel. That code — not the origin
 check — protects the grant, since loopback is reachable by every local
 account; the origin check keeps every other page out, and `/office/*` serves
-only files gezel ships.
+only files gezel ships. *Amended by [0018](0018-local-add-in-grants.md):* a
+pane Gezel set up now presents an enrollment key from its manifest instead,
+and the code remains the fallback.
 
 **LibreOffice** needs none of this. `packages/libreoffice-extension` builds a
 deterministic `gezel.oxt` (the daemon detects "newer" by hash), staged as
 `dist/libreoffice/gezel.oxt`; Electron runs `unopkg add -f -s`. The extension
 discovers the daemon, asks for its own `product` grant as `libreoffice`, and
-offers the same tool names as the Office pane.
+offers the same tool names as the Office pane. (Since
+[0018](0018-local-add-in-grants.md) it gets that grant without a code.)
 
 Both integrations map a document to a project through ADR 0015's inference,
 so a newly found folder project is read-only and document edits go through

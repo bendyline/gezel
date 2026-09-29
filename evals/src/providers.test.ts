@@ -13,6 +13,7 @@ import {
   isLocalEngine,
   isSelfOrchestratingProvider,
   probeProviderAuth,
+  providerCredentialConfig,
 } from './providers.ts';
 
 describe('CHAT_PROVIDERS allowlist', () => {
@@ -234,5 +235,19 @@ describe('probeProviderAuth', () => {
     const res = probeProviderAuth('copilot', { GH_CONFIG_DIR: ghDir });
     expect(res.ok).toBe(false);
     expect(res.message).toContain('gh auth login');
+  });
+});
+
+describe('providerCredentialConfig', () => {
+  it('hands a cloud-SDK key to the trial daemon config, and nothing for other providers', () => {
+    expect(providerCredentialConfig('anthropic', { ANTHROPIC_API_KEY: ' sk-ant ' })).toEqual({
+      anthropicApiKey: 'sk-ant',
+    });
+    expect(
+      providerCredentialConfig('openai', { OPENAI_API_KEY: 'sk-o', OPENAI_ORG_ID: 'org-1' }),
+    ).toEqual({ openaiApiKey: 'sk-o', openaiOrganization: 'org-1' });
+    expect(providerCredentialConfig('openai', {})).toEqual({});
+    expect(providerCredentialConfig('codex-cli', { OPENAI_API_KEY: 'sk-o' })).toEqual({});
+    expect(providerCredentialConfig('mlx', { ANTHROPIC_API_KEY: 'k' })).toEqual({});
   });
 });

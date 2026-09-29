@@ -2241,6 +2241,14 @@ describe('ProjectsView', () => {
       expect(chat.getAttribute('data-compact')).toBe('true');
     });
 
+    it('spends no row on a name-only heading in a compact single-project tab', async () => {
+      activeWidth = 390;
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.queryByRole('heading', { name: 'Alpha' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Projects' })).not.toBeInTheDocument();
+    });
+
     it('keeps section names, selected project, and settings drafts when layout changes', async () => {
       activeWidth = 1024;
       const { rerender } = render(<ProjectsView forceProjectId="pj-alpha" />);

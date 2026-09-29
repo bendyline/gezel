@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -22,11 +22,14 @@ import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
 import {
   assertMlxSourceComplete,
+  cloneModelDirIntoTrial,
   defaultCacheRoot,
   ensureWarmModel,
+  findReadOnlyModelDir,
   isModelInstalled,
   linkDrafterIntoTrial,
   linkModelIntoTrial,
+  readOnlyModelRoots,
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
@@ -47,9 +50,11 @@ import {
   appleFmHelperPath,
   buildProviderConfig,
   categorizeProvider,
+  isChatProvider,
   isLocalEngine,
   isSelfOrchestratingProvider,
   probeProviderAuth,
+  providerCredentialConfig,
 } from './providers.ts';
 import { captureRecordingState, writeRecordingManifest } from './recording/capture.ts';
 import { distillRunDir } from './recording/distill-io.ts';
@@ -163,21 +168,35 @@ function defaultMlxSourceHome(): string {
  * rather than copying — copying a 3-4 GB venv would defeat the speed
  * win we're after.
  */
-async function linkUvTreeIntoTrial(opts: {
+/**
+ * A persistent uv tree for trials whose source home has none — an install
+ * whose machine service runs the engines keeps its venv in the service's
+ * private home. Linking every trial to one cache means the first trial pays
+ * the several-GB provision and the rest reuse it, instead of each trial
+ * provisioning (and deleting) its own.
+ */
+export const EVAL_UV_CACHE_ENV = 'GEZEL_EVAL_UV_CACHE';
+
+export async function linkUvTreeIntoTrial(opts: {
   mlxSourceHome: string;
   trialHome: string;
   log: (line: string) => void;
 }): Promise<void> {
-  const sourceUv = join(opts.mlxSourceHome, 'engines', 'uv');
+  let sourceUv = join(opts.mlxSourceHome, 'engines', 'uv');
   if (!existsSync(sourceUv)) {
-    opts.log(
-      `[trial] uv venv tree not present at ${sourceUv} — trial daemon will provision a fresh venv (slow)`,
-    );
-    return;
+    const cache = process.env[EVAL_UV_CACHE_ENV]?.trim();
+    if (!cache) {
+      opts.log(
+        `[trial] uv venv tree not present at ${sourceUv} — trial daemon will provision a fresh venv (slow)`,
+      );
+      return;
+    }
+    await mkdir(cache, { recursive: true });
+    opts.log(`[trial] uv venv tree not present at ${sourceUv}; sharing the eval cache at ${cache}`);
+    sourceUv = cache;
   }
   const trialUv = join(opts.trialHome, 'engines', 'uv');
   if (existsSync(trialUv)) return; // already linked / created
-  const { mkdir, symlink } = await import('node:fs/promises');
   await mkdir(join(opts.trialHome, 'engines'), { recursive: true });
   const type = process.platform === 'win32' ? 'junction' : 'dir';
   await symlink(sourceUv, trialUv, type);
@@ -277,6 +296,43 @@ export function modelWarmFailure(
  * even on spawn errors, timeouts, or scenario failures — and always
  * leaves the run directory populated for postmortem.
  */
+/**
+ * Resolve one model from a read-only source home, or throw the sentence a
+ * person needs: install it, or update it. Never downloads — the source is
+ * someone's own install, and a harness that "helpfully" refetched into it
+ * would be writing to state it was only lent.
+ */
+async function requireReadOnlyModel(opts: {
+  sourceHome: string;
+  engine: 'llama-cpp' | 'ds4' | 'mlx' | 'sd-cpp';
+  modelId: string;
+  log: (line: string) => void;
+}): Promise<string> {
+  const dir = await findReadOnlyModelDir({
+    sourceHome: opts.sourceHome,
+    engine: opts.engine,
+    modelId: opts.modelId,
+  });
+  if (!dir) {
+    throw new Error(
+      `${opts.modelId} is not installed for ${opts.engine} on this computer. Install it from Settings, then run the eval again.`,
+    );
+  }
+  const stale = await staleInstallReason({
+    cacheRoot: opts.sourceHome,
+    engine: opts.engine,
+    modelId: opts.modelId,
+    modelDir: dir,
+  });
+  if (stale) {
+    throw new Error(
+      `${opts.modelId} is out of date with the catalog (${stale}). Update it from Settings, then run the eval again.`,
+    );
+  }
+  opts.log(`[trial] ${opts.engine} source=${dir} (read-only)`);
+  return dir;
+}
+
 export async function runTrial(
   scenarioInput: EvalScenario,
   opts: TrialOptions,
@@ -301,7 +357,7 @@ export async function runTrial(
     engine === 'llama-cpp'
       ? llamaCppEvalLaunchOverridesForModel(opts.modelId)
       : engine === 'ds4'
-        ? ds4EvalLaunchOverridesForModel(opts.modelId)
+        ? ds4EvalLaunchOverridesForModel(opts.modelId, opts.modelSourceHome)
         : undefined;
   const llamaEvalLaunch = mergeLlamaCppEvalLaunchOverrides(
     defaultLlamaEvalLaunch,
@@ -405,6 +461,7 @@ export async function runTrial(
     startedAt: startedAt.toISOString(),
     status: 'running',
   });
+  opts.onTrialStart?.({ trialId, runDir, startedAt: startedAt.toISOString() });
 
   const logger = new TrialLogger({ runDir, gezelHome: trialHome });
   await logger.init();
@@ -509,8 +566,32 @@ export async function runTrial(
   // model would otherwise surface an hour in as a wedged enrichment drive.
   const secondModelId =
     opts.enrichModelId && opts.enrichModelId !== opts.modelId ? opts.enrichModelId : null;
+  // Read-only sourcing (`modelSourceHome`): exact directories to clone from,
+  // resolved here so a missing or stale install fails before any daemon work.
+  const sourcedModelDirs = new Map<string, string>();
+  let sourcedImageDir: string | undefined;
   try {
-    if (engine === 'llama-cpp') {
+    if (opts.modelSourceHome) {
+      const sourceHome = opts.modelSourceHome;
+      if (engine === 'llama-cpp' || engine === 'ds4' || engine === 'mlx') {
+        for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
+          sourcedModelDirs.set(
+            modelId,
+            await requireReadOnlyModel({ sourceHome, engine, modelId, log }),
+          );
+        }
+      } else {
+        log(`[trial] ${engine} is ${category} — no local weights to source`);
+      }
+      if (imageModelId && sdBin) {
+        sourcedImageDir = await requireReadOnlyModel({
+          sourceHome,
+          engine: 'sd-cpp',
+          modelId: imageModelId,
+          log,
+        });
+      }
+    } else if (engine === 'llama-cpp') {
       if (!llamaBin) throw new Error('llama-cpp engine selected but llamaBin is unresolved');
       for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
         await ensureWarmModel({
@@ -567,7 +648,7 @@ export async function runTrial(
     } else {
       log(`[trial] ${engine} is ${category} — skipping warm-cache phase`);
     }
-    if (imageModelId && sdBin) {
+    if (imageModelId && sdBin && !opts.modelSourceHome) {
       // Same source-home shortcut we use for MLX chat models: if the
       // user already has the image model installed under
       // `<mlxSourceHome>/engines/sd-cpp/models/<id>` (i.e. their dev
@@ -629,7 +710,23 @@ export async function runTrial(
   // where the filesystem supports them. Llama-cpp clones from the eval cache;
   // MLX clones from the user's existing `engines/mlx/models/<id>` tree.
   // CLI-wrapper and cloud providers have nothing to materialize.
-  if (engine === 'llama-cpp' || engine === 'ds4') {
+  if (
+    sourcedModelDirs.size > 0 &&
+    (engine === 'llama-cpp' || engine === 'ds4' || engine === 'mlx')
+  ) {
+    for (const [modelId, sourceDir] of sourcedModelDirs) {
+      await cloneModelDirIntoTrial({ sourceDir, trialHome, engine, modelId });
+      log(`[trial] cloned ${engine}/${modelId} from ${sourceDir} into ${trialHome}`);
+    }
+    if (engine === 'mlx' && opts.modelSourceHome) {
+      for (const modelId of sourcedModelDirs.keys()) {
+        if (await linkDrafterIntoTrial({ sourceHome: opts.modelSourceHome, trialHome, modelId })) {
+          log(`[trial] linked mlx drafter for ${modelId} (speculative decoding armed)`);
+        }
+      }
+      await linkUvTreeIntoTrial({ mlxSourceHome: opts.modelSourceHome, trialHome, log });
+    }
+  } else if (engine === 'llama-cpp' || engine === 'ds4') {
     for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
       await linkModelIntoTrial({
         cacheRoot,
@@ -664,7 +761,15 @@ export async function runTrial(
     // ensureVenv call short-circuits to an O(ms) no-op.
     await linkUvTreeIntoTrial({ mlxSourceHome, trialHome, log });
   }
-  if (imageModelId) {
+  if (imageModelId && sourcedImageDir) {
+    await cloneModelDirIntoTrial({
+      sourceDir: sourcedImageDir,
+      trialHome,
+      engine: 'sd-cpp',
+      modelId: imageModelId,
+    });
+    log(`[trial] cloned sd-cpp/${imageModelId} from ${sourcedImageDir} into ${trialHome}`);
+  } else if (imageModelId) {
     // Reuse the exact complete install selected during the warm phase.
     // A merely-present source directory may hold only `.partial` files.
     const linkFrom = imageModelHome ?? cacheRoot;
@@ -971,6 +1076,10 @@ export async function runTrial(
     // tool — the two pipelines are decoupled.
     await client.updateConfig({
       ...buildProviderConfig(engine, opts.modelId),
+      ...providerCredentialConfig(engine),
+      ...(opts.keurmeester && isChatProvider(opts.keurmeester.providerName)
+        ? providerCredentialConfig(opts.keurmeester.providerName)
+        : {}),
       // Eval prompts must be deterministic. Retrieval scenarios may enable
       // the embedding engine above, but no trial gets unsolicited recall.
       autoRecall: { enabled: false },
@@ -1321,7 +1430,7 @@ export async function ensureMeester(client: GezelClient): Promise<string> {
  * thorough overnight reviews are valid; runaway processes consuming a
  * full day are not.
  */
-const DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000;
+export const DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 
 /**
  * Default soft no-progress window. If the SOFT digest (engine-alive
@@ -1913,7 +2022,7 @@ export function ds4EvalPayloadFromModelDir(dir: string): Ds4EvalPayloadPaths {
   };
 }
 
-function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
+function resolveDs4EvalPayload(modelId: string, sourceHome?: string): Ds4EvalPayloadPaths {
   const envModel = process.env.GEZEL_DS4_MODEL?.trim();
   const envVision = process.env.GEZEL_DS4_VISION_ENCODER?.trim();
   if (envModel && existsSync(envModel)) {
@@ -1922,8 +2031,15 @@ function resolveDs4EvalPayload(modelId: string): Ds4EvalPayloadPaths {
       ...(envVision && existsSync(envVision) ? { visionEncoderPath: envVision } : {}),
     };
   }
-  for (const home of [join(homedir(), '.gezel-eval-cache'), join(homedir(), '.gezel-dev')]) {
-    const dir = join(home, 'engines', 'ds4', 'models', modelId);
+  // A read-only source home is authoritative: the trial clones its weights
+  // from there, so sizing the launch from some other copy would describe a
+  // different payload than the one that runs.
+  const dirs = sourceHome
+    ? readOnlyModelRoots(sourceHome, 'ds4').map((root) => join(root, modelId))
+    : [join(homedir(), '.gezel-eval-cache'), join(homedir(), '.gezel-dev')].map((home) =>
+        join(home, 'engines', 'ds4', 'models', modelId),
+      );
+  for (const dir of dirs) {
     if (!existsSync(dir)) continue;
     const payload = ds4EvalPayloadFromModelDir(dir);
     if (payload.modelPath) return payload;
@@ -1975,8 +2091,9 @@ export function ds4EvalCapacityBudgetGb(totalRamBytes: number): 56 | 72 | 104 {
 
 export function ds4EvalLaunchOverridesForModel(
   modelId: string,
+  sourceHome?: string,
 ): LlamaCppEvalLaunchOverrides | undefined {
-  const payload = resolveDs4EvalPayload(modelId);
+  const payload = resolveDs4EvalPayload(modelId, sourceHome);
   const model = payload.modelPath;
   const visionEncoder = payload.visionEncoderPath;
   const bin = resolveDs4Binary({ requireVision: visionEncoder !== undefined });

@@ -184,6 +184,16 @@ export interface LocalConnectInput extends ConnectInput {
    * loaded automatically from the per-user runtime directory.
    */
   tlsCertPath?: string;
+  /**
+   * For Gezel's own add-ins only. When the SDK adopts or starts this user's
+   * own daemon (`daemon.daemonEntry`), it trades the owner credential read
+   * from the protected runtime directory for this app's grant instead of
+   * asking for a connection code: being able to read that directory already
+   * makes the caller the owner. The owner credential serves that one request
+   * and is never returned. The daemon refuses any app id that is not a Gezel
+   * add-in, and a configured URL or a legacy machine service still consents.
+   */
+  gezelAddIn?: boolean;
 }
 
 /** Authorized app transport plus non-sensitive local-daemon diagnostics. */

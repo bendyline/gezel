@@ -451,6 +451,16 @@ import type {
   WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
 import { KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
+import type {
+  EvalCatalog,
+  EvalJob,
+  EvalJobListResponse,
+  EvalJobSpec,
+  EvalJobStreamEvent,
+  EvalTargetsResponse,
+  EvalTrialDetail,
+  EvalTrialListResponse,
+} from '@bendyline/gezel/eval';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
@@ -481,6 +491,13 @@ import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 import type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
 import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
+import type {
+  MachineServingConfig,
+  MachineServingDevice,
+  MachineServingGrant,
+  MachineServingState,
+  PairedRemoteInfo,
+} from './remote-serving.js';
 import { RetrievalClient } from './retrieval.js';
 import {
   type ConsumeSseJsonOptions,
@@ -501,6 +518,13 @@ export type {
 } from './folders.js';
 export type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 export type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
+export type {
+  MachineServingConfig,
+  MachineServingDevice,
+  MachineServingGrant,
+  MachineServingState,
+  PairedRemoteInfo,
+} from './remote-serving.js';
 
 export interface ScanModelBundleOptions {
   scanId?: string;
@@ -1614,63 +1638,6 @@ export interface ConfigResponse {
   };
 }
 
-/** One server this device has paired with (token redacted). */
-export interface PairedRemoteInfo {
-  remoteId: string;
-  baseUrl: string;
-  displayName: string;
-  pinnedIdentityFingerprint: string;
-  scopes: string[];
-  pairedAt: number;
-  lastSeenAt?: number;
-  hasToken: boolean;
-}
-
-/** remoteServing config as managed on the machine broker. */
-export interface MachineServingConfig {
-  enabled?: boolean;
-  bindAddress?: string;
-  port?: number;
-  priority?: 'equal' | 'below-local' | 'above-local';
-  reserveLocalGb?: number;
-  allowModels?: string[];
-  limits?: {
-    maxConcurrentPerDevice?: number;
-    maxChatPerDevice?: number;
-    requestsPerMinute?: number;
-  };
-}
-
-/**
- * GET/PUT /api/machine-serving response. `config.enabled` reflects the
- * actual listener state; `identity` is the BROKER's device identity (the
- * fingerprint peers verify out-of-band), not the user daemon's.
- */
-export interface MachineServingState {
-  config: MachineServingConfig;
-  status: { listening: boolean; host?: string; port?: number };
-  identity: { deviceId: string; fingerprint: string };
-}
-
-export interface MachineServingGrant {
-  id: string;
-  appId: string;
-  appName: string;
-  scopes: string[];
-  status: 'pending' | 'approved' | 'denied' | string;
-  createdAt: number;
-  decidedAt?: number;
-}
-
-export interface MachineServingDevice {
-  appId: string;
-  appName: string;
-  scopes: string[];
-  createdAt: number;
-  lastUsedAt?: number;
-  deviceId?: string;
-}
-
 export type SendChannelResult =
   | { ok: true; id?: string; channel?: 'webhook' }
   | { ok: false; error: string; channel?: 'webhook' };
@@ -1735,11 +1702,12 @@ export type LlamaCppInstallEvent =
     };
 
 // ── Evals (in-app Benchmarks panel) ──
-// Mirror of packages/service/src/eval/{scenarios,runner}.ts shapes —
-// kept in the client for now to avoid coupling the client to the
-// service package. When the catalog moves into `@bendyline/gezel`
-// proper this duplication goes away.
+// The current contract lives in `@bendyline/gezel` (schemas/eval.ts):
+// `getEvalCatalog`, `listEvalTargets`, the job methods, and the trial index.
+// The three shapes below belong to the first in-app runner's endpoints, kept
+// working for existing callers.
 
+/** @deprecated Use `getEvalCatalog()` and `EvalCatalogScenario`. */
 export interface EvalScenarioManifest {
   id: string;
   name: string;
@@ -1751,6 +1719,7 @@ export interface EvalScenarioManifest {
   anchored: boolean;
 }
 
+/** @deprecated Use `listEvalTrials()` and `EvalTrialSummary`. */
 export interface TrialOutcome {
   trialId: string;
   scenarioId: string;
@@ -1764,6 +1733,7 @@ export interface TrialOutcome {
   runDir: string;
 }
 
+/** @deprecated Use `createEvalJob()` + `streamEvalJob()`. */
 export type RunEvalEvent =
   | { type: 'spawned'; trialId?: string; runDir?: string }
   | { type: 'log'; line: string }
@@ -2006,6 +1976,25 @@ const MlxInstallEventSchema: z.ZodType<MlxInstallEvent> = z.discriminatedUnion('
   z.object({ type: z.literal('done'), id: z.string(), warning: z.string().optional() }),
   z.object({ type: z.literal('error'), error: z.string(), mismatch: mismatchSchema.optional() }),
 ]);
+/**
+ * The eval job stream, checked only as far as the stream loop reads it.
+ *
+ * Deliberately not core's `EvalJobStreamEventSchema`: importing it pulls the
+ * whole eval-job schema graph into every client consumer's startup bundle —
+ * the desktop UI's initial load paid for a Settings page most people never
+ * open. The daemon's job record is the authority for the rest of the shape.
+ */
+const EvalJobStreamWireSchema = z.union([
+  z.object({ type: z.literal('log'), line: z.string() }),
+  z
+    .object({
+      type: z.enum(['snapshot', 'job']),
+      job: z.object({ id: z.string(), status: z.string() }).passthrough(),
+      log: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+]) as unknown as z.ZodType<EvalJobStreamEvent>;
+
 const RunEvalEventSchema: z.ZodType<RunEvalEvent> = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('spawned'),
@@ -3900,14 +3889,91 @@ export class GezelClient {
 
   // ── Evals (in-app Benchmarks panel) ──
 
+  /** The eval harness's registry: every scenario, suite, and provider default. */
+  getEvalCatalog(opts?: { refresh?: boolean }): Promise<EvalCatalog> {
+    return this.request('GET', opts?.refresh ? '/api/eval/catalog?refresh=1' : '/api/eval/catalog');
+  }
+
+  /** What this install can evaluate: models per provider, image models, environment. */
+  listEvalTargets(): Promise<EvalTargetsResponse> {
+    return this.request('GET', '/api/eval/targets');
+  }
+
+  listEvalJobs(): Promise<EvalJobListResponse> {
+    return this.request('GET', '/api/eval/jobs');
+  }
+
+  /** Queue a job. It runs in the daemon and outlives this request. */
+  createEvalJob(spec: EvalJobSpec): Promise<EvalJob> {
+    return this.request('POST', '/api/eval/jobs', spec);
+  }
+
+  getEvalJob(id: string): Promise<EvalJob> {
+    return this.request('GET', `/api/eval/jobs/${encodeURIComponent(id)}`);
+  }
+
+  cancelEvalJob(id: string): Promise<EvalJob> {
+    return this.request('POST', `/api/eval/jobs/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /**
+   * Follow one job: a snapshot (record + recent log), then live log lines
+   * and record updates. Resolves when the job reaches a terminal status;
+   * abort `signal` to stop watching without affecting the job.
+   */
+  async streamEvalJob(
+    id: string,
+    onEvent: (event: EvalJobStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const finished = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
+    await consumeApiSseJson({
+      url: `${this.baseUrl}/api/eval/jobs/${encodeURIComponent(id)}/stream`,
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal,
+      fetch: this.fetchImpl,
+      schema: EvalJobStreamWireSchema,
+      onEvent,
+      isTerminal: (event) => event.type !== 'log' && finished.has(event.job.status),
+      label: 'Eval job stream',
+    });
+  }
+
+  listEvalTrials(filter?: {
+    scenarioId?: string;
+    modelId?: string;
+    provider?: string;
+    jobId?: string;
+    limit?: number;
+  }): Promise<EvalTrialListResponse> {
+    const qs = new URLSearchParams();
+    if (filter?.scenarioId) qs.set('scenario', filter.scenarioId);
+    if (filter?.modelId) qs.set('model', filter.modelId);
+    if (filter?.provider) qs.set('provider', filter.provider);
+    if (filter?.jobId) qs.set('job', filter.jobId);
+    if (filter?.limit != null) qs.set('limit', String(filter.limit));
+    const query = qs.toString();
+    return this.request('GET', query ? `/api/eval/trials?${query}` : '/api/eval/trials');
+  }
+
+  getEvalTrial(trialId: string): Promise<EvalTrialDetail> {
+    return this.request('GET', `/api/eval/trials/${encodeURIComponent(trialId)}`);
+  }
+
+  /** @deprecated Use `getEvalCatalog()`. */
   listEvalScenarios(): Promise<{ scenarios: readonly EvalScenarioManifest[] }> {
     return this.request('GET', '/api/eval/scenarios');
   }
 
+  /**
+   * @deprecated Every install can run in-app evals now; the harness ships
+   * with the service.
+   */
   getEvalAvailability(): Promise<{ available: boolean; reason: string | null }> {
     return this.request('GET', '/api/eval/availability');
   }
 
+  /** @deprecated Use `listEvalTrials()`. */
   listEvalResults(filter?: {
     scenarioId?: string;
     limit?: number;
@@ -3920,6 +3986,9 @@ export class GezelClient {
   }
 
   /**
+   * @deprecated Use `createEvalJob()` + `streamEvalJob()`; this queues a
+   * one-trial job and cancels it if the stream is aborted.
+   *
    * Run an eval trial end-to-end. SSE-streams progress events; resolves
    * when the child harness exits. The `done` event carries the final
    * outcome; `error` events surface harness-side failures. UI consumers

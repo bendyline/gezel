@@ -84,6 +84,7 @@ import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
+import { createFirstPartyAppTokens } from './grants/first-party-apps.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
 import { createXpRefresher } from './growth/xp-refresher.js';
@@ -427,6 +428,9 @@ export async function startProductService(
     tokenStore,
     autoApproveAppIds: parseAutoApproveAppIds(process.env.GEZEL_AUTOAPPROVE_APPS),
   });
+  // Gezel's own Office, LibreOffice and VS Code add-ins connect without a
+  // code once they prove they run as this user; see grants/first-party-apps.ts.
+  const firstPartyApps = createFirstPartyAppTokens(tokenStore);
   // The EnsureModel orchestrator construction happens after the local
   // model managers + catalog are built — see the assignment below the
   // `catalog`/`llamaCppModels`/`ds4Models`/`mlxModels` lines.
@@ -1477,6 +1481,19 @@ export async function startProductService(
   const folderJobs = new FolderJobManager();
   const { StorageJobManager } = await import('./storage/job-manager.js');
   const storageJobs = new StorageJobManager();
+  // In-app evals: the compiled harness beside this daemon (or a checkout's
+  // live source), queued jobs under <home>/eval-runs/, and the trial index.
+  const { EvalService } = await import('./eval/service.js');
+  const evals = new EvalService({
+    home,
+    readConfig: () => store.readConfig(),
+    secrets,
+    engineBinaries,
+    llamaCppModels,
+    mlxModels,
+    ds4Models,
+    history,
+  });
   const { detectInterruptedMove } = await import('./folders/recovery.js');
   void detectInterruptedMove(home);
 
@@ -2253,7 +2270,7 @@ export async function startProductService(
     port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
   });
   // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
-  const officeIntegrations = createOfficeIntegrations(home, opts);
+  const officeIntegrations = createOfficeIntegrations(home, opts, firstPartyApps);
   const vscodeSetup = createVSCodeSetupManager({
     home,
     ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
@@ -2426,6 +2443,7 @@ export async function startProductService(
     token,
     tokenStore,
     grants,
+    firstPartyApps,
     deviceIdentity,
     signIdentityCertificate: () =>
       cert ? signCertFingerprint(secrets, home, cert.sha256Hex) : Promise.resolve(null),
@@ -2446,6 +2464,7 @@ export async function startProductService(
     uiDir: opts.uiDir,
     folderJobs,
     storageJobs,
+    evals,
     invalidateModelsCache,
     workspaceIndex,
     contentIndex,
@@ -2976,6 +2995,8 @@ export async function startProductService(
         clearTimeout(libraryRefreshTimer);
         libraryRefreshTimer = null;
       }
+      // First: a running eval harness owns a trial daemon and its engines.
+      await shutdownStep('eval jobs', () => evals.shutdown());
       await shutdownStep('workspace index', () => workspaceIndex.stop());
       workspaceWatch.stop();
       await shutdownStep('index enrichment', () => indexEnrichment.stop());

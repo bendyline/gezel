@@ -167,6 +167,15 @@ Apps consent request, so a headless CLI never waits for a desktop approval UI.
 Third-party integrations must use `authorizeLocal()`; do not use the owner
 surface as an app-consent bypass.
 
+Gezel's own add-ins (Office, LibreOffice, VS Code) pass `gezelAddIn: true` to
+`authorizeLocal()`. On the user's own daemon the SDK then trades the owner
+credential it read during discovery for the add-in's own, narrower grant
+instead of asking for a connection code, and never returns the owner
+credential. A configured `baseUrl` or a legacy machine service still consents,
+and the daemon refuses the exchange for any app id that is not a Gezel add-in,
+so the option does nothing for third-party apps. See ADR 0018 in the Gezel
+repository.
+
 Use `product` for ordinary stateful product access and add `openai` only when
 the same app also calls the OpenAI-compatible inference routes. `product` does
 not grant first-party administration of other app connections.

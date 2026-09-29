@@ -9,7 +9,7 @@ import type {
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
 import { queueComposerPrefill } from '../components/composer-prefill.js';
@@ -24,6 +24,7 @@ import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
 const DOCUMENT_KEY = 'gezel:knowledge:document';
+const EXPANDED_KEY_PREFIX = 'gezel:knowledge:expanded:';
 const PAGE_SIZE = 50;
 
 interface TopicTreeNode extends KnowledgeTopicNode {
@@ -41,6 +42,24 @@ function foldTopics(topics: KnowledgeTopicNode[]): TopicTreeNode[] {
     else roots.push(node);
   }
   return roots;
+}
+
+function readExpandedTopics(catalogId: string): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_KEY_PREFIX + catalogId);
+    const ids: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeExpandedTopics(catalogId: string, ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(EXPANDED_KEY_PREFIX + catalogId, JSON.stringify([...ids]));
+  } catch {
+    /* private mode */
+  }
 }
 
 /**
@@ -63,6 +82,8 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   });
   const [topics, setTopics] = useState<KnowledgeTopicNode[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
+  const topicIdPrefix = useId();
   const [documents, setDocuments] = useState<KnowledgeDocumentSummary[] | null>(null);
   const [documentsTotal, setDocumentsTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -168,6 +189,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     let alive = true;
     setTopics([]);
     setSelectedTopicId(null);
+    setExpandedTopics(readExpandedTopics(selectedCatalogId));
     api
       .knowledgeCatalogTopics(selectedCatalogId)
       .then((r) => {
@@ -267,6 +289,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     [catalogs, selectedCatalogId],
   );
   const topicTree = useMemo(() => foldTopics(topics), [topics]);
+  const topicTreeNests = useMemo(() => topicTree.some((n) => n.children.length > 0), [topicTree]);
   const topicNames = useMemo(() => new Map(topics.map((t) => [t.id, t.name])), [topics]);
 
   // Catalog images resolve through the daemon (bearer-authed, so never a
@@ -352,6 +375,15 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     navigateToTab({ kind: 'project', id: 'default' });
   }, [citation, doc]);
 
+  const setTopicExpanded = (topicId: string, expanded: boolean) => {
+    if (!selectedCatalogId || expandedTopics.has(topicId) === expanded) return;
+    const next = new Set(expandedTopics);
+    if (expanded) next.add(topicId);
+    else next.delete(topicId);
+    setExpandedTopics(next);
+    writeExpandedTopics(selectedCatalogId, next);
+  };
+
   const openSettings = useCallback(() => {
     requestSettingsSection('knowledge');
     navigateToTab({ kind: 'area', area: 'settings' });
@@ -374,26 +406,69 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     );
   }
 
-  const renderTopic = (node: TopicTreeNode, depth: number) => (
-    <li key={node.id}>
-      <button
-        type="button"
-        className="knowledge-topic-row"
-        aria-current={selectedTopicId === node.id ? 'true' : undefined}
-        onClick={() => {
-          setSelectedTopicId((prev) => (prev === node.id ? null : node.id));
-          setQuery('');
-          setMobilePane('list');
-        }}
-      >
-        <span>{node.name}</span>
-        <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
-      </button>
-      {node.children.length > 0 && (
-        <ul>{node.children.map((child) => renderTopic(child, depth + 1))}</ul>
-      )}
-    </li>
-  );
+  // A topic's name selects it (and opens it, since picking a shelf is a
+  // request to see what is on it); only the chevron folds it back up.
+  const renderTopic = (node: TopicTreeNode, path: string) => {
+    const hasChildren = node.children.length > 0;
+    const expanded = hasChildren && expandedTopics.has(node.id);
+    const childrenId = `${topicIdPrefix}-topic-${path}`;
+    return (
+      <li key={node.id}>
+        <div
+          className={`knowledge-topic-line${
+            selectedTopicId === node.id ? ' knowledge-topic-line--current' : ''
+          }`}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              className="knowledge-topic-toggle"
+              aria-expanded={expanded}
+              aria-controls={expanded ? childrenId : undefined}
+              aria-label={expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+              onClick={() => setTopicExpanded(node.id, !expanded)}
+            >
+              <svg
+                width={12}
+                height={12}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+                aria-hidden="true"
+              >
+                <polyline points="9 6 15 12 9 18" />
+              </svg>
+            </button>
+          ) : (
+            topicTreeNests && <span className="knowledge-topic-toggle-spacer" />
+          )}
+          <button
+            type="button"
+            className="knowledge-topic-row"
+            aria-current={selectedTopicId === node.id ? 'true' : undefined}
+            onClick={() => {
+              setSelectedTopicId((prev) => (prev === node.id ? null : node.id));
+              if (hasChildren) setTopicExpanded(node.id, true);
+              setQuery('');
+              setMobilePane('list');
+            }}
+          >
+            <span>{node.name}</span>
+            <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
+          </button>
+        </div>
+        {expanded && (
+          <ul id={childrenId}>
+            {node.children.map((child, i) => renderTopic(child, `${path}-${i}`))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div className={`knowledge-view knowledge-view--${mobilePane}`} data-testid="knowledge-view">
@@ -446,7 +521,9 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
         >
           All documents
         </button>
-        <ul className="knowledge-topics">{topicTree.map((node) => renderTopic(node, 0))}</ul>
+        <ul className="knowledge-topics">
+          {topicTree.map((node, i) => renderTopic(node, String(i)))}
+        </ul>
       </nav>
 
       <section className="knowledge-list" aria-label="Documents">
