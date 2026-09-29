@@ -537,6 +537,8 @@ public final class MobileUiSmokeTest {
             editor.focus();
             document.execCommand('insertText', false, 'Say hello.');
             await until(() => editor.textContent.includes('Say hello.'), 'composer draft');
+            // Send reads the composer's draft, which Squisq reports a task after the edit.
+            await until(async () => (await api('/api/projects/' + %1$s + '/prompt-drafts')).drafts.some(item => item.title.includes('Say hello.')), 'editor change saved before Send');
             let streamed = '';
             const listener = await plugin.addListener('chatDelta', event => { streamed += event.delta; });
             try {
