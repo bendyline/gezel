@@ -58,6 +58,21 @@ export function renderCurrentDateTimeLine(
   return `${CURRENT_DATE_TIME_PREFIX}${date}, ${time} (${timeZone}, ${utcOffsetLabel(now, timeZone)})]`;
 }
 
+/** Today as YYYY-MM-DD in `timeZone`: the same day the date line names. */
+export function todayIso(
+  now: Date = new Date(),
+  timeZone: string = resolvePromptTimeZone(),
+): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 /** Prefix `text` with the current date line, keeping the user's words last. */
 export function withCurrentDateTimeLine(text: string, line: string): string {
   return `${line}\n\n${text}`;

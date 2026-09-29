@@ -846,6 +846,8 @@ export const ChatMessageSchema = z.object({
    * - `'task-wrapup'` — a task launched from this thread finished; the
    *   thread's gezel tells the owner what was made, with the files it wrote
    *   as `referencedFiles`.
+   * - `'crew-introduction'` — a gezel was hired for a task launched from
+   *   this thread; the thread's gezel introduces them before they start.
    *
    * UI renders these as muted bubbles; the model sees them as normal
    * assistant turns (the role label is what matters to the API).
@@ -859,6 +861,7 @@ export const ChatMessageSchema = z.object({
       'keurmeester-notice',
       'craftbook-launch',
       'task-wrapup',
+      'crew-introduction',
     ])
     .optional(),
   /**

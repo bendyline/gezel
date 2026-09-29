@@ -399,6 +399,9 @@ function EngineStatusPillForProvider({
   const [installedModels, setInstalledModels] = useState<
     Array<{ id: string; name: string; plannedSlots?: number }>
   >([]);
+  // Whether that list has answered at least once, so an empty list means
+  // "nothing installed" rather than "not asked yet".
+  const [modelsListed, setModelsListed] = useState(false);
   // Rolling window of recent turn_stats events, newest-last.
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
   // Most recently completed turn is daemon-backed rather than derived from
@@ -569,6 +572,7 @@ function EngineStatusPillForProvider({
             ...(m.plannedSlots !== undefined ? { plannedSlots: m.plannedSlots } : {}),
           })),
         );
+        setModelsListed(true);
       } catch {
         /* non-fatal — pill just omits the model name */
       }
@@ -934,9 +938,14 @@ function EngineStatusPillForProvider({
   // Popover Status line — who and what, not how many. The decode counters
   // have their own "This turn" row below; repeating them here made one long
   // string the eye has to parse for the part it wanted.
+  // A fresh install read "Idle — waiting for a message" with no model to
+  // answer one.
+  const noModelInstalled = !!onDeviceProvider && modelsListed && installedModels.length === 0;
   const statusText = busy
     ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
-    : queue.idleStatus;
+    : noModelInstalled
+      ? 'No chat model installed yet'
+      : queue.idleStatus;
   const healthPresentation = deviceHealth ? presentDeviceHealth(deviceHealth) : null;
   const dotClassName = [
     'engine-pill-dot',

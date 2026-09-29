@@ -113,6 +113,21 @@ describe('evaluateDeclarativeCheck', () => {
     expect((await evaluateDeclarativeCheck(check, unlisted)).ok).toBe(false);
   });
 
+  // A quote said $297 for items adding up to $197, and nothing checked it.
+  it('fails a deliverable whose figures do not hold up', async () => {
+    const check = { kind: 'figures', file: 'quote.md', artifact: true } as GateCheck as never;
+    const quote = (total: string) =>
+      `## Option 2\n\n- Fruit platter: $85\n- Coffee: $45\n- Pastries: $42\n- Delivery: $25\n\n**Subtotal: ${total}**\n`;
+
+    const wrong = await evaluateDeclarativeCheck(check, reader({}, { 'quote.md': quote('$297') }));
+    expect(wrong.ok).toBe(false);
+    expect(wrong.detail).toContain('says $297.00, but the items above it add up to $197.00');
+
+    const right = await evaluateDeclarativeCheck(check, reader({}, { 'quote.md': quote('$197') }));
+    expect(right.ok).toBe(true);
+    expect(isSharedGateCheck(check)).toBe(true);
+  });
+
   it('labels a check by its configuration, never its observed values', () => {
     expect(gateCheckLabel({ kind: 'minBytes', file: 'a.md', bytes: 9 } as GateCheck)).toBe(
       'minBytes a.md',

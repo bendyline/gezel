@@ -235,6 +235,7 @@ import {
   taskFinishedQuestion,
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
+import { reviewTaskFigures } from '../tasks/figure-review.js';
 import {
   buildStageOneNudge,
   buildStageTwoNudge,
@@ -244,6 +245,7 @@ import {
 } from '../tasks/gate-escalation.js';
 import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
+import { findOwnerThread } from '../tasks/owner-thread.js';
 import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
 import {
@@ -7681,6 +7683,7 @@ export class ChatManager extends LocalEngineRuntime {
     state.record.turnStartedAt = nowIso();
     if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
       state.record.title =
+        (await this.taskThreadTitle(state.record, userMessage)) ??
         deriveThreadTitleFromMessages(state.record.messages.slice(0, -1), {
           requireCompletedTurn: true,
         }) ??
@@ -9984,6 +9987,7 @@ export class ChatManager extends LocalEngineRuntime {
     record.messages.push(userMessage);
     if (!record.title || record.title === NEW_THREAD_TITLE) {
       record.title =
+        (await this.taskThreadTitle(record, userMessage)) ??
         deriveThreadTitleFromMessages(record.messages.slice(0, -1), {
           requireCompletedTurn: true,
         }) ??
@@ -11754,21 +11758,77 @@ export class ChatManager extends LocalEngineRuntime {
    * A launch from inside another task's session climbs to the first
    * ancestor that is not task-scoped: that is the thread the person reads.
    */
+  /**
+   * A task thread's title. Its first user turn is the dispatch seed the
+   * machinery wrote, and the title extractor turned one into "Default/2
+   * Bakery Weekly Admin Relief 20th craftbook"; the task already has a name.
+   */
+  private async taskThreadTitle(record: ChatSession, first: ChatMessage): Promise<string | null> {
+    if (!record.taskRef || first.origin !== 'system') return null;
+    const ref = parseTaskRef(record.taskRef);
+    if (!ref) return null;
+    const task = await this.store.readTask(ref.projectId, ref.num).catch(() => null);
+    return task?.title.trim() || null;
+  }
+
+  /** Append a message the runtime wrote to a thread, persist it, and publish it. */
+  private async appendToThread(
+    thread: ChatSession,
+    message: ChatMessage,
+  ): Promise<{ record: ChatSession; scope: PublishScope }> {
+    // The live record, when the thread is open, so unsaved turn state survives.
+    const record = this.states.get(thread.id)?.record ?? thread;
+    record.messages.push(message);
+    record.lastActivityAt = message.at;
+    await this.store.writeSession(record);
+    const scope: PublishScope = {
+      sessionId: record.id,
+      gezelId: record.gezelId,
+      projectId: record.projectId,
+    };
+    this.events.publish(scope, { type: 'complete', message });
+    return { record, scope };
+  }
+
+  /**
+   * Introduce a gezel hired for a task in the thread the owner reads, before
+   * they start. The crew used to be recruited silently: a copywriter and an
+   * omroeper joined the roster mid-task without a word to the owner.
+   */
+  async postCrewIntroduction(
+    task: Task,
+    gezelId: string,
+    step: TaskCraftbookStep,
+  ): Promise<string | null> {
+    const thread = await findOwnerThread(this.store, task);
+    if (!thread || thread.gezelId === gezelId) return null;
+    const gezel = await this.store.getGezel(gezelId).catch(() => null);
+    if (!gezel) return null;
+    const role = gezel.role?.trim();
+    const message: ChatMessage = {
+      role: 'assistant',
+      content:
+        `I've brought **${gezel.name}** onto the crew${role ? ` as your ${role}` : ''} ` +
+        `for **${task.title}**. ${gezel.name} starts with "${step.name}".`,
+      at: nowIso(),
+      synthetic: 'crew-introduction',
+      referencedTasks: [task.ref],
+    };
+    const { record } = await this.appendToThread(thread, message);
+    return record.id;
+  }
+
   async postTaskWrapUp(task: Task, outcome: 'complete' | 'canceled'): Promise<string | null> {
-    if (!wantsWrapUp(task, outcome) || !task.launchSessionId) return null;
-    let thread = await this.store.findSessionById(task.launchSessionId).catch(() => null);
-    const seen = new Set<string>();
-    while (thread?.taskRef && thread.parentSession && !seen.has(thread.id)) {
-      seen.add(thread.id);
-      thread = await this.store.findSessionById(thread.parentSession.sessionId).catch(() => null);
-    }
-    if (!thread || thread.taskRef || thread.archived) return null;
+    if (!wantsWrapUp(task, outcome)) return null;
+    const thread = await findOwnerThread(this.store, task);
+    if (!thread) return null;
 
     const outputs = await loadTaskOutputs(this.store, task);
+    const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
 
     const message: ChatMessage = {
       role: 'assistant',
-      content: composeTaskWrapUp(task, outputs),
+      content: composeTaskWrapUp(task, outputs, figures),
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
@@ -11777,18 +11837,7 @@ export class ChatManager extends LocalEngineRuntime {
     const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
 
-    const live = this.states.get(thread.id);
-    const record = live?.record ?? thread;
-    record.messages.push(message);
-    record.lastActivityAt = message.at;
-    await this.store.writeSession(record);
-
-    const scope: PublishScope = {
-      sessionId: record.id,
-      gezelId: record.gezelId,
-      projectId: record.projectId,
-    };
-    this.events.publish(scope, { type: 'complete', message });
+    const { record, scope } = await this.appendToThread(thread, message);
     this.events.publishProjectEvent(record.projectId, {
       type: 'task_settled',
       taskRef: task.ref,
@@ -11804,7 +11853,13 @@ export class ChatManager extends LocalEngineRuntime {
       (q) => q.intent?.kind === 'task-finished' && q.intent.taskRef === task.ref && !q.answer,
     );
     if (!alreadyFiled) {
-      const question = taskFinishedQuestion({ task, thread: record, outputs, at: message.at });
+      const question = taskFinishedQuestion({
+        task,
+        thread: record,
+        outputs,
+        at: message.at,
+        ...(figures ? { figures } : {}),
+      });
       await this.store.writeQuestion(question);
       this.events.publish(scope, { type: 'question_asked', question });
     }

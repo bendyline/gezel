@@ -89,6 +89,26 @@ describe('ownerStepQuestion', () => {
     // A deck would render as bytes; the first readable artifact is previewed.
     expect(q.documentPath).toBe('tasks/2/notes.md');
   });
+
+  // The owner approved a quote whose subtotal was $100 too high; nothing had
+  // looked at the numbers.
+  it('puts what the figure checks found in front of the owner before they approve', () => {
+    const q = ownerStepQuestion({
+      task: task(),
+      step: review,
+      returnTo: draft,
+      askerGezelId: 'kylian',
+      outputs: [{ kind: 'artifact', path: 'tasks/2/quote.md' }],
+      figures: {
+        problems: ['The subtotal says $297.00, but the items above it add up to $197.00.'],
+        checked: ['sums'],
+      },
+    });
+    expect(q.prompt).toContain(
+      'Before you approve, check:\n\n- The subtotal says $297.00, but the items above it add up to $197.00.',
+    );
+    expect(q.prompt.trim().endsWith('goes back to "Draft posts".')).toBe(true);
+  });
 });
 
 describe('answerOwnerStep', () => {

@@ -697,6 +697,13 @@ scale (a report title must not out-shout the question it belongs to), and
 an *answered* card — which collapses to one line — stays single-column,
 because a full-height panel beside one sentence reads as broken.
 
+**A question card has one filled action.** Submit is terracotta; Skip,
+Open in chat and Pause task take the secondary face
+(`.pending-question-skip`, `.pending-question-open`), and Cancel task takes
+the danger face (`.pending-question-cancel-task`). The task steers sit behind
+a hairline as their own group. A card that rendered five equal terracotta
+buttons made ending the task look as ordinary as answering.
+
 **A question drawer answers, so the answer keys stay on screen.** The Updates
 drawer hangs from the header and stops short of the window's bottom edge; what
 it holds is a control surface, not a page. When the question is longer than the

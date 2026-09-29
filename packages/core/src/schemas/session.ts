@@ -884,6 +884,7 @@ export const TimelineMessageSchema = z.object({
       'keurmeester-notice',
       'craftbook-launch',
       'task-wrapup',
+      'crew-introduction',
     ])
     .optional(),
   /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */

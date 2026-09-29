@@ -76,6 +76,12 @@ export function HomeWorkshop({
       return next;
     });
   }, []);
+  // Once the person is talking, the greeting steps aside for this visit: at
+  // full height it squeezed the conversation to a third of the window. Not
+  // persisted, and a manual toggle always wins.
+  const collapseForConversation = useCallback(() => {
+    if (!userToggledCollapse.current) setCollapsed(true);
+  }, []);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
   const [statusRunning, setStatusRunning] = useState(false);
@@ -286,6 +292,7 @@ export function HomeWorkshop({
               meesterIcon={meesterIcon}
               meesterPoppetje={meesterPoppetje}
               meesterIconOverride={meesterIconOverride}
+              onTurnStarted={collapseForConversation}
             />
           ) : (
             <section className="home-workshop-conversation">

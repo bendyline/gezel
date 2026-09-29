@@ -264,7 +264,17 @@ export function ProviderModelSelect({
   }, [globalProvider]);
 
   if (loading) {
-    return <span className="muted small">loading providers…</span>;
+    // The current choice is known before any provider answers, and the
+    // slowest probe (Ollama, Copilot) can take seconds; a header reading
+    // "Model: loading providers…" said nothing a person could use.
+    const current = provider
+      ? `${providerLabelFor(provider)}${model ? ` · ${model}` : ''}`
+      : inheritLabel;
+    return (
+      <span className="muted small" aria-busy="true">
+        {current}
+      </span>
+    );
   }
   if (!entries || entries.length === 0) {
     // No configured providers at all — degenerate case (fresh install,

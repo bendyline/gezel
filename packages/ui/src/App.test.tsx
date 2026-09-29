@@ -440,6 +440,45 @@ describe('Night Shift header status', () => {
     expect(screen.getByText('Working on')).toBeInTheDocument();
   });
 
+  // A fresh install listed oversight work "queued for tonight" that no model
+  // could run.
+  it('says the shift waits for a chat model on a fresh install', async () => {
+    const user = userEvent.setup();
+    const config = vi.mocked(api.getConfig).getMockImplementation();
+    const models = vi.mocked(api.listLlamaCppModels).getMockImplementation();
+    const tasks = vi.mocked(api.getNightShiftTasks).getMockImplementation();
+    try {
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as never);
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] });
+      vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+      vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+        background: [],
+        active: [],
+        upcoming: [
+          {
+            ref: 'default/1',
+            title: 'Night-shift oversight: project review',
+            projectId: 'default',
+          } as never,
+        ],
+      });
+      render(<App />);
+
+      await user.click(
+        await screen.findByRole('button', { name: /^Task speed: .*Click to change\.$/ }),
+      );
+
+      expect(
+        await screen.findByText('Night Shift starts once a chat model is installed.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Queued for tonight')).not.toBeInTheDocument();
+    } finally {
+      if (config) vi.mocked(api.getConfig).mockImplementation(config);
+      if (models) vi.mocked(api.listLlamaCppModels).mockImplementation(models);
+      if (tasks) vi.mocked(api.getNightShiftTasks).mockImplementation(tasks);
+    }
+  });
+
   it('says plainly when an active shift has no real work in flight or queued', async () => {
     const user = userEvent.setup();
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });

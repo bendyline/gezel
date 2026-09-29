@@ -113,7 +113,7 @@ import {
   sortAggregates,
 } from '../components/file-view-modes.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
-import { navigateToTab } from '../components/nav-actions.js';
+import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import {
@@ -527,6 +527,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     size?: number;
     outsideIn?: OutsideInOpenFile;
   } | null>(null);
+  // A file opened from a pending question: its viewer offers the way back,
+  // which a person reviewing a quote otherwise had to hunt for.
+  const [questionReturnPath, setQuestionReturnPath] = useState<string | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus | null>(
     null,
   );
@@ -1206,8 +1209,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // `openProject` whose `setSelected` hasn't flushed yet (the search quick-open
   // path). Switches to the right file panel, then loads the file.
   const focusFile = useCallback(
-    async (projectId: string, path: string, source: FileTab, line?: number) => {
+    async (
+      projectId: string,
+      path: string,
+      source: FileTab,
+      line?: number,
+      fromQuestion?: boolean,
+    ) => {
       setTab(source);
+      setQuestionReturnPath(fromQuestion ? path : null);
       const name = path.slice(path.lastIndexOf('/') + 1);
       const media = mediaSentinel(name);
       if (media) {
@@ -1264,12 +1274,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   useEffect(() => {
     const onOpenFile = (e: Event) => {
       const d = (
-        e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab; line?: number }>
+        e as CustomEvent<{
+          projectId?: string;
+          path?: string;
+          source?: FileTab;
+          line?: number;
+          fromQuestion?: boolean;
+        }>
       ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source, d.line);
+        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1282,7 +1298,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (!forceProjectId) return;
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
-      if (intent) void focusFile(forceProjectId, intent.path, intent.source, intent.line);
+      if (intent) {
+        void focusFile(
+          forceProjectId,
+          intent.path,
+          intent.source,
+          intent.line,
+          intent.fromQuestion,
+        );
+      }
     });
   }, [forceProjectId, openProject, focusFile]);
 
@@ -3323,6 +3347,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             onUpdateIssue={updateWorkspaceIssue}
                             onOpenTask={(taskRef) => navigateToTab({ kind: 'task', ref: taskRef })}
                           />
+                        ) : undefined
+                      }
+                      viewerNotice={
+                        openFile && questionReturnPath === openFile.path ? (
+                          <div className="file-viewer-return">
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => {
+                                setQuestionReturnPath(null);
+                                openUpdates();
+                              }}
+                            >
+                              ← Back to the question
+                            </button>
+                            <span title={openFile.path}>{openFile.path.split('/').at(-1)}</span>
+                          </div>
                         ) : undefined
                       }
                       viewer={

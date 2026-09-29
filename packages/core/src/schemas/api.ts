@@ -6828,6 +6828,7 @@ export const SessionDebugSnapshotSchema = z.object({
           'keurmeester-notice',
           'craftbook-launch',
           'task-wrapup',
+          'crew-introduction',
         ])
         .optional(),
       /**

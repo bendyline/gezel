@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Task, securityPolicyForLevel } from '@bendyline/gezel';
+import { type Task, type TaskCraftbookStep, securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
@@ -534,6 +534,42 @@ describe('ChatManager — send + persistence', () => {
 
     const disk = await store.getSession('ada', session.id);
     expect(disk!.title).toBe('Meaning life');
+  });
+
+  // The dispatch seed is the machinery's sentence; the extractor turned one
+  // into "Default/2 Bakery Weekly Admin Relief 20th craftbook".
+  it('titles a task thread after its task, not after the dispatch seed', async () => {
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'default',
+      num: 2,
+      ref: 'default/2',
+      title: 'Bakery weekly admin',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        id: 'admin',
+        name: 'Bakery Weekly Admin Relief',
+        steps: [{ id: 'scope', name: 'Scope', createdAt: now }],
+        entryStepId: 'scope',
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'scope',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    const session = await manager.createSession({ gezelId: 'ada', taskRef: 'default/2' });
+    mock.script('On it.');
+    await manager.send(
+      session.id,
+      'Task default/2 ("Bakery Weekly Admin Relief - May 20th") was just created from the **Bakery Weekly Admin Relief** craftbook.',
+      { messageOrigin: 'system' },
+    );
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk?.title).toBe('Bakery weekly admin');
   });
 
   it('names a passive-CC-only session from the later direct user starter', async () => {
@@ -7203,6 +7239,49 @@ describe('ChatManager — served model', () => {
         (s) => s.id === session.id,
       );
       expect(summary?.servedModel).toBe('model-that-runs');
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
+  });
+});
+
+describe('ChatManager — crew introduction', () => {
+  // A copywriter and an omroeper joined the roster mid-task with no word to
+  // the owner.
+  it('introduces a new hire in the thread the owner reads', async () => {
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', new MockProvider({ name: 'copilot' })]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const thread = await localManager.createSession({ gezelId: 'ada' });
+      const hire = await store.createGezel({ name: 'Kylian', role: 'Copywriter' });
+      const task = {
+        projectId: 'default',
+        num: 8,
+        ref: 'default/8',
+        title: 'Bakery weekly admin',
+        status: 'active',
+        launchSessionId: thread.id,
+      } as Task;
+      const step = { id: 'draft', name: 'Draft posts and quotes' } as TaskCraftbookStep;
+
+      await expect(localManager.postCrewIntroduction(task, hire.id, step)).resolves.toBe(thread.id);
+      const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
+      expect(intro).toMatchObject({ role: 'assistant', synthetic: 'crew-introduction' });
+      expect(intro?.content).toBe(
+        'I\'ve brought **Kylian** onto the crew as your Copywriter for **Bakery weekly admin**. Kylian starts with "Draft posts and quotes".',
+      );
+      // The thread's own gezel needs no introduction.
+      await expect(localManager.postCrewIntroduction(task, 'ada', step)).resolves.toBeNull();
     } finally {
       await localManager.drainBackground();
       await localManager.shutdown();

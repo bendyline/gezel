@@ -166,7 +166,7 @@ export function TaskStepTracker({
         }}
       >
         <option value="__inherit">
-          {inheritedName ? `inherit · ${inheritedName}` : 'inherit from task'}
+          {inheritedName ? `${inheritedName} (default)` : 'Default'}
         </option>
         <option value="__user">you</option>
         {gezels.map((g) => (

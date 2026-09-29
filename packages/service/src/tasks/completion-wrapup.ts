@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ChatSession, Question, ReferencedFile, Task } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
+import { type FigureReview, renderFigureReview } from './figure-review.js';
 
 /**
  * The owner's wrap-up when a task they launched from a chat finishes.
@@ -167,6 +168,7 @@ export function taskFinishedQuestion(opts: {
   thread: { id: string; gezelId: string; projectId: string };
   outputs: readonly ReferencedFile[];
   at: string;
+  figures?: FigureReview | null;
 }): Question {
   const { task, thread, outputs } = opts;
   const shown = outputs.slice(0, 3);
@@ -175,6 +177,8 @@ export function taskFinishedQuestion(opts: {
     lines.push('', ...shown.map((file) => `- \`${file.path}\``));
     if (outputs.length > shown.length) lines.push(`- …and ${outputs.length - shown.length} more`);
   }
+  const checks = renderFigureReview(opts.figures, 'Before you send anything, check:');
+  if (checks.length > 0) lines.push('', ...checks);
   const preview = thread.projectId === task.projectId ? previewableArtifact(outputs) : undefined;
   return {
     id: randomUUID(),
@@ -193,7 +197,11 @@ export function taskFinishedQuestion(opts: {
 }
 
 /** The message itself: warm, short, and only true things. */
-export function composeTaskWrapUp(task: Task, outputs: readonly ReferencedFile[]): string {
+export function composeTaskWrapUp(
+  task: Task,
+  outputs: readonly ReferencedFile[],
+  figures?: FigureReview | null,
+): string {
   const lines = [`All done — **${task.title}** is finished.`];
   const shown = outputs.slice(0, WRAP_UP_MAX_FILES);
   if (shown.length === 1) {
@@ -203,6 +211,8 @@ export function composeTaskWrapUp(task: Task, outputs: readonly ReferencedFile[]
     const more = outputs.length - shown.length;
     if (more > 0) lines.push('', `…and ${more} more on the task page (${task.ref}).`);
   }
+  const checks = renderFigureReview(figures, 'Before you send anything, check:');
+  if (checks.length > 0) lines.push('', ...checks);
   lines.push(
     '',
     shown.length > 0

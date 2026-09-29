@@ -78,3 +78,23 @@ describe('MessageBubble user markdown', () => {
     expect(container.querySelector('.msg-user .msg-body-rendered .squisq-linear')).toBeTruthy();
   });
 });
+
+describe('MessageBubble cross-gezel messages', () => {
+  // A consultation opened with "[Question from Zara]: …" quoted at the owner;
+  // the header already names the sender.
+  it('drops the service sentinel from a consultation question', () => {
+    const { container } = render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="user"
+        content="[Question from Zara]: Which three admin jobs should she hand off first?"
+        authorLabel="Dina"
+        authorIcon={null}
+        from={{ gezelId: 'zara', gezelName: 'Zara' }}
+      />,
+    );
+    const body = container.querySelector('.msg-from-gezel .msg-body-rendered');
+    expect(body?.textContent).toContain('Which three admin jobs');
+    expect(body?.textContent).not.toContain('[Question from');
+  });
+});

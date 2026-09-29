@@ -410,7 +410,9 @@ describe('Sidebar', () => {
       projects: [{ id: 'default', name: 'Default' } as Project],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
-    expect(await screen.findByText('No projects yet.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('None of your own yet. Everything else lives in Default.'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the current Default project visible and selected after restore', async () => {
@@ -424,7 +426,9 @@ describe('Sidebar', () => {
     expect(currentProject).toHaveClass('active');
     expect(currentProject).toHaveAttribute('aria-current', 'page');
     expect(currentProject.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
-    expect(screen.queryByText('No projects yet.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('None of your own yet. Everything else lives in Default.'),
+    ).not.toBeInTheDocument();
   });
 
   /**

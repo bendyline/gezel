@@ -16,6 +16,7 @@ describe('MessageBubble indexed context disclosure', () => {
         authorLabel="You"
         authorIcon={null}
         projectId="gezel"
+        debugMode
         retrieval={{
           injectedBytes: 1_024,
           hits: [
@@ -34,7 +35,7 @@ describe('MessageBubble indexed context disclosure', () => {
 
     const retrieval = container.querySelector<HTMLDetailsElement>('.msg-retrieval');
     const source = container.querySelector<HTMLDetailsElement>('.msg-retrieval-source');
-    expect(retrieval).toHaveTextContent('Consulted 1 indexed source · ~256 tokens injected');
+    expect(retrieval).toHaveTextContent('Used 1 source from your files · ~256 tokens injected');
     expect(source).toHaveTextContent('[workspace] src/retrieval.ts:42');
     expect(source).toHaveTextContent('~7 tokens from source');
     expect(retrieval?.open).toBe(false);
@@ -49,6 +50,27 @@ describe('MessageBubble indexed context disclosure', () => {
       'const greeting = "gezellig";',
     );
     expect(container.querySelector('.msg-retrieval-open')).toHaveTextContent('Open source');
+  });
+
+  // "Consulted 1 indexed source · ~349 tokens injected" sat under an owner's
+  // own message: prompt plumbing in their words' place.
+  it('keeps token counts out of the summary outside debug mode', () => {
+    const { container } = render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="user"
+        content="What did we charge Maya?"
+        authorLabel="You"
+        authorIcon={null}
+        retrieval={{
+          injectedBytes: 1_396,
+          hits: [{ source: 'workspace', path: 'quotes/maya.md', line: 1, score: 300 }],
+        }}
+      />,
+    );
+    expect(container.querySelector('.msg-retrieval-summary')).toHaveTextContent(
+      /^Used 1 source from your files$/,
+    );
   });
 
   it('keeps older citation-only turns usable without inventing counts or excerpts', () => {
@@ -66,7 +88,7 @@ describe('MessageBubble indexed context disclosure', () => {
     );
 
     expect(container.querySelector('.msg-retrieval')).toHaveTextContent(
-      'Consulted 1 indexed source',
+      'Used 1 source from your files',
     );
     expect(container.querySelector('.msg-retrieval')).not.toHaveTextContent('tokens injected');
     expect(container.querySelector('.msg-retrieval-source')).toBeNull();

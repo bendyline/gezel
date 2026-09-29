@@ -65,6 +65,9 @@ function describeChecks(checks: GateCheck[]): string {
       case 'listedFiles':
         parts.push(`a file per listed ${c.key}`);
         break;
+      case 'figures':
+        parts.push('sums and dates checked');
+        break;
       case 'sniff':
         parts.push(`${c.sniff}`);
         break;

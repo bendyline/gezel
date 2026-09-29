@@ -690,9 +690,29 @@
    so the pair reads as its own group behind a hairline rather than as two
    more answers. */
 .pending-question-task-steer {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-left: 0.25rem;
   padding-left: 0.75rem;
   border-left: 1px solid var(--border);
+}
+
+/* One filled action per card: Submit. Skip, Open in chat and the task
+   steers had no face of their own and fell through to the filled default,
+   so a card showed five equal terracotta buttons, "Cancel task" among
+   them. */
+.pending-question-skip,
+.pending-question-open {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.pending-question-skip.pending-question-cancel-task {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .pending-question-submit {

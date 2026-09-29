@@ -96,6 +96,14 @@ export {
 } from './prose.js';
 export { wrapperReturnHint } from './runtime-hints.js';
 export {
+  checkFigures,
+  extractMoneyAmounts,
+  type FigureCheckOptions,
+  type FigureCheckResult,
+  type FigureFinding,
+  type FigureFindingKind,
+} from './figures.js';
+export {
   markdownHeadingsMatch,
   type MarkdownHeadingsMatchResult,
 } from './markdown.js';

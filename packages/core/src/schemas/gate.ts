@@ -99,6 +99,16 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minBytes: z.number().int().positive().optional(),
     artifact: z.boolean().optional(),
   }),
+  /**
+   * The figures in `file` hold up: subtotals match their items, quantity ×
+   * unit price matches each line, weekdays match their dates, and no date
+   * with a year has clearly passed. For quotes, invoices and schedules.
+   */
+  z.object({
+    kind: z.literal('figures'),
+    file: z.string().min(1),
+    artifact: z.boolean().optional(),
+  }),
   /** Inline `<style>` + linked `.css` in `file` (default index.html) clears `bytes`. */
   z.object({
     kind: z.literal('cssMinBytes'),

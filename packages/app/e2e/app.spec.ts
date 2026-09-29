@@ -206,7 +206,7 @@ test('07 - projects group hides the built-in default project', async () => {
   await captureScreenshot(page, { path: join(screenshotDir, '07-projects.png'), fullPage: true });
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
-  await expect(sidebar).toContainText('No projects yet');
+  await expect(sidebar).toContainText('None of your own yet');
   await expect(sidebar).not.toContainText('Default');
 });
 

@@ -10,6 +10,7 @@ import {
   parseTaskRef,
 } from '@bendyline/gezel';
 import { previewableArtifact } from './completion-wrapup.js';
+import { type FigureReview, renderFigureReview } from './figure-review.js';
 import type { TaskManager } from './manager.js';
 
 const log = createLogger('tasks');
@@ -62,6 +63,8 @@ export function ownerStepQuestion(opts: {
   askerGezelId: string;
   /** What the task has made so far (`loadTaskOutputs`). */
   outputs?: readonly ReferencedFile[];
+  /** What checking those files' numbers found (`reviewTaskFigures`). */
+  figures?: FigureReview | null;
 }): Question {
   const { task, step, returnTo } = opts;
   const intent: StepAwaitsOwnerIntent = {
@@ -78,6 +81,7 @@ export function ownerStepQuestion(opts: {
   const files = filesUnderReview(task, step, opts.outputs ?? []);
   const shown = files.slice(0, REVIEW_MAX_FILES);
   const more = files.length - shown.length;
+  const checks = renderFigureReview(opts.figures, 'Before you approve, check:');
   const prompt =
     shown.length === 0
       ? `${head} ${choose}`
@@ -92,6 +96,7 @@ export function ownerStepQuestion(opts: {
               : `- \`${file.path}\` (in the project folder)`,
           ),
           ...(more > 0 ? [`- …and ${more} more`] : []),
+          ...(checks.length > 0 ? ['', ...checks] : []),
           '',
           choose,
         ].join('\n');

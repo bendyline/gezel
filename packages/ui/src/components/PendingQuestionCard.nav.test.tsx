@@ -138,7 +138,13 @@ describe('PendingQuestionCard navigation', () => {
       { type: 'gezel:open-tab', detail: { kind: 'project', id: 'learning' } },
       {
         type: 'gezel:open-file',
-        detail: { projectId: 'learning', path: 'reviews/weekly.md', source: 'artifacts' },
+        // The viewer offers the way back to the question it came from.
+        detail: {
+          projectId: 'learning',
+          path: 'reviews/weekly.md',
+          source: 'artifacts',
+          fromQuestion: true,
+        },
       },
     ]);
   });

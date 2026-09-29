@@ -276,10 +276,10 @@ function TaskLifecycleActions({
 
   if (!ref) return null;
   return (
-    <>
+    <span className="pending-question-task-steer">
       <button
         type="button"
-        className="pending-question-skip pending-question-task-steer subtle"
+        className="pending-question-skip subtle"
         onClick={() => void steer('paused')}
         disabled={disabled || busy !== null}
         title="Stop the task here. It keeps its progress and can be resumed later."
@@ -288,14 +288,14 @@ function TaskLifecycleActions({
       </button>
       <button
         type="button"
-        className="pending-question-skip subtle"
+        className="pending-question-skip pending-question-cancel-task subtle"
         onClick={() => void steer('canceled')}
         disabled={disabled || busy !== null}
         title="End the task. It stops for good — its notes and artifacts stay."
       >
         {busy === 'canceled' ? 'Canceling…' : 'Cancel task'}
       </button>
-    </>
+    </span>
   );
 }
 
@@ -1684,7 +1684,9 @@ function DocumentContext({
       const path =
         resolvedFrom?.relativePath ??
         documentPath.replace(/^projects\/[^/]+\//, '').replace(/^artifacts\//, '');
-      runNavActions(openProjectFileActions({ projectId: owner, path, source: 'artifacts' }));
+      runNavActions(
+        openProjectFileActions({ projectId: owner, path, source: 'artifacts', fromQuestion: true }),
+      );
       return;
     }
     if (resolvedKind === 'project-document') {

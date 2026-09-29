@@ -54,7 +54,18 @@ vi.mock('@bendyline/gezel-client', async () => {
 // are pulled in by HomeWorkshop's conversation, not by HomeView directly —
 // the module-level mocks apply regardless of the importer.
 vi.mock('../components/ChatComposer.js', () => ({
-  ChatComposer: () => <div data-testid="chat-composer">composer</div>,
+  ChatComposer: ({
+    onTurnStateChange,
+  }: {
+    onTurnStateChange?: (state: 'idle' | 'streaming') => void;
+  }) => (
+    <div data-testid="chat-composer">
+      composer
+      <button type="button" onClick={() => onTurnStateChange?.('streaming')}>
+        mock send
+      </button>
+    </div>
+  ),
 }));
 vi.mock('../components/ChatReferences.js', () => ({
   ChatReferences: ({
@@ -846,6 +857,25 @@ describe('HomeView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
     expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: false });
+  });
+
+  // At full height the band squeezed the conversation to a third of the
+  // window until the owner found the collapse control.
+  it('steps the greeting aside once the owner starts talking, without saving it', async () => {
+    render(<HomeView />);
+    await waitFor(() => {
+      expect(screen.getByText('Tip of the day')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    });
+    expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+
+    // Reopened by hand, it stays open through the next message.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
+    fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
+    expect(screen.getByText('Tip of the day')).toBeInTheDocument();
   });
 
   it('starts collapsed when the saved preference says so', async () => {

@@ -19,6 +19,8 @@ export interface OpenFileIntent {
   /** 1-based line to reveal after opening — a search hit's match location. */
   line?: number;
   lineEnd?: number;
+  /** Opened from a pending question's document; the viewer offers the way back. */
+  fromQuestion?: boolean;
 }
 
 interface StoredIntent extends OpenFileIntent {

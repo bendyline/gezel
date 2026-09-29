@@ -756,15 +756,16 @@ export function MessageBubble({
   // one row per citation, path rows deep-linking through the same
   // queue-then-dispatch nav actions as titlebar search results (E1-anchored).
   const retrievalHits = retrieval?.hits ?? [];
+  // Token counts are prompt plumbing; the owner sees them only in debug mode.
   const retrievalTokenLabel =
-    retrieval?.injectedBytes !== undefined
+    debugMode && retrieval?.injectedBytes !== undefined
       ? ` · ${formatEstimatedTokens(retrieval.injectedBytes)} injected`
       : '';
   const consultedSources =
     retrievalHits.length > 0 ? (
       <details className="msg-retrieval">
         <summary className="msg-retrieval-summary">
-          Consulted {retrievalHits.length} indexed source{retrievalHits.length === 1 ? '' : 's'}
+          Used {retrievalHits.length} source{retrievalHits.length === 1 ? '' : 's'} from your files
           {retrievalTokenLabel}
         </summary>
         <ul className="msg-retrieval-list">
@@ -1042,7 +1043,11 @@ export function MessageBubble({
           <div className="msg-body msg-body-empty muted">
             <em>
               {recoveredInNextTurn
-                ? '(continued in the next turn)'
+                ? // A gezel whose turns were all tool calls read as nothing
+                  // but this stub; what it last did says more.
+                  toolCalls && toolCalls.length > 0
+                  ? summarizeTerminalToolCall(toolCalls)
+                  : '(continued in the next turn)'
                 : synthetic === 'turn-aborted'
                   ? warnings && warnings.length > 0
                     ? '(this turn was stopped before the model wrote a reply — see the notice below)'
@@ -1516,14 +1521,14 @@ export function formatDebugBundle(opts: {
 }
 
 /**
- * Strip the `[Message from {Name}]: ` sentinel the service prefixes onto
- * cross-gezel messages for the model's benefit. The header already shows
- * the sender, so the body reads cleaner without it.
+ * Strip the `[Message from {Name}]: ` / `[Question from {Name}]: ` sentinel
+ * the service prefixes onto cross-gezel messages for the model's benefit.
+ * The header already shows the sender, so the body reads cleaner without it.
  */
 function stripFromPrefix(content: string, fromName: string): string {
-  const prefix = `[Message from ${fromName}]:`;
-  if (content.startsWith(prefix)) {
-    return content.slice(prefix.length).trimStart();
+  for (const kind of ['Message', 'Question']) {
+    const prefix = `[${kind} from ${fromName}]:`;
+    if (content.startsWith(prefix)) return content.slice(prefix.length).trimStart();
   }
   return content;
 }

@@ -52,6 +52,7 @@ describe('PromptMeesterCraftbookPrelude', () => {
     // A Meester-authored book gated a multi-platform draft on size alone and
     // gave its review step to a gezel; a missing variant went through.
     expect(out).toContain('"listedFiles"');
+    expect(out).toContain('{ kind: "figures", file }');
     expect(out).toContain('approval steps belong to the user');
   });
 

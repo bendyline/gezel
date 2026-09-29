@@ -67,7 +67,7 @@ describe('TaskStepTracker assignee picker', () => {
     const picker = await screen.findByRole('combobox', {
       name: 'Assignee for Acquire and verify sources',
     });
-    await waitFor(() => expect(within(picker).getByText('inherit · Agathe')).toBeInTheDocument());
+    await waitFor(() => expect(within(picker).getByText('Agathe (default)')).toBeInTheDocument());
     expect(within(picker).getByText('Daouda · Slide Designer')).toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe('TaskStepTracker assignee picker', () => {
       name: 'Assignee for Acquire and verify sources',
     });
     await waitFor(() =>
-      expect(within(picker).getByText('inherit · research-analyst')).toBeInTheDocument(),
+      expect(within(picker).getByText('research-analyst (default)')).toBeInTheDocument(),
     );
     expect(within(picker).getByText('slide-designer')).toBeInTheDocument();
     expect(within(picker).queryByText(/Daouda/)).toBeNull();
