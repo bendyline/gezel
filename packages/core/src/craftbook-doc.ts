@@ -9,6 +9,7 @@ import type {
 import {
   CraftbookDocSchema,
   nearestMatch,
+  parseTolerant,
   slugifyStepId,
   sniffCraftbookDocFormat,
   stepOnEnterProducesAdvanceFile,
@@ -29,12 +30,23 @@ import {
  */
 
 export type ParseCraftbookDocResult =
-  | { ok: true; doc: CraftbookDoc }
+  | { ok: true; doc: CraftbookDoc; ignored?: string[] }
   | { ok: false; errors: CraftbookDocError[] };
+
+export interface ParseCraftbookDocOptions {
+  /**
+   * Read a book authored for a newer gezel: values this build does not
+   * understand are dropped and listed in `ignored` instead of failing the
+   * whole book (see `parseTolerant`). For catalog readers only — every
+   * authoring path stays strict so a model learns about its mistakes.
+   */
+  tolerant?: boolean;
+}
 
 export function parseCraftbookDoc(
   text: string,
   format?: CraftbookDocFormat,
+  opts?: ParseCraftbookDocOptions,
 ): ParseCraftbookDocResult {
   const fmt = format ?? sniffCraftbookDocFormat(text);
   let raw: unknown;
@@ -57,6 +69,26 @@ export function parseCraftbookDoc(
     const md = parseCraftbookMarkdown(text);
     if (!md.ok) return { ok: false, errors: md.errors };
     raw = md.doc;
+  }
+  return parseCraftbookDocValue(raw, opts);
+}
+
+/**
+ * {@link parseCraftbookDoc} for a document that is already a value — the
+ * catalog's file-bundle index carries `craftbook.json` as parsed JSON.
+ */
+export function parseCraftbookDocValue(
+  raw: unknown,
+  opts?: ParseCraftbookDocOptions,
+): ParseCraftbookDocResult {
+  if (opts?.tolerant) {
+    const tolerant = parseTolerant(CraftbookDocSchema, raw);
+    if (!tolerant.ok) return { ok: false, errors: zodIssuesToDocErrors(tolerant.issues, raw) };
+    const inlined = inlineScriptBodyErrors(raw);
+    if (inlined.length > 0) return { ok: false, errors: inlined };
+    return tolerant.ignored.length > 0
+      ? { ok: true, doc: tolerant.data, ignored: tolerant.ignored }
+      : { ok: true, doc: tolerant.data };
   }
   const parsed = CraftbookDocSchema.safeParse(raw);
   if (!parsed.success) {

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { gildeDataDir } from '@bendyline/gezel-catalog';
+import type { CatalogItemManifest, CatalogKind } from '@bendyline/gezel';
+import { BundledSource, gildeDataDir } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY } from '@bendyline/gezel-mcp';
 import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contracts';
 import fg from 'fast-glob';
@@ -213,18 +214,25 @@ function repoRoot(): string {
   return fileURLToPath(new URL('../../../../', import.meta.url));
 }
 
+/**
+ * The kind's items as this build resolves them, through the catalog loader
+ * rather than any one index file, so the audit follows whichever index the
+ * resolved gilde ships.
+ */
+async function catalogManifests(
+  dataDir: string,
+  kind: CatalogKind,
+): Promise<CatalogItemManifest[]> {
+  return (await new BundledSource({ dataDir }).list(kind)).map((item) => item.manifest);
+}
+
 async function readCatalogToolsets(dataDir: string): Promise<Map<string, readonly string[]>> {
-  const indexPath = resolve(dataDir, 'toolsets/index.json');
-  const parsed = JSON.parse(await readFile(indexPath, 'utf8')) as {
-    entries?: Array<{ manifest?: { id?: string; tools?: Array<{ name?: string }> } }>;
-  };
   const toolsets = new Map<string, readonly string[]>();
-  for (const entry of parsed.entries ?? []) {
-    const id = entry.manifest?.id;
-    if (!id) continue;
+  for (const manifest of await catalogManifests(dataDir, 'toolset')) {
+    if (manifest.kind !== 'toolset') continue;
     toolsets.set(
-      id,
-      (entry.manifest?.tools ?? [])
+      manifest.id,
+      manifest.tools
         .map((tool) => tool.name)
         .filter((name): name is string => typeof name === 'string' && name.length > 0),
     );
@@ -238,19 +246,12 @@ async function readCatalogToolsets(dataDir: string): Promise<Map<string, readonl
 async function projectTypeToolsByGezelTemplate(
   dataDir: string,
 ): Promise<Map<string, readonly string[]>> {
-  const index = JSON.parse(
-    await readFile(resolve(dataDir, 'project-types/index.json'), 'utf8'),
-  ) as {
-    entries?: Array<{
-      manifest?: { id?: string; version?: string; availableVersions?: string[] };
-    }>;
-  };
   const byTemplate = new Map<string, Set<string>>();
-  for (const item of index.entries ?? []) {
-    const id = item.manifest?.id;
-    const version = item.manifest?.version;
-    if (!id || !version) continue;
-    for (const selectedVersion of item.manifest?.availableVersions ?? [version]) {
+  for (const { id, version, availableVersions } of await catalogManifests(
+    dataDir,
+    'project-type',
+  )) {
+    for (const selectedVersion of availableVersions ?? [version]) {
       const path = resolve(
         dataDir,
         'project-types',
@@ -420,38 +421,24 @@ async function generatedCatalogEntries(
     return value;
   };
 
-  for (const kind of [
-    'craftbook-templates',
-    'gezel-templates',
-    'project-types',
-    'toolsets',
+  for (const [kind, catalogKind] of [
+    ['craftbook-templates', 'craftbook-template'],
+    ['gezel-templates', 'gezel-template'],
+    ['project-types', 'project-type'],
+    ['toolsets', 'toolset'],
   ] as const) {
-    const index = JSON.parse(await readFile(resolve(dataDir, `${kind}/index.json`), 'utf8')) as {
-      entries?: Array<{
-        manifest?: {
-          id?: string;
-          version?: string;
-          availableVersions?: string[];
-          tools?: Array<{ name?: string }>;
-        };
-      }>;
-    };
-    for (const item of index.entries ?? []) {
-      const id = item.manifest?.id;
-      const currentVersion = item.manifest?.version;
-      if (!id || !currentVersion) continue;
+    for (const manifest of await catalogManifests(dataDir, catalogKind)) {
+      const { id, version: currentVersion } = manifest;
       const itemDir = resolve(dataDir, kind, id.slice(0, 2), id);
       const currentDeclaredTools =
-        kind === 'toolsets'
-          ? (item.manifest?.tools ?? [])
-              .map((tool) => tool.name)
-              .filter((name): name is string => Boolean(name))
+        manifest.kind === 'toolset'
+          ? manifest.tools.map((tool) => tool.name).filter((name): name is string => Boolean(name))
           : kind === 'gezel-templates'
             ? [...(roleProjectTools.get(id) ?? [])]
             : [];
       await addJson(resolve(itemDir, 'manifest.json'), currentDeclaredTools);
-      const versions = item.manifest?.availableVersions?.length
-        ? item.manifest.availableVersions
+      const versions = manifest.availableVersions?.length
+        ? manifest.availableVersions
         : [currentVersion];
       for (const version of versions) {
         const versionDir = resolve(itemDir, 'versions', version);

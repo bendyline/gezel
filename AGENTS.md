@@ -169,7 +169,13 @@ Catalog **content** is not in this repo. It lives across three repos:
   published package and the checkout are interchangeable. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation
   (ajv against `schemas/*.schema.json`, which are **generated from
-  core's Zod schemas** — see Gotchas). It takes open-source PRs.
+  core's Zod schemas** — see Gotchas). `build-index` writes two indexes
+  per kind directory: `raw-index.json`, the item files verbatim (identity,
+  every version's stamp, the newest payload), which this build lists from
+  and resolves with its own code; and the legacy `index.json`, a resolved
+  manifest re-derived through gilde's schema copy and a port of gezel's
+  merge, kept only for older builds live-updating on the current minor
+  line — drop it at the next minor bump. It takes open-source PRs.
 - **[`bendyline/gilde-pipeline`](https://github.com/bendyline/gilde-pipeline)**
   — verifies gilde, publishes `@bendyline/gilde` to npm (patch version
   injected at publish; the committed gilde version is the minor line),
@@ -196,12 +202,26 @@ data-contract tests.
 
 **If your content edit uses a value newly added to a core Zod schema**
 (a fresh `style.family`, behavior id, tool-grammar format, engine enum,
-etc.), run `pnpm gilde:export-schemas` **before** `build-index` — else the
-manifest fails gilde's generated `schemas/*.schema.json` ajv identity
-check and `build-index` **silently drops the item from the index** (no
-error; surfaced only by `node ../gilde/tools/build-index.mjs --verbose` as
-`skip … invalid-identity`). The daemon then falls back to defaults as if
-your edit never happened. See the `gilde:export-schemas` gotcha below.
+etc.), run `pnpm gilde:export-schemas` so gilde's validation accepts it,
+and rebuild the service: a daemon built before the value drops it (see
+below). With stale schemas, `build-index` also **silently drops the item
+from the legacy `index.json`** (`--verbose` → `skip … invalid-identity`);
+only builds that predate `raw-index.json` read that file.
+
+**Gezel and gilde are not in schema lockstep.** Every catalog read — identity,
+version manifest, `craftbook.json`, and each index entry — goes
+through core's own schemas via `parseTolerant`
+([schemas/tolerant-parse.ts](packages/core/src/schemas/tolerant-parse.ts)):
+a value this build does not understand (an unknown gate check kind, enum
+value, or key in a strict object) is dropped and logged once as
+`ignored what this build does not understand`, instead of failing the
+whole item. Required values are never dropped; an item that is
+structurally incompatible still fails. So content may run ahead of the app,
+and the app ahead of gilde's schema snapshot, in either direction. When a
+new field is load-bearing (ignoring it would make the item *wrong*, not just
+less capable), the content sets `minGezelVersion` and older builds skip that
+version. Authoring paths (`craftbook_write`, gilde validation, the exporter)
+stay strict.
 
 **Live gilde updates (opt-in, default off).** Between app releases, the
 daemon can pick up newer gilde content on its own:
@@ -225,8 +245,9 @@ keeps absolute priority — with it set the manager reports `overridden` and
 never fetches, so dev/`link:gilde`/evals are unaffected. Line bumps (new
 minor) deliberately ride app releases, and the identity pick-lists in
 `mergeIdentityAndVersion` (source.ts) still drop manifest *fields* this
-build doesn't know — live updates deliver value changes and new items, not
-new schema surface.
+build doesn't know. Newer schema surface inside an existing item no longer
+blocks activation: the tolerant read drops what this build cannot use, so
+the item still resolves and the no-regression gate passes.
 
 ## Core concepts
 
@@ -574,9 +595,9 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 - **Squisq editor is an external package** ([`bendyline/squisq`](https://github.com/bendyline/squisq)) — some integration points live in that repository, whose local checkout location is not fixed. Use `pnpm link:squisq` when testing a sibling checkout. When a new capability belongs in Squisq (for example, the chat composer's `submitOnEnter` prop), change it there and rebuild before updating Gezel's pinned package versions. One caveat while linked: `pnpm build:bundle` uses pnpm's dedicated-lockfile deploy, so the bundle reflects the registry resolutions recorded in `pnpm-lock.yaml`, not your sibling checkout. Never reintroduce an in-place edit/restore of `pnpm-workspace.yaml`; another task can observe that transient file.
 - **Gilde content is external** ([`bendyline/gilde`](https://github.com/bendyline/gilde)) — same shape as squisq: sibling checkout at `../gilde` and `pnpm link:gilde` / `pnpm unlink:gilde`. CI and release workflows run `pnpm check:local-links` before dependency installation so a committed `link:` override fails with a clear message. That guard only *enforces* when `CI` is set (or `GEZEL_ENFORCE_LOCAL_LINKS=1`) — a local `pnpm validate` / `pnpm all` just warns, so the full gate stays runnable while linked, and hard-fails only when a link points at a checkout that is not on disk. Content correctness gates run in gezel CI against the *pinned* `@bendyline/gilde` version (the catalog package's data-contract tests), so a bad content release fails here at bump time, before it ships.
 - **`@bendyline/gilde` must keep `./package.json` exported.** The catalog loader locates the content root via `createRequire(...).resolve('@bendyline/gilde/package.json')` ([gilde-data.ts](packages/catalog/src/gilde-data.ts)). If a gilde release ships an `exports` map without that subpath, resolution throws and the service boots with an **empty catalog** — no error, just no models/templates/craftbooks. Guarded by `packages/catalog/src/gilde-data.test.ts` (mirror of the mcp `./dist/server.js` gotcha).
-- **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. Gilde CI validation is deliberately *looser* than the runtime (Zod refinements don't survive `z.toJSONSchema`); gezel's `.parse()` of the pinned content stays authoritative. The exporter throws on unrepresentable constructs (e.g. `z.transform`) rather than silently weakening gilde CI. **Forgetting to regenerate has a silent failure mode:** a manifest that uses a newly-added enum value (family/behavior/format) fails the stale generated schema's ajv identity check, so `build-index` drops it from the index with no error (`--verbose` → `skip … invalid-identity`) and the daemon serves it with default tuning. Regenerate before `build-index` whenever a content edit depends on a core-schema change — see the content-change dance above.
+- **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. Drift never fails gezel CI: [gilde-schema-freshness.test.ts](packages/catalog/src/gilde-schema-freshness.test.ts) reports it on stderr and in the GitHub job summary, because the runtime reads content tolerantly (see "not in schema lockstep" above) and a stale snapshot only limits what gilde content can *use*. Gilde CI validation is deliberately *looser* than the runtime (Zod refinements don't survive `z.toJSONSchema`); gezel's `.parse()` of the pinned content stays authoritative. The exporter throws on unrepresentable constructs (e.g. `z.transform`) rather than silently weakening gilde CI. **Forgetting to regenerate is quiet, not silent data loss:** gilde's validation flags content that uses the new value, and the legacy `index.json` (read only by builds that predate `raw-index.json`) drops the item (`build-index --verbose` → `skip … invalid-identity`). Current builds list from `raw-index.json`, which carries the files verbatim, so nothing reaches the daemon through gilde's schema copy.
 - **A packaged build with Copilot not installed fails *fast*, not slow.** Don't diagnose it as a cold-start timeout. The SDK is an on-demand toolset and is stripped from the shipped bundle by `pnpm deploy --prod`, so `loadSdk()` throws immediately; the error says "install it in Settings" and carries `isActionable = true`. That marker is load-bearing — without it `ChatManager.ensureProvider` rewrites the message into "check your credentials", pointing at the wrong problem.
-- **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. **Forgetting has a silent failure mode:** a manifest that uses a newly-added enum value (family/behavior/format) fails the stale generated schema's ajv identity check, so `build-index` drops it from the index with no error (`--verbose` → `skip … invalid-identity`) and the daemon serves it with default tuning as if your edit never happened.
+- **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. Drift never fails gezel CI: [gilde-schema-freshness.test.ts](packages/catalog/src/gilde-schema-freshness.test.ts) reports it on stderr and in the GitHub job summary, because the runtime reads content tolerantly (see "not in schema lockstep" above) and a stale snapshot only limits what gilde content can *use*. **Forgetting to regenerate is quiet, not silent data loss:** gilde's validation flags content that uses the new value, and the legacy `index.json` (read only by builds that predate `raw-index.json`) drops the item (`build-index --verbose` → `skip … invalid-identity`). Current builds list from `raw-index.json`, which carries the files verbatim, so nothing reaches the daemon through gilde's schema copy.
 - **Textual tool-call markup cannot carry nested arguments.** Every salvage format in [local-tool-call-salvage.ts](packages/service/src/providers/local-tool-call-salvage.ts) — Hermes `<parameter=KEY>`, Claude `<parameter>`, GLM `<arg_value>`, XML attributes, shell-style — is a flat KEY→text map, so a parameter declared `object`/`array` arrives as a *string*. Invisible while every wired tool took flat scalars; the first toolset with non-scalar top-level args turned it into an unbreakable loop — the validator says `got string, expected object`, the model re-emits the identical correct JSON, the markup flattens it again. The defense is schema-gated coercion in [tool-arg-schema-coercion.ts](packages/service/src/providers/tool-arg-schema-coercion.ts); if you add a salvage format, route its args through it rather than parsing JSON blindly.
 - **A repeated, unresolved tool-validation failure hard-blocks `advance_task_step`.** [unresolved-tool-failure-ledger.ts](packages/service/src/providers/unresolved-tool-failure-ledger.ts) is pool-scoped, because the failing tool normally lives on a third-party bridge while the task tools live on gezel-mcp. Two *identical* validation rejections on the same tool with no later success and the bridge refuses `advance_task_step` before dispatch. Any success clears it; a *different* validation error restarts the count; transport faults and permission denials never count. `set_task_status` is deliberately not gated — pausing is the honest exit and a blocked gezel must keep one.
 - **A runtime hint may only name tools the turn actually wired — and only for the right drawer.** A steer hardcoding `replace_in_file`/`replace_lines` (workspace tools) on a writes-off project whose only payload tool was `write_artifact` forbade the one call the session could make and prescribed two it could not. Behaviors that steer toward a specific tool gate positively on `PromptCtx.availableToolNames` and return null when it is absent. Same failure class as ADR 0001, one layer down.

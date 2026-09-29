@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BundledSource } from './source.js';
+import { categorizeToolset } from './categorize.js';
+import { BundledSource, FILE_INDEX_FILENAME } from './source.js';
 
 /**
  * Build a minimal bundled-data tree on disk so we can exercise the
@@ -809,6 +810,75 @@ describe('BundledSource — craftbook template layouts', () => {
     const src = new BundledSource({ dataDir: root, noIndex: true });
     expect(await src.get('craftbook-template', 'mm-book')).toBeNull();
   });
+
+  const knownCheck = { kind: 'minBytes', file: 'quote.md', bytes: 10 };
+  const futureCheck = { kind: 'teleport', file: 'quote.md' };
+
+  async function writeGatedBook(id: string, checks: unknown[]): Promise<void> {
+    const dir = await writeIdentity(root, 'craftbook-template', id, craftbookIdentity(id));
+    const vdir = join(dir, 'versions', '1.0.0');
+    await mkdir(vdir, { recursive: true });
+    await writeFile(
+      join(vdir, 'craftbook.json'),
+      JSON.stringify({
+        name: `${id} book`,
+        entryStepId: 'go',
+        steps: [{ id: 'go', name: 'Go', gate: { checks } }],
+        version: '1.0.0',
+        releasedAt: '2026-04-22T00:00:00Z',
+      }),
+    );
+  }
+
+  async function writeIndex(manifests: unknown[]): Promise<void> {
+    await writeFile(
+      join(root, 'craftbook-templates', 'index.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: 'craftbook-template',
+        count: manifests.length,
+        entries: manifests.map((manifest) => ({ manifest })),
+      }),
+    );
+  }
+
+  // gilde ships on its own schedule: a book that adopts a check this build
+  // predates used to vanish here, and the live-update gate then refused
+  // every gilde update over it.
+  it('reads a book written for a newer gezel, dropping only the check it does not know', async () => {
+    await writeGatedBook('nn-book', [knownCheck, futureCheck]);
+    const detail = await new BundledSource({ dataDir: root, noIndex: true }).get(
+      'craftbook-template',
+      'nn-book',
+    );
+    if (!detail || detail.manifest.kind !== 'craftbook-template') throw new Error('no book');
+    expect(detail.manifest.steps[0]?.gate).toMatchObject({ checks: [knownCheck] });
+  });
+
+  it('reads index entries through its own schema, not whatever the index builder kept', async () => {
+    await writeGatedBook('oo-book', [knownCheck]);
+    const clean = await new BundledSource({ dataDir: root, noIndex: true }).get(
+      'craftbook-template',
+      'oo-book',
+    );
+    if (!clean || clean.manifest.kind !== 'craftbook-template') throw new Error('no book');
+    const ahead = structuredClone(clean.manifest);
+    ahead.name = 'oo-book (indexed)';
+    ahead.steps[0]!.gate = { checks: [knownCheck, futureCheck] } as never;
+    await writeIndex([ahead]);
+
+    const [item] = await new BundledSource({ dataDir: root }).list('craftbook-template');
+    if (item?.manifest.kind !== 'craftbook-template') throw new Error('no indexed book');
+    expect(item.manifest.name).toBe('oo-book (indexed)');
+    expect(item.manifest.steps[0]?.gate).toMatchObject({ checks: [knownCheck] });
+  });
+
+  it('resolves an index entry it cannot read at all from the item folder instead', async () => {
+    await writeGatedBook('pp-book', [knownCheck]);
+    await writeIndex([{ kind: 'craftbook-template', id: 'pp-book', steps: 'reshaped' }]);
+    const items = await new BundledSource({ dataDir: root }).list('craftbook-template');
+    expect(items.map((i) => i.manifest.id)).toEqual(['pp-book']);
+  });
 });
 
 describe('BundledSource — project types', () => {
@@ -1044,5 +1114,150 @@ describe('BundledSource — knowledge-catalog kind', () => {
     });
     const src = new BundledSource(root);
     expect(await src.list('knowledge-catalog')).toHaveLength(0);
+  });
+});
+
+describe('BundledSource — file-bundle index', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'catalog-file-index-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  type Entry = {
+    id: string;
+    identity: object;
+    versions: Array<{ version: string; releasedAt: string; minGezelVersion?: string }>;
+    latest?: { version: string; file: string; payload: object };
+  };
+
+  async function writeFileIndex(kindDir: string, kind: string, items: Entry[]) {
+    await mkdir(join(root, kindDir), { recursive: true });
+    await writeFile(
+      join(root, kindDir, FILE_INDEX_FILENAME),
+      JSON.stringify({
+        format: 'gilde-file-index',
+        schemaVersion: 1,
+        kind,
+        count: items.length,
+        items,
+      }),
+    );
+  }
+
+  const toolsetEntry = (
+    id: string,
+    version = '1.0.0',
+    payload: object = baseToolsetVersion(version),
+  ): Entry => ({
+    id,
+    identity: baseToolsetIdentity(id),
+    versions: [{ version, releasedAt: '2026-04-22T00:00:00Z' }],
+    latest: { version, file: 'manifest.json', payload },
+  });
+
+  it('lists what the folder walk resolves, from one read', async () => {
+    for (const id of ['aa-tool', 'ab-tool']) {
+      await writeVersion(
+        await writeIdentity(root, 'toolset', id, baseToolsetIdentity(id)),
+        '1.0.0',
+        baseToolsetVersion('1.0.0'),
+      );
+    }
+    // Only the index carries this one, so seeing it proves the index was read.
+    await writeFileIndex('toolsets', 'toolset', [
+      toolsetEntry('aa-tool'),
+      toolsetEntry('ab-tool'),
+      toolsetEntry('zz-indexed'),
+    ]);
+
+    const indexed = await new BundledSource({ dataDir: root }).list('toolset');
+    const walked = await new BundledSource({ dataDir: root, noIndex: true }).list('toolset');
+    expect(indexed.map((i) => i.manifest.id)).toEqual(['aa-tool', 'ab-tool', 'zz-indexed']);
+    expect(indexed.slice(0, 2)).toEqual(walked);
+  });
+
+  it('is preferred over the legacy index', async () => {
+    await writeFileIndex('toolsets', 'toolset', [toolsetEntry('aa-tool')]);
+    await writeFile(
+      join(root, 'toolsets', 'index.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: 'toolset',
+        count: 1,
+        entries: [{ manifest: { id: 'legacy-only', kind: 'toolset' } }],
+      }),
+    );
+    const items = await new BundledSource({ dataDir: root }).list('toolset');
+    expect(items.map((i) => i.manifest.id)).toEqual(['aa-tool']);
+  });
+
+  it('reads a version its snapshot does not carry from the item folder', async () => {
+    const dir = await writeIdentity(root, 'toolset', 'aa-tool', baseToolsetIdentity('aa-tool'));
+    await writeVersion(dir, '1.0.0', { ...baseToolsetVersion('1.0.0'), notes: 'from the folder' });
+    await writeFileIndex('toolsets', 'toolset', [
+      {
+        id: 'aa-tool',
+        identity: baseToolsetIdentity('aa-tool'),
+        versions: [
+          { version: '2.0.0', releasedAt: '2026-09-01T00:00:00Z', minGezelVersion: '1.26290' },
+          { version: '1.0.0', releasedAt: '2026-04-22T00:00:00Z' },
+        ],
+        latest: {
+          version: '2.0.0',
+          file: 'manifest.json',
+          payload: { ...baseToolsetVersion('2.0.0'), minGezelVersion: '1.26290' },
+        },
+      },
+    ]);
+    // A build below 2.0.0's floor picks 1.0.0, which only the folder has.
+    const [item] = await new BundledSource({ dataDir: root, gezelVersion: '1.26200.3' }).list(
+      'toolset',
+    );
+    expect(item?.manifest).toMatchObject({ version: '1.0.0', notes: 'from the folder' });
+  });
+
+  it('ignores what this build does not understand inside an entry', async () => {
+    const payload = {
+      ...baseToolsetVersion('1.0.0'),
+      requirements: { platforms: ['linux-arm64', 'riscv64-plan9'] },
+      somethingNew: { shape: 'unknown' },
+    };
+    await writeFileIndex('toolsets', 'toolset', [toolsetEntry('aa-tool', '1.0.0', payload)]);
+    const [item] = await new BundledSource({ dataDir: root }).list('toolset');
+    expect(item?.manifest).toMatchObject({ requirements: { platforms: ['linux-arm64'] } });
+    expect(item?.manifest).not.toHaveProperty('somethingNew');
+  });
+
+  it('derives a toolset category the identity does not pin, the same way on both paths', async () => {
+    const pinned = baseToolsetIdentity('ab-tool', { category: 'data' });
+    await writeVersion(
+      await writeIdentity(root, 'toolset', 'aa-tool', baseToolsetIdentity('aa-tool')),
+      '1.0.0',
+      baseToolsetVersion('1.0.0'),
+    );
+    await writeVersion(
+      await writeIdentity(root, 'toolset', 'ab-tool', pinned),
+      '1.0.0',
+      baseToolsetVersion('1.0.0'),
+    );
+    const walked = await new BundledSource({ dataDir: root, noIndex: true }).list('toolset');
+    const [derived, kept] = walked.map((i) =>
+      i.manifest.kind === 'toolset' ? i.manifest.category : null,
+    );
+    expect(derived).toBe(
+      categorizeToolset({
+        id: 'aa-tool',
+        name: 'aa-tool',
+        description: 'aa-tool fixture',
+        tags: [],
+        maintainerName: 'Test',
+      }),
+    );
+    expect(kept).toBe('data');
   });
 });

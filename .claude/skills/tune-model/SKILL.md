@@ -11,11 +11,9 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 > `@bendyline/gilde` package; refresh generated indexes with
 > `pnpm --filter @bendyline/gezel-catalog build-index`. **If a lever adds
 > or changes a value in a core Zod schema — a new `style.family`, a new
-> behavior id, a new tool-grammar format — run `pnpm gilde:export-schemas`
-> BEFORE `build-index`**, or the manifest fails gilde's *generated*
-> `schemas/*.schema.json` ajv identity check and the model is **silently
-> dropped from the index** (`build-index --verbose` → `skip …
-> invalid-identity`). When the loop
+> behavior id, a new tool-grammar format — land it in core and rebuild the
+> service first, then run `pnpm gilde:export-schemas`** so gilde's
+> validation accepts it (see the core-enum gotcha below). When the loop
 > lands: PR the gilde changes, publish, bump the pin in
 > `packages/catalog/package.json` (+ its `minimumReleaseAgeExclude` entry
 > in `pnpm-workspace.yaml`), then `pnpm unlink:gilde`.
@@ -168,7 +166,7 @@ Sampling only threads through the **gezel-session path** (the scenarios), never 
 #    Change exactly ONE field. Example: tame a repetition loop on llama-cpp.
 #    ../gilde/data/chat-models/<shard>/<modelId>/manifest.json → tuning.sampling.repetitionPenalty: 1.0 → 1.1
 
-# 2. Rebuild the index — the daemon reads data/chat-models/index.json (which CACHES the full manifest),
+# 2. Rebuild the index — the daemon lists from data/chat-models/raw-index.json (a SNAPSHOT of the files),
 #    NOT the per-model file. Without this the edit is invisible. (This is the #1 tune-model footgun.)
 pnpm --filter @bendyline/gezel-catalog build-index
 
@@ -240,12 +238,12 @@ Compare the full scorecard to the pre-change one. If the aggregate dropped or an
 `pnpm eval:all --count 1 --model <modelId> --provider <engine> --mlx-source-home <home>`
 ```
 
-The shipped artifact is the edited **root `manifest.json`** (+ `build-index` so `data/chat-models/index.json` reflects it). Confirm it lints clean (`pnpm --filter @bendyline/gezel-catalog lint-manifests`). Per repo rules, **do not commit** — leave the manifest edit + report for the user to review and commit.
+The shipped artifact is the edited **root `manifest.json`** (+ `build-index` so `data/chat-models/raw-index.json` and `index.json` reflect it). Confirm it lints clean (`pnpm --filter @bendyline/gezel-catalog lint-manifests`). Per repo rules, **do not commit** — leave the manifest edit + report for the user to review and commit.
 
 ## Guardrails & gotchas
 
-- **The `build-index` footgun (most common failure).** `data/chat-models/index.json` caches the *full* resolved manifest; the daemon reads that, not your edited per-model file. Every sampling/behavior manifest edit MUST be followed by `pnpm --filter @bendyline/gezel-catalog build-index` before the next eval, or you'll A/B two identical configs and conclude "the lever did nothing." (Behavior A/Bs via `ab-prompt-conduct --force/--remove` bypass this — they override at the daemon-env layer.)
-- **The `invalid-identity` silent-drop (when a lever touches a core enum).** If a lever introduces a value that isn't yet in gilde's *generated* JSON schemas — a new `style.family` (e.g. adding `glm`), a new behavior id, a new engine/grammar enum — `build-index` **silently omits the model from the index** (it fails `loadResolvedManifest`'s ajv identity check). No error; the model just isn't there, and the daemon falls back to defaults so your "tuning" evaluates a model that no longer carries your edit. Symptoms: the model vanishes from `index.json`, or the daemon logs a default profile you didn't set. Diagnose with `cd ../gilde && node tools/build-index.mjs --verbose | grep <model>` → `skip … invalid-identity`. Fix: `pnpm gilde:export-schemas` (regenerates `gilde/schemas/*.schema.json` from core's Zod), then re-run `build-index`. This only bites campaigns that cross into framework territory (adding a family/behavior/format) — pure sampling/reasoning tuning never trips it. Wild-caught tuning laguna-s-118b: adding `style.family: "glm"` dropped all three quants from the 32-entry index until the schemas were regenerated.
+- **The `build-index` footgun (most common failure).** `data/chat-models/raw-index.json` snapshots the item files (builds that predate it read the resolved `index.json`); the daemon lists from that, not your edited per-model file. Every sampling/behavior manifest edit MUST be followed by `pnpm --filter @bendyline/gezel-catalog build-index` before the next eval, or you'll A/B two identical configs and conclude "the lever did nothing." (Behavior A/Bs via `ab-prompt-conduct --force/--remove` bypass this — they override at the daemon-env layer.)
+- **A lever that touches a core enum.** If a lever introduces a value core's Zod schemas don't have yet — a new `style.family` (e.g. adding `glm`), a new behavior id, a new engine/grammar enum — add it to core and rebuild the service before the next eval. A daemon built without the value reads the manifest tolerantly: it drops the value, logging `<file>: ignored what this build does not understand — <path>`, or drops the whole model (`invalid identity manifest`) when the value is required — either way your "tuning" evaluates a model without your edit. Then run `pnpm gilde:export-schemas` so gilde's validation accepts it. Before gezel listed from `raw-index.json`, a stale gilde schema also made `build-index` silently omit the model from the index (`--verbose` → `skip … invalid-identity`); that now affects only the legacy `index.json` older builds read. Wild-caught tuning laguna-s-118b: adding `style.family: "glm"` dropped all three quants from the 32-entry index until the schemas were regenerated. Pure sampling/reasoning tuning never trips this.
 - **Never overtune to a scenario's sniff.** The anchored-scenario rule from [docs/eval-strategy.md](../../../docs/eval-strategy.md): do NOT pick a temperature or force a behavior *because it makes `tankcombat`'s tank-vocab sniff fire*. Tune to the genuine capability, and verify the win across MULTIPLE scenarios of the same class. A lever that only moves one scenario's specific signal is overfit — it helps no real user and it's the same sin as hard-coding a sniff into a craftbook gate. The regression sweep (Phase 4) is your overfit detector: a real tuning win generalizes.
 - **Never answer "use a bigger model."** If the flagship you're tuning still fails a scenario a medium model should pass, the finding is a *specific* lever or a *specific* framework gap — not a model-size recommendation. "This model can't" without a named lever or module is low-value work (eval-strategy.md's hard rule).
 - **MLX drops half the sampling knobs** (`presencePenalty`, `frequencyPenalty`, `dry`, `xtc`, `grammar`, per-request `thinkingBudget`). Check the engine before proposing a lever — an MLX DRY fix silently no-ops. `thinkingBudget` on MLX has no effect; on llama-cpp it's a *launch* flag (`--reasoning-budget`), applied server-wide, so a change needs a fresh daemon (every eval trial spawns one, so it's automatic there).

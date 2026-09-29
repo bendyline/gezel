@@ -6,8 +6,9 @@ import { BundledSource } from '../source.js';
 
 /**
  * The empirical no-regression gate for live gilde activation. The loader in
- * this build parses content with this build's Zod schemas, and an
- * unparseable item silently vanishes from the catalog — acceptable for a
+ * this build parses content with this build's Zod schemas, tolerantly: a
+ * value it does not understand is dropped, but an item that is structurally
+ * incompatible silently vanishes from the catalog — acceptable for a
  * brand-new item authored against newer schemas, catastrophic for one the
  * install already relies on (an installed model would lose its tuning, a
  * scheduled craftbook would stop resolving). So before activating a

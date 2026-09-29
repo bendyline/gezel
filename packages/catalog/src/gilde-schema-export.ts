@@ -10,15 +10,17 @@
  * that is what gezel ships against. With `pnpm link:gilde` they are the
  * same tree; without it, the test is checking the pinned tarball.
  *
- * Why the test exists: gilde's `build-index` normalizes every manifest
- * through these committed JSON Schemas, and a property the schema does
- * not declare is dropped from the published `index.json` — which is the
- * fast path `BundledSource` reads at runtime. So a core schema field
- * added without re-exporting does not fail anywhere; it is silently
- * erased from shipped content. Three craftbooks were shipping that way
- * (`pull-request-review` lost `corpusCoverage.artifact`,
- * `powerpoint-deck` lost `markdownHeadingsMatch.outlineArtifact`,
- * `invoice-run` lost `spawn.overArtifact`) before anyone noticed.
+ * Why the report exists: gilde's legacy `index.json` is built by
+ * normalizing every manifest through these committed JSON Schemas, and a
+ * property the schema does not declare is dropped from it. Three
+ * craftbooks lost fields that way (`pull-request-review` lost
+ * `corpusCoverage.artifact`, `powerpoint-deck` lost
+ * `markdownHeadingsMatch.outlineArtifact`, `invoice-run` lost
+ * `spawn.overArtifact`) before anyone noticed. The test used to fail on
+ * any drift; it only reports now, because this build lists from gilde's
+ * `raw-index.json` — the files verbatim — and resolves them with its own
+ * schemas, so drift limits what gilde content can cleanly use without
+ * breaking what gezel reads.
  */
 
 import {
