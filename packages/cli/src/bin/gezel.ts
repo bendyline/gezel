@@ -1772,6 +1772,7 @@ program
         `speech synthesis failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    if (!res.artifactPath) throw new CliError('speech synthesis returned no saved audio');
     const dest = await saveArtifact(client, projectId, res.artifactPath, opts.output);
     const m = res.meta;
     console.log(dest);

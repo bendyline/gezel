@@ -70,6 +70,24 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_cancel(JNIEnv *, jclass, jlong handl
     gezel_llama_cancel(engine(handle), static_cast<uint64_t>(request));
 }
 
+/** {phase, load per-mille, prompt, processed, reused, generated}; never throws. */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_progress(JNIEnv * env, jclass, jlong handle) {
+    gezel_llama_progress progress{};
+    progress.struct_size = sizeof(progress);
+    progress.abi_version = GEZEL_LLAMA_ABI_VERSION;
+    if (gezel_llama_get_progress(engine(handle), &progress) != GEZEL_LLAMA_OK) return nullptr;
+    const jlong values[] = {static_cast<jlong>(progress.phase),
+                            static_cast<jlong>(progress.load_fraction * 1000.0f),
+                            static_cast<jlong>(progress.prompt_tokens),
+                            static_cast<jlong>(progress.processed_tokens),
+                            static_cast<jlong>(progress.reused_tokens),
+                            static_cast<jlong>(progress.generated_tokens)};
+    jlongArray result = env->NewLongArray(6);
+    if (result) env->SetLongArrayRegion(result, 0, 6, values);
+    return result;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_bendyline_gezel_llama_LlamaRuntime_load(JNIEnv * env, jclass, jlong handle, jstring path, jlong request, jint context) try {
     std::string nativePath = utf8(env, path);

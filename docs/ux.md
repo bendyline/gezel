@@ -374,7 +374,15 @@ The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search
 keys beside it, with its count raised onto the key's top-right corner as a
-notification badge. The word stays in its accessible name. On macOS the
+notification badge. The word stays in its accessible name. At the right end
+the bar keeps two status keys from the desktop cluster: the chat queue (a
+stack glyph with a total badge, present only while something runs or waits)
+and the default engine (a chip glyph whose corner dot is the status light).
+Their popovers span the width of the phone. Further engines, quotas, and the
+task-speed menu wait for a wider window. The keys follow the `engineStatus`
+capability, so the phone shows them too; there the engine popover reports status
+only — idle retention, health policy, memory and Hard Stop are desktop engine
+management (`daemonSettings`). On macOS the
 compact bar is still the window titlebar, so it keeps the desktop bar's 39px
 height and 30px keys, which centres them on the traffic lights (a trackpad
 needs no 44px target). The phone preview keeps phone sizes. Compact layouts spend no row on a heading that only repeats a name: a
@@ -384,6 +392,9 @@ tiles, 60px wide and 24px tall (WCAG's minimum target), that show the status
 dot and the start of the title. This is a deliberate exception to the 44px
 rule. The strip stays a glance at the state of the work, not a second pane,
 and each tile's accessible name still carries the full summary.
+On touch screens and windows up to 600px, where a message's action row sits
+in the flow instead of floating in the gutter, it shows only the debug-bundle
+key, and only while debug mode is on; Copy and Save stay desktop affordances.
 A narrow composer (under 480px) moves its thread bar into the editor toolbar
 beside the attach keys, as an icon-only picker plus the context meter. New
 thread and New draft are rows in that picker, which lists them at every width,

@@ -26,7 +26,16 @@ import type { PortableTaskGateResult } from './tasks.js';
 
 export interface PortableTaskRunnerOptions {
   store: PortableStore;
-  runStep(task: Task, activationId?: string): Promise<void>;
+  /**
+   * `holdBudget` stops the run's awake-time budget while the step waits for
+   * the engine behind other conversations; call its release once the step
+   * holds the engine.
+   */
+  runStep(
+    task: Task,
+    activationId: string | undefined,
+    control: { holdBudget(): () => void },
+  ): Promise<void>;
   cancelStep?(): Promise<void>;
   canRun?(): void;
   evaluateGate?(
@@ -156,7 +165,7 @@ export class PortableTaskRunner {
         const waitingForAnswer = await this.awaitingAnswer(task);
         if (!waitingForAnswer && autoAdvance) await this.complete(task.ref, step.id);
         else if (!waitingForAnswer && taskActiveAssignee(task).kind !== 'user') {
-          await this.options.runStep(task, activation);
+          await this.options.runStep(task, activation, { holdBudget: () => budget.hold() });
           this.check(controller.signal);
           const current = await store.getTask(task.ref);
           if (

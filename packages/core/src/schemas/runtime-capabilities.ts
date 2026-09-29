@@ -24,6 +24,12 @@ export interface RuntimeCapabilities {
   catalog: boolean;
   htmlPreview: boolean;
   daemonSettings: boolean;
+  /**
+   * The host reports its engine and queue live (`/api/queues`, running
+   * turns, `engine_phase`), so the header's engine and queue keys can show.
+   * Managing the engine stays with `daemonSettings`.
+   */
+  engineStatus: boolean;
   externalFolders: boolean;
   scripts: boolean;
   scriptAuthoring: boolean;
@@ -73,6 +79,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   catalog: true,
   htmlPreview: true,
   daemonSettings: true,
+  engineStatus: true,
   externalFolders: true,
   scripts: true,
   scriptAuthoring: true,
@@ -112,6 +119,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   catalog: false,
   htmlPreview: false,
   daemonSettings: false,
+  engineStatus: true,
   externalFolders: false,
   scripts: true,
   scriptAuthoring: true,
@@ -126,6 +134,6 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   audioModelManagement: false,
   mediaExport: false,
   chatAttachments: false,
-  queuedChat: false,
+  queuedChat: true,
   textTransforms: true,
 });

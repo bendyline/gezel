@@ -150,6 +150,35 @@ int32_t gezel_llama_generate(gezel_llama_engine * engine,
     gezel_llama_chunk_callback on_chunk, void * user_data,
     gezel_llama_result * result, gezel_llama_error * error);
 
+/** What the engine's current operation is doing, for a host's status display. */
+typedef enum gezel_llama_phase {
+    GEZEL_LLAMA_PHASE_IDLE = 0,
+    GEZEL_LLAMA_PHASE_LOADING = 1,
+    GEZEL_LLAMA_PHASE_PROMPT = 2,
+    GEZEL_LLAMA_PHASE_GENERATING = 3
+} gezel_llama_phase;
+
+typedef struct gezel_llama_progress {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    /** A gezel_llama_phase value. */
+    uint32_t phase;
+    /** Model loading fraction in [0, 1]; meaningful while loading. */
+    float load_fraction;
+    /** Tokens in the formatted prompt, and how many of them are in memory so
+     * far — reused from the previous request or processed by this one. */
+    uint32_t prompt_tokens;
+    uint32_t processed_tokens;
+    uint32_t reused_tokens;
+    uint32_t generated_tokens;
+} gezel_llama_progress;
+
+/** Thread-safe snapshot of the current operation's counters; hosts poll it from
+ * their cancellation timer while load or generate runs. Never blocks. Requires
+ * struct_size and abi_version; returns INVALID_ARGUMENT otherwise. Added after
+ * ABI 1 shipped; hosts that must run against older libraries check the symbol. */
+int32_t gezel_llama_get_progress(gezel_llama_engine * engine, gezel_llama_progress * progress);
+
 /** Thread-safe cooperative cancellation of the matching CURRENT request only.
  * A late cancellation with an older request_id cannot cancel a later request.
  * Native loading/Metal kernels can delay observation until their next safe point.

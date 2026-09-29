@@ -944,6 +944,11 @@ button.search-palette-group-more:hover {
 .engine-pill-dot-danger {
   background: var(--danger);
 }
+/* The chip glyph belongs to the compact header's engine key alone
+   (ResponsiveAppShell.mobile.css); the desktop pill leads with its dot. */
+.engine-pill-key-icon {
+  display: none;
+}
 @keyframes engine-pill-dot-pulse {
   0%,
   100% {
@@ -1595,6 +1600,11 @@ button.machine-memory-unload-button {
 .queue-meter-button:hover {
   border-color: rgba(243, 237, 224, 0.55);
   background: #728c6c;
+}
+/* The compact header's face for this button (glyph + one total); the desktop
+   bar shows the per-engine chips instead. */
+.queue-meter-key {
+  display: none;
 }
 .queue-meter-button-open {
   border-color: rgba(243, 237, 224, 0.55);

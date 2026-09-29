@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AbortedWhileQueuedError, ProviderQueue, backgroundLaneCap, runInQueue } from './queue.js';
+import {
+  AbortedWhileQueuedError,
+  ProviderQueue,
+  backgroundLaneCap,
+  runInQueue,
+} from './provider-queue.js';
 
 /**
  * Fake clock: each `advance(ms)` also flushes any microtask
@@ -1163,5 +1168,67 @@ describe('runInQueue — queue-wait notices', () => {
     ).resolves.toBe('immediate');
     await vi.advanceTimersByTimeAsync(30_000);
     expect(seen).toEqual([]);
+  });
+});
+
+describe('ProviderQueue — pause and resume', () => {
+  it('holds pending work in order while paused and dispatches it on resume', async () => {
+    const q = new ProviderQueue({ concurrency: 1 });
+    const running = await q.acquire({ lane: 'interactive', sessionId: 'a' });
+    const order: string[] = [];
+    const b = q.acquire({ lane: 'interactive', sessionId: 'b' }).then((release) => {
+      order.push('b');
+      return release;
+    });
+    const c = q.acquire({ lane: 'interactive', sessionId: 'c' }).then((release) => {
+      order.push('c');
+      return release;
+    });
+
+    q.pause();
+    expect(q.isPaused).toBe(true);
+    running();
+    await flush();
+    expect(order).toEqual([]);
+    expect(q.snapshot()).toEqual({ running: 0, queuedInteractive: 2, queuedBackground: 0 });
+
+    q.resume();
+    (await b)();
+    (await c)();
+    expect(order).toEqual(['b', 'c']);
+    expect(q.isPaused).toBe(false);
+  });
+
+  it('keeps held entries cancellable', async () => {
+    const q = new ProviderQueue({ concurrency: 1 });
+    q.pause();
+    const controller = new AbortController();
+    const held = q.acquire({ lane: 'interactive', signal: controller.signal });
+    controller.abort();
+    await expect(held).rejects.toBeInstanceOf(AbortedWhileQueuedError);
+    expect(q.snapshot().queuedInteractive).toBe(0);
+  });
+
+  it('leaves work that was already running alone', async () => {
+    const q = new ProviderQueue({ concurrency: 1 });
+    const release = await q.acquire({ lane: 'interactive' });
+    q.pause();
+    expect(q.snapshot().running).toBe(1);
+    release();
+    expect(q.snapshot().running).toBe(0);
+  });
+});
+
+describe('ProviderQueue — provider tag', () => {
+  it('echoes the display-only provider on active and pending entries', async () => {
+    const q = new ProviderQueue({ concurrency: 1 });
+    const release = await q.acquire({ lane: 'interactive', provider: 'llama-cpp' });
+    const waiting = q.acquire({ lane: 'background', provider: 'apple-foundation-models' });
+    await flush();
+    const described = q.describe();
+    expect(described.active[0]?.provider).toBe('llama-cpp');
+    expect(described.pending[0]?.provider).toBe('apple-foundation-models');
+    release();
+    (await waiting)();
   });
 });

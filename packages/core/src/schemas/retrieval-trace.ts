@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { RelevanceThresholdsSchema } from './relevance-model.js';
 import { RetrievalModeSchema, RetrievalSourceSchema } from './retrieval.js';
+import { TurnMessageOriginSchema } from './session.js';
 
 /**
  * Why a retrieval candidate was kept or dropped. One reason per candidate,
@@ -146,9 +147,7 @@ export const RetrievalPreviewRequestSchema = z.object({
   /** turn: judge as this task step's turn (its subject, folders, references). */
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
-  messageOrigin: z
-    .enum(['direct-user', 'question-answer', 'cross-gezel', 'background-nudge', 'system'])
-    .optional(),
+  messageOrigin: TurnMessageOriginSchema.optional(),
   /** turn: override the resolved policy for this preview only. */
   mode: RetrievalModeSchema.optional(),
   maxTokens: z.number().int().min(0).max(16_000).optional(),

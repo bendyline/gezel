@@ -83,6 +83,8 @@ describe('model access to authored scripts', () => {
       scope: 'project',
       inputs: { title: 'Brief' },
       trigger: { kind: 'chat', gezelId, sessionId: session.id },
+      // A chat tool waits for a task hook's script rather than failing.
+      admission: 'wait',
     });
   });
 });

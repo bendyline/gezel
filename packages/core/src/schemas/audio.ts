@@ -86,6 +86,13 @@ export const AudioSynthesizeRequestSchema = z.object({
    * `ImageGenerationRequestSchema`.
    */
   inline: z.boolean().optional(),
+  /**
+   * `false` skips the artifact write, for speech that is played once and
+   * discarded — chat narration, which asks a sentence at a time and would
+   * otherwise leave a WAV in the drawer for every one. The response then
+   * has no `artifactPath`. Defaults to true.
+   */
+  persist: z.boolean().optional(),
 });
 export type AudioSynthesizeRequest = z.infer<typeof AudioSynthesizeRequestSchema>;
 
@@ -99,7 +106,8 @@ export const AudioSynthesizeMetaSchema = z.object({
 export type AudioSynthesizeMeta = z.infer<typeof AudioSynthesizeMetaSchema>;
 
 export const AudioSynthesizeResponseSchema = z.object({
-  artifactPath: z.string(),
+  /** Where the WAV was saved. Absent when the request set `persist: false`. */
+  artifactPath: z.string().optional(),
   meta: AudioSynthesizeMetaSchema,
   /** Base64 WAV bytes when caller asked for inline. Empty otherwise. */
   b64Wav: z.string().optional(),
@@ -124,7 +132,11 @@ export const AudioSynthesizeChunkSchema = z.object({
 });
 export type AudioSynthesizeChunk = z.infer<typeof AudioSynthesizeChunkSchema>;
 
-/** Finite SSE stream used by document narration and other progress-aware callers. */
+/**
+ * Finite SSE stream used by document and chat narration. Audio always
+ * arrives as at least one `chunk`, even from an engine that cannot split its
+ * output, so a caller can play chunks alone and ignore the final result.
+ */
 export const AudioSynthesizeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('progress'), progress: AudioSynthesizeProgressSchema }),
   z.object({ type: z.literal('chunk'), chunk: AudioSynthesizeChunkSchema }),

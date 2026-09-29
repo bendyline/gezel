@@ -527,8 +527,12 @@ public final class GezelNativeRuntime {
         Throwable failure = null;
         List<NativeCall> waiting;
         try {
+            final long[] lastProgress = {-1, -1};
+            final int[] ticks = {0};
             cancelTimer = cancellationQueue.scheduleAtFixedRate(() -> {
-                if (isCancelled(requestId)) cancelActive(requestId);
+                if (isCancelled(requestId)) { cancelActive(requestId); return; }
+                // Every fifth tick (~250 ms) is plenty for a status pill.
+                if (++ticks[0] % 5 == 0) reportProgress(requestId, lastProgress);
             }, 50, 50, TimeUnit.MILLISECONDS);
             result = performGeneration(requestId, modelId, roles, contents, maxTokens, contextSize, sampling, text);
         }
@@ -559,6 +563,7 @@ public final class GezelNativeRuntime {
             if ("android-mlkit".equals(activeProvider)) {
                 unloadLlama();
                 checkResources(256L * 1024 * 1024);
+                emitPhase(requestId, "prefill");
                 MlKitPrompt.Reply reply = mlkit.generate(roles, contents, maxTokens, contextSize, () -> isCancelled(requestId),
                     delta -> emitDelta(requestId, text, delta));
                 return new NativeObject().put("text", reply.text).put("stopReason", reply.stopReason);
@@ -570,6 +575,7 @@ public final class GezelNativeRuntime {
                 checkResources(requiredBytes(model[1], contextSize));
                 long operation = nextOperation(requestId);
                 if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
+                emitPhase(requestId, "loading_model");
                 synchronized (sizing) {
                     LlamaRuntime.load(engine, model[1], operation, contextSize);
                     loadedId = model[0]; loadedPath = model[1]; loadedContext = contextSize;
@@ -578,6 +584,7 @@ public final class GezelNativeRuntime {
             long operation = nextOperation(requestId);
             if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             checkResources(64L * 1024 * 1024);
+            emitPhase(requestId, "prefill");
             int reason = LlamaRuntime.generate(engine, roles, contents, operation, maxTokens,
                 sampling.temperature, sampling.topK, sampling.topP, sampling.minP, sampling.repeatPenalty,
                 sampling.repeatLastN, sampling.seed, utf8 -> {
@@ -592,8 +599,45 @@ public final class GezelNativeRuntime {
     private synchronized void emitDelta(String requestId, StringBuilder text, String delta) {
         if (isCancelled(requestId)) return;
         if (delta.length() > 64_000 - text.length()) throw new IllegalStateException("The model response exceeded the supported size");
+        // The first chunk is when decoding began; say so before it arrives.
+        if (text.length() == 0) emitPhase(requestId, "generating");
         text.append(delta);
         notifyListeners("chatDelta", new NativeObject().put("requestId", requestId).put("delta", delta));
+    }
+
+    /**
+     * Model-loading and prompt-processing progress for the status pill, polled
+     * from the cancellation timer. Reports only changes, and nothing at all
+     * from a native library too old to have the counters.
+     */
+    private void reportProgress(String requestId, long[] last) {
+        long handle = engine;
+        if ("android-mlkit".equals(activeProvider) || handle == 0) return;
+        long[] progress;
+        try { progress = LlamaRuntime.progress(handle); }
+        catch (LinkageError error) { return; }
+        if (progress == null || progress.length < 6) return;
+        long phase = progress[0];
+        long value = phase == 1 ? progress[1] : phase == 2 ? progress[3] : -1;
+        if (value < 0 || (phase == last[0] && value == last[1])) return;
+        last[0] = phase;
+        last[1] = value;
+        NativeObject event = new NativeObject().put("requestId", requestId);
+        if (phase == 1) {
+            event.put("phase", "loading_model").put("progress", Math.min(1.0, progress[1] / 1000.0));
+        } else {
+            long prompt = progress[2];
+            event.put("phase", "prefill").put("promptTokens", prompt)
+                .put("processedTokens", progress[3]).put("reusedTokens", progress[4]);
+            if (prompt > 0) event.put("progress", Math.min(1.0, progress[3] / (double) prompt));
+        }
+        if (!isCancelled(requestId)) notifyListeners("enginePhase", event);
+    }
+
+    /** Engine phase for the status pill, on the inference thread so it stays ordered with chatDelta. */
+    private void emitPhase(String requestId, String phase) {
+        if (isCancelled(requestId)) return;
+        notifyListeners("enginePhase", new NativeObject().put("requestId", requestId).put("phase", phase));
     }
 
     private void unloadLlama() {

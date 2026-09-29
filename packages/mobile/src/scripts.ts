@@ -129,7 +129,20 @@ export function createMobileScripts(store: PortableStore): PortableScripts {
       await running?.catch(() => {});
     },
     async run(options) {
-      if (running) throw new Error('A script is already running on this device');
+      // One QuickJS worker. A person's direct run is refused while another
+      // script runs; chat tools and task hooks wait their turn instead.
+      while (running) {
+        if (options.admission !== 'wait')
+          throw new Error('A script is already running on this device');
+        options.signal?.throwIfAborted();
+        const blocking = running;
+        await new Promise<void>((resolve) => {
+          const done = () => resolve();
+          blocking.then(done, done);
+          options.signal?.addEventListener('abort', done, { once: true });
+        });
+      }
+      options.signal?.throwIfAborted();
       const current = new AbortController();
       controller = current;
       const abort = () => current.abort();

@@ -50,6 +50,10 @@ so an availability probe cannot start a large download.
   unchanged; portable clients use `GezelApp<'portable'>`.
 - Pass `{ signal }` as the second `chat` argument to cancel. Breaking out of a
   stream or closing its client also cancels and waits for native release.
+- `enginePhase` events report `loading_model`, `prefill`, and `generating` for a
+  `requestId`, with load progress and prompt/processed/reused/output token
+  counts where the engine measures them. They are advisory: older native builds
+  and platform providers send fewer, so never wait on one.
 - Clients share one process runtime and admission gate. Closing an idle client
   does not stop another client's generation. `releaseModel()` is explicitly
   process-wide and may cancel active work. A closed client cannot be reused.

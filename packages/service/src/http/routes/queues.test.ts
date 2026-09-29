@@ -1,3 +1,4 @@
+import { QueueStatusResponseSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { ServiceContext } from '../context.js';
 import { queueRoutes } from './queues.js';
@@ -48,6 +49,8 @@ describe('GET /api/queues', () => {
     const response = await queueRoutes(ctx).request('/');
     expect(response.status).toBe(200);
     const body = (await response.json()) as { taskRunner: Record<string, unknown> };
+    // The same wire schema the phone runtime answers with.
+    expect(QueueStatusResponseSchema.safeParse(body).success).toBe(true);
     expect(body.taskRunner).toMatchObject({
       pendingCount: 5,
       dispatchable: { count: 1, byGezel: { koray: 1 } },

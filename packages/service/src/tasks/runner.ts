@@ -44,6 +44,7 @@
 import {
   type ModelTier,
   type Task,
+  type TaskHandoffHoldReason,
   type TaskWaitReason,
   type TaskWaitState,
   createLogger,
@@ -74,7 +75,7 @@ const log = createLogger('tasks');
  * turns on its own. Split from `'engagement-off'` so the UI can name
  * the setting the user actually chose.
  */
-export type TaskHandoffHoldReason = 'engagement-off' | 'engagement-paused' | 'provider-busy';
+export type { TaskHandoffHoldReason };
 
 export interface PendingHandoff {
   /** `{projectId}/{num}` ref of the task. */

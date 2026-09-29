@@ -1,5 +1,5 @@
 import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,15 +16,23 @@ vi.mock('./api.js', () => ({
     getFetch: vi.fn(() => fetch),
   }),
 }));
-vi.mock('./components/BoekwachterPill.js', () => ({ BoekwachterPill: () => null }));
-vi.mock('./components/ClaudeCliPoolPill.js', () => ({ ClaudeCliPoolPill: () => null }));
-vi.mock('./components/EngineStatusPill.js', () => ({ EngineStatusPill: () => null }));
+vi.mock('./components/BoekwachterPill.js', () => ({
+  BoekwachterPill: () => <span data-testid="boekwachter-pill" />,
+}));
+vi.mock('./components/ClaudeCliPoolPill.js', () => ({
+  ClaudeCliPoolPill: () => <span data-testid="claude-pool-pill" />,
+}));
+vi.mock('./components/EngineStatusPill.js', () => ({
+  EngineStatusPill: () => <span data-testid="engine-pill" />,
+}));
 vi.mock('./components/GrantConsentDialog.js', () => ({ GrantConsentDialog: () => null }));
 vi.mock('./components/ModelBundleControls.js', () => ({
   ModelBundleImportController: () => null,
 }));
 vi.mock('./components/NeedsInputPanel.js', () => ({ NeedsInputPanel: () => null }));
-vi.mock('./components/QueueMeter.js', () => ({ QueueMeter: () => null }));
+vi.mock('./components/QueueMeter.js', () => ({
+  QueueMeter: () => <span data-testid="queue-meter" />,
+}));
 vi.mock('./components/Sidebar.js', () => ({
   Sidebar: ({
     activeProjectIds,
@@ -94,6 +102,21 @@ describe('Responsive navigation in the desktop app', () => {
   afterEach(() => {
     window.history.replaceState(null, '', '/');
     vi.unstubAllGlobals();
+  });
+
+  it('shows the engine and queue keys but no daemon management on an offline host', async () => {
+    const bridge = window.__GEZEL__;
+    window.__GEZEL__ = { ...bridge!, capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      render(<App />);
+      const header = await screen.findByTestId('app-header');
+      expect(within(header).getByTestId('queue-meter')).toBeInTheDocument();
+      expect(within(header).getByTestId('engine-pill')).toBeInTheDocument();
+      expect(within(header).queryByTestId('boekwachter-pill')).toBeNull();
+      expect(within(header).queryByTestId('claude-pool-pill')).toBeNull();
+    } finally {
+      window.__GEZEL__ = bridge;
+    }
   });
 
   it('shows Updates as a bell key on a phone and as a labelled tab when wide', async () => {

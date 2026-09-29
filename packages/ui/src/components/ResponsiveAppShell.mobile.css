@@ -129,8 +129,9 @@
   align-items: center;
 }
 
-/* Every key holds its width. Three 44px keys fit any phone; only a desktop
-   window narrower than about 250px can overflow them. */
+/* Every key holds its width. All five 44px keys (menu, Updates, search,
+   queue, engine) need about 285px, so they fit any phone; only a desktop
+   window narrower than that can overflow them. */
 .app.app-compact .app-header > * {
   flex-shrink: 0;
 }
@@ -193,7 +194,13 @@
 
 :root[data-platform="darwin"]
   .app.app-compact:not(.app-mobile-preview)
-  :is(.app-header-navigation, .app-header-questions, .titlebar-search-trigger) {
+  :is(
+    .app-header-navigation,
+    .app-header-questions,
+    .titlebar-search-trigger,
+    .queue-meter-button,
+    .engine-pill
+  ) {
   flex: 0 0 30px;
   width: 30px;
   height: 30px;
@@ -202,15 +209,20 @@
 
 :root[data-platform="darwin"]
   .app.app-compact:not(.app-mobile-preview)
-  :is(.app-header-navigation-icon, .app-header-questions-icon, .titlebar-search-trigger-icon) {
+  :is(
+    .app-header-navigation-icon,
+    .app-header-questions-icon,
+    .titlebar-search-trigger-icon,
+    .queue-meter-key-icon,
+    .engine-pill-key-icon
+  ) {
   width: 16px;
   height: 16px;
 }
 
 :root[data-platform="darwin"]
   .app.app-compact:not(.app-mobile-preview)
-  .app-header-questions
-  .app-nav-badge {
+  :is(.app-header-questions .app-nav-badge, .queue-meter-key-count) {
   top: -4px;
   right: -7px;
   min-width: 14px;
@@ -218,6 +230,16 @@
   padding: 0 3px;
   font-size: 9px;
   line-height: 14px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  .engine-pill
+  .engine-pill-dot {
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
 }
 
 :root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .titlebar-search-input {
@@ -253,8 +275,98 @@
   min-height: 44px;
 }
 
+/* Of the desktop status cluster, the compact header keeps two keys: the chat
+   queue (present only while something runs or waits) and the default engine.
+   Further engines, quotas, and the task-speed menu wait for a wider window;
+   the queue's panel still lists every busy engine. */
 .app.app-compact .app-header-right {
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.app.app-compact .app-header-right > :not(.queue-meter, .engine-pill-root),
+.app.app-compact .app-header-right > .engine-pill-root ~ .engine-pill-root {
   display: none;
+}
+
+.app.app-compact :is(.queue-meter-button, .engine-pill) {
+  position: relative;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  max-width: none;
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+  color: var(--titlebar-ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+}
+
+.app.app-compact :is(.queue-meter-button, .engine-pill):hover,
+.app.app-compact :is(.queue-meter-button-open, .engine-pill[aria-expanded="true"]) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--titlebar-ink);
+}
+
+.app.app-compact .queue-meter-button > .queue-meter-chip {
+  display: none;
+}
+
+/* `contents`, so the count positions against the button like the Updates
+   badge does against its key. */
+.app.app-compact .queue-meter-key {
+  display: contents;
+}
+
+.app.app-compact :is(.queue-meter-key-icon, .engine-pill-key-icon) {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+
+.app.app-compact .queue-meter-key-count {
+  position: absolute;
+  top: -2px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--titlebar);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* The engine's state rides in the key's corner as a status light: dim when
+   idle, pulsing while it works, amber or red when its health says so. */
+.app.app-compact .engine-pill .engine-pill-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* Hidden visually, not removed: the label is the button's accessible name. */
+.app.app-compact .engine-pill-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Under their keys but sized to the phone: from 8px off the left edge to the
+   key's right edge, which the popover's inline style pins. */
+.app.app-compact :is(.engine-pill-popover, .queue-meter-panel) {
+  left: 8px;
+  width: auto;
+  min-width: 0;
+  max-width: none;
 }
 
 .app-header-navigation {

@@ -643,6 +643,19 @@ export type LaunchTaskFromSessionResponse = z.infer<typeof LaunchTaskFromSession
  * 160-char `preview`, `text` is the full message body — the edit
  * affordance on ghost queue bubbles loads it lazily through this shape.
  */
+/**
+ * Strong provenance for a user-role turn; the role alone is ambiguous.
+ * Per-turn behavior hooks and queue coalescing read it.
+ */
+export const TurnMessageOriginSchema = z.enum([
+  'direct-user',
+  'question-answer',
+  'cross-gezel',
+  'background-nudge',
+  'system',
+]);
+export type TurnMessageOrigin = z.infer<typeof TurnMessageOriginSchema>;
+
 export const QueuedMessageSchema = z.object({
   queueId: z.string(),
   /** Full message text (the SSE event only carries a truncated preview). */

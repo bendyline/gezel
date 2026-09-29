@@ -171,3 +171,21 @@ export function resolveMobileInferenceBudget(
     throw new Error('These token limits exceed what this on-device provider supports');
   return budget;
 }
+
+/**
+ * Live engine phase from a native runtime, for the status pill. `progress`
+ * and the token counters are present only while the engine publishes them
+ * (model loading and prompt processing); hosts that report nothing leave the
+ * product runtime's own coarse phases in place.
+ */
+export const MobileEnginePhaseEventSchema = z.object({
+  requestId: z.string(),
+  phase: z.enum(['loading_model', 'prefill', 'generating']),
+  progress: z.number().min(0).max(1).optional(),
+  promptTokens: z.number().int().nonnegative().optional(),
+  processedTokens: z.number().int().nonnegative().optional(),
+  reusedTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  tokensPerSec: z.number().nonnegative().optional(),
+});
+export type MobileEnginePhaseEvent = z.infer<typeof MobileEnginePhaseEventSchema>;

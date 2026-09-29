@@ -830,11 +830,11 @@ function FullApp() {
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
+            {runtimeCapabilities().engineStatus && <QueueMeter />}
+            {runtimeCapabilities().daemonSettings && <BoekwachterPill />}
+            {runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {runtimeCapabilities().daemonSettings && (
               <>
-                <QueueMeter />
-                <BoekwachterPill />
-                <EngineStatusPill />
                 <ClaudeCliPoolPill />
                 <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
                 <TaskSpeedMenu

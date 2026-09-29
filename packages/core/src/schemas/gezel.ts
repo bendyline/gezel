@@ -1407,7 +1407,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    */
   z.object({
     type: z.literal('engine_phase'),
-    provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+    /** Desktop engines, and a phone's on-device providers. */
+    provider: z.enum(['llama-cpp', 'mlx', 'ds4', 'apple-foundation-models', 'android-mlkit']),
     phase: z.enum(['starting', 'loading_model', 'prefill', 'generating', 'ready']),
     /**
      * Human-readable subject for an ephemeral background completion. Unlike

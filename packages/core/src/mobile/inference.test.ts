@@ -160,4 +160,77 @@ describe('shared native inference adapter', () => {
     ).rejects.toThrow('Native tool calls need a handler');
     expect(plugin.generate).not.toHaveBeenCalled();
   });
+
+  it('forwards native engine phases for its own request only, when asked for them', async () => {
+    const listeners = new Map<string, (event: never) => void>();
+    const removed: string[] = [];
+    let finish!: (result: GenerationResult) => void;
+    const plugin: NativeInferencePlugin = {
+      providers: async () => ({ providers: [] }),
+      listModels: async () => ({ models: [] }),
+      generate: vi.fn(
+        () =>
+          new Promise<GenerationResult>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+      cancel: vi.fn(async () => {}),
+      addListener: (async (event: string, callback: (event: never) => void) => {
+        listeners.set(event, callback);
+        return { remove: async () => void removed.push(event) };
+      }) as NativeInferencePlugin['addListener'],
+    };
+    const onPhase = vi.fn();
+    const running = createNativeInference(plugin).generate(
+      {
+        requestId: 'mine',
+        providerId: 'llama-cpp',
+        modelId: 'local',
+        messages: [{ role: 'user', content: 'Hello' }],
+      },
+      vi.fn(),
+      undefined,
+      { onPhase },
+    );
+    await vi.waitFor(() => expect(plugin.generate).toHaveBeenCalledOnce());
+    const emit = listeners.get('enginePhase') as (event: unknown) => void;
+    emit({ requestId: 'mine', phase: 'prefill', promptTokens: 1024, processedTokens: 512 });
+    emit({ requestId: 'other', phase: 'prefill' });
+    emit({ requestId: 'mine', phase: 'not-a-phase' });
+    expect(onPhase).toHaveBeenCalledExactlyOnceWith({
+      requestId: 'mine',
+      phase: 'prefill',
+      promptTokens: 1024,
+      processedTokens: 512,
+    });
+    finish({ text: '', stopReason: 'stop' });
+    await running;
+    expect(removed).toContain('enginePhase');
+    emit({ requestId: 'mine', phase: 'generating' });
+    expect(onPhase).toHaveBeenCalledOnce();
+  });
+
+  it('does not subscribe to engine phases nobody asked for', async () => {
+    const events: string[] = [];
+    const plugin: NativeInferencePlugin = {
+      providers: async () => ({ providers: [] }),
+      listModels: async () => ({ models: [] }),
+      generate: vi.fn(async () => ({ text: 'ok', stopReason: 'stop' as const })),
+      cancel: vi.fn(async () => {}),
+      addListener: (async (event: string) => {
+        events.push(event);
+        return { remove: async () => {} };
+      }) as NativeInferencePlugin['addListener'],
+    };
+    await createNativeInference(plugin).generate(
+      {
+        requestId: 'r',
+        providerId: 'llama-cpp',
+        modelId: 'local',
+        messages: [{ role: 'user', content: 'Hello' }],
+      },
+      vi.fn(),
+    );
+    expect(events).toEqual(['chatDelta']);
+  });
 });

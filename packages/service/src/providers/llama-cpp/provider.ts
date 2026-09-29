@@ -95,7 +95,13 @@ import type {
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
-import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
+import {
+  ProviderQueue,
+  QUEUE_WAIT_NOTICE_DELAY_MS,
+  QUEUE_WAIT_NOTICE_REPEAT_MS,
+  backgroundLaneCap,
+  defaultAmbientQuietMs,
+} from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { condensePresentedToolOutput } from './condense-presented-output.js';
@@ -569,15 +575,6 @@ const TOOL_GRAMMAR_FALLBACK_ORDER: readonly ToolGrammarFallback[] = [
   'simplified',
   'permissive',
 ];
-
-/**
- * Don't announce a physical-slot wait shorter than this — a background
- * one-shot slipping between foreground iterations is normal, and flashing
- * the queue badge for a frame reads as a glitch.
- */
-const ENGINE_REQUEST_WAIT_NOTICE_DELAY_MS = 200;
-/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
-const ENGINE_REQUEST_WAIT_NOTICE_MS = 5_000;
 
 function applyToolGrammarFallback(
   tools: ChatCompletionTool[],
@@ -2020,9 +2017,9 @@ export class LlamaCppProvider implements LLMProvider {
             };
             waitNoticeDelay = setTimeout(() => {
               publish();
-              waitNotice = setInterval(publish, ENGINE_REQUEST_WAIT_NOTICE_MS);
+              waitNotice = setInterval(publish, QUEUE_WAIT_NOTICE_REPEAT_MS);
               waitNotice.unref?.();
-            }, ENGINE_REQUEST_WAIT_NOTICE_DELAY_MS);
+            }, QUEUE_WAIT_NOTICE_DELAY_MS);
             waitNoticeDelay.unref?.();
           }
         });

@@ -123,7 +123,10 @@ callback. These device checks are separate from building the APK.
 
 Call native load/generate on a background serial executor. Own the engine's
 lifetime, wait for generation and cancellation to finish before destroy, and
-keep model files immutable and app-private. The C ABI's allocation and operation
+keep model files immutable and app-private. `gezel_llama_get_progress` (Java:
+`LlamaRuntime.progress(engine)`) is safe from any thread while a load or
+generate runs; it reports the phase, load fraction, and prompt, processed,
+reused, and generated token counts for status display. The C ABI's allocation and operation
 bounds still apply. These low-level packages do not provide the app-wide
 admission, foreground lifecycle and model download manager required by the
 finished SDK; consumers should use the forthcoming extracted host wrapper for

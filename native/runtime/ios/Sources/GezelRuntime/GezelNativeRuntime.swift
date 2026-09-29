@@ -7,6 +7,8 @@ private final class NativeChatStream {
     weak var plugin: GezelNativeRuntime?
     let requestId: String
     var text = ""
+    /** Set on the first chunk, which is when decoding began. */
+    var generating = false
     init(plugin: GezelNativeRuntime, requestId: String) {
         self.plugin = plugin
         self.requestId = requestId
@@ -19,7 +21,10 @@ private func receiveLlamaChunk(_ bytes: UnsafePointer<CChar>?, _ length: Int, _ 
     guard let plugin = stream.plugin, !plugin.isCancelled(stream.requestId) else { return 1 }
     let delta = String(decoding: UnsafeRawBufferPointer(start: bytes, count: length), as: UTF8.self)
     stream.text.append(delta)
+    let first = !stream.generating
+    stream.generating = true
     DispatchQueue.main.async {
+        if first { plugin.notifyListeners("enginePhase", data: ["requestId": stream.requestId, "phase": "generating"]) }
         plugin.notifyListeners("chatDelta", data: ["requestId": stream.requestId, "delta": delta])
     }
     return 0
@@ -59,6 +64,50 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     public func removeListener(_ id: UUID) {
         operationLock.lock(); defer { operationLock.unlock() }; listeners.removeValue(forKey: id)
     }
+    /**
+     * Model-loading and prompt-processing progress for the status pill, polled
+     * from the cancellation timer. Reports only changes.
+     */
+    fileprivate func reportProgress(_ requestId: String, last: inout (phase: UInt32, value: UInt32)) {
+        guard let engine else { return }
+        var progress = gezel_llama_progress()
+        progress.struct_size = UInt32(MemoryLayout<gezel_llama_progress>.size)
+        progress.abi_version = gezel_llama_abi_version()
+        guard gezel_llama_get_progress(engine, &progress) == 0 else { return }
+        let value: UInt32
+        switch progress.phase {
+        case 1: value = UInt32(progress.load_fraction * 1000)
+        case 2: value = progress.processed_tokens
+        default: return
+        }
+        guard progress.phase != last.phase || value != last.value else { return }
+        last = (progress.phase, value)
+        var data: [String: Any] = ["requestId": requestId]
+        if progress.phase == 1 {
+            data["phase"] = "loading_model"
+            data["progress"] = min(1.0, Double(progress.load_fraction))
+        } else {
+            data["phase"] = "prefill"
+            data["promptTokens"] = Int(progress.prompt_tokens)
+            data["processedTokens"] = Int(progress.processed_tokens)
+            data["reusedTokens"] = Int(progress.reused_tokens)
+            if progress.prompt_tokens > 0 {
+                data["progress"] = min(1.0, Double(progress.processed_tokens) / Double(progress.prompt_tokens))
+            }
+        }
+        DispatchQueue.main.async {
+            guard !self.isCancelled(requestId) else { return }
+            self.notifyListeners("enginePhase", data: data)
+        }
+    }
+
+    /** Engine phase for the status pill, ordered with `chatDelta` on the main queue. */
+    fileprivate func notifyPhase(_ requestId: String, _ phase: String) {
+        DispatchQueue.main.async {
+            self.notifyListeners("enginePhase", data: ["requestId": requestId, "phase": phase])
+        }
+    }
+
     fileprivate func notifyListeners(_ event: String, data: [String: Any]) {
         operationLock.lock(); let callbacks = Array(listeners.values); operationLock.unlock()
         for callback in callbacks { callback(event, data) }
@@ -712,6 +761,8 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             try checkResources(additionalBytes: 256 * 1024 * 1024)
             if isCancelled(requestId) { throw CancellationError() }
             guard #available(iOS 26.0, *) else { throw MobileInferenceError(code: "UNAVAILABLE", message: "Apple on-device AI requires iOS 26 or later.") }
+            notifyPhase(requestId, "prefill")
+            var generating = false
             let reason = try await AppleFoundationProvider.generate(
                 turns: turns, maxTokens: maxTokens, contextSize: contextSize, tools: tools,
                 invoke: { [weak self] name, arguments in
@@ -721,6 +772,10 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             ) { delta in
                 if self.isCancelled(requestId) { throw CancellationError() }
                 text.append(delta)
+                if !generating {
+                    generating = true
+                    self.notifyPhase(requestId, "generating")
+                }
                 DispatchQueue.main.async {
                     self.notifyListeners("chatDelta", data: ["requestId": requestId, "delta": delta])
                 }
@@ -740,9 +795,17 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         // interval between assigning its ID and entering the native function.
         let cancellation = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
         cancellation.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50))
+        var ticks = 0
+        var lastProgress: (phase: UInt32, value: UInt32) = (UInt32.max, UInt32.max)
         cancellation.setEventHandler { [weak self] in
-            guard let self, self.isCancelled(requestId) else { return }
-            self.cancelActive(requestId)
+            guard let self else { return }
+            if self.isCancelled(requestId) {
+                self.cancelActive(requestId)
+                return
+            }
+            // Every fifth tick (~250 ms) is plenty for a status pill.
+            ticks += 1
+            if ticks % 5 == 0 { self.reportProgress(requestId, last: &lastProgress) }
         }
         cancellation.resume()
         var terminal: Result<[String: Any], Error>
@@ -760,6 +823,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
                 }
                 var options = loadOptions(contextSize: contextSize)
                 options.request_id = operation
+                notifyPhase(requestId, "loading_model")
                 sizingLock.lock()
                 let status = url.path.withCString { gezel_llama_load(engine, $0, &options, &nativeError) }
                 if status == 0 { loadedModelId = model.id; loadedPath = url.path; loadedContextSize = contextSize }
@@ -788,6 +852,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
                 gezel_llama_message(role: UnsafePointer(strings[index * 2]), content: UnsafePointer(strings[index * 2 + 1]))
             }
             var result = gezel_llama_result()
+            notifyPhase(requestId, "prefill")
             let status = nativeTurns.withUnsafeBufferPointer { buffer in
                 gezel_llama_generate(engine, buffer.baseAddress, buffer.count, &options, receiveLlamaChunk,
                     Unmanaged.passUnretained(stream).toOpaque(), &result, &nativeError)

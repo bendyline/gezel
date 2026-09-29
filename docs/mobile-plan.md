@@ -62,7 +62,7 @@ A standalone mobile project can choose among these inference providers:
 
 Persist these choices independently. A failed local inference request must not silently upload content to a cloud provider or transfer a task to a computer. Show the selected execution device and data destination. Remote inference is still data transmission even though it is the user's own computer.
 
-Use one model at a time initially: the crew can retain distinct identities while sharing a serialized inference queue. Multiple gezels do not require multiple resident models.
+Use one model at a time initially: the crew can retain distinct identities while sharing a serialized inference queue. Multiple gezels do not require multiple resident models. Implemented: the portable runtime schedules through the same core `ProviderQueue` and `SessionSendQueue` the daemon uses, at concurrency 1 (see the [parity status](mobile-parity.md)).
 
 **3. App shell and portable product runtime**
 

@@ -368,6 +368,15 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* In the flow the row costs a line under every message, and only the
+     debug bundle earns that — Copy and Save do not, and the row itself goes
+     whenever debug mode is off, which is the usual case. */
+  .msg-action-button:not(.msg-action-button-debug) {
+    display: none;
+  }
+  .msg-actions-anchor:not(:has(.msg-action-button-debug)) {
+    display: none;
+  }
 }
 
 /* Debug-only "copy debug bundle" button — same shape as the regular

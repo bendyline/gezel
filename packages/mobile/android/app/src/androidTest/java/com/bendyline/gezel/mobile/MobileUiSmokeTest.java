@@ -249,7 +249,7 @@ public final class MobileUiSmokeTest {
         run("""
             await until(()=>visualViewport.height>500,'keyboard dismissed');
             check(document.querySelector('.chat-composer [contenteditable="true"]').textContent.includes('Keep this draft above the keyboard.'),'Layout changes must preserve the draft');
-            document.querySelector('.chat-composer [role="combobox"]').click();
+            document.querySelector('.chat-composer [role="combobox"][aria-label="Conversation"]').click();
             const menu=await until(()=>document.querySelector('.gz-select-content'),'thread menu');
             await until(()=>{const box=menu.getBoundingClientRect(),app=document.querySelector('.app').getBoundingClientRect();return box.top>=app.top-1&&box.bottom<=app.bottom+1&&box.left>=app.left-1&&box.right<=app.right+1;},'thread menu inside the safe rectangle');
             menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
@@ -504,7 +504,7 @@ public final class MobileUiSmokeTest {
             await clickButton('Settings', sidebar);
             const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native provider controls inside shared Settings');
             await until(() => models.querySelector('select')?.options.length > 0, 'native provider inventory');
-            const navigation = document.querySelector('.app-compact-navigation');
+            const navigation = button('Navigation', document.querySelector('[data-testid="app-header"]') ?? document);
             if (visible(navigation)) {
                 const rect = navigation.getBoundingClientRect();
                 check(rect.top >= -1 && rect.bottom <= innerHeight + 1 && rect.height >= 40, 'Navigation must remain fully visible in Settings');
@@ -532,6 +532,8 @@ public final class MobileUiSmokeTest {
             await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
             await until(() => visible(document.querySelector('[data-testid="project-tab-chat"]')), 'ordinary project Chat tab');
             check(!document.querySelector('.project-compact-heading'), 'A single-project tab must not spend a row on a name-only heading');
+            // Without that row, the rail is what names the open project.
+            check(Array.from(document.querySelectorAll('.app-sidebar-proj-row.active')).some(row => row.textContent.includes('Native workshop')), 'Current project is not marked in navigation');
             const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
             const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
             editor.focus();
@@ -541,6 +543,8 @@ public final class MobileUiSmokeTest {
             await until(async () => (await api('/api/projects/' + %1$s + '/prompt-drafts')).drafts.some(item => item.title.includes('Say hello.')), 'editor change saved before Send');
             let streamed = '';
             const listener = await plugin.addListener('chatDelta', event => { streamed += event.delta; });
+            const phases = [];
+            const phaseListener = await plugin.addListener('enginePhase', event => { if (phases.at(-1) !== event.phase) phases.push(event.phase); });
             try {
                 await until(() => { const send = composer.querySelector('[aria-label="Send"]'); return send && !send.disabled && send; }, 'enabled Send');
                 composer.querySelector('[aria-label="Send"]').click();
@@ -556,10 +560,11 @@ public final class MobileUiSmokeTest {
                 check(completed.answer.providerId === 'llama-cpp', 'Native provider identity must be persisted');
                 check(completed.answer.content === 'a'.repeat(256), 'Native fixture returned the wrong text');
                 await until(() => streamed === completed.answer.content, 'streamed native deltas');
+                check(phases.includes('prefill') && phases.indexOf('prefill') < phases.lastIndexOf('generating'), 'Native engine phases must report prefill before generating: ' + phases.join(','));
                 await until(() => document.body.textContent.includes(completed.answer.content), 'rendered shared chat response');
                 check(document.documentElement.scrollWidth <= innerWidth + 1, 'Project chat overflows');
                 return {sessionId:completed.session.id};
-            } finally { await listener.remove(); }
+            } finally { await listener.remove(); await phaseListener.remove(); }
             """.formatted(JSONObject.quote(seeded.getString("projectId"))));
         snapshot("02-shared-native-chat");
         run("""
@@ -730,7 +735,7 @@ public final class MobileUiSmokeTest {
         };
         const openNavigation = async () => {
             if (!visible(document.querySelector('[data-testid="app-sidebar"]'))) {
-                const navigation = await until(() => document.querySelector('.app-compact-navigation button'), 'Navigation control');
+                const navigation = await until(() => button('Navigation', document.querySelector('[data-testid="app-header"]') ?? document), 'Navigation control');
                 navigation.click();
             }
             await until(() => visible(document.querySelector('[data-testid="app-sidebar"]')), 'shared primary navigation');

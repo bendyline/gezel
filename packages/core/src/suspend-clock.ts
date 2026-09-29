@@ -273,8 +273,11 @@ export class AwakeBudget {
   readonly budgetMs: number;
   /** `Date.now()` at construction, used to scope suspension queries. */
   readonly startedAt: number;
-  private readonly deadline: number;
+  private deadline: number;
   private readonly abortAfterSuspensionMs: number;
+  /** Open {@link hold} handles, and when the first of them was taken. */
+  private holds = 0;
+  private heldSince: number | undefined;
 
   constructor(budgetMs: number, opts: AwakeBudgetOptions = {}) {
     this.budgetMs = budgetMs;
@@ -285,7 +288,29 @@ export class AwakeBudget {
 
   /** Awake ms left, floored at 0. */
   remainingMs(): number {
-    return Math.max(0, this.deadline - awakeNow());
+    const now = awakeNow();
+    const held = this.heldSince === undefined ? 0 : now - this.heldSince;
+    return Math.max(0, this.deadline + held - now);
+  }
+
+  /**
+   * Stop spending this budget until the returned release is called, for
+   * time the guarded work spends waiting on something that is not its own
+   * doing — a turn queued behind another conversation's, say. Holds nest;
+   * the budget runs again when the last one is released. Releasing twice is
+   * harmless.
+   */
+  hold(): () => void {
+    if (this.holds++ === 0) this.heldSince = awakeNow();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--this.holds === 0 && this.heldSince !== undefined) {
+        this.deadline += awakeNow() - this.heldSince;
+        this.heldSince = undefined;
+      }
+    };
   }
 
   /** Total suspension the host took since this budget started. */

@@ -519,6 +519,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - [`packages/service/src/fs/store.ts`](packages/service/src/fs/store.ts) — every disk read/write. If you're tempted to read a file from anywhere else, add a method here instead.
 - [`packages/service/src/chat/manager.ts`](packages/service/src/chat/manager.ts) — session lifecycle, persistence, resume, `ensureOrCreateSession`, `oneShotCompletion`.
 - [`packages/service/src/providers/`](packages/service/src/providers/) — the pluggable LLM layer plus the MCP bridge.
+- [`packages/core/src/runtime/provider-queue.ts`](packages/core/src/runtime/provider-queue.ts) and [`session-send-queue.ts`](packages/core/src/runtime/session-send-queue.ts) — the queued execution model the daemon and the phone runtime share: the per-engine scheduler (lanes, affinity, cancel/reorder, pause) and the per-conversation send list (queued chat, nudge, interrupt). The service's `providers/queue.ts` re-exports the first.
 - [`packages/service/src/meester/prompt.ts`](packages/service/src/meester/prompt.ts) — the curated Meester about.md and name list.
 - [`packages/mcp/src/server.ts`](packages/mcp/src/server.ts) — every MCP tool. Add new capabilities here.
 - [`packages/service/src/diffpack/`](packages/service/src/diffpack/) — change proposals: the copy-on-write draft store, the record/seal/apply manager, and the night planner.

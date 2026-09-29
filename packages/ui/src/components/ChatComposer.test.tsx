@@ -1259,9 +1259,34 @@ describe('ChatComposer mid-turn nudge + interrupt', () => {
     expect(screen.queryByRole('button', { name: /^interrupt$/i })).toBeNull();
   });
 
-  it('keeps the draft editable without offering unavailable audio or queued sends', async () => {
+  it('offers Nudge and Interrupt on a phone, which queues sends like the desktop', async () => {
     const previousBridge = window.__GEZEL__;
     window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      render(
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+        />,
+      );
+      await screen.findByRole('button', { name: /stop/i });
+      fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+      expect(await screen.findByRole('button', { name: /^nudge$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^interrupt$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Narrate prompt' })).toBeNull();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
+  });
+
+  it('keeps the draft editable without offering unavailable audio or queued sends', async () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = {
+      token: 'test',
+      capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, queuedChat: false },
+    };
     try {
       render(
         <ChatComposer

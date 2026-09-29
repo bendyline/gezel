@@ -1,14 +1,7 @@
 import { createLogger } from '@bendyline/gezel';
+import { QUEUE_WAIT_NOTICE_DELAY_MS, QUEUE_WAIT_NOTICE_REPEAT_MS } from '../queue.js';
 
 const log = createLogger('mlx');
-
-/**
- * Don't announce an engine-gate wait shorter than this — a brief handoff
- * between iterations is normal and would flash the queue badge for a frame.
- */
-const ENGINE_GATE_WAIT_NOTICE_DELAY_MS = 200;
-/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
-const ENGINE_GATE_WAIT_NOTICE_MS = 5_000;
 
 interface EngineGateWaiter {
   resolve: () => void;
@@ -81,9 +74,9 @@ export class MlxEngineGate {
             };
             waitNoticeDelay = setTimeout(() => {
               publish();
-              waitNotice = setInterval(publish, ENGINE_GATE_WAIT_NOTICE_MS);
+              waitNotice = setInterval(publish, QUEUE_WAIT_NOTICE_REPEAT_MS);
               waitNotice.unref?.();
-            }, ENGINE_GATE_WAIT_NOTICE_DELAY_MS);
+            }, QUEUE_WAIT_NOTICE_DELAY_MS);
             waitNoticeDelay.unref?.();
           }
         });

@@ -16,10 +16,13 @@ import {
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  QueuedMessage,
   RetrievalDecisionTrace,
   SendToSessionRequest,
+  SessionQueueState,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
+  TurnMessageOrigin,
 } from '@bendyline/gezel';
 import {
   type AIEngagementMode,
@@ -94,6 +97,7 @@ import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { SessionSendQueue } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
@@ -572,28 +576,7 @@ function hasSocialConnectorBinding(
   );
 }
 
-/**
- * Two send-paths share a `from` bucket when they're either both
- * user-initiated (no `from`) or both originate from the same sender
- * gezel. Used by the queue coalescer — we never merge a user follow-up
- * into a gezel→gezel handoff or vice versa, even if both were opted
- * into coalescing.
- */
-function sameFromBucket(
-  a: { gezelId: string; gezelName: string } | undefined,
-  b: { gezelId: string; gezelName: string } | undefined,
-): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.gezelId === b.gezelId;
-}
-
-export type TurnMessageOrigin =
-  | 'direct-user'
-  | 'question-answer'
-  | 'cross-gezel'
-  | 'background-nudge'
-  | 'system';
+export type { TurnMessageOrigin };
 
 function resolveTurnMessageOrigin(
   opts:
@@ -950,51 +933,6 @@ interface InflightTurn {
   };
 }
 
-/**
- * One entry in the per-session `pendingSends` FIFO queue. When a
- * caller's send would collide with an in-flight turn, the queue
- * either appends a new entry or, if the tail is coalescable and
- * shares the same `from` bucket, merges into the tail.
- *
- * Merging lets follow-up status messages (e.g. a batch of
- * `[npm_install follow-up: …]` notifications fired as each install
- * completes) pile into one turn rather than one-turn-each, which
- * was wasting entire LLM turns on trivial notifications.
- *
- * `waiters` holds every enqueue-side caller's `{resolve, reject}`
- * so all of them settle when the merged turn runs.
- */
-interface PendingSendEntry {
-  id: string;
-  userText: string;
-  enqueuedAt: number;
-  from: NonNullable<ChatMessage['from']> | undefined;
-  coalescable: boolean;
-  lane: Lane | undefined;
-  /** Ambient housekeeping turn — see `EnqueueRequest.ambient`. */
-  ambient: boolean;
-  /** Strong provenance for behavior hooks; user-role alone is ambiguous. */
-  messageOrigin: TurnMessageOrigin;
-  /** See send() opts — forwarded to the provider request. */
-  continuationMaxTokens: number | undefined;
-  fileTurnIntent?: FileTurnIntent;
-  /** Persist + deliver to the model but never render a transcript bubble. */
-  hidden: boolean;
-  /**
-   * Queued as a mid-turn nudge. Nudges stay separate entries while
-   * queued (individually editable/discardable), then contiguous
-   * same-bucket nudges merge into ONE turn at drain time — the
-   * user-facing counterpart of enqueue-time coalescing. The persisted
-   * user message carries `ChatMessage.nudge` for the transcript chip.
-   */
-  nudge: boolean;
-  /** The prompt draft this send was written in, if any. */
-  draftId: string | undefined;
-  /** See send() opts — a queued turn keeps its route opt-out. */
-  turnIntent: TurnIntentMode | undefined;
-  waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
-}
-
 type TurnIntentMode = NonNullable<SendToSessionRequest['turnIntent']>;
 
 export interface ChatManagerOptions {
@@ -1315,13 +1253,18 @@ export class ChatManager extends LocalEngineRuntime {
    * then contiguous same-bucket nudges merge into ONE turn at drain
    * time (`drainNextQueued`).
    *
+   * The queue itself is core's `SessionSendQueue`, shared with the phone
+   * runtime; this class decides when a session is busy and runs turns.
    * In-memory only — queued messages don't survive a service
    * restart. The persisted `record.messages` still contains prior
    * user turns; only the *unstarted* queued entries are lost. Regression
    * coverage lives under "ChatManager — per-session message queue" in
    * `manager.test.ts`.
    */
-  private readonly pendingSends = new Map<string, PendingSendEntry[]>();
+  private readonly sendQueue = new SessionSendQueue<ChatMessage>({
+    publish: (sessionId, event) => this.publishWithScopeLookup(sessionId, event),
+    log,
+  });
   /**
    * Background work that must not start until the current turn is idle.
    * Cross-gezel fire-and-forget handoffs use this when invoked from inside
@@ -2683,7 +2626,7 @@ export class ChatManager extends LocalEngineRuntime {
    * that state and can omit a turn while ensureState is still initializing.
    */
   isSessionTurnPending(sessionId: string): boolean {
-    return this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0;
+    return this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0;
   }
 
   /**
@@ -2834,40 +2777,8 @@ export class ChatManager extends LocalEngineRuntime {
    * `inflight` surface. Returns a flat array keyed by `sessionId`
    * with a short preview of each queued message's userText.
    */
-  listQueued(): Array<{
-    sessionId: string;
-    providerName?: ProviderName;
-    depth: number;
-    nextPreview: string;
-    entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
-  }> {
-    const out: Array<{
-      sessionId: string;
-      providerName?: ProviderName;
-      depth: number;
-      nextPreview: string;
-      entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
-    }> = [];
-    for (const [sessionId, q] of this.pendingSends) {
-      if (q.length === 0) continue;
-      const head = q[0]!.userText;
-      const nextPreview = head.length > 120 ? `${head.slice(0, 117)}…` : head;
-      const entries = q.map((e) => ({
-        queueId: e.id,
-        preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
-        enqueuedAt: new Date(e.enqueuedAt).toISOString(),
-        ...(e.nudge ? { nudge: true } : {}),
-      }));
-      const providerName = this.states.get(sessionId)?.record.providerName;
-      out.push({
-        sessionId,
-        ...(providerName ? { providerName } : {}),
-        depth: q.length,
-        nextPreview,
-        entries,
-      });
-    }
-    return out;
+  listQueued(): SessionQueueState[] {
+    return this.sendQueue.list((id) => this.states.get(id)?.record.providerName);
   }
 
   /**
@@ -2877,18 +2788,8 @@ export class ChatManager extends LocalEngineRuntime {
    * carries the complete `text` so the ghost bubble's edit affordance
    * can load it lazily. Empty array when the session has no queue.
    */
-  listSessionQueue(
-    sessionId: string,
-  ): Array<{ queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean }> {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return [];
-    return q.map((e) => ({
-      queueId: e.id,
-      text: e.userText,
-      preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
-      enqueuedAt: new Date(e.enqueuedAt).toISOString(),
-      nudge: e.nudge,
-    }));
+  listSessionQueue(sessionId: string): QueuedMessage[] {
+    return this.sendQueue.listSession(sessionId);
   }
 
   /**
@@ -3136,10 +3037,7 @@ export class ChatManager extends LocalEngineRuntime {
   }> {
     this.engagementMode = 'reactive';
 
-    const clearedQueuedMessages = Array.from(this.pendingSends.values()).reduce(
-      (total, queue) => total + queue.length,
-      0,
-    );
+    const clearedQueuedMessages = this.sendQueue.totalDepth();
     const clearedDeferredActions = Array.from(this.afterSessionIdle.values()).reduce(
       (total, actions) => total + actions.length,
       0,
@@ -3149,7 +3047,7 @@ export class ChatManager extends LocalEngineRuntime {
     // the session slot synchronously, and the unwind path may otherwise drain
     // one of these callbacks before all cancellations have settled.
     this.afterSessionIdle.clear();
-    for (const sessionId of Array.from(this.pendingSends.keys())) {
+    for (const sessionId of this.sendQueue.sessionIds()) {
       this.rejectQueuedForSession(sessionId, 'emergency stop', 'emergency-stop');
     }
 
@@ -3211,48 +3109,28 @@ export class ChatManager extends LocalEngineRuntime {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
-    const queueDepth = this.pendingSends.get(sessionId)?.length ?? 0;
+    const queueDepth = this.sendQueue.depth(sessionId);
     if (!this.inflight.has(sessionId) && queueDepth === 0) {
       return this.send(sessionId, userText, opts?.draftId ? { draftId: opts.draftId } : {});
     }
-    return new Promise<ChatMessage>((resolve, reject) => {
-      const q = this.pendingSends.get(sessionId) ?? [];
-      const entry: PendingSendEntry = {
-        id: randomUUID(),
-        userText,
-        enqueuedAt: Date.now(),
-        from: undefined,
-        coalescable: false,
-        lane: undefined,
-        ambient: false,
-        messageOrigin: 'direct-user',
-        continuationMaxTokens: undefined,
-        hidden: false,
-        nudge: false,
-        draftId: opts?.draftId,
-        turnIntent: undefined,
-        waiters: [{ resolve, reject }],
-      };
-      q.unshift(entry);
-      this.pendingSends.set(sessionId, q);
-      log.debug(
-        `queue#${sessionId.slice(0, 8)} INTERRUPT entry=${entry.id.slice(0, 8)} depth=${q.length}`,
-      );
-      this.publishQueueEnqueued(sessionId, entry);
-      void this.cancelInflight(sessionId, 'user-interrupt')
-        .catch((err) => {
-          // Cancel is best-effort teardown; the entry is already queued
-          // and will drain either below or via the unwind. Never reject
-          // the waiter here — that would double-settle when it drains.
-          log.warn(
-            `interrupt: cancelInflight failed for ${sessionId}:`,
-            err instanceof Error ? err.message : String(err),
-          );
-        })
-        .then(() => {
-          if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
-        });
+    const { result } = this.sendQueue.enqueueFront(sessionId, userText, {
+      messageOrigin: 'direct-user',
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
     });
+    void this.cancelInflight(sessionId, 'user-interrupt')
+      .catch((err) => {
+        // Cancel is best-effort teardown; the entry is already queued
+        // and will drain either below or via the unwind. Never reject
+        // the waiter here — that would double-settle when it drains.
+        log.warn(
+          `interrupt: cancelInflight failed for ${sessionId}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      })
+      .then(() => {
+        if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
+      });
+    return result;
   }
 
   async getSessionRecord(sessionId: string): Promise<ChatSession | null> {
@@ -3541,7 +3419,7 @@ export class ChatManager extends LocalEngineRuntime {
               .listActive()
               .some((activity) => activity.sessionId === sessionId)
           ? 'in-progress'
-          : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+          : this.sendQueue.depth(sessionId) > 0
             ? 'queued'
             : 'idle',
       recentMessages,
@@ -4233,7 +4111,7 @@ export class ChatManager extends LocalEngineRuntime {
       // drain, so the queued input runs under the old step before the
       // prompt and surface flip. A fresh session would strand it in a
       // thread nobody reads again.
-      ((this.pendingSends.get(previous.id)?.length ?? 0) === 0 || generalistTask)
+      (this.sendQueue.depth(previous.id) === 0 || generalistTask)
     ) {
       const prior = await this.store.getSession(args.gezelId, previous.id);
       if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
@@ -6556,7 +6434,7 @@ export class ChatManager extends LocalEngineRuntime {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     if (!record.lastTurnError) throw new Error('this session has no failed turn to retry');
-    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+    if (this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0) {
       throw new Error('a turn is already in progress for this session');
     }
 
@@ -6746,7 +6624,7 @@ export class ChatManager extends LocalEngineRuntime {
   private async resumeInterruptedTurn(sessionId: string): Promise<boolean> {
     const record = await this.getSessionRecord(sessionId);
     if (!record?.turnStartedAt) return false;
-    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+    if (this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0) {
       return false;
     }
     const input = [...record.messages].reverse().find((message) => message.role === 'user');
@@ -6803,21 +6681,10 @@ export class ChatManager extends LocalEngineRuntime {
     reason: string,
     cancel?: TurnCancelReason,
   ): void {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return;
-    this.pendingSends.delete(sessionId);
+    if (this.sendQueue.depth(sessionId) === 0) return;
     const err = new Error(`send rejected: ${reason} (session ${sessionId})`);
     if (cancel) markTurnCancelled(err, cancel);
-    for (const entry of q) {
-      for (const w of entry.waiters) {
-        try {
-          w.reject(err);
-        } catch {
-          /* ignore — best-effort cleanup */
-        }
-      }
-      this.publishQueueRemoved(sessionId, entry.id, 'rejected');
-    }
+    this.sendQueue.rejectSession(sessionId, err);
   }
 
   /**
@@ -6829,22 +6696,12 @@ export class ChatManager extends LocalEngineRuntime {
    * between turns. `inflight` is intentionally untouched.
    */
   onEngagementModeChangedToOff(): void {
-    const sessionIds = Array.from(this.pendingSends.keys());
-    for (const sessionId of sessionIds) {
-      const q = this.pendingSends.get(sessionId);
-      if (!q || q.length === 0) continue;
-      this.pendingSends.delete(sessionId);
-      const err = new Error('engagement-off: AI disabled before this queued message ran');
-      for (const entry of q) {
-        for (const w of entry.waiters) {
-          try {
-            w.reject(err);
-          } catch {
-            /* ignore — best-effort cleanup */
-          }
-        }
-        this.publishQueueRemoved(sessionId, entry.id, 'rejected');
-      }
+    for (const sessionId of this.sendQueue.sessionIds()) {
+      if (this.sendQueue.depth(sessionId) === 0) continue;
+      this.sendQueue.rejectSession(
+        sessionId,
+        new Error('engagement-off: AI disabled before this queued message ran'),
+      );
     }
   }
 
@@ -6859,23 +6716,7 @@ export class ChatManager extends LocalEngineRuntime {
    * don't want a queued message to run after all.
    */
   cancelQueuedMessage(sessionId: string, queueId: string): boolean {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return false;
-    const i = q.findIndex((e) => e.id === queueId);
-    if (i === -1) return false;
-    const [entry] = q.splice(i, 1);
-    if (q.length === 0) this.pendingSends.delete(sessionId);
-    if (!entry) return false;
-    const err = new Error('queued message canceled by user');
-    for (const w of entry.waiters) {
-      try {
-        w.reject(err);
-      } catch {
-        /* ignore */
-      }
-    }
-    this.publishQueueRemoved(sessionId, entry.id, 'canceled');
-    return true;
+    return this.sendQueue.cancel(sessionId, queueId);
   }
 
   /**
@@ -6888,60 +6729,8 @@ export class ChatManager extends LocalEngineRuntime {
    * gone (the entry already started or was discarded — the PATCH
    * route maps that to 404).
    */
-  updateQueuedMessage(
-    sessionId: string,
-    queueId: string,
-    text: string,
-  ): { queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean } | null {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return null;
-    const entry = q.find((e) => e.id === queueId);
-    if (!entry) return null;
-    entry.userText = text;
-    this.publishQueueEnqueued(sessionId, entry);
-    return {
-      queueId: entry.id,
-      text: entry.userText,
-      preview: entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText,
-      enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
-      nudge: entry.nudge,
-    };
-  }
-
-  /**
-   * Publish `queue_enqueued` on the session's project + global buses
-   * so timelines can render a ghost bubble. If the session isn't in
-   * `this.states` yet (possible during the enqueue-during-prologue
-   * race), fall back to a disk lookup — the ghost bubble appears a
-   * microtask later but correctness is preserved.
-   */
-  private publishQueueEnqueued(
-    sessionId: string,
-    entry: { id: string; userText: string; enqueuedAt: number; nudge?: boolean },
-  ): void {
-    const preview =
-      entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText;
-    const event = {
-      type: 'queue_enqueued' as const,
-      queueId: entry.id,
-      preview,
-      enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
-      ...(entry.nudge ? { nudge: true } : {}),
-    };
-    this.publishWithScopeLookup(sessionId, event);
-  }
-
-  /** Counterpart to {@link publishQueueEnqueued}. */
-  private publishQueueRemoved(
-    sessionId: string,
-    queueId: string,
-    reason: 'started' | 'canceled' | 'rejected',
-  ): void {
-    this.publishWithScopeLookup(sessionId, {
-      type: 'queue_removed' as const,
-      queueId,
-      reason,
-    });
+  updateQueuedMessage(sessionId: string, queueId: string, text: string): QueuedMessage | null {
+    return this.sendQueue.update(sessionId, queueId, text);
   }
 
   private publishWithScopeLookup(sessionId: string, event: ChatEvent): void {
@@ -7058,7 +6847,7 @@ export class ChatManager extends LocalEngineRuntime {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Public send. Serializes messages per session via {@link pendingSends}:
+   * Public send. Serializes messages per session via {@link sendQueue}:
    * if the session already has a turn in flight (or queued items ahead),
    * this message waits its turn instead of throwing. FIFO ordering within
    * a session is preserved by checking the queue *before* the direct
@@ -7098,7 +6887,8 @@ export class ChatManager extends LocalEngineRuntime {
        * chores). On local engine queues with ambient admission control
        * the turn dispatches only after a quiet window with no
        * user-facing activity — see `EnqueueRequest.ambient` in
-       * providers/queue.ts. Implies nothing about `lane`; pass both.
+       * core's runtime/provider-queue.ts. Implies nothing about `lane`;
+       * pass both.
        */
       ambient?: boolean;
       /** Cap output tokens on tool-loop continuation iterations — see
@@ -7145,90 +6935,19 @@ export class ChatManager extends LocalEngineRuntime {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
-    const existingQueue = this.pendingSends.get(sessionId);
     const messageOrigin = resolveTurnMessageOrigin(opts);
-    const shouldQueue =
-      this.inflight.has(sessionId) || (existingQueue !== undefined && existingQueue.length > 0);
-
-    if (shouldQueue) {
-      return new Promise<ChatMessage>((resolve, reject) => {
-        const q = this.pendingSends.get(sessionId) ?? [];
-        const tail = q.length > 0 ? q[q.length - 1] : undefined;
-        // Enqueue-time coalescing never mixes nudge and non-nudge
-        // semantics — nudges stay separate entries so each remains
-        // individually editable/discardable until drain merges them.
-        const canMerge =
-          opts?.fileTurnIntent === undefined &&
-          tail?.fileTurnIntent === undefined &&
-          opts?.coalescable === true &&
-          opts?.nudge !== true &&
-          tail?.coalescable === true &&
-          tail.nudge !== true &&
-          tail.messageOrigin === messageOrigin &&
-          sameFromBucket(tail.from, opts.from);
-
-        if (canMerge && tail) {
-          // Merge: join the body with a separator, append this caller
-          // as another waiter on the existing entry. Both senders'
-          // promises resolve with the same final assistant reply.
-          tail.userText = `${tail.userText}\n\n${userText}`;
-          // The merged turn is only hidden if BOTH parts are — coalescing
-          // a visible user message onto a hidden seed (or vice-versa) must
-          // surface, never silently swallow a real message.
-          tail.hidden = tail.hidden && opts?.hidden === true;
-          tail.waiters.push({ resolve, reject });
-          if (this.debug?.isEnabled() === true) {
-            log.info(
-              `coalesced send onto pending entry ${tail.id} ` +
-                `(session ${sessionId}, waiters=${tail.waiters.length})`,
-            );
-          }
-          // Re-publish the enqueue event with the *same* queueId so
-          // the UI upserts its ghost bubble with the updated preview
-          // rather than adding a second one.
-          this.publishQueueEnqueued(sessionId, {
-            id: tail.id,
-            userText: tail.userText,
-            enqueuedAt: tail.enqueuedAt,
-          });
-          return;
-        }
-
-        const entry: PendingSendEntry = {
-          id: randomUUID(),
-          userText,
-          enqueuedAt: Date.now(),
-          from: opts?.from,
-          coalescable: opts?.coalescable === true,
-          lane: opts?.lane,
-          ambient: opts?.ambient === true,
-          messageOrigin,
-          continuationMaxTokens: opts?.continuationMaxTokens,
-          fileTurnIntent: opts?.fileTurnIntent,
-          hidden: opts?.hidden === true,
-          nudge: opts?.nudge === true,
-          draftId: opts?.draftId,
-          turnIntent: opts?.turnIntent,
-          waiters: [{ resolve, reject }],
-        };
-        q.push(entry);
-        this.pendingSends.set(sessionId, q);
-        log.debug(
-          `queue#${sessionId.slice(0, 8)} ENQUEUED entry=${entry.id.slice(0, 8)} ` +
-            `depth=${q.length} reason=${this.inflight.has(sessionId) ? 'inflight' : 'queue-non-empty'}`,
+    const busy = this.inflight.has(sessionId);
+    const admission = this.sendQueue.admit(sessionId, busy, userText, { ...opts, messageOrigin });
+    if (admission.queued) {
+      if (admission.merged && this.debug?.isEnabled() === true) {
+        log.info(
+          `coalesced send onto pending entry ${admission.queueId} ` +
+            `(session ${sessionId}, waiters=${admission.waiters})`,
         );
-        this.publishQueueEnqueued(sessionId, entry);
-      });
+      }
+      return admission.result;
     }
-
-    // A nudge that never queued (session idle by the time it landed)
-    // is just a normal send — strip the flag so the persisted message
-    // doesn't claim mid-turn delivery.
-    return this.runSendAndDrain(
-      sessionId,
-      userText,
-      opts?.nudge ? { ...opts, nudge: false, messageOrigin } : { ...opts, messageOrigin },
-    );
+    return this.runSendAndDrain(sessionId, userText, admission.runOptions);
   }
 
   /**
@@ -7353,95 +7072,9 @@ export class ChatManager extends LocalEngineRuntime {
     // Broker adoption closes the old local session + its tool bridges before
     // a queued follow-up is allowed to rebuild on the machine remote.
     if (this.machineEngineSessionTeardowns.has(sessionId)) return;
-    const tag = sessionId.slice(0, 8);
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) {
-      this.pendingSends.delete(sessionId);
-      log.debug(`drain#${tag} empty`);
-      return;
-    }
-    const next = q.shift();
-    if (!next) return;
-    // Merged nudge delivery: contiguous same-bucket nudges collapse
-    // into ONE user message / ONE turn, joined the same way
-    // enqueue-time coalescing joins ("all pending nudges get inserted
-    // in the context" rather than one reply per nudge). Non-nudge
-    // entries keep strict one-per-turn drain, and a non-nudge entry
-    // (or a bucket change) breaks the merge run.
-    if (next.nudge) {
-      while (q.length > 0) {
-        const peek = q[0]!;
-        if (
-          !peek.nudge ||
-          peek.hidden !== next.hidden ||
-          peek.messageOrigin !== next.messageOrigin ||
-          next.fileTurnIntent !== undefined ||
-          peek.fileTurnIntent !== undefined ||
-          !sameFromBucket(peek.from, next.from)
-        ) {
-          break;
-        }
-        q.shift();
-        next.userText = `${next.userText}\n\n${peek.userText}`;
-        next.waiters.push(...peek.waiters);
-        this.publishQueueRemoved(sessionId, peek.id, 'started');
-      }
-    }
-    log.debug(
-      `drain#${tag} dispatch entry=${next.id.slice(0, 8)} ` +
-        `remaining=${q.length} waiters=${next.waiters.length}${next.nudge ? ' nudge' : ''}`,
+    this.sendQueue.dispatchNext(sessionId, (text, opts) =>
+      this.runSendAndDrain(sessionId, text, opts),
     );
-    if (q.length === 0) this.pendingSends.delete(sessionId);
-    // Tell listeners the ghost bubble is about to convert into a
-    // real user_message. The UI drops the ghost; the regular
-    // user_message event fires inside runSend right after.
-    this.publishQueueRemoved(sessionId, next.id, 'started');
-    const runOpts: {
-      from?: NonNullable<ChatMessage['from']>;
-      lane?: Lane;
-      ambient?: boolean;
-      continuationMaxTokens?: number;
-      fileTurnIntent?: FileTurnIntent;
-      hidden?: boolean;
-      nudge?: boolean;
-      draftId?: string;
-      messageOrigin?: TurnMessageOrigin;
-      turnIntent?: TurnIntentMode;
-    } = {};
-    if (next.from) runOpts.from = next.from;
-    if (next.turnIntent) runOpts.turnIntent = next.turnIntent;
-    if (next.lane) runOpts.lane = next.lane;
-    if (next.ambient) runOpts.ambient = true;
-    if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
-    if (next.fileTurnIntent) runOpts.fileTurnIntent = next.fileTurnIntent;
-    if (next.hidden) runOpts.hidden = true;
-    if (next.nudge) runOpts.nudge = true;
-    // Merged nudges keep the FIRST entry's draft: the run is that draft's
-    // turn, and the later nudges are text appended to it.
-    if (next.draftId) runOpts.draftId = next.draftId;
-    runOpts.messageOrigin = next.messageOrigin;
-    void this.runSendAndDrain(sessionId, next.userText, runOpts)
-      .then((msg) => {
-        // Every caller that coalesced into this entry gets the
-        // same final assistant message — they all contributed to
-        // the same turn, so they all see the same reply.
-        for (const w of next.waiters) {
-          try {
-            w.resolve(msg);
-          } catch {
-            /* ignore per-waiter resolve failures */
-          }
-        }
-      })
-      .catch((err) => {
-        for (const w of next.waiters) {
-          try {
-            w.reject(err);
-          } catch {
-            /* ignore */
-          }
-        }
-      });
   }
 
   /**
@@ -11214,7 +10847,7 @@ export class ChatManager extends LocalEngineRuntime {
     // Parked handoffs must not dispatch as their sender unwinds.
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
-    for (const sessionId of Array.from(this.pendingSends.keys())) {
+    for (const sessionId of this.sendQueue.sessionIds()) {
       this.rejectQueuedForSession(sessionId, 'service shutting down', 'service-restart');
     }
     await Promise.allSettled(

@@ -25,4 +25,10 @@ public final class LlamaRuntime {
         return generate(engine, roles, contents, requestId, maxTokens, 0f, 40, 0.95f, 0f, 1f, 64, 1, delta);
     }
     public static native void cancel(long engine, long requestId);
+    /**
+     * Live counters for the current load or generate, safe from any thread:
+     * {phase (0 idle, 1 loading, 2 prompt, 3 generating), load per-mille,
+     * prompt tokens, processed tokens, reused tokens, generated tokens}.
+     */
+    public static native long[] progress(long engine);
 }

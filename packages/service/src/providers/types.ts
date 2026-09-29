@@ -717,7 +717,7 @@ export interface SendAndWaitOpts {
      * generation). On local engine queues with ambient admission
      * control, these dispatch only after a quiet window with no
      * user-facing activity — see `EnqueueRequest.ambient` in
-     * providers/queue.ts. Never set on work a foreground turn awaits
+     * core's runtime/provider-queue.ts. Never set on work a foreground turn awaits
      * (compaction) or user-facing background turns (page reactions).
      */
     ambient?: boolean;

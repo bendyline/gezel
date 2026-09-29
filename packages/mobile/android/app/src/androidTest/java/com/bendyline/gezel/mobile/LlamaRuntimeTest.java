@@ -174,4 +174,20 @@ public final class LlamaRuntimeTest {
         assertSame(expected, actual);
         assertEightTokens();
     }
+
+    @Test public void progressReportsPhasesAndFinalCounts() {
+        assertEquals(0L, LlamaRuntime.progress(engine)[0]);
+        load();
+        AtomicInteger phaseDuringStream = new AtomicInteger(-1);
+        assertEquals(FINISH_LENGTH, LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8, bytes -> {
+            phaseDuringStream.compareAndSet(-1, (int) LlamaRuntime.progress(engine)[0]);
+            return true;
+        }));
+        assertEquals(3, phaseDuringStream.get());
+        long[] done = LlamaRuntime.progress(engine);
+        assertEquals(0L, done[0]);
+        assertTrue("Prompt tokens must be counted", done[2] > 0);
+        assertEquals(done[2], done[3]);
+        assertEquals(8L, done[5]);
+    }
 }

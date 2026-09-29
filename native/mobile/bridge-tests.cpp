@@ -299,6 +299,31 @@ static void bridge_tests(const char * path) {
     write_fixture(path);
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_OK);
     CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+
+    // Progress: a mismatched struct is refused; a snapshot taken while tokens
+    // stream says so; afterwards the engine is idle and the counters describe
+    // the reply that just finished.
+    gezel_llama_progress progress{};
+    CHECK(gezel_llama_get_progress(engine.get(), &progress) == GEZEL_LLAMA_INVALID_ARGUMENT);
+    progress.struct_size = sizeof(progress);
+    progress.abi_version = GEZEL_LLAMA_ABI_VERSION;
+    CHECK(gezel_llama_get_progress(nullptr, &progress) == GEZEL_LLAMA_INVALID_ARGUMENT);
+    struct observed { gezel_llama_engine * engine; uint32_t phase; };
+    observed streaming{engine.get(), GEZEL_LLAMA_PHASE_IDLE};
+    auto observe = [](const char *, size_t, void * data) -> int32_t {
+        auto & state = *static_cast<observed *>(data);
+        gezel_llama_progress snapshot{};
+        snapshot.struct_size = sizeof(snapshot);
+        snapshot.abi_version = GEZEL_LLAMA_ABI_VERSION;
+        if (gezel_llama_get_progress(state.engine, &snapshot) == GEZEL_LLAMA_OK) state.phase = snapshot.phase;
+        return 0;
+    };
+    CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, observe, &streaming, &result, &error) == GEZEL_LLAMA_OK);
+    CHECK(streaming.phase == GEZEL_LLAMA_PHASE_GENERATING);
+    CHECK(gezel_llama_get_progress(engine.get(), &progress) == GEZEL_LLAMA_OK);
+    CHECK(progress.phase == GEZEL_LLAMA_PHASE_IDLE);
+    CHECK(progress.prompt_tokens > 0 && progress.processed_tokens == progress.prompt_tokens);
+    CHECK(progress.generated_tokens == result.generated_tokens);
 }
 
 int main(int argc, char ** argv) {

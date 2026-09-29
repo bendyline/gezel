@@ -106,6 +106,11 @@ export default defineConfig({
     // never stall text embedding and its crashes never count against the
     // embed worker's limit.
     'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
+    // Kokoro speech synthesis. An ONNX run blocks its thread for a whole
+    // sentence; in embedded mode the event loop it would block is Electron's
+    // main process, which beachballed the app for as long as a chat reply
+    // took to narrate.
+    'providers/audio/kokoro-worker': 'src/providers/audio/kokoro-worker.ts',
     // Portable guest execution must never occupy the daemon/Electron event loop.
     'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's

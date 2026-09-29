@@ -39,6 +39,22 @@ constexpr uint32_t max_context_tokens = 16384;
 struct gezel_llama_engine {
     std::mutex mutex;
     std::atomic<uint64_t> active_request{0};
+    // Read by gezel_llama_get_progress from any thread; written only by the
+    // operation that holds the engine.
+    std::atomic<uint32_t> progress_phase{GEZEL_LLAMA_PHASE_IDLE};
+    std::atomic<float> progress_load{0.0f};
+    std::atomic<uint32_t> progress_prompt{0};
+    std::atomic<uint32_t> progress_processed{0};
+    std::atomic<uint32_t> progress_reused{0};
+    std::atomic<uint32_t> progress_generated{0};
+    void begin_progress(uint32_t phase) {
+        progress_load.store(0.0f, std::memory_order_relaxed);
+        progress_prompt.store(0, std::memory_order_relaxed);
+        progress_processed.store(0, std::memory_order_relaxed);
+        progress_reused.store(0, std::memory_order_relaxed);
+        progress_generated.store(0, std::memory_order_relaxed);
+        progress_phase.store(phase, std::memory_order_release);
+    }
     clock_type::time_point deadline;
     llama_model * model = nullptr;
     llama_context * context = nullptr;
@@ -104,7 +120,10 @@ struct operation {
 };
 
 bool abort_decode(void * data) { return static_cast<gezel_llama_engine *>(data)->stopped() != GEZEL_LLAMA_OK; }
-bool load_progress(float, void * data) { return !abort_decode(data); }
+bool load_progress(float fraction, void * data) {
+    static_cast<gezel_llama_engine *>(data)->progress_load.store(fraction, std::memory_order_relaxed);
+    return !abort_decode(data);
+}
 bool valid_request(uint64_t id) { return id != 0 && (id & cancelled_bit) == 0; }
 bool valid_timeout(uint32_t value) { return value > 0 && value <= 300000; }
 bool valid_load_options(const gezel_llama_load_options * options) {
@@ -413,6 +432,10 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         reuse = 0;
     }
     engine.cached.assign(tokens.begin(), tokens.begin() + static_cast<std::ptrdiff_t>(reuse));
+    engine.progress_prompt.store(static_cast<uint32_t>(tokens.size()), std::memory_order_relaxed);
+    engine.progress_reused.store(static_cast<uint32_t>(reuse), std::memory_order_relaxed);
+    engine.progress_processed.store(static_cast<uint32_t>(reuse), std::memory_order_relaxed);
+    engine.progress_phase.store(GEZEL_LLAMA_PHASE_PROMPT, std::memory_order_release);
     // A checkpoint needs a token left to decode after it, so the prompt's last
     // token goes in its own batch.
     const size_t checkpoint_at = engine.reusable_memory ? 0 : tokens.size() - 1;
@@ -434,7 +457,9 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         engine.cached.insert(engine.cached.end(), tokens.begin() + static_cast<std::ptrdiff_t>(offset),
                              tokens.begin() + static_cast<std::ptrdiff_t>(offset + static_cast<size_t>(n)));
         offset += static_cast<size_t>(n);
+        engine.progress_processed.store(static_cast<uint32_t>(offset), std::memory_order_relaxed);
     }
+    engine.progress_phase.store(GEZEL_LLAMA_PHASE_GENERATING, std::memory_order_release);
     auto params = llama_sampler_chain_default_params();
     params.no_perf = true;
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(llama_sampler_chain_init(params), llama_sampler_free);
@@ -484,6 +509,7 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         }
         if (llama_vocab_is_eog(vocab, token)) { result.finish_reason = GEZEL_LLAMA_FINISH_STOP; break; }
         ++result.generated_tokens;
+        engine.progress_generated.store(result.generated_tokens, std::memory_order_relaxed);
         char small[256];
         auto length = llama_token_to_piece(vocab, token, small, sizeof(small), 0, false);
         std::vector<char> large;
@@ -553,12 +579,26 @@ int32_t gezel_llama_load(gezel_llama_engine * engine, const char * path,
     if (!lock.owns_lock()) return fail(error, GEZEL_LLAMA_BUSY, "Engine is busy");
     const auto config = *options;
     operation active(*engine, config.request_id, config.timeout_ms);
+    engine->begin_progress(GEZEL_LLAMA_PHASE_LOADING);
     int32_t status;
     try { status = load_impl(*engine, path, config, error); }
     catch (const std::bad_alloc &) { status = fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Insufficient memory to load the model"); }
     catch (...) { status = fail(error, GEZEL_LLAMA_LOAD_FAILED, "Unexpected native model loading failure"); }
     if (status != GEZEL_LLAMA_OK) engine->unload();
+    engine->progress_phase.store(GEZEL_LLAMA_PHASE_IDLE, std::memory_order_release);
     return status;
+}
+int32_t gezel_llama_get_progress(gezel_llama_engine * engine, gezel_llama_progress * progress) {
+    if (!engine || !progress || progress->struct_size != sizeof(*progress) ||
+        progress->abi_version != GEZEL_LLAMA_ABI_VERSION)
+        return GEZEL_LLAMA_INVALID_ARGUMENT;
+    progress->phase = engine->progress_phase.load(std::memory_order_acquire);
+    progress->load_fraction = engine->progress_load.load(std::memory_order_relaxed);
+    progress->prompt_tokens = engine->progress_prompt.load(std::memory_order_relaxed);
+    progress->processed_tokens = engine->progress_processed.load(std::memory_order_relaxed);
+    progress->reused_tokens = engine->progress_reused.load(std::memory_order_relaxed);
+    progress->generated_tokens = engine->progress_generated.load(std::memory_order_relaxed);
+    return GEZEL_LLAMA_OK;
 }
 int32_t gezel_llama_estimate_memory(gezel_llama_engine * engine, const char * path,
                                   const gezel_llama_load_options * options,
@@ -603,6 +643,7 @@ int32_t gezel_llama_generate(gezel_llama_engine * engine, const gezel_llama_mess
     if (!engine->model || !engine->context) return finish(fail(error, GEZEL_LLAMA_NOT_LOADED, "No model is loaded"));
     const auto config = *options;
     operation active(*engine, config.request_id, config.timeout_ms);
+    engine->begin_progress(GEZEL_LLAMA_PHASE_PROMPT);
     int32_t status;
     try { status = generate_impl(*engine, messages, count, config, callback, user_data, output, error); }
     catch (const std::bad_alloc &) { status = fail(error, GEZEL_LLAMA_RESOURCE_LIMIT, "Insufficient inference memory"); }
@@ -618,6 +659,7 @@ int32_t gezel_llama_generate(gezel_llama_engine * engine, const gezel_llama_mess
         llama_memory_clear(llama_get_memory(engine->context), true);
         engine->cached.clear();
     }
+    engine->progress_phase.store(GEZEL_LLAMA_PHASE_IDLE, std::memory_order_release);
     return finish(status);
 }
 }

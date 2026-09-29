@@ -1077,3 +1077,56 @@ describe('EngineStatusPill — crowded titlebar', () => {
     expect(pill).not.toHaveClass('engine-pill-busy');
   });
 });
+
+describe('EngineStatusPill — phone host', () => {
+  it('reports engine status without desktop engine management', async () => {
+    const { OFFLINE_RUNTIME_CAPABILITIES } = await import('@bendyline/gezel');
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = { ...previousBridge!, capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    mockLiveTurns = new Map();
+    for (const method of [
+      api.getEngineRetention,
+      api.getUsage,
+      api.getMachineMemoryUsage,
+      api.emergencyStopChats,
+    ])
+      vi.mocked(method).mockClear();
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'android-mlkit' } as ConfigResponse);
+    // A missing queue snapshot must not hide the turn the host reports running.
+    vi.mocked(api.getQueueStatus).mockRejectedValue(new Error('unavailable'));
+    vi.mocked(api.listInflightTurns).mockResolvedValue({
+      inflight: [
+        {
+          sessionId: 'phone-session',
+          gezelId: 'wren',
+          projectId: 'default',
+          providerName: 'android-mlkit',
+          userText: 'hello',
+          startedAt: Date.now(),
+          elapsedMs: 3_000,
+        },
+      ],
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      provider: 'android-mlkit',
+      models: [{ id: 'android-mlkit', name: 'Gemini Nano' }],
+    } as never);
+    try {
+      const { container } = render(<EngineStatusPill />);
+      await waitFor(() =>
+        expect(container.querySelector('.engine-pill.engine-pill-busy')).not.toBeNull(),
+      );
+      await userEvent.click(container.querySelector('.engine-pill')!);
+      expect(await screen.findByText('Status')).toBeInTheDocument();
+      expect(screen.queryByText('Idle models')).toBeNull();
+      expect(screen.queryByText('Health policy')).toBeNull();
+      expect(screen.queryByText('Memory')).toBeNull();
+      expect(screen.queryByRole('button', { name: /Hard Stop/ })).toBeNull();
+      expect(api.getEngineRetention).not.toHaveBeenCalled();
+      expect(api.getUsage).not.toHaveBeenCalled();
+      expect(api.getMachineMemoryUsage).not.toHaveBeenCalled();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
+  });
+});

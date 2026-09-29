@@ -1,4 +1,6 @@
 import {
+  type MobileEnginePhaseEvent,
+  MobileEnginePhaseEventSchema,
   MobileInferenceBudgetSchema,
   type MobileModelInventory,
   MobileModelInventorySchema,
@@ -52,6 +54,8 @@ export interface PortableInference {
     },
     onDelta: (event: { requestId: string; delta: string }) => void,
     onToolCall?: (call: MobileNativeToolCall) => Promise<MobileNativeToolReply>,
+    /** Native engine phases (loading, prompt processing, first token), when reported. */
+    hooks?: { onPhase?(event: MobileEnginePhaseEvent): void },
   ): Promise<{ text: string; stopReason: 'stop' | 'length' | 'cancelled' }>;
   cancel(requestId: string): Promise<void>;
 }
@@ -80,6 +84,11 @@ export interface NativeInferencePlugin {
     event: 'toolCall',
     callback: (event: MobileNativeToolCall) => void,
   ): Promise<NativeInferenceListener>;
+  /** Older native builds never emit this; callers must not depend on it. */
+  addListener(
+    event: 'enginePhase',
+    callback: (event: MobileEnginePhaseEvent) => void,
+  ): Promise<NativeInferenceListener>;
 }
 
 export interface NativeInferenceListener {
@@ -102,7 +111,7 @@ export function createNativeInference(plugin: NativeInferencePlugin): PortableIn
       const result = await plugin.providers();
       return MobileProviderListSchema.parse(result.providers);
     },
-    async generate(request, onDelta, onToolCall) {
+    async generate(request, onDelta, onToolCall, hooks) {
       if (runs.size) throw new Error('A response is already running');
       if (request.tools?.length && (!onToolCall || !plugin.completeToolCall))
         throw new Error('Native tool calls need a handler and a host that can complete them');
@@ -114,7 +123,16 @@ export function createNativeInference(plugin: NativeInferencePlugin): PortableIn
       runs.set(request.requestId, run);
       let listener: NativeInferenceListener | undefined;
       let toolListener: NativeInferenceListener | undefined;
+      let phaseListener: NativeInferenceListener | undefined;
       try {
+        if (hooks?.onPhase) {
+          const onPhase = hooks.onPhase;
+          phaseListener = await plugin.addListener('enginePhase', (raw) => {
+            const event = MobileEnginePhaseEventSchema.safeParse(raw);
+            if (!run.cancelled && event.success && event.data.requestId === request.requestId)
+              onPhase(event.data);
+          });
+        }
         listener = await plugin.addListener('chatDelta', (event) => {
           if (!run.cancelled && event.requestId === request.requestId) onDelta(event);
         });
@@ -151,7 +169,7 @@ export function createNativeInference(plugin: NativeInferencePlugin): PortableIn
       } finally {
         run.cancelled = true;
         try {
-          await Promise.all([listener?.remove(), toolListener?.remove()]);
+          await Promise.all([listener?.remove(), toolListener?.remove(), phaseListener?.remove()]);
         } catch {
           // Teardown cannot replace the model's authoritative result (or error).
           // The sealed run also ignores callbacks if the native listener survived.

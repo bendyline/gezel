@@ -55,6 +55,13 @@ export interface PortableScripts {
     signal?: AbortSignal;
     timeoutMs?: number;
     depth?: number;
+    /**
+     * What to do when another script is already running on a single-flight
+     * executor: `reject` (the default, for a person's direct run) or `wait`
+     * for it, abortably. Chat tools and task hooks wait, because a turn and a
+     * task step can now overlap.
+     */
+    admission?: 'wait' | 'reject';
   }): Promise<ScriptRun>;
   initialize(): Promise<void>;
   cancel(): Promise<void>;

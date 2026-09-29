@@ -173,7 +173,7 @@ describe('shared speech API on the portable runtime', () => {
       await f.store.readFileBytes(
         'artifacts',
         'default',
-        result.artifactPath.replace(/^artifacts\//, ''),
+        result.artifactPath!.replace(/^artifacts\//, ''),
       ),
     ).toEqual(speechBytes(result.b64Wav!));
   });
@@ -218,5 +218,24 @@ describe('shared speech API on the portable runtime', () => {
     const response = await f.request('synthesize-stream', { text: 'Hello' });
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toContain('"type":"done"');
+  });
+  it('streams the audio as a chunk even when the engine delivered it whole', async () => {
+    const f = await product();
+    const body = await (await f.request('synthesize-stream', { text: 'Hello' })).text();
+    const events = body
+      .split('\n\n')
+      .filter((frame) => frame.startsWith('data: '))
+      .map((frame) => JSON.parse(frame.slice(6)) as { type: string; chunk?: { b64Wav: string } });
+    const chunks = events.filter((event) => event.type === 'chunk');
+    expect(chunks).toHaveLength(1);
+    expect(speechBytes(chunks[0]!.chunk!.b64Wav)).toEqual(new Uint8Array([82, 73, 70, 70]));
+  });
+  it('saves nothing for speech that is only to be heard', async () => {
+    const f = await product();
+    const response = await f.request('synthesize', { text: 'Hello', persist: false });
+    expect(response.status).toBe(200);
+    const result = AudioSynthesizeResponseSchema.parse(await response.json());
+    expect(result.artifactPath).toBeUndefined();
+    expect([...f.files.entries.keys()].some((path) => /tts-.*\.wav$/.test(path))).toBe(false);
   });
 });

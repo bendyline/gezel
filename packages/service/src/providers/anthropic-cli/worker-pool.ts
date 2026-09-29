@@ -65,7 +65,7 @@ export interface ClaudeWorkerPoolOpts {
  * affinity. A worker handles one turn at a time (Claude is sequential), so
  * routing two simultaneous turns to the same `sessionId` would race on the
  * worker; we don't enforce this at the pool layer because the
- * per-`ChatSession` queueing in `ChatManager.pendingSends` already
+ * per-`ChatSession` queueing in `ChatManager.sendQueue` already
  * guarantees one in-flight turn per session.
  */
 export class ClaudeWorkerPool {

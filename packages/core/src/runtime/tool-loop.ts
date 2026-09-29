@@ -1,6 +1,7 @@
 import { isEngagementAllowed } from '../engagement.js';
 import { createLogger } from '../log.js';
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
+import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { isContextOverflowError } from '../task-execution.js';
@@ -203,6 +204,16 @@ export async function runPortableToolLoop(options: {
   checkpoint(message: ChatMessage): Promise<void>;
   tool(call: ChatMessageToolCall): void;
   delta(text: string): void;
+  /**
+   * Engine phase for the live status pill: `prefill` as each model call is
+   * sent, `generating` when its first chunk streams back (reasoning and
+   * tool-call text included, though neither reaches `delta`). Native hosts
+   * add model loading and prompt-processing progress between the two.
+   */
+  phase?(
+    phase: MobileEnginePhaseEvent['phase'],
+    detail?: Omit<MobileEnginePhaseEvent, 'requestId' | 'phase'>,
+  ): void;
 }): Promise<LoopResult> {
   const { session } = options;
   const messages = [...options.messages];
@@ -384,6 +395,8 @@ export async function runPortableToolLoop(options: {
         : [];
       let nativeCalls = 0;
       let limited = false;
+      let decoding = false;
+      options.phase?.('prefill');
       try {
         result = await options.inference.generate(
           {
@@ -398,6 +411,10 @@ export async function runPortableToolLoop(options: {
           },
           (event) => {
             if (options.cancelled() || event.requestId !== options.requestId) return;
+            if (!decoding) {
+              decoding = true;
+              options.phase?.('generating');
+            }
             buffered += event.delta;
             if (inOpenReasoning(buffered)) return;
             const visible = extractReasoning(buffered).visible;
@@ -442,6 +459,18 @@ export async function runPortableToolLoop(options: {
                   return { output: '', endTurn: true };
                 }
                 return { output: outcome.output };
+              }
+            : undefined,
+          options.phase
+            ? {
+                onPhase: ({ requestId: _requestId, phase, ...detail }) => {
+                  // The native first token and the first streamed chunk are the
+                  // same moment; report it once. Progress polled on another
+                  // native thread can land after decoding began; drop it.
+                  if (decoding) return;
+                  if (phase === 'generating') decoding = true;
+                  options.phase?.(phase, detail);
+                },
               }
             : undefined,
         );

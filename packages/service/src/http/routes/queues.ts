@@ -21,38 +21,16 @@ export { sanitizeBrokerCacheStats } from './engine-queues.js';
  * "copilot is busy" noise, not "ollama has 0 queued" clutter.
  */
 
+import { QueueProviderNameSchema, type QueueStatusResponse } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
 import type { ServiceContext } from '../context.js';
 import { MACHINE_ENGINE_PROVIDER_NAMES, usesMachineEngine } from './machine-engine-proxy.js';
 
-type ProviderName =
-  | 'copilot'
-  | 'openai'
-  | 'anthropic'
-  | 'anthropic-cli'
-  | 'codex-cli'
-  | 'ollama'
-  | 'llama-cpp'
-  | 'mlx'
-  | 'ds4'
-  | 'apple-foundation-models';
-
 export function queueRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
-  const PROVIDER_NAMES: readonly ProviderName[] = [
-    'copilot',
-    'openai',
-    'anthropic',
-    'anthropic-cli',
-    'codex-cli',
-    'ollama',
-    'llama-cpp',
-    'mlx',
-    'ds4',
-    'apple-foundation-models',
-  ];
+  const PROVIDER_NAMES = QueueProviderNameSchema.options;
 
   app.get('/', async (c) => {
     const providers = providerQueueSnapshot(ctx, PROVIDER_NAMES);
@@ -109,7 +87,7 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       }
     }
 
-    return c.json({
+    const body: QueueStatusResponse = {
       providers,
       taskRunner: { ...ctx.taskRunner.snapshot(), nightShift },
       sessions,
@@ -117,7 +95,8 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       ...(deviceHealth ? { deviceHealth } : {}),
       ...(anthropicCliPool ? { anthropicCliPool } : {}),
       at: new Date().toISOString(),
-    });
+    };
+    return c.json(body);
   });
   app.route('/', providerQueueControls(ctx, PROVIDER_NAMES));
 
