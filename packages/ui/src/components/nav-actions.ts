@@ -36,6 +36,22 @@ export function openHandboekArticleActions(articleId: string): NavAction[] {
 }
 
 /**
+ * Open one file in its project's file editor. Queue first so a remounting
+ * `ProjectsView` can consume the intent, then switch to the project tab, then
+ * fire the live event for a view that is already open.
+ *
+ * A project file must never be opened as a `document` tab: that tab is the
+ * shared-library editor, and its autosave writes into the library folder.
+ */
+export function openProjectFileActions(intent: OpenFileIntent): NavAction[] {
+  return [
+    { kind: 'open-file', intent },
+    openTabAction({ kind: 'project', id: intent.projectId }),
+    { kind: 'event', type: 'gezel:open-file', detail: intent },
+  ];
+}
+
+/**
  * Fire a single tab navigation — the common one-liner case. Going through
  * `RecentTabInput` is the point: a hand-built `gezel:open-tab` detail with a
  * wrong shape fails silently (App's listener just returns), so the type is
@@ -43,6 +59,13 @@ export function openHandboekArticleActions(articleId: string): NavAction[] {
  */
 export function navigateToTab(detail: RecentTabInput): void {
   runNavActions([openTabAction(detail)]);
+}
+
+/** Opens the titlebar's Updates drawer (the owner's pending questions). */
+export const OPEN_UPDATES_EVENT = 'gezel:open-updates';
+
+export function openUpdates(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_UPDATES_EVENT));
 }
 
 /**

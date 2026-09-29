@@ -121,6 +121,27 @@ describe('POST /api/projects/:id/page-read', () => {
     expect(c.etag).not.toBe(a.etag);
   });
 
+  // A page watches files its gezel has not written yet: every poll used to
+  // 404, and the unseeded watch then missed the file's arrival.
+  it('stat answers a declared file that does not exist yet as absent', async () => {
+    const workspace = await svc.context.store.projectWorkspaceDir(projectId);
+    await rm(join(workspace, 'game.json'), { force: true });
+    const missing = await read({ op: 'stat', source: 'workspace', path: 'game.json' });
+    expect(missing.status).toBe(200);
+    const absent = (await missing.json()) as { etag: string; exists?: boolean };
+    expect(absent.exists).toBe(false);
+
+    const body = await read({ op: 'read', source: 'workspace', path: 'game.json' });
+    expect(body.status).toBe(404);
+
+    await writeFile(join(workspace, 'game.json'), JSON.stringify({ board: [] }));
+    const present = (await (
+      await read({ op: 'stat', source: 'workspace', path: 'game.json' })
+    ).json()) as { etag: string; exists?: boolean };
+    expect(present.etag).not.toBe(absent.etag);
+    expect(present.exists).toBeUndefined();
+  });
+
   it('list on a file is a 400', async () => {
     const res = await read({ op: 'list', source: 'workspace', path: 'game.json' });
     expect(res.status).toBe(400);

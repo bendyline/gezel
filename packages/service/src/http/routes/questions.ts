@@ -14,11 +14,25 @@ import {
 import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
+import { answerOwnerStep } from '../../tasks/owner-step.js';
 import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 import { applyNpmInstallApprovals, intentPackages } from '../../workspace/npm.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
+
+/** The step of `taskRef` the asking session works, else the task's active step. */
+async function askingStepId(
+  ctx: ServiceContext,
+  sessionId: string,
+  taskRef: string,
+): Promise<string | undefined> {
+  const session = sessionId ? await ctx.store.findSessionById(sessionId).catch(() => null) : null;
+  if (session?.taskRef === taskRef && session.stepId) return session.stepId;
+  const ref = parseTaskRef(taskRef);
+  if (!ref) return undefined;
+  return (await ctx.tasks.get(ref.projectId, ref.num).catch(() => null))?.activeStepId;
+}
 
 /**
  * Routes for the structured ask-user-question system.
@@ -56,12 +70,19 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
-    const { question, deduped } = resolved;
+    const { deduped } = resolved;
+    let question = resolved.question;
     if (deduped) {
       log.info(
         `[questions] dedup: session ${body.sessionId} already has unanswered question ${question.id}; suppressing re-ask`,
       );
       return c.json({ questionId: question.id, deduped: true }, 200);
+    }
+    // Record which task step asked, so a later `runWhen` step can be decided
+    // from this answer without a model turn.
+    if (question.taskRef && !question.stepId) {
+      const stepId = await askingStepId(ctx, question.sessionId, question.taskRef);
+      if (stepId) question = { ...question, stepId };
     }
     await ctx.store.writeQuestion(question);
     // Correlate the question with its chat bubble. During an active model
@@ -280,7 +301,21 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // Task-paused cards are the same shape: service-synthesized, no live
     // session. Dismiss collapses the card; fixing/resuming the task
     // happens through the attached "Open task" link, not the answer.
-    if (question.intent?.kind === 'task-paused') {
+    // Task-finished cards point at the wrap-up thread only for "Open in
+    // chat"; dismissing one must not seed a turn there.
+    if (question.intent?.kind === 'task-paused' || question.intent?.kind === 'task-finished') {
+      return c.json(question);
+    }
+
+    // An owner step: the answer IS the owner's action on the task — approve
+    // it, or send the work back with their note. There is no session to seed.
+    if (question.intent?.kind === 'step-awaits-owner') {
+      try {
+        await answerOwnerStep(ctx.tasks, question);
+      } catch (err) {
+        // The card still collapses; the task page shows where the step stands.
+        log.warn(`[questions] owner-step answer failed for ${question.intent.taskRef}:`, err);
+      }
       return c.json(question);
     }
 

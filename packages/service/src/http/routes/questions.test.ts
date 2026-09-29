@@ -233,6 +233,35 @@ describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
   });
 });
 
+describe('POST /api/questions/:id/answer — task-finished card', () => {
+  // The card names the wrap-up thread only so Updates can open it there.
+  it('dismisses without starting a turn in the wrap-up thread', async () => {
+    const project = await svc.context.store.createProject({ name: 'Ready Card' });
+    const questionId = crypto.randomUUID();
+    await svc.context.store.writeQuestion({
+      id: questionId,
+      projectId: project.id,
+      gezelId: 'zara',
+      sessionId: 'meester-thread',
+      prompt: '**Weekly posts** is finished.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      taskRef: `${project.id}/2`,
+      intent: { kind: 'task-finished', taskRef: `${project.id}/2` },
+      createdAt: new Date().toISOString(),
+    });
+    const deliver = vi.spyOn(svc.context.chat, 'deliverQuestionAnswer');
+
+    const res = await api('POST', `/api/questions/${questionId}/answer`, {
+      selectedChoices: [0],
+    });
+    expect(res.status).toBe(200);
+    expect(deliver).not.toHaveBeenCalled();
+
+    deliver.mockRestore();
+  });
+});
+
 describe('POST /api/questions/:id/answer — toolset install approval', () => {
   it('persists the approval without seeding a duplicate model turn', async () => {
     const project = await svc.context.store.createProject({ name: 'MCP Approval' });

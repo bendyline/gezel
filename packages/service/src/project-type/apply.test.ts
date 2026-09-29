@@ -716,6 +716,53 @@ describe('seed policy, overlay, and roster reuse', () => {
     );
   });
 
+  // Creating a Social Feed project hired a second Omroeper and a second
+  // Copywriter beside the ones the user already had.
+  it('fills the crew with gezels the user already has, by template then role title', async () => {
+    const trainer = await store.createGezel({
+      name: 'Triono',
+      role: 'Language Trainer',
+      templateId: 'trainer',
+    });
+    const coach = await store.createGezel({ name: 'Kylian', role: 'practice coach' });
+    // A title the role aliases map to the same canonical role is not a match.
+    await store.createGezel({ name: 'Dina', role: 'Team Coach' });
+    const before = (await store.listGezels()).length;
+
+    const project = await store.createProject({ name: 'Crew reuse' });
+    const applied = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Dutch' },
+    });
+
+    expect(applied.gezelsCreated.map((g) => [g.id, g.reused])).toEqual([
+      [trainer.id, true],
+      [coach.id, true],
+    ]);
+    expect((await store.listGezels()).length).toBe(before);
+    const saved = await store.getProject(project.id);
+    expect(saved?.voormanGezelId).toBe(trainer.id);
+    expect(saved?.gezelIds).toEqual(expect.arrayContaining([trainer.id, coach.id]));
+  });
+
+  it('hires a fresh crew when the caller opts out of reuse', async () => {
+    const trainer = await store.createGezel({
+      name: 'Triono',
+      role: 'Language Trainer',
+      templateId: 'trainer',
+    });
+    const project = await store.createProject({ name: 'Fresh crew' });
+    const applied = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Dutch' },
+      reuseRosterGezels: false,
+    });
+    expect(applied.gezelsCreated).toHaveLength(2);
+    expect(applied.gezelsCreated.some((g) => g.reused || g.id === trainer.id)).toBe(false);
+  });
+
   it('planProjectTypeApply reports the plan without writing anything', async () => {
     const project = await store.createProject({ name: 'Plan' });
     const plan = await planProjectTypeApply(deps(), {

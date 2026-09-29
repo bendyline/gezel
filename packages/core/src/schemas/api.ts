@@ -4202,9 +4202,10 @@ export const ApplyProjectTypeRequestSchema = z.object({
    */
   seedPolicy: z.enum(['overwrite', 'preserve']).optional(),
   /**
-   * Reuse a roster gezel with the same `templateId` instead of minting a
-   * fresh one — makes re-apply idempotent for non-lean types. Lean types
-   * always reuse from the global pool regardless.
+   * Fill the type's crew with gezels the user already has — this project's
+   * roster first, then the rest of the install — matched by template, then by
+   * role title. Defaults to true; `false` hires a fresh gezel per slot
+   * (lean types reuse regardless).
    */
   reuseRosterGezels: z.boolean().optional(),
 });
@@ -4232,12 +4233,15 @@ export const AppliedProjectTypeSchema = z.object({
   typeId: z.string(),
   version: z.string(),
   source: z.string(),
+  /** The type's crew, in manifest order: newly hired gezels and reused ones. */
   gezelsCreated: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
       templateId: z.string(),
       voorman: z.boolean(),
+      /** An existing gezel filled this slot instead of a new hire. */
+      reused: z.boolean().optional(),
     }),
   ),
   scriptsInstalled: z.array(z.string()),
@@ -6823,6 +6827,7 @@ export const SessionDebugSnapshotSchema = z.object({
           'growth-announcement',
           'keurmeester-notice',
           'craftbook-launch',
+          'task-wrapup',
         ])
         .optional(),
       /**

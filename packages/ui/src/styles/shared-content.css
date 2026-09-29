@@ -521,6 +521,16 @@
   overflow-x: auto;
 }
 
+/* Keep words whole in table cells and let the table scroll instead. The
+   bubble's anywhere-break makes every character a break opportunity, which
+   shrinks each column's minimum width to one glyph: auto table layout then
+   split "Schedul|es" and "Instagra|m" across lines. Both properties need
+   resetting — legacy `word-break: break-word` implies anywhere-breaking. */
+.msg-body-rendered :is(table, th, td) {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 /* Images should never outsize the bubble. */
 .msg-body img,
 .msg-body-rendered img {

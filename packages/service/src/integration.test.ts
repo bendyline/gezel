@@ -690,6 +690,66 @@ describe('tasks API', () => {
     expect(await svc.context.store.readTaskAbout('taskclearproj', created.num)).toBe('');
   });
 
+  // A Meester-authored "Owner Review" once went to a gezel, which reviewed
+  // its crew's work and advanced the task.
+  it('holds an owner step for the owner, refuses a gezel, and moves on their approval', async () => {
+    await api('POST', '/api/gezels', { name: 'OwnerAgent' });
+    await api('POST', '/api/projects', {
+      name: 'OwnerProj',
+      about: 'Integration test project for steps that only the owner can approve.',
+      missionObjectives: 'An owner step waits for the owner and moves only on their answer.',
+    });
+    const createRes = await api('POST', '/api/projects/ownerproj/tasks', {
+      title: 'Weekly posts',
+      description: 'Draft the week of posts, have the owner approve them, then finish up.',
+      assignee: { kind: 'gezel', gezelId: 'owneragent' },
+      steps: [
+        { name: 'Draft' },
+        { name: 'Owner Review', assignee: { kind: 'user' } },
+        { name: 'Finish', terminal: true },
+      ],
+    });
+    expect(createRes.status).toBe(201);
+    const task = (await createRes.json()) as {
+      num: number;
+      craftbook: { steps: Array<{ id: string }> };
+    };
+    const [draftId, reviewId] = task.craftbook.steps.map((s) => s.id);
+
+    await api('POST', `/api/projects/ownerproj/tasks/${task.num}/steps/${draftId}/complete`, {});
+    const questions = (await (
+      await api('GET', '/api/questions?project=ownerproj&pending=true')
+    ).json()) as { questions: Array<{ id: string; intent?: Record<string, unknown> }> };
+    const card = questions.questions.find((q) => q.intent?.kind === 'step-awaits-owner');
+    expect(card?.intent).toMatchObject({ stepId: reviewId, returnToStepId: draftId });
+
+    const session = svc.context.tokenStore.issueSession({
+      appId: 'session:owner-step-test',
+      projectId: 'ownerproj',
+      gezelId: 'owneragent',
+      team: false,
+    });
+    const refused = await httpFetch(
+      `${baseUrl}/api/projects/ownerproj/tasks/${task.num}/steps/${reviewId}/complete`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    );
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code?: string }).code).toBe('owner_step');
+
+    const answer = await api('POST', `/api/questions/${card!.id}/answer`, {
+      selectedChoices: [0],
+    });
+    expect(answer.status).toBe(200);
+    const after = (await (
+      await api('GET', `/api/projects/ownerproj/tasks/${task.num}`)
+    ).json()) as { activeStepId?: string };
+    expect(after.activeStepId).toBe(task.craftbook.steps[2]!.id);
+  });
+
   it('dispatchEntry: true enqueues the entry handoff and logs task.entry.dispatched', async () => {
     await api('POST', '/api/gezels', { name: 'KickAgent' });
     await api('POST', '/api/projects', {

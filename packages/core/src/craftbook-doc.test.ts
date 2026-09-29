@@ -253,6 +253,79 @@ describe('craftbookFromDoc', () => {
     }
   });
 
+  // A Meester-authored book gave "Owner Review" to a gezel role, and a model
+  // approved its own crew's work.
+  it('hands approval steps to the owner unless the author named someone', () => {
+    const res = craftbookFromDoc(
+      {
+        name: 'Weekly posts',
+        steps: [
+          { name: 'Draft posts', suggestedRole: 'writer', next: 'owner-review' },
+          { id: 'owner-review', name: 'Owner Review', suggestedRole: 'omroeper', next: 'check' },
+          { name: 'Check', suggestedRole: 'reviewer', next: 'approve' },
+          // Catalog steps where a gezel approves: pull-request-review, deploy-checklist.
+          { id: 'approve', name: 'Approve', suggestedRole: 'reviewer', next: 'report' },
+          { id: 'report', name: 'Sign off go/no-go', suggestedRole: 'reviewer', next: 'final' },
+          {
+            id: 'final',
+            name: 'Final approval',
+            suggestedRole: 'omroeper',
+            next: 'approve-and-publish',
+          },
+          {
+            name: 'Approve and publish',
+            assignee: { kind: 'gezel', gezelId: 'publisher' },
+            terminal: true,
+          },
+        ],
+      },
+      { now: '2026-01-01T00:00:00.000Z' },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = new Map(res.craftbook.steps.map((s) => [s.id, s]));
+    expect(byId.get('owner-review')?.assignee).toEqual({ kind: 'user' });
+    expect(byId.get('final')?.assignee).toEqual({ kind: 'user' });
+    expect(byId.get('draft-posts')?.assignee).toBeUndefined();
+    // A plain review or approval stays with its reviewer.
+    expect(byId.get('check')?.assignee).toBeUndefined();
+    expect(byId.get('approve')?.assignee).toBeUndefined();
+    expect(byId.get('report')?.assignee).toBeUndefined();
+    // An explicit assignee always wins.
+    expect(byId.get('approve-and-publish')?.assignee).toEqual({
+      kind: 'gezel',
+      gezelId: 'publisher',
+    });
+  });
+
+  it('keeps runWhen through a write and checks it names a real asking step', () => {
+    const doc = (answerOf: string) => ({
+      name: 'Post',
+      steps: [
+        { name: 'Review', next: 'queue' },
+        {
+          name: 'Queue',
+          runWhen: { answerOf, choiceAnyOf: ['Approve and queue'] },
+          terminal: true,
+        },
+      ],
+    });
+    const ok = craftbookFromDoc(doc('review'), { now: '2026-01-01T00:00:00.000Z' });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.craftbook.steps[1]!.runWhen).toEqual({
+        answerOf: 'review',
+        choiceAnyOf: ['Approve and queue'],
+      });
+      const md = serializeCraftbookDoc(docFromCraftbook(ok.craftbook), 'markdown');
+      const reparsed = parseCraftbookDoc(md, 'markdown');
+      expect(reparsed.ok && reparsed.doc.steps[1]!.runWhen?.answerOf).toBe('review');
+    }
+    const bad = craftbookFromDoc(doc('reveiw'), { now: '2026-01-01T00:00:00.000Z' });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(formatCraftbookDocErrors(bad.errors)).toContain('runWhen.answerOf');
+  });
+
   it('a dangling next gets valid ids + a did-you-mean fix', () => {
     const res = craftbookFromDoc(
       {

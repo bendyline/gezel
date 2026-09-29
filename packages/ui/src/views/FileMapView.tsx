@@ -100,7 +100,14 @@ const SCOPES: Array<{ value: FileMapScope; label: string }> = [
   { value: 'all', label: 'All' },
 ];
 
-export function FileMapView({ projectId }: { projectId: string }) {
+export function FileMapView({
+  projectId,
+  hasGitHub = false,
+}: {
+  projectId: string;
+  /** Only a GitHub-linked project has pull requests; others answer 400. */
+  hasGitHub?: boolean;
+}) {
   const [model, setModel] = useState<FileMapResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -312,8 +319,12 @@ export function FileMapView({ projectId }: { projectId: string }) {
     load();
   }, [load, selectBlockAtLine]);
 
-  // Best-effort PR list for the overlay picker; absent/empty for non-GitHub projects.
+  // Best-effort PR list for the overlay picker.
   useEffect(() => {
+    if (!hasGitHub) {
+      setPulls([]);
+      return;
+    }
     let cancelled = false;
     api
       .listProjectGitHubPulls(projectId)
@@ -326,7 +337,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, hasGitHub]);
 
   const overlayById = useMemo(
     () => new Map((model?.overlay?.changedBlocks ?? []).map((c) => [c.blockId, c])),

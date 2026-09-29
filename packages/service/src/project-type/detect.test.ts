@@ -1,5 +1,9 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { type LanguageProfile, scoreProjectTypes } from './detect.js';
+import { Store } from '../fs/store.js';
+import { type LanguageProfile, detectAndPersistProjectType, scoreProjectTypes } from './detect.js';
 
 function profile(
   extensions: Record<string, number>,
@@ -51,5 +55,31 @@ describe('scoreProjectTypes', () => {
     const a = scoreProjectTypes({ profile: profile({ html: 1 }), aboutText: '' });
     const b = scoreProjectTypes({ profile: profile({ html: 1 }), aboutText: '' });
     expect(a).toEqual(b);
+  });
+});
+
+// Default holds a bit of every kind of work; a detected type there titled its
+// recipe shelf "Recommended for Email / Inbox" and gave it an envelope.
+describe('detectAndPersistProjectType', () => {
+  it('never types Default, and clears a detection left there', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-detect-'));
+    try {
+      const store = new Store({ home });
+      await store.ensureDefaultProject();
+      await store.updateProject('default', {
+        detectedProjectType: { id: 'email', score: 9, scannedAt: '2026-09-28T00:00:00.000Z' },
+      });
+      await store.writeProjectDoc('default', 'about.md', 'Triage the inbox and reply to email.');
+
+      await expect(detectAndPersistProjectType({ store }, 'default')).resolves.toBeNull();
+      expect((await store.getProject('default'))?.detectedProjectType).toBeUndefined();
+
+      const mail = await store.createProject({ name: 'Mail' });
+      await store.writeProjectDoc(mail.id, 'about.md', 'Triage the inbox and reply to email.');
+      await detectAndPersistProjectType({ store }, mail.id);
+      expect((await store.getProject(mail.id))?.detectedProjectType?.id).toBe('email');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

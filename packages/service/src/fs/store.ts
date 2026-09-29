@@ -3493,7 +3493,8 @@ export class Store {
       credentialAllowedOrigins?: Record<string, string[]>;
       /** `null` clears the user override (back to auto-detection). */
       projectTypeId?: string | null;
-      detectedProjectType?: { id: string; score: number; scannedAt: string };
+      /** `null` clears a detection. */
+      detectedProjectType?: { id: string; score: number; scannedAt: string } | null;
       /** Custom project-type provenance stamped on adoption; `null` clears it. */
       projectType?: import('@bendyline/gezel').ProjectTypeProvenance | null;
       /**
@@ -3656,9 +3657,11 @@ export class Store {
         : patch.projectTypeId !== undefined
           ? { projectTypeId: patch.projectTypeId }
           : {}),
-      ...(patch.detectedProjectType !== undefined
-        ? { detectedProjectType: patch.detectedProjectType }
-        : {}),
+      ...(patch.detectedProjectType === null
+        ? { detectedProjectType: undefined }
+        : patch.detectedProjectType !== undefined
+          ? { detectedProjectType: patch.detectedProjectType }
+          : {}),
       ...(patch.projectType === null
         ? { projectType: undefined }
         : patch.projectType !== undefined

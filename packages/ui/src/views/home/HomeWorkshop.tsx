@@ -10,6 +10,7 @@ import type {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
@@ -217,17 +218,43 @@ export function HomeWorkshop({
     [tasks],
   );
 
-  const pendingQuestions = useMemo(() => questions.filter((q) => !q.answer), [questions]);
+  // "Ready" cards (finished work) ask nothing, so they get their own chip
+  // rather than inflating "waiting on you".
+  const pendingQuestions = useMemo(
+    () => questions.filter((q) => !q.answer && q.intent?.kind !== 'task-finished'),
+    [questions],
+  );
+  const readyForYou = useMemo(
+    () => questions.filter((q) => !q.answer && q.intent?.kind === 'task-finished').length,
+    [questions],
+  );
 
-  const waitingOnYou =
-    pendingQuestions.length +
-    visibleTasks.filter((t) => t.assignee.kind === 'user' && t.status !== 'complete').length;
+  const ownerTasks = visibleTasks.filter(
+    (t) => t.assignee.kind === 'user' && t.status !== 'complete',
+  );
+  const waitingOnYou = pendingQuestions.length + ownerTasks.length;
 
   const chips: HomeChip[] = [];
   if (waitingOnYou > 0) {
+    // The count is a to-do list, so it opens one: the Updates drawer when a
+    // question is waiting, else the task that is.
+    const firstTask = ownerTasks[0];
     chips.push({
       dot: 'var(--ochre)',
       label: `${waitingOnYou} waiting on you`,
+      actionLabel: pendingQuestions.length > 0 ? 'Open your updates' : 'Open the task',
+      onClick: () => {
+        if (pendingQuestions.length > 0) openUpdates();
+        else if (firstTask) navigateToTab({ kind: 'task', ref: firstTask.ref });
+      },
+    });
+  }
+  if (readyForYou > 0) {
+    chips.push({
+      dot: 'var(--sage)',
+      label: `${readyForYou} ready for you`,
+      actionLabel: 'Open your updates',
+      onClick: openUpdates,
     });
   }
 

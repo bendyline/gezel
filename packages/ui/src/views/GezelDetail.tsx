@@ -38,7 +38,7 @@ import { EffortPicker } from '../components/ModelPicker.js';
 import { ProviderModelSelect } from '../components/ProviderModelSelect.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useGenerationEngineLabel } from '../components/generation-engine-label.js';
-import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -98,6 +98,7 @@ export function GezelDetail({
     resourceKey: `gezel:${gezelId}:about`,
     initialValue: '',
     save: saveAbout,
+    isEquivalent: markdownEquivalent,
     onLatestSaved: (updated) => {
       const current = selectedRef.current;
       if (!current || current.id !== gezelId) return;
@@ -117,11 +118,12 @@ export function GezelDetail({
       try {
         const detail = await api.getGezel(gezelId);
         if (cancelled) return;
-        // about.md feeds a Squisq editor — baseline on its canonical form so
-        // opening the tab never reads as an edit (see markdown-baseline.ts).
+        // about.md feeds a Squisq editor as stored; the lane's
+        // `markdownEquivalent` keeps its re-serialization at mount from
+        // reading as an edit (see markdown-baseline.ts).
         const effective = {
           ...detail,
-          about: aboutAutosave.hydrate(normalizeMarkdownBaseline(detail.about)),
+          about: aboutAutosave.hydrate(detail.about),
         };
         selectedRef.current = effective;
         setSelected(effective);

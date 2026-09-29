@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { securityPolicyForLevel } from '@bendyline/gezel';
+import { type Task, securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
@@ -4808,10 +4808,16 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(synthCount).toBe(1);
       const synth = rec?.messages.find((m) => m.synthetic === 'compaction-summary');
       expect(synth?.content).toContain('compacted bullet');
+      // The pending turn carries the date line, whose length varies with the
+      // day and time zone, so read it back rather than hardcoding it.
+      const sentPrompt =
+        mock.calls.find((call) => call.kind === 'send' && call.prompt === 'continue please')
+          ?.rawPrompt ?? '';
+      expect(sentPrompt).toMatch(/^\[Current date and time: .*continue please$/s);
       expect(synth?.contextCompaction).toEqual({
         removedCount: 15,
         contextWindow: 1000,
-        estimatedTokensBefore: 1129,
+        estimatedTokensBefore: Math.ceil((4500 + sentPrompt.length) / 4),
         compactionCount: 1,
         autoCompactRatio: 0.7,
       });
@@ -7230,6 +7236,200 @@ describe('ChatManager — modify-claim re-prompt (false "I updated X")', () => {
     // Before the fix this was 1 (the existence check swallowed the claim).
     const completes = eventTypes.filter((t) => t === 'complete');
     expect(completes.length).toBe(2);
+  });
+});
+
+describe('ChatManager — current date and time', () => {
+  // With no date anywhere in the prompt stack, a Meester planned "the week of
+  // May 20th" in September and the invented date reached a customer quote.
+  it('starts every turn with the current date, keeps the ask last, and stays out of the system prompt', async () => {
+    const localMock = new MockProvider({ name: 'copilot' });
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', localMock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const session = await localManager.createSession({ gezelId: 'ada' });
+      await localManager.send(session.id, 'what is the date this Thursday?');
+
+      const sends = localMock.calls.filter((c) => c.kind === 'send');
+      const raw = sends.at(-1)?.rawPrompt ?? '';
+      expect(raw.startsWith('[Current date and time: ')).toBe(true);
+      expect(raw).toContain(String(new Date().getFullYear()));
+      expect(raw.endsWith('what is the date this Thursday?')).toBe(true);
+      expect(sends.at(-1)?.prompt).toBe('what is the date this Thursday?');
+
+      const created = localMock.calls.find((c) => c.kind === 'create');
+      expect(created?.opts?.systemMessage ?? '').not.toContain('Current date and time');
+
+      // The stored transcript keeps the user's own words.
+      const stored = await store.getSession('ada', session.id);
+      expect(stored?.messages.find((m) => m.role === 'user')?.content).toBe(
+        'what is the date this Thursday?',
+      );
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
+  });
+});
+
+describe('ChatManager — served model', () => {
+  // The thread label read the model stamped at creation while another one
+  // answered every turn ("This PC (qwen3.6-27b-q8)" over Gemma 4 31B).
+  it('records the model that actually runs the turn', async () => {
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', new MockProvider({ name: 'copilot' })]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const session = await localManager.createSession({ gezelId: 'ada' });
+      const record = await store.getSession('ada', session.id);
+      record!.model = 'model-at-creation';
+      await store.writeSession(record!);
+      await store.writeConfig({ defaultModel: { copilot: 'model-that-runs' } });
+
+      await localManager.send(session.id, 'hello');
+
+      const after = await store.getSession('ada', session.id);
+      expect(after?.model).toBe('model-at-creation');
+      expect(after?.servedModel).toBe('model-that-runs');
+      const summary = (await store.listSessions({ gezelId: 'ada' })).find(
+        (s) => s.id === session.id,
+      );
+      expect(summary?.servedModel).toBe('model-that-runs');
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
+  });
+});
+
+describe('ChatManager — task wrap-up', () => {
+  // The owner used to learn a task was done from the worker's tool receipt
+  // ("Active step is now "(none)". Task is now complete (terminal step).").
+  it('tells the launching thread what the task made and raises task_settled', async () => {
+    const localManager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', new MockProvider({ name: 'copilot' })]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const thread = await localManager.createSession({ gezelId: 'ada' });
+      const worker = await localManager.createSession({
+        gezelId: 'ada',
+        taskRef: 'default/7',
+        parentSession: { sessionId: thread.id, gezelId: 'ada', kind: 'task-entry' },
+      });
+      const workerRecord = await store.getSession('ada', worker.id);
+      const at = new Date().toISOString();
+      const write = (name: string, path: string) => ({
+        name,
+        path,
+        at,
+        durationMs: 1,
+        success: true,
+      });
+      workerRecord!.messages.push({
+        role: 'assistant',
+        content: '',
+        at,
+        toolCalls: [
+          write('write_file', 'social/drafts/gone.md'),
+          write('write_file', 'social/final/week.md'),
+          write('write_artifact', 'tasks/7/quote.md'),
+        ],
+      });
+      await store.writeSession(workerRecord!);
+      await store.writeProjectWorkspaceFile('default', 'social/final/week.md', '# Week\n');
+      await store.writeProjectArtifact('default', 'tasks/7/quote.md', '# Quote\n');
+      await store.writeProjectArtifact('default', 'tasks/7/summary.md', '# Summary\n');
+      await store.writeProjectArtifact('default', 'tasks/7/inputs/brief.md', '# Brief\n');
+
+      const settled: unknown[] = [];
+      const unsubscribe = events.subscribeProject('default', (env) => {
+        if (env.event.type === 'task_settled') settled.push(env.event);
+      });
+      const task = {
+        projectId: 'default',
+        num: 7,
+        ref: 'default/7',
+        title: 'Weekly posts',
+        status: 'complete',
+        launchSessionId: worker.id,
+        artifactDir: 'tasks/7',
+      } as Task;
+      const posted = await localManager.postTaskWrapUp(task, 'complete');
+      unsubscribe();
+
+      // Launched from inside a task session, it climbs to the owner's thread.
+      expect(posted).toBe(thread.id);
+      const reply = (await store.getSession('ada', thread.id))?.messages.at(-1);
+      expect(reply).toMatchObject({ role: 'assistant', synthetic: 'task-wrapup' });
+      expect(reply?.content).toContain('**Weekly posts** is finished');
+      expect(reply?.referencedFiles).toEqual([
+        { kind: 'workspace', path: 'social/final/week.md' },
+        { kind: 'artifact', path: 'tasks/7/quote.md' },
+        { kind: 'artifact', path: 'tasks/7/summary.md' },
+      ]);
+      expect(reply?.referencedTasks).toEqual(['default/7']);
+      expect(settled).toEqual([
+        {
+          type: 'task_settled',
+          taskRef: 'default/7',
+          title: 'Weekly posts',
+          outcome: 'complete',
+          sessionId: thread.id,
+        },
+      ]);
+
+      // A "ready for you" card in Updates, pointing at the wrap-up.
+      const cards = (await store.listProjectQuestions('default')).filter(
+        (q) => q.intent?.kind === 'task-finished',
+      );
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        sessionId: thread.id,
+        taskRef: 'default/7',
+        documentPath: 'tasks/7/quote.md',
+        choices: ['Dismiss'],
+      });
+      expect(cards[0]!.prompt).toContain('**Weekly posts** is finished.');
+      // Settling twice files no second card.
+      await localManager.postTaskWrapUp(task, 'complete');
+      expect(
+        (await store.listProjectQuestions('default')).filter(
+          (q) => q.intent?.kind === 'task-finished',
+        ),
+      ).toHaveLength(1);
+
+      await expect(
+        localManager.postTaskWrapUp({ ...task, parentTaskRef: 'default/6' }, 'complete'),
+      ).resolves.toBeNull();
+    } finally {
+      await localManager.drainBackground();
+      await localManager.shutdown();
+    }
   });
 });
 

@@ -2,6 +2,7 @@ import type { UnifiedSearchResult, UnifiedSearchResultKind } from '@bendyline/ge
 import {
   type NavAction,
   openHandboekArticleActions,
+  openProjectFileActions,
   openTabAction as openTab,
 } from './nav-actions.js';
 import type { OpenFileIntent } from './pending-open-file.js';
@@ -109,13 +110,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
           ...(r.line ? { line: r.line } : {}),
           ...(r.lineEnd ? { lineEnd: r.lineEnd } : {}),
         };
-        return [
-          // Queue first so the freshly-remounted ProjectsView can consume it.
-          { kind: 'open-file', intent },
-          openTab({ kind: 'project', id: r.projectId }),
-          // Live event for the already-open-project case (no remount).
-          { kind: 'event', type: 'gezel:open-file', detail: intent },
-        ];
+        return openProjectFileActions(intent);
       }
       return r.projectId ? [openTab({ kind: 'project', id: r.projectId })] : [];
     case 'session': {

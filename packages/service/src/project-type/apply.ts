@@ -6,6 +6,7 @@ import {
   type AppliedSeedRecord,
   type GezelFrontmatter,
   GezelFrontmatterSchema,
+  type GezelSummary,
   type InstalledToolset,
   type ProjectTypeApplyPlan,
   type ProjectTypeManifest,
@@ -54,10 +55,67 @@ export interface ApplyProjectTypeInput {
    */
   seedPolicy?: 'overwrite' | 'preserve';
   /**
-   * Reuse a roster gezel with the same templateId instead of minting a new
-   * one — makes re-apply idempotent for non-lean types.
+   * Fill the crew with gezels the user already has (default true); `false`
+   * hires fresh. Lean types reuse regardless.
    */
   reuseRosterGezels?: boolean;
+}
+
+export interface ApplyProjectTypeDeps {
+  store: Store;
+  catalog: CatalogService;
+  home: string;
+  /**
+   * The install's gezels when `store` is not the install — a staged create
+   * applies against an empty home, where nothing could otherwise be reused.
+   */
+  installGezels?: readonly GezelSummary[];
+}
+
+type CrewCandidate = Pick<GezelSummary, 'id' | 'name' | 'role' | 'templateId' | 'fixedFunction'>;
+
+/**
+ * Gezels who may fill a type's crew: the project's roster first, then the
+ * rest of the install. Creating a Social Feed project once hired a second
+ * Omroeper and a second Copywriter beside the ones the user already had.
+ */
+async function crewPool(
+  deps: ApplyProjectTypeDeps,
+  rosterIds: readonly string[],
+): Promise<CrewCandidate[]> {
+  const roster = (
+    await Promise.all(rosterIds.map((id) => deps.store.getGezel(id).catch(() => null)))
+  ).filter((gezel): gezel is NonNullable<typeof gezel> => gezel !== null);
+  const install = deps.installGezels ?? (await deps.store.listGezels().catch(() => []));
+  const onRoster = new Set(roster.map((gezel) => gezel.id));
+  return [...roster, ...install.filter((gezel) => !onRoster.has(gezel.id))];
+}
+
+function roleKey(role: string | undefined): string {
+  return (role ?? '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * The gezel already filling a crew slot: one from the same template, else
+ * one with the same role title. Titles match exactly, not through the role
+ * aliases, which map "Practice Coach" to voorman. A fixed-function gezel runs
+ * a single scripted job and never fills a slot, and no gezel fills two.
+ */
+function crewMatch(
+  pool: readonly CrewCandidate[],
+  slot: { templateId: string; role: string | undefined },
+  taken: ReadonlySet<string>,
+): CrewCandidate | undefined {
+  const free = pool.filter((gezel) => !taken.has(gezel.id) && !gezel.fixedFunction);
+  const sameTemplate = free.find((gezel) => gezel.templateId === slot.templateId);
+  if (sameTemplate) return sameTemplate;
+  const wanted = roleKey(slot.role);
+  if (!wanted) return undefined;
+  return free.find((gezel) => roleKey(gezel.role) === wanted);
 }
 
 function sha256Hex(content: string | Buffer): string {
@@ -273,7 +331,7 @@ export async function preflightProjectType(
  * materialization lands in later phases. See docs/project-types.md.
  */
 export async function applyProjectType(
-  deps: { store: Store; catalog: CatalogService; home: string },
+  deps: ApplyProjectTypeDeps,
   input: ApplyProjectTypeInput,
 ): Promise<AppliedProjectType> {
   const { store, catalog, home } = deps;
@@ -313,39 +371,26 @@ export async function applyProjectType(
   }
 
   // 2. Set up the roster gezels from gilde templates; remember which is
-  // voorman. For lean singleton types (games, chat-room personas) REUSE an
-  // existing global gezel from the same template instead of minting a fresh
-  // one every time: a game's opponent — the checkers Damspeler — should be
-  // ONE recurring character across every game you start, not a new stranger
-  // per project (which is how you end up with four Damspelers, none of them
-  // clearly "the" opponent). Reuse keeps the existing character (including
-  // any rename); the per-project personality still varies through the
-  // reaction params, not the gezel.
+  // voorman. A slot someone the user already has can fill goes to them — the
+  // checkers Damspeler is ONE recurring opponent across every game, not a new
+  // stranger per project, and a new Social Feed project gets the Omroeper
+  // the user already works with. Reuse keeps the existing character
+  // (including any rename); per-project personality varies through params.
   const gezelsCreated: AppliedProjectType['gezelsCreated'] = [];
   let voormanGezelId: string | undefined;
-  const reusePool = manifest.leanProfile ? await store.listGezels().catch(() => []) : [];
-  // Non-lean re-apply reuse (opt-in): a roster gezel from the same template
-  // is this project's instance of that role — minting another one per apply
-  // is exactly the duplicate-Damspeler failure, one project down.
-  const rosterPool =
-    !manifest.leanProfile && input.reuseRosterGezels
-      ? (
-          await Promise.all(
-            (project.gezelIds ?? []).map((id) => store.getGezel(id).catch(() => null)),
-          )
-        ).filter((g) => g !== null)
-      : [];
+  const reuse = manifest.leanProfile || input.reuseRosterGezels !== false;
+  const pool = reuse ? await crewPool(deps, project.gezelIds ?? []) : [];
+  const taken = new Set<string>();
   for (const ref of manifest.gezels) {
-    const reused = manifest.leanProfile
-      ? reusePool.find((g) => g.templateId === ref.templateId)
-      : rosterPool.find((g) => g.templateId === ref.templateId);
+    const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
+    const role = tpl?.manifest.kind === 'gezel-template' ? tpl.manifest.role : undefined;
+    const reused = crewMatch(pool, { templateId: ref.templateId, role }, taken);
     let gezelId: string;
     let gezelName: string;
     if (reused) {
       gezelId = reused.id;
       gezelName = reused.name;
     } else {
-      const tpl = await catalog.get('gezel-template', ref.templateId);
       if (!tpl || tpl.manifest.kind !== 'gezel-template') {
         log.warn(
           `[apply] project type ${typeId}: gezel template ${ref.templateId} not found — skipping`,
@@ -366,16 +411,18 @@ export async function applyProjectType(
       gezelId = created.id;
       gezelName = created.name;
     }
+    taken.add(gezelId);
     gezelsCreated.push({
       id: gezelId,
       name: gezelName,
       templateId: ref.templateId,
       voorman: ref.voorman,
+      ...(reused ? { reused: true } : {}),
     });
     if (ref.voorman && !voormanGezelId) voormanGezelId = gezelId;
     // The type's crew belongs on the project roster — that is what makes a
-    // later `reuseRosterGezels` re-apply idempotent for every role, not
-    // just the voorman (whose roster join rides the provenance update).
+    // re-apply idempotent for every role, not just the voorman (whose roster
+    // join rides the provenance update).
     await store.addGezelToProject(projectId, gezelId, { source: 'project-type' }).catch((err) => {
       log.warn(`[apply] roster add failed for ${projectId}/${gezelId}: ${String(err)}`);
     });
@@ -796,7 +843,7 @@ async function writeScheduleApprovalQuestion(
  * apply engine relies on, so a plan that renders is a plan that can apply.
  */
 export async function planProjectTypeApply(
-  deps: { store: Store; catalog: CatalogService; home: string },
+  deps: ApplyProjectTypeDeps,
   input: ApplyProjectTypeInput,
 ): Promise<ProjectTypeApplyPlan> {
   const { store, catalog } = deps;
@@ -807,22 +854,17 @@ export async function planProjectTypeApply(
   const params = { ...seedParamDefaults(manifest.params), ...(input.params ?? {}) };
   const policy = input.seedPolicy ?? 'overwrite';
 
-  const reusePool = manifest.leanProfile ? await store.listGezels().catch(() => []) : [];
-  const rosterPool =
-    !manifest.leanProfile && input.reuseRosterGezels
-      ? (
-          await Promise.all(
-            (project.gezelIds ?? []).map((id) => store.getGezel(id).catch(() => null)),
-          )
-        ).filter((g) => g !== null)
-      : [];
-  const gezels = manifest.gezels.map((ref) => ({
-    templateId: ref.templateId,
-    voorman: ref.voorman,
-    reuse: manifest.leanProfile
-      ? reusePool.some((g) => g.templateId === ref.templateId)
-      : rosterPool.some((g) => g.templateId === ref.templateId),
-  }));
+  const reuse = manifest.leanProfile || input.reuseRosterGezels !== false;
+  const pool = reuse ? await crewPool(deps, project.gezelIds ?? []) : [];
+  const taken = new Set<string>();
+  const gezels: ProjectTypeApplyPlan['gezels'] = [];
+  for (const ref of manifest.gezels) {
+    const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
+    const role = tpl?.manifest.kind === 'gezel-template' ? tpl.manifest.role : undefined;
+    const match = crewMatch(pool, { templateId: ref.templateId, role }, taken);
+    if (match) taken.add(match.id);
+    gezels.push({ templateId: ref.templateId, voorman: ref.voorman, reuse: !!match });
+  }
 
   const overlay = await store.readProjectTypeOverlay(input.projectId);
   const priorSeedByPath = new Map((overlay?.seeds ?? []).map((seed) => [seed.path, seed] as const));

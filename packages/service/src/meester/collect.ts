@@ -81,7 +81,9 @@ export async function collectProjectContexts(
       openTasks: tasks
         .filter((t) => t.status === 'active' || t.status === 'paused' || t.status === 'draft')
         .slice(0, MAX_TASKS_PER_PROJECT),
-      pendingQuestions: questions.filter((q) => !q.answer).length,
+      // "Your work is ready" cards ask nothing of anyone.
+      pendingQuestions: questions.filter((q) => !q.answer && q.intent?.kind !== 'task-finished')
+        .length,
       events: rawEvents
         .filter((e) => !opts.excludeEventKinds.includes(e.kind))
         .slice(0, MAX_EVENTS_PER_PROJECT),

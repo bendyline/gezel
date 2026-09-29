@@ -386,10 +386,19 @@ export function NewTaskDialog({
     );
   const explicitPullNumber = String((params as { number?: unknown }).number ?? '').trim();
 
+  const projectHasGitHub = !!projects.find((p) => p.id === projectId)?.github;
   useEffect(() => {
     const sequence = ++pullHintSequence.current;
     setPullHint(null);
     if (!runtimeCapabilities().git || !open || !resolvesPullAtLaunch || !projectId) return;
+    // The pull list answers 400 for a project with no GitHub link; say so
+    // instead of probing.
+    if (!projectHasGitHub) {
+      setPullHint(
+        'This recipe reads GitHub pull requests, and this project is not linked to a GitHub repository.',
+      );
+      return;
+    }
     void (async () => {
       try {
         const [status, openPulls] = await Promise.all([
@@ -414,7 +423,7 @@ export function NewTaskDialog({
         // real reason itself.
       }
     })();
-  }, [open, resolvesPullAtLaunch, projectId]);
+  }, [open, resolvesPullAtLaunch, projectId, projectHasGitHub]);
 
   const selectGeneral = useCallback(() => {
     setSelectedBookId(null);

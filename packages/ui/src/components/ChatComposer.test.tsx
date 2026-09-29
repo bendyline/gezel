@@ -799,7 +799,7 @@ describe('ChatComposer lossless draft submission', () => {
     expect(api.sendToChatSession).not.toHaveBeenCalled();
   });
 
-  it('shows the model setup explanation and opens Settings without losing the unsent draft', async () => {
+  it('shows the model setup explanation and opens setup without losing the unsent draft', async () => {
     const explanation =
       'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.';
     vi.mocked(api.createChatSession).mockRejectedValueOnce(
@@ -818,11 +818,11 @@ describe('ChatComposer lossless draft submission', () => {
     const navigate = vi.fn();
     window.addEventListener('gezel:navigate', navigate);
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Choose a model' }));
-      expect(navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ detail: { view: 'settings', section: 'defaults' } }),
-      );
-      expect(takePendingSettingsSection()).toBe('defaults');
+      // With nothing installed, Home's first-run setup offers the one-click
+      // download; Settings → General (where this used to land) offered nothing.
+      fireEvent.click(screen.getByRole('button', { name: 'Set up a model' }));
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ detail: { view: 'home' } }));
+      expect(takePendingSettingsSection()).toBeNull();
       expect(screen.getByLabelText('Message')).toHaveValue('Hello from the test');
     } finally {
       window.removeEventListener('gezel:navigate', navigate);

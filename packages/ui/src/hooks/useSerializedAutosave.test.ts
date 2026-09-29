@@ -33,6 +33,41 @@ describe('SerializedAutosaveController', () => {
     expect(controller.getSnapshot().phase).toBe('dirty');
   });
 
+  it("adopts an editor's equivalent re-serialization without writing", async () => {
+    const save = vi.fn<(value: string) => Promise<string>>().mockResolvedValue('ok');
+    const sameIgnoringCase = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    const controller = new SerializedAutosaveController({
+      resourceKey: 'document:quote.md',
+      initialValue: 'Price $3.50',
+      save,
+      isEquivalent: sameIgnoringCase,
+    });
+
+    controller.update('PRICE $3.50');
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'idle', dirty: false });
+    expect(controller.getAcknowledgedValue()).toBe('PRICE $3.50');
+    await controller.flush();
+    expect(save).not.toHaveBeenCalled();
+
+    controller.update('Price $3.75');
+    expect(controller.getSnapshot().phase).toBe('dirty');
+  });
+
+  it('writes a revert to an equivalent form once a real edit is pending', async () => {
+    const save = vi.fn<(value: string) => Promise<string>>().mockResolvedValue('ok');
+    const controller = new SerializedAutosaveController({
+      resourceKey: 'document:revert.md',
+      initialValue: 'draft',
+      save,
+      isEquivalent: (a, b) => a.trim() === b.trim(),
+    });
+
+    controller.update('draft plus');
+    controller.update('draft ');
+    await controller.flush();
+    expect(save).toHaveBeenCalledWith('draft ');
+  });
+
   it('serializes requests and coalesces edits made while a save is in flight', async () => {
     const first = deferred<string>();
     const second = deferred<string>();

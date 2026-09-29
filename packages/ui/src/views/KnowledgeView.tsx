@@ -18,6 +18,7 @@ import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { inlineBundledAssets } from './handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
 import '../styles/knowledge.css';
 
@@ -317,12 +318,14 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   );
   const renderedDoc = useMemo(() => {
     if (!doc) return null;
+    const markdown =
+      selectedCatalogId === 'handboek' ? inlineBundledAssets(doc.markdown) : doc.markdown;
     try {
-      return markdownToDoc(parseMarkdown(doc.markdown), { articleId: doc.id });
+      return markdownToDoc(parseMarkdown(markdown), { articleId: doc.id });
     } catch {
       return null;
     }
-  }, [doc]);
+  }, [doc, selectedCatalogId]);
 
   const citation = useMemo(() => {
     if (!selectedCatalogId || !doc) return null;

@@ -1263,6 +1263,17 @@ a.license-button:hover {
   min-height: 0;
 }
 
+/* The card grid is the scroll region. Squeezed to min-height 0 without its
+   own overflow, it spilled past its box and the dialog's Cancel was drawn on
+   top of the card text. */
+.template-picker-dialog .catalog-grid,
+.new-gezel-dialog .catalog-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+
 .toolsets-notice {
   margin: 0.15rem 0 0;
 }

@@ -122,6 +122,14 @@ export const ChatSessionSchema = z.object({
    * selected model. Optional so pre-routing session files remain valid.
    */
   modelSource: z.enum(['capability-routing']).optional(),
+  /**
+   * The model that actually answered the most recent turn. `model` is stamped
+   * when the session is created and never moves, while a pinned model that
+   * is not installed is served by a stand-in every turn — so the thread label
+   * read "This PC (qwen3.6-27b-q8)" while Gemma 4 31B answered. Labels read
+   * this first.
+   */
+  servedModel: z.string().optional(),
   /** True only when this session was dispatched as deferred Night Shift work. */
   nightShift: z.boolean().optional(),
   /**
@@ -453,6 +461,7 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   projectId: true,
   providerName: true,
   model: true,
+  servedModel: true,
   title: true,
   createdAt: true,
   lastActivityAt: true,
@@ -874,6 +883,7 @@ export const TimelineMessageSchema = z.object({
       'growth-announcement',
       'keurmeester-notice',
       'craftbook-launch',
+      'task-wrapup',
     ])
     .optional(),
   /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */

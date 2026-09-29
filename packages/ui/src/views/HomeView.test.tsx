@@ -693,6 +693,87 @@ describe('HomeView', () => {
     expect(screen.queryByText('Run npx tsx to check the frame timing?')).not.toBeInTheDocument();
   });
 
+  // The chip looked like a button and did nothing; the only way to the
+  // question was the titlebar or scrolling the thread.
+  it('opens the Updates drawer from the chip when a question waits', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q1',
+          projectId: 'default',
+          gezelId: 'gz-meester',
+          sessionId: 's1',
+          prompt: 'Approve?',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-updates', opened);
+    try {
+      render(<HomeView />);
+      const chip = await screen.findByRole('button', { name: /1 waiting on you/ });
+      fireEvent.click(chip);
+      expect(opened).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('gezel:open-updates', opened);
+    }
+  });
+
+  // Finished work used to leave nothing to click once Updates emptied.
+  it('shows finished work as ready, not as waiting, and opens Updates', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q-ready',
+          projectId: 'default',
+          gezelId: 'gz-meester',
+          sessionId: 's1',
+          prompt: '**Weekly posts** is finished.',
+          taskRef: 'default/2',
+          intent: { kind: 'task-finished', taskRef: 'default/2' },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-updates', opened);
+    try {
+      render(<HomeView />);
+      fireEvent.click(await screen.findByRole('button', { name: /1 ready for you/ }));
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener('gezel:open-updates', opened);
+    }
+  });
+
+  it('opens the owner task from the chip when only a task waits', async () => {
+    vi.mocked(api.listProjectTasks).mockResolvedValue({
+      tasks: [
+        {
+          ref: 'default/4',
+          projectId: 'default',
+          num: 4,
+          title: 'Sign the lease',
+          status: 'active',
+          assignee: { kind: 'user' },
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    const tabs: unknown[] = [];
+    const onTab = (e: Event) => tabs.push((e as CustomEvent).detail);
+    window.addEventListener('gezel:open-tab', onTab);
+    try {
+      render(<HomeView />);
+      fireEvent.click(await screen.findByRole('button', { name: /1 waiting on you/ }));
+      expect(tabs).toContainEqual({ kind: 'task', ref: 'default/4' });
+    } finally {
+      window.removeEventListener('gezel:open-tab', onTab);
+    }
+  });
+
   // The chip counted questions fetched once at mount. Dismissing them from
   // the titlebar Updates drawer left the greeting insisting two things were
   // still waiting, minutes after the user had cleared both.

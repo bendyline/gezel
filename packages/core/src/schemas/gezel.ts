@@ -843,6 +843,9 @@ export const ChatMessageSchema = z.object({
    * - `'keurmeester-notice'` — the Keurmeester stepped in on a stalled
    *   turn: one-line diagnosis + what was done, dropped into the thread
    *   before the granted recovery continuation runs.
+   * - `'task-wrapup'` — a task launched from this thread finished; the
+   *   thread's gezel tells the owner what was made, with the files it wrote
+   *   as `referencedFiles`.
    *
    * UI renders these as muted bubbles; the model sees them as normal
    * assistant turns (the role label is what matters to the API).
@@ -855,6 +858,7 @@ export const ChatMessageSchema = z.object({
       'growth-announcement',
       'keurmeester-notice',
       'craftbook-launch',
+      'task-wrapup',
     ])
     .optional(),
   /**
@@ -1369,6 +1373,15 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     toLevel: z.number().int(),
   }),
   /**
+   * A gezel's XP was recomputed after it finished work. Global; the UI
+   * reloads the growth surfaces for that gezel.
+   */
+  z.object({
+    type: z.literal('growth_updated'),
+    gezelId: z.string(),
+    xp: z.number(),
+  }),
+  /**
    * llama-cpp-only: lifecycle phase of the supervised on-device engine
    * for this turn. Fills the gap between "user sent a message" and
    * "first token arrives" — long enough (up to 60-180s on a cold start)
@@ -1566,6 +1579,21 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('project_deleted'),
     projectId: z.string(),
     name: z.string(),
+  }),
+  /**
+   * A task the owner launched from a chat thread finished and its wrap-up
+   * landed in that thread. Emitted on the project + global streams so the
+   * app can raise one OS notification while the window is hidden. Only
+   * owner-launched work emits it: scheduled, night-shift, and fanout-child
+   * tasks settle silently. Not a renderable timeline event.
+   */
+  z.object({
+    type: z.literal('task_settled'),
+    taskRef: z.string(),
+    title: z.string(),
+    outcome: z.enum(['complete', 'canceled']),
+    /** The thread holding the wrap-up, so a click can land on it. */
+    sessionId: z.string().optional(),
   }),
   /**
    * A new shared gezel joined the global roster. Emitted on the global

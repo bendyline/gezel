@@ -3356,6 +3356,9 @@ export function ChatTimelineView({
   const unclaimedQuestionsBySession = new Map<string, Question>();
   for (const q of questionsById.values()) {
     if (claimedQuestionIds.has(q.id)) continue;
+    // A "your work is ready" card names the wrap-up's thread only so Updates
+    // can open it; the wrap-up message already says it in the thread.
+    if (q.intent?.kind === 'task-finished') continue;
     const existing = unclaimedQuestionsBySession.get(q.sessionId);
     if (!existing || q.createdAt > existing.createdAt) {
       unclaimedQuestionsBySession.set(q.sessionId, q);

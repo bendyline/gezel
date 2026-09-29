@@ -45,6 +45,7 @@ import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
+import { modelSetupAction } from './model-setup-action.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -379,6 +380,7 @@ export function ChatComposer({
   // composer never regresses to a misleading Send button.
   const [serverInflight, setServerInflight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const setupAction = error ? modelSetupAction(error) : null;
   // Session resolution and the send/interrupt POST happen before the daemon
   // accepts ownership of the draft. Keep a synchronous ref as the actual
   // double-submit lock (React state does not update until the event returns)
@@ -1610,21 +1612,28 @@ export function ChatComposer({
           </span>
           <div className="chat-composer-error-text">
             {error}
-            {error.includes('Settings → Artificial Intelligence') && (
+            {setupAction && (
               <div>
                 <button
                   type="button"
                   className="gz-key"
                   onClick={() => {
-                    requestSettingsSection('defaults');
+                    const { target } = setupAction;
+                    if (target.kind === 'home') {
+                      window.dispatchEvent(
+                        new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
+                      );
+                      return;
+                    }
+                    requestSettingsSection(target.section);
                     window.dispatchEvent(
                       new CustomEvent('gezel:navigate', {
-                        detail: { view: 'settings', section: 'defaults' },
+                        detail: { view: 'settings', section: target.section },
                       }),
                     );
                   }}
                 >
-                  Choose a model
+                  {setupAction.label}
                 </button>
               </div>
             )}

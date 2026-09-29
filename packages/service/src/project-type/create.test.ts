@@ -86,6 +86,30 @@ describe('createTypedProject', () => {
     expect(events.filter((event) => event.kind === 'project.updated')).toHaveLength(1);
   });
 
+  // The staged apply ran against an empty home, so every typed project hired
+  // a fresh crew beside the gezels the user already had.
+  it('reuses a gezel the install already has instead of publishing a duplicate', async () => {
+    const first = await createTypedProject({ store, catalog }, request);
+    const lead = first.applied.gezelsCreated[0]!;
+    expect(lead.reused).toBeUndefined();
+    const gezelCount = (await store.listGezels()).length;
+
+    const second = await createTypedProject(
+      { store, catalog },
+      { ...request, name: 'Spanish Practice Two' },
+    );
+
+    expect(second.applied.gezelsCreated).toEqual([
+      expect.objectContaining({ id: lead.id, reused: true }),
+    ]);
+    expect((await store.listGezels()).length).toBe(gezelCount);
+    expect(second.project.voormanGezelId).toBe(lead.id);
+    expect(second.project.gezelIds).toContain(lead.id);
+    const events = await history.listEvents({ projectId: second.project.id });
+    expect(events.filter((event) => event.kind === 'project.gezel.joined')).toHaveLength(1);
+    expect(await listTypedProjectStagingRoots(home)).toEqual([]);
+  });
+
   it('preflight failure publishes nothing and records no history', async () => {
     await expect(
       createTypedProject(

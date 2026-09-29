@@ -95,6 +95,7 @@ import {
   expandStepDeliverable,
   formatReviewProvenance,
   inferDeliverableKind,
+  isOwnerStep,
   isReservedShadowArtifactPath,
   isSafeEntityId,
   isTrustedConstrainedToolset,
@@ -106,6 +107,7 @@ import {
   resolveRoleId,
   resolveSteps,
   stepInsertionIndex,
+  stepOwnerGezelId,
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
@@ -115,7 +117,7 @@ import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { advanceHandoffNote } from './advance-note.js';
+import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 import {
   ASSIGNEE_ARG_DESCRIPTION,
   type AssigneeArg,
@@ -313,11 +315,7 @@ async function staleStepMutationResult() {
       if (activeStep && activeStepId === sessionStepId) {
         sessionStepCompletion = activeStep.advanceWhen ? 'automatic' : 'manual';
       }
-      const owner =
-        activeStep?.assignee?.kind === 'gezel'
-          ? activeStep.assignee.gezelId
-          : (activeStep?.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      const owner = activeStep ? stepOwnerGezelId(task, activeStep) : undefined;
       activeStepOwnedBySession = !!gezelId && owner === gezelId;
     } catch {
       // Let the mutation's own API request enforce scope after a transient read failure.
@@ -4569,13 +4567,16 @@ server.tool(
         ...(params ? { params } : {}),
       });
       const gz = applied.gezelsCreated
-        .map((g) => `${g.name}${g.voorman ? ' (voorman)' : ''}`)
+        .map(
+          (g) =>
+            `${g.name}${g.voorman ? ' (voorman)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
+        )
         .join(', ');
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Created: ${gz || 'no new gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
+            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
           },
         ],
       };
@@ -9286,8 +9287,19 @@ server.tool(
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
       active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;
-    const handoffNote = advanceHandoffNote({ status: task.status, assigneeId });
-    const text = `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
+    const handoffNote = advanceHandoffNote({
+      status: task.status,
+      assigneeId,
+      ownerStep: isOwnerStep(active),
+    });
+    const statusLine = advanceStatusLine({
+      completedName: task.craftbook.steps.find((s) => s.id === stepId)?.name ?? stepId,
+      nextName: active?.name,
+      status: task.status,
+      taskTitle: task.title,
+      ownerStep: isOwnerStep(active),
+    });
+    const text = `${statusLine}\n\nCompleted step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
     return okResult(
       TaskToolOutputSchema,
       {

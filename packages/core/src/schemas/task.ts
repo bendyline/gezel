@@ -21,6 +21,7 @@ import {
   ModelTierSchema,
   NewCraftbookStepSchema,
   StepGateUnionSchema,
+  StepRunWhenSchema,
 } from './craftbook.js';
 import { HookSpecSchema } from './hook.js';
 import { RetrievalPolicySchema } from './retrieval.js';
@@ -961,6 +962,8 @@ export const UpdateTaskStepRequestSchema = z.object({
   consumes: z.array(CraftbookStepInputSchema).min(1).nullable().optional(),
   /** Auto-advance contract. `null` clears it. */
   advanceWhen: AdvanceWhenSchema.nullable().optional(),
+  /** Run only when an earlier owner answer asked for it. `null` clears it. */
+  runWhen: StepRunWhenSchema.nullable().optional(),
   /** The end-of-step gate (current or legacy shape). `null` clears it. */
   gate: StepGateUnionSchema.nullable().optional(),
   /** Default outgoing edge (step id). `null` clears it. */

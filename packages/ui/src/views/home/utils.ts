@@ -22,6 +22,10 @@ export type HomeNavView =
 export interface HomeChip {
   dot: string;
   label: string;
+  /** Makes the chip a small-radius button (see docs/ux.md, Corners). */
+  onClick?: () => void;
+  /** What the click does, for the tooltip and screen readers. */
+  actionLabel?: string;
 }
 
 /** Time-of-day greeting. There is no stored user name, so callers append none. */

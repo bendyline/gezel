@@ -982,6 +982,35 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(values.indexOf('draft:2026-09-03-0031')).toBeLessThan(values.indexOf('s-sent'));
   });
 
+  // The label read the model stamped at creation while a stand-in answered.
+  it('names the model that answered, not the one the thread was created with', async () => {
+    mockSessions([
+      {
+        id: 's-served',
+        gezelId: 'g1',
+        title: 'Catering quote',
+        lastActivityAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        providerName: 'llama-cpp',
+        model: 'qwen3.6-27b-q8',
+        servedModel: 'gemma4-31b-q4',
+        archived: false,
+      },
+    ]);
+    mockDrafts({ fresh: [], onThread: [] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-served"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    const row = await screen.findByRole('option', { name: /Catering quote/ });
+    expect(row.textContent).toContain('gemma4-31b-q4');
+    expect(row.textContent).not.toContain('qwen3.6-27b-q8');
+  });
+
   it('files "Draft" under the open thread, not as a new thread starter', async () => {
     mockSessions([
       {

@@ -9,6 +9,7 @@ import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../../components/chat-theme
 import { navigateToTab } from '../../components/nav-actions.js';
 import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
 import { useEffectiveTheme } from '../../theme.js';
+import { inlineBundledAssets } from '../handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from '../knowledge/KnowledgeMediaProvider.js';
 
 const ARTICLE_ID = 'welcome';
@@ -83,7 +84,10 @@ export function IntroHandboekArticle({
   // durations — durations turn LinearDocView into a timed reader that
   // dims all but the active block, wrong for a static embed. The player
   // doc keeps them so the synthetic clock paces the video.
-  const markdown = article?.markdown ?? null;
+  // The brand mark is bundled; pointing at it before the first paint keeps
+  // the browser from requesting the catalog-relative path (a 404 on every
+  // Home load) while the media provider is still resolving it.
+  const markdown = article?.markdown ? inlineBundledAssets(article.markdown) : null;
   const doc = useMemo(() => {
     if (!markdown) return null;
     try {

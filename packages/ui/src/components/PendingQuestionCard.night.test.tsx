@@ -83,17 +83,27 @@ describe('night-shift review card', () => {
 
   // Landing on the owning project and hunting the artifacts drawer for the
   // file we just named by title is a step the user shouldn't have to take.
+  // It opens in the project's file editor: the document tab is the
+  // shared-library editor, whose autosave would copy it into the library.
   it('opens the named report itself', async () => {
-    const opened = vi.fn();
-    window.addEventListener('gezel:open-tab', opened);
+    const tabs = vi.fn();
+    const files = vi.fn();
+    window.addEventListener('gezel:open-tab', tabs);
+    window.addEventListener('gezel:open-file', files);
     render(<PendingQuestionCard question={nightCard()} />);
 
     fireEvent.click(await screen.findByText('What the night shift found'));
-    window.removeEventListener('gezel:open-tab', opened);
+    window.removeEventListener('gezel:open-tab', tabs);
+    window.removeEventListener('gezel:open-file', files);
 
-    expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
-      kind: 'document',
-      path: 'projects/default/artifacts/reports/night-2026-08-25.md',
+    expect((tabs.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      kind: 'project',
+      id: 'default',
+    });
+    expect((files.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      projectId: 'default',
+      path: 'reports/night-2026-08-25.md',
+      source: 'artifacts',
     });
   });
 

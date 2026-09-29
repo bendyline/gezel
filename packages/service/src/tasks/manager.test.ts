@@ -1458,6 +1458,93 @@ describe('TaskManager — suggestedRole auto-assignment', () => {
     expect(task.craftbook.steps[0]!.suggestedGezelId).toBeUndefined();
   });
 
+  it('never recruits a gezel for the owner own step', async () => {
+    let calls = 0;
+    tasks.setRoleResolver(async () => {
+      calls++;
+      return { gezelId: 'omroeper' };
+    });
+    const task = await tasks.create('website', {
+      title: 'Weekly posts',
+      assignee: { kind: 'gezel', gezelId: 'kylian' },
+      steps: [
+        { id: 'draft', name: 'Draft', suggestedGezelId: 'kylian' },
+        {
+          id: 'owner-review',
+          name: 'Owner Review',
+          suggestedRole: 'omroeper',
+          assignee: { kind: 'user' },
+        },
+      ],
+      entryStepId: 'draft',
+    });
+    const advanced = await tasks.completeStep('website', task.num, 'draft');
+    expect(calls).toBe(0);
+    expect(advanced.activeStepId).toBe('owner-review');
+    expect(advanced.craftbook.steps[1]!.suggestedGezelId).toBeUndefined();
+  });
+
+  it('hands an unassigned owner review to the owner on every step-authoring path', async () => {
+    const task = await tasks.create('website', {
+      title: 'Weekly posts',
+      assignee: { kind: 'gezel', gezelId: 'kylian' },
+      steps: [
+        { id: 'draft', name: 'Draft', suggestedGezelId: 'kylian' },
+        { id: 'owner-review', name: 'Owner Review', suggestedRole: 'omroeper' },
+      ],
+      entryStepId: 'draft',
+    });
+    expect(task.craftbook.steps[1]!.assignee).toEqual({ kind: 'user' });
+    const added = await tasks.addStep('website', task.num, {
+      name: 'Client sign-off',
+      suggestedRole: 'omroeper',
+    });
+    const signOff = added.craftbook.steps.find((s) => s.name === 'Client sign-off');
+    expect(signOff?.assignee).toEqual({ kind: 'user' });
+  });
+
+  it('skips a runWhen step the owner did not ask for, without dispatching it', async () => {
+    const activated: string[] = [];
+    tasks.setStepActivatedHook(async ({ newStep }) => {
+      activated.push(newStep.id);
+    });
+    const task = await tasks.create('website', {
+      title: 'Post',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'review', name: 'Review', next: 'queue' },
+        {
+          id: 'queue',
+          name: 'Queue to Bluesky (only when asked)',
+          runWhen: { answerOf: 'review', choiceAnyOf: ['Approve and queue to Bluesky'] },
+          next: 'finish',
+        },
+        { id: 'finish', name: 'Finish', terminal: true },
+      ],
+      entryStepId: 'review',
+    });
+    await store.writeQuestion({
+      id: 'q1',
+      projectId: 'website',
+      gezelId: 'omroeper',
+      sessionId: 's1',
+      prompt: 'Review the draft',
+      choices: ['Approve', 'Revise', 'Approve and queue to Bluesky'],
+      taskRef: task.ref,
+      stepId: 'review',
+      createdAt: new Date().toISOString(),
+      answer: { selectedChoices: [0], at: new Date().toISOString() },
+    });
+
+    const advanced = await tasks.completeStep('website', task.num, 'review');
+    expect(advanced.activeStepId).toBe('finish');
+    expect(activated).toEqual(['finish']);
+    const notes = await store.listTaskNotes('website', task.num);
+    expect(notes.map((n) => n.text)).toContain(
+      `Skipped "Queue to Bluesky (only when asked)": the owner's answer did not ask for it.`,
+    );
+  });
+
   it('falls back gracefully when the resolver returns null', async () => {
     tasks.setRoleResolver(async () => null);
     const task = await tasks.create('website', {

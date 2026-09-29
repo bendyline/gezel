@@ -61,6 +61,9 @@ const { NewTaskDialog } = await import('./NewTaskDialog.js');
 const { api } = await import('../../api.js');
 
 const PROJECTS: Project[] = [{ id: 'pj-alpha', name: 'Alpha' } as Project];
+const GITHUB_PROJECTS: Project[] = [
+  { id: 'pj-alpha', name: 'Alpha', github: { url: 'https://github.com/acme/alpha' } } as Project,
+];
 const GEZELS: GezelSummary[] = [
   { id: 'gz-maya', name: 'Maya', role: 'Researcher' } as GezelSummary,
 ];
@@ -802,7 +805,7 @@ describe('NewTaskDialog', () => {
       pulls: [{ number: 7, headRef: 'someone-else' }],
     } as never);
 
-    renderDialog();
+    renderDialog({ projects: GITHUB_PROJECTS });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
 
@@ -838,12 +841,40 @@ describe('NewTaskDialog', () => {
       pulls: [{ number: 7, headRef: 'qualityfixes' }],
     } as never);
 
-    renderDialog();
+    renderDialog({ projects: GITHUB_PROJECTS });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
 
     expect(await screen.findByText(/Starts immediately/)).toBeInTheDocument();
     expect(screen.queryByText(/No open pull request/)).not.toBeInTheDocument();
+  });
+
+  // The probe answered 400 for every project without a GitHub link.
+  it('names the missing GitHub link instead of probing pull requests', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('pull-request-review', 'Pull Request Review', {
+          connectors: [{ typeId: 'github-pulls' }],
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.listProjectGitHubPulls).mockClear();
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
+
+    expect(
+      await screen.findByText(/this project is not linked to a GitHub repository/),
+    ).toBeInTheDocument();
+    expect(api.listProjectGitHubPulls).not.toHaveBeenCalled();
   });
 
   it('blocks creation while a craftbook still needs toolset setup', async () => {

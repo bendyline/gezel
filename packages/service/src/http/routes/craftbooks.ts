@@ -10,6 +10,7 @@ import {
   type ScriptMeta,
   ScriptNameSchema,
   UpdateCraftbookRequestSchema,
+  assignOwnerApprovalSteps,
   craftbookDocFormatFromEnv,
   craftbookFromDoc,
   createLogger,
@@ -321,7 +322,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
     const body = CreateCraftbookRequestSchema.parse(await c.req.json());
     const now = nowIso();
     const id = body.id ?? slugifyStepId(body.name);
-    const steps = expandStepDeliverables(body.steps);
+    const steps = expandStepDeliverables(assignOwnerApprovalSteps(body.steps));
     const entryStepId =
       body.entryStepId && steps.some((s) => s.id === body.entryStepId)
         ? body.entryStepId
@@ -419,7 +420,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
       } else next.recommends = body.recommends;
     }
     if (body.steps !== undefined) {
-      next.steps = expandStepDeliverables(body.steps);
+      next.steps = expandStepDeliverables(assignOwnerApprovalSteps(body.steps));
     }
     if (body.entryStepId !== undefined) {
       if (next.steps.some((s) => s.id === body.entryStepId)) {

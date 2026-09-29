@@ -33,6 +33,13 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       <button type="button" data-testid="editor-emit" onClick={() => onChange?.('drafted text')}>
         emit
       </button>
+      <button
+        type="button"
+        data-testid="editor-reserialize"
+        onClick={() => onChange?.(`${initialMarkdown}\n`)}
+      >
+        reserialize
+      </button>
       {toolbarSlotAfterActions}
     </div>
   ),
@@ -309,6 +316,16 @@ describe('TaskDetail', () => {
         expect.objectContaining({ description: 'drafted text' }),
       );
     });
+  });
+
+  // The editor's first emission is its re-serialization of the stored text.
+  // Treated as an edit, an untouched description read "Unsaved changes".
+  it('does not mark an untouched description unsaved when the editor re-serializes it', async () => {
+    render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getAllByTestId('editor-reserialize')[0]!);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    expect(api.updateTask).not.toHaveBeenCalled();
   });
 
   it('switching the task view exposes its selected button and mounts the chat pane', async () => {

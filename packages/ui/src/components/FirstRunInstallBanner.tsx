@@ -30,6 +30,14 @@ import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { FIRST_RUN_INTRO_ANCHOR_ID } from '../views/home/first-run-intro-anchor.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
+import {
+  type InstallRate,
+  emptyInstallRate,
+  formatRate,
+  formatTimeLeft,
+  installQuiet,
+  recordInstallSample,
+} from './install-rate.js';
 import { useCopilotAvailability } from './useCopilotAvailability.js';
 
 interface Props {
@@ -60,12 +68,21 @@ interface InstallProgress {
 
 type BannerState =
   | { kind: 'hidden' }
+  /**
+   * Waiting on the first inventory answer. On a machine with borrowed or
+   * shared models that first answer can take minutes (each model is hashed
+   * once), and rendering nothing meanwhile left "First run setup" with no
+   * way forward.
+   */
+  | { kind: 'checking' }
   | {
       kind: 'needs-download';
       provider: 'llama-cpp' | 'mlx';
       modelId: string;
       sizeBytes: number | null;
       memory: MemoryProfile | null;
+      /** Chat models already on disk that could be used right away. */
+      alternatives: Array<{ id: string; name: string }>;
     }
   | {
       kind: 'installing';
@@ -112,11 +129,15 @@ function failedFromCaught(
 }
 
 export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalled }: Props) {
-  const [state, setState] = useState<BannerState>({ kind: 'hidden' });
+  const [state, setState] = useState<BannerState>({ kind: 'checking' });
+  const [rate, setRate] = useState<InstallRate>(emptyInstallRate);
+  const [now, setNow] = useState(() => Date.now());
+  const [switchBusy, setSwitchBusy] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
   const [fallbackBusy, setFallbackBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const installedNotifiedRef = useRef(false);
+  const checkInFlightRef = useRef(false);
   const copilotAvailability = useCopilotAvailability();
 
   const check = useCallback(async () => {
@@ -126,80 +147,106 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
       return;
     }
     const provider = config.provider;
-    const targetModel = config.defaultModel?.[provider];
-    if (!targetModel) {
-      setState({ kind: 'hidden' });
-      return;
-    }
-    // Fast path: error stamped → show failed, skip the installed-models poll.
-    if (config.firstRunInstallError) {
-      setState({
-        kind: 'failed',
-        provider,
-        modelId: targetModel,
-        error: config.firstRunInstallError,
-      });
-      return;
-    }
+    // An inventory answer can take minutes on first adoption of shared
+    // models; stacking a fresh request every poll only slowed it further.
+    if (checkInFlightRef.current) return;
+    checkInFlightRef.current = true;
     try {
-      // Four signals: installed-models list, active-installs map, the
-      // catalog item (for the size label on the download CTA), and the
-      // memory profile (for the tier-aware explainer copy). Run them
-      // all in parallel — all localhost, ordering doesn't matter.
-      const [modelsRes, activeRes, catalog, memory] = await Promise.all([
-        provider === 'mlx' ? api.listMlxModels() : api.listLlamaCppModels(),
-        provider === 'mlx' ? api.listMlxActiveInstalls() : api.listLlamaCppActiveInstalls(),
-        api.getCatalogItem('chat-model', targetModel).catch(() => null),
-        api.getMemoryProfile().catch(() => null),
-      ]);
-      const installed = modelsRes.models.some((m) => m.id === targetModel);
-      if (installed) {
-        setState({ kind: 'hidden' });
-        if (!installedNotifiedRef.current) {
-          installedNotifiedRef.current = true;
-          announceModelInventoryChanged(provider);
-          onModelInstalled?.();
+      const targetModel = config.defaultModel?.[provider];
+      if (!targetModel) {
+        // The first-run pin is written in the background at daemon start, so a
+        // config read before it landed has no target yet. Re-read rather than
+        // hide: a hidden banner on the setup page is a dead end.
+        try {
+          const fresh = await api.getConfig();
+          if (fresh.defaultModel?.[provider]) onConfigChanged(fresh);
+        } catch {
+          // Keep checking on the next poll.
         }
         return;
       }
-      const sizeBytes = readSizeFromCatalog(catalog, provider);
-      // Prefer the pinned model's install, but fall back to any other
-      // in-flight install for this provider (e.g. the user kicked off a
-      // different model from Settings). Offering the pinned download while
-      // another multi-GB install streams would run two downloads at once
-      // and leave the visible one untracked.
-      const active =
-        activeRes.installs.find((i) => i.catalogId === targetModel) ?? activeRes.installs[0];
-      if (active) {
-        // Genuine in-flight install (user clicked the button, or
-        // another tab kicked it) — show the spinner banner.
+      // Fast path: error stamped → show failed, skip the installed-models poll.
+      if (config.firstRunInstallError) {
         setState({
-          kind: 'installing',
+          kind: 'failed',
           provider,
-          modelId: active.catalogId,
-          sizeBytes: active.catalogId === targetModel ? sizeBytes : null,
-          progress: {
-            bytesWritten: active.bytesWritten,
-            totalBytes: active.totalBytes,
-            phase: active.phase,
-          },
+          modelId: targetModel,
+          error: config.firstRunInstallError,
         });
         return;
       }
-      // Pinned default but nothing installed and nothing in flight —
-      // either fresh first-run or an abandoned mid-download. Either
-      // way we wait for an explicit user click on the download CTA.
-      setState({
-        kind: 'needs-download',
-        provider,
-        modelId: targetModel,
-        sizeBytes,
-        memory,
-      });
-    } catch {
-      // Service not reachable — stay in whatever we had.
+      try {
+        // Four signals: installed-models list, active-installs map, the
+        // catalog item (for the size label on the download CTA), and the
+        // memory profile (for the tier-aware explainer copy). Run them
+        // all in parallel — all localhost, ordering doesn't matter.
+        const [modelsRes, activeRes, catalog, memory] = await Promise.all([
+          provider === 'mlx' ? api.listMlxModels() : api.listLlamaCppModels(),
+          provider === 'mlx' ? api.listMlxActiveInstalls() : api.listLlamaCppActiveInstalls(),
+          api.getCatalogItem('chat-model', targetModel).catch(() => null),
+          api.getMemoryProfile().catch(() => null),
+        ]);
+        const installed = modelsRes.models.some((m) => m.id === targetModel);
+        if (installed) {
+          setState({ kind: 'hidden' });
+          if (!installedNotifiedRef.current) {
+            installedNotifiedRef.current = true;
+            announceModelInventoryChanged(provider);
+            onModelInstalled?.();
+          }
+          return;
+        }
+        const sizeBytes = readSizeFromCatalog(catalog, provider);
+        // Prefer the pinned model's install, but fall back to any other
+        // in-flight install for this provider (e.g. the user kicked off a
+        // different model from Settings). Offering the pinned download while
+        // another multi-GB install streams would run two downloads at once
+        // and leave the visible one untracked.
+        const active =
+          activeRes.installs.find((i) => i.catalogId === targetModel) ?? activeRes.installs[0];
+        if (active) {
+          // Genuine in-flight install (user clicked the button, or
+          // another tab kicked it) — show the spinner banner.
+          setState({
+            kind: 'installing',
+            provider,
+            modelId: active.catalogId,
+            sizeBytes: active.catalogId === targetModel ? sizeBytes : null,
+            progress: {
+              bytesWritten: active.bytesWritten,
+              totalBytes: active.totalBytes,
+              phase: active.phase,
+            },
+          });
+          return;
+        }
+        // Pinned default but nothing installed and nothing in flight —
+        // either fresh first-run or an abandoned mid-download. Either
+        // way we wait for an explicit user click on the download CTA.
+        setState({
+          kind: 'needs-download',
+          provider,
+          modelId: targetModel,
+          sizeBytes,
+          memory,
+          alternatives: modelsRes.models
+            .filter((m) => m.id !== targetModel)
+            .slice(0, 3)
+            .map((m) => ({ id: m.id, name: m.name })),
+        });
+      } catch {
+        // Service not reachable — stay in whatever we had.
+      }
+    } finally {
+      checkInFlightRef.current = false;
     }
-  }, [config.provider, config.defaultModel, config.firstRunInstallError, onModelInstalled]);
+  }, [
+    config.provider,
+    config.defaultModel,
+    config.firstRunInstallError,
+    onConfigChanged,
+    onModelInstalled,
+  ]);
 
   useEffect(() => {
     // Only auto-poll in states where polling is the right signal —
@@ -210,11 +257,85 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
     // silently revert (e.g., overwriting a freshly set 'failed' state
     // with the polled-but-stale 'needs-download' before the user can
     // read the error).
-    if (state.kind !== 'installing' && state.kind !== 'hidden') return;
+    if (state.kind !== 'checking') return;
     void check();
     const t = setInterval(() => void check(), 3_000);
     return () => clearInterval(t);
   }, [check, state.kind]);
+
+  // While a model downloads, poll only the cheap progress snapshot. The full
+  // check lists every installed model and waited on the slowest of four
+  // calls, so progress updated far less often than its 3 s poll suggested.
+  // When the install leaves the map, one full check decides what comes next.
+  const installingProvider = state.kind === 'installing' ? state.provider : null;
+  const installingModel = state.kind === 'installing' ? state.modelId : null;
+  useEffect(() => {
+    if (!installingProvider || !installingModel) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res =
+          installingProvider === 'mlx'
+            ? await api.listMlxActiveInstalls()
+            : await api.listLlamaCppActiveInstalls();
+        if (cancelled) return;
+        const active = res.installs.find((i) => i.catalogId === installingModel) ?? res.installs[0];
+        if (!active) {
+          setState({ kind: 'checking' });
+          return;
+        }
+        const at = Date.now();
+        setRate((prev) => recordInstallSample(prev, at, active.bytesWritten));
+        setState((prev) =>
+          prev.kind === 'installing'
+            ? {
+                ...prev,
+                progress: {
+                  bytesWritten: active.bytesWritten,
+                  totalBytes: active.totalBytes,
+                  phase: active.phase,
+                },
+              }
+            : prev,
+        );
+      } catch {
+        // Keep the last progress; the next poll tries again.
+      }
+    };
+    void poll();
+    const pollTimer = setInterval(() => void poll(), 2_000);
+    const clock = setInterval(() => setNow(Date.now()), 1_000);
+    return () => {
+      cancelled = true;
+      clearInterval(pollTimer);
+      clearInterval(clock);
+    };
+  }, [installingProvider, installingModel]);
+
+  /**
+   * Use a chat model that is already on disk instead of downloading the
+   * recommendation. Pinning it as the default is all it takes; the Home
+   * probe then finds a working model and leaves setup.
+   */
+  const pickInstalledModel = useCallback(
+    async (provider: 'llama-cpp' | 'mlx', modelId: string) => {
+      setSwitchBusy(true);
+      try {
+        const next = await api.updateConfig({
+          defaultModel: { ...config.defaultModel, [provider]: modelId },
+        });
+        onConfigChanged(next);
+        announceModelInventoryChanged(provider);
+        setState({ kind: 'hidden' });
+        onModelInstalled?.();
+      } catch (err) {
+        setState(failedFromCaught(err, provider, modelId));
+      } finally {
+        setSwitchBusy(false);
+      }
+    },
+    [config.defaultModel, onConfigChanged, onModelInstalled],
+  );
 
   /**
    * Drive an install API call to completion and surface server-side
@@ -274,6 +395,7 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
     try {
       // Optimistic flip — the next poll will confirm the install is
       // actually registered with the active-installs map.
+      setRate(emptyInstallRate());
       setState({
         kind: 'installing',
         provider: state.provider,
@@ -402,6 +524,21 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
 
   if (state.kind === 'hidden') return null;
 
+  if (state.kind === 'checking') {
+    return (
+      <output className="first-run-banner first-run-banner-installing">
+        <div className="first-run-banner-head">
+          <span className="first-run-banner-spinner" aria-hidden />
+          <strong>Checking this computer for AI models</strong>
+        </div>
+        <p className="first-run-banner-body">
+          Gezel is looking for models that are already installed. The first check can take a few
+          minutes when large models are present.
+        </p>
+      </output>
+    );
+  }
+
   if (state.kind === 'needs-download') {
     const name = modelDisplay(state.modelId);
     const size = state.sizeBytes ? formatGb(state.sizeBytes) : null;
@@ -428,6 +565,24 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
             {downloadBusy ? 'Starting…' : label}
           </button>
         </div>
+        {state.alternatives.length > 0 && (
+          <p className="first-run-banner-wait">
+            Or use a model that's already on this computer:{' '}
+            {state.alternatives.map((m, i) => (
+              <span key={m.id}>
+                {i > 0 && ', '}
+                <button
+                  type="button"
+                  className="gz-link-button"
+                  disabled={switchBusy || downloadBusy}
+                  onClick={() => void pickInstalledModel(state.provider, m.id)}
+                >
+                  {m.name}
+                </button>
+              </span>
+            ))}
+          </p>
+        )}
       </output>
     );
   }
@@ -444,7 +599,7 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
           {formatDownloadTime(state.sizeBytes)} on fast Internet. You can start working with
           gezellen as soon as this finishes.
         </p>
-        <FirstRunProgressBar progress={state.progress} />
+        <FirstRunProgressBar progress={state.progress} rate={rate} now={now} />
         <WhileYouWait />
       </output>
     );
@@ -571,11 +726,27 @@ function WhileYouWait() {
   );
 }
 
-function FirstRunProgressBar({ progress }: { progress: InstallProgress | null }) {
+function FirstRunProgressBar({
+  progress,
+  rate,
+  now,
+}: {
+  progress: InstallProgress | null;
+  rate: InstallRate;
+  now: number;
+}) {
   const known = progress != null && progress.totalBytes > 0 && progress.phase === 'downloading';
   const pct = known
     ? Math.min(100, Math.round((progress.bytesWritten / progress.totalBytes) * 100))
     : 0;
+  const speed =
+    known && rate.bytesPerSecond
+      ? ` · ${formatRate(rate.bytesPerSecond)} · ${formatTimeLeft(
+          progress.totalBytes - progress.bytesWritten,
+          rate.bytesPerSecond,
+        )}`
+      : '';
+  const quiet = progress?.phase === 'downloading' ? installQuiet(rate, now) : 'moving';
   const label = !progress
     ? 'Starting…'
     : progress.phase === 'verifying'
@@ -583,7 +754,7 @@ function FirstRunProgressBar({ progress }: { progress: InstallProgress | null })
       : progress.phase === 'extracting-metadata'
         ? 'Reading model info…'
         : known
-          ? `${formatBytes(progress.bytesWritten)} of ${formatBytes(progress.totalBytes)} · ${pct}%`
+          ? `${formatBytes(progress.bytesWritten)} of ${formatBytes(progress.totalBytes)} · ${pct}%${speed}`
           : progress.bytesWritten > 0
             ? `${formatBytes(progress.bytesWritten)} downloaded`
             : 'Starting…';
@@ -600,6 +771,17 @@ function FirstRunProgressBar({ progress }: { progress: InstallProgress | null })
         />
       </div>
       <span className="first-run-banner-progress-label">{label}</span>
+      {quiet === 'quiet' && (
+        <span className="first-run-banner-progress-label">
+          Still downloading — progress arrives in large chunks, so the bar can pause for a while.
+        </span>
+      )}
+      {quiet === 'stalled' && (
+        <span className="first-run-banner-progress-label">
+          No progress for a few minutes. Check the internet connection; the download picks up where
+          it left off.
+        </span>
+      )}
     </div>
   );
 }
@@ -719,6 +901,13 @@ function modelDisplay(id: string): string {
     case 'qwen3.6-35b-a3b-q4':
     case 'qwen3.6-35b-a3b-q8':
       return 'Qwen 3.6 (35B-A3B MoE)';
+    case 'qwen3.8-27b-iq1-s':
+    case 'qwen3.8-27b-q2':
+    case 'qwen3.8-27b-q3':
+    case 'qwen3.8-27b-q4':
+    case 'qwen3.8-27b-q6':
+    case 'qwen3.8-27b-q8':
+      return 'Qwen 3.8 (27B)';
     default:
       return id;
   }

@@ -59,14 +59,14 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
-import { markdownToChatDoc } from './chat-markdown.js';
+import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { shouldDisplayIntent } from './intent-display.js';
-import { openTabAction, runNavActions } from './nav-actions.js';
+import { openProjectFileActions, openTabAction, runNavActions } from './nav-actions.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -498,11 +498,7 @@ function openRetrievalSource(
     ...(hit.line ? { line: hit.line } : {}),
     ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
   };
-  runNavActions([
-    { kind: 'open-file', intent },
-    openTabAction({ kind: 'project', id: targetProject }),
-    { kind: 'event', type: 'gezel:open-file', detail: intent },
-  ]);
+  runNavActions(openProjectFileActions(intent));
 }
 
 /**
@@ -3871,7 +3867,7 @@ export function RenderedMarkdown({
 }) {
   const doc = useMemo(() => {
     try {
-      const mdDoc = parseMarkdown(markdown);
+      const mdDoc = parseMarkdown(prepareChatMarkdown(markdown));
       // Mostly-raw-HTML messages render as source rather than a hollow
       // sanitized page — see isRawHtmlDump / toHtmlCodeFence above.
       const source = isRawHtmlDump(
@@ -3922,6 +3918,7 @@ export function RenderedMarkdown({
       theme={theme}
       surface={surface}
       thinMargins
+      showCover={false}
       imageDisplayMode="thumbnail"
     />
   );

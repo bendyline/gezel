@@ -21,6 +21,7 @@ import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
@@ -196,6 +197,9 @@ export function TaskDetail({
     resourceKey: `task:${task.ref}:description`,
     initialValue: task.description ?? '',
     save: saveDescription,
+    // The editor's first emission is its own re-serialization of the stored
+    // text; without this an untouched description reads "Unsaved changes".
+    isEquivalent: markdownEquivalent,
     onLatestSaved: (updated) => {
       void onChanged(updated);
     },

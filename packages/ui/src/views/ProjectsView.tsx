@@ -112,7 +112,7 @@ import {
   formatRelativeFileTime,
   sortAggregates,
 } from '../components/file-view-modes.js';
-import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
@@ -3429,7 +3429,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                   {tab === 'map' && (
                     <ProjectPaneBoundary>
-                      <FileMapView projectId={selected.id} />
+                      <FileMapView projectId={selected.id} hasGitHub={!!selected.github} />
                     </ProjectPaneBoundary>
                   )}
                   {tab === 'overview' && (
@@ -3556,10 +3556,11 @@ function ProjectFileEditor({
   const versionBasename = useMemo(() => documentVersionBasename(file.path), [file.path]);
   const autosave = useSerializedAutosave({
     resourceKey: `file:${file.source}:${file.path}`,
-    initialValue: markdown ? normalizeMarkdownBaseline(file.content) : file.content,
+    initialValue: file.content,
     save: async (content) => {
       await onSave(content);
     },
+    isEquivalent: markdown ? markdownEquivalent : undefined,
   });
   const handleChange = useCallback(
     (content: string) => {
@@ -3967,15 +3968,14 @@ function ProjectDocEditor({
   onSave: (value: string) => Promise<unknown>;
 }) {
   const editorTheme = useEffectiveTheme();
-  // Baseline on the editor-canonical form: Squisq re-emits its own
-  // serialization of unchanged content at mount, and a raw-text baseline
-  // reads that as an edit (false "unsaved changes" + a spurious write on
-  // open). See markdown-baseline.ts.
-  const normalizedInitial = useMemo(() => normalizeMarkdownBaseline(initial), [initial]);
+  // Squisq re-emits its own serialization of unchanged content at mount;
+  // `markdownEquivalent` keeps that from reading as an edit (false "unsaved
+  // changes" + a spurious write on open). See markdown-baseline.ts.
   const autosave = useSerializedAutosave({
     resourceKey,
-    initialValue: normalizedInitial,
+    initialValue: initial,
     save: onSave,
+    isEquivalent: markdownEquivalent,
   });
 
   const handleDocChange = useCallback(

@@ -38,7 +38,7 @@ import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
-import { takePendingSettingsSection } from '../settings-nav.js';
+import { clearPendingSettingsSection, peekPendingSettingsSection } from '../settings-nav.js';
 import {
   type EngagementMode,
   EngagementModePanel,
@@ -400,11 +400,14 @@ function DaemonSettingsView() {
   // Keurmeester section) instead of saving on click.
   const [keurmeesterConsentOpen, setKeurmeesterConsentOpen] = useState(false);
   // A caller (e.g. the first-run Home "manage on-device models" link) can
-  // request a section before this view mounts; consume it as the initial
-  // section so the deep link doesn't race the event listener below.
+  // request a section before this view mounts; read it as the initial
+  // section so the deep link doesn't race the event listener below. The
+  // read is non-destructive and the clear waits for a committed mount: a
+  // lazy view's first render can be discarded — see settings-nav.ts.
   const [section, setSection] = useState<SectionId>(
-    () => (takePendingSettingsSection() as SectionId | null) ?? 'general',
+    () => (peekPendingSettingsSection() as SectionId | null) ?? 'general',
   );
+  useEffect(() => clearPendingSettingsSection(), []);
   // Collapsed nav groups (expanded by default → empty set). The "Artificial
   // Intelligence" and "Workloads" headers toggle membership here.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<SettingsGroup>>(() => new Set());
@@ -1593,7 +1596,7 @@ function DaemonSettingsView() {
   ]);
 
   // Landing on a hidden tab is reachable two ways: the posture drops to Super
-  // Lockdown while one is open, or a deep link (`takePendingSettingsSection`)
+  // Lockdown while one is open, or a deep link (`peekPendingSettingsSection`)
   // points at one. Send those to the Artificial Intelligence tab, where the
   // greyed pill explains why the provider is gone. Deliberately narrower than
   // "any section missing from `sections`" — config loads async, and a blanket

@@ -11,10 +11,42 @@
  * gezel nor the user learned the task had stopped.
  */
 
+/**
+ * The first paragraph of `advance_task_step`'s result: one plain sentence a
+ * person can read. The runtime ends the step's turn on this tool and shows the
+ * result's first paragraph as the gezel's reply (`terminalToolClosingText`),
+ * so the ids, the active-step bookkeeping and the handoff instructions for the
+ * model go in the paragraphs after it. The owner used to read `Completed step
+ * "finish" on default/2. Active step is now "(none)". Task is now complete
+ * (terminal step).` as the last word on their finished work.
+ */
+export function advanceStatusLine(opts: {
+  completedName: string;
+  nextName: string | undefined;
+  status: string;
+  taskTitle: string;
+  ownerStep?: boolean;
+}): string {
+  const done = `Finished "${opts.completedName}"`;
+  if (opts.status === 'complete') return `${done}. "${opts.taskTitle}" is complete.`;
+  if (opts.status === 'paused') return `${done}, but the task paused before the next step.`;
+  if (!opts.nextName) return `${done}.`;
+  if (opts.ownerStep) return `${done}. Next: "${opts.nextName}", which is waiting for your review.`;
+  return `${done}. Next: "${opts.nextName}".`;
+}
+
 export function advanceHandoffNote(opts: {
   status: string;
   assigneeId: string | undefined;
+  /** The new step is the owner's own (review, approval, sign-off). */
+  ownerStep?: boolean;
 }): string {
+  if (opts.ownerStep && opts.status === 'active') {
+    return (
+      " It now waits for the user's own review — they have a card asking them to approve it." +
+      ' Do not work on or advance it. Tell the user it is ready for them, and stop.'
+    );
+  }
   if (opts.status === 'paused') {
     return (
       ' The task is now PAUSED — the new step could not be dispatched, so NO handoff was' +

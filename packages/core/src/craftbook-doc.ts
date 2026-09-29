@@ -189,6 +189,34 @@ export function craftbookStepContractErrors(doc: CraftbookDoc): CraftbookDocErro
           });
         }
       }
+      if (step.runWhen) {
+        const known = steps.map((s) => s.id ?? slugifyStepId(s.name));
+        if (!known.includes(step.runWhen.answerOf)) {
+          errors.push({
+            where: `${label} → runWhen.answerOf`,
+            message: `"${step.runWhen.answerOf}" is not a step id.`,
+            fix: `name the step that asks the owner (with ask_user_question): ${known.join(', ')}.`,
+          });
+        }
+        if (!step.runWhen.choiceAnyOf && !step.runWhen.writeInMatches) {
+          errors.push({
+            where: `${label} → runWhen`,
+            message: 'runWhen names no answer that runs the step, so it would always be skipped.',
+            fix: 'add choiceAnyOf (the choice labels that call for this step) and/or writeInMatches.',
+          });
+        }
+        if (step.runWhen.writeInMatches) {
+          try {
+            new RegExp(step.runWhen.writeInMatches, 'i');
+          } catch (err) {
+            errors.push({
+              where: `${label} → runWhen.writeInMatches`,
+              message: `not a valid regular expression (${err instanceof Error ? err.message : String(err)}).`,
+              fix: 'escape special characters, for example `\\b(linkedin|x)\\b`.',
+            });
+          }
+        }
+      }
       const prompt = step.prompt ?? '';
       if (/\bread_file\s*\(\s*\{[^}]*["']?path["']?\s*:\s*["']artifacts\//is.test(prompt)) {
         errors.push({
@@ -212,6 +240,35 @@ export function craftbookStepContractErrors(doc: CraftbookDoc): CraftbookDocErro
   return errors;
 }
 
+const OWNER_APPROVAL_STEP_RE =
+  /\b(?:owner|client|customer)[-_\s]+(?:review|approval|sign[-_\s]?off)\b|\bfinal[-_\s]+(?:approval|sign[-_\s]?off)\b/i;
+
+/**
+ * Whether a step's name or id reads as the owner's own approval: "Owner
+ * Review", "Client sign-off", "Final approval". A plain "Review", "Approve"
+ * or "Sign off" does not count: reviewer gezels approve pull requests and
+ * sign off on deploys in the catalog, and the catalog compiles through here.
+ */
+export function looksLikeOwnerApprovalStep(step: { id?: string; name?: string }): boolean {
+  return OWNER_APPROVAL_STEP_RE.test(step.name ?? '') || OWNER_APPROVAL_STEP_RE.test(step.id ?? '');
+}
+
+/**
+ * Hand an approval step to the owner unless the author named an assignee.
+ * A Meester-authored book gave "Owner Review" to a gezel role, and a model
+ * approved its own crew's work, missing deliverable and all. Every authoring
+ * path runs this: the document compiler here and the JSON step routes.
+ */
+export function assignOwnerApprovalSteps<
+  T extends { id?: string; name?: string; assignee?: unknown; suggestedGezelId?: string },
+>(steps: T[]): T[] {
+  return steps.map((step) => {
+    if (step.assignee || !looksLikeOwnerApprovalStep(step)) return step;
+    const { suggestedGezelId: _dropped, ...rest } = step;
+    return { ...rest, assignee: { kind: 'user' as const } } as T;
+  });
+}
+
 /**
  * Turn a schema-valid doc into the runtime `Craftbook`: expand each
  * step's `deliverable` sugar into its enforced gate, default the entry
@@ -223,7 +280,7 @@ export function craftbookFromDoc(
   doc: CraftbookDoc,
   opts: CraftbookFromDocOptions,
 ): CraftbookFromDocResult {
-  const steps = expandStepDeliverables(doc.steps);
+  const steps = expandStepDeliverables(assignOwnerApprovalSteps(doc.steps));
   const stepIds = steps.map((s) => s.id);
   const entryStepId = doc.entryStepId ?? steps[0]!.id;
 

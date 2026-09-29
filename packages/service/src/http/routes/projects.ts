@@ -28,6 +28,7 @@ import {
   getEngagementMode,
   getProjectType,
   isTaskWorkAllowed,
+  isUserCreatedProject,
   resolveProjectTypeId,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -200,6 +201,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       // with filesystem renames, so they bypass the live Store's creation
       // listener. Announce them explicitly after the atomic commit succeeds.
       for (const gezel of response.applied.gezelsCreated) {
+        if (gezel.reused) continue;
         ctx.chatEvents.publishGlobalEvent({
           type: 'gezel_created',
           gezelId: gezel.id,
@@ -410,7 +412,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // compute the curated suggested subset. Additive fields: older clients
     // ignore them and keep showing the full list.
     const project = await ctx.store.getProject(id).catch(() => null);
-    const type = project ? getProjectType(resolveProjectTypeId(project)) : undefined;
+    // Only a person's choice types Default or the shared library; a detection
+    // left there before the detector skipped them is not one.
+    const typeId =
+      project && (project.projectTypeId || isUserCreatedProject(project))
+        ? resolveProjectTypeId(project)
+        : undefined;
+    const type = typeId ? getProjectType(typeId) : undefined;
     const suggested = new Set(suggestedCraftbookIdsForType(items, type));
     // Books the project's type installed are suggested by definition —
     // the type curated them; no tag intersection required.

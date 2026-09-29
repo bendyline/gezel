@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -77,6 +78,7 @@ vi.mock('../components/ModelPicker.js', async () => {
 vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: () => null }));
 
 const { SettingsView } = await import('./SettingsView.js');
+const { peekPendingSettingsSection, requestSettingsSection } = await import('../settings-nav.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 const { refreshCopilotAvailability } = await import('../components/useCopilotAvailability.js');
@@ -1286,5 +1288,19 @@ describe('generalist mode switch', () => {
     await waitFor(() =>
       expect(tray.getByRole('radio', { name: 'On' })).toHaveAttribute('aria-checked', 'true'),
     );
+  });
+});
+
+describe('SettingsView deep links', () => {
+  // SettingsView is lazy(), so React may render it, discard that render, and
+  // render again. Consuming the section in the discarded pass made the chat's
+  // "Choose a model" button land on General instead of the models page.
+  it('does not spend a requested section on a render that never commits', async () => {
+    requestSettingsSection('llamaCpp');
+    renderToStaticMarkup(<SettingsView />);
+    expect(peekPendingSettingsSection()).toBe('llamaCpp');
+
+    render(<SettingsView />);
+    await waitFor(() => expect(peekPendingSettingsSection()).toBeNull());
   });
 });

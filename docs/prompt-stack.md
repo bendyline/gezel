@@ -7,7 +7,8 @@ that review — re-measure with `GEZEL_PROMPT_BREAKDOWN=1` (per-section token ta
 ## The mental model
 
 Every provider gets a real system prompt from us. There is one builder —
-`buildInstructions` in [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
+`buildInstructions` in [chat/instructions.ts](../packages/service/src/chat/instructions.ts),
+called from [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
 runs for every session on every provider. The differences between local and cloud are not
 "local has no system prompt"; they are:
 
@@ -191,6 +192,15 @@ while they stream.
 
 ## Channel two: the user-message channel
 
+- **Current date and time** ([prompt-clock.ts](../packages/core/src/prompt-clock.ts)): one
+  line, `[Current date and time: Monday, September 28, 2026, 10:44 AM (America/Los_Angeles,
+  UTC-07:00)]`, placed first on the first provider send of every turn. `ChatManager.runSend`
+  adds it at the provider seam only (`providerPrompt()`), so the stored user message, the
+  prefix-anchored turn classifiers, and continuation nudges never see it. It sits outside
+  the system prompt because a clock there would change every minute and invalidate the
+  cached prefix. Without it, models dated plans from their training data: a Meester
+  planned "the week of May 20th" in September 2026, and that date ended up in craftbook
+  params, filenames and a customer quote. Guarded by the `date-grounding` eval.
 - **Turn intent plan** (`chat/turn-intent-plan.ts`): a deterministic first pass shared by
   the service, typed client, and composer. Exact requested formats (PPTX, DOCX, PDF, and
   animated slideshow outputs) resolve to one existing craftbook id before the model runs;

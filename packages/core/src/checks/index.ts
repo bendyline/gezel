@@ -19,7 +19,9 @@ export {
   fileCountByExt,
   fileMinBytes,
   fileMinLines,
+  frontmatterList,
   grepMatches,
+  listedFiles,
   notContainsPattern,
   totalMinBytes,
 } from './files.js';

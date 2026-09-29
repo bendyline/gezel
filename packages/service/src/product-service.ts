@@ -31,7 +31,9 @@ import {
 import {
   type ExternalFolders,
   KeyedLock,
+  type Task,
   type TaskAssignee,
+  type TaskCraftbookStep,
   resolveDistributionProfile,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -86,6 +88,8 @@ import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
+import { createXpRefresher } from './growth/xp-refresher.js';
+import { stepCreditedGezelId } from './growth/xp.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { generateLoopbackCert } from './http/cert.js';
@@ -196,6 +200,7 @@ import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
+import { loadTaskOutputs } from './tasks/completion-wrapup.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import { deriveFanoutChildTitle } from './tasks/fanout-title.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
@@ -204,6 +209,7 @@ import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
+import { ownerStepQuestion } from './tasks/owner-step.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { TaskScheduler } from './tasks/scheduler.js';
@@ -213,6 +219,7 @@ import {
   type TaskStepRef,
   pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
 } from './tasks/step-pause.js';
+import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
@@ -831,8 +838,11 @@ export async function startProductService(
   // TaskRunner's live dispatch to the new activation timestamp immediately so
   // its stale-dispatch pruning does not cancel that same recovery turn.
   tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
-    const gezelId =
-      newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+    const gezelId = isOwnerStep(newStep)
+      ? undefined
+      : newStep.assignee?.kind === 'gezel'
+        ? newStep.assignee.gezelId
+        : newStep.suggestedGezelId;
     if (!gezelId || !newStep.lastActivatedAt) return;
     taskRunner.adoptActiveDispatchActivation({
       taskRef: task.ref,
@@ -1053,7 +1063,49 @@ export async function startProductService(
   const { installCraftbookScripts, installLocalCraftbookScripts } = await import(
     './scripts/install.js'
   );
+  // Owner-step card: one unanswered card per (task, step), attributed to the
+  // gezel whose work is under review so the card reads as their hand-over.
+  const fileOwnerStepCard = async (
+    task: Task,
+    step: TaskCraftbookStep,
+    reviewed: TaskCraftbookStep | undefined,
+  ): Promise<void> => {
+    const existing = await store.listProjectQuestions(task.projectId).catch(() => []);
+    if (
+      existing.some(
+        (q) =>
+          q.intent?.kind === 'step-awaits-owner' &&
+          q.intent.taskRef === task.ref &&
+          q.intent.stepId === step.id &&
+          !q.answer,
+      )
+    ) {
+      return;
+    }
+    const returnTo = reviewed && reviewed.id !== step.id ? reviewed : undefined;
+    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+    const asker =
+      (returnTo ? stepOwnerGezelId(task, returnTo) : undefined) ?? config.meesterGezelId ?? '';
+    const question = ownerStepQuestion({
+      task,
+      step,
+      ...(returnTo ? { returnTo } : {}),
+      askerGezelId: asker,
+      outputs: await loadTaskOutputs(store, task),
+    });
+    await store.writeQuestion(question);
+    chatEvents.publishProjectEvent(task.projectId, { type: 'question_asked', question });
+    log.info(`[tasks] ${task.ref} step "${step.id}" waits for the owner; filed a card`);
+  };
   tasks.setTaskCreatedHook(async ({ projectId, task, sources }) => {
+    // A task that opens on an owner step (approve the plan first) never
+    // passes through the activation hook, so its card is filed here.
+    const entry = task.craftbook.steps.find((s) => s.id === task.activeStepId);
+    if (task.status === 'active' && entry && isOwnerStep(entry)) {
+      await fileOwnerStepCard(task, entry, undefined).catch((err) =>
+        log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
+      );
+    }
     // A book that verifies its work by running project commands
     // (`commandEvidence` gates) declares them as `commands` needs; raise
     // their first-use approval questions NOW so the user answers at
@@ -1207,7 +1259,21 @@ export async function startProductService(
   // state. Kept out of the `TaskManager` constructor to avoid a circular
   // dep — and kept here (not inline in chat/) so the wiring is visible
   // alongside the other cross-manager plumbing.
+  // XP follows finished work (growth/xp-refresher.ts). The growth engine is
+  // built further down, so the refresher reaches it through this ref.
+  const growthRef: { engine?: GrowthEngine } = {};
+  const xpRefresher = createXpRefresher({
+    refresh: async (gezelId) => {
+      if (!growthRef.engine) throw new Error('growth engine not ready');
+      return growthRef.engine.refresh(gezelId, { allowKlerk: false, createPending: false });
+    },
+    onRefreshed: (gezelId, xp) =>
+      chatEvents.publishGlobalEvent({ type: 'growth_updated', gezelId, xp }),
+  });
   tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
+    if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
+      xpRefresher.note(stepCreditedGezelId(completedStep));
+    }
     // ── Automated ACTIVATION gate ───────────────────────────────────────
     // When the newly-activated step declares an activation-moment gate
     // (legacy GateSpec, or a StepGate with `at: 'activation'`), the
@@ -1254,11 +1320,7 @@ export async function startProductService(
             .filter((c) => !c.ok)
             .map((c) => c.kind as string);
           const book = task.sourceCraftbookIds?.find((s) => s.role === 'main');
-          const gezelId =
-            newStep.assignee?.kind === 'gezel'
-              ? newStep.assignee.gezelId
-              : (newStep.suggestedGezelId ??
-                (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+          const gezelId = stepOwnerGezelId(task, newStep);
           return history
             .log({
               kind: 'task.step.gated',
@@ -1450,6 +1512,15 @@ export async function startProductService(
         );
         return;
       }
+    }
+
+    // An owner step waits for the owner: nobody is dispatched, and a card
+    // tells them it is their turn.
+    if (isOwnerStep(newStep)) {
+      await fileOwnerStepCard(task, newStep, completedStep).catch((err) =>
+        log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
+      );
+      return;
     }
 
     // The same three-level resolution entry dispatch uses. A task created
@@ -1762,6 +1833,20 @@ export async function startProductService(
   // the linked finding (cancel reopens it); code reviews flip their
   // record to complete/canceled.
   tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
+    // The terminal step activates nothing, so its XP (and the task's) is
+    // noted here rather than in the step hook.
+    if (outcome === 'complete') {
+      if (task.assignee.kind === 'gezel') xpRefresher.note(task.assignee.gezelId);
+      for (const step of task.craftbook.steps) {
+        if (step.completedAt) xpRefresher.note(stepCreditedGezelId(step));
+      }
+    }
+    // The owner's wrap-up. Detached: this hook runs inside the worker's
+    // final `advance_task_step` call, and the wrap-up reads every session
+    // the task used — the worker's tool result must not wait on that.
+    void chat
+      .postTaskWrapUp(task, outcome)
+      .catch((err) => log.warn(`[service] task wrap-up failed for ${task.ref}: ${String(err)}`));
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
@@ -2224,6 +2309,7 @@ export async function startProductService(
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
     announce: (gezelId, toLevel) => chat.announceGrowth(gezelId, toLevel),
   });
+  growthRef.engine = growth;
 
   const remoteFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
   const remoteServing = createRemoteServingController({
@@ -3069,6 +3155,7 @@ export async function startProductService(
       await shutdownStep('task runner', () => taskRunner.stop());
       memoryHealth.stop();
       memoryCompactor.stop();
+      xpRefresher.dispose();
       digestGenerator.stop();
       promptDraftSweeper.stop();
       inputStaging.stopSweeping();

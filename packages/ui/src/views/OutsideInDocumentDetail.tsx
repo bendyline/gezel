@@ -25,7 +25,7 @@ import {
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
 import { recordDocumentUsed } from '../components/document-quick-list.js';
-import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -257,14 +257,11 @@ function OutsideInEditor({
     },
     [dataReferenceContainer, layout, path, prepared.sourcePath],
   );
-  const initialContent = useMemo(
-    () => normalizeMarkdownBaseline(prepared.content),
-    [prepared.content],
-  );
   const autosave = useSerializedAutosave({
     resourceKey: `outside-in:documents:${prepared.sourcePath}`,
-    initialValue: initialContent,
+    initialValue: prepared.content,
     save: saveDocument,
+    isEquivalent: markdownEquivalent,
   });
   useEffect(() => () => mediaProvider.dispose(), [mediaProvider]);
   const handleChange = useCallback(

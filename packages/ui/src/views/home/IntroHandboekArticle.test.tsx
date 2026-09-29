@@ -24,6 +24,7 @@ vi.mock('@bendyline/squisq-react', () => ({
     <div
       data-testid="linear-doc-view"
       data-show-cover={String(showCover ?? true)}
+      data-doc={JSON.stringify(doc)}
       className={className}
     >
       {doc ? 'doc' : 'no-doc'}
@@ -72,6 +73,22 @@ describe('IntroHandboekArticle', () => {
     render(<IntroHandboekArticle />);
     const view = await screen.findByTestId('linear-doc-view');
     expect(view).toHaveAttribute('data-show-cover', 'false');
+  });
+
+  // squisq paints an unresolved relative image before the media provider
+  // answers, so the catalog path reached the network as /assets/gezel-mark.png
+  // and 404ed on every Home load.
+  it('points the brand mark at the bundled image before the first paint', async () => {
+    vi.mocked(api.readKnowledgeDocument).mockResolvedValue({
+      id: 'welcome',
+      title: 'What is gezel?',
+      markdown: '# What is gezel?\n\n![gezel-mark](assets/gezel-mark.png)\n\nA crew.',
+    } as never);
+    render(<IntroHandboekArticle />);
+    const view = await screen.findByTestId('linear-doc-view');
+    const doc = view.getAttribute('data-doc') ?? '';
+    expect(doc).toContain('gezel-mark');
+    expect(doc).not.toContain('"assets/gezel-mark.png"');
   });
 
   it('switches to the synthetic-clock video player and back', async () => {

@@ -13,6 +13,7 @@ import {
   localDateKey,
   projectAllowsAmbientWork,
   projectManagedWorkspaceWritable,
+  stepOwnerGezelId,
   taskEffectiveStatus,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
@@ -304,11 +305,7 @@ export class TaskScheduler {
     const terminalStep = step.terminal === true;
     // Only gezel-owned steps are driveable: step assignee → suggested → the
     // task-level assignee. A user-owned step waits for the user, not us.
-    const assignee =
-      step.assignee?.kind === 'gezel'
-        ? step.assignee.gezelId
-        : (step.suggestedGezelId ??
-          (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+    const assignee = stepOwnerGezelId(task, step);
     if (!assignee) return;
 
     // Never interfere with live work: the assignee mid-turn anywhere (a
@@ -996,11 +993,12 @@ export class TaskScheduler {
     // decision surfaced through the structured-question UI (Home pane
     // + chat card + Home tab badge) — pinging them to "check in" is
     // just going to prompt "I'm still waiting," which is noise.
-    const pendingQuestions = await this.store.listProjectQuestions(project.id).catch(() => []);
-    if (pendingQuestions.some((q) => !q.answer)) {
-      trace(
-        `skip meester nudge — ${pendingQuestions.filter((q) => !q.answer).length} unanswered question(s) pending`,
-      );
+    // A "your work is ready" card asks nothing, so it holds no nudge back.
+    const pendingQuestions = (
+      await this.store.listProjectQuestions(project.id).catch(() => [])
+    ).filter((q) => !q.answer && q.intent?.kind !== 'task-finished');
+    if (pendingQuestions.length > 0) {
+      trace(`skip meester nudge — ${pendingQuestions.length} unanswered question(s) pending`);
       return;
     }
 

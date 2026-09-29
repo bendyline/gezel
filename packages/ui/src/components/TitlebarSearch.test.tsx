@@ -152,12 +152,33 @@ describe('TitlebarSearch', () => {
     expect(screen.getByTestId('titlebar-search-input')).toHaveFocus();
   });
 
-  it('Escape closes the palette', async () => {
+  // The query used to stay in the well after closing, and the next focus
+  // reopened stale results.
+  it('Escape closes the palette and clears the query', async () => {
     render(<TitlebarSearch />);
     const input = await typeQuery('space');
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
     fireEvent.keyDown(input, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    expect(input).toHaveValue('');
+  });
+
+  it('leaving the palette clears the query; returning to the well does not', async () => {
+    render(
+      <>
+        <TitlebarSearch />
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    const input = await typeQuery('space');
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
+    act(() => input.focus());
+    expect(input).toHaveValue('space');
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    act(() => screen.getByRole('button', { name: 'elsewhere' }).focus());
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    expect(input).toHaveValue('');
   });
 
   /**

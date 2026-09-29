@@ -34,6 +34,7 @@ import {
   applyGateRejection,
   applyStepPatch,
   assertCraftbookGraph,
+  assignOwnerApprovalSteps,
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
@@ -51,6 +52,7 @@ import {
   resolveNextStep,
   resolveSecurityPolicy,
   resolveSteps,
+  runWhenVerdict,
   stampGateHandoff,
   stepInsertionIndex,
   summarizePlanDocument,
@@ -127,6 +129,7 @@ export { StepCompletionBlockedError };
 import {
   bumpStepActivation,
   findBranchGoto,
+  isOwnerStep,
   mainBookSource,
   shouldAutoAdvance,
   stepOwnerGezelId,
@@ -793,8 +796,9 @@ export class TaskManager {
     const step = craftbook.steps.find((s) => s.id === stepId);
     if (!step || !step.suggestedRole) return;
     // Explicit override: caller already pinned an assignee (either via
-    // step.assignee or step.suggestedGezelId). Respect it.
-    if (step.assignee?.kind === 'gezel' || step.suggestedGezelId) return;
+    // step.assignee or step.suggestedGezelId). Respect it. An owner step is
+    // pinned to the person; its role only says who would help them.
+    if (step.assignee || step.suggestedGezelId) return;
     try {
       const resolved = await this.roleResolver(step.suggestedRole, projectId);
       if (resolved?.gezelId) {
@@ -1714,7 +1718,7 @@ export class TaskManager {
     // via the shared resolver, then mint a unique id against this task.
     // Deliverable expansion happens AFTER the mint — the expanded gate
     // loops back with `onReject: <id>`, so it must see the final id.
-    const base = resolveSteps([input])[0]!;
+    const base = resolveSteps(assignOwnerApprovalSteps([input]))[0]!;
     const id = uniqueStepId(task.craftbook.steps, base.name, base.id);
     const expanded = input.deliverable
       ? expandStepDeliverable({ ...base, id }, input.deliverable)
@@ -2161,6 +2165,8 @@ export class TaskManager {
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const adv = step?.advanceWhen;
     if (!step || step.terminal || !adv || adv.requireChange) return 'not-ready';
+    // A file existing is not the owner's approval.
+    if (isOwnerStep(step)) return 'not-ready';
 
     const content = await (adv.artifact
       ? this.store.readProjectArtifact(projectId, adv.file)
@@ -2588,6 +2594,31 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         details: { ref: updated.ref, stepId: newActive },
       });
 
+      // A step that runs only when the owner asked for it is decided from
+      // their recorded answer, before any hook or model turn. "Queue to
+      // Bluesky (only when asked)" used to spend a two-minute turn finding
+      // out nobody had asked.
+      if (newStep?.runWhen && cascadeDepth + 1 <= STEP_CASCADE_CAP) {
+        const questions = await this.store.listProjectQuestions(projectId).catch(() => []);
+        const verdict = runWhenVerdict(newStep.runWhen, questions, updated.ref);
+        if (!verdict.run) {
+          await this.appendNote(projectId, num, {
+            text: `Skipped "${newStep.name}": ${verdict.reason}.`,
+            author: { kind: 'user' },
+            stepId: newStep.id,
+          }).catch(() => {});
+          log.info(`[tasks] ${updated.ref} skipped "${newStep.id}" (runWhen): ${verdict.reason}`);
+          return this.completeStepInternal(
+            projectId,
+            num,
+            newStep.id,
+            undefined,
+            cascadeDepth + 1,
+            { force: true, cause: 'auto' },
+          );
+        }
+      }
+
       if (newStep) {
         const entrance = await this.runActivatedStepOnEnter(
           projectId,
@@ -2884,11 +2915,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         // verdict. Consult before pausing; an applied verdict earns a
         // fresh ladder (budget + trail reset), stand_down/misses pause
         // with the diagnosis exactly as before.
-        const plateauAssignee =
-          step.assignee?.kind === 'gezel'
-            ? step.assignee.gezelId
-            : (step.suggestedGezelId ??
-              (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+        const plateauAssignee = stepOwnerGezelId(task, step);
         if (this.keurmeester && plateauAssignee) {
           const consult = await this.keurmeester
             .consultTaskStall({
@@ -3496,11 +3523,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       // (corrective message, step/craftbook rewrite, or takeover) keeps
       // the task active with a fresh gate budget; stand_down, predicate
       // misses, and consult failures pause exactly as before.
-      const gateAssignee =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : (step.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      const gateAssignee = stepOwnerGezelId(task, step);
       if (this.keurmeester && gateAssignee) {
         // Stage-3 before the attempt budget is spent = a busy plateau
         // (same failing checks, content churning) — a distinct trigger

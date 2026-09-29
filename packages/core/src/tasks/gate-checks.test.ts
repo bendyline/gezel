@@ -78,6 +78,41 @@ describe('evaluateDeclarativeCheck', () => {
     expect(missing.detail).toBe('nope.md not found (needed for the nonempty check)');
   });
 
+  // The review's draft targeted Instagram, shipped no Instagram variant, and
+  // its size-only gate passed.
+  it('requires a file for every value a deliverable lists', async () => {
+    const check = {
+      kind: 'listedFiles',
+      file: 'posts/_drafting/post.md',
+      key: 'platforms',
+      pathTemplate: 'posts/_drafting/variants/{value}.md',
+    } as GateCheck as never;
+    const post = (platforms: string) =>
+      `---\nstatus: in-review\n${platforms}\ntitle: Pumpkin loaf\n---\n\nBase copy.\n`;
+    const variants = {
+      'posts/_drafting/variants/bluesky.md': 'Bluesky copy',
+      'posts/_drafting/variants/instagram.md': 'Instagram copy',
+    };
+
+    const inline = reader({
+      'posts/_drafting/post.md': post('platforms: [Bluesky, Instagram]'),
+      ...variants,
+    });
+    expect((await evaluateDeclarativeCheck(check, inline)).ok).toBe(true);
+
+    const block = reader({
+      'posts/_drafting/post.md': post('platforms:\n  - bluesky\n  - instagram\n  - LinkedIn'),
+      ...variants,
+    });
+    const missing = await evaluateDeclarativeCheck(check, block);
+    expect(missing.ok).toBe(false);
+    expect(missing.detail).toContain('posts/_drafting/variants/linkedin.md');
+    expect(missing.evidence).toEqual({ missing: ['posts/_drafting/variants/linkedin.md'] });
+
+    const unlisted = reader({ 'posts/_drafting/post.md': post('title2: none'), ...variants });
+    expect((await evaluateDeclarativeCheck(check, unlisted)).ok).toBe(false);
+  });
+
   it('labels a check by its configuration, never its observed values', () => {
     expect(gateCheckLabel({ kind: 'minBytes', file: 'a.md', bytes: 9 } as GateCheck)).toBe(
       'minBytes a.md',

@@ -6,8 +6,12 @@ import {
   buildToolReceipt,
   findAskCycleOrDepth,
   inferTargetProject,
+  isOwnerStep,
+  renderCurrentDateTimeLine,
   resolvePromptFootprint,
+  stepOwnerGezelId,
   taskTranscriptCompatible,
+  withCurrentDateTimeLine,
 } from '@bendyline/gezel';
 import type {
   FileTurnIntent,
@@ -224,6 +228,13 @@ import { retrievalTraceEnabled, traceHistoryDetails } from '../search/retrieval-
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
+import {
+  WRAP_UP_MAX_FILES,
+  composeTaskWrapUp,
+  loadTaskOutputs,
+  taskFinishedQuestion,
+  wantsWrapUp,
+} from '../tasks/completion-wrapup.js';
 import {
   buildStageOneNudge,
   buildStageTwoNudge,
@@ -2316,12 +2327,9 @@ export class ChatManager extends LocalEngineRuntime {
         ) &&
         normalizedGate.scripts.length === 0;
       if (!adv && !readEvidenceOnly) continue;
-      // Only this gezel's step (step assignee → suggested → task assignee).
-      const owner =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : (step.suggestedGezelId ??
-            (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
+      // Only this gezel's step (step assignee → suggested → task assignee);
+      // an owner step advances only when the owner says so.
+      const owner = stepOwnerGezelId(task, step);
       if (owner !== gezelId) continue;
 
       // A fixed-action evidence step intentionally hides
@@ -7905,7 +7913,10 @@ export class ChatManager extends LocalEngineRuntime {
         this.events.publish(scope, {
           type: 'turn_stats',
           provider,
-          ...(state.record.model ? { model: state.record.model } : {}),
+          // The model that ran, so speed is filed under it and not the pin.
+          ...((state.effectiveModel ?? state.record.model)
+            ? { model: state.effectiveModel ?? state.record.model }
+            : {}),
           promptTokens: ev.promptTokens,
           completionTokens: ev.completionTokens,
           durationMs: ev.durationMs,
@@ -8145,6 +8156,16 @@ export class ChatManager extends LocalEngineRuntime {
         );
       }
       let continuations = 0;
+      // Every provider receives the turn through the sends below, so this is
+      // the one place the date reaches them all. It rides the user turn rather
+      // than the system prompt so the cached prefix never churns, and it goes
+      // first so the user's words stay last. It is added only at the provider
+      // seam: `promptForTurn` also feeds prefix-anchored classifiers
+      // (`isValidationRepairPrompt`, no-op confirmations) that a leading
+      // bracket line would blind. Continuations already have it in history.
+      const clockLine = renderCurrentDateTimeLine();
+      const providerPrompt = () =>
+        continuations === 0 ? withCurrentDateTimeLine(promptForTurn, clockLine) : promptForTurn;
       let falseCapabilityDenialCorrected = false;
       const maxContinuations = resolveContinuationBudget(state);
       // Voorman-idle recovery is a project-level suggestion, not a broken
@@ -8175,7 +8196,7 @@ export class ChatManager extends LocalEngineRuntime {
       while (true) {
         const debugOn = this.debug?.isEnabled() === true;
         if (continuations === 0) {
-          const preview = debugOn ? promptForTurn : promptForTurn.slice(0, 80);
+          const preview = debugOn ? providerPrompt() : promptForTurn.slice(0, 80);
           log.info(`sending to session ${sessionId} via ${state.record.providerName}: ${preview}`);
           // Log the system prompt once per session when debug is on. Not
           // on every turn — it doesn't change mid-session, so re-logging
@@ -8214,7 +8235,7 @@ export class ChatManager extends LocalEngineRuntime {
           scope,
           state,
           liveSession,
-          promptForTurn,
+          providerPrompt(),
         );
         log.debug(
           `runSend#${tag} pressure-check END rebuilt=${pressureResult.rebuilt} ` +
@@ -8400,7 +8421,7 @@ export class ChatManager extends LocalEngineRuntime {
           }
           inflightTurn.providerStarted = true;
           this.telemetry.noteProviderRequestStart(sessionId);
-          finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+          finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
         } catch (err) {
           if (err instanceof ProviderDisposedError && !inflightTurn.cancelled) {
             // Only the provider's pre-start guard uses this error type. A
@@ -8429,7 +8450,7 @@ export class ChatManager extends LocalEngineRuntime {
               throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
             }
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await fresh.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await fresh.sendAndWait(providerPrompt(), sendOpts);
           } else if (
             isContextOverflowError(err) &&
             compactionsThisSend < this.maxCompactionsPerSend
@@ -8452,7 +8473,7 @@ export class ChatManager extends LocalEngineRuntime {
               scope,
               state,
               liveSession,
-              promptForTurn,
+              providerPrompt(),
               {
                 force: true,
               },
@@ -8463,7 +8484,7 @@ export class ChatManager extends LocalEngineRuntime {
             liveUnsub = subscribeLive(liveSession);
             compactionsThisSend++;
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
           } else if (!isSessionGoneError(err)) throw err;
           else {
             // The provider session is no longer resumable. Rebuild from scratch
@@ -8498,7 +8519,7 @@ export class ChatManager extends LocalEngineRuntime {
             liveSession = fresh;
             liveUnsub = subscribeLive(liveSession);
             this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
+            finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
           }
         }
         // A provider should reject when its signal is aborted, but keep the
@@ -8626,9 +8647,14 @@ export class ChatManager extends LocalEngineRuntime {
         let commandApprovalRaisedThisTurn = false;
         try {
           const projectQuestions = await this.store.listProjectQuestions(state.record.projectId);
+          // A task finishing in the background files its "ready" card on
+          // this thread; it belongs to the wrap-up, not to this reply.
           const raisedQuestions = projectQuestions.filter(
             (q) =>
-              q.sessionId === sessionId && q.intent !== undefined && q.createdAt >= iterStartedAt,
+              q.sessionId === sessionId &&
+              q.intent !== undefined &&
+              q.intent.kind !== 'task-finished' &&
+              q.createdAt >= iterStartedAt,
           );
           // An immediate answer may already be queued. It still owns the next
           // turn: a stall-recovery nudge must not run ahead of that answer.
@@ -10420,6 +10446,18 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Record which model this session's turns are really served by. A pinned
+   * model that is not installed is replaced by a stand-in on every turn
+   * (`ensureServableLocalModel`) while `record.model` keeps the pin, and the
+   * thread label read that pin.
+   */
+  private async noteServedModel(record: ChatSession, served: string | undefined): Promise<void> {
+    if (!served || record.servedModel === served) return;
+    record.servedModel = served;
+    await this.store.writeSession(record);
+  }
+
+  /**
    * Build a brand-new live session for an existing record, ignoring any
    * stored `providerState` (use when the stored one is known dead). Used by
    * the mid-conversation "session gone" recovery path in `send`.
@@ -10436,6 +10474,7 @@ export class ChatManager extends LocalEngineRuntime {
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
+    await this.noteServedModel(record, effectiveModel ?? provider.getEffectiveModelId?.());
     const effectiveContextWindow = await this.resolveEffectiveContextWindow(
       provider,
       effectiveModel,
@@ -11702,6 +11741,73 @@ export class ChatManager extends LocalEngineRuntime {
     const wantsGb = (minFreeBytes / GIB).toFixed(0);
     const freeGb = (freeBytes / GIB).toFixed(1);
     return `loading ${model ?? providerName} for background work wants at least ${wantsGb} GB of free memory and only ${freeGb} GB is free right now; it will run once memory frees up or the model is loaded for interactive use`;
+  }
+
+  /**
+   * Tell the owner a task they launched from a chat is finished: a
+   * deterministic `task-wrapup` message in the thread that launched it,
+   * naming the files the task wrote, then a `task_settled` event the app
+   * turns into an OS notification. Returns the thread id, or null when the
+   * task earns no wrap-up (see `wantsWrapUp`) or its thread is gone.
+   *
+   * A launch from inside another task's session climbs to the first
+   * ancestor that is not task-scoped: that is the thread the person reads.
+   */
+  async postTaskWrapUp(task: Task, outcome: 'complete' | 'canceled'): Promise<string | null> {
+    if (!wantsWrapUp(task, outcome) || !task.launchSessionId) return null;
+    let thread = await this.store.findSessionById(task.launchSessionId).catch(() => null);
+    const seen = new Set<string>();
+    while (thread?.taskRef && thread.parentSession && !seen.has(thread.id)) {
+      seen.add(thread.id);
+      thread = await this.store.findSessionById(thread.parentSession.sessionId).catch(() => null);
+    }
+    if (!thread || thread.taskRef || thread.archived) return null;
+
+    const outputs = await loadTaskOutputs(this.store, task);
+
+    const message: ChatMessage = {
+      role: 'assistant',
+      content: composeTaskWrapUp(task, outputs),
+      at: nowIso(),
+      synthetic: 'task-wrapup',
+      referencedTasks: [task.ref],
+      ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+    };
+    const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
+    if (artifacts.length > 0) message.referencedArtifacts = artifacts;
+
+    const live = this.states.get(thread.id);
+    const record = live?.record ?? thread;
+    record.messages.push(message);
+    record.lastActivityAt = message.at;
+    await this.store.writeSession(record);
+
+    const scope: PublishScope = {
+      sessionId: record.id,
+      gezelId: record.gezelId,
+      projectId: record.projectId,
+    };
+    this.events.publish(scope, { type: 'complete', message });
+    this.events.publishProjectEvent(record.projectId, {
+      type: 'task_settled',
+      taskRef: task.ref,
+      title: task.title,
+      outcome,
+      sessionId: record.id,
+    });
+
+    // A "ready for you" card in Updates, so the finished work stays one click
+    // away after the thread scrolls on. One per task, however it settles.
+    const pending = await this.store.listProjectQuestions(record.projectId).catch(() => []);
+    const alreadyFiled = pending.some(
+      (q) => q.intent?.kind === 'task-finished' && q.intent.taskRef === task.ref && !q.answer,
+    );
+    if (!alreadyFiled) {
+      const question = taskFinishedQuestion({ task, thread: record, outputs, at: message.at });
+      await this.store.writeQuestion(question);
+      this.events.publish(scope, { type: 'question_asked', question });
+    }
+    return record.id;
   }
 
   /**
@@ -13322,6 +13428,7 @@ export class ChatManager extends LocalEngineRuntime {
       // or ignores them.
       delete record.model;
       delete record.modelSource;
+      delete record.servedModel;
       await this.store.writeSession(record);
     }
 
@@ -13491,6 +13598,7 @@ export class ChatManager extends LocalEngineRuntime {
     );
 
     const liveEffectiveModel = effectiveModel ?? provider.getEffectiveModelId?.();
+    await this.noteServedModel(record, liveEffectiveModel);
     const state: LiveSessionState = {
       record,
       session,
@@ -14174,10 +14282,12 @@ export class ChatManager extends LocalEngineRuntime {
           // invites a chat turn to start the run — and Default always holds
           // the Meester's perpetual Night Shift oversight task.
           if (t.cron || t.nightShift?.enabled) return false;
+          const activeStep = t.craftbook.steps.find((s) => s.id === t.activeStepId);
+          // Waiting on the owner's review is nobody's work to pick up.
+          if (isOwnerStep(activeStep)) return false;
           if (t.assignee.kind === 'gezel' && t.assignee.gezelId === record.gezelId) return true;
           // Step-level assignment: the active step may name this gezel
           // even if the task's top-level assignee is someone else.
-          const activeStep = t.craftbook.steps.find((s) => s.id === t.activeStepId);
           if (
             activeStep?.assignee?.kind === 'gezel' &&
             activeStep.assignee.gezelId === record.gezelId

@@ -31,6 +31,7 @@ import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
+import { OPEN_UPDATES_EVENT } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
@@ -495,6 +496,13 @@ function FullApp() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [questionsOpen]);
+  // Anything that counts the owner's questions (Home's "waiting on you" chip)
+  // opens the same drawer the titlebar's Updates button does.
+  useEffect(() => {
+    const onOpenUpdates = () => setQuestionsOpen(true);
+    window.addEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
+    return () => window.removeEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
+  }, []);
 
   // Global search shortcuts: ⌘P / Ctrl+P → quick-open (names/files),
   // ⌘K / Ctrl+K → full unified search. Both focus the titlebar box via
@@ -675,7 +683,11 @@ function FullApp() {
           // question arrives and the window is backgrounded — the tray is
           // the locus, so the user can be elsewhere and still get pulled
           // back. Gated on visibility to avoid notifying the active window.
-          if (ev.type === 'question_asked' && document.visibilityState === 'hidden') {
+          if (
+            ev.type === 'question_asked' &&
+            ev.question.intent?.kind !== 'task-finished' &&
+            document.visibilityState === 'hidden'
+          ) {
             const prompt = ev.question.prompt.split('\n')[0]?.slice(0, 140) ?? '';
             void window.__GEZEL__?.notify?.({
               title: 'Gezel needs your input',
@@ -683,9 +695,29 @@ function FullApp() {
               view: 'chat',
             });
           }
+          // Work the owner launched from a chat finished and its wrap-up
+          // landed in that thread. Same calm, hidden-window-only rule as
+          // questions: an owner watching the thread already sees it.
+          if (
+            ev.type === 'task_settled' &&
+            ev.outcome === 'complete' &&
+            document.visibilityState === 'hidden'
+          ) {
+            void window.__GEZEL__?.notify?.({
+              title: 'Your work is ready',
+              body: `${ev.title} is finished.`,
+              view: env.projectId === 'default' ? 'home' : 'projects',
+            });
+          }
           // Level-ups: fan out to the roster badge / Growth-tab surfaces,
           // and nudge via OS notification only when the window is hidden —
           // one calm notification, never a foreground interruption.
+          // XP recomputed after finished work: the growth surfaces reload.
+          if (ev.type === 'growth_updated') {
+            window.dispatchEvent(
+              new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
+            );
+          }
           if (ev.type === 'growth_level_up') {
             window.dispatchEvent(
               new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),

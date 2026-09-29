@@ -55,6 +55,9 @@ export interface PageIoResult {
   body: Record<string, unknown>;
 }
 
+/** Stat etag for a declared path that does not exist yet. */
+const ABSENT_ETAG = 'absent';
+
 function etagOf(size: number, mtimeMs: number): string {
   return createHash('sha256')
     .update(`${size}:${Math.trunc(mtimeMs)}`)
@@ -244,6 +247,12 @@ export async function readPageData(
   try {
     stats = await stat(full);
   } catch {
+    // A page watches files a gezel has not written yet. A 404 there logged a
+    // failed request every poll, and left the watch unseeded, so the file's
+    // arrival never fired a change.
+    if (request.op === 'stat') {
+      return { status: 200, body: { op: 'stat', etag: ABSENT_ETAG, exists: false } };
+    }
     return { status: 404, body: { error: 'not found' } };
   }
 

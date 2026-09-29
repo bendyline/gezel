@@ -345,6 +345,35 @@ export const TaskPausedIntentSchema = z.object({
 });
 export type TaskPausedIntent = z.infer<typeof TaskPausedIntentSchema>;
 
+/**
+ * Service-created "this step is waiting for you" card. An owner step
+ * (`assignee.kind === 'user'`: review, approval, sign-off) is never handed to
+ * a gezel, so without the card the task would sit silently. Choosing Approve
+ * completes the step as the owner. A written reply instead sends the work
+ * back to `returnToStepId` with the reply as that step's note.
+ */
+export const StepAwaitsOwnerIntentSchema = z.object({
+  kind: z.literal('step-awaits-owner'),
+  taskRef: z.string(),
+  stepId: z.string(),
+  /** The step whose work is under review, when there is one to send back to. */
+  returnToStepId: z.string().optional(),
+});
+export type StepAwaitsOwnerIntent = z.infer<typeof StepAwaitsOwnerIntentSchema>;
+
+/**
+ * Service-created "your work is ready" card, filed beside the Meester's
+ * wrap-up when a task the owner launched from a chat finishes. The Updates
+ * button used to vanish the moment the last question was answered, so a
+ * finished task left nothing to click. `sessionId` is the wrap-up's thread;
+ * answering (Dismiss) only collapses the card.
+ */
+export const TaskFinishedIntentSchema = z.object({
+  kind: z.literal('task-finished'),
+  taskRef: z.string(),
+});
+export type TaskFinishedIntent = z.infer<typeof TaskFinishedIntentSchema>;
+
 export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('npm-install-approval'),
@@ -364,6 +393,8 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   ScheduleApprovalIntentSchema,
   NightShiftReviewIntentSchema,
   TaskPausedIntentSchema,
+  StepAwaitsOwnerIntentSchema,
+  TaskFinishedIntentSchema,
 ]);
 export type QuestionIntent = z.infer<typeof QuestionIntentSchema>;
 
@@ -387,6 +418,11 @@ export const QuestionSchema = z.object({
    * link.
    */
   taskRef: z.string().optional(),
+  /**
+   * The step of `taskRef` that asked, stamped by the service. A later step's
+   * `runWhen` reads this answer to decide whether it runs at all.
+   */
+  stepId: z.string().optional(),
   /**
    * Approval-flow attachment: a document this question is *about*.
    * Project-relative path when `projectId` is set, otherwise into the

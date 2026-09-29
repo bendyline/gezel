@@ -52,6 +52,24 @@ export function sessionContextPoisoned(record: ChatSession): boolean {
   return false;
 }
 
+/** A step the owner does themselves: review, approval, sign-off. */
+export function isOwnerStep(step: Pick<TaskCraftbookStep, 'assignee'> | undefined): boolean {
+  return step?.assignee?.kind === 'user';
+}
+
+/**
+ * The gezel accountable for a step, or undefined when no gezel is. An owner
+ * step has none even when a role resolved to a gezel or the task itself is a
+ * gezel's: falling through to either handed "Owner Review" to a model, which
+ * did the review and advanced the task.
+ */
+export function stepOwnerGezelId(task: Task, step: TaskCraftbookStep): string | undefined {
+  if (isOwnerStep(step)) return undefined;
+  if (step.assignee?.kind === 'gezel') return step.assignee.gezelId;
+  if (step.suggestedGezelId) return step.suggestedGezelId;
+  return task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined;
+}
+
 /** Same step-first ownership on both hosts; an explicit human handoff stays human. */
 export function taskActiveAssignee(task: Task): TaskAssignee {
   const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);

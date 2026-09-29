@@ -20,6 +20,7 @@ import {
   isLocalProvider,
   parseCraftbookDoc,
   serializeCraftbookDoc,
+  stepOwnerGezelId,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import { classifyModelTier } from '../chat/local-model-tier.js';
@@ -700,12 +701,7 @@ export class KeurmeesterManager {
       if (!t.activeStepId) return false;
       const step = t.craftbook.steps.find((s) => s.id === t.activeStepId);
       if (!step) return false;
-      const assignee =
-        step.assignee?.kind === 'gezel'
-          ? step.assignee.gezelId
-          : (step.suggestedGezelId ??
-            (t.assignee.kind === 'gezel' ? t.assignee.gezelId : undefined));
-      return assignee === ctx.gezelId;
+      return stepOwnerGezelId(t, step) === ctx.gezelId;
     });
     if (!task?.activeStepId) {
       log.debug(`context_loop consult skipped: no active task step for ${ctx.gezelId}`);

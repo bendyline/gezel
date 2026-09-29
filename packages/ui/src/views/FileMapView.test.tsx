@@ -256,6 +256,18 @@ describe('FileMapView code context', () => {
     });
   });
 
+  // Every Map open used to probe pull requests, a 400 for any project
+  // without a GitHub link.
+  it('lists pull requests only for a GitHub-linked project', async () => {
+    const { unmount } = render(<FileMapView projectId="p1" />);
+    await screen.findByTestId('building-src/a.ts#run');
+    expect(api.listProjectGitHubPulls).not.toHaveBeenCalled();
+    unmount();
+
+    render(<FileMapView projectId="p1" hasGitHub />);
+    await waitFor(() => expect(api.listProjectGitHubPulls).toHaveBeenCalledWith('p1'));
+  });
+
   it('opens the real workspace file when an embedding editor provides that capability', async () => {
     const openWorkspaceFile = vi.fn();
     window.__GEZEL__ = { ...window.__GEZEL__!, openWorkspaceFile };

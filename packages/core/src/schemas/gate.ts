@@ -84,6 +84,21 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     verifyImageBytes: z.boolean().optional(),
     artifact: z.boolean().optional(),
   }),
+  /**
+   * Every value a deliverable lists has its own file: each entry of the
+   * frontmatter list `key` in `file` names `pathTemplate` with `{value}`
+   * replaced by the entry's lowercase slug, and each must hold at least
+   * `minBytes` (default 1). A draft whose `platforms` names Instagram and
+   * ships no Instagram variant fails here; a size floor alone passed it.
+   */
+  z.object({
+    kind: z.literal('listedFiles'),
+    file: z.string().min(1),
+    key: z.string().min(1),
+    pathTemplate: z.string().min(1).includes('{value}'),
+    minBytes: z.number().int().positive().optional(),
+    artifact: z.boolean().optional(),
+  }),
   /** Inline `<style>` + linked `.css` in `file` (default index.html) clears `bytes`. */
   z.object({
     kind: z.literal('cssMinBytes'),

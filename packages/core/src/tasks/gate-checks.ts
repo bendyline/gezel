@@ -15,6 +15,7 @@ import {
   fileCountByExt,
   fileMinBytes,
   jsonPathEquals,
+  listedFiles,
   recordSchema,
   runSniff,
   tableShape,
@@ -39,6 +40,7 @@ export const SHARED_GATE_CHECK_KINDS = [
   'minBytes',
   'totalMinBytes',
   'fileCount',
+  'listedFiles',
   'cssMinBytes',
   'sniff',
   'jsonPathEquals',
@@ -113,6 +115,14 @@ export async function evaluateDeclarativeCheck(
         ok: r.ok,
         detail: r.detail,
         ...(matched ? { evidence: { matched: capList(matched) } } : {}),
+      };
+    }
+    case 'listedFiles': {
+      const r = await listedFiles(reader, c.file, c.key, c.pathTemplate, c.minBytes);
+      return {
+        ok: r.ok,
+        detail: r.detail,
+        ...(r.missing.length > 0 ? { evidence: { missing: capList(r.missing) } } : {}),
       };
     }
     case 'cssMinBytes': {
@@ -210,6 +220,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `totalMinBytes ${c.files.join('+')}`;
     case 'fileCount':
       return `fileCount ${c.ext.join(',')}${c.dir ? ` ${c.dir}` : ''}`;
+    case 'listedFiles':
+      return `listedFiles ${c.file} ${c.key}`;
     case 'cssMinBytes':
       return `cssMinBytes ${c.file ?? 'index.html'}`;
     case 'sniff':

@@ -1686,9 +1686,10 @@ describe('ProjectsView', () => {
         content: '# Existing document',
       } as never);
       await openRenderedFile();
+      // The editor gets the companion exactly as stored (see markdown-baseline.ts).
       expect(await screen.findByTestId('editor')).toHaveAttribute(
         'data-initial',
-        '# Existing document\n',
+        '# Existing document',
       );
       expect(api.readProjectArtifact).toHaveBeenCalledWith('pj-alpha', htmlLayout.markdownPath);
       expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
@@ -1749,7 +1750,7 @@ describe('ProjectsView', () => {
         await openRenderedFile(layout);
         expect(await screen.findByTestId('editor')).toHaveAttribute(
           'data-initial',
-          '# Imported office document\n',
+          '# Imported office document',
         );
         expect(outsideInMocks.importDocument).toHaveBeenCalledWith(expect.any(ArrayBuffer), layout);
         expect(writeDocument).toHaveBeenCalledWith('# Imported office document', 'report.md');

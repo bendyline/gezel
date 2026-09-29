@@ -988,12 +988,15 @@ function renderTitleWithMentions(title: string): ReactNode {
 }
 
 // The engine/model suffix shown after the relative time. `engineLabel`
-// (fixed-function generators) wins; otherwise it's the chat provider + model.
+// (fixed-function generators) wins; otherwise it's the chat provider and the
+// model that actually answered, which differs from `model` when the pinned
+// one is not installed and a stand-in serves the thread.
 function engineSuffix(s: ChatSessionSummary, engineLabel?: string | null): string {
   if (s.source?.kind === 'external') return `From ${s.source.appName} · read-only`;
   if (engineLabel) return engineLabel;
   const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
-  return `${provider}${s.model ? ` (${s.model})` : ''}`;
+  const model = s.servedModel ?? s.model;
+  return `${provider}${model ? ` (${model})` : ''}`;
 }
 
 /** What the row calls the thread: its own title, or the draft lending one. */

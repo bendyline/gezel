@@ -13,6 +13,7 @@ import { codebaseEvolutionScenario } from './codebase-evolution.ts';
 import { conflictSynthesisScenario } from './conflict-synthesis.ts';
 import { constrainedCommsScenario } from './constrained-comms.ts';
 import { dataWrangleScenario } from './data-wrangle.ts';
+import { dateGroundingScenario } from './date-grounding.ts';
 import { decoyResearchScenario } from './decoy-research.ts';
 import { docblocksIntegrationScenarios } from './docblocks-integration.ts';
 import { docblocksThemeRoundtripScenario } from './docblocks-theme-roundtrip.ts';
@@ -116,6 +117,9 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [researchVerifyT1.id]: researchVerifyT1,
   [researchVerifyT2.id]: researchVerifyT2,
   [researchVerifyT3.id]: researchVerifyT3,
+  // Clock grounding: today's date and a relative weekday, graded against the
+  // host clock. Guards the per-turn date line (core/prompt-clock.ts).
+  [dateGroundingScenario.id]: dateGroundingScenario,
   // Office-shaped source work, hand-authored because each contract is
   // stronger than a generic craftbook `test.json` sidecar can express:
   //   - theme round-trip: cited values must equal what the DocBlocks tools

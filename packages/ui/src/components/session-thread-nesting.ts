@@ -31,15 +31,32 @@ function parentIdFor<M extends MessageWithParent, S>(
   return undefined;
 }
 
+type ThreadItem<M extends MessageWithParent, S, T, TS, I> = Extract<
+  TimelineThreadItem<M, S, T, TS, I>,
+  { kind: 'thread' }
+>;
+
+function atMs(at: string): number {
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 /**
- * Keep every child session directly after the parent session that opened it.
+ * Keep every child session directly after the parent turn that opened it.
  *
  * The ordinary timeline order follows newest activity and deliberately pins
  * the composer's active thread last. That makes a delegated worker look like
  * an unrelated conversation above its launcher. This pass removes only
- * explicitly-related child sessions from that root order and emits them after
- * their parent's final visible turn, preserving each session's own turn order
- * and the relative order of siblings.
+ * explicitly-related child sessions from that root order and emits each one
+ * after the parent turn it was spawned from — the latest parent turn that
+ * started no later than the child's first visible turn — preserving each
+ * session's own turn order and the relative order of siblings.
+ *
+ * Anchoring to the spawning turn rather than the parent's final turn is what
+ * keeps a newer exchange with the parent at the bottom: emitting every child
+ * after the final turn put hours-old consultations and hand-offs beneath the
+ * message the user had just sent, and the follow-to-bottom scroll then showed
+ * the stale sub-threads instead of the reply.
  */
 export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I = never>(
   items: Array<TimelineThreadItem<M, S, T, TS, I>>,
@@ -71,14 +88,6 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
     siblings.sort((a, b) => (firstIndex.get(a) ?? 0) - (firstIndex.get(b) ?? 0));
   }
 
-  const hasFollowingSibling = new Map<string, boolean>();
-  for (const siblings of childrenByParent.values()) {
-    for (let index = 0; index < siblings.length; index++) {
-      const sessionId = siblings[index];
-      if (sessionId) hasFollowingSibling.set(sessionId, index < siblings.length - 1);
-    }
-  }
-
   const depthBySession = new Map<string, number>();
   const resolveDepth = (sessionId: string, trail = new Set<string>()): number => {
     const cached = depthBySession.get(sessionId);
@@ -96,6 +105,58 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
     return depth;
   };
   for (const sessionId of presentSessions) resolveDepth(sessionId);
+
+  const nestedSessions = new Set<string>();
+  for (const [childId, parentId] of parentBySession) {
+    if (presentSessions.has(parentId) && (depthBySession.get(childId) ?? 0) > 0) {
+      nestedSessions.add(childId);
+    }
+  }
+
+  // Delegations can reuse a worker's existing session, so its creation time
+  // may predate the launcher; the child's earliest visible turn is the safer
+  // spawn estimate. A child older than every loaded parent turn (the window
+  // starts mid-history) falls back to the parent's earliest loaded turn.
+  const childrenByAnchor = new Map<ThreadItem<M, S, T, TS, I>, string[]>();
+  for (const [parentId, siblings] of childrenByParent) {
+    const parentGroups = (sessionItems.get(parentId) ?? []).filter(
+      (group): group is ThreadItem<M, S, T, TS, I> => group.kind === 'thread',
+    );
+    for (const childId of siblings) {
+      if (!nestedSessions.has(childId)) continue;
+      const spawnAt = Math.min(...(sessionItems.get(childId) ?? []).map((group) => atMs(group.at)));
+      let anchor: ThreadItem<M, S, T, TS, I> | undefined;
+      let anchorAt = Number.NEGATIVE_INFINITY;
+      let earliest: ThreadItem<M, S, T, TS, I> | undefined;
+      let earliestAt = Number.POSITIVE_INFINITY;
+      for (const group of parentGroups) {
+        const groupAt = atMs(group.at);
+        if (groupAt <= spawnAt && groupAt >= anchorAt) {
+          anchor = group;
+          anchorAt = groupAt;
+        }
+        if (groupAt < earliestAt) {
+          earliest = group;
+          earliestAt = groupAt;
+        }
+      }
+      const target = anchor ?? earliest;
+      if (!target) continue;
+      const bucket = childrenByAnchor.get(target) ?? [];
+      bucket.push(childId);
+      childrenByAnchor.set(target, bucket);
+    }
+  }
+
+  // A parent guide continues only to a later sibling under the same turn; the
+  // next parent turn starts with its own "continuing" divider.
+  const hasFollowingSibling = new Map<string, boolean>();
+  for (const bucket of childrenByAnchor.values()) {
+    for (let index = 0; index < bucket.length; index++) {
+      const sessionId = bucket[index];
+      if (sessionId) hasFollowingSibling.set(sessionId, index < bucket.length - 1);
+    }
+  }
 
   const branchBySession = new Map<string, SessionTreeBranch>();
   for (const sessionId of presentSessions) {
@@ -118,36 +179,21 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
     });
   }
 
-  const nestedSessions = new Set<string>();
-  for (const [childId, parentId] of parentBySession) {
-    if (presentSessions.has(parentId) && (depthBySession.get(childId) ?? 0) > 0) {
-      nestedSessions.add(childId);
-    }
-  }
-
   const output: Array<TimelineThreadItem<M, S, T, TS, I>> = [];
   const emitted = new Set<string>();
   const emitSession = (sessionId: string, trail = new Set<string>()) => {
     if (emitted.has(sessionId) || trail.has(sessionId)) return;
     emitted.add(sessionId);
-    for (const item of sessionItems.get(sessionId) ?? []) output.push(item);
     const nextTrail = new Set(trail);
     nextTrail.add(sessionId);
-    for (const childId of childrenByParent.get(sessionId) ?? []) {
-      emitSession(childId, nextTrail);
+    for (const item of sessionItems.get(sessionId) ?? []) {
+      output.push(item);
+      if (item.kind !== 'thread') continue;
+      for (const childId of childrenByAnchor.get(item) ?? []) emitSession(childId, nextTrail);
     }
   };
 
-  const lastTopLevelIndex = new Map<string, number>();
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index];
-    if (item?.kind === 'thread' && !nestedSessions.has(item.sessionId)) {
-      lastTopLevelIndex.set(item.sessionId, index);
-    }
-  }
-
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index];
+  for (const item of items) {
     if (!item) continue;
     if (item.kind !== 'thread') {
       output.push(item);
@@ -155,10 +201,8 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
     }
     if (nestedSessions.has(item.sessionId)) continue;
     output.push(item);
-    if (lastTopLevelIndex.get(item.sessionId) === index) {
-      emitted.add(item.sessionId);
-      for (const childId of childrenByParent.get(item.sessionId) ?? []) emitSession(childId);
-    }
+    emitted.add(item.sessionId);
+    for (const childId of childrenByAnchor.get(item) ?? []) emitSession(childId);
   }
 
   // A malformed cycle should never erase history. Append anything the guarded
