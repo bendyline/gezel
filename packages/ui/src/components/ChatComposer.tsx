@@ -44,8 +44,10 @@ import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
 import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
+import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { modelSetupAction } from './model-setup-action.js';
+import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayout.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -176,7 +178,9 @@ export interface ChatComposerProps {
   /**
    * Optional content rendered between the "To:" line and the editor —
    * SessionSwitcher slots in here so the session picker reads as part
-   * of the composer instead of floating above it.
+   * of the composer instead of floating above it. A narrow composer moves
+   * it into the editor toolbar instead, inside `ComposerToolbarContext`,
+   * so the conversation keeps that row.
    */
   belowAddressLine?: ReactNode;
   /**
@@ -351,6 +355,10 @@ export function ChatComposer({
   taskLaunch: taskLaunchProps,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
+  // Hysteresis because a split grip can drag the width across the line, and
+  // each crossing remounts the thread bar in its other home.
+  const narrow = useCompactLayout(composerRef, COMPACT_LAYOUT_THRESHOLD_PX, 24);
+  const threadBarInToolbar = narrow && Boolean(belowAddressLine);
   useEffect(() => {
     if (!focusRequestKey) return;
     const frame = window.requestAnimationFrame(() => {
@@ -1753,7 +1761,7 @@ export function ChatComposer({
         </button>
         {addressLineTrailing}
       </div>
-      {belowAddressLine}
+      {!threadBarInToolbar && belowAddressLine}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
           <div className="chat-open-command-menu" role="menu" aria-label="Open targets">
@@ -1824,8 +1832,18 @@ export function ChatComposer({
           fullWidth
           thinMargins
           toolbarSlotAfterActions={
-            runtimeCapabilities().chatAttachments ? (
-              <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+            runtimeCapabilities().chatAttachments || threadBarInToolbar ? (
+              <>
+                {runtimeCapabilities().chatAttachments && (
+                  <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
+                )}
+                {threadBarInToolbar && (
+                  <ComposerToolbarContext.Provider value>
+                    <div className="chat-composer-toolbar-thread">{belowAddressLine}</div>
+                  </ComposerToolbarContext.Provider>
+                )}
+                <span className="chat-composer-toolbar-spacer" aria-hidden="true" />
+              </>
             ) : null
           }
           toolbarSlotRight={

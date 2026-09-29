@@ -70,6 +70,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
     EditorShell: ({
       initialMarkdown = '',
       placeholder,
+      toolbarSlotAfterActions,
       toolbarSlotRight,
       onChange,
       submitOnEnter,
@@ -78,6 +79,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
     }: {
       initialMarkdown?: string;
       placeholder?: string;
+      toolbarSlotAfterActions?: React.ReactNode;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
       submitOnEnter?: () => void;
@@ -126,6 +128,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             >
               Fill draft
             </button>
+            <div data-testid="editor-toolbar-after-actions">{toolbarSlotAfterActions}</div>
             {toolbarSlotRight}
           </div>
         </EditorTestContext.Provider>
@@ -275,6 +278,69 @@ describe('ChatComposer To line', () => {
     expect(screen.getByText('scheepstimmerman')).toBeTruthy();
     expect(screen.queryByText('Tomas')).toBeNull();
     expect(screen.queryByText('Scheepstimmerman')).toBeNull();
+  });
+});
+
+describe('ChatComposer thread bar placement', () => {
+  let width = 0;
+  const realClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    roleBasedNameOnly.value = false;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => width,
+    });
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly cb: ResizeObserverCallback) {}
+        observe(): void {
+          queueMicrotask(() => this.cb([], this as unknown as ResizeObserver));
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (realClientWidth) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', realClientWidth);
+    }
+  });
+
+  const composer = () => (
+    <ChatComposer
+      gezelId="tomas"
+      gezelName="Tomas"
+      projectId="default"
+      sessionId="session-1"
+      belowAddressLine={<div data-testid="thread-bar">threads</div>}
+    />
+  );
+
+  it('keeps the thread bar on its own row in a wide composer', async () => {
+    width = 900;
+    render(composer());
+    await act(async () => {});
+    expect(screen.getByTestId('editor-toolbar-after-actions')).not.toContainElement(
+      screen.getByTestId('thread-bar'),
+    );
+  });
+
+  it('moves the thread bar into the editor toolbar in a narrow composer', async () => {
+    width = 380;
+    render(composer());
+    await waitFor(() =>
+      expect(screen.getByTestId('editor-toolbar-after-actions')).toContainElement(
+        screen.getByTestId('thread-bar'),
+      ),
+    );
+    expect(screen.getAllByTestId('thread-bar')).toHaveLength(1);
   });
 });
 

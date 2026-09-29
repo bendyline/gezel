@@ -4,6 +4,7 @@ import {
   Fragment,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ContextMeter, type ContextMeterStatus } from './ContextMeter.js';
 import { readDraftText, subscribeDraftText } from './composer-drafts.js';
+import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
 import { MENTION_RE, displayThreadTitle, isUnnamedThread, plainTitle } from './session-labels.js';
 
@@ -96,6 +98,8 @@ const DRAFT_VALUE_PREFIX = 'draft:';
  */
 const NEW_THREAD_VALUE = '__NEW__';
 const NEW_THREAD_LABEL = 'New thread';
+const NEW_DRAFT_VALUE = '__NEW_DRAFT__';
+const NEW_DRAFT_LABEL = 'New draft';
 
 /** A draft whose first line is still empty (it opens with an image, say). */
 const UNTITLED_DRAFT_LABEL = 'Untitled draft';
@@ -131,6 +135,34 @@ const newThreadLabel = (
   </span>
 );
 
+const newDraftLabel = (
+  <span className="session-row session-row-action">
+    <CircledPlusIcon />
+    <span className="session-row-title">{NEW_DRAFT_LABEL}</span>
+  </span>
+);
+
+/** Two overlapping speech bubbles: the conversations this picker lists. */
+function ThreadsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h6A1.5 1.5 0 0 1 11 3.5v3.5A1.5 1.5 0 0 1 9.5 8.5H6L3.5 10.5V8.5A1.5 1.5 0 0 1 2 7Z"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13 6.5a1.5 1.5 0 0 1 1 1.4V11a1.5 1.5 0 0 1-1.5 1.5v2l-2.5-2H7.5A1.5 1.5 0 0 1 6 11"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Recently sent messages offered for reuse under the open thread. */
 const RECENT_SENT_LIMIT = 5;
 const SENT_VALUE_PREFIX = 'sent:';
@@ -162,6 +194,9 @@ export function SessionSwitcher({
   draftScope,
   craftbookRef,
 }: Props) {
+  // Inside a narrow composer's toolbar: an icon-only picker plus the meter.
+  // New thread and New draft stay reachable as rows in the picker.
+  const inToolbar = useContext(ComposerToolbarContext);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   // Unsent thread starters. They have no session to belong to, so they are
   // listed above the threads rather than inside one.
@@ -829,7 +864,13 @@ export function SessionSwitcher({
   const contextStatus = live ? { ...persistedContext, ...live } : persistedContext;
 
   return (
-    <div className="gezel-chat-session-header">
+    <div
+      className={
+        inToolbar
+          ? 'gezel-chat-session-header gezel-chat-session-header-toolbar'
+          : 'gezel-chat-session-header'
+      }
+    >
       <Select.Root
         value={activeValue}
         onOpenChange={(open) => {
@@ -843,6 +884,10 @@ export function SessionSwitcher({
           }
           if (v === NEW_THREAD_VALUE) {
             startFreshThread();
+            return;
+          }
+          if (v === NEW_DRAFT_VALUE) {
+            void createDraft();
             return;
           }
           if (v.startsWith(DRAFT_VALUE_PREFIX)) {
@@ -864,17 +909,37 @@ export function SessionSwitcher({
         }}
         disabled={busy || (isFreshThread && !hasThreadChoices)}
       >
-        <Select.Trigger className="gezel-chat-session-select" aria-label="Conversation">
+        <Select.Trigger
+          className={
+            inToolbar
+              ? 'gezel-chat-session-select squisq-toolbar-button'
+              : 'gezel-chat-session-select'
+          }
+          aria-label="Conversation"
+          {...(inToolbar ? { title: 'Threads and drafts' } : {})}
+        >
+          {inToolbar && <ThreadsIcon />}
           {/* Nothing picked means the next message opens a thread — the row
               the user just chose, or the resting state with auto-pick off.
               The trigger names that destination rather than sitting blank
               and reading as a control they forgot to set. */}
-          <Select.Value placeholder={NEW_THREAD_LABEL} />
+          {inToolbar ? (
+            <span className="sr-only">
+              <Select.Value placeholder={NEW_THREAD_LABEL} />
+            </span>
+          ) : (
+            <Select.Value placeholder={NEW_THREAD_LABEL} />
+          )}
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu">
           {!isFreshThread && (
             <Select.Item value={NEW_THREAD_VALUE} textValue={NEW_THREAD_LABEL}>
               {newThreadLabel}
+            </Select.Item>
+          )}
+          {sessionId && (
+            <Select.Item value={NEW_DRAFT_VALUE} textValue={NEW_DRAFT_LABEL}>
+              {newDraftLabel}
             </Select.Item>
           )}
           {!isFreshThread && hasThreadChoices && <Select.Separator />}
@@ -930,21 +995,23 @@ export function SessionSwitcher({
           )}
         </Select.Content>
       </Select.Root>
-      <button
-        type="button"
-        className="gezel-chat-session-btn gezel-chat-session-btn-new"
-        onClick={startFreshThread}
-        disabled={busy || isFreshThread}
-        title={isFreshThread ? 'Already on a new thread' : 'Start a new thread'}
-        aria-label={NEW_THREAD_LABEL}
-      >
-        <CircledPlusIcon />
-        Thread
-      </button>
+      {!inToolbar && (
+        <button
+          type="button"
+          className="gezel-chat-session-btn gezel-chat-session-btn-new"
+          onClick={startFreshThread}
+          disabled={busy || isFreshThread}
+          title={isFreshThread ? 'Already on a new thread' : 'Start a new thread'}
+          aria-label={NEW_THREAD_LABEL}
+        >
+          <CircledPlusIcon />
+          Thread
+        </button>
+      )}
       <ContextMeter status={contextStatus} sessionId={sessionId} />
       {/* Only on a thread: a second message in progress inside the current
           conversation, unlike New thread which clears that address. */}
-      {sessionId && (
+      {sessionId && !inToolbar && (
         <button
           type="button"
           className="gezel-chat-session-btn gezel-chat-session-btn-new"

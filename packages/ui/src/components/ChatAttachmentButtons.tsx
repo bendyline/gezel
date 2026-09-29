@@ -104,47 +104,44 @@ export function ChatAttachmentButtons({ mediaProvider, onError }: ChatAttachment
   );
 
   return (
-    <>
-      <div className="chat-composer-attachment-actions">
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(event) => handleSelection(event, 'image')}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          hidden
-          onChange={(event) => handleSelection(event, 'file')}
-        />
-        <button
-          type="button"
-          className="squisq-toolbar-button"
-          onClick={() => imageInputRef.current?.click()}
-          disabled={uploading !== null}
-          aria-label={uploading === 'image' ? 'Inserting image…' : 'Insert image'}
-          aria-busy={uploading === 'image'}
-          title="Insert image"
-          data-tooltip="Insert image"
-        >
-          <ImageIcon />
-        </button>
-        <button
-          type="button"
-          className="squisq-toolbar-button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading !== null}
-          aria-label={uploading === 'file' ? 'Attaching file…' : 'Attach file'}
-          aria-busy={uploading === 'file'}
-          title="Attach file"
-          data-tooltip="Attach file"
-        >
-          <PaperclipIcon />
-        </button>
-      </div>
-      <span className="chat-composer-toolbar-spacer" aria-hidden="true" />
-    </>
+    <div className="chat-composer-attachment-actions">
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => handleSelection(event, 'image')}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        hidden
+        onChange={(event) => handleSelection(event, 'file')}
+      />
+      <button
+        type="button"
+        className="squisq-toolbar-button"
+        onClick={() => imageInputRef.current?.click()}
+        disabled={uploading !== null}
+        aria-label={uploading === 'image' ? 'Inserting image…' : 'Insert image'}
+        aria-busy={uploading === 'image'}
+        title="Insert image"
+        data-tooltip="Insert image"
+      >
+        <ImageIcon />
+      </button>
+      <button
+        type="button"
+        className="squisq-toolbar-button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading !== null}
+        aria-label={uploading === 'file' ? 'Attaching file…' : 'Attach file'}
+        aria-busy={uploading === 'file'}
+        title="Attach file"
+        data-tooltip="Attach file"
+      >
+        <PaperclipIcon />
+      </button>
+    </div>
   );
 }

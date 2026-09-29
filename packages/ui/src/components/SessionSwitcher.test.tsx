@@ -48,6 +48,7 @@ vi.mock('../shared-chat-events.js', () => ({
 }));
 
 const { SessionSwitcher } = await import('./SessionSwitcher.js');
+const { ComposerToolbarContext } = await import('./composer-toolbar-context.js');
 const { resetComposerDrafts, writeDraftText } = await import('./composer-drafts.js');
 const { api } = await import('../api.js');
 
@@ -1095,6 +1096,52 @@ describe('SessionSwitcher prompt drafts', () => {
       />,
     );
     expect(screen.getByRole('button', { name: 'New draft' })).toBeInTheDocument();
+  });
+
+  it('in a composer toolbar, keeps the picker and meter and offers both starts as rows', async () => {
+    mockSessions([
+      {
+        id: 's-1',
+        gezelId: 'g1',
+        title: 'Delivery failure planning',
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    mockDrafts({});
+    vi.mocked(api.createPromptDraft).mockResolvedValue(
+      draft({
+        id: '2026-09-03-0042',
+        sessionId: 's-1',
+        title: 'second note',
+        content: 'second note',
+      }) as never,
+    );
+    const onDraftSelect = vi.fn();
+    render(
+      <ComposerToolbarContext.Provider value>
+        <SessionSwitcher
+          gezelId="g1"
+          projectId="p1"
+          sessionId="s-1"
+          onSessionIdChange={vi.fn()}
+          onDraftSelect={onDraftSelect}
+        />
+      </ComposerToolbarContext.Provider>,
+    );
+    expect(screen.queryByRole('button', { name: 'New thread' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New draft' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'New thread' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__NEW_DRAFT__' } });
+    await waitFor(() =>
+      expect(api.createPromptDraft).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ sessionId: 's-1' }),
+      ),
+    );
+    expect(onDraftSelect).toHaveBeenCalledWith('2026-09-03-0042');
   });
 
   it('removes a draft from its own row, wherever that row sits', async () => {

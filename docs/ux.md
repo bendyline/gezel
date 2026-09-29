@@ -374,13 +374,20 @@ The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search
 keys beside it, with its count raised onto the key's top-right corner as a
-notification badge. The word stays in its accessible name. Compact layouts spend no row on a heading that only repeats a name: a
+notification badge. The word stays in its accessible name. On macOS the
+compact bar is still the window titlebar, so it keeps the desktop bar's 39px
+height and 30px keys, which centres them on the traffic lights (a trackpad
+needs no 44px target). The phone preview keeps phone sizes. Compact layouts spend no row on a heading that only repeats a name: a
 single-project tab has no project title row. The Projects area keeps its row
 for the back button. The chat's thread-and-task strip shrinks to one-line
 tiles, 60px wide and 24px tall (WCAG's minimum target), that show the status
 dot and the start of the title. This is a deliberate exception to the 44px
 rule. The strip stays a glance at the state of the work, not a second pane,
 and each tile's accessible name still carries the full summary.
+A narrow composer (under 480px) moves its thread bar into the editor toolbar
+beside the attach keys, as an icon-only picker plus the context meter. New
+thread and New draft are rows in that picker, which lists them at every width,
+so their separate keys drop out there.
 Compact chat composers extend to both edges of their pane, with no outer
 desktop gutter. Only the text and controls keep a small inner inset. Native
 shells reserve the system's safe rectangle for content, including landscape

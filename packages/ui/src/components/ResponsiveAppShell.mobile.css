@@ -181,6 +181,54 @@
   box-shadow: 0 0 0 2px var(--titlebar);
 }
 
+/* On a Mac the compact bar is still the window's titlebar. Electron puts the
+   traffic lights 12px down (trafficLightPosition in the main process), which
+   centres them near 19px, the desktop bar's midline. 44px keys in a 52px bar
+   centre 7px below that, so the lights look stuck to the top edge. A trackpad
+   is not a finger, so these keys take the desktop titlebar's scale. The phone
+   preview keeps phone sizes: it stands in for a device, not this window. */
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .app-header {
+  min-height: 39px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  :is(.app-header-navigation, .app-header-questions, .titlebar-search-trigger) {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  :is(.app-header-navigation-icon, .app-header-questions-icon, .titlebar-search-trigger-icon) {
+  width: 16px;
+  height: 16px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  .app-header-questions
+  .app-nav-badge {
+  top: -4px;
+  right: -7px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 14px;
+}
+
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .titlebar-search-input {
+  min-height: 30px;
+}
+
+:root[data-platform="darwin"] .app.app-compact:not(.app-mobile-preview) .titlebar-search-close {
+  width: 26px;
+  min-height: 26px;
+}
+
 :root[data-layout="mobile"] .app.app-compact .app-header {
   height: auto;
 }
