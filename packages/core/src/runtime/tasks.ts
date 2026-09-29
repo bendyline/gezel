@@ -11,7 +11,7 @@ import { CreateProjectRequestSchema } from '../schemas/api.js';
 import { type Craftbook, CraftbookSchema, resolveSteps } from '../schemas/craftbook.js';
 import { GATE_DEFAULT_MAX_ATTEMPTS } from '../schemas/gate.js';
 import { type GateScriptResult, normalizeStepGate } from '../schemas/gate.js';
-import { ProjectSchema } from '../schemas/project.js';
+import { type ProjectDetail, ProjectSchema } from '../schemas/project.js';
 import { QuestionSchema } from '../schemas/question.js';
 import {
   type ScriptRef,
@@ -110,7 +110,11 @@ function taskWrites(repo: PortableRepository, input: Task): Map<string, Uint8Arr
     [`${root}/about.md`, encodeText(description ?? '')],
   ]);
 }
-async function write(repo: PortableRepository, task: Task, extra?: Map<string, Uint8Array>) {
+async function write(
+  repo: PortableRepository,
+  task: Task,
+  extra?: Map<string, Uint8Array>,
+): Promise<Task> {
   const writes = taskWrites(repo, task);
   for (const [path, bytes] of extra ?? []) writes.set(path, bytes);
   await repo.transactions.commit(writes);
@@ -135,7 +139,7 @@ export async function editTaskStructure(
   ref: string,
   edit: (task: Task) => Promise<void> | void,
   reactivate = false,
-) {
+): Promise<Task> {
   const task = await requireTask(repo, ref);
   await writable(repo, task.projectId);
   const run = await repo.record(`${taskLocation(ref).root}/execution.json`, RunSchema);
@@ -164,7 +168,10 @@ export async function editTaskStructure(
       : undefined,
   );
 }
-export async function listTasks(repo: PortableRepository, filter: PortableTaskFilter = {}) {
+export async function listTasks(
+  repo: PortableRepository,
+  filter: PortableTaskFilter = {},
+): Promise<Task[]> {
   const projects = filter.projectId
     ? [await requireProject(repo, filter.projectId)]
     : await listProjects(repo);
@@ -229,7 +236,7 @@ export async function createTask(
   projectId: string,
   input: CreateTaskRequest,
   resolved?: Craftbook,
-) {
+): Promise<Task> {
   return createTaskInternal(repo, projectId, input, resolved);
 }
 async function createTaskInternal(
@@ -238,7 +245,7 @@ async function createTaskInternal(
   input: CreateTaskRequest,
   resolved?: Craftbook,
   staged?: NewProjectTaskStage,
-) {
+): Promise<Task> {
   const request = CreateTaskRequestSchema.parse(input);
   if (!staged) await writable(repo, projectId);
   if (
@@ -373,7 +380,7 @@ export async function updateTask(
   ref: string,
   input: UpdateTaskRequest,
   expectedActiveStepId?: string,
-) {
+): Promise<Task> {
   const patch = UpdateTaskRequestSchema.parse(input);
   const task = await requireTask(repo, ref);
   await writable(repo, task.projectId);
@@ -404,7 +411,11 @@ export async function updateTask(
     if (values[key] === null) delete values[key];
   return write(repo, TaskSchema.parse(values));
 }
-export async function setTaskStatus(repo: PortableRepository, ref: string, value: TaskStatus) {
+export async function setTaskStatus(
+  repo: PortableRepository,
+  ref: string,
+  value: TaskStatus,
+): Promise<Task> {
   const status = TaskStatusSchema.parse(value);
   const task = await requireTask(repo, ref);
   await writable(repo, task.projectId);
@@ -555,7 +566,7 @@ export async function resolveTaskStepRole(
   ref: string,
   stepId: string,
   gezelId: string,
-) {
+): Promise<Task> {
   const task = await requireTask(repo, ref);
   await writable(repo, task.projectId);
   if (task.status !== 'active' || task.activeStepId !== stepId)
@@ -567,7 +578,10 @@ export async function resolveTaskStepRole(
   task.updatedAt = repo.now();
   return write(repo, task);
 }
-export async function beginTaskRun(repo: PortableRepository, ref: string) {
+export async function beginTaskRun(
+  repo: PortableRepository,
+  ref: string,
+): Promise<{ task: Task; runId: string }> {
   const task = await requireTask(repo, ref);
   await writable(repo, task.projectId);
   if (task.status !== 'active' || !task.activeStepId)
@@ -609,7 +623,7 @@ export async function finishTaskRun(
   ref: string,
   runId: string,
   error?: string,
-) {
+): Promise<Task> {
   const task = await requireTask(repo, ref);
   const root = taskLocation(ref).root;
   const run = await repo.record(`${root}/execution.json`, RunSchema);
@@ -627,11 +641,11 @@ export async function finishTaskRun(
   return task;
 }
 /** Hook failure may hold active work, but must preserve a concurrent user stop. */
-export async function pauseTaskIfActive(repo: PortableRepository, ref: string) {
+export async function pauseTaskIfActive(repo: PortableRepository, ref: string): Promise<Task> {
   const task = await requireTask(repo, ref);
   return task.status === 'active' ? setTaskStatus(repo, ref, 'paused') : task;
 }
-export async function recoverTasks(repo: PortableRepository) {
+export async function recoverTasks(repo: PortableRepository): Promise<Task[]> {
   const recovered: Task[] = [];
   for (const task of await listTasks(repo)) {
     const run = await repo.record(`${taskLocation(task.ref).root}/execution.json`, RunSchema);
@@ -843,7 +857,10 @@ export interface PortableStartProject {
   leadGezelId: string;
 }
 /** One published journal owns the project, initial crew, task and work folder. */
-export async function startProject(repo: PortableRepository, input: PortableStartProject) {
+export async function startProject(
+  repo: PortableRepository,
+  input: PortableStartProject,
+): Promise<{ project: ProjectDetail; task: Task }> {
   const parsed = CreateProjectRequestSchema.parse(input);
   await requireGezel(repo, input.leadGezelId);
   const id = await repo.uniqueId('projects', slugifyEntityName(parsed.name) || repo.createId());
