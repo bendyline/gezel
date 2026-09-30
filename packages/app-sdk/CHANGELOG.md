@@ -1,3 +1,11 @@
+## @bendyline/gezel-app-sdk [1.1.0](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-app-sdk%401.0.10...%40bendyline%2Fgezel-app-sdk%401.1.0) (2026-09-30)
+
+
+### Dependencies
+
+* **@bendyline/gezel-client:** upgraded to 1.2.0
+* **@bendyline/gezel-service:** upgraded to 1.2.0
+
 ## @bendyline/gezel-app-sdk [1.0.10](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-app-sdk%401.0.9...%40bendyline%2Fgezel-app-sdk%401.0.10) (2026-09-18)
 
 
