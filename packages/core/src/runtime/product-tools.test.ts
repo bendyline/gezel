@@ -144,25 +144,28 @@ describe('portable tool authority and durable effects', () => {
       enabled,
     );
     expect(scripts.run).toHaveBeenLastCalledWith('checkContains', {}, session, 'standard');
-    for (const name of ['list_scripts', 'run_installed_script', 'get_script_run'])
-      await expect(
-        executePortableTool(
-          store,
-          session,
-          name,
-          {
-            project: other.id,
-            ...(name === 'run_installed_script'
-              ? { name: 'report' }
-              : name === 'get_script_run'
-                ? { runId: 'private' }
-                : {}),
-          },
-          enabled,
-        ),
-      ).rejects.toThrow('outside its project');
-    expect(scripts.run).toHaveBeenCalledTimes(2);
-    expect(scripts.list).not.toHaveBeenCalled();
+    // As on the desktop, a project-confined gezel's project argument means its
+    // own project: another project's id never reaches that project.
+    await executePortableTool(store, session, 'list_scripts', { project: other.id }, enabled);
+    expect(scripts.list).toHaveBeenLastCalledWith(session.projectId);
+    await executePortableTool(
+      store,
+      session,
+      'run_installed_script',
+      { project: other.id, name: 'report' },
+      enabled,
+    );
+    expect(scripts.run).toHaveBeenLastCalledWith('report', {}, session, 'project');
+    await expect(
+      executePortableTool(
+        store,
+        session,
+        'get_script_run',
+        { project: other.id, runId: 'private' },
+        enabled,
+      ),
+    ).rejects.toThrow();
+    expect(scripts.run).toHaveBeenCalledTimes(3);
   });
 
   it('keeps the Meester coordinator role from acquiring script execution', async () => {
@@ -225,6 +228,79 @@ describe('portable tool authority and durable effects', () => {
     );
     expect((await store.getProjectGezels(target.id)).map((member) => member.id)).not.toContain(
       gezel.id,
+    );
+  });
+
+  it('names a task owner the way the desktop does: id, name, role, or "user"', async () => {
+    const { store, gezel, session } = await fixture();
+    const created: unknown[] = [];
+    const recording = {
+      ...actions,
+      createTask: async (input: unknown) => void created.push(input),
+    };
+    const task = (assignee?: unknown) => ({
+      project: 'default',
+      title: 'Repair day',
+      description:
+        'Plan the repair day so every neighbour knows the date, venue and what to bring.',
+      steps: [{ id: 'plan', name: 'Plan', suggestedRole: 'Generalist' }],
+      ...(assignee === undefined ? {} : { assignee }),
+    });
+    for (const assignee of ['Noor', 'noor', gezel.id, 'user', 'gezel'])
+      await executePortableTool(store, session, 'create_task', task(assignee), recording);
+    expect(created.map((input) => (input as { assignee?: unknown }).assignee)).toEqual([
+      { kind: 'gezel', gezelId: gezel.id },
+      { kind: 'gezel', gezelId: gezel.id },
+      { kind: 'gezel', gezelId: gezel.id },
+      { kind: 'user' },
+      undefined,
+    ]);
+    await expect(
+      executePortableTool(store, session, 'create_task', task('Zed'), recording),
+    ).rejects.toThrow(/gezel "Zed" not found\. Available: .*"Noor"|Noor/);
+  });
+
+  it('reads a model path the way the desktop tools do', async () => {
+    const { store, session } = await fixture();
+    await executePortableTool(
+      store,
+      session,
+      'write_artifact',
+      { path: 'artifacts/cabinet-note.md', content: 'ORCHARD-7284' },
+      actions,
+    );
+    expect(await store.readFile('artifacts', session.projectId, 'cabinet-note.md')).toBe(
+      'ORCHARD-7284',
+    );
+    await executePortableTool(store, session, 'write_file', { path: './notes//a.md', content: 'a' }, actions);
+    expect(await store.readFile('workspace', session.projectId, 'notes/a.md')).toBe('a');
+  });
+
+  it('lets a team gezel name a project by id or display name, as on the desktop', async () => {
+    const { store, gezel } = await fixture();
+    const target = await store.createProject({ name: 'Repair Cafe' });
+    const meester = (await store.readConfig()).meesterGezelId!;
+    const teamSession = await store.createSession({ gezelId: meester, providerName: 'llama-cpp' });
+    await executePortableTool(
+      store,
+      teamSession,
+      'add_gezel_to_project',
+      { project: 'repair cafe', gezel: gezel.id },
+      actions,
+    );
+    expect((await store.getProjectGezels(target.id)).map((member) => member.id)).toContain(
+      gezel.id,
+    );
+    await expect(
+      executePortableTool(
+        store,
+        teamSession,
+        'add_gezel_to_project',
+        { project: 'Nowhere', gezel: gezel.id },
+        actions,
+      ),
+    ).rejects.toThrow(
+      /project "Nowhere" does not exist\. Available projects: .*"Repair Cafe"|Repair Cafe/,
     );
   });
 

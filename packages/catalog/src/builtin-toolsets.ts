@@ -18,7 +18,7 @@ function builtinIconSvg(id: string): string | undefined {
 }
 
 import { BUILTIN_TOOLSETS, type BuiltinToolsetGroup } from '@bendyline/gezel';
-export { BUILTIN_TOOLSETS, type BuiltinToolsetGroup } from '@bendyline/gezel';
+export { BUILTIN_TOOL_TO_GROUP, BUILTIN_TOOLSETS, type BuiltinToolsetGroup } from '@bendyline/gezel';
 
 const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((g) => [g.id, g]));
 
@@ -41,10 +41,6 @@ export function getBuiltinToolset(id: string): BuiltinToolsetGroup | undefined {
  * strict slice of their base group; other duplication is a manifest bug
  * worth surfacing rather than silently resolving here.
  */
-export const BUILTIN_TOOL_TO_GROUP = new Map<string, BuiltinToolsetGroup>(
-  BUILTIN_TOOLSETS.flatMap((g) => g.tools.map((toolName) => [toolName, g] as const)),
-);
-
 /** Catalog id format: `builtin.<group-id>`. */
 export function builtinCatalogId(groupId: string): string {
   return `builtin.${groupId}`;

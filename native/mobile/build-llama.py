@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned llama.cpp libraries; never fetch, patch, or build a server."""
+"""Build pinned llama.cpp libraries with desktop's engine patches; never fetch or build a server."""
 
 import argparse
 import hashlib
@@ -74,7 +74,7 @@ def common_flags(pin):
 
 
 def prerequisites(args):
-    for tool in ("git", "cmake", "tar", "make"):
+    for tool in ("git", "cmake", "tar", "make", "patch"):
         if not shutil.which(tool):
             raise ValueError(f"Required build tool is missing: {tool}")
     info = {"cmake": run(["cmake", "--version"], capture=True).splitlines()[0]}
@@ -218,7 +218,7 @@ def build_host(args, source, output, pin):
     configure_build(source, build, common_flags(pin) + [
         "-DBUILD_SHARED_LIBS=OFF", "-DGGML_METAL=OFF", "-DGGML_ACCELERATE=OFF", "-DGEZEL_MOBILE_TESTS=ON",
     ], args.jobs)
-    run(["cmake", "--build", build, "--target", "gezel-llama-tests", "--parallel", args.jobs])
+    run(["cmake", "--build", build, "--target", "gezel-llama-tests", "gezel-chat-tests", "--parallel", args.jobs])
     run(["ctest", "--test-dir", build, "--output-on-failure"])
     return {"backend": "cpu", "contractTests": "passed", "model": "generated tiny deterministic GGUF fixture"}
 
@@ -254,6 +254,13 @@ def main():
     run(["git", "-C", args.source, "archive", "--format=tar", "-o", archive, pin["commit"]])
     run(["tar", "-xf", archive, "-C", source])
     archive.unlink()
+    # Desktop's llama-server build applies these to the same pin; the chat layer
+    # compiled into the bridge must be byte-identical to it.
+    patches = []
+    for patch in sorted((ENGINE / "patches").glob("*.patch")):
+        # Not `git apply`: inside this repository it would resolve paths against Gezel's tree.
+        run(["patch", "-p1", "-N", "-s", "-d", source, "-i", patch])
+        patches.append({"name": patch.name, "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
     settings = {"ios": build_ios, "android": build_android, "host": build_host}[args.target](args, source, output, pin)
     shutil.copy2(source / "LICENSE", output / "LICENSE-llama-cpp.txt")
     shutil.copy2(HERE.parent / "licenses/LICENSE-ggml-MIT.txt", output / "LICENSE-ggml.txt")
@@ -265,9 +272,10 @@ def main():
     checksums = {str(path.relative_to(output)): hashlib.sha256(path.read_bytes()).hexdigest()
                  for path in sorted(packaged)}
     (output / "manifest.json").write_text(json.dumps({
-        "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": [], "gezelABIVersion": 1,
+        "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": patches, "gezelABIVersion": 1,
         "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in
-                          ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "chat_formats.h", "CMakeLists.txt")},
+                          ("gezel_llama.h", "gezel_llama.cpp", "gezel_engine.h", "gezel_chat.cpp", "utf8_stream.h",
+                           "chat_formats.h", "CMakeLists.txt", "common-chat.cmake")},
         "toolchains": toolchains, "settings": settings, "files": checksums,
         "verification": {"linkSmoke": "passed", "deviceInference": "not-run", "hostContractTests": "passed" if args.target == "host" else "not-run"},
     }, indent=2) + "\n")

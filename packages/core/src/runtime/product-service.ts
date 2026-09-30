@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
+import { displayName } from '../gezel-display.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
 import { checkHandoffChain } from '../handoff-limits.js';
+import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
 import type { PortableInference, PortableSampling } from '../mobile/inference.js';
+import { classifyModelTier } from '../model-profile/local-model-tier.js';
+import { resolveProfile } from '../model-profile/registry.js';
+import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { pickRandomNameWithGender } from '../names.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
 import {
@@ -12,6 +17,7 @@ import {
   renderProjectBrief,
   resolvePromptFootprint,
 } from '../prompt-footprint.js';
+import type { BuiltInstructions } from '../prompt/instructions.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { resolveRoleId } from '../roles/index.js';
 import {
@@ -59,6 +65,7 @@ import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
+import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { roleHasTeamScope } from '../tools/access.js';
 import type { NativeToolBinding } from '../tools/native-tools.js';
@@ -78,12 +85,14 @@ import { HttpStatusError as ProductError, errorToResponse } from './http/errors.
 import { json } from './http/json.js';
 import { portableInputLimitError } from './inference-limits.js';
 import { PORTABLE_HANDOFF_LIMITS } from './inference-limits.js';
+import { PortableEngineHost } from './local-loop-host.js';
 import {
   portableFileTurnContext,
   preparePortableMessage,
   validatePortableMessageHints,
 } from './message-delivery.js';
-import { portableSampling } from './portable-sampling.js';
+import { buildPortableInstructions } from './portable-instructions.js';
+import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
 import { AbortedWhileQueuedError, type Lane, ProviderQueue, runInQueue } from './provider-queue.js';
 import { answeredQuestion } from './questions.js';
@@ -93,6 +102,7 @@ import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
 import { portableScriptTools } from './script-tools.js';
 import { type QueuedSendOptions, SessionSendQueue } from './session-send-queue.js';
+import { runSharedLoopTurn } from './shared-loop-turn.js';
 import { PortableSpeechRoutes } from './speech-routes.js';
 import type { PortableSpeech } from './speech.js';
 import type { PortableStore } from './store.js';
@@ -103,6 +113,7 @@ import { taskActiveAssignee } from './tasks.js';
 import {
   type PortableToolListing,
   type PortableToolSpec,
+  type StructuredChatSettings,
   runPortableToolLoop,
 } from './tool-loop.js';
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
@@ -186,6 +197,8 @@ export class PortableProductService {
    * same scheduler the desktop daemon runs per engine.
    */
   private readonly engine = new ProviderQueue({ concurrency: 1 });
+  /** The in-app llama.cpp engine as the desktop loop's host sees it. */
+  private readonly engineHost = new PortableEngineHost();
   private providerCache: MobileProvider[] | undefined;
   /** Messages sent to a conversation that is already responding. */
   private readonly sendQueue = new SessionSendQueue<unknown, PortableQueuedSend>({
@@ -927,16 +940,53 @@ export class PortableProductService {
         modelId,
         context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens,
       );
-      const sampling =
-        providerId === 'llama-cpp'
-          ? portableSampling({
-              catalog: this.catalogModelFor(inventory, modelId),
-              installDefault: config.modelTuning?.[modelId],
-              override: context.gezel.parsed.frontmatter.tuning,
-              tuningProfileId: context.gezel.parsed.frontmatter.tuningProfile,
-              installDefaultProfileId: config.modelTuningProfile?.[modelId],
-              suggestedProfileId: context.gezel.parsed.frontmatter.suggestedTuningProfile,
-            })
+      const catalogModel =
+        providerId === 'llama-cpp' ? this.catalogModelFor(inventory, modelId) : undefined;
+      const tuningInput = {
+        catalog: catalogModel,
+        installDefault: config.modelTuning?.[modelId],
+        override: context.gezel.parsed.frontmatter.tuning,
+        tuningProfileId: context.gezel.parsed.frontmatter.tuningProfile,
+        installDefaultProfileId: config.modelTuningProfile?.[modelId],
+        suggestedProfileId: context.gezel.parsed.frontmatter.suggestedTuningProfile,
+      };
+      const sampling = providerId === 'llama-cpp' ? portableSampling(tuningInput) : undefined;
+      // llama.cpp's own chat layer takes the request fields and launch
+      // settings the desktop's llama-server does, from the same resolvers.
+      const tuning = portableTuning(tuningInput);
+      const structuredChat:
+        | (StructuredChatSettings & {
+            history: readonly ChatMessage[];
+            catalogId?: string;
+            profile: ResolvedModelProfile;
+            isMeester: boolean;
+            prompt?: BuiltInstructions;
+          })
+        | undefined =
+        providerId === 'llama-cpp' && provider.capabilities.structuredChat && this.inference.chat
+          ? {
+              config: llamaCppNativeChatConfig(resolveLlamaCppChatLaunch(catalogModel?.tuning)),
+              ...(tuning ? { tuning } : {}),
+              history: admitted ? session.messages.slice(0, -1) : [...session.messages],
+              ...(catalogModel ? { catalogId: catalogModel.source.catalogId } : {}),
+              isMeester: config.meesterGezelId === session.gezelId,
+              // The behaviors the desktop resolves for this catalog model.
+              profile: resolveProfile({
+                manifest: catalogModel
+                  ? {
+                      id: catalogModel.source.catalogId,
+                      ...(catalogModel.behaviors ? { behaviors: catalogModel.behaviors } : {}),
+                      ...(catalogModel.style ? { style: catalogModel.style } : {}),
+                    }
+                  : undefined,
+                tier: classifyModelTier({
+                  providerName: 'llama-cpp',
+                  modelId,
+                  parameterSize: catalogModel?.parameterSize,
+                }),
+                providerName: 'llama-cpp',
+              }),
+            }
           : undefined;
       session.model = modelId;
       const activeTask = await checkTask();
@@ -944,27 +994,48 @@ export class PortableProductService {
       const inventoryTools = await portableToolSurface(this.store, session, !!this.scripts);
       // Only phones and tablets host this runtime, and every prompt token is
       // prefill time there.
-      const footprint =
-        PROMPT_FOOTPRINT_POLICY[
-          resolvePromptFootprint({ contextWindow: limits.contextSize, constrainedDevice: true })
-        ];
-      const instructions = [
-        capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
-        activeTask &&
-          renderTaskContextBlock(
-            { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
-            { availableToolNames: new Set(inventoryTools.map((tool) => tool.name)) },
-          ),
-        `Current project: ${context.project.name}`,
-        context.crew.length &&
-          `Project crew: ${context.crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
-        context.project.voormanGezelId &&
-          context.crew.some((member) => member.id === context.project.voormanGezelId) &&
-          `The voorman of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
-        renderProjectBrief(context.project, footprint.projectBriefMaxChars),
-      ]
-        .filter(Boolean)
-        .join('\n\n');
+      const footprintName = resolvePromptFootprint({
+        contextWindow: limits.contextSize,
+        constrainedDevice: true,
+      });
+      const footprint = PROMPT_FOOTPRINT_POLICY[footprintName];
+      // llama.cpp gets the desktop's own prompt, so a model and craftbook tuned
+      // there read the same words here. The system models keep the phone's
+      // shorter prompt: they have 4K windows and no desktop counterpart.
+      if (structuredChat)
+        structuredChat.prompt = await buildPortableInstructions({
+          store: this.store,
+          config,
+          session,
+          context,
+          ...(activeTask ? { task: activeTask } : {}),
+          modelId: catalogModel?.source.catalogId ?? modelId,
+          tier: structuredChat.profile.tier,
+          profile: structuredChat.profile,
+          toolNames: inventoryTools.map((tool) => tool.name),
+          minimalContext: footprintName === 'minimal',
+        });
+      const instructions = structuredChat?.prompt
+        ? [structuredChat.prompt.full, structuredChat.prompt.volatileContext]
+            .filter(Boolean)
+            .join('\n\n')
+        : [
+            capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
+            activeTask &&
+              renderTaskContextBlock(
+                { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
+                { availableToolNames: new Set(inventoryTools.map((tool) => tool.name)) },
+              ),
+            `Current project: ${context.project.name}`,
+            context.crew.length &&
+              `Project crew: ${context.crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
+            context.project.voormanGezelId &&
+              context.crew.some((member) => member.id === context.project.voormanGezelId) &&
+              `The voorman of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
+            renderProjectBrief(context.project, footprint.projectBriefMaxChars),
+          ]
+            .filter(Boolean)
+            .join('\n\n');
       const input = [
         { role: 'system' as const, content: instructions },
         ...portableConversationHistory(admitted ? session.messages.slice(0, -1) : session.messages),
@@ -1094,6 +1165,7 @@ export class PortableProductService {
                 stepId: session.stepId,
               }
             : undefined,
+          ...(structuredChat ? { structuredChat } : {}),
         },
         inventoryTools,
       );
@@ -1280,6 +1352,14 @@ export class PortableProductService {
       sampling?: PortableSampling;
       startListing: PortableToolListing;
       nativeTools?: NativeToolBinding;
+      structuredChat?: StructuredChatSettings & {
+        history: readonly ChatMessage[];
+        catalogId?: string;
+        profile?: ResolvedModelProfile;
+        isMeester: boolean;
+        /** The desktop builder's system prompt for this turn. */
+        prompt?: BuiltInstructions;
+      };
     },
     inventory: readonly PortableToolSpec[],
   ): Promise<void> {
@@ -1293,7 +1373,7 @@ export class PortableProductService {
       limits.contextSize,
       limits.maxTokens,
     ].join(':');
-    const { startListing, ...loopLimits } = limits;
+    const { startListing, structuredChat: _shared, ...loopLimits } = limits;
     // A turn may queue other work but must never wait on it: its own
     // conversation already holding the slot would wait forever.
     if (this.engine.describe().active.some((item) => item.sessionId === session.id))
@@ -1321,7 +1401,7 @@ export class PortableProductService {
           let firstToken = true;
           let lastPhase: string | undefined;
           let lastPhaseAt = 0;
-          return runPortableToolLoop({
+          const loopOptions: Parameters<typeof runPortableToolLoop>[0] = {
             phase: (phase, detail = {}) => {
               // Progress ticks arrive faster than a pill can show them; a phase
               // change always goes out, repeats at most four times a second.
@@ -1335,7 +1415,8 @@ export class PortableProductService {
               this.emit(session, {
                 type: 'engine_phase',
                 provider: providerId,
-                phase,
+                // Desktop engines never wait on heat; the pill's detail says why.
+                phase: phase === 'cooling' ? 'starting' : phase,
                 ...(text ? { detail: text } : {}),
                 ...(detail.progress !== undefined ? { progress: detail.progress } : {}),
                 ...(ttftMs !== undefined ? { ttftMs } : {}),
@@ -1400,7 +1481,39 @@ export class PortableProductService {
                   name: manifest.name,
                   description: manifest.description,
                 })),
-              createTask: (input, projectId) => this.store.createTask(projectId, input),
+              createTask: async (input, projectId, options) => {
+                const task = await this.store.createTask(projectId, input);
+                const owner = taskActiveAssignee(task);
+                // The desktop's `dispatch`: the entry step's owner starts in a
+                // task-scoped conversation, opened the way the desktop opens it.
+                if (
+                  !options?.dispatch ||
+                  task.status !== 'active' ||
+                  owner.kind !== 'gezel' ||
+                  owner.gezelId === session.gezelId
+                )
+                  return { ...task, dispatched: false };
+                // The task exists either way; a refused handoff leaves it
+                // undispatched rather than failing the call into a retry.
+                const dispatched = await this.queueHandoff(
+                  turn,
+                  owner.gezelId,
+                  projectId,
+                  buildStepDispatchSeed({
+                    kind: 'entry',
+                    task,
+                    taskRef: task.ref,
+                    stepId: task.activeStepId!,
+                    selfHandoff: false,
+                    resumedExisting: false,
+                  }).seed,
+                  task,
+                ).then(
+                  () => true,
+                  () => false,
+                );
+                return { ...task, dispatched };
+              },
               completeTask: (ref, next) => this.completeTask(ref, next),
               message: (gezelId, projectId, message) =>
                 this.queueHandoff(turn, gezelId, projectId, message),
@@ -1423,6 +1536,39 @@ export class PortableProductService {
                 return { ...result, handoff: queued };
               },
             },
+          };
+          const shared = limits.structuredChat;
+          if (!shared) return runPortableToolLoop(loopOptions);
+          // llama.cpp's own chat layer on this device: the desktop's turn loop,
+          // over the same request, stream and error semantics.
+          return runSharedLoopTurn({
+            store: this.store,
+            inference: this.inference,
+            host: this.engineHost,
+            session,
+            requestId: turn.requestId,
+            modelId: limits.modelId,
+            ...(shared.catalogId ? { catalogId: shared.catalogId } : {}),
+            ...(shared.profile ? { profile: shared.profile } : {}),
+            isMeester: shared.isMeester,
+            contextSize: limits.contextSize,
+            structuredChat: shared,
+            systemMessage:
+              shared.prompt?.full ?? (messages[0]?.role === 'system' ? messages[0].content : ''),
+            ...(shared.prompt?.volatileContext
+              ? { volatileContext: shared.prompt.volatileContext }
+              : {}),
+            ...(shared.prompt?.layers ? { systemPromptLayers: shared.prompt.layers } : {}),
+            history: shared.history,
+            prompt: messages.at(-1)?.content ?? '',
+            tools: inventory,
+            actions: loopOptions.actions,
+            signal: turn.abort.signal,
+            cancelled: loopOptions.cancelled,
+            checkpoint: loopOptions.checkpoint,
+            tool: loopOptions.tool,
+            delta: loopOptions.delta,
+            ...(loopOptions.phase ? { phase: loopOptions.phase } : {}),
           });
         },
       );
@@ -1430,6 +1576,7 @@ export class PortableProductService {
         this.emit(session, { type: 'delta', content: result.text });
       turn.text = result.text;
       turn.cancelled ||= result.stopReason === 'cancelled';
+      const loopWarnings = (result as { warnings?: string[] }).warnings;
       response = {
         ...result.message,
         id: result.message?.id ?? crypto.randomUUID(),
@@ -1437,13 +1584,19 @@ export class PortableProductService {
         content: turn.text,
         at: new Date().toISOString(),
         providerId,
+        ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+        ...(result.reasoningDurationMs !== undefined
+          ? { reasoningDurationMs: result.reasoningDurationMs }
+          : {}),
         status: turn.cancelled || result.stopReason === 'cancelled' ? 'interrupted' : 'complete',
         stopReason: turn.cancelled ? 'cancelled' : result.stopReason,
         ...(turn.cancelled
           ? { warnings: ['This response was stopped before it finished.'] }
           : result.stopReason === 'length'
             ? { warnings: ["This response reached the model's output limit."] }
-            : {}),
+            : loopWarnings?.length
+              ? { warnings: loopWarnings }
+              : {}),
       };
     } catch (error) {
       if (error instanceof AbortedWhileQueuedError) {
@@ -1643,6 +1796,7 @@ export class PortableProductService {
     const model = gezel.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
     const roleBasedNameOnlyMode = task.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode;
     let session: ChatSession | undefined;
+    let continued = false;
     const prior = (await this.store.listSessions({ gezelId: gezel.id, projectId: task.projectId }))
       .filter((item) => item.taskRef === task.ref && !item.archived)
       .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
@@ -1660,6 +1814,7 @@ export class PortableProductService {
       ) {
         await checkActivation();
         session = candidate;
+        continued = true;
         session.stepId = task.activeStepId;
         session.stepActivationId = activationId;
         await this.store.writeSession(session);
@@ -1687,22 +1842,41 @@ export class PortableProductService {
       releaseWhileBusy();
     }
     await checkActivation();
-    await this.startTurn(
-      session.id,
-      {
-        message:
-          'Work on the active task step. Save the deliverable and check its completion gate before advancing.',
-      },
-      undefined,
-      true,
-      undefined,
-      undefined,
-      {
-        lane: 'background',
-        job: `${task.ref} · ${task.activeStepId}`,
-        holdBudget: control.holdBudget,
-      },
-    );
+    // The desktop's opening for the step: who handed it over, what to persist,
+    // and how it completes.
+    const previous = task.craftbook.steps
+      .filter((step) => step.id !== task.activeStepId && step.completedAt)
+      .sort((a, b) => b.completedAt!.localeCompare(a.completedAt!))[0];
+    const handedBy = previous
+      ? (previous.assignee ??
+        (previous.suggestedGezelId
+          ? { kind: 'gezel' as const, gezelId: previous.suggestedGezelId }
+          : task.assignee))
+      : undefined;
+    const fromGezelId = handedBy?.kind === 'gezel' ? handedBy.gezelId : undefined;
+    const fromGezel =
+      fromGezelId && fromGezelId !== gezel.id ? await this.store.getGezel(fromGezelId) : null;
+    const { seed } = buildStepDispatchSeed({
+      kind: previous ? 'handoff' : 'entry',
+      task,
+      taskRef: task.ref,
+      stepId: task.activeStepId!,
+      selfHandoff: fromGezelId === gezel.id || (task.executionMode === 'generalist' && continued),
+      ...(fromGezel
+        ? {
+            fromGezelDisplayName: displayName(
+              { name: fromGezel.name, roleBasedName: fromGezel.roleBasedName },
+              roleBasedNameOnlyMode ?? false,
+            ),
+          }
+        : {}),
+      resumedExisting: false,
+    });
+    await this.startTurn(session.id, { message: seed }, undefined, true, undefined, undefined, {
+      lane: 'background',
+      job: `${task.ref} · ${task.activeStepId}`,
+      holdBudget: control.holdBudget,
+    });
     const turn = this.turns.get(session.id);
     await turn?.finished;
     if (turn?.cancelled || this.pendingSaves.size)

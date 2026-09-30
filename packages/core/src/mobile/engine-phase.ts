@@ -10,6 +10,7 @@ const count = (value: number) => value.toLocaleString('en-US');
 export function mobileEnginePhaseDetail(
   event: Omit<MobileEnginePhaseEvent, 'requestId'>,
 ): string | undefined {
+  if (event.phase === 'cooling') return 'Waiting for the phone to cool down';
   const pct = event.progress === undefined ? undefined : Math.round(event.progress * 100);
   if (event.phase === 'loading_model')
     return pct === undefined ? 'Loading model into memory' : `Loading model weights (${pct}%)`;

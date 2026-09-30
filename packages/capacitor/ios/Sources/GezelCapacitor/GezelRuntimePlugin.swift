@@ -26,6 +26,7 @@ public final class GezelRuntimePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPi
         CAPPluginMethod(name: "selectModel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "removeModel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "generate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "chat", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "completeToolCall", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "releaseModel", returnType: CAPPluginReturnPromise),
@@ -63,6 +64,7 @@ public final class GezelRuntimePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPi
     @objc public func selectModel(_ call: CAPPluginCall) { withRuntime(call) { $0.selectModel(Self.adapt(call)) } }
     @objc public func removeModel(_ call: CAPPluginCall) { withRuntime(call) { $0.removeModel(Self.adapt(call)) } }
     @objc public func generate(_ call: CAPPluginCall) { withRuntime(call) { $0.generate(Self.adapt(call)) } }
+    @objc public func chat(_ call: CAPPluginCall) { withRuntime(call) { $0.chat(Self.adapt(call)) } }
     @objc public func cancel(_ call: CAPPluginCall) { withRuntime(call) { $0.cancel(Self.adapt(call)) } }
     @objc public func completeToolCall(_ call: CAPPluginCall) { withRuntime(call) { $0.completeToolCall(Self.adapt(call)) } }
     @objc public func releaseModel(_ call: CAPPluginCall) { withRuntime(call) { $0.releaseModel(Self.adapt(call)) } }

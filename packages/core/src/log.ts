@@ -68,20 +68,43 @@ function parseNamespaceAllowList(raw: string | undefined): Set<string> | '*' | n
 }
 
 const environment = typeof process === 'undefined' ? undefined : process.env;
-let currentLevel: LogLevel = parseLevel(environment?.GEZEL_LOG_LEVEL) ?? 'info';
-let debugAllow: Set<string> | '*' | null = parseNamespaceAllowList(environment?.GEZEL_LOG_DEBUG);
-let currentOutput: LogOutput = 'split';
+
+interface LogState {
+  level: LogLevel;
+  debugAllow: Set<string> | '*' | null;
+  output: LogOutput;
+}
+
+// Each entry point of this package bundles its own copy of this module, and a
+// process routinely loads several (the daemon imports the main entry and the
+// portable-runtime and local-loop entries). One shared state keeps a level or
+// output change reaching every copy.
+const STATE_KEY = Symbol.for('bendyline.gezel.log-state');
+function sharedLogState(): LogState {
+  const holder = globalThis as Record<symbol, LogState | undefined>;
+  let existing = holder[STATE_KEY];
+  if (!existing) {
+    existing = {
+      level: parseLevel(environment?.GEZEL_LOG_LEVEL) ?? 'info',
+      debugAllow: parseNamespaceAllowList(environment?.GEZEL_LOG_DEBUG),
+      output: 'split',
+    };
+    holder[STATE_KEY] = existing;
+  }
+  return existing;
+}
+const state = sharedLogState();
 
 export function getLogLevel(): LogLevel {
-  return currentLevel;
+  return state.level;
 }
 
 export function setLogLevel(level: LogLevel): void {
-  currentLevel = level;
+  state.level = level;
 }
 
 export function getLogOutput(): LogOutput {
-  return currentOutput;
+  return state.output;
 }
 
 /**
@@ -93,7 +116,7 @@ export function getLogOutput(): LogOutput {
  * value when their scoped operation completes.
  */
 export function setLogOutput(output: LogOutput): void {
-  currentOutput = output;
+  state.output = output;
 }
 
 /**
@@ -101,15 +124,15 @@ export function setLogOutput(output: LogOutput): void {
  * Mainly used by tests; production callers set `GEZEL_LOG_DEBUG`.
  */
 export function setDebugNamespaces(spec: string | null): void {
-  debugAllow = parseNamespaceAllowList(spec ?? undefined);
+  state.debugAllow = parseNamespaceAllowList(spec ?? undefined);
 }
 
 function shouldEmit(level: Exclude<LogLevel, 'silent'>, name: string): boolean {
   if (level === 'debug') {
-    if (debugAllow === '*') return true;
-    if (debugAllow?.has(name)) return true;
+    if (state.debugAllow === '*') return true;
+    if (state.debugAllow?.has(name)) return true;
   }
-  return LEVEL_ORDER[level] <= LEVEL_ORDER[currentLevel];
+  return LEVEL_ORDER[level] <= LEVEL_ORDER[state.level];
 }
 
 function format(level: Exclude<LogLevel, 'silent'>, name: string, message: string): string {
@@ -169,7 +192,7 @@ function emit(
 ): void {
   if (!shouldEmit(level, name)) return;
   const line = format(level, name, message);
-  const useStderr = currentOutput === 'stderr' || level === 'warn' || level === 'error';
+  const useStderr = state.output === 'stderr' || level === 'warn' || level === 'error';
   if (typeof process === 'undefined' || !process.stdout || !process.stderr) {
     // Browser and native webview hosts share the same logger and level gate.
     // Keep Node's structured stream writes unchanged when those streams exist.

@@ -147,7 +147,7 @@ final class MobileProductEvalTests: XCTestCase {
         var options: [String: Any] = [
             "runId": runId,
             "provider": env["GEZEL_EVAL_PROVIDER"] ?? "apple-foundation-models",
-            "trialTimeoutMs": Int(env["GEZEL_EVAL_TRIAL_TIMEOUT_MS"] ?? "180000") ?? 180000,
+            "trialTimeoutMs": Int(env["GEZEL_EVAL_TRIAL_TIMEOUT_MS"] ?? "1200000") ?? 1200000,
             "identity": ["os": UIDevice.current.systemName, "osVersion": UIDevice.current.systemVersion,
                          "device": UIDevice.current.model, "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                          "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",

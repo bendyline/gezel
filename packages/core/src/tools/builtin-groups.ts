@@ -397,3 +397,8 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['delegate_voorman', 'consult_voorman', 'delegate_meester', 'consult_meester'],
   },
 ];
+
+/** Built-in tool name → the group that carries it. */
+export const BUILTIN_TOOL_TO_GROUP = new Map<string, BuiltinToolsetGroup>(
+  BUILTIN_TOOLSETS.flatMap((g) => g.tools.map((toolName) => [toolName, g] as const)),
+);

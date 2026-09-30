@@ -1,0 +1,282 @@
+import type { McpToolWrapper } from '../mcp-wrapper-types.js';
+/**
+ * Zod / JSON-schema error translator — runs against every MCP server,
+ * for every model tier.
+ *
+ * Upstream MCP servers (gezel-mcp, playwright-mcp, anything wrapping
+ * Zod) report validation failures as a dense JSON blob:
+ *
+ *   MCP error -32602: Input validation error: Invalid arguments for
+ *   tool create_project: [
+ *     {"code":"invalid_type","expected":"string","received":"undefined",
+ *      "path":["about"],"message":"Required"},
+ *     {"code":"invalid_type",...,"path":["missionObjectives"],...}
+ *   ]
+ *
+ * Frontier models can usually parse this. Smaller models can't, and
+ * even frontier models do better with plain English. This wrapper
+ * detects the validation-error shape, parses the embedded JSON, and
+ * rewrites the text into a one-line teaching message:
+ *
+ *   ERROR: create_project rejected by validator. Missing required
+ *   fields: `about`, `missionObjectives`. Retry with both supplied.
+ *
+ * Universal — runs at every tier — because the translation strictly
+ * dominates the raw blob: capable models are no worse off, smaller
+ * models recover much better.
+ */
+import { looksLikeFlattenedStructuralArg } from '../tool-arg-schema-coercion.js';
+import { describeAcceptedShapes, describeClosestShape } from './schema-shape-hint.js';
+
+interface ZodIssue {
+  code?: string;
+  path?: ReadonlyArray<string | number>;
+  message?: string;
+  expected?: string;
+  received?: string;
+}
+
+function isMissingValueIssue(issue: ZodIssue): boolean {
+  if (issue.code !== 'invalid_type') return false;
+  // Zod 3 included `received: "undefined"` in serialized issues. Zod 4
+  // moved that detail into the human message and omits `received`, so
+  // checking only the field mislabels required fields as "got unknown".
+  return (
+    issue.received === 'undefined' ||
+    (issue.received === undefined && /\breceived undefined\b/i.test(issue.message ?? ''))
+  );
+}
+
+const VALIDATION_PREFIX_RE =
+  /(?:Input validation error: )?Invalid arguments for tool ([\w-]+):\s*(\[[\s\S]*\])/;
+
+function tryParseIssues(blob: string): ZodIssue[] | null {
+  try {
+    const parsed = JSON.parse(blob);
+    return Array.isArray(parsed) ? (parsed as ZodIssue[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function pathLabel(path: ReadonlyArray<string | number> | undefined): string {
+  if (!path || path.length === 0) return '(root)';
+  return path.map((p) => String(p)).join('.');
+}
+
+/**
+ * Zod 3 reports a failed discriminated union as `invalid_union_discriminator`;
+ * Zod 4 folds it into `invalid_union` and moves the detail into `note` /
+ * `message`. Both land here, so match on either code plus the message the
+ * two versions share rather than pinning one library major.
+ */
+function isDiscriminatorIssue(issue: ZodIssue): boolean {
+  if (issue.code === 'invalid_union_discriminator') return true;
+  return issue.code === 'invalid_union' && /discriminator/i.test(issue.message ?? '');
+}
+
+function isDraftStatusIssue(toolName: string, issue: ZodIssue): boolean {
+  return (
+    toolName === 'set_task_status' &&
+    pathLabel(issue.path) === 'status' &&
+    (issue.received === 'draft' || /\bdraft\b/i.test(issue.message ?? ''))
+  );
+}
+
+function draftStatusGuidance(): string {
+  return [
+    'ERROR: `set_task_status` cannot set a task to `draft`.',
+    'Do not retry `set_task_status` with `status: "draft"`.',
+    'If you are authoring a draft plan, keep it in draft and attach gates to build steps with `set_step_deliverable({ task: "<draft ref>", stepId: "<step id>", path: "<deliverable path>", kind: "<kind>" })`.',
+    'Use `activate_task` only after the draft plan is ready or approved.',
+    'Valid `set_task_status` statuses are `active`, `paused`, `complete`, and `canceled`.',
+  ].join(' ');
+}
+
+/**
+ * "Retry with corrected args" is the wrong advice when the arguments
+ * were already correct and the *transport* flattened them.
+ *
+ * The textual tool-call formats local models emit (Hermes
+ * `<parameter=KEY>`, Claude `<parameter>`, GLM `<arg_value>`, XML
+ * attributes) are flat KEY→text maps with no way to express a nested
+ * object or array. A model that correctly emits
+ * `source={"kind":"file",…}` gets it delivered as a string, sees
+ * `got string, expected object`, re-emits the identical JSON, and loops
+ * — 19 consecutive attempts on one craftbook step in the wild, each one
+ * telling the next that the tool itself was broken.
+ *
+ * The schema-aware repair in tool-arg-schema-coercion.ts should prevent
+ * this reaching the validator at all. When it still does — a tool with
+ * no declared schema, a `$ref` we can't resolve, a union that also
+ * accepts a string — the model needs to be told that re-sending the
+ * same shape cannot work, not encouraged to try again.
+ */
+function flattenedStructuralGuidance(toolName: string, fields: string[]): string {
+  const list = fields.map((f) => `\`${f}\``).join(', ');
+  return [
+    `ERROR: \`${toolName}\` received ${list} as JSON text instead of a real object/array.`,
+    'Your argument values were correct — the tool-call format you used cannot carry nested structure, so they were delivered as strings.',
+    'Do NOT retry with the same markup: re-sending identical JSON will fail identically.',
+    'Emit a real structured tool call (the function-calling mechanism) so nested arguments survive.',
+    'If you cannot, report the blocker instead of retrying — and do not claim the work succeeded.',
+  ].join(' ');
+}
+
+function valueAt(args: Record<string, unknown>, path: ReadonlyArray<string | number>): unknown {
+  let node: unknown = args;
+  for (const seg of path) {
+    if (typeof node !== 'object' || node === null) return undefined;
+    node = (node as Record<string, unknown>)[String(seg)];
+  }
+  return node;
+}
+
+/** Locate misplaced envelope fields without interpreting or repairing their values. */
+function nestedArgumentHints(args: Record<string, unknown>, issues: ZodIssue[]): string[] {
+  const fields = new Set(
+    issues
+      .filter((issue) => isMissingValueIssue(issue) && issue.path?.length === 1)
+      .map((issue) => String(issue.path![0]))
+      .filter((field) => /^[A-Za-z_][\w-]{0,63}$/.test(field))
+      .slice(0, 3),
+  );
+  if (fields.size === 0) return [];
+  const locations = new Map<string, string[]>();
+  const seen = new Set<object>();
+  let remaining = 2_048;
+  function visit(node: unknown, path: string, depth: number): void {
+    if (!node || typeof node !== 'object' || depth > 6 || seen.has(node)) return;
+    seen.add(node);
+    // Do not allocate an unbounded keys/entries array or invoke getters. The
+    // input normally comes from JSON, but a diagnostic must also tolerate
+    // cycles and shared objects supplied by an adapter.
+    for (const key in node) {
+      if (--remaining < 0) return;
+      if (!Object.hasOwn(node, key) || !/^(?:[A-Za-z_][\w-]{0,63}|\d{1,10})$/.test(key)) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(node, key);
+      if (!descriptor || !('value' in descriptor)) continue;
+      const value: unknown = descriptor.value;
+      const location =
+        Array.isArray(node) && /^\d+$/.test(key)
+          ? `${path}[${key}]`
+          : path
+            ? `${path}.${key}`
+            : key;
+      if (depth > 0 && value !== undefined && fields.has(key)) {
+        const found = locations.get(key) ?? [];
+        if (found.length < 3) found.push(location);
+        locations.set(key, found);
+      }
+      visit(value, location, depth + 1);
+    }
+  }
+  visit(args, '', 0);
+  return [...locations].map(
+    ([field, paths]) =>
+      `Required argument \`${field}\` belongs at the top level. Same-named nested fields occur at ${paths.map((path) => `\`${path}\``).join(', ')}; they do not supply that argument. Supply \`${field}\` directly in the tool arguments and check the nested data structure before retrying.`,
+  );
+}
+
+function translateIssues(
+  toolName: string,
+  issues: ZodIssue[],
+  args: Record<string, unknown>,
+  schema?: Record<string, unknown>,
+): string {
+  if (issues.some((issue) => isDraftStatusIssue(toolName, issue))) {
+    return draftStatusGuidance();
+  }
+
+  const flattened = issues
+    .filter(
+      (issue) =>
+        issue.code === 'invalid_type' &&
+        issue.received === 'string' &&
+        looksLikeFlattenedStructuralArg(args, issue.path, issue.expected),
+    )
+    .map((issue) => pathLabel(issue.path));
+  if (flattened.length > 0) return flattenedStructuralGuidance(toolName, flattened);
+
+  const missing: string[] = [];
+  const wrongType: string[] = [];
+  const tooShort: string[] = [];
+  const other: string[] = [];
+  // Schema-derived shape guidance, deduped: two issues on the same
+  // position (a discriminator miss and a wrong type) must not print the
+  // same sentence twice.
+  const shapeHints = new Set<string>();
+
+  for (const issue of issues) {
+    const label = pathLabel(issue.path);
+    if (isMissingValueIssue(issue)) {
+      missing.push(label);
+    } else if (issue.code === 'invalid_type') {
+      wrongType.push(
+        `\`${label}\` (got ${issue.received ?? 'unknown'}, expected ${issue.expected ?? '?'})`,
+      );
+      // `expected object` names the type and nothing else. The schema
+      // knows the field names, and without them a small model guesses —
+      // which is how a bare artifact URI became three failed calls.
+      if (issue.expected === 'object' && issue.path) {
+        const hint = describeAcceptedShapes(schema, issue.path, valueAt(args, issue.path));
+        if (hint) shapeHints.add(hint);
+      }
+    } else if (issue.code === 'too_small') {
+      tooShort.push(`\`${label}\` (${issue.message ?? 'too short'})`);
+    } else {
+      other.push(`\`${label}\` — ${issue.message ?? issue.code ?? 'invalid'}`);
+      // The validator prints the legal discriminator values but never
+      // what each branch requires alongside them, so a model that picks
+      // the right branch still fails on the fields it had to invent.
+      if (isDiscriminatorIssue(issue) && issue.path) {
+        const hint = describeClosestShape(schema, issue.path, args);
+        if (hint) shapeHints.add(hint);
+      }
+    }
+  }
+
+  const parts: string[] = [`ERROR: \`${toolName}\` rejected by validator.`];
+  if (missing.length > 0) {
+    parts.push(`Missing required fields: ${missing.map((m) => `\`${m}\``).join(', ')}.`);
+  }
+  if (wrongType.length > 0) {
+    parts.push(`Wrong type: ${wrongType.join(', ')}.`);
+  }
+  if (tooShort.length > 0) {
+    parts.push(`Too short: ${tooShort.join(', ')}.`);
+  }
+  if (other.length > 0) {
+    parts.push(`Other: ${other.join('; ')}.`);
+  }
+  for (const hint of shapeHints) parts.push(hint);
+  parts.push(...nestedArgumentHints(args, issues));
+  // Never promise a list this message did not give: the old blanket
+  // "retry with all listed fields supplied" was printed even when the
+  // only content was `expected object`, which lists nothing.
+  parts.push(
+    `Retry \`${toolName}\` with the corrections named above. Do not narrate success — call \`${toolName}\` again with corrected args.`,
+  );
+  return parts.join(' ');
+}
+
+export const ZodErrorTranslator: McpToolWrapper = {
+  id: 'zod-error-translator',
+  matches: () => true,
+  async postProcessError(
+    _toolName: string,
+    args: Record<string, unknown>,
+    errorText: string,
+    _ctx,
+    inputSchema?: Record<string, unknown>,
+  ): Promise<string> {
+    const m = errorText.match(VALIDATION_PREFIX_RE);
+    if (!m) return errorText;
+    const upstreamToolName = m[1];
+    const blob = m[2];
+    if (!upstreamToolName || !blob) return errorText;
+    const issues = tryParseIssues(blob);
+    if (!issues || issues.length === 0) return errorText;
+    return translateIssues(upstreamToolName, issues, args, inputSchema);
+  },
+};

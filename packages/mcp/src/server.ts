@@ -6,6 +6,7 @@ import {
   CreateTaskInputSchema,
   EmptyInputSchema,
   EnsureGezelInputSchema,
+  GEZEL_TOOL_DESCRIPTIONS,
   GetScriptRunInputSchema,
   GetTaskInputSchema,
   ListArtifactsInputSchema,
@@ -31,6 +32,12 @@ import {
   WriteDocumentInputSchema,
   WriteFileInputSchema,
   WriteTaskNoteInputSchema,
+  findGezelInRoster,
+  findProjectByReference,
+  gezelNotFoundMessage,
+  gezelRosterHint,
+  normalizeArtifactPath,
+  projectNotFoundMessage,
 } from '@bendyline/gezel';
 /**
  * Gezel MCP Server
@@ -55,6 +62,7 @@ import {
 
 import { readFileSync } from 'node:fs';
 import {
+  ASK_USER_QUESTION_EMPTY_TEXT,
   AdvanceWhenSchema,
   type Craftbook,
   CraftbookBranchSchema,
@@ -73,7 +81,6 @@ import {
   type Outcome,
   ProviderNameSchema,
   type ReadWorkspaceFilesResponse,
-  type ScriptMeta,
   type StepDeliverable,
   StepGateUnionSchema,
   type StepPatch,
@@ -83,41 +90,63 @@ import {
   WORKSPACE_READ_MAX_FILES,
   WORKSPACE_READ_MAX_RANGE_LINES,
   type WorkspaceReadFileRequest,
+  addGezelToProjectText,
+  advanceGateFailureText,
+  advanceTaskStepText,
   applyStepPatch,
+  artifactCompletionHint,
+  askUserQuestionText,
   assertCraftbookGraph,
+  asyncHandoffReleaseInstruction,
   coerceDeliverableKind,
   composeCraftbookLaunch,
-  contextBudgetCeiling,
   craftbookDocFormatFromEnv,
+  createTaskText,
   deliverableStep,
   deniedTaskScopedWrite,
-  estimateTokens,
   expandStepDeliverable,
   formatReviewProvenance,
+  formatTaskLine,
+  getScriptRunText,
+  getTaskText,
   inferDeliverableKind,
   isOwnerStep,
   isReservedShadowArtifactPath,
   isSafeEntityId,
   isTrustedConstrainedToolset,
+  listArtifactsText,
+  listDirText,
+  listDocumentsText,
+  listGezelsText,
+  listGildeText,
+  listProjectGezelsText,
+  listProjectsText,
+  listScriptsText,
+  listTasksText,
+  messageGezelText,
   parseKnowledgeUri,
   pickRandomNameWithGender,
   prioritizePullsForCurrentBranch,
+  readTaskNotesText,
   removeStepAndCleanEdges,
   reorderStepsArray,
   resolveRoleId,
   resolveSteps,
+  saveMemoryText,
+  searchMemoryText,
+  searchResultText,
   stepInsertionIndex,
   stepOwnerGezelId,
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
+  writeTaskNoteText,
 } from '@bendyline/gezel';
 import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
 import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client/node';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 import {
   ASSIGNEE_ARG_DESCRIPTION,
   type AssigneeArg,
@@ -856,7 +885,7 @@ function isZodRawShape(value: unknown): value is Record<string, z.ZodType> {
 
 server.tool(
   'search_memory',
-  'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
+  GEZEL_TOOL_DESCRIPTIONS.search_memory,
   SearchMemoryInputSchema.shape,
   async ({ query, topK }) => {
     try {
@@ -883,9 +912,6 @@ server.tool(
       const summary = data.degraded?.message
         ? `${data.degraded.message} ${resultSummary}`
         : resultSummary;
-      const formatted = results
-        .map((r) => `[${r.scope}/${r.day} score=${r.score.toFixed(2)}] ${r.text}`)
-        .join('\n\n');
       return okResult(
         SearchToolOutputSchema,
         {
@@ -897,7 +923,7 @@ server.tool(
           ...(data.mode ? { mode: data.degraded ? `${data.mode}-fallback` : data.mode } : {}),
           engine: data.mode === 'semantic' || data.mode === 'hybrid' ? 'sqlite-vec' : 'markdown',
         },
-        { text: formatted ? `${summary}\n${formatted}` : summary },
+        { text: searchMemoryText(results, data.degraded?.message) },
       );
     } catch (err) {
       return errorResult(`search_memory failed: ${unwrapApiError(err)}`);
@@ -907,7 +933,7 @@ server.tool(
 
 server.tool(
   'save_memory',
-  'Save an important fact, decision, preference, or context to memory so you can recall it later. Use this when you learn something worth remembering.',
+  GEZEL_TOOL_DESCRIPTIONS.save_memory,
   SaveMemoryInputSchema.shape,
   async ({ text, scope, kind }) => {
     try {
@@ -933,15 +959,11 @@ server.tool(
         degraded?: { message?: unknown };
       };
       const status = data.status === 'duplicate' ? 'duplicate' : 'saved';
-      const savedSummary =
-        status === 'duplicate'
-          ? `Memory already existed (${scope}); no duplicate was added.`
-          : `Memory saved (${scope}).`;
       const degradedMessage =
         data.degraded && typeof data.degraded.message === 'string'
           ? data.degraded.message
           : undefined;
-      const summary = degradedMessage ? `${savedSummary} ${degradedMessage}` : savedSummary;
+      const summary = saveMemoryText(status, scope, degradedMessage);
       return okResult(
         MemorySaveToolOutputSchema,
         {
@@ -1591,7 +1613,7 @@ if (process.env.GEZEL_TABLES_ENABLED === '1') {
 
 server.tool(
   'list_dir',
-  'List the files and subdirectories at a path in the project. The project root is the default. When this project links other projects, list `..` to discover them and use `../<project-id>/...` to browse one with this same tool.',
+  GEZEL_TOOL_DESCRIPTIONS.list_dir,
   ListDirectoryInputSchema.shape,
   async ({ path }) => {
     try {
@@ -1608,14 +1630,13 @@ server.tool(
             ).files.map((entry) =>
               target.kind === 'linked' ? prefixLinkedEntry(target.projectId, entry) : entry,
             );
-      const listing = files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
       const summary = files.length
         ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
         : 'Empty directory.';
       return okResult(
         ListToolOutputSchema,
         { summary, items: files, count: files.length },
-        { text: listing ? `${summary}\n${listing}` : summary },
+        { text: listDirText(files) },
       );
     } catch (err) {
       return errorResult(`list_dir failed: ${unwrapApiError(err)}`);
@@ -2309,7 +2330,7 @@ async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
 
 server.tool(
   'write_file',
-  'Create or overwrite a file in the project. **This is how you write code** (or any workspace file) for the thing the user is building. Do NOT paste a code block into chat and expect the user to save it — that does nothing; call this tool with the full file body. If the user, task, or checker names a workspace deliverable path such as `index.html`, `report.md`, `analysis.md`, `src/solution.mjs`, `bug_report.md`, `docs/...`, or `packages/...`, call `write_file` with that exact path as soon as you have enough input to write the file. Do not write a plan, artifact, draft note, chat code block, alternate filename, or `workspace/<path>` substitute. For scratch notes or analysis material that is not meant to live in the workspace, use `write_artifact` instead. Path is relative to the project root. HTML and JS/TS files are syntax-checked before write — if the inline `<script>` or source body has a parse error, overwriting an existing file is refused and the existing file is left untouched; a broken first-write HTML draft may still be saved so you can read/repair/append instead of starting over. **For binary files (images, PDFs, audio) generated by another tool into the artifacts drawer, use `copy_artifact_to_workspace` instead of read_artifact + write_file.**',
+  GEZEL_TOOL_DESCRIPTIONS.write_file,
   WriteFileInputSchema.shape,
   async ({ path, content }) => {
     const stale = await staleStepMutationResult();
@@ -2470,7 +2491,7 @@ async function tryPersistFirstWritePartial(
 
 server.tool(
   'append_to_file',
-  "Append text to the end of an existing file in the project. Use this to continue a `write_file` that ran out of room — wild on local models when the first call's content exceeded the per-turn output budget. Pass the path and ONLY the missing tail (the parts of the file you haven't written yet); the existing content stays. For a brand-new file, prefer `write_file`. Path is relative to the project root.",
+  GEZEL_TOOL_DESCRIPTIONS.append_to_file,
   AppendToFileInputSchema.shape,
   async ({ path, content, create }) => {
     const stale = await staleStepMutationResult();
@@ -2541,7 +2562,7 @@ server.tool(
 
 server.tool(
   'replace_in_file',
-  "Make a surgical edit to an existing file by replacing one literal substring with another. **Strongly preferred over `write_file` for editing any file that already exists** — token cost is proportional to the change, not the file size, and you don't risk re-truncating a long file you already wrote correctly. `find` is matched verbatim (no regex). By default the pattern must match exactly once; pass `occurrence: 'all'` to apply blanket renames, or a 1-based index to target a specific match. Returns a unified diff so you can verify what changed. If `find` isn't unique you'll get back an `ambiguous-match` error — re-read the file and use a longer literal substring.",
+  GEZEL_TOOL_DESCRIPTIONS.replace_in_file,
   ReplaceInFileInputSchema.extend({
     partial: PartialEditArg,
   }).shape,
@@ -2599,7 +2620,7 @@ server.tool(
 
 server.tool(
   'replace_lines',
-  "Replace an inclusive range of lines in an existing file with new content — the easiest surgical edit when you know *which lines* are wrong (e.g. `read_file` shows `142→` gutters, or `validate`/`write_file` reported a parse error 'at line 142'). You just give `startLine`/`endLine` and the replacement `content`; no need to reproduce an exact `find` string or count diff coordinates. To replace one line, set `startLine === endLine`. To delete lines, pass an empty `content`. **Do NOT include the `N→` line-number gutter in `content`** — that's a display aid, not file text. **Each edit shifts the lines below it**, so line numbers from an earlier `read_file` go stale after the first edit; this tool reports the shift and re-prints the edited region with fresh numbers, so target your next edit from that, not from the original read.",
+  GEZEL_TOOL_DESCRIPTIONS.replace_lines,
   ReplaceLinesInputSchema.extend({
     partial: PartialEditArg,
   }).shape,
@@ -3495,22 +3516,6 @@ function extractApiErrorMessage(err: unknown): string | undefined {
   return typeof errorField === 'string' ? errorField : undefined;
 }
 
-/**
- * Models sometimes pass `artifacts/foo.md` because they see that folder
- * name in workspace listings or the UI. The API already scopes the call
- * to the artifacts root, so a leading `artifacts/` (or `./`) is always
- * redundant — and passing it through caused real-world bugs like files
- * landing in `<project>/artifacts/artifacts/foo.md`. Strip it once here
- * so every artifact tool is forgiving of this class of mistake.
- */
-function normalizeArtifactPath(path: string): string {
-  let p = path.replace(/^\.?\/+/, '');
-  // Strip repeated leading "artifacts/" segments (handles both `artifacts/`
-  // and the pathological `artifacts/artifacts/` case).
-  while (/^artifacts\/+/i.test(p)) p = p.replace(/^artifacts\/+/i, '');
-  return p;
-}
-
 /** Connector-managed records under artifacts/data are read-only to gezels. */
 function isProtectedConnectorArtifactPath(path: string): boolean {
   const segments = normalizeArtifactPath(path)
@@ -3761,7 +3766,7 @@ async function listWorkspaceDeliverableFiles(projectId: string): Promise<string[
 
 server.tool(
   'list_artifacts',
-  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. A task\'s working files live under its own folder, `tasks/<num>/`. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
+  GEZEL_TOOL_DESCRIPTIONS.list_artifacts,
   ListArtifactsInputSchema.shape,
   async ({ path, recursive }) => {
     const subpath = normalizeArtifactPath(path ?? '');
@@ -3772,21 +3777,11 @@ server.tool(
     // the subtree, so the cap applies to the subtree alone.
     const wantRecursive = recursive !== false;
     const res = await api.listProjectArtifacts(projectId, subpath || undefined, wantRecursive);
-    const listing = res.files
-      .map((f) =>
-        f.isDirectory
-          ? `📁 ${f.path}`
-          : `📄 ${f.path}\n   open: ${renderExactToolCall('read_artifact', { path: f.path })}`,
-      )
-      .join('\n');
     const summary = res.files.length
       ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}${subpath ? ` under ${subpath}/` : ''}.`
       : subpath
         ? `No artifacts under ${subpath}/.`
         : 'No artifacts yet.';
-    const truncation = res.truncated
-      ? `\nResults were truncated; ${subpath ? 'narrow `path` further' : 'pass `path` to scope the walk'} or use \`recursive: false\`.`
-      : '';
     return okResult(
       ListToolOutputSchema,
       {
@@ -3799,7 +3794,7 @@ server.tool(
         count: res.files.length,
         ...(res.truncated !== undefined ? { truncated: res.truncated } : {}),
       },
-      { text: listing ? `${summary}\n${listing}${truncation}` : `${summary}${truncation}` },
+      { text: listArtifactsText(res.files, subpath, res.truncated) },
     );
   },
 );
@@ -4094,7 +4089,7 @@ server.tool(
 
 server.tool(
   'write_artifact',
-  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. When working a task, its working files belong in that task's folder, `tasks/<num>/` (e.g. `tasks/11/outline.md`). Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `tasks/`/`scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
+  GEZEL_TOOL_DESCRIPTIONS.write_artifact,
   WriteArtifactInputSchema.extend({
     force: z
       .boolean()
@@ -4235,19 +4230,8 @@ server.tool(
       ...(gezelId ? { gezelId } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
-    let completionHint = '';
-    if (sessionTaskRef && sessionStepId) {
-      if (sessionStepCompletion === 'automatic') {
-        completionHint =
-          '\nThis step uses automatic completion checks. Finish its required deliverable and stop; the runtime will run its completion gate. Saving does not approve the work. If the gate rejects it, repair the named problems and save the complete deliverable again.';
-      } else if (sessionStepCompletion === 'manual') {
-        completionHint =
-          '\nSaving an artifact does not complete the task step. When its required deliverable is ready, call advance_task_step to run the completion checks. Repair specific failures if returned; do not repeatedly rewrite a finished report without submitting it.';
-      } else {
-        completionHint =
-          '\nFollow the active craftbook completion rule. If it uses automatic completion, finish the required deliverable and stop; otherwise call advance_task_step when ready. Saving alone is not approval. Repair any specific validation failures returned.';
-      }
-    }
+    const completionHint =
+      sessionTaskRef && sessionStepId ? artifactCompletionHint(sessionStepCompletion) : '';
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
   },
 );
@@ -4319,25 +4303,24 @@ server.tool(
 
 server.tool(
   'list_documents',
-  'List files in the shared documents library — cross-project guides every gezel can read (guidelines, mission statements, style guides, policies). Pass { recursive: true } to see inside folders. To find content rather than names, use search_documents.',
+  GEZEL_TOOL_DESCRIPTIONS.list_documents,
   ListDocumentsInputSchema.shape,
   async ({ path, recursive }) => {
     const res = await api.listDocuments(path ?? '', recursive ?? false);
-    const listing = res.files.map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}`).join('\n');
     const summary = res.files.length
       ? `Listed ${res.files.length} ${res.files.length === 1 ? 'document entry' : 'document entries'}.`
       : 'No documents found.';
     return okResult(
       ListToolOutputSchema,
       { summary, items: res.files, count: res.files.length },
-      { text: listing ? `${summary}\n${listing}` : summary },
+      { text: listDocumentsText(res.files) },
     );
   },
 );
 
 server.tool(
   'read_document',
-  'Read one document from the shared library by path, or a knowledge-catalog article by its knowledge:// URI (from a `search` result with the knowledge source). Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
+  GEZEL_TOOL_DESCRIPTIONS.read_document,
   ReadDocumentInputSchema.shape,
   async ({ path }) => {
     const knowledgeUri = parseKnowledgeUri(path);
@@ -4365,7 +4348,7 @@ server.tool(
 
 server.tool(
   'write_document',
-  'Create or update a document in the shared documents library (markdown preferred). Use for durable cross-project knowledge — guidelines, policies, style rules. For knowledge specific to one project, use a folder named after that project (e.g. "acme-site/decisions.md"). Deliverables for the current job belong in the workspace or artifacts, not here.',
+  GEZEL_TOOL_DESCRIPTIONS.write_document,
   WriteDocumentInputSchema.shape,
   async ({ path, content }) => {
     const redirected = await redirectExpectedDeliverableWriteToWorkspace(
@@ -4428,23 +4411,17 @@ server.tool(
 
 server.tool(
   'list_gezels',
-  "List every gezel (agent) on the user's team. Each entry includes id, name, and role. Use this to find the right gezel for a task, or to see who needs a change.",
+  GEZEL_TOOL_DESCRIPTIONS.list_gezels,
   EmptyInputSchema.shape,
   async () => {
     const res = await api.listGezels();
-    const listing = res.gezels
-      .map(
-        (g: { id: string; name: string; role?: string }) =>
-          `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`,
-      )
-      .join('\n');
     const summary = res.gezels.length
       ? `Listed ${res.gezels.length} ${res.gezels.length === 1 ? 'gezel' : 'gezels'}.`
       : 'No gezels yet.';
     return okResult(
       ListToolOutputSchema,
       { summary, items: res.gezels, count: res.gezels.length },
-      { text: listing ? `${summary}\n${listing}` : summary },
+      { text: listGezelsText(res.gezels) },
     );
   },
 );
@@ -4511,24 +4488,17 @@ server.tool(
   },
 );
 
-server.tool(
-  'list_gilde',
-  'List the gezel templates ("gilde" — the guild roster) bundled with Gezel. Each template has a canonical role and curated about.md. For normal recruitment call ensure_gezel with the role; to force a separate new gezel from an exact template, call create_gezel with templateId.',
-  EmptyInputSchema.shape,
-  async () => {
-    const res = await api.listCatalogItems('gezel-template');
-    if (!res.items.length) {
-      return { content: [{ type: 'text' as const, text: 'No templates in the gilde.' }] };
-    }
-    const listing = res.items
-      .map(
-        (item: { manifest: { id: string; name: string; description: string } }) =>
-          `• ${item.manifest.name} (id: ${item.manifest.id}) — ${item.manifest.description}`,
-      )
-      .join('\n');
-    return { content: [{ type: 'text' as const, text: listing }] };
-  },
-);
+server.tool('list_gilde', GEZEL_TOOL_DESCRIPTIONS.list_gilde, EmptyInputSchema.shape, async () => {
+  const res = await api.listCatalogItems('gezel-template');
+  const text = listGildeText(
+    res.items.map((item: { manifest: { id: string; name: string; description: string } }) => ({
+      id: item.manifest.id,
+      name: item.manifest.name,
+      description: item.manifest.description,
+    })),
+  );
+  return { content: [{ type: 'text' as const, text }] };
+});
 
 server.tool(
   'list_project_types',
@@ -6083,7 +6053,7 @@ server.tool(
 
 server.tool(
   'ensure_gezel',
-  "Make sure a gezel exists who can handle a given job (designer, dev, copywriter, …) and return them, creating one if nothing fits. Prefer this over the `list_gezels` → `list_gilde` → `create_gezel` sequence: one fuzzy, idempotent call reuses a good roster match or creates from the matching gilde template. Gezels are shared across projects, so reuse preserves their memory of the user's preferences. Use `create_gezel` only when you explicitly need a separate new gezel, an exact templateId, or a custom about.md.",
+  GEZEL_TOOL_DESCRIPTIONS.ensure_gezel,
   EnsureGezelInputSchema.shape,
   async ({ jobTitle }) => {
     const res = await api.ensureGezel({
@@ -6200,7 +6170,7 @@ server.tool(
 
 server.tool(
   'message_gezel',
-  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in a later turn. After a successful call, END YOUR TURN immediately — remaining alive can keep the recipient parked and occupies a provider slot. Use this for fan-out and ambient updates; emit every fan-out call in the same tool-call batch before ending. For explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
+  GEZEL_TOOL_DESCRIPTIONS.message_gezel,
   MessageGezelInputSchema.extend({
     project: z
       .string()
@@ -6259,21 +6229,19 @@ server.tool(
         hint: '`gezel` must be an id or display name, not a role word. Call `list_gezels` for the real roster, or `ensure_gezel({ jobTitle: "..." })` to create the specialist and use the id it returns.',
       });
     }
-    const deliverableText =
-      expectedDeliverable?.kind === 'file'
-        ? ` They have been asked to write ${expectedDeliverable.filePath ? `\`${expectedDeliverable.filePath}\`` : 'the file'} before replying.`
-        : '';
     // The client package may be consumed from a previously built declaration
     // during workspace-local typechecks; the wire field is optional so this
     // remains compatible with both response revisions.
     const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean }).deduplicated;
     const deliveryState = messageGezelDeliveryState(res);
-    const releaseInstruction = asyncHandoffReleaseInstruction(res.toGezelName, deliveryState);
-    const responseText = responseWasDeduplicated
-      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of creating another message. ${releaseInstruction}`
-      : deliveryState === 'parked'
-        ? `Accepted the message for ${res.toGezelName}.${deliverableText} ${releaseInstruction}`
-        : `Dispatched the message to ${res.toGezelName}.${deliverableText} ${releaseInstruction}`;
+    const responseText = messageGezelText({
+      recipientName: res.toGezelName,
+      deliveryState,
+      ...(responseWasDeduplicated ? { deduplicated: true } : {}),
+      ...(expectedDeliverable?.kind === 'file'
+        ? { expectedFilePath: expectedDeliverable.filePath ?? null }
+        : {}),
+    });
     return {
       content: [
         {
@@ -6292,16 +6260,6 @@ function messageGezelDeliveryState(response: {
   // omit the new field, and telling the caller to release its turn is safer
   // than claiming the recipient has already entered the provider queue.
   return response.deliveryState === 'dispatched' ? 'dispatched' : 'parked';
-}
-
-function asyncHandoffReleaseInstruction(
-  recipientName: string,
-  deliveryState: 'parked' | 'dispatched',
-): string {
-  if (deliveryState === 'parked') {
-    return `The handoff is durably parked and has NOT entered ${recipientName}'s provider queue because your current turn still holds its slot. END YOUR TURN NOW — do not call more tools or wait — so this turn releases the slot and ${recipientName}'s turn can dispatch. Their reply will arrive asynchronously in a later turn.`;
-  }
-  return `${recipientName}'s turn has entered the provider queue. END YOUR TURN NOW — do not call more tools or wait — so your turn releases its provider slot. Their reply will arrive asynchronously in a later turn.`;
 }
 
 function normalizeFileHandoffMessage(
@@ -6897,7 +6855,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
 
 server.tool(
   'ask_user_question',
-  'Ask the user a question and end your turn. Call this whenever you\'d otherwise stall waiting on the user — a design choice, a scope confirmation, an approval on something you drafted, a missing asset. The user sees a structured card in chat AND on the Home "Needs your input" panel AND as a count badge on the Home nav, so they WILL see it. Their answer arrives in your next turn as a new user message starting with `[Answer to: …]`. When the answer is bounded (colors, yes/no, pick one of these three), always pass concrete `choices`; the user can still write a free-text note alongside unless `allowWriteIn: false`. For approvals where you\'ve drafted a task or a document, attach `taskRef` (`projectId/num`) or `documentPath` so the user can review the artifact inline without leaving the card.',
+  GEZEL_TOOL_DESCRIPTIONS.ask_user_question,
   AskUserQuestionInputSchema.shape,
   async ({
     question,
@@ -6915,7 +6873,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: 'ask_user_question needs a non-empty `question` string — that\'s the actual question to show the user. Retry this tool call with `question: "..."`.',
+            text: ASK_USER_QUESTION_EMPTY_TEXT,
           },
         ],
       };
@@ -6953,7 +6911,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: `[STOP — a question is ALREADY waiting for the user]\n\nYou asked the user a question on an earlier turn (id ${res.questionId}) and they haven't answered it yet, so this new question was NOT posted — re-asking a reworded version would only stack duplicate cards. Do NOT rephrase and ask again. **END YOUR TURN now** and wait; their answer arrives as the next user message starting with "[Answer to: …]". If the work can proceed without that answer, take a concrete action (route, hand off, or build) instead of asking.`,
+              text: askUserQuestionText(res.questionId, true),
             },
           ],
         };
@@ -6962,7 +6920,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `[STOP — question card is now in front of the user]\n\nThe runtime posted the card (id ${res.questionId}). The user sees it in chat, on the Home panel, and as a badge. **END YOUR TURN HERE** — do NOT emit a follow-up assistant message, a "thanks for waiting" sentence, or another \`ask_user_question\` call. Any further text or tool calls this turn are runtime-suppressed and never reach the user; the card is the message. Their answer will arrive as the next user message starting with "[Answer to: …]" — your turn fires again then.`,
+            text: askUserQuestionText(res.questionId, false),
           },
         ],
       };
@@ -6978,36 +6936,17 @@ server.tool(
 
 server.tool(
   'list_projects',
-  'List every project. Projects are separate workspaces with their own file tree, artifacts, and chat history. The `default` project is the catch-all.',
+  GEZEL_TOOL_DESCRIPTIONS.list_projects,
   EmptyInputSchema.shape,
   async () => {
     const res = await api.listProjects({ rollup: true });
-    const listing = res.projects
-      .map(
-        (p: {
-          id: string;
-          name: string;
-          description?: string;
-          workingDir?: string;
-          voormanGezelId?: string;
-          detectedProjectType?: { id: string };
-          projectTypeId?: string;
-          architecture?: string;
-        }) => {
-          const type = p.projectTypeId ?? p.detectedProjectType?.id;
-          const head = `• ${p.name} — id: ${p.id}${type ? ` [${type}]` : ''}${p.workingDir ? ` (ext: ${p.workingDir})` : ''}${p.voormanGezelId ? ` (voorman: ${p.voormanGezelId})` : ''}`;
-          const body = p.architecture ?? p.description;
-          return body ? `${head}\n    ${body}` : head;
-        },
-      )
-      .join('\n');
     const summary = res.projects.length
       ? `Listed ${res.projects.length} ${res.projects.length === 1 ? 'project' : 'projects'}.`
       : 'No projects yet.';
     return okResult(
       ListToolOutputSchema,
       { summary, items: res.projects, count: res.projects.length },
-      { text: listing ? `${summary}\n${listing}` : summary },
+      { text: listProjectsText(res.projects) },
     );
   },
 );
@@ -7712,7 +7651,7 @@ async function runPromotedStartJobAsProject(input: {
 
 server.tool(
   'start_project',
-  'Start a fresh project for any build request, from a single-file prototype to a multimodal product. Atomically: creates the project, selects an appropriate lead or crew for the effective execution mode, creates the kickoff task, and hands off its entry step. ONE call replaces the old multi-call setup ritual; preserve the requested deliverable paths and acceptance criteria in `taskDescription`.',
+  GEZEL_TOOL_DESCRIPTIONS.start_project,
   StartProjectInputSchema.shape,
   async ({ name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage }) => {
     const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
@@ -8028,7 +7967,7 @@ server.tool(
 
 server.tool(
   'update_project',
-  'Update a project — rename, change description, set / clear its external working directory, assign a voorman gezel, set its lifecycle status, rewrite its about.md / missionObjectives.md, or set shared project properties (e.g. `content.language`, the designated language). Pass `workingDir: ""` to clear the external path. Pass `voormanGezelId: ""` to clear the voorman.',
+  GEZEL_TOOL_DESCRIPTIONS.update_project,
   UpdateProjectInputSchema.extend({
     status: z
       .enum(['active', 'readonly', 'inactive', 'stable'])
@@ -8076,7 +8015,7 @@ server.tool(
 
 server.tool(
   'list_project_gezels',
-  "List every gezel available in a project, in two clearly labeled sections: the shared roster pulled into this project and workspace-local gezels such as `@project` derived from AGENTS.md/CLAUDE.md or `.gezel/`. Use this single call to answer 'who is on this project?' or discover a project-local specialist.",
+  GEZEL_TOOL_DESCRIPTIONS.list_project_gezels,
   ListProjectGezelsInputSchema.shape,
   async ({ project }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
@@ -8085,59 +8024,28 @@ server.tool(
       api.listProjectLocalGezels(resolvedProject),
       api.listGezels(),
     ]);
-    if (roster.gezelIds.length === 0 && local.gezels.length === 0) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Project ${resolvedProject} has no shared-roster or workspace-local gezels yet.`,
-          },
-        ],
-      };
-    }
     const byId = new Map(allGezels.gezels.map((g) => [g.id, g]));
-    const sections: string[] = [`Project ${resolvedProject} gezels:`];
-    if (roster.gezelIds.length > 0) {
-      sections.push(
-        [
-          `Shared roster (${roster.gezelIds.length}):`,
-          ...roster.gezelIds.map((id) => {
-            const g = byId.get(id);
-            return g ? `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${id}` : `• id: ${id}`;
-          }),
-        ].join('\n'),
-      );
-    }
-    if (local.gezels.length > 0) {
-      sections.push(
-        [
-          `Workspace-local (${local.gezels.length}):`,
-          ...local.gezels.map((g) => `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`),
-        ].join('\n'),
-      );
-    }
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: sections.join('\n\n'),
-        },
-      ],
-    };
+    const text = listProjectGezelsText(
+      resolvedProject,
+      roster.gezelIds.map((id) => {
+        const gezel = byId.get(id);
+        return gezel ? { id, gezel } : { id };
+      }),
+      local.gezels,
+    );
+    return { content: [{ type: 'text' as const, text }] };
   },
 );
 
 server.tool(
   'add_gezel_to_project',
-  "Add a gezel to a project's roster explicitly. Most paths auto-add (voorman assignment, opening a session, message_gezel/ask_gezel, task assignment), so reach for this only when you want to pre-populate the team without one of those triggers — e.g. introducing a reviewer who hasn't been pinged yet. Idempotent.",
+  GEZEL_TOOL_DESCRIPTIONS.add_gezel_to_project,
   AddGezelToProjectInputSchema.shape,
   async ({ gezel, project }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     const resolvedGezel = await resolveGezelId(gezel);
     const res = await api.addGezelToProject(resolvedProject, resolvedGezel);
-    const base = res.added
-      ? `Added gezel ${resolvedGezel} to project ${resolvedProject}.`
-      : `Gezel ${resolvedGezel} is already on the roster for project ${resolvedProject}.`;
+    const base = addGezelToProjectText(resolvedGezel, resolvedProject, res.added);
     const offers = await describeSuggestedWorkOffers(resolvedProject, resolvedGezel);
     return {
       content: [{ type: 'text' as const, text: offers ? `${base}\n\n${offers}` : base }],
@@ -8328,29 +8236,6 @@ async function resolveAssigneeArg(
   return { kind: 'gezel' as const, gezelId: await resolveGezelId(normalized.ref) };
 }
 
-function formatTaskLine(t: {
-  ref: string;
-  title: string;
-  status: string;
-  assignee: { kind: string; gezelId?: string };
-  activeStepId?: string;
-  craftbook: { steps: Array<{ id: string; name: string; completedAt?: string }> };
-  spawnsCraftbook?: { steps: Array<unknown> };
-  parentTaskRef?: string;
-}): string {
-  const who = t.assignee.kind === 'user' ? 'user' : t.assignee.gezelId;
-  const active = t.activeStepId
-    ? t.craftbook.steps.find((s) => s.id === t.activeStepId)
-    : undefined;
-  const stepLabel = t.activeStepId
-    ? `active step: ${active?.name ?? t.activeStepId}`
-    : t.spawnsCraftbook
-      ? `spawn craftbook (${t.spawnsCraftbook.steps.length} step blueprint)`
-      : 'no active step';
-  const parentLabel = t.parentTaskRef ? ` · child of ${t.parentTaskRef}` : '';
-  return `• ${t.ref} [${t.status}] (→ ${who}) — "${t.title}" · ${stepLabel}${parentLabel}`;
-}
-
 function inferDraftDeliverable(task: {
   title?: string;
   description?: string | null;
@@ -8380,7 +8265,7 @@ function setStepDeliverableCall(
 
 server.tool(
   'list_tasks',
-  'List tasks. Optionally filter by project, status, or assignee gezel id. Sorted newest-updated first.',
+  GEZEL_TOOL_DESCRIPTIONS.list_tasks,
   ListTasksInputSchema.shape,
   async ({ project, status, assignee }) => {
     const projectId = project ? await resolveProjectId(project) : undefined;
@@ -8402,18 +8287,14 @@ server.tool(
     return okResult(
       TaskToolOutputSchema,
       { summary, operation: 'list', tasks: res.tasks, count: res.tasks.length },
-      {
-        text: res.tasks.length
-          ? `${summary}\n${res.tasks.map(formatTaskLine).join('\n')}`
-          : summary,
-      },
+      { text: listTasksText(res.tasks) },
     );
   },
 );
 
 server.tool(
   'get_task',
-  'Get one task by ref (format: `projectId/num`). Returns full detail: status, assignee, every phase, active phase, any cron schedule, parent task.',
+  GEZEL_TOOL_DESCRIPTIONS.get_task,
   GetTaskInputSchema.shape,
   async ({ ref }) => {
     // `getTaskByRef` splits the ref literally, so it saw neither the
@@ -8432,7 +8313,7 @@ server.tool(
         status: t.status,
         task: t,
       },
-      { text: `Loaded task ${t.ref}.\n${JSON.stringify(t, null, 2)}` },
+      { text: getTaskText(t) },
     );
   },
 );
@@ -8484,7 +8365,7 @@ const fanoutArg = coerceJsonObject(
 
 server.tool(
   'create_task',
-  'Create a task in a project. Always starts with status "active" at the first step of its craftbook. Provide either `craftbookId` (a recipe from the catalog) OR inline `steps` (an ad-hoc craftbook embedded in the task). For recurring work, also pass `spawnsCraftbookId` or `spawnsSteps` plus a `cron` expression; for N parallel copies, pass spawn-side steps plus a `fanout` config.',
+  GEZEL_TOOL_DESCRIPTIONS.create_task,
   CreateTaskInputSchema.extend({
     assignee: assigneeArg()
       .optional()
@@ -8589,19 +8470,10 @@ server.tool(
       });
       // Tool-guided kickoff. When the assignee is a gezel other than the
       // caller, tell the model to actually ping them.
-      const assigneeGezelId = created.assignee.kind === 'gezel' ? created.assignee.gezelId : null;
-      const spawnNote = created.spawnsCraftbook
-        ? ` Spawn craftbook has ${created.spawnsCraftbook.steps.length} step(s).`
-        : '';
-      const fanoutNote = created.fanout?.materializedAt
-        ? ` Materialized ${created.fanout.count} instance(s) from the spawn craftbook.`
-        : '';
-      const kickoff = dispatch
-        ? `\n\nEntry step dispatched — ${assigneeGezelId ?? 'the assignee'} starts in a task-scoped session with the step contract in-prompt. Do not message_gezel them a duplicate kickoff.`
-        : created.craftbook.steps.length > 0 && assigneeGezelId && assigneeGezelId !== gezelId
-          ? `\n\n${assigneeGezelId} has NOT been engaged. Prefer \`dispatch: true\` on create_task so the assignee starts in a task-scoped session with the step contract in-prompt. For this already-created task, call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }) to brief them.`
-          : '';
-      const text = `Created ${created.ref} — "${created.title}" with ${created.craftbook.steps.length} step(s).${spawnNote}${fanoutNote}${kickoff}`;
+      const text = createTaskText(created, {
+        dispatch: Boolean(dispatch),
+        ...(gezelId ? { callerGezelId: gezelId } : {}),
+      });
       return okResult(
         TaskToolOutputSchema,
         {
@@ -9252,7 +9124,7 @@ async function explainAdvanceFailure(
 
 server.tool(
   'advance_task_step',
-  'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool. A SUCCESSFUL call is terminal for this gezel\'s turn: stop immediately and yield; the successor owns all further work. A rejected gate is not terminal — repair the named issue and retry.',
+  GEZEL_TOOL_DESCRIPTIONS.advance_task_step,
   AdvanceTaskStepInputSchema.shape,
   async ({ ref, stepId, next }) => {
     const draftBlock = partialEdits.blockReason('advance_task_step');
@@ -9273,55 +9145,13 @@ server.tool(
     }
     const { task, gate } = advanced;
     if (gate) {
-      // A declarative gate can reject the work, or an onExit lifecycle
-      // script can fail after gate approval. Both use the same compatible
-      // wire envelope, but a hook failure is infrastructure—not a defect
-      // the model should try to repair in the deliverable.
-      const exitHookFailed = gate.hook === 'onExit';
-      const pausedNote = exitHookFailed
-        ? ' The lifecycle script could not finish, so the task is PAUSED and the step remains incomplete. Do not retry or rewrite the deliverable; report the script/runtime problem.'
-        : gate.infrastructureError
-          ? ' The gate itself could not run, so the task is PAUSED and no deliverable attempt was consumed. Do not rewrite the deliverable; report the gate/runtime problem.'
-          : gate.paused
-            ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
-            : ' Address these specifically, then call `advance_task_step` again.';
-      const failedRun = gate.scriptRuns?.find((run) => run.error || run.runId);
-      const diagnosticNote = failedRun
-        ? `\nScript diagnostic: ${failedRun.scriptName}${failedRun.runId ? ` (run ${failedRun.runId})` : ''}${failedRun.error ? ` — ${failedRun.error}` : ''}. Full redacted logs are in the task note.`
-        : '';
-      return errorResult(
-        exitHookFailed
-          ? `Step "${stepId}" on ${ref} was NOT completed because its onExit script failed:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
-          : gate.infrastructureError
-            ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
-            : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
-        {
-          code: exitHookFailed
-            ? 'step_exit_script_failed'
-            : gate.infrastructureError
-              ? 'gate_infrastructure_error'
-              : 'gate_rejected',
-          retryable: !gate.paused && !gate.infrastructureError,
-        },
-      );
+      return {
+        content: [{ type: 'text' as const, text: advanceGateFailureText(ref, stepId, gate) }],
+        isError: true,
+      };
     }
     sessionStepCompleted = true;
-    const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
-    const assigneeId =
-      active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;
-    const handoffNote = advanceHandoffNote({
-      status: task.status,
-      assigneeId,
-      ownerStep: isOwnerStep(active),
-    });
-    const statusLine = advanceStatusLine({
-      completedName: task.craftbook.steps.find((s) => s.id === stepId)?.name ?? stepId,
-      nextName: active?.name,
-      status: task.status,
-      taskTitle: task.title,
-      ownerStep: isOwnerStep(active),
-    });
-    const text = `${statusLine}\n\nCompleted step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
+    const text = advanceTaskStepText(ref, stepId, task);
     return okResult(
       TaskToolOutputSchema,
       {
@@ -9339,7 +9169,7 @@ server.tool(
 
 server.tool(
   'read_task_notes',
-  'Read the chronological feed of timestamped notes for a task (or a specific step). Omit stepId to read the whole task feed across every step. Each entry has an author (a gezel or the user) and was appended at a known time — newest first.',
+  GEZEL_TOOL_DESCRIPTIONS.read_task_notes,
   ReadTaskNotesInputSchema.shape,
   async ({ ref, stepId }) => {
     const parsed = await parseRef(ref);
@@ -9356,14 +9186,14 @@ server.tool(
         count: notes.length,
         details: { notes },
       },
-      { text: `${summary}\n${JSON.stringify({ notes })}` },
+      { text: readTaskNotesText(ref, effectiveStep, notes) },
     );
   },
 );
 
 server.tool(
   'write_task_note',
-  'Append one focused, dated, attributed note to a task. Prefer many small notes over a long blob — teammates and you will read this feed later. Author is auto-attributed to you.',
+  GEZEL_TOOL_DESCRIPTIONS.write_task_note,
   WriteTaskNoteInputSchema.shape,
   async ({ ref, text, note, content, stepId }) => {
     const body = text ?? note ?? content;
@@ -9384,7 +9214,7 @@ server.tool(
       },
       gezelId ? { actorGezelId: gezelId } : {},
     );
-    const summary = `Appended note ${appended.id} to ${ref}${effectiveStep ? `/${effectiveStep}` : ''} at ${appended.at}.`;
+    const summary = writeTaskNoteText(ref, effectiveStep, appended);
     return okResult(
       TaskToolOutputSchema,
       {
@@ -9526,13 +9356,9 @@ async function resolveProjectId(input: string): Promise<string> {
     }
     throw err;
   }
-  const lc = input.trim().toLowerCase();
-  const byName = all.find((p) => p.name.toLowerCase() === lc);
-  if (byName) return byName.id;
-  const available = all.map((p) => `"${p.id}" (${p.name})`).join(', ');
-  throw new Error(
-    `project "${input}" does not exist. Available projects: ${available || '(none)'}. Project ids and exact display names are both accepted. [runtime: non-retryable] Do not retry this same project reference. Call \`list_projects\` and use an id it returns; if this is genuinely new work, launch it with \`start_project\` or the matching craftbook before messaging a gezel.`,
-  );
+  const match = findProjectByReference(all, input);
+  if (match) return match.id;
+  throw new Error(projectNotFoundMessage(input, all));
 }
 
 /**
@@ -9551,15 +9377,7 @@ async function resolveProjectId(input: string): Promise<string> {
  */
 async function resolveGezelId(input: string): Promise<string> {
   const all = (await api.listGezels()).gezels;
-  const exact = all.find((g) => g.id === input);
-  if (exact) return exact.id;
-  const lc = input.trim().toLowerCase();
-  const match = all.find(
-    (g) =>
-      g.id.toLowerCase() === lc ||
-      g.name.toLowerCase() === lc ||
-      g.roleBasedName?.toLowerCase() === lc,
-  );
+  const match = findGezelInRoster(all, input);
   if (match) return match.id;
   try {
     const g = await api.getGezel(input);
@@ -9567,18 +9385,7 @@ async function resolveGezelId(input: string): Promise<string> {
   } catch {
     /* not a listed gezel and not directly readable */
   }
-  throw new Error(
-    `gezel "${input}" not found. ${gezelRosterHint(all)} Use the id (the slug), the friendly name, or the role-based name.`,
-  );
-}
-
-function gezelRosterHint(
-  gezels: ReadonlyArray<{ id: string; name: string; roleBasedName?: string }>,
-): string {
-  const available = gezels
-    .map((g) => `"${g.id}" (${g.name}${g.roleBasedName ? `, role: ${g.roleBasedName}` : ''})`)
-    .join(', ');
-  return `Available: ${available || '(none)'}.`;
+  throw new Error(gezelNotFoundMessage(input, all));
 }
 
 async function availableGezelsHint(): Promise<string> {
@@ -10867,29 +10674,9 @@ server.tool(
 );
 
 /** Per-hit snippet cap in the rendered `search` text (structuredContent keeps the full snippet). */
-const SEARCH_SNIPPET_MAX_CHARS = 200;
-
-function clampSearchSnippet(snippet: string): string {
-  const collapsed = snippet.replace(/\s+/g, ' ').trim();
-  if (collapsed.length <= SEARCH_SNIPPET_MAX_CHARS) return collapsed;
-  return `${collapsed.slice(0, SEARCH_SNIPPET_MAX_CHARS - 1).trimEnd()}…`;
-}
-
-/**
- * Token budget for the rendered `search` text. The model explicitly asked for
- * results, so it gets 2× the per-turn indexed-context ceiling for its window;
- * when the window is unknown (env var absent), a fixed budget that keeps the
- * worst case around ~8KB instead of the ~24KB an unbudgeted 30×800-char
- * response could reach.
- */
-function searchTextBudgetTokens(): number {
-  const ceiling = contextBudgetCeiling(sessionContextWindow);
-  return Number.isFinite(ceiling) ? ceiling * 2 : 2_000;
-}
-
 server.tool(
   'search',
-  "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
+  GEZEL_TOOL_DESCRIPTIONS.search,
   SearchInputSchema.extend({
     sources: z
       .array(
@@ -10943,85 +10730,19 @@ server.tool(
         }
         return result;
       });
-      const lines = modelResults.map((r) => {
-        const provenance = r.retrievalSource ?? r.source ?? r.kind;
-        const projectScope =
-          r.projectId && r.projectId !== projectId ? ` project=${r.projectId}` : '';
-        // Mark only high-confidence hits; unmarked rows are the weak tier —
-        // a marker on every row would just spend tokens saying nothing.
-        const confidence = r.tier === 'strong' ? ' strong' : '';
-        const lineSpan = r.line
-          ? `:${r.line}${r.lineEnd && r.lineEnd !== r.line ? `-${r.lineEnd}` : ''}`
-          : '';
-        // Knowledge rows have no filesystem path — the citation URI is the
-        // handle the model passes to read_document.
-        const where = r.path ? `${r.path}${lineSpan}` : (r.uri ?? r.title);
-        const title = !r.path && r.uri ? ` ${r.title}` : '';
-        const preview = r.snippet ? ` — ${clampSearchSnippet(r.snippet)}` : '';
-        return `[${provenance}${projectScope}${confidence}] ${where}${title}${preview}`;
-      });
-      const craftbookLines = res.craftbooks.map((craftbook) => {
-        const source =
-          craftbook.source === 'bundled'
-            ? 'Gilde'
-            : craftbook.source === 'project'
-              ? 'project-local'
-              : 'local';
-        const description = craftbook.description ? ` — ${craftbook.description}` : '';
-        const callArguments = JSON.stringify(craftbook.invocation.arguments);
-        return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`invoke_craftbook\` directly with arguments \`${callArguments}\`; otherwise ignore it.`;
-      });
-      // A source that timed out is not a source with nothing on the topic. A
-      // researcher told "no match" records the corpus as empty and moves on,
-      // which is how a cold reference-catalog model read as "the food
-      // catalog has nothing on quiche".
       const incomplete = res.sourcesIncomplete === true;
-      // Off-topic matches the relevance model left out. Named, so "nothing
-      // relevant" never reads as "nothing indexed".
-      const weak = res.hiddenBelowRelevanceFloor ?? 0;
-      const weakNote = weak > 0 ? ` (${weak} weak match${weak === 1 ? '' : 'es'} hidden)` : '';
-      const resultSummary = modelResults.length
-        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${incomplete ? ' (partial: some sources did not answer in time)' : res.truncated ? ' (truncated)' : ''}${weakNote}`
-        : incomplete
-          ? 'Nothing returned yet: some sources did not answer in time, so this is not evidence the topic is absent. Repeat the same search once before concluding there is no indexed material'
-          : weak > 0
-            ? `No closely relevant results${weakNote}`
-            : 'No indexed project knowledge matched';
-      const summary = res.craftbooks.length
-        ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
-        : `${resultSummary}.`;
-      // Budget the rendered text to the session model's context window.
-      // Summary and craftbook recipes are small and load-bearing, so they are
-      // reserved first; result rows then fill the remainder (always at least
-      // one, so a tight window still gets the best hit).
-      const craftbookSection = craftbookLines.length
-        ? `Craftbook options:\n${craftbookLines.join('\n')}`
-        : null;
-      const budget = searchTextBudgetTokens();
-      let usedTokens =
-        estimateTokens(summary) + (craftbookSection ? estimateTokens(craftbookSection) : 0);
-      const shownLines: string[] = [];
-      for (const line of lines) {
-        const cost = estimateTokens(line);
-        if (shownLines.length > 0 && usedTokens + cost > budget) break;
-        shownLines.push(line);
-        usedTokens += cost;
-      }
-      const hidden = lines.length - shownLines.length;
-      const moreExists = res.truncated || hidden > 0;
-      const nextCursor =
-        moreExists && shownLines.length > 0 ? (cursor ?? 0) + shownLines.length : undefined;
-      // Prescriptive recovery, grep_files-style: a truncated response tells
-      // the model exactly how to get the rest instead of dead-ending.
-      const truncationFooter =
-        moreExists && nextCursor !== undefined
-          ? `Results truncated${hidden > 0 ? ` (${hidden} retrieved but not shown — output budgeted to the context window)` : ''}. Continue with cursor=${nextCursor}, or narrow with pathPrefix/sources.`
-          : null;
-      const sections = [
-        ...(shownLines.length ? [shownLines.join('\n')] : []),
-        ...(truncationFooter ? [truncationFooter] : []),
-        ...(craftbookSection ? [craftbookSection] : []),
-      ];
+      const { text, summary, moreExists, hidden, nextCursor } = searchResultText({
+        results: modelResults,
+        craftbooks: res.craftbooks,
+        projectId,
+        truncated: res.truncated === true,
+        sourcesIncomplete: incomplete,
+        ...(res.hiddenBelowRelevanceFloor !== undefined
+          ? { hiddenBelowRelevanceFloor: res.hiddenBelowRelevanceFloor }
+          : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
+        ...(sessionContextWindow !== undefined ? { contextWindow: sessionContextWindow } : {}),
+      });
       return okResult(
         SearchToolOutputSchema,
         {
@@ -11041,7 +10762,7 @@ server.tool(
           engine: 'scoped-index',
           craftbooks: res.craftbooks,
         },
-        { text: sections.length ? `${summary}\n${sections.join('\n\n')}` : summary },
+        { text },
       );
     } catch (err) {
       return errorResult(`search failed: ${unwrapApiError(err)}`);
@@ -11940,32 +11661,12 @@ server.tool(
 
 server.tool(
   'list_scripts',
-  'List the scripts available to this gezel: project-scoped scripts plus the read-only STANDARD library packed into the app. Each entry returns its name, one-line description, input fields (with types), and required capabilities. Standard-library entries (mostly `kind: gate` checks like checkFileMinBytes / checkContains / checkHtmlComplete) are the preferred vocabulary for craftbook step gates — reference them with `scope: "standard"` and parameterize via `inputs` instead of writing new scripts.',
+  GEZEL_TOOL_DESCRIPTIONS.list_scripts,
   ListScriptsInputSchema.shape,
   async ({ project }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     const res = await api.listProjectScripts(resolved);
     const std = await api.listStandardScripts().catch(() => ({ scripts: [] }));
-    const fmt = (s: { name: string; meta: ScriptMeta }) => {
-      const inputs = s.meta.inputs
-        ? Object.entries(s.meta.inputs)
-            .map(([k, f]) => `${k}: ${f.type}${f.required ? '' : '?'}`)
-            .join(', ')
-        : '—';
-      const requires = s.meta.requires?.length ? s.meta.requires.join(', ') : '—';
-      return `• ${s.name} — ${s.meta.description}\n    inputs: ${inputs}\n    requires: ${requires}`;
-    };
-    const sections: string[] = [];
-    sections.push(
-      res.scripts.length
-        ? `## Project scripts\n${res.scripts.map(fmt).join('\n')}`
-        : 'No project scripts yet.',
-    );
-    if (std.scripts.length) {
-      sections.push(
-        `## Standard library (read-only, scope: "standard")\n${std.scripts.map(fmt).join('\n')}`,
-      );
-    }
     const items = [
       ...res.scripts.map((script) => ({ ...script, scope: 'project' })),
       ...std.scripts.map((script) => ({ ...script, scope: 'standard' })),
@@ -11974,14 +11675,14 @@ server.tool(
     return okResult(
       ListToolOutputSchema,
       { summary, items, count: items.length },
-      { text: `${summary}\n${sections.join('\n\n')}` },
+      { text: listScriptsText(res.scripts, std.scripts) },
     );
   },
 );
 
 server.tool(
   'run_installed_script',
-  "Run an ALREADY-INSTALLED project script by NAME — one of the scripts `list_scripts` shows, including ops/probe scripts a craftbook installed. Takes a name, never a file path. To run a file you just wrote yourself (e.g. `tools/derive.mjs`), use `run_nodejs_script` — not this. When a task, kickoff, or step tells you to run a named script, THIS is the runner — not `run_package_script` or `run_npx`. Input is validated against the script's meta.inputs. Returns the stamped output, per-call trace summary, and run id. Runs with undeclared capabilities or missing required inputs fail fast.",
+  GEZEL_TOOL_DESCRIPTIONS.run_installed_script,
   RunInstalledScriptInputSchema.shape,
   async ({ project, name, scope, input }) => {
     // A path-shaped `name` means the model wanted to run a file it wrote,
@@ -12018,7 +11719,7 @@ server.tool(
 
 server.tool(
   'get_script_run',
-  'Fetch a persisted ScriptRun by id. Returns the full call trace, stdout/stderr logs, and stamped output for post-hoc inspection.',
+  GEZEL_TOOL_DESCRIPTIONS.get_script_run,
   GetScriptRunInputSchema.shape,
   async ({ project, runId }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
@@ -12038,7 +11739,7 @@ server.tool(
           ...(run.output !== undefined ? { output: run.output } : {}),
           ...(run.error ? { error: run.error } : {}),
         },
-        { text: `${summary}\n${JSON.stringify(run, null, 2)}` },
+        { text: getScriptRunText(run) },
       );
     } catch (err) {
       const msg = unwrapApiError(err);

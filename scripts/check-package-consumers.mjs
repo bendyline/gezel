@@ -91,6 +91,7 @@ const IMPORTABLE = [
   '@bendyline/gezel/markdown',
   '@bendyline/gezel/native',
   '@bendyline/gezel/checks',
+  '@bendyline/gezel/local-loop',
   '@bendyline/gezel-client',
   '@bendyline/gezel-client/node',
   '@bendyline/gezel-sdk',

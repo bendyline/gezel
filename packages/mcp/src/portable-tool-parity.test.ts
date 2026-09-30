@@ -7,7 +7,7 @@
  * `KNOWN_SCHEMA_DIVERGENCE` lists the pairs that still disagree, and a
  * change may only shrink it.
  */
-import { TOOL_CALL_FIXTURES } from '@bendyline/gezel';
+import { GEZEL_TOOL_DESCRIPTIONS, TOOL_CALL_FIXTURES } from '@bendyline/gezel';
 import { portableToolInputSchema, portableToolNames } from '@bendyline/gezel/runtime';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
@@ -68,6 +68,18 @@ describe('portable tools against the MCP inventory', () => {
       else if (registry[name]?.registration !== 'always')
         problems.push(`${name}: conditional on desktop`);
       else if (!registry[name]?.modelFacing) problems.push(`${name}: not model-facing on desktop`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('describes every portable tool in the shared words both hosts show the model', () => {
+    const registered = server._registeredTools as Record<string, { description?: string }>;
+    const shared = GEZEL_TOOL_DESCRIPTIONS as Record<string, string>;
+    const problems: string[] = [];
+    for (const name of portableToolNames()) {
+      if (!shared[name]) problems.push(`${name}: no shared description`);
+      else if (registered[name]?.description !== shared[name])
+        problems.push(`${name}: the server registers different words`);
     }
     expect(problems).toEqual([]);
   });

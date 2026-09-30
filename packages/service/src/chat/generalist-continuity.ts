@@ -29,28 +29,8 @@ export function renderWriteBailContinuation(stepId: string): string {
 
 export { isContextOverflowError, sessionContextPoisoned } from '@bendyline/gezel';
 
-/**
- * Entry preface: a fresh-launch gezel has never seen this task before, so
- * before the "you've been assigned" line it is oriented with the craftbook
- * the task came from and the full step arc. The per-step procedure lives in
- * the system prompt; this is the bird's-eye "what is this task and where
- * does my step sit in it" the seed otherwise lacks. Only for the `entry`
- * kind — handoff recipients inherit the same system-prompt context and the
- * prior gezels' notes (and a generalist task carries a Task outline on every
- * turn), so they don't need it re-stated.
- */
-export function renderEntryPreface(task: Task, dispatchStepId: string): string {
-  const cb = task.craftbook;
-  const stepArc = cb.steps
-    .map((s, i) => {
-      const here = s.id === dispatchStepId ? ' ← your step' : '';
-      const desc = s.description?.trim() ? ` — ${s.description.trim()}` : '';
-      return `${i + 1}. ${s.name}${desc}${here}`;
-    })
-    .join('\n');
-  const cbDesc = cb.description?.trim() ? ` ${cb.description.trim()}` : '';
-  return `Task ${task.ref} ("${task.title}") was just created from the **${cb.name}** craftbook.${cbDesc}\n\nIts steps:\n${stepArc}\n\n`;
-}
+// Shared with every host that runs craftbook steps.
+export { renderEntryPreface } from '@bendyline/gezel';
 
 /**
  * The model tier `providerName` would execute a gezel's turns with: the

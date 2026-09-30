@@ -70,7 +70,26 @@ public final class MobileProductEvalTest {
         if (modelPath != null && provider.equals("llama-cpp")) {
             File source = new File(modelPath);
             assertTrue("A real trained GGUF must be staged before the eval", source.isFile() && source.length() > 1024 * 1024);
-            String modelId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(source)).getString("id");
+            String catalogSource = arguments.getString("evalModelSource");
+            String modelId;
+            if (catalogSource != null) {
+                // A catalog GGUF is published the way its download publishes it,
+                // so the product resolves its catalog tuning as for a user who
+                // downloaded it. The transfer manager hashes before publishing;
+                // so does this.
+                JSONObject identity = new JSONObject(new String(android.util.Base64.decode(catalogSource, android.util.Base64.DEFAULT), StandardCharsets.UTF_8));
+                String name = new String(android.util.Base64.decode(arguments.getString("evalModelName"), android.util.Base64.DEFAULT), StandardCharsets.UTF_8);
+                assertEquals("The staged GGUF must be the catalog's file", identity.getString("sha256"), sha256(source));
+                modelId = java.util.UUID.randomUUID().toString();
+                File folder = new File(store.downloadsRoot(), modelId);
+                assertTrue("Cannot stage the catalog download", folder.mkdirs());
+                File partial = new File(folder, "model.part");
+                Files.copy(source.toPath(), partial.toPath());
+                try { store.publishDownloadedModel(modelId, name, identity, partial); }
+                finally { Files.deleteIfExists(partial.toPath()); Files.deleteIfExists(folder.toPath()); }
+            } else {
+                modelId = store.importModel(instrumentation.getTargetContext().getContentResolver(), Uri.fromFile(source)).getString("id");
+            }
             importedModel = new File(root, "models/" + modelId + ".gguf");
             store.selectModel(modelId);
             if ("1".equals(arguments.getString("evalDeleteStaged"))) {
@@ -100,7 +119,7 @@ public final class MobileProductEvalTest {
         }
         JSONObject options = new JSONObject()
             .put("runId", runId).put("provider", provider)
-            .put("trialTimeoutMs", Integer.parseInt(arguments.getString("evalTrialTimeoutMs", "180000")))
+            .put("trialTimeoutMs", Integer.parseInt(arguments.getString("evalTrialTimeoutMs", "1200000")))
             .put("identity", new JSONObject().put("os", "Android").put("osVersion", Build.VERSION.RELEASE)
                 .put("apiLevel", Build.VERSION.SDK_INT).put("device", Build.MODEL).put("abi", Build.SUPPORTED_ABIS[0])
                 .put("nativeHarness", "Android instrumentation packaged WebView").put("harnessSourceSha256", sourceHash).put("productIndexSha256", productIndexHash)
@@ -238,6 +257,17 @@ public final class MobileProductEvalTest {
         instrumentation.runOnMainSync(() -> webView = activity.getBridge().getWebView());
         waitForApp();
         evaluate(source);
+    }
+
+    private static String sha256(File file) throws Exception {
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        try (java.io.InputStream input = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[1 << 20];
+            for (int count; (count = input.read(buffer)) != -1;) digest.update(buffer, 0, count);
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte value : digest.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
+        return hex.toString();
     }
 
     private static String sha256(byte[] bytes) throws Exception {

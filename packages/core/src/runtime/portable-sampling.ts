@@ -1,6 +1,6 @@
 import type { PortableSampling } from '../mobile/inference.js';
 import type { ChatModelTuning } from '../schemas/model-tuning.js';
-import { resolveTuning } from '../tuning-resolve.js';
+import { type ResolvedTuning, resolveTuning } from '../tuning-resolve.js';
 import type { PortableCatalogModel } from './content.js';
 
 export interface PortableSamplingInput {
@@ -16,16 +16,14 @@ export interface PortableSamplingInput {
 }
 
 /**
- * The sampling a phone gives its engine for one turn: the model's tuning
- * resolved through the layers the desktop uses (gezel override > install
- * default > profile > catalog). Only fields the native bridge implements are
- * carried, clamped to what it accepts so a catalog value can never fail a
- * turn; the reply-length budget stays the phone's own. With no catalog entry
- * and no override, the engine default stands.
+ * A model's tuning resolved for one phone turn through the layers the desktop
+ * uses (gezel override > install default > profile > catalog), or undefined
+ * when nothing sets any. Structured chat writes it onto the request exactly as
+ * the desktop's llama.cpp session does.
  */
-export function portableSampling(input: PortableSamplingInput): PortableSampling | undefined {
+export function portableTuning(input: PortableSamplingInput): ResolvedTuning | undefined {
   if (!input.catalog?.tuning && !input.installDefault && !input.override) return undefined;
-  const { sampling } = resolveTuning({
+  return resolveTuning({
     ...(input.catalog?.tuning ? { catalog: input.catalog.tuning } : {}),
     ...(input.installDefault ? { installDefault: input.installDefault } : {}),
     ...(input.override ? { override: input.override } : {}),
@@ -38,6 +36,18 @@ export function portableSampling(input: PortableSamplingInput): PortableSampling
       ? { styleReasoningFormat: input.catalog.reasoningFormat }
       : {}),
   });
+}
+
+/**
+ * The sampling a phone gives its engine for one turn: {@link portableTuning}'s
+ * sampling, keeping only fields the native bridge implements, clamped to what
+ * it accepts so a catalog value can never fail a turn; the reply-length budget
+ * stays the phone's own. With no catalog entry and no override, the engine
+ * default stands.
+ */
+export function portableSampling(input: PortableSamplingInput): PortableSampling | undefined {
+  const sampling = portableTuning(input)?.sampling;
+  if (!sampling) return undefined;
   const out: PortableSampling = {};
   const within = (value: unknown, min: number, max: number): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
