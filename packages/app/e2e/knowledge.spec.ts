@@ -7,13 +7,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
  * Knowledge catalogs, end to end (WS-I exit flow): build a real `.gezk`,
- * install it through Settings → Knowledge, watch the sidebar area appear
- * exactly when the first catalog registers, browse the shipped TOC to a
- * document, copy a citation, disable the catalog (area disappears), and
- * remove it. Then the gilde flow: the same archive pinned by a
- * `knowledge-catalog` entry in a fixture gilde data dir, served by a local
- * stand-in for Hugging Face, downloaded from the Knowledge section's catalog
- * browser and removed again.
+ * install it through Settings → Knowledge, browse the shipped TOC to a
+ * document, copy a citation, disable the catalog, and remove it. The bundled
+ * Handboek is always registered, so the sidebar area is present throughout
+ * and the Knowledge view opens on it. Then the gilde flow: the same archive
+ * pinned by a `knowledge-catalog` entry in a fixture gilde data dir, served by
+ * a local stand-in for Hugging Face, downloaded from the Knowledge section's
+ * catalog browser and removed again.
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
@@ -52,10 +52,13 @@ function pinnedGildeDataDir(): string {
 
 async function buildGildeData(root: string, archivePath: string): Promise<void> {
   await cp(pinnedGildeDataDir(), root, { recursive: true });
-  // A pinned kind index lists only the published items, and the loader
-  // trusts it over the folders, so the fixture would never be seen. Without
-  // it the loader walks the folders, which it documents as equivalent.
-  await rm(join(root, 'knowledge-catalogs', 'index.json'), { force: true });
+  // Pinned kind indexes list only the published items, and the loader trusts
+  // them over the folders, so the fixture would never be seen. It reads
+  // raw-index.json, then the legacy index.json, and without either walks the
+  // folders, which it documents as equivalent.
+  for (const index of ['raw-index.json', 'index.json']) {
+    await rm(join(root, 'knowledge-catalogs', index), { force: true });
+  }
   const bytes = await readFile(archivePath);
   const itemDir = join(root, 'knowledge-catalogs', 'sh', 'shop-notes');
   await mkdir(join(itemDir, 'versions', '1.0.0'), { recursive: true });
@@ -271,8 +274,8 @@ test.describe('Knowledge catalogs', () => {
   });
 
   test('install → area appears → browse → cite → disable → remove', async () => {
-    // The area is hidden while no catalog is registered.
-    await expect(page.getByTestId('sidebar-area-knowledge')).toHaveCount(0);
+    // The bundled Handboek puts the area in the rail before any install.
+    await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible({ timeout: 10_000 });
 
     // Install through Settings → Knowledge (typed path — no native dialog
     // in a driven session).
@@ -293,16 +296,16 @@ test.describe('Knowledge catalogs', () => {
       fullPage: true,
     });
 
-    // The sidebar area flips on at registered-count ≥ 1.
-    await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible({ timeout: 10_000 });
-
-    // Browse: TOC → topic → document → provenance actions.
+    // Browse: TOC → topic → document → provenance actions. The view opens on
+    // the bundled Handboek, so switch to the catalog just installed.
     await page.getByTestId('sidebar-area-knowledge').click();
     await expect(page.getByTestId('knowledge-view')).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('combobox', { name: 'Catalog' }).selectOption({ label: 'Shop Notes' });
     // gezk 0.6: the Joinery row rolls its nested Variants shelf up (two
     // documents, not one), the listing puts ordered documents first, and the
     // body's asset paints from a blob: URL fetched through the client.
-    const joinery = page.getByRole('button', { name: /Joinery/ });
+    // Anchored: a topic with a nested shelf also has an "Expand Joinery" toggle.
+    const joinery = page.getByRole('button', { name: /^Joinery/ });
     await expect(joinery).toBeVisible();
     await expect(joinery.locator('.knowledge-topic-count')).toHaveText('2');
     await joinery.click();
@@ -325,8 +328,7 @@ test.describe('Knowledge catalogs', () => {
       fullPage: true,
     });
 
-    // Disable: the catalog stays REGISTERED, so the area stays in the rail
-    // (visibility flips at registered-count ≥ 1, not enabled-count).
+    // Disable: the catalog stays registered, and so does its row.
     await page.getByTestId('sidebar-area-settings').click();
     await page.getByTestId('settings-nav-knowledge').click();
     // The checkbox is controlled: its state lands after the daemon round
@@ -335,15 +337,14 @@ test.describe('Knowledge catalogs', () => {
     const enabledToggle = page.getByTestId('knowledge-catalog-shop-notes').getByRole('checkbox');
     await enabledToggle.click();
     await expect(enabledToggle).not.toBeChecked({ timeout: 10_000 });
-    await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible();
 
-    // Remove: the registration goes away, and with it the sidebar area.
+    // Remove: the registration goes away. The Handboek keeps the area.
     await page.getByRole('button', { name: 'Remove', exact: true }).click();
     await page.getByRole('button', { name: 'Remove catalog' }).click();
-    await expect(page.getByText('Nothing installed yet', { exact: false })).toBeVisible({
+    await expect(page.getByTestId('knowledge-catalog-shop-notes')).toHaveCount(0, {
       timeout: 10_000,
     });
-    await expect(page.getByTestId('sidebar-area-knowledge')).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible();
   });
 
   test('download from the catalog → installed → remove', async () => {
@@ -372,15 +373,12 @@ test.describe('Knowledge catalogs', () => {
     await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible({ timeout: 10_000 });
     await captureScreenshot(page, screenshotDir, 'knowledge-catalog-downloaded');
 
-    // Remove: the card offers Download again, and the area disappears.
+    // Remove: the row goes and the card offers Download again.
     await row.getByRole('button', { name: 'Remove', exact: true }).click();
     await page.getByRole('button', { name: 'Remove catalog' }).click();
-    await expect(page.getByText('Nothing installed yet', { exact: false })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(row).toHaveCount(0, { timeout: 10_000 });
     await expect(card.getByRole('button', { name: 'Download', exact: true })).toBeEnabled({
       timeout: 10_000,
     });
-    await expect(page.getByTestId('sidebar-area-knowledge')).toHaveCount(0, { timeout: 10_000 });
   });
 });
