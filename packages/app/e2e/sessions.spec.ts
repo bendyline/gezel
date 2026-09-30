@@ -170,9 +170,13 @@ test("sessions — the picker's New thread row starts a fresh thread", async () 
 
     // A fresh thread is a destination in the picker, not a button — the
     // toolbar's own button drafts a second message inside the open thread.
-    // Scope to the menu: the trigger renders the same row as its placeholder.
+    // Scope to the menu: the trigger renders the same row as its placeholder,
+    // and New draft is a sibling action row.
     await sessionTrigger.click();
-    await page.locator('.gezel-chat-session-menu .session-row-action').click();
+    await page
+      .locator('.gezel-chat-session-menu .session-row-action')
+      .filter({ hasText: 'New thread' })
+      .click();
     await expect(sessionTrigger).toHaveText('New thread', { timeout: 10_000 });
     await captureScreenshot(page, {
       path: join(screenshotDir, 'sessions-05-new-session.png'),

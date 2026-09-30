@@ -110,17 +110,39 @@ async function readTaskObservation<T>(
 ): Promise<T> {
   for (let retries = 0; ; retries++) {
     signal.throwIfAborted();
-    if (budget.expired()) throw new CliError('Task observation timed out.');
+    // The budget bounds retries, never the first attempt: a wait whose budget
+    // lapsed before any read would otherwise throw instead of reporting the
+    // task as timed out. `Date.now()` ticks in whole milliseconds, so a 1 ms
+    // budget lapses about 1% of the time before the first read even starts.
+    if (retries > 0 && budget.expired()) throw new CliError('Task observation timed out.');
     try {
       return await read();
     } catch (error) {
       signal.throwIfAborted();
       if (!transientTaskReadError(error) || retries >= READ_RETRY_DELAYS.length || budget.expired())
         throw error;
-      await delay(Math.min(READ_RETRY_DELAYS[retries]!, budget.remainingMs()), undefined, {
-        signal,
-      });
+      await sleepWithinBudget(READ_RETRY_DELAYS[retries]!, budget, signal);
     }
+  }
+}
+
+/**
+ * A backoff the budget cannot hold ends only once the budget reads spent.
+ * Linux timers can resolve a millisecond before `Date.now()` agrees the time
+ * has passed, and a clamped sleep that wakes that tick early would buy one
+ * more read the budget had already ruled out.
+ */
+async function sleepWithinBudget(
+  backoffMs: number,
+  budget: AwakeBudget,
+  signal: AbortSignal,
+): Promise<void> {
+  if (budget.remainingMs() > backoffMs) {
+    await delay(backoffMs, undefined, { signal });
+    return;
+  }
+  while (!budget.expired()) {
+    await delay(Math.max(1, budget.remainingMs()), undefined, { signal });
   }
 }
 

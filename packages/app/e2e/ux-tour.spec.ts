@@ -96,6 +96,8 @@ test('01 - home workshop renders and a chat turn round-trips', async () => {
 });
 
 test('02 - the home tour tab shows the intro article', async () => {
+  // The greeting steps aside once a conversation starts, and 01 started one.
+  await page.getByRole('button', { name: 'Expand the greeting' }).click();
   const tour = page.getByRole('button', { name: /New here/ });
   await tour.click();
   await expect(tour).toHaveAttribute('aria-pressed', 'true');

@@ -48,14 +48,14 @@ test('bundled Handboek opens in Knowledge with its articles and images', async (
   await expect(view.locator('.knowledge-reader-body')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('heading', { level: 2, name: 'What is gezel?' })).toBeVisible();
 
-  // The bundled image is fetched through the catalog asset route.
+  // The brand image paints from the UI bundle (`inlineBundledAssets`), so the
+  // first paint never requests a path no route serves. knowledge.spec covers
+  // the catalog asset route's blob: images.
   await page.waitForFunction(
     () => {
       const imgs = Array.from(document.querySelectorAll('.knowledge-reader-body img'));
       return imgs.some(
-        (el) =>
-          (el as HTMLImageElement).src.startsWith('blob:') &&
-          (el as HTMLImageElement).naturalWidth > 0,
+        (el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0,
       );
     },
     undefined,

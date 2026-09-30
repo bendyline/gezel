@@ -124,6 +124,15 @@ describe('task wait', () => {
     };
     expect((await waitForTask(client, 'p/1', { timeoutMs: 1, pollMs: 2 })).exitCode).toBe(3);
   });
+  it('observes the task once even when the budget lapsed before the first read', async () => {
+    const client = {
+      getTaskByRef: vi.fn().mockResolvedValue(task('active')),
+      listTaskChildren: vi.fn(),
+    };
+    const result = await waitForTask(client, 'p/1', { timeoutMs: 0 });
+    expect(result).toMatchObject({ outcome: 'timeout', exitCode: 3 });
+    expect(client.getTaskByRef).toHaveBeenCalledOnce();
+  });
   it('exits when a task is waiting for a user answer', async () => {
     const client = {
       getTaskByRef: vi.fn().mockResolvedValue(task('active')),
@@ -223,6 +232,26 @@ describe('bounded task observation recovery', () => {
     expect(result.outcome).toBe('timeout');
     expect(client.listTaskChildren).toHaveBeenCalledOnce();
     expect(client.setTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it('spends a clamped backoff without another read when timers wake early', async () => {
+    // Linux timers can resolve a millisecond before Date.now() agrees; an
+    // instant sleep is the extreme case, and reproduces it on every platform.
+    vi.resetModules();
+    vi.doMock('node:timers/promises', () => ({ setTimeout: async () => {} }));
+    try {
+      const { waitForTask: waitWithEarlyTimers } = await import('./craftbook-command.js');
+      const client = {
+        getTaskByRef: vi.fn().mockResolvedValue(task('active')),
+        listTaskChildren: vi.fn().mockRejectedValue(reset()),
+      };
+      const result = await waitWithEarlyTimers(client, 'p/1', { timeoutMs: 20 });
+      expect(result.outcome).toBe('timeout');
+      expect(client.listTaskChildren).toHaveBeenCalledOnce();
+    } finally {
+      vi.doUnmock('node:timers/promises');
+      vi.resetModules();
+    }
   });
 
   it('honors abort during an in-flight status read', async () => {
