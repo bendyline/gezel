@@ -370,6 +370,15 @@ desktop window driven by a mouse keeps the desktop navigation's row heights
 and caret column. Project and conversation tabs drop to icons only when
 their labels no longer fit (see [Tab rows fit by shedding labels](#patterns)),
 and narrow file browsers use list → detail/back while keeping editors mounted.
+Every master/detail area does the same below 640px of its own width — Tasks,
+Craftbooks, History, Gezellen: the list first, the item in its place when
+tapped, and a secondary "Back to …" key above it. Side by side at phone width
+they left the editor about 70px wide. A chat whose only pane is Chat shows no
+pane tab row. A described tray stays one row on a phone, its keys sharing the
+width and wrapping their words, because the stem to its readout can only reach
+from the first row. The composer's keys, the Settings group chevrons, and the
+row action menus take the 44px hit area; the gezel header's Context and
+Sandbox chips do not yet.
 The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search

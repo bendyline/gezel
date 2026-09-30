@@ -4038,6 +4038,14 @@ export const CreateProjectRequestSchema = z.object({
    */
   mode: z.enum(['crew', 'solo']).optional(),
   /**
+   * `none` skips the lead the route otherwise seats (a Voorman for a crew
+   * project, a Builder for a solo folder project). For callers that seat their
+   * own lead right after creating the project: the Meester's kickoff macros
+   * mint a fresh Voorman, and with the route minting one too every kickoff
+   * roster carried two, one of them idle.
+   */
+  lead: z.enum(['auto', 'none']).optional(),
+  /**
    * Opt out of structural and content indexing for this project's workspace.
    * Missing/true keeps the historical indexing behavior.
    */

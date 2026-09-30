@@ -57,6 +57,26 @@
 .app.app-compact .home-workshop-greeting {
   max-height: 30%;
   overflow-y: auto;
+  /* The cap keeps the chat usable; spend it on words rather than the desktop
+     band's air, or the tip's last line is sliced by the chat below. */
+  padding-top: 12px;
+  padding-bottom: 14px;
+}
+
+.app.app-compact .home-workshop-greeting-top {
+  margin-bottom: 8px;
+}
+
+.app.app-compact .home-workshop-headline {
+  font-size: 26px;
+}
+
+.app.app-compact .home-workshop-tip {
+  margin-top: 10px;
+}
+
+.app.app-compact .home-workshop-tip-body {
+  font-size: 15px;
 }
 
 .app.app-compact .home-workshop-conversation .chat-rail-main {
@@ -67,6 +87,12 @@
 .app.app-compact .two-col > section:has(> .gezel-detail-chat),
 .app.app-compact .task-detail-panel:has(.task-detail-chat-mode) {
   padding: 0;
+}
+
+/* The chat tab drops its section's padding; the back key keeps the inset
+   the header and tabs below it take, instead of wedging into the corner. */
+.app.app-compact .two-col > section:has(> .gezel-detail-chat) > .gezellen-back {
+  margin: 0.75rem 0.75rem 0.25rem;
 }
 
 .app.app-compact .gezel-detail-chat > :is(.detail-header, .entity-tabs-row),
@@ -669,4 +695,53 @@ html[data-layout="mobile"]
   .app-sidebar-scroll
   :is(.app-sidebar-item.active, .app-sidebar-tree .tree-row.tree-row-selected)::after {
   display: none;
+}
+
+/* Finger-sized hit areas (docs/ux.md: 44px on touch) for the controls a phone
+   user reaches for most — the composer's keys, the Settings group chevrons,
+   and the row action menus — which otherwise sit at 15–30px. Faces keep
+   their desktop recipe; only the box grows. */
+@media (any-pointer: coarse) {
+  .app.app-compact
+    :is(
+      .chat-send-btn-icon,
+      .chat-composer-recipient-trigger,
+      .chat-composer-expand-btn,
+      .chat-narrate-btn,
+      .chat-task-btn,
+      .chat-stop-btn,
+      .chat-interrupt-btn,
+      .settings-nav-group-toggle,
+      .gezel-actions-trigger,
+      .project-actions-trigger
+    ) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .app.app-compact .chat-composer-recipient-trigger {
+    transform: none;
+  }
+}
+
+/* A path has no spaces to wrap at, and a phone hides the scrollbar that would
+   reveal the rest, so let it break anywhere and read whole. */
+.app.app-compact .folders-row-path {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* A described tray's stem can only reach its panel from the first row, so on
+   a phone the tray stays one row: the keys share the width and their words
+   wrap inside them instead of the tray wrapping. */
+.app.app-compact .gz-tray--described {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  width: 100%;
+}
+
+.app.app-compact .gz-tray--described .gz-key {
+  min-width: 0;
+  white-space: normal;
 }

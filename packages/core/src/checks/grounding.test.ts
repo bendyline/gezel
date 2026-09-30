@@ -225,6 +225,31 @@ describe('citationsResolve — template slots are not citations', () => {
     expect(r.unresolved).toEqual([]);
   });
 
+  it.each(['(source: …)', '(source: —)', '(source: ...)', '(source: path)', '(source: none)'])(
+    'ignores the slot %s beside a real citation',
+    async (slot) => {
+      const report = [
+        `4. Every claim maps to a real \`${slot}\` entry — PASS.`,
+        'Evidence: (source: powerpoint/eval/deck.md).',
+      ].join('\n');
+      const r = await citationsResolve(
+        ws({ 'review.md': report, 'powerpoint/eval/deck.md': 'y' }),
+        'review.md',
+        { minCitations: 1 },
+      );
+      expect(r.ok).toBe(true);
+    },
+  );
+
+  it('still checks a real file whose name starts like a slot word', async () => {
+    const r = await citationsResolve(
+      ws({ 'review.md': 'Per (source: notes/pathology.md).' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(false);
+  });
+
   it('still checks a bracketed file path and quotes what failed', async () => {
     const r = await citationsResolve(
       ws({ 'review.md': 'Numbers from (source: <reports/q3.md>).' }),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type DeliverableWrite,
+  completionGateWorkspaceFiles,
   deliverableWrittenThisTurn,
   evaluateDeliverableGate,
   hookOwnedAdvanceHasModelOutput,
@@ -284,5 +285,36 @@ describe('evaluateDeliverableGate', () => {
       expect(r.satisfied).toBe(false);
       expect(r.reason).toContain('html-complete');
     });
+  });
+});
+
+describe('completionGateWorkspaceFiles', () => {
+  // pwa-offline 'build': advanceWhen is index.html, the gate also reads sw.js.
+  it('lists the other workspace files the completion gate reads', () => {
+    expect(
+      completionGateWorkspaceFiles(
+        [
+          { kind: 'minBytes', file: 'index.html', bytes: 600 },
+          { kind: 'htmlLint', file: './index.html' },
+          { kind: 'contains', file: 'index.html', pattern: 'serviceWorker\\.register' },
+          { kind: 'contains', file: 'sw.js', pattern: 'install' },
+          { kind: 'sniff', file: 'workspace/manifest.json', sniff: 'json-valid' },
+        ],
+        'index.html',
+      ),
+    ).toEqual(['sw.js', 'manifest.json']);
+  });
+
+  it('skips artifact-drawer files and checks that pass on an absent file', () => {
+    expect(
+      completionGateWorkspaceFiles(
+        [
+          { kind: 'minBytes', file: 'tasks/1/notes.md', bytes: 10, artifact: true },
+          { kind: 'notContains', file: 'debug.log', pattern: 'TODO' },
+          { kind: 'fileCount', ext: ['png'], min: 3 },
+        ],
+        'index.html',
+      ),
+    ).toEqual([]);
   });
 });

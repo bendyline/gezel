@@ -12,6 +12,7 @@ import {
 import { api } from '../api.js';
 import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
+import { useCompactLayout } from '../components/useCompactLayout.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import '../styles/history.css';
@@ -93,6 +94,10 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   const [kindFilter, setKindFilter] = useState('');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+  // Too narrow for the list and an entry side by side: they take turns.
+  const compact = useCompactLayout(viewRef, 640);
+  const [showCompactDetail, setShowCompactDetail] = useState(false);
   // Transcript FTS hits for the same query — what was actually SAID, not just
   // session titles (which is all the history filter itself can match).
   const [transcriptHits, setTranscriptHits] = useState<SessionSearchResult[]>([]);
@@ -242,8 +247,21 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   );
 
   return (
-    <div className="history-view" data-testid="history-view">
-      <header className="history-header">
+    <div
+      ref={viewRef}
+      className={`history-view${compact ? ' history-view-compact' : ''}`}
+      data-testid="history-view"
+    >
+      {compact && showCompactDetail && (
+        <button
+          type="button"
+          className="secondary history-back"
+          onClick={() => setShowCompactDetail(false)}
+        >
+          Back to history
+        </button>
+      )}
+      <header className="history-header" hidden={compact && showCompactDetail}>
         <h2>History</h2>
         <div className="history-filters">
           {projectId === undefined && (
@@ -322,7 +340,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         ref={splitRef}
         style={{ ['--history-list-width' as string]: `${(listFraction * 100).toFixed(2)}%` }}
       >
-        <ul className="history-list">
+        <ul className="history-list" hidden={compact && showCompactDetail}>
           {transcriptHits.length > 0 && (
             <li className="history-item">
               <span className="history-transcript-header muted">Said in chats</span>
@@ -379,7 +397,10 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
                 <button
                   type="button"
                   className={`history-row${isSelected ? ' history-row-selected' : ''}`}
-                  onClick={() => setSelectedId(entryId)}
+                  onClick={() => {
+                    setSelectedId(entryId);
+                    setShowCompactDetail(true);
+                  }}
                 >
                   {e.entryType === 'session' ? (
                     <HistorySessionRow
@@ -408,7 +429,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
           onMouseDown={onGripMouseDown}
           onKeyDown={onGripKeyDown}
         />
-        <section className="history-detail">
+        <section className="history-detail" hidden={compact && !showCompactDetail}>
           {(() => {
             const selected = entries.find(
               (e) => (e.entryType === 'event' ? e.id : `session:${e.id}`) === selectedId,

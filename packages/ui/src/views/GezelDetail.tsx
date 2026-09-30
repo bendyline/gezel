@@ -429,7 +429,8 @@ export function GezelDetail({
                 {runtimeCapabilities().imageGeneration && (
                   <button
                     type="button"
-                    className="link-btn"
+                    className="link-btn gezel-about-draft"
+                    aria-label={generatingAbout ? 'Drafting' : 'Draft from role'}
                     disabled={generatingAbout || !selected.role}
                     title={
                       selected.role
@@ -459,7 +460,13 @@ export function GezelDetail({
                       }
                     }}
                   >
-                    {generatingAbout ? 'Drafting…' : 'Draft from role'}
+                    {generatingAbout ? (
+                      'Drafting…'
+                    ) : (
+                      <>
+                        Draft<span className="gezel-about-draft-tail"> from role</span>
+                      </>
+                    )}
                   </button>
                 )}
               </>

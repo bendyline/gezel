@@ -328,6 +328,7 @@ import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import {
+  completionGateWorkspaceFiles,
   deliverableWrittenThisTurn,
   evaluateDeliverableGate,
   hookOwnedAdvanceHasModelOutput,
@@ -2346,15 +2347,12 @@ export class ChatManager extends LocalEngineRuntime {
         continue;
       }
 
-      // A drafting task's workspace deliverable lives in the diffpack
-      // overlay — judge the proposed tree, not the untouched real one.
-      // Artifact deliverables are real in both modes.
-      const content = await (adv.artifact
-        ? this.store.readProjectArtifact(projectId, adv.file)
-        : task.diffpackId && this.draftReader
-          ? this.draftReader.read(projectId, task.diffpackId, adv.file)
-          : this.store.readProjectWorkspaceFile(projectId, adv.file)
-      ).catch(() => null);
+      const content = await this.readStepDeliverable(
+        projectId,
+        task,
+        adv.file,
+        adv.artifact === true,
+      );
       // `requireChange` steps (edit-an-existing-file deliverables) gate on
       // the model having written to `adv.file` THIS turn — presence alone
       // would advance on turn 1 since the source already exists. The
@@ -2416,6 +2414,62 @@ export class ChatManager extends LocalEngineRuntime {
       return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
     }
     return unmetEditGate ? { unmetEditGate } : {};
+  }
+
+  /**
+   * A step deliverable as the observable-progress check reads it. A drafting
+   * task's workspace deliverable lives in the diffpack overlay — judge the
+   * proposed tree, not the untouched real one. Artifact deliverables are
+   * real in both modes.
+   */
+  private readStepDeliverable(
+    projectId: string,
+    task: Task,
+    file: string,
+    artifact: boolean,
+  ): Promise<string | null> {
+    return (
+      artifact
+        ? this.store.readProjectArtifact(projectId, file)
+        : task.diffpackId && this.draftReader
+          ? this.draftReader.read(projectId, task.diffpackId, file)
+          : this.store.readProjectWorkspaceFile(projectId, file)
+    ).catch(() => null);
+  }
+
+  /**
+   * Mid-turn twin of the workspace branch of
+   * {@link maybeAutoAdvanceOnObservableProgress}: the same task status,
+   * step ownership, read and {@link evaluateDeliverableGate} verdict, so the
+   * local loop's "deliverable is ready" footer never fires on a file the
+   * end-of-turn advance would hold. It additionally waits for every other
+   * workspace file the completion gate reads (see
+   * {@link completionGateWorkspaceFiles}).
+   */
+  private async workspaceDeliverableReady(
+    projectId: string,
+    taskNum: number,
+    stepId: string,
+    gezelId: string,
+    writtenThisTurn: boolean,
+  ): Promise<boolean> {
+    const task = await this.readEffectiveTask(projectId, taskNum);
+    if (!task || taskEffectiveStatus(task) !== 'active' || task.activeStepId !== stepId) {
+      return false;
+    }
+    const step = task.craftbook.steps.find((s) => s.id === stepId);
+    const adv = step?.advanceWhen;
+    if (!step || !adv || adv.artifact) return false;
+    if (stepOwnerGezelId(task, step) !== gezelId) return false;
+    const content = await this.readStepDeliverable(projectId, task, adv.file, false);
+    const writes = writtenThisTurn ? [{ name: 'write_file', path: adv.file, success: true }] : [];
+    if (!evaluateDeliverableGate({ content, spec: adv, writes }).satisfied) return false;
+    const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
+    if (gate?.at !== 'completion') return true;
+    for (const file of completionGateWorkspaceFiles(gate.checks, adv.file)) {
+      if ((await this.readStepDeliverable(projectId, task, file, false)) === null) return false;
+    }
+    return true;
   }
 
   /**
@@ -14751,6 +14805,23 @@ export class ChatManager extends LocalEngineRuntime {
       // routing, so that's the one the anti-spin corrective names.
       const exitRefs = normalizeScriptRefs(step.onExit);
       const lastExit = exitRefs[exitRefs.length - 1];
+      // Workspace deliverables only: an artifact checkpoint already ends
+      // the turn on its write (terminalToolPolicy below), and a file the
+      // step's onEnter hook wrote proves nothing about the model's work.
+      const readyTask = taskContext.task;
+      const deliverableReady =
+        step.advanceWhen?.file &&
+        !step.advanceWhen.artifact &&
+        !stepOnEnterProducesAdvanceFile(step)
+          ? ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
+              this.workspaceDeliverableReady(
+                readyTask.projectId,
+                readyTask.num,
+                step.id,
+                record.gezelId,
+                writtenThisTurn,
+              )
+          : undefined;
       opts.activeCraftbookStep = {
         name: step.name,
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
@@ -14764,6 +14835,7 @@ export class ChatManager extends LocalEngineRuntime {
               })),
             }
           : {}),
+        ...(deliverableReady ? { deliverableReady } : {}),
       };
       const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
       const fixedEvidenceAction =

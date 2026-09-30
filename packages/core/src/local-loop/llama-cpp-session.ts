@@ -140,7 +140,11 @@ import {
 } from './required-input-reads.js';
 import { isSseComment, readSseEvents } from './sse.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from './streaming-session.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
+import {
+  DeliverableReadySteer,
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from './terminal-tool-policy.js';
 import { coerceToolCallArgs } from './tool-arg-schema-coercion.js';
 import { computeToolBudgetChars } from './tool-budget.js';
 import { type ToolFailureLoop, ToolFailureTracker } from './tool-failure-tracker.js';
@@ -607,6 +611,18 @@ export function isGateSurgicalEditTurn(
     .map((tool) => chatCompletionToolName(tool))
     .filter((name): name is string => !!name);
   return names.includes('replace_in_file') || names.includes('replace_lines');
+}
+
+/**
+ * Names on this iteration's wire. A runtime hint may name only these; the
+ * union of every tool that exists is not what the model can call.
+ */
+function liveWireToolNames(body: Record<string, unknown>): Set<string> {
+  return new Set(
+    (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+      .map((tool) => chatCompletionToolName(tool))
+      .filter((name): name is string => typeof name === 'string'),
+  );
 }
 
 function hasDirectFileWorkToolSurface(tools: ChatCompletionTool[] | undefined): boolean {
@@ -2108,6 +2124,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       prompt,
       opts?.fileTurnIntent,
     );
+    const deliverableReadySteer = DeliverableReadySteer.forStep(this.deps.activeCraftbookStep);
     // Per-turn ask_user_question dedup + post-question prose-fold
     // signal. See the matching block in MlxSession for the rationale.
     let askedQuestionThisTurn = false;
@@ -5645,11 +5662,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             const recoveredPath = malformedStructuredCallPaths.get(call.id) ?? null;
             // The remedy has to be checkable against what this turn actually
             // wired, not against the union of every write tool that exists.
-            const liveToolNames = new Set(
-              (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
-                .map((tool) => chatCompletionToolName(tool))
-                .filter((name): name is string => typeof name === 'string'),
-            );
+            const liveToolNames = liveWireToolNames(body);
             output = appendCapTruncationHintToRejectedWrite(
               output,
               call.function.name,
@@ -5684,9 +5697,23 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           );
           const repeated = repeatTracker.recordCall(call.function.name, args, tracked.output);
           const paced = deliverableReadPaceTracker?.recordCall(call.function.name, repeated.output);
+          const readyFooter = await deliverableReadySteer?.footerFor(
+            call.function.name,
+            args,
+            output,
+            () => liveWireToolNames(body),
+          );
+          if (readyFooter) {
+            log.info(
+              `[llama-cpp] deliverable-ready footer appended tool=${call.function.name} path=${deliverableReadySteer?.deliverableFile} fired=${deliverableReadySteer?.firedCount}`,
+            );
+          }
+          const toolResultContent = readyFooter
+            ? `${paced?.output ?? repeated.output}\n\n${readyFooter}`
+            : (paced?.output ?? repeated.output);
           this.messages.push({
             role: 'tool',
-            content: paced?.output ?? repeated.output,
+            content: toolResultContent,
             tool_call_id: call.id,
           });
           if (directFileWorkScriptHelperJustWritten) {
@@ -5703,11 +5730,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           if (
             this.compactWriteTranscript &&
-            compactSuccessfulWriteToolCallForTranscript(
-              call,
-              args,
-              paced?.output ?? repeated.output,
-            )
+            compactSuccessfulWriteToolCallForTranscript(call, args, toolResultContent)
           ) {
             const path = typeof args.path === 'string' ? args.path : '(unknown path)';
             const bytes =
@@ -5789,6 +5812,15 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             );
           }
           return fullText;
+        }
+        if (!terminalActionClosing && !abortDueToFailureLoop && deliverableReadySteer) {
+          const backstop = await deliverableReadySteer.backstopClosing();
+          if (backstop) {
+            log.info(
+              `[llama-cpp] deliverable-ready backstop: ${deliverableReadySteer.deliverableFile} stayed ready through the grace iterations; ending turn for the end-of-turn advance`,
+            );
+            terminalActionClosing = backstop;
+          }
         }
         if (terminalActionClosing && !abortDueToFailureLoop) {
           this.messages.push({ role: 'assistant', content: terminalActionClosing });

@@ -1,6 +1,7 @@
 import type { CraftbookSummary, NewCraftbookStep } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useCompactLayout } from '../components/useCompactLayout.js';
 import { Dialog } from '../primitives/index.js';
 import { CraftbookEditor } from './CraftbookEditor.js';
 
@@ -17,6 +18,11 @@ const SOURCE_GROUPS: Array<{ source: Source; label: string; hint: string }> = [
 ];
 
 export function CraftbooksView() {
+  const layoutRef = useRef<HTMLDivElement>(null);
+  // Below this the library and the editor cannot share a row, so the list
+  // and the book take turns, the same way Tasks does.
+  const compact = useCompactLayout(layoutRef, 640);
+  const [showCompactDetail, setShowCompactDetail] = useState(false);
   const [craftbooks, setCraftbooks] = useState<CraftbookSummary[]>([]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -50,6 +56,7 @@ export function CraftbooksView() {
   const open = useCallback((id: string, source: Source) => {
     setCreating(false);
     setSelected({ id, source });
+    setShowCompactDetail(true);
   }, []);
 
   // Land on a craftbook instead of an empty editor pane: prefer the user's
@@ -80,9 +87,22 @@ export function CraftbooksView() {
   );
 
   return (
-    <div className="tasks-view craftbooks-view" data-testid="craftbooks-view">
+    <div
+      ref={layoutRef}
+      className={`tasks-view craftbooks-view${compact ? ' tasks-view-compact' : ''}`}
+      data-testid="craftbooks-view"
+    >
+      {compact && showCompactDetail && (
+        <button type="button" className="secondary" onClick={() => setShowCompactDetail(false)}>
+          Back to craftbooks
+        </button>
+      )}
       <div className="tasks-layout craftbooks-layout">
-        <aside className="craftbooks-sidebar" aria-label="Craftbook library">
+        <aside
+          className="craftbooks-sidebar"
+          aria-label="Craftbook library"
+          hidden={compact && showCompactDetail}
+        >
           <div className="craftbooks-toolbar">
             <label className="craftbooks-search-field">
               <span className="sr-only">Search craftbooks</span>
@@ -146,7 +166,11 @@ export function CraftbooksView() {
           </div>
         </aside>
 
-        <section className="task-detail-panel craftbooks-detail" aria-label="Craftbook editor">
+        <section
+          className="task-detail-panel craftbooks-detail"
+          aria-label="Craftbook editor"
+          hidden={compact && !showCompactDetail}
+        >
           {selected ? (
             <CraftbookEditor
               key={`${selected.source}:${selected.id}`}

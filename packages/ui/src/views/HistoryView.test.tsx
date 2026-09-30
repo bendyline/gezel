@@ -11,6 +11,9 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 // in each test then customizes responses.
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
+const layout = vi.hoisted(() => ({ compact: false }));
+vi.mock('../components/useCompactLayout.js', () => ({ useCompactLayout: () => layout.compact }));
+
 // Stub the Radix Select primitive so filter dropdowns behave as plain
 // <select> in tests — we're testing HistoryView, not Radix portals.
 vi.mock('../primitives/index.js', () => primitivesMock);
@@ -74,6 +77,39 @@ describe('HistoryView', () => {
       expect(screen.getByText(/No entries yet/i)).toBeInTheDocument();
     });
     expect(api.listHistory).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+  });
+
+  it('on a phone, opens an entry in place of the list and goes back', async () => {
+    layout.compact = true;
+    try {
+      vi.mocked(api.listHistory).mockResolvedValue({
+        entries: [
+          makeEvent({ id: 'e-1', kind: 'gezel.created', summary: 'Created gezel Maya' }),
+          makeEvent({ id: 'e-2', kind: 'gezel.created', summary: 'Created gezel Joss' }),
+        ],
+      });
+      const user = userEvent.setup();
+      const { container } = render(<HistoryView />);
+      const list = await waitFor(() => {
+        const el = container.querySelector('.history-list');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      const detail = container.querySelector('.history-detail')!;
+      await screen.findAllByText(/Created gezel Joss/);
+      expect(list).not.toHaveAttribute('hidden');
+      expect(detail).toHaveAttribute('hidden');
+
+      await user.click(within(list as HTMLElement).getByText(/Created gezel Joss/));
+      expect(list).toHaveAttribute('hidden');
+      expect(detail).not.toHaveAttribute('hidden');
+
+      await user.click(screen.getByRole('button', { name: 'Back to history' }));
+      expect(list).not.toHaveAttribute('hidden');
+      expect(detail).toHaveAttribute('hidden');
+    } finally {
+      layout.compact = false;
+    }
   });
 
   it('lists event and session entries with their gezel + project chips', async () => {
