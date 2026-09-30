@@ -78,10 +78,32 @@ export const MODEL_RELEVANCE_ANCHORS = {
 } as const;
 
 /**
+ * The relevance a calibrated model must give a KNOWLEDGE passage before a
+ * filter surface (per-turn injection, the launch reference list) keeps it.
+ * Stricter than `keep`: a catalog is reference material the user did not ask
+ * for, and an encyclopedia always has a plausible-looking neighbour, so its
+ * passages have to be on topic rather than merely not off topic. Calibrated on
+ * installed catalogs — evals/src/retrieval-bench/KNOWLEDGE-CALIBRATION.md.
+ */
+export const KNOWLEDGE_FILTER_MIN_RELEVANCE = 0.5;
+
+function logit(p: number): number {
+  const q = Math.min(Math.max(p, 1e-12), 1 - 1e-12);
+  return Math.log(q / (1 - q));
+}
+
+/**
  * A relevance model's activated score (0–1) as calibrated relevance: monotone
- * and piecewise-linear through the model's thresholds. An uncalibrated model
- * (no thresholds) passes its raw score through — good for ordering, and the
- * callers never drop on it.
+ * and piecewise through the model's thresholds, so each threshold lands
+ * exactly on its anchor. An uncalibrated model (no thresholds) passes its raw
+ * score through — good for ordering, and the callers never drop on it.
+ *
+ * Between `drop` and `strong` the interpolation runs in logit space. A
+ * sigmoid saturates, so a model's thresholds can sit orders of magnitude
+ * apart (keep 3e-5, strong 0.95): interpolated linearly, every score from
+ * "barely not irrelevant" to "plausibly on topic" landed between 0.30 and
+ * 0.32, and no cut in relevance space could separate them. The end segments
+ * stay linear — logit is unbounded there.
  */
 export function relevanceFromModelScore(
   score: number,
@@ -89,17 +111,21 @@ export function relevanceFromModelScore(
 ): number {
   const s = clamp01(score);
   if (!thresholds) return s;
-  const points: Array<[number, number]> = [
-    [0, 0],
-    [thresholds.drop, MODEL_RELEVANCE_ANCHORS.drop],
-    [thresholds.keep, MODEL_RELEVANCE_ANCHORS.keep],
-    [thresholds.strong, MODEL_RELEVANCE_ANCHORS.strong],
-    [1, 1],
+  const points: Array<[number, number, 'linear' | 'logit']> = [
+    [0, 0, 'linear'],
+    [thresholds.drop, MODEL_RELEVANCE_ANCHORS.drop, 'linear'],
+    [thresholds.keep, MODEL_RELEVANCE_ANCHORS.keep, 'logit'],
+    [thresholds.strong, MODEL_RELEVANCE_ANCHORS.strong, 'logit'],
+    [1, 1, 'linear'],
   ];
   for (let i = 1; i < points.length; i++) {
     const [x0, y0] = points[i - 1]!;
-    const [x1, y1] = points[i]!;
-    if (s <= x1) return x1 === x0 ? y1 : y0 + ((s - x0) / (x1 - x0)) * (y1 - y0);
+    const [x1, y1, space] = points[i]!;
+    if (s > x1) continue;
+    if (x1 === x0) return y1;
+    const t =
+      space === 'logit' ? (logit(s) - logit(x0)) / (logit(x1) - logit(x0)) : (s - x0) / (x1 - x0);
+    return y0 + t * (y1 - y0);
   }
   return 1;
 }

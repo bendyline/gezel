@@ -80,6 +80,7 @@ import {
 } from './install.js';
 import { KnowledgeRegistry, type KnowledgeRegistryEntry } from './registry.js';
 import type { SharedEnsureResult, SharedKnowledgeInstaller } from './shared-install.js';
+import { type KnowledgeVectorFloors, resolveKnowledgeVectorFloors } from './vector-floors.js';
 
 type GlobalSearchDocumentHit = GlobalSearchResponse['documents'][number];
 
@@ -178,6 +179,9 @@ interface InstallStart {
   request: KnowledgeInstallRequestSource;
 }
 
+/** Which arm vouches for a fused knowledge hit — see the vector arm in `searchUnified`. */
+type KnowledgeEvidence = { arm: 'vector'; similarity: number } | { arm: 'fts' };
+
 interface InstallPlan {
   source: KnowledgeInstallSource;
   origin: KnowledgeInstallSourceKind;
@@ -213,6 +217,8 @@ export interface KnowledgeManagerOptions {
   ) => Promise<number[]>;
   /** Test seam; null turns off the bundled Handboek. */
   bundledHandboekArchive?: string | null;
+  /** Test seam: per-profile cosine floors (default: the measured table + env override). */
+  vectorFloors?: KnowledgeVectorFloors;
 }
 
 export class KnowledgeManager {
@@ -225,9 +231,11 @@ export class KnowledgeManager {
   private readonly jobDownloadKeys = new Map<string, string>();
   private readonly autoUpdateTimers: NodeJS.Timeout[] = [];
   private jobCounter = 0;
+  private readonly vectorFloors: KnowledgeVectorFloors;
 
   constructor(private readonly opts: KnowledgeManagerOptions) {
     this.registry = new KnowledgeRegistry(opts.home);
+    this.vectorFloors = opts.vectorFloors ?? resolveKnowledgeVectorFloors(opts.env ?? process.env);
     this.installs = new ChatModelInstallRegistry<KnowledgeInstallEvent, InstallStart>({
       engine: 'knowledge',
       run: (jobId, start) => this.runInstall(jobId, start.request),
@@ -824,13 +832,14 @@ export class KnowledgeManager {
    * can outweigh the catalog — multilingual-e5-small's full-precision graph
    * is ~470 MB against a 160 MB Wikipedia catalog — so its download reports
    * bytes the way the catalog's own does.
+   *
+   * Not gated on `allowAppNetwork`: every install is either a person's own
+   * download or an auto-update `checkAutoUpdates` already gated, and skipping
+   * the model here would leave an offline machine without semantic search.
    */
   private async *prewarmProfile(
     profile: KnowledgeEmbeddingProfile,
   ): AsyncGenerator<KnowledgeInstallEvent, string | undefined> {
-    if (!(await this.networkAllowed())) {
-      return `semantic search starts once the embedding model ${profile.model.repo} can be downloaded (app network access is off)`;
-    }
     const progress: {
       latest: ModelDownloadProgress | null;
       reported: ModelDownloadProgress | null;
@@ -1284,7 +1293,14 @@ export class KnowledgeManager {
     // ── fuse the arms per document ──────────────────────────────────────
     const fused = new Map<
       string,
-      { catalogKey: string; documentId: string; score: number; chunk?: GlobalSearchHit }
+      {
+        catalogKey: string;
+        documentId: string;
+        score: number;
+        chunk?: GlobalSearchHit;
+        /** Best vector cosine that cleared a MEASURED floor — what labels the hit `vector`. */
+        similarity?: number;
+      }
     >();
     const bump = (
       catalogKey: string,
@@ -1304,7 +1320,10 @@ export class KnowledgeManager {
       fused.set(key, entry);
     };
 
-    // Vector arm: one rank per document, in rerank-cosine order.
+    // Vector arm: one rank per document, in rerank-cosine order. A hit under
+    // its profile's floor is not evidence at all — KNN always returns its
+    // nearest rows, and a rank-0 row fuses to relevance 1.0 however far away
+    // it is (see vector-floors.ts).
     const seenVector = new Set<string>();
     let vectorRank = 0;
     for (const hit of response.chunks
@@ -1312,8 +1331,15 @@ export class KnowledgeManager {
       .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
       const key = `${hit.catalogKey}\u0000${hit.documentId}`;
       if (seenVector.has(key)) continue;
+      const cosine = hit.cosine ?? 0;
+      const floor = this.vectorFloorFor(hit.catalogKey);
+      if (floor !== null && cosine < floor) continue;
       seenVector.add(key);
       bump(hit.catalogKey, hit.documentId, ARM_WEIGHTS.vector, vectorRank++, hit);
+      const entry = fused.get(key);
+      if (entry && floor !== null && cosine > (entry.similarity ?? Number.NEGATIVE_INFINITY)) {
+        entry.similarity = cosine;
+      }
     }
     // Chunk-body FTS arm: BM25 order as the shards returned it, ranked per catalog.
     const chunkFtsRank = new Map<string, number>();
@@ -1345,9 +1371,15 @@ export class KnowledgeManager {
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
       if (count >= PER_CATALOG_CAP) continue;
       const relevance = fusedRankRelevance(out.length);
+      // `vector` only when the hit cleared a measured floor; everything else
+      // is lexical evidence, which proactive injection asks to be grounded.
+      const evidence: KnowledgeEvidence =
+        entry.similarity !== undefined
+          ? { arm: 'vector', similarity: entry.similarity }
+          : { arm: 'fts' };
       const result = entry.chunk
-        ? this.toResult(info, entry.chunk, relevance)
-        : await this.toDocumentResult(info, entry.documentId, relevance);
+        ? this.toResult(info, entry.chunk, relevance, evidence)
+        : await this.toDocumentResult(info, entry.documentId, relevance, evidence);
       if (!result) continue;
       perCatalogCount.set(entry.catalogKey, count + 1);
       out.push(result);
@@ -1361,6 +1393,7 @@ export class KnowledgeManager {
     info: MountedInfo,
     documentId: string,
     relevance: number,
+    evidence: KnowledgeEvidence,
   ): Promise<UnifiedSearchResult | null> {
     const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
     if (!doc) return null;
@@ -1382,8 +1415,16 @@ export class KnowledgeManager {
         documentId,
       }),
       ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...evidence,
       ...scoreResult('knowledge', relevance),
     };
+  }
+
+  /** A catalog's vector floor, or null when its hits are keyword-only or its scale unmeasured. */
+  private vectorFloorFor(catalogKey: string): number | null {
+    const info = this.mountedByKey.get(catalogKey);
+    if (!info) return null;
+    return this.vectorFloors.floorFor({ catalogKey, profileId: info.embedding.id });
   }
 
   /**
@@ -1443,6 +1484,7 @@ export class KnowledgeManager {
     info: MountedInfo,
     hit: GlobalSearchHit,
     relevance: number,
+    evidence: KnowledgeEvidence,
   ): UnifiedSearchResult {
     return {
       kind: 'knowledge',
@@ -1463,6 +1505,7 @@ export class KnowledgeManager {
       }),
       line: hit.lineStart,
       lineEnd: hit.lineEnd,
+      ...evidence,
       ...scoreResult('knowledge', relevance),
     };
   }

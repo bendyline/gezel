@@ -2145,9 +2145,10 @@ export const GezelConfigSchema = z.object({
     .optional(),
   /**
    * The relevance model: a small on-device cross-encoder that checks each
-   * indexed passage against the request before it reaches a prompt. Default
-   * off; enabling downloads the selected model (pinned in the service's
-   * relevance registry) when app network access is allowed.
+   * indexed passage against the request before it reaches a prompt. First
+   * run turns it on for new installs; absent means off, which is what
+   * existing installs keep. Enabling downloads the selected model (pinned in
+   * the service's relevance registry) when app network access is allowed.
    */
   relevanceModel: z
     .object({
@@ -5611,6 +5612,12 @@ export const UnifiedSearchResultSchema = z.object({
    * cleared a cosine floor and shares no words by nature.
    */
   arm: z.enum(['vector', 'fts']).optional(),
+  /**
+   * Cosine similarity of the hit's best vector evidence, when that evidence
+   * cleared its embedder's floor. On that embedder's own scale — never
+   * compare it across embedders or catalogs.
+   */
+  similarity: z.number().optional(),
   /** 1-based line for content/symbol hits. */
   line: z.number().int().positive().optional(),
   /** Inclusive end line when the underlying index provides a span. */

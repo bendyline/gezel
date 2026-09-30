@@ -570,7 +570,7 @@ Suggested first-party routes:
 | `GET /api/knowledge/catalogs` | This user's catalog refs, storage scope, versions, health, size, enabled state |
 | `GET /api/knowledge/available` | Every gilde `knowledge-catalog` entry joined with this user's registry, the machine-shared inventory, live installs and partial downloads; offline-safe (gilde is local) |
 | `GET /api/knowledge/updates` | Installed catalogs with a strictly newer version in the shipped gilde content (`source: 'gilde'`; no network) |
-| `POST /api/knowledge/install` | `{ source }` (file, URL, or a gilde `catalog` id) → `{ jobId, alreadyRunning }`; URL and catalog sources 403 `network-blocked` when the security policy turns off app network |
+| `POST /api/knowledge/install` | `{ source }` (file, URL, or a gilde `catalog` id) → `{ jobId, alreadyRunning }`; never gated on the security policy (see below) |
 | `POST /api/knowledge/catalogs/:id/install?version=&placement=` | Install a gilde entry and stream its events as SSE; the job id is the catalog id, so a second request attaches to the running install |
 | `DELETE /api/knowledge/catalogs/:id/install` | Cancel a running catalog install (disconnecting never cancels) |
 | `GET /api/knowledge/active-installs` | Every running install with its latest progress (the polled twin of the SSE) |
@@ -589,9 +589,15 @@ The model-facing project search route does not accept arbitrary project ids;
 likewise it must resolve catalog ids against the session project's effective
 policy rather than trusting request input.
 
-Manual network downloads and automatic update checks both honor the app-network
-security policy. Local `.gezk` import remains available offline. Search and
-browsing of installed data never use the network. The shared install path uses a
+A person can always download a catalog, at every security level. The security
+policy governs what gezels do, and the install routes are first-party only (the
+scope guard refuses session tokens), so an install is never a gezel's egress —
+and a catalog is precisely how a locked-down, offline-first machine gets
+knowledge it can use without the network. The same holds for the query
+embedding model an install warms. Automatic update checks are background
+traffic nobody asked for in the moment, so they stay on the app-network policy
+(`allowAppNetwork`). Local `.gezk` import works offline. Search and browsing of
+installed data never use the network. The shared install path uses a
 separate user-daemon-to-broker client and allowlisted machine route, not these
 renderer-facing product routes. A future machine-wide reclaim endpoint should live
 with the other `/api/machine-*` management proxies and must not be confused with

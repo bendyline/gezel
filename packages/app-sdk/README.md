@@ -42,7 +42,7 @@ const app = await connect({
 
 // Make sure the model is downloaded and warm.
 const ensure = await app.ensureModel({
-  model: 'llama-cpp:qwen3-4b-instruct-q4_k_m',
+  model: 'llama-cpp:gemma4-e2b-q4',
 });
 if (ensure.status === 'downloading') {
   for await (const ev of app.streamEnsureEvents(ensure.job_id!)) {
@@ -54,7 +54,7 @@ if (ensure.status === 'downloading') {
 
 // Stream a chat completion.
 const stream = await app.chat({
-  model: 'llama-cpp:qwen3-4b-instruct-q4_k_m',
+  model: 'llama-cpp:gemma4-e2b-q4',
   messages: [{ role: 'user', content: 'Hello!' }],
   stream: true,
 });

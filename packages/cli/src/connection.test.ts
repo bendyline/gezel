@@ -22,6 +22,7 @@ import {
   resolveStartPortEnv,
   resolveTuiProject,
   shouldTrySystemService,
+  spawnedDaemonNotice,
   validateGlobals,
 } from './connection.js';
 
@@ -246,6 +247,20 @@ describe('CLI grant token storage', () => {
     await first.delete('gezel-cli');
     await expect(first.load('gezel-cli')).resolves.toBeNull();
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
+  });
+});
+
+describe('spawned daemon notice', () => {
+  it('names the process that keeps running and how to stop it', () => {
+    expect(spawnedDaemonNotice(4242)).toBe(
+      'Started the Gezel background service (pid 4242); it keeps running after this command. Stop it with `gezel stop --daemon`.\n',
+    );
+  });
+
+  it('still explains itself when the pid is unknown', () => {
+    expect(spawnedDaemonNotice(undefined)).toBe(
+      'Started the Gezel background service; it keeps running after this command. Stop it with `gezel stop --daemon`.\n',
+    );
   });
 });
 

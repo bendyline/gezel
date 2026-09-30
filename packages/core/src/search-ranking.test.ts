@@ -97,4 +97,19 @@ describe('relevanceFromModelScore', () => {
   it('passes an uncalibrated score through', () => {
     expect(relevanceFromModelScore(0.42, null)).toBeCloseTo(0.42);
   });
+
+  it('spreads a saturating sigmoid between keep and strong instead of pinning it to keep', () => {
+    // The shipped ms-marco thresholds sit five orders of magnitude apart.
+    const saturating = { drop: 0.00001, keep: 0.00003, strong: 0.95 };
+    const junk = relevanceFromModelScore(0.0001, saturating);
+    const plausible = relevanceFromModelScore(0.1, saturating);
+    const likely = relevanceFromModelScore(0.9, saturating);
+    expect(relevanceFromModelScore(0.00003, saturating)).toBeCloseTo(MODEL_RELEVANCE_ANCHORS.keep);
+    expect(relevanceFromModelScore(0.95, saturating)).toBeCloseTo(MODEL_RELEVANCE_ANCHORS.strong);
+    // Linear interpolation put all three within 0.03 of keep.
+    expect(junk).toBeLessThan(0.35);
+    expect(plausible).toBeGreaterThan(0.45);
+    expect(likely).toBeGreaterThan(0.55);
+    expect(likely).toBeLessThan(MODEL_RELEVANCE_ANCHORS.strong);
+  });
 });

@@ -5,8 +5,8 @@ import { api } from '../api.js';
 /**
  * Settings → Project knowledge: the relevance check. A small on-device model
  * that reads each indexed passage beside the question and sets aside what is
- * off-topic before a gezel sees it. Off by default; turning it on downloads
- * the chosen model once. The status line is the whole lifecycle — download,
+ * off-topic before a gezel sees it. First run turns it on for new installs;
+ * turning it on downloads the chosen model once. The status line is the whole lifecycle — download,
  * load, ready — because the check never makes a conversation wait for it.
  */
 export function RelevanceModelCard() {

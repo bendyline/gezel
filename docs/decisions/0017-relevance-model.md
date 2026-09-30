@@ -71,9 +71,10 @@ It is named "relevance model" in code and "Relevance check" in the UI, never
 
 ## Consequences
 
-- Default **off** until the outcome A/B shows it earns its download. The
-  English model is calibrated from the bench (drop 1e-5, keep 3e-5, strong
-  0.95 — [record](../../evals/src/retrieval-bench/RELEVANCE-CALIBRATION-2026-09-26.md));
+- Originally default **off** until the outcome A/B showed it earned its
+  download; since 2026-09-30 **on for new installs** (see Revision below).
+  The English model is calibrated from the bench (drop 1e-5, keep 3e-5,
+  strong 0.95 — [record](../../evals/src/retrieval-bench/RELEVANCE-CALIBRATION-2026-09-26.md));
   the multilingual one is not, so it only reorders.
 - Keyword hits are judged on their whole indexed chunk, read for the scored
   window only, so search result shapes stay unchanged.
@@ -93,3 +94,38 @@ It is named "relevance model" in code and "Relevance check" in the UI, never
   no provider or chat import.
 - The retrieval bench (`evals/src/retrieval-bench/`) is the calibration and
   acceptance record.
+
+## Revision — 2026-09-30: knowledge catalogs, logit mapping, on for new installs
+
+The Handboek became a built-in knowledge catalog, and the v1.26273.82
+release audit found a Handboek excerpt on almost every chat turn. Knowledge
+was the one corpus the rules above did not reach: its relevance was
+rank-anchored, its vector arm had no cosine floor, and its hits carried no
+`arm`, so grounding exempted them. Measured on the Handboek and Wikipedia
+Food & Drink ([record](../../evals/src/retrieval-bench/KNOWLEDGE-CALIBRATION-2026-09-30.md)):
+
+- **Vector floors per catalog.** A catalog vector hit under its floor is not
+  evidence (`knowledge/vector-floors.ts`), keyed by catalog, then embedding
+  profile; an unmeasured profile's hits rank but are labelled `fts`.
+- **Unjudged catalog hits need vector evidence.** Grounding was not enough
+  for an encyclopedia ("Olive Oil Times" grounds "17 times 23"), so per-turn
+  injection admits an unjudged knowledge hit only when it is `vector`.
+- **A stricter bar for judged knowledge.** Filter surfaces keep a knowledge
+  passage only at relevance ≥ `KNOWLEDGE_FILTER_MIN_RELEVANCE` (0.5), above
+  the general keep (0.3). Project content keeps the general keep.
+- **Logit-space mapping.** Between `drop` and `strong` the model score maps
+  to relevance in logit space. Anchors, and so every keep/drop decision at
+  the general keep, are unchanged; the band between them stopped collapsing
+  onto 0.30.
+- **On for new installs.** First run writes `relevanceModel.enabled: true`
+  when it writes the new-install security posture; existing installs keep
+  their setting (absent, so off). The model downloads at the relevance
+  manager's boot step, under the same app-network gate as before.
+
+Off-topic injection on the labelled set went from 25/25 (model off) and
+23/25 (model on) to 2/25 and 1/25, with on-topic answers unchanged.
+Regression surface: `knowledge/vector-floors.test.ts`, the vector-floor
+cases in `knowledge/manager.test.ts`, the knowledge cases in
+`search/project-retrieval.test.ts` and `search/relevance-stage.test.ts`,
+`relevance/manager.test.ts`, and the relevance-default cases in
+`first-run/on-device-bootstrap.test.ts`.

@@ -77,7 +77,11 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     gezapp: 'src/gezapp-entry.ts',
-    'bin/gezeld': 'src/bin/gezeld.ts',
+    // `bin/gezeld` is the path every host spawns; it is a dependency-free
+    // launcher that refuses an unsupported Node before loading the daemon
+    // entry, whose imports would otherwise crash first (see node-version.ts).
+    'bin/gezeld': 'src/bin/gezeld-launcher.ts',
+    'bin/gezeld-main': 'src/bin/gezeld.ts',
     // Spawned as a separate process by sandbox-convert.ts to parse untrusted
     // attachments in isolation; must exist as its own file, not bundled into
     // index.js. squisq stays external (see below), so this stays small.
@@ -174,7 +178,7 @@ export default defineConfig({
   // and fragile. `@xmldom/xmldom` backs the DOMParser polyfill the DOCX importer
   // needs under node (no browser DOMParser global).
   external: [
-    // bin/gezeld imports the daemon through the package's own name so it
+    // bin/gezeld-main imports the daemon through the package's own name so it
     // stays a thin launcher over dist/index.js instead of a second bundle.
     '@bendyline/gezel-service',
     '@github/copilot-sdk',

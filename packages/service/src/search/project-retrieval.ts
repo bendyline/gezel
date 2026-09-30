@@ -245,7 +245,8 @@ function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
  * term the user actually typed? Only keyword hits are asked. A vector hit
  * shares no words by nature, has already cleared a cosine floor at its
  * source, and is exactly the semantic neighbour retrieval exists to find.
- * An unlabelled hit (older caller, knowledge catalog) is left alone.
+ * An unlabelled hit (older caller) is left alone. Knowledge catalogs are held
+ * to a stricter rule than grounding — see the knowledge branch below.
  */
 function isGrounded(
   result: UnifiedSearchResult,
@@ -430,6 +431,16 @@ export async function retrieveProjectContext(args: {
     if (source === 'knowledge') {
       if (!result.uri) {
         trace.reject(result, 'source-policy');
+        continue;
+      }
+      // Unjudged, a catalog hit needs semantic evidence that cleared its
+      // catalog's measured cosine floor (knowledge/vector-floors.ts). A
+      // shared word is not enough here, unlike project content: an
+      // encyclopedia always has a title that shares one with the request —
+      // "Olive Oil Times" for "What is 17 times 23?", "Puppy chow" for a
+      // puppy's name. Keyword-only catalog hits still reach the `search` tool.
+      if (!judged(result) && result.arm !== 'vector') {
+        trace.reject(result, 'floor');
         continue;
       }
       if (knowledgeCount >= KNOWLEDGE_MAX_CHUNKS[policy.mode]) {

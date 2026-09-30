@@ -173,6 +173,20 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   if (!storedConfig.securityPolicy) {
     await store.writeConfig({ securityPolicy: config.securityPolicy });
   }
+  // New installs start with the relevance check on: without it, installed
+  // knowledge catalogs (the bundled Handboek included) inject their nearest
+  // neighbour into turns it has nothing to do with. Same new-install test as
+  // the security posture above; an existing install keeps its absent (off)
+  // setting, and any explicit choice is left alone. The ~24 MB model
+  // downloads at the relevance manager's boot step, network permitting.
+  if (
+    storedConfig.relevanceModel === undefined &&
+    !storedConfig.firstRunCompleted &&
+    storedConfig.provider === undefined
+  ) {
+    await store.writeConfig({ relevanceModel: { enabled: true } });
+    log.info('[first-run] relevance check on for this new install');
+  }
   if (!isSupportedOnDevicePlatform(effPlatform, effArch)) {
     // Intel Mac and other platforms we don't ship a bundled engine
     // for. Auto-enrolling here would download 3-10 GB of model that

@@ -272,6 +272,48 @@ describe('bootstrapOnDeviceFirstRun', () => {
     expect(config.firstRunCompleted).toBe(true);
   });
 
+  describe('the relevance check default', () => {
+    const run = (platformOverride: NodeJS.Platform = 'linux', archOverride = 'x64') =>
+      bootstrapOnDeviceFirstRun({
+        store,
+        llamaCppModels: fakeModelManager().manager,
+        mlxModels: fakeMlxManager().manager,
+        catalog: new CatalogService(),
+        platformOverride,
+        archOverride,
+      });
+
+    it('turns it on for a new install, including one with no bundled engine', async () => {
+      await run();
+      expect((await store.readConfig()).relevanceModel).toEqual({ enabled: true });
+
+      await rm(home, { recursive: true, force: true });
+      home = await mkdtemp(join(tmpdir(), 'gezel-first-run-test-'));
+      store = new Store({ home });
+      await store.ensureLayout();
+      await run('darwin', 'x64');
+      expect((await store.readConfig()).relevanceModel).toEqual({ enabled: true });
+    });
+
+    it('leaves an existing install off', async () => {
+      await store.writeConfig({ firstRunCompleted: true });
+      await run();
+      expect((await store.readConfig()).relevanceModel).toBeUndefined();
+    });
+
+    it('leaves an install that already chose a provider off', async () => {
+      await store.writeConfig({ provider: 'copilot' });
+      await run();
+      expect((await store.readConfig()).relevanceModel).toBeUndefined();
+    });
+
+    it('never overrides an explicit choice, even on a new install', async () => {
+      await store.writeConfig({ relevanceModel: { enabled: false } });
+      await run();
+      expect((await store.readConfig()).relevanceModel).toEqual({ enabled: false });
+    });
+  });
+
   it('pins provider to llama-cpp and a recommended default on linux-x64 without auto-installing', async () => {
     const { manager, calls } = fakeModelManager();
     await bootstrapOnDeviceFirstRun({

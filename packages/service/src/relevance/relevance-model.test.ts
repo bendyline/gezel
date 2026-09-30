@@ -1,3 +1,4 @@
+import { KNOWLEDGE_FILTER_MIN_RELEVANCE } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ResolvedRelevanceModel } from './relevance-core.js';
 import { type RelevanceBackend, createRelevanceScorer } from './relevance-model.js';
@@ -115,6 +116,16 @@ describe('resolveRelevanceSetting', () => {
     expect(setting.spec?.id).toBe('mxbai-rerank-xsmall@1');
     expect([...setting.surfaces]).toEqual(['references']);
     expect(resolveRelevanceSetting(null, { GEZEL_RELEVANCE_MODEL: 'off' }).enabled).toBe(false);
+  });
+
+  it('holds knowledge to the calibrated knowledge bar unless an eval sweeps it', () => {
+    expect(resolveRelevanceSetting(null, {}).knowledgeKeep).toBe(KNOWLEDGE_FILTER_MIN_RELEVANCE);
+    expect(
+      resolveRelevanceSetting(null, { GEZEL_RELEVANCE_KNOWLEDGE_KEEP: '0.45' }).knowledgeKeep,
+    ).toBe(0.45);
+    expect(
+      resolveRelevanceSetting(null, { GEZEL_RELEVANCE_KNOWLEDGE_KEEP: '7' }).knowledgeKeep,
+    ).toBe(KNOWLEDGE_FILTER_MIN_RELEVANCE);
   });
 
   it('ignores thresholds out of order and an unknown model', () => {

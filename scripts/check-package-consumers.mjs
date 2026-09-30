@@ -963,8 +963,38 @@ async function daemonSmoke(consumerDir, opts = {}) {
   } catch (err) {
     fail(`daemon smoke: ${err.message}\n${logs.join('')}`);
   } finally {
+    await stopDaemon(child);
+    removeScratchDir(home);
+  }
+}
+
+/**
+ * Stop the smoke daemon and wait for it to exit: its home cannot be removed
+ * while any process still holds files there. On Windows `kill()` is an
+ * immediate TerminateProcess that returns before the process is gone and
+ * leaves the daemon's own children running, so take down the whole tree.
+ */
+async function stopDaemon(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
     child.kill('SIGTERM');
-    rmSync(home, { recursive: true, force: true });
+  }
+  const gaveUp = await Promise.race([
+    exited.then(() => false),
+    new Promise((resolve) => setTimeout(() => resolve(true), 15_000).unref()),
+  ]);
+  if (gaveUp) child.kill('SIGKILL');
+}
+
+/** A leftover temp directory must not fail a run whose checks all passed. */
+function removeScratchDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    console.log(`  note could not remove ${dir}: ${err.message}`);
   }
 }
 

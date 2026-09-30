@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   normalizeSummary,
   parseArgs,
+  selectTargets,
+  targets,
   thresholdFailures,
   validateTargets,
 } from './run-vitest-coverage.mjs';
@@ -12,7 +14,37 @@ test('parses report-only and targeted package arguments', () => {
   assert.deepEqual(parseArgs(['--report-only', '--package', 'ui', '--package', 'service']), {
     reportOnly: true,
     packageIds: ['ui', 'service'],
+    excludedPackageIds: [],
   });
+  assert.deepEqual(parseArgs(['--exclude-package', 'service']), {
+    reportOnly: false,
+    packageIds: [],
+    excludedPackageIds: ['service'],
+  });
+  assert.throws(() => parseArgs(['--exclude-package']), /--exclude-package requires a package id/);
+});
+
+test('the CI shards measure every configured package exactly once', () => {
+  const ids = (args) => selectTargets(targets, parseArgs(args)).map((target) => target.id);
+  const serviceShard = ids(['--package', 'service']);
+  const packagesShard = ids(['--exclude-package', 'service']);
+  assert.deepEqual(serviceShard, ['service']);
+  assert.ok(!packagesShard.includes('service'));
+  assert.deepEqual(
+    [...serviceShard, ...packagesShard].sort(),
+    targets.map((target) => target.id).sort(),
+  );
+});
+
+test('rejects unknown package ids and selections that leave nothing to measure', () => {
+  assert.throws(
+    () => selectTargets(targets, parseArgs(['--exclude-package', 'servce'])),
+    /Unknown coverage package\(s\): servce/,
+  );
+  assert.throws(
+    () => selectTargets(targets, parseArgs(['--package', 'ui', '--exclude-package', 'ui'])),
+    /No coverage packages left to measure/,
+  );
 });
 
 test('normalizes V8 totals and reports metrics below their package floors', () => {

@@ -13,7 +13,10 @@ export const RETRIEVAL_DECISION_REASONS = [
   'kept',
   /** The relevance model scored it below the surface's cutoff. */
   'relevance-model',
-  /** Below the per-kind injection floor (rank-derived relevance). */
+  /**
+   * Below the per-kind injection floor (rank-derived relevance), or an
+   * unjudged knowledge hit with no vector evidence above its catalog's floor.
+   */
   'floor',
   /** A keyword hit whose injected text names no term of the query. */
   'grounding',
@@ -63,6 +66,8 @@ export const RetrievalTraceCandidateSchema = z.object({
   fusedRelevance: z.number().optional(),
   /** The relevance model's activated score, when it judged this candidate. */
   modelScore: z.number().optional(),
+  /** Vector cosine on the candidate's own embedder scale, when it has vector evidence. */
+  similarity: z.number().optional(),
   kept: z.boolean(),
   reason: RetrievalDecisionReasonSchema,
 });
@@ -127,6 +132,8 @@ export const RelevanceModelOverrideSchema = z.object({
   modelId: z.string().optional(),
   thresholds: RelevanceThresholdsSchema.nullable().optional(),
   budgetMs: z.number().int().positive().max(60_000).optional(),
+  /** Relevance a knowledge passage needs on filter surfaces (calibration sweeps). */
+  knowledgeKeep: z.number().min(0).max(1).optional(),
 });
 export type RelevanceModelOverride = z.infer<typeof RelevanceModelOverrideSchema>;
 

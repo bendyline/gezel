@@ -28,6 +28,12 @@
  * Catalog ids resolve against THIS user's registry — never against request-
  * supplied paths. The document read uses a query param because document ids
  * legitimately contain slashes.
+ *
+ * Installs are not gated on the security policy. The policy governs what
+ * gezels do; these routes are first-party only (the scope guard refuses
+ * session tokens), so every install here is a person's own download — and a
+ * catalog is how a locked-down machine gets knowledge it can use offline.
+ * Background auto-updates stay gated inside the KnowledgeManager.
  */
 
 import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
@@ -36,7 +42,6 @@ import {
   KnowledgeInstallRequestSchema,
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
-  resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -45,20 +50,12 @@ import { embedQuery } from '../../memory/embeddings.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 
-const NETWORK_BLOCKED = {
-  error: 'network-blocked',
-  message:
-    'Downloading knowledge catalogs needs app network access, which the security policy turns off.',
-} as const;
-
 export function knowledgeRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
   const manager = () => {
     if (!ctx.knowledge) throw new KnowledgeNotFoundError('knowledge subsystem not available');
     return ctx.knowledge;
   };
-  const networkBlocked = async () =>
-    !resolveSecurityPolicy(await ctx.store.readConfig()).allowAppNetwork;
 
   app.onError((err, c) => {
     if (err instanceof KnowledgeNotFoundError) return c.json({ error: err.message }, 404);
@@ -97,9 +94,6 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
 
   app.post('/install', async (c) => {
     const body = KnowledgeInstallRequestSchema.parse(await c.req.json());
-    if (body.source.kind !== 'file' && (await networkBlocked())) {
-      return c.json(NETWORK_BLOCKED, 403);
-    }
     const { jobId, alreadyRunning } = manager().startInstall(body.source);
     return c.json({ jobId, alreadyRunning }, 202);
   });
@@ -132,7 +126,6 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
    * bytes private even when a machine-shared store is available.
    */
   app.post('/catalogs/:catalogId/install', async (c) => {
-    if (await networkBlocked()) return c.json(NETWORK_BLOCKED, 403);
     const version = c.req.query('version');
     const placement = c.req.query('placement');
     const { source } = KnowledgeInstallRequestSchema.parse({

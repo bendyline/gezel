@@ -118,6 +118,28 @@ is never the query.
 The follow-up hint under the injected rows names `search` and `read_document`
 only when the turn wired them.
 
+### Knowledge catalogs in per-turn injection
+
+Installed catalogs, the bundled Handboek included, are held to a stricter
+rule than project content, because an encyclopedia always has a plausible
+neighbour and a title that shares a word with the request.
+
+- **Vector floors.** A catalog's vector hit counts as evidence only above its
+  cosine floor ([knowledge/vector-floors.ts](../packages/service/src/knowledge/vector-floors.ts)),
+  keyed by catalog, then embedding profile. A hit under it neither ranks the
+  document nor labels it `vector`. A profile nobody measured keeps its hits
+  for ranking but labels them `fts`.
+- **Unjudged hits need vector evidence.** Without a relevance-model judgment,
+  a knowledge hit is injected only when it is `vector`. Keyword grounding,
+  which serves project content, is not enough here ("Olive Oil Times" would
+  ground "What is 17 times 23?"). Keyword-only catalog hits still reach the
+  `search` tool.
+- **Ceilings.** At most 2 chunks in Balanced (4 in Deep) within 25% (35%) of
+  the turn budget, and `knowledge` is last in every diversification round.
+
+Floors and the knowledge bar below are measured on real catalogs:
+[KNOWLEDGE-CALIBRATION-2026-09-30.md](../evals/src/retrieval-bench/KNOWLEDGE-CALIBRATION-2026-09-30.md).
+
 ## Launch reference list
 
 A craftbook started from the get-go — the composer's attached task or
@@ -180,14 +202,18 @@ pair on its own, which gives an absolute cut.
   before.
 - **Calibration.** Scores map onto fixed relevance anchors (drop 0.1, keep
   0.3, strong 0.6) through the model's thresholds, which come from the
-  retrieval bench, never from guesswork. A model with no thresholds may
-  reorder but never drop. `search` drops only below *drop* and reports the
+  retrieval bench, never from guesswork; between drop and strong the mapping
+  runs in logit space, so a saturating sigmoid does not collapse onto keep.
+  A model with no thresholds may reorder but never drop. On filter surfaces a
+  knowledge passage must reach 0.5 (`KNOWLEDGE_FILTER_MIN_RELEVANCE`), not
+  just keep. `search` drops only below *drop* and reports the
   rest as `hiddenBelowRelevanceFloor` ("No closely relevant results (N weak
   matches hidden)").
 - **Models.** Pinned by sha256 at an exact revision in
   [relevance/registry.ts](../packages/service/src/relevance/registry.ts),
-  stored under `~/.gezel/engines/relevance-models/<id>/`, downloaded only on
-  opt-in and only when the security policy allows app network, and loaded
+  stored under `~/.gezel/engines/relevance-models/<id>/`, downloaded when the
+  check is on (first run turns it on for new installs; the boot step fetches
+  a missing model) and only when the security policy allows app network, and loaded
   with `local_files_only`. Each model proves itself at load (a canned answer
   must outscore a canned non-answer); failing that, it is disabled. It runs in
   its own worker and never imports provider or chat code — a classifier cannot
@@ -195,7 +221,8 @@ pair on its own, which gives an absolute cut.
 - **Eval levers.** `GEZEL_RELEVANCE_MODEL` (`off` | `on` | id),
   `GEZEL_RELEVANCE_SURFACES`, `GEZEL_RELEVANCE_THRESHOLDS`,
   `GEZEL_RELEVANCE_BUDGET_MS`, `GEZEL_RELEVANCE_ORDER`,
-  `GEZEL_RELEVANCE_MODELS_DIR`, and the kill switch
+  `GEZEL_RELEVANCE_KNOWLEDGE_KEEP`, `GEZEL_KNOWLEDGE_VECTOR_FLOORS` (`off`, or
+  `key=floor,…`), `GEZEL_RELEVANCE_MODELS_DIR`, and the kill switch
   `GEZEL_DISABLE_RELEVANCE_MODEL`. The retrieval preview takes a
   `relevanceModel` override per request.
 

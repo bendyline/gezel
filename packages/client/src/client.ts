@@ -2445,8 +2445,7 @@ export class GezelClient {
 
   /**
    * Kick off a catalog install (file path, URL, or a gilde catalog id); poll
-   * the job or subscribe to its events. A 403 `network-blocked` means the
-   * security policy turns off app network access.
+   * the job or subscribe to its events.
    */
   installKnowledgeCatalog(
     body: KnowledgeInstallRequest,
