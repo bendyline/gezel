@@ -32,8 +32,8 @@ import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../vision-capability.
 import {
   type CapacityCommitted,
   CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
   availableSystemRamBytes,
-  formatContextCapacityDenial,
   minViableLocalContextTokens,
   resolveLlamaCppContextRequirement,
 } from './capacity-broker.js';
@@ -1243,9 +1243,7 @@ export class LocalEngineRuntime {
           vramBytes: capacity.vramBytes,
         });
         if (!admission.minimumSatisfied) {
-          throw new CapacityDeniedError(
-            formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
-          );
+          throw new CapacityDeniedError(NOT_ENOUGH_MEMORY_MESSAGE);
         }
         slots = admission.slots;
         effective = admission.perTurnCtxTokens;
@@ -1909,9 +1907,7 @@ export class LocalEngineRuntime {
           }
         }
         if (!admission.minimumSatisfied) {
-          throw new CapacityDeniedError(
-            formatContextCapacityDenial({ modelLabel: installed.name ?? modelId, plan: admission }),
-          );
+          throw new CapacityDeniedError(NOT_ENOUGH_MEMORY_MESSAGE);
         }
         slots = admission.slots;
         grantedCtx = admission.perTurnCtxTokens;

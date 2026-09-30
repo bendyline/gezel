@@ -49,6 +49,34 @@ describe('readMlxModelGeometry', () => {
     expect(perSlot).toBe(8 * 1 * 1024 * 2 * 65_536 + 40 * 8 * 512 * 2 * (1024 + 2048));
   });
 
+  it('prices only the cache-owning layers of a KV-shared gemma4 (real E4B shape)', () => {
+    // 42 layers, 5:1 sliding:full, the last 18 reuse earlier K/V. mlx-vlm's
+    // make_cache stops at layer 24, which leaves 4 full-attention caches of
+    // the 7 full-attention layers. Measured on an M2 (2026-09-30): a
+    // 12,213-token prompt left 290 MiB resident; this pricing says 290.8
+    // MiB, and pricing all 7 layers said 509.
+    const layerTypes = Array.from({ length: 42 }, (_, i) =>
+      (i + 1) % 6 === 0 ? 'full_attention' : 'sliding_attention',
+    );
+    const geometry = readMlxModelGeometry(
+      writeConfig({
+        model_type: 'gemma4',
+        text_config: {
+          num_hidden_layers: 42,
+          num_key_value_heads: 2,
+          head_dim: 256,
+          global_head_dim: 512,
+          sliding_window: 512,
+          num_kv_shared_layers: 18,
+          layer_types: layerTypes,
+        },
+      }),
+    );
+    expect(geometry).toMatchObject({ blockCount: 42, sharedKvLayers: 18 });
+    const perSlot = estimateExactPerSlotKvBytesF16(geometry ?? {}, 32_768);
+    expect(perSlot).toBe(4 * 2 * 1024 * 2 * 32_768 + 20 * 2 * 512 * 2 * (512 + 2048));
+  });
+
   it('treats linear-attention hybrid layers as bounded state (qwen3.6-a3b shape)', () => {
     const layerTypes = Array.from({ length: 40 }, (_, i) =>
       i % 4 === 3 ? 'full_attention' : 'linear_attention',
