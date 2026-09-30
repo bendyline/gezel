@@ -1157,18 +1157,8 @@
           options.provider === 'llama-cpp'
             ? inventory.models.find((m) => m.id === inventory.selectedModelId)
             : { id: options.provider },
-        configuration: {
-          maxTokens:
-            options.maxTokens ??
-            Math.min(
-              1024,
-              provider?.maxOutputTokens ?? 1024,
-              Math.floor(
-                (options.contextSize ?? Math.min(4096, provider?.contextTokens ?? 4096)) / 4,
-              ),
-            ),
-          contextSize: options.contextSize ?? Math.min(4096, provider?.contextTokens ?? 4096),
-        },
+        // Filled from the product once the run's config is in place.
+        configuration: {},
       },
       canonicalCoreCoverage: canonicalCoreCoverage.map((entry) => ({ ...entry })),
       canonicalMode:
@@ -1241,15 +1231,30 @@
     const modelId = report.identity.model?.id;
     if (!modelId) throw new Error('No selected trained model');
     clock.startSuspendMonitor();
+    // Run the budget a person gets unless the launcher pinned one. The harness
+    // once re-derived it (a flat 4K window and 1024-token replies), so every
+    // run measured a configuration no phone used, and whole-file writes arrived
+    // cut off.
     await api('/api/config', 'PUT', {
       provider: options.provider,
-      modelContextOverrides: {
-        [`${options.provider}:${modelId}`]: report.identity.configuration.contextSize,
-      },
-      modelTuning: {
-        [modelId]: { sampling: { maxTokens: report.identity.configuration.maxTokens } },
-      },
+      ...(options.contextSize
+        ? { modelContextOverrides: { [`${options.provider}:${modelId}`]: options.contextSize } }
+        : {}),
+      ...(options.maxTokens
+        ? { modelTuning: { [modelId]: { sampling: { maxTokens: options.maxTokens } } } }
+        : {}),
     });
+    const listed = (
+      await api(`/api/models?provider=${encodeURIComponent(options.provider)}`)
+    ).models.find((m) => m.id === modelId);
+    if (!listed?.contextWindow || !listed.maxOutputTokens)
+      throw new Error('The product did not report the inference budget its turns use');
+    report.identity.configuration = {
+      contextSize: listed.contextWindow,
+      maxTokens: listed.maxOutputTokens,
+      source: options.contextSize || options.maxTokens ? 'launcher' : 'product',
+    };
+    report.revision++;
     for (const id of requested) {
       const fixture = fixtures.find((f) => f.id === id);
       if (!cases[id] && !fixture) throw new Error(`Unknown mobile scenario: ${id}`);

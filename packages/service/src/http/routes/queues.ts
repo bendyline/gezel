@@ -21,7 +21,7 @@ export { sanitizeBrokerCacheStats } from './engine-queues.js';
  * "copilot is busy" noise, not "ollama has 0 queued" clutter.
  */
 
-import { QueueProviderNameSchema, type QueueStatusResponse } from '@bendyline/gezel';
+import { QueueProviderNameSchema, type QueueStatusResponse } from '@bendyline/gezel/queue-status';
 import { Hono } from 'hono';
 
 import type { ServiceContext } from '../context.js';

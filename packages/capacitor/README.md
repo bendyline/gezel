@@ -45,6 +45,9 @@ so an availability probe cannot start a large download.
 - Text messages (`system`, `user`, `assistant`), streaming, explicit model ID,
   and `max_tokens` are supported. Tools, images, JSON constraints, sampling
   options and other unsupported controls reject with `unsupported_capability`.
+- Without `max_tokens`, a reply may use up to half the context window (at most
+  4096 tokens on llama.cpp, 1024 on the system models). On llama.cpp that is a
+  ceiling within whatever room the prompt leaves, not a reservation.
 - Replies preserve `stop`, `length`, and `cancelled`. Usage is absent when the
   provider cannot measure it. Desktop's existing `GezelApp` default types remain
   unchanged; portable clients use `GezelApp<'portable'>`.

@@ -62,7 +62,11 @@ typedef struct gezel_llama_generation_options {
     uint32_t struct_size;
     uint32_t abi_version;
     uint64_t request_id;
+    /** Ceiling on the reply, 1-4096. The reply gets whatever context the prompt
+     * leaves, up to this; GEZEL_LLAMA_CONTEXT_LIMIT only when the prompt leaves
+     * less than min(max_tokens, 256). */
     uint32_t max_tokens;
+    /** Covers prompt processing and decoding; at most 600000. */
     uint32_t timeout_ms;
     uint32_t max_output_bytes;
     /** Zero uses greedy decoding. Positive values use top-k/top-p/min-p/temperature. */

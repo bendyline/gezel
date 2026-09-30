@@ -156,7 +156,15 @@ export const MobileInferenceBudgetSchema = z
   });
 export type MobileInferenceBudget = z.infer<typeof MobileInferenceBudgetSchema>;
 
-/** Explicit choices fail instead of being silently replaced by defaults. */
+/**
+ * Explicit choices fail instead of being silently replaced by defaults.
+ *
+ * The default reply budget is half the window, up to what the provider allows.
+ * It has to hold a whole file in one tool call: at the old 1024-token default a
+ * phone could not write a small HTML page, and the call arrived cut off. The
+ * llama.cpp bridge spends only the room the prompt leaves, so a generous budget
+ * costs the prompt nothing; the system models cap their own replies at 1024.
+ */
 export function resolveMobileInferenceBudget(
   provider: Pick<MobileProvider, 'contextTokens' | 'maxOutputTokens'>,
   requested: Partial<MobileInferenceBudget> = {},
@@ -165,7 +173,7 @@ export function resolveMobileInferenceBudget(
   const budget = MobileInferenceBudgetSchema.parse({
     contextSize,
     maxTokens:
-      requested.maxTokens ?? Math.min(1024, provider.maxOutputTokens, Math.floor(contextSize / 4)),
+      requested.maxTokens ?? Math.min(provider.maxOutputTokens, Math.floor(contextSize / 2)),
   });
   if (budget.contextSize > provider.contextTokens || budget.maxTokens > provider.maxOutputTokens)
     throw new Error('These token limits exceed what this on-device provider supports');

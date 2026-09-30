@@ -19,7 +19,6 @@ import type {
   QueuedMessage,
   RetrievalDecisionTrace,
   SendToSessionRequest,
-  SessionQueueState,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
   TurnMessageOrigin,
@@ -97,6 +96,7 @@ import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import type { SessionQueueState } from '@bendyline/gezel/queue-status';
 import { SessionSendQueue } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';

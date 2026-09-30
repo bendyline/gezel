@@ -125,7 +125,10 @@ bool load_progress(float fraction, void * data) {
     return !abort_decode(data);
 }
 bool valid_request(uint64_t id) { return id != 0 && (id & cancelled_bit) == 0; }
-bool valid_timeout(uint32_t value) { return value > 0 && value <= 300000; }
+// Hosts scale a reply's deadline with its budget (30 s plus 250 ms a token);
+// a 4096-token reply needs the full ten minutes on a phone.
+bool valid_timeout(uint32_t value) { return value > 0 && value <= 600000; }
+constexpr uint32_t minimum_reply_tokens = 256;
 bool valid_load_options(const gezel_llama_load_options * options) {
     return options && options->struct_size == sizeof(*options) && options->abi_version == GEZEL_LLAMA_ABI_VERSION &&
         options->context_tokens >= 256 && options->context_tokens <= max_context_tokens &&
@@ -393,8 +396,14 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Could not tokenize the chat transcript");
     const auto token_count = static_cast<uint32_t>(-required);
     result.prompt_tokens = token_count;
-    if (token_count >= engine.context_tokens || options.max_tokens > engine.context_tokens - token_count)
+    // max_tokens is a ceiling, not a reservation: the reply gets whatever the
+    // prompt leaves, up to it, so a budget big enough to write a whole file
+    // never costs the prompt its tools or history. Only a prompt that leaves
+    // less than a short answer is refused, for the caller to shorten.
+    const uint32_t room = token_count < engine.context_tokens ? engine.context_tokens - token_count : 0;
+    if (room < std::min(options.max_tokens, minimum_reply_tokens))
         return fail(error, GEZEL_LLAMA_CONTEXT_LIMIT, "Prompt plus requested output exceeds the context; shorten the transcript or output");
+    const uint32_t max_tokens = std::min(options.max_tokens, room);
     std::vector<llama_token> tokens(token_count);
     if (llama_tokenize(vocab, prompt.data(), size, tokens.data(), tokens.size(), true, true) != static_cast<int32_t>(tokens.size()))
         return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Could not tokenize the chat transcript");
@@ -494,7 +503,7 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         return GEZEL_LLAMA_OK;
     };
     result.finish_reason = GEZEL_LLAMA_FINISH_LENGTH;
-    while (result.generated_tokens < options.max_tokens) {
+    while (result.generated_tokens < max_tokens) {
         // Past the first token a stop ends the reply rather than failing it.
         if (const auto stop = engine.stopped()) {
             if (result.generated_tokens == 0) return stop_error(engine, error);
@@ -523,7 +532,7 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
         }
         if (length < 0) return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Could not decode a model token");
         if (const auto status = emit(decoder.append(bytes, length)); status) return status;
-        if (result.generated_tokens < options.max_tokens) {
+        if (result.generated_tokens < max_tokens) {
             const auto status = llama_decode(engine.context, llama_batch_get_one(&token, 1));
             if (engine.stopped()) return stop_error(engine, error);
             if (status != 0) return fail(error, GEZEL_LLAMA_INFERENCE_FAILED, "Token decoding failed");

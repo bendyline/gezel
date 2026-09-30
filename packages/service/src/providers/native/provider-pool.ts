@@ -17,7 +17,8 @@
  * that produces no-op LLMProviders.
  */
 
-import { type ProviderQueueDescription, createLogger } from '@bendyline/gezel';
+import { createLogger } from '@bendyline/gezel';
+import type { ProviderQueueDescription } from '@bendyline/gezel/queue-status';
 import type { LLMProvider } from '../types.js';
 import {
   type CapacityBroker,

@@ -14,7 +14,11 @@ import {
 } from '../prompt-footprint.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { resolveRoleId } from '../roles/index.js';
-import { type AnswerQuestionRequest, AskQuestionRequestSchema } from '../schemas/api.js';
+import {
+  type AnswerQuestionRequest,
+  AskQuestionRequestSchema,
+  type GezelConfig,
+} from '../schemas/api.js';
 import {
   type CreateGezelRequest,
   CreateGezelRequestSchema,
@@ -28,7 +32,9 @@ import {
 } from '../schemas/api.js';
 import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
+  type MobileInferenceBudget,
   type MobileModelInventory,
+  type MobileProvider,
   type MobileProviderId,
   MobileProviderIdSchema,
   resolveMobileInferenceBudget,
@@ -133,6 +139,8 @@ type Turn = {
 /** A turn being admitted: validated, its prompt built, its message saved. */
 type Admission = {
   sessionId: string;
+  /** When the send was accepted; the turn it becomes keeps this clock. */
+  startedAt: number;
   cancelled: boolean;
   taskOwned: boolean;
   /** False while a reserved drain or handoff still waits to enter `serial`. */
@@ -178,6 +186,7 @@ export class PortableProductService {
    * same scheduler the desktop daemon runs per engine.
    */
   private readonly engine = new ProviderQueue({ concurrency: 1 });
+  private providerCache: MobileProvider[] | undefined;
   /** Messages sent to a conversation that is already responding. */
   private readonly sendQueue = new SessionSendQueue<unknown, PortableQueuedSend>({
     publish: (sessionId, event) => this.emitToSession(sessionId, event),
@@ -486,6 +495,19 @@ export class PortableProductService {
         );
     }
   }
+  /**
+   * The native hosts answer provider probes on their inference queue, so a
+   * probe during a generation waits for it to end. Routes run under `serial`,
+   * so one such wait froze every route for the whole reply: the phone could
+   * not show a queued send, report a turn, or stop one in time. While the
+   * engine is busy, reuse the last answer instead.
+   */
+  private async providers(): Promise<MobileProvider[]> {
+    if (this.providerCache && this.engine.describe().active.length) return this.providerCache;
+    const providers = await this.inference.providers();
+    this.providerCache = providers;
+    return providers;
+  }
   private sessionBusy(sessionId: string): boolean {
     return (
       this.admissions.has(sessionId) ||
@@ -576,13 +598,18 @@ export class PortableProductService {
         () => {},
       );
     }
-    if (turn) {
-      turn.cancelled = true;
-      turn.abort.abort();
-      if (turn.state === 'running') await this.inference.cancel(turn.requestId).catch(() => {});
-    }
+    const stop = async (target: Turn) => {
+      target.cancelled = true;
+      target.abort.abort();
+      if (target.state === 'running') await this.inference.cancel(target.requestId).catch(() => {});
+    };
+    if (turn) await stop(turn);
     if (admission?.started) await admission.finished;
+    // An admission past its last check becomes a turn while this waited.
+    const late = this.turns.get(sessionId);
+    if (late && late !== turn) await stop(late);
     await turn?.finished;
+    await late?.finished;
     return { cancelled: true, ...(taskPaused ? { taskPaused } : {}) };
   }
   /** The task runner's stop: only task-owned turns, whether waiting or running. */
@@ -707,7 +734,7 @@ export class PortableProductService {
   }
   async setProvider(id: MobileProviderId): Promise<void> {
     await this.withModelChange(async () => {
-      const provider = (await this.inference.providers()).find((item) => item.id === id);
+      const provider = (await this.providers()).find((item) => item.id === id);
       if (provider?.availability !== 'available')
         throw new ProductError(provider?.reason ?? 'Provider unavailable', 409);
       await this.store.writeConfig({ provider: id });
@@ -729,7 +756,7 @@ export class PortableProductService {
     const providerId = MobileProviderIdSchema.parse(
       gezel.provider ?? config.provider ?? 'llama-cpp',
     );
-    const provider = (await this.inference.providers()).find((item) => item.id === providerId);
+    const provider = (await this.providers()).find((item) => item.id === providerId);
     if (provider?.availability !== 'available')
       throw new ProductError(provider?.reason ?? 'Choose an available model in Settings.', 409);
     const inventory = providerId === 'llama-cpp' ? await this.inference.models?.() : undefined;
@@ -741,14 +768,13 @@ export class PortableProductService {
         'The Klerk model is no longer available. Choose a model in Settings.',
         409,
       );
-    const budget = resolveMobileInferenceBudget(provider, {
-      contextSize:
-        config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
-        fittedContext(inventory, modelId),
-      maxTokens:
-        gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
-        config.modelTuning?.[modelId]?.sampling?.maxTokens,
-    });
+    const budget = modelBudget(
+      config,
+      provider,
+      inventory,
+      modelId,
+      gezel.parsed.frontmatter.tuning?.sampling?.maxTokens,
+    );
     const sampling =
       providerId === 'llama-cpp'
         ? portableSampling({
@@ -867,7 +893,7 @@ export class PortableProductService {
           409,
         );
       const providerId = MobileProviderIdSchema.parse(session.providerName);
-      const provider = (await this.inference.providers()).find((item) => item.id === providerId);
+      const provider = (await this.providers()).find((item) => item.id === providerId);
       if (!provider || provider.availability !== 'available')
         throw new ProductError(
           provider?.reason ?? 'Choose an available on-device model in Settings.',
@@ -894,14 +920,13 @@ export class PortableProductService {
           'The model used by this conversation is no longer available. Import it again or start a conversation with another model.',
           409,
         );
-      const limits = resolveMobileInferenceBudget(provider, {
-        contextSize:
-          config.modelContextOverrides?.[`${providerId}:${modelId}`] ??
-          fittedContext(inventory, modelId),
-        maxTokens:
-          context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens ??
-          config.modelTuning?.[modelId]?.sampling?.maxTokens,
-      });
+      const limits = modelBudget(
+        config,
+        provider,
+        inventory,
+        modelId,
+        context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens,
+      );
       const sampling =
         providerId === 'llama-cpp'
           ? portableSampling({
@@ -1025,13 +1050,15 @@ export class PortableProductService {
         if (question) this.emit(session, { type: 'question_answered', question });
       }
       if (sentDraft) this.draftChanged({ ...sentDraft, status: 'sent', updatedAt: now });
-      check();
       await checkTask();
+      // Last stop check, with no await between it and the turn existing: a stop
+      // that landed during an await above must not let the turn through.
+      check();
       const turn: Turn = {
         requestId: crypto.randomUUID(),
         session,
         text: '',
-        startedAt: Date.now(),
+        startedAt: admission.startedAt,
         cancelled: false,
         ancestors: admitted?.ancestors ?? [session.gezelId],
         chain: placement.chain ?? { count: 0 },
@@ -1230,6 +1257,7 @@ export class PortableProductService {
     let settle!: () => void;
     const admission: Admission = {
       sessionId,
+      startedAt: Date.now(),
       cancelled: false,
       taskOwned,
       started: false,
@@ -2088,7 +2116,7 @@ export class PortableProductService {
       });
     }
     if (resource === 'models' && method === 'GET') {
-      const providers = await this.inference.providers();
+      const providers = await this.providers();
       const provider = providers.find((item) => item.id === query.get('provider'));
       const inventory = provider?.id === 'llama-cpp' ? await this.inference.models?.() : undefined;
       if (id === 'test') {
@@ -2110,26 +2138,31 @@ export class PortableProductService {
               },
         );
       }
+      if (provider?.availability !== 'available')
+        return json({ provider: query.get('provider'), models: [] });
+      const config = await this.store.readConfig();
+      // The window and reply ceiling turns actually get, so the UI and the
+      // eval harness never run on a second copy of the budget rules.
+      const describe = (id: string, name: string) => {
+        let budget: MobileInferenceBudget | undefined;
+        try {
+          budget = modelBudget(config, provider, inventory, id);
+        } catch {
+          budget = undefined;
+        }
+        return {
+          id,
+          name,
+          contextWindow: budget?.contextSize ?? provider.contextTokens,
+          ...(budget ? { maxOutputTokens: budget.maxTokens } : {}),
+          supportsTools: true,
+        };
+      };
       return json({
-        provider: query.get('provider'),
-        models:
-          provider?.availability === 'available'
-            ? inventory
-              ? inventory.models.map((model) => ({
-                  id: model.id,
-                  name: model.name,
-                  contextWindow: provider.contextTokens,
-                  supportsTools: true,
-                }))
-              : [
-                  {
-                    id: provider.id,
-                    name: provider.name,
-                    contextWindow: provider.contextTokens,
-                    supportsTools: true,
-                  },
-                ]
-            : [],
+        provider: provider.id,
+        models: inventory
+          ? inventory.models.map((model) => describe(model.id, model.name))
+          : [describe(provider.id, provider.name)],
       });
     }
     if (resource === 'sessions') {
@@ -2165,23 +2198,37 @@ export class PortableProductService {
         }
       }
       if (id === 'inflight') {
-        // Turns waiting for the engine count as in flight, as on desktop.
-        return json({
-          inflight: [...this.turns.values()]
-            .filter(
-              (t) =>
-                (!query.get('project') || query.get('project') === t.session.projectId) &&
-                (!query.get('gezel') || query.get('gezel') === t.session.gezelId),
+        // A send is in flight from the moment it is accepted, as on desktop:
+        // while it is set up, while it waits for the engine, and while it runs.
+        const entries = [
+          ...[...this.turns.values()].map((t) => ({ session: t.session, startedAt: t.startedAt })),
+          ...(
+            await Promise.all(
+              [...this.admissions.values()]
+                .filter((a) => !this.turns.has(a.sessionId))
+                .map(async (a) => {
+                  const session = await this.session(a.sessionId).catch(() => undefined);
+                  return session ? [{ session, startedAt: a.startedAt }] : [];
+                }),
             )
-            .map((t) => ({
-              sessionId: t.session.id,
-              gezelId: t.session.gezelId,
-              projectId: t.session.projectId,
-              providerName: t.session.providerName,
-              ...(t.session.model ? { model: t.session.model } : {}),
-              userText: lastUserText(t.session),
-              startedAt: t.startedAt,
-              elapsedMs: Date.now() - t.startedAt,
+          ).flat(),
+        ];
+        return json({
+          inflight: entries
+            .filter(
+              ({ session }) =>
+                (!query.get('project') || query.get('project') === session.projectId) &&
+                (!query.get('gezel') || query.get('gezel') === session.gezelId),
+            )
+            .map(({ session, startedAt }) => ({
+              sessionId: session.id,
+              gezelId: session.gezelId,
+              projectId: session.projectId,
+              providerName: session.providerName,
+              ...(session.model ? { model: session.model } : {}),
+              userText: lastUserText(session),
+              startedAt,
+              elapsedMs: Date.now() - startedAt,
             })),
         });
       }
@@ -2190,14 +2237,16 @@ export class PortableProductService {
         if (!action && method === 'GET') return json(session);
         if (action === 'inflight') {
           const turn = this.turns.get(id);
+          const startedAt = turn?.startedAt ?? this.admissions.get(id)?.startedAt;
           return json({
-            inflight: turn
-              ? {
-                  userText: lastUserText(turn.session),
-                  startedAt: turn.startedAt,
-                  elapsedMs: Date.now() - turn.startedAt,
-                }
-              : null,
+            inflight:
+              startedAt === undefined
+                ? null
+                : {
+                    userText: lastUserText(turn?.session ?? session),
+                    startedAt,
+                    elapsedMs: Date.now() - startedAt,
+                  },
           });
         }
         if (action === 'send' && method === 'POST') return json(await this.submit(id, body));
@@ -2714,6 +2763,26 @@ function fittedContext(
   modelId: string,
 ): number | undefined {
   return inventory?.models.find((model) => model.id === modelId)?.contextTokens;
+}
+
+/**
+ * The window and reply ceiling a turn runs with, and what the model listing
+ * reports: the person's per-model choice, else the window this device fits and
+ * the default reply budget. A gezel's own reply budget wins over both.
+ */
+function modelBudget(
+  config: Pick<GezelConfig, 'modelContextOverrides' | 'modelTuning'>,
+  provider: MobileProvider,
+  inventory: MobileModelInventory | undefined,
+  modelId: string,
+  gezelMaxTokens?: number,
+): MobileInferenceBudget {
+  return resolveMobileInferenceBudget(provider, {
+    contextSize:
+      config.modelContextOverrides?.[`${provider.id}:${modelId}`] ??
+      fittedContext(inventory, modelId),
+    maxTokens: gezelMaxTokens ?? config.modelTuning?.[modelId]?.sampling?.maxTokens,
+  });
 }
 
 function mimeFor(path: string): string {

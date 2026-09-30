@@ -1,4 +1,4 @@
-import { QueueStatusResponseSchema } from '@bendyline/gezel';
+import { QueueStatusResponseSchema } from '@bendyline/gezel/queue-status';
 import { describe, expect, it } from 'vitest';
 import type { ServiceContext } from '../context.js';
 import { queueRoutes } from './queues.js';

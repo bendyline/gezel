@@ -82,6 +82,7 @@ const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optional
 const IMPORTABLE = [
   '@bendyline/gezel/poppetje',
   '@bendyline/gezel/mobile-providers',
+  '@bendyline/gezel/queue-status',
   '@bendyline/gezk',
   '@bendyline/gezk/node',
   '@bendyline/gezel',

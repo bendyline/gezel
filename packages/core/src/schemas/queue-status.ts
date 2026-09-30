@@ -7,7 +7,8 @@ import { QueuedMessageSchema } from './session.js';
  * Wire shapes for `GET /api/queues`. The daemon and the phone runtime both
  * serve this response, and the provider queue's `describe()` returns
  * {@link ProviderQueueDescription} directly, so the scheduler, the routes
- * and the client share one definition.
+ * and the client share one definition. Imported as
+ * `@bendyline/gezel/queue-status`; the main barrel does not re-export it.
  */
 
 export const QueueLaneSchema = z.enum(['interactive', 'background']);

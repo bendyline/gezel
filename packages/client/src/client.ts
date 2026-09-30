@@ -64,7 +64,7 @@ import type {
   SessionQueueState,
   TaskHandoffBucket,
   TaskRunnerState,
-} from '@bendyline/gezel';
+} from '@bendyline/gezel/queue-status';
 import type {
   AiAppDetail,
   AmbientDashboardDisplayTarget,
@@ -667,7 +667,7 @@ export interface UsageResponse {
 export type { NightShiftQuotaHoldReason, NightShiftStatusResponse };
 
 /**
- * Queue status wire types live in core's `schemas/queue-status.ts`, which
+ * Queue status wire types live in `@bendyline/gezel/queue-status`, which
  * the daemon, the phone runtime and the provider queue share; re-exported
  * here so the long-standing `@bendyline/gezel-client` import path keeps
  * working.

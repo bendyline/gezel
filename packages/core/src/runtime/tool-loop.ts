@@ -137,6 +137,13 @@ function inOpenReasoning(buffered: string): boolean {
 const ACTION_LIMIT =
   'This turn reached its action limit. Completed actions are saved; send a message to continue.';
 
+/**
+ * Tool calls one turn may make. Reading a handful of sources, writing the
+ * result, and checking it takes a dozen; at the old limit of 8 a phone ended
+ * real work mid-task. The repeated-failure stop still ends a loop early.
+ */
+export const PORTABLE_TURN_ACTION_LIMIT = 24;
+
 function withNativeToolNote(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   listing: PortableToolListing,
@@ -374,7 +381,7 @@ export async function runPortableToolLoop(options: {
     };
   };
 
-  for (let iteration = 0; iteration < 8; iteration++) {
+  for (let iteration = 0; iteration <= PORTABLE_TURN_ACTION_LIMIT; iteration++) {
     await check();
     await assertPortableTaskSessionActive(options.store, session);
     let buffered = '';
@@ -431,7 +438,7 @@ export async function runPortableToolLoop(options: {
           nativeSpecs.length
             ? async (event) => {
                 if (ended) return { output: '', endTurn: true };
-                if (++actionCount > 8) {
+                if (++actionCount > PORTABLE_TURN_ACTION_LIMIT) {
                   limited = true;
                   throw new Error(ACTION_LIMIT);
                 }
@@ -503,7 +510,7 @@ export async function runPortableToolLoop(options: {
     const visibleText = extractReasoning(result.text).visible;
     const envelope = result.stopReason === 'stop' ? parseToolEnvelopeReply(visibleText) : null;
     if (!envelope) return { ...result, text: visibleText, message, streamed: prose };
-    if (++actionCount > 8) break;
+    if (++actionCount > PORTABLE_TURN_ACTION_LIMIT) break;
     const outcome = await perform(envelope.name, envelope.arguments);
     if ('end' in outcome) return { ...outcome.end, message };
     messages.push(

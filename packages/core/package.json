@@ -81,6 +81,10 @@
       "types": "./dist/eval/index.d.ts",
       "import": "./dist/eval/index.js"
     },
+    "./queue-status": {
+      "types": "./dist/schemas/queue-status.d.ts",
+      "import": "./dist/schemas/queue-status.js"
+    },
     "./svg": {
       "types": "./dist/svg/index.d.ts",
       "import": "./dist/svg/index.js"

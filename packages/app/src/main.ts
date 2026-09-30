@@ -63,7 +63,6 @@ import {
   normalizedDocumentUrl,
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
-import * as installedServiceCompatibility from './installed-service-compatibility.js';
 import { createLoopbackCertificatePin } from './loopback-certificate-pin.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
@@ -3140,14 +3139,7 @@ app.whenReady().then(async () => {
         (!app.isPackaged && process.env.GEZEL_SPAWN !== '1'),
       ...(storeBuild.channel ? { storeProfile: true } : {}),
       uiDir: resolveBundledUi(),
-      ...installedServiceCompatibility.options(
-        app.isPackaged ? app.getVersion() : GEZEL_VERSION,
-        mainWindow,
-        {
-          enabled: !app.isPackaged || Boolean(storeBuild.channel),
-          autoAccept: process.env.GEZEL_E2E === '1' || packagedSmoke || launch.forceEmbeddedFromCli,
-        },
-      ),
+      appVersion: app.isPackaged ? app.getVersion() : GEZEL_VERSION,
       logger: {
         info: (m) => {
           console.log(m);
@@ -3160,7 +3152,6 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     console.error('Gezel service failed to start:', err);
-    if (installedServiceCompatibility.isDeclined(err)) return app.quit();
     if (packagedSmoke) {
       app.exit(1);
       return;

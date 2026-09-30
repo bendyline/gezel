@@ -12,8 +12,15 @@ export default defineConfig({
   // minified React error #130 — the broken-Handboek-tab incident).
   // Dedupe pins every react import, linked or installed, to this
   // package's copy.
+  // The client imports its schemas from `@bendyline/gezel/schemas`, and
+  // this app imports `@bendyline/gezel`, whose browser entry re-exports the
+  // same schemas. Core builds each entry standalone and bundlers cannot
+  // prove zod schema construction side-effect free, so the two entries put
+  // every schema in the startup bundle twice (~58 KiB gzip). Pointing the
+  // subpath at the browser entry keeps one copy.
   resolve: {
     dedupe: ['react', 'react-dom'],
+    alias: [{ find: /^@bendyline\/gezel\/schemas$/, replacement: '@bendyline/gezel' }],
   },
   // IronCalc's wasm-bindgen shim is reached only after Squisq asks for a
   // formula session. Pre-bundling it would break the explicit wasm asset URL

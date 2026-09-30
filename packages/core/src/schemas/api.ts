@@ -3118,6 +3118,9 @@ export const ModelInfoSchema = z.object({
   reasoningEfforts: z.array(z.string()).optional(),
   defaultReasoningEffort: z.string().optional(),
   contextWindow: z.number().optional(),
+  /** Reply ceiling this host applies by default. Phones report it with the
+   * window they actually run the model at, not the provider maximum. */
+  maxOutputTokens: z.number().int().positive().optional(),
   /**
    * Whether the model supports structured tool / function calling. Cloud
    * providers can assume true for their current chat models; Ollama sets

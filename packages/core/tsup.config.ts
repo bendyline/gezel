@@ -34,6 +34,11 @@ export default defineConfig({
     // `./eval` — the in-app eval runner's contract. Kept off the main entry
     // so its schemas stay out of the UI's startup bundle (see src/eval/index.ts).
     'src/eval/index.ts',
+    // `./queue-status` — `GET /api/queues` wire shapes. Off the main entry for
+    // the same reason as `./eval`: the UI only needs the types, and a
+    // re-export would ship the zod schemas twice in its startup bundle (once
+    // in `browser.js`, once in `schemas/index.js` via the client).
+    'src/schemas/queue-status.ts',
   ],
   format: ['esm'],
   dts: true,

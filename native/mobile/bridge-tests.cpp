@@ -199,7 +199,8 @@ static void bridge_tests(const char * path) {
              [](gezel_llama_generation_options & o) { o.top_k = 1001; },
              [](gezel_llama_generation_options & o) { o.min_p = 1; },
              [](gezel_llama_generation_options & o) { o.repeat_penalty = 0.5f; },
-             [](gezel_llama_generation_options & o) { o.repeat_last_n = 4097; }}) {
+             [](gezel_llama_generation_options & o) { o.repeat_last_n = 4097; },
+             [](gezel_llama_generation_options & o) { o.timeout_ms = 600001; }}) {
         auto invalid = generation;
         invalid.request_id = ++generation.request_id;
         spoil(invalid);
@@ -217,9 +218,22 @@ static void bridge_tests(const char * path) {
         CHECK(gezel_llama_generate(engine.get(), message, 2, &sampled, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
         CHECK(result.generated_tokens == 8 && !text.empty());
     }
+    // A reply budget is a ceiling: one larger than the room the prompt leaves
+    // fills that room, and the ten-minute deadline a 4096-token reply asks for
+    // is accepted. Only a prompt leaving less than a short answer is refused.
     ++generation.request_id;
     generation.max_tokens = 512;
-    CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_CONTEXT_LIMIT);
+    generation.timeout_ms = 600000;
+    text.clear();
+    CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
+    CHECK(result.finish_reason == GEZEL_LLAMA_FINISH_LENGTH && result.generated_tokens == 512 - result.prompt_tokens);
+    std::string crowded(2400, ' ');
+    for (size_t i = 0; i < crowded.size(); i += 6) crowded.replace(i, 5, "Hello");
+    const gezel_llama_message long_prompt[] = {{"system", "Brief replies."}, {"user", crowded.c_str()}};
+    ++generation.request_id;
+    generation.max_tokens = 256;
+    CHECK(gezel_llama_generate(engine.get(), long_prompt, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_CONTEXT_LIMIT);
+    generation.timeout_ms = 60000;
     generation.max_tokens = 8;
     generation.max_output_bytes = 2;
     text.clear();

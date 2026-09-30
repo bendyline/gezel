@@ -44,7 +44,6 @@
 import {
   type ModelTier,
   type Task,
-  type TaskHandoffHoldReason,
   type TaskWaitReason,
   type TaskWaitState,
   createLogger,
@@ -55,6 +54,7 @@ import {
   taskEffectiveStatus,
   withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
+import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
 import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';

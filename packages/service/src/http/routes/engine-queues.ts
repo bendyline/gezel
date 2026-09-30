@@ -3,7 +3,7 @@ import type {
   ProviderQueueState,
   QueueProviderName,
   QueueStatusResponse,
-} from '@bendyline/gezel';
+} from '@bendyline/gezel/queue-status';
 import { Hono } from 'hono';
 import { liveProviderConcurrency } from '../../providers/native/provider-pool.js';
 import type { ProviderName } from '../../providers/types.js';

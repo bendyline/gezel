@@ -70,7 +70,8 @@ export * from './script-input.js';
 export * from './handboek.js';
 export * from './storage.js';
 export * from './mobile-provider.js';
-export * from './queue-status.js';
+// queue-status.ts is the `@bendyline/gezel/queue-status` subpath, not a
+// barrel export: see the note on its tsup entry.
 
 export * from './file-turn-intent.js';
 export * from './turn-intent-plan.js';

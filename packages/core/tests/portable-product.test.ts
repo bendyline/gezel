@@ -532,10 +532,18 @@ describe('ordinary client against offline product runtime', () => {
     await client.sendToChatSession(session.id, { message: 'Say hello.' });
     await settled(service);
     expect(requests.at(-1)).toMatchObject({ contextSize: 16384, maxTokens: 1000 });
+    // The listing reports the budget turns get, not the provider's maximum.
+    expect((await client.listProviderModels('llama-cpp')).models).toEqual([
+      expect.objectContaining({ id: 'fixture', contextWindow: 16384, maxOutputTokens: 1000 }),
+    ]);
     await client.updateConfig({ modelContextOverrides: { 'llama-cpp:fixture': 4096 } });
     await client.sendToChatSession(session.id, { message: 'Once more.' });
     await settled(service);
     expect(requests.at(-1)).toMatchObject({ contextSize: 4096 });
+    expect((await client.listProviderModels('llama-cpp')).models[0]).toMatchObject({
+      contextWindow: 4096,
+      maxOutputTokens: 1000,
+    });
   });
 
   it("passes a downloaded model's catalog sampling to the engine, and none for an imported file", async () => {
