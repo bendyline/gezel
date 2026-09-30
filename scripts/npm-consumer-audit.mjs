@@ -3,16 +3,19 @@
  * check-package-consumers.mjs.
  *
  * WHY a separate module: the consumer check does all of its work at import
- * time, so its decision logic could not be tested. The allowlist is the
- * pressure valve that makes a `high` threshold livable: an advisory that is
- * genuinely unreachable can be accepted with a written reason and an expiry,
- * instead of lowering the gate back to `critical` for everything.
+ * time, so its decision logic could not be tested.
+ *
+ * Critical only, like every other audit gate. Advisories land on npm's clock,
+ * not ours, and a `high` threshold turned each new DoS report against a
+ * transitive dependency into a red build on unrelated work. The daily
+ * supply-chain workflow still reports high and below. The allowlist remains
+ * for a critical advisory that is genuinely unreachable.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BLOCKING = new Set(['high', 'critical']);
+const BLOCKING = new Set(['critical']);
 
 export const AUDIT_ALLOWLIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -39,7 +42,7 @@ export function readAuditAllowlist(path = AUDIT_ALLOWLIST_PATH) {
 }
 
 /**
- * Advisories at high or critical severity that no unexpired allowlist entry
+ * Critical advisories that no unexpired allowlist entry
  * covers. Advisory ids come from the GHSA URL npm reports.
  *
  * @param {any} report parsed `npm audit --json`

@@ -327,12 +327,12 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   assert.match(
     consumerCheck,
     /blockingAdvisories\(auditReport, readAuditAllowlist\(\)\)/,
-    'npm consumer checks must apply the high/critical allowlist gate',
+    'npm consumer checks must apply the critical allowlist gate',
   );
   assert.match(
     consumerAudit,
-    /const BLOCKING = new Set\(\['high', 'critical'\]\)/,
-    'the clean npm consumer graph must reject high and critical advisories',
+    /const BLOCKING = new Set\(\['critical'\]\)/,
+    'the clean npm consumer graph must block on critical advisories only',
   );
   assert.match(
     consumerCheck,

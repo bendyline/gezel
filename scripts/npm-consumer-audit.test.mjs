@@ -8,13 +8,13 @@ import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs
 const REPORT = {
   vulnerabilities: {
     'adm-zip': {
-      severity: 'high',
+      severity: 'critical',
       via: [
         {
           source: 1,
-          title: 'adm-zip: Uncontrolled memory allocation (DoS)',
+          title: 'adm-zip: Path traversal on extraction',
           url: 'https://github.com/advisories/GHSA-7q85-xj36-vmfc',
-          severity: 'high',
+          severity: 'critical',
         },
         {
           source: 2,
@@ -24,16 +24,32 @@ const REPORT = {
         },
       ],
     },
-    '@bendyline/gezel-service': { severity: 'high', via: ['adm-zip'] },
+    nodemailer: {
+      severity: 'high',
+      via: [
+        {
+          source: 3,
+          title: 'Nodemailer: Quadratic backtracking in the addressparser',
+          url: 'https://github.com/advisories/GHSA-v53p-9fqp-m79j',
+          severity: 'high',
+        },
+      ],
+    },
+    '@bendyline/gezel-service': { severity: 'critical', via: ['adm-zip', 'nodemailer'] },
   },
 };
 
-test('reports a high advisory once, under the package it affects', () => {
+test('reports a critical advisory once, under the package it affects', () => {
   const found = blockingAdvisories(REPORT, []);
   assert.deepEqual(
     found.map((a) => [a.id, a.pkg, a.severity]),
-    [['GHSA-7q85-xj36-vmfc', 'adm-zip', 'high']],
+    [['GHSA-7q85-xj36-vmfc', 'adm-zip', 'critical']],
   );
+});
+
+test('high and lower advisories never block', () => {
+  const { 'adm-zip': _critical, ...rest } = REPORT.vulnerabilities;
+  assert.deepEqual(blockingAdvisories({ vulnerabilities: rest }, []), []);
 });
 
 test('an unexpired allowlist entry accepts the advisory', () => {
