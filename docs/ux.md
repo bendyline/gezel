@@ -315,7 +315,7 @@ where a link needs forcing back to sans.
 gap above it; notices, errors, and progress boxes stay tight to the section
 they belong to. Stacked cards in a flat settings pane sit 2.5rem apart, since
 spacing is the only separator once the card chrome is stripped. Both rules
-live in [styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css);
+live in [styles/catalog.css](../packages/ui/src/styles/catalog.css);
 don't set a section's top margin inline.
 
 ## Foundation
@@ -983,7 +983,7 @@ mistake.
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in
-[styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css)):
+[styles/catalog.css](../packages/ui/src/styles/catalog.css)):
 an instruction
 field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
@@ -1365,6 +1365,20 @@ streaming reply, so the key outlives it by about a second rather than shoving
 its neighbours in and out. Stopping silences the rest of that turn — a reply
 still streaming would otherwise start the voice again at its next sentence —
 while the next turn is read as usual; turning narration off stays in Settings.
+
+**A list of things set up in Settings is rows, not bullets.** Connected apps,
+paired servers, and project connections share `.settings-list` with
+`.connected-app-row` rows: a bordered `--radius-md` row naming the thing on the
+left (`.connected-app-name` over a muted detail line) and its actions on the
+right, wrapping under it when narrow. A bare `<ul>` in a settings panel renders
+browser bullets and strands its buttons on their own line — Remote Servers
+shipped that way. Facts about the install (About → Version) use
+`.settings-facts`: muted label, value beside it.
+
+**A label travels with its control.** In a wrapping row of labelled controls —
+the gezel header's Model, Context, Sandbox — wrap each label and its keys in one
+non-wrapping group (`.provider-override-group`), so a line never ends on
+"Sandbox:" with its keys starting the next.
 
 **Rows that differ only by state need the state named.** When one list holds
 items in two states that share a row shape — a queue's running turns above its

@@ -256,6 +256,18 @@
   margin-top: 0.35rem;
 }
 
+/* Each labelled control wraps as one unit, so a label never ends a line while
+   its keys start the next, and a wrapped group starts flush left. */
+.provider-override-grouped {
+  column-gap: 1.05rem;
+}
+
+.provider-override-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .provider-chip {
   padding: 0.15rem 0.6rem;
   border: 1px solid var(--border);

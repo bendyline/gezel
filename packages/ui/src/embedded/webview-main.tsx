@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../assets/fonts/fonts.css';
 import '../styles.css';
+import '../surfaces.css';
 import './embedded.css';
 import { EmbeddedChat } from './EmbeddedChat.js';
 

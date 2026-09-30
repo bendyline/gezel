@@ -601,15 +601,6 @@
   font-weight: 400;
   opacity: 0.7;
 }
-.task-badge-local {
-  background: var(--accent-soft, #2b6);
-  color: #fff;
-}
-.task-badge-bundled,
-.task-badge-project {
-  background: var(--surface-3, #555);
-  color: #fff;
-}
 .craftbook-tab,
 .craftbook-editor {
   display: flex;
@@ -667,13 +658,6 @@
   display: flex;
   flex-direction: column;
 }
-.step-dot.entry .step-dot-label {
-  font-weight: 600;
-}
-.step-dot.entry .step-dot-badge {
-  outline: 2px solid var(--accent, #6af);
-  outline-offset: 1px;
-}
 .step-script-row {
   display: flex;
   align-items: center;
@@ -682,21 +666,6 @@
 }
 .step-script-moment {
   min-width: 56px;
-}
-.link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--accent-text, #6af);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.link-button:hover {
-  text-decoration: underline;
-}
-.link-button.muted {
-  color: var(--text-muted, #999);
 }
 
 /* --- Step automation chips + gate row -------------------------------- */

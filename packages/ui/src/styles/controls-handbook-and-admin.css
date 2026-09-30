@@ -246,6 +246,23 @@
   font-weight: 600;
 }
 
+/* Link buttons: a button set in text as a link. */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-text, #6af);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.link-button.muted {
+  color: var(--text-muted, #999);
+}
+
 /* --- Settings → About → Storage on this device ------------------------
    A plain two-column ledger: what the category is on the left, how much
    room it takes on the right. Sizes are the reason anyone opens this, so

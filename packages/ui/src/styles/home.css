@@ -251,7 +251,6 @@
 .gezel-chat-session-select {
   flex: 1;
   min-width: 0;
-  font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
   /* Radix renders nothing in the trigger when the selected value has no

@@ -1,22 +1,19 @@
 /*
  * Ordered startup stylesheet manifest. Keep imports in cascade order.
- * Lazy views import their surface-only CSS directly; see ./styles/README.md.
+ * Lazy views import their surface-only CSS directly, and sheets for surfaces
+ * the shell never draws arrive with every view through ./surfaces.css; see
+ * ./styles/README.md.
  */
 @import "./styles/foundation.css";
 @import "./styles/app-shell.css";
 @import "./styles/file-browser.css";
 @import "./styles/shared-content.css";
 @import "./styles/gezels.css";
-@import "./styles/settings-and-status.css";
 @import "./styles/tasks.css";
-@import "./styles/home.css";
 @import "./styles/chat.css";
-@import "./styles/catalog-and-primitives.css";
+@import "./styles/primitives.css";
 @import "./styles/project-surfaces.css";
 @import "./styles/terminal.css";
-@import "./styles/github-and-growth.css";
-@import "./styles/scripts-and-craftbooks.css";
-@import "./styles/village-and-overview.css";
 @import "./styles/controls-handbook-and-admin.css";
 /* Last: rebinds the vendored Squisq chrome palette onto gezel's tokens. */
 @import "./styles/squisq-theme.css";

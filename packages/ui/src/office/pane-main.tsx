@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { type Root, createRoot } from 'react-dom/client';
 import '../assets/fonts/fonts.css';
 import '../styles.css';
+import '../surfaces.css';
 import './office.css';
 import { BootScreen } from './BootScreen.js';
 import { type BootState, bootPane } from './boot.js';

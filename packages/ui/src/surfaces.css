@@ -1,0 +1,17 @@
+/*
+ * Ordered stylesheet manifest for surfaces the shell never draws. Every
+ * destination loader waits for it beside its view
+ * (components/tab-content-loaders.ts), so it stays off the startup path
+ * without a view ever rendering unstyled. See ./styles/README.md.
+ *
+ * These sheets load after every startup sheet, so a rule here wins a tie it
+ * used to lose to a later startup file. Keep them in the order they held in
+ * ./styles.css, and move a rule that must draw in the shell back to a startup
+ * sheet rather than leaving it here.
+ */
+@import "./styles/settings-and-status.css";
+@import "./styles/home.css";
+@import "./styles/catalog.css";
+@import "./styles/github-and-growth.css";
+@import "./styles/scripts-and-craftbooks.css";
+@import "./styles/village-and-overview.css";

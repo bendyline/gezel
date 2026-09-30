@@ -404,6 +404,15 @@
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
 }
+.task-badge-local {
+  background: var(--accent-soft, #2b6);
+  color: #fff;
+}
+.task-badge-bundled,
+.task-badge-project {
+  background: var(--surface-3, #555);
+  color: #fff;
+}
 
 .task-child-count {
   font-size: 0.7rem;
@@ -878,6 +887,16 @@
 
 .step-dot-add .step-dot-label {
   color: var(--muted);
+}
+
+/* The entry step is marked after every status, so an active entry step
+   keeps both its bold label and its ring. */
+.step-dot.entry .step-dot-label {
+  font-weight: 600;
+}
+.step-dot.entry .step-dot-badge {
+  outline: 2px solid var(--accent, #6af);
+  outline-offset: 1px;
 }
 
 /* ── Step tracker · bench-rail variant (task mode) ──────────────────
@@ -1620,6 +1639,14 @@ button.bench-step-foot:disabled {
   border-color: var(--accent, #b0724c);
 }
 
+/* The Source view is Monaco, which has no height of its own: it takes its
+   container's, and inside a compact field that was the 80px floor less the
+   toolbar — about one visible line. A definite height gives it room to read
+   and edit; longer bodies scroll inside the editor. */
+.markdown-field .squisq-raw-editor-container {
+  height: 10rem;
+}
+
 .step-scripts {
   display: flex;
   flex-direction: column;
@@ -1828,4 +1855,84 @@ button.bench-step-foot:disabled {
   border-radius: 4px;
   padding: 0.4rem 1rem;
   cursor: pointer;
+}
+
+/* ── Plan / draft task UI ─────────────────────────────────────────── */
+.draft-plan-card {
+  margin-top: 0.5rem;
+  border-left: 3px solid var(--terra, #c9722e);
+}
+.draft-plan-card .pending-question-document-preview {
+  max-height: 420px;
+  overflow: auto;
+}
+.task-detail-status-badge,
+.pending-question-context-status.status-draft {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--terra, #c9722e) 18%, transparent);
+  color: var(--terra, #c9722e);
+}
+.task-draft-activate {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.task-draft-activate button.primary {
+  background: var(--terra, #c9722e);
+  color: #fff;
+  border: none;
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+.task-draft-activate button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.button.linklike,
+button.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--terra, #c9722e);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.task-outcomes-section {
+  margin: 0.75rem 0;
+}
+.task-outcomes-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.task-outcome-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.task-outcome-check {
+  width: 1rem;
+  text-align: center;
+  /* Pinned to the primitive, not `--sage`: this rule used to rely on the
+     fallback because `--sage` was scoped to `.home-workshop`, so promoting
+     the token to `:root` would have silently repainted the check. */
+  color: var(--gezel-sage);
+}
+.task-outcome-input {
+  flex: 1;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--ink-5, #d8d2c6);
+  border-radius: 0.35rem;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
 }

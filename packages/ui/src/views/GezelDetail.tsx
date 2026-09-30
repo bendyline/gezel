@@ -1255,48 +1255,50 @@ function ProviderOverride({
   const retrievalCurrent: RetrievalMode | 'inherit' = gezel.retrieval?.mode ?? 'inherit';
 
   return (
-    <div className="provider-override">
-      <span className="muted small">Model:</span>
-      <ProviderModelSelect
-        provider={gezel.provider ?? null}
-        model={gezel.model}
-        onChange={(p, m) => void setProviderAndModel(p, m)}
-        globalProvider={globalProvider}
-        disabled={saving}
-      />
-      <EffortPicker
-        provider={effectiveProvider}
-        model={gezel.model}
-        value={gezel.reasoningEffort}
-        onChange={(v) => void saveEffort(v)}
-      />
-      <span
-        className="muted small"
-        style={{ marginLeft: '0.75rem' }}
-        title="How much relevant indexed project knowledge is added to each substantive turn. Search remains available in Off mode."
-      >
-        Context:
-      </span>
-      {(['inherit', 'off', 'lean', 'balanced', 'deep'] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          className={`provider-chip${retrievalCurrent === value ? ' provider-chip-active' : ''}`}
-          onClick={() => void saveRetrieval(value)}
+    <div className="provider-override provider-override-grouped">
+      <span className="provider-override-group">
+        <span className="muted small">Model:</span>
+        <ProviderModelSelect
+          provider={gezel.provider ?? null}
+          model={gezel.model}
+          onChange={(p, m) => void setProviderAndModel(p, m)}
+          globalProvider={globalProvider}
           disabled={saving}
+        />
+        <EffortPicker
+          provider={effectiveProvider}
+          model={gezel.model}
+          value={gezel.reasoningEffort}
+          onChange={(v) => void saveEffort(v)}
+        />
+      </span>
+      <span className="provider-override-group">
+        <span
+          className="muted small"
+          title="How much relevant indexed project knowledge is added to each substantive turn. Search remains available in Off mode."
         >
-          {value === 'inherit'
-            ? 'Inherit'
-            : value === 'off'
-              ? 'Off'
-              : value[0]!.toUpperCase() + value.slice(1)}
-        </button>
-      ))}
+          Context:
+        </span>
+        {(['inherit', 'off', 'lean', 'balanced', 'deep'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={`provider-chip${retrievalCurrent === value ? ' provider-chip-active' : ''}`}
+            onClick={() => void saveRetrieval(value)}
+            disabled={saving}
+          >
+            {value === 'inherit'
+              ? 'Inherit'
+              : value === 'off'
+                ? 'Off'
+                : value[0]!.toUpperCase() + value.slice(1)}
+          </button>
+        ))}
+      </span>
       {effectiveProvider === 'copilot' && (
-        <>
+        <span className="provider-override-group">
           <span
             className="muted small"
-            style={{ marginLeft: '0.75rem' }}
             title="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this gezel through our MCP tools."
           >
             Sandbox:
@@ -1312,13 +1314,12 @@ function ProviderOverride({
               {value === 'default' ? 'Inherit' : value === 'on' ? 'On' : 'Off'}
             </button>
           ))}
-        </>
+        </span>
       )}
       {effectiveProvider === 'codex-cli' && (
-        <>
+        <span className="provider-override-group">
           <span
             className="muted small"
-            style={{ marginLeft: '0.75rem' }}
             title="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
           >
             Access:
@@ -1342,7 +1343,7 @@ function ProviderOverride({
                       : 'Full'}
             </button>
           ))}
-        </>
+        </span>
       )}
       {gezel.model && (
         <AdvancedTuningDisclosure

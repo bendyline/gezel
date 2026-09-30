@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { ProjectDetailView } from '../views/ProjectsView.js';
+import '../surfaces.css';
 
 /**
  * Chrome-free project surface used by external hosts (currently the
