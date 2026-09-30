@@ -503,6 +503,17 @@ Republican Party vice presidential candidate selection" fell out of its own
 top 5. The same query backs the compiler's smoke verification and the
 validator, so seal-time and install-time checks agree with search.
 
+Shard routing only reaches what its budget covers (S = 6 explicit, 3 proactive),
+so a catalog with more shards than S loses the neighbours that live in unrouted
+shards. The spec's topic-order fill (gezk §8.1) puts an artist, their albums
+and their songs in different slices; the compiler's opt-in `shardFill:
+'semantic'` fills shards by balanced k-means over each document's mean chunk
+vector instead (within a shard, topic order still holds), embedding each chunk
+once. Measured on a 1.85M-chunk Wikipedia music catalog, routed recall@8 went
+from 82.6% to 85.7% at S = 6 and from 52.1% to 63.9% at S = 3 over 10 shards;
+recut to 37 shards, from 36.0% to 55.5% at S = 6. It helps; it does not make a
+catalog of dozens of shards routable at S = 6 — split those by subject.
+
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest
 keywords and compiler-emitted topic centroids, to select a bounded set. Explicit

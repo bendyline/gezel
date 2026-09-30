@@ -1,5 +1,16 @@
+/**
+ * Streams one Codex CLI subprocess into Gezel's chat and task runtime. A
+ * ten-minute inactivity budget detects silent model turns between tools;
+ * active tools retain the caller's overall turn budget. Both budgets measure
+ * awake time. Heartbeats and stderr are diagnostics, never progress.
+ *
+ * Failure rejects the normal provider call so task dispatch owns its bounded
+ * recovery and completion gates. Related: session.ts, stream-parser.ts and
+ * invoker-idle.test.ts.
+ */
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import {
+  AwakeBudget,
   type CodexPermissionModeCompat,
   createLogger,
   normalizeCodexPermissionMode,
@@ -70,6 +81,7 @@ const log = createLogger('codex-cli');
  */
 
 const TURN_TIMEOUT_DEFAULT_MS = 600_000; // 10 min — long tool loops can be slow.
+const IDLE_TIMEOUT_DEFAULT_MS = 10 * 60_000;
 const KILL_GRACE_MS = 3_000;
 const STDERR_RING_CAP = 64 * 1024;
 const HEARTBEAT_INTERVAL_MS = 3_000;
@@ -126,6 +138,8 @@ export interface CodexInvokerOpts {
   hooks: CodexInvokerHooks;
   /** Per-turn hard timeout. Default 600s. */
   timeoutMs?: number;
+  /** Silence between stream events while no tool runs. Default 10 min; 0 disables. */
+  idleTimeoutMs?: number;
   /** Caller's abort signal. */
   signal?: AbortSignal;
   /** Test seam — defaults to `node:child_process.spawn`. */
@@ -256,6 +270,10 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
   const spawn = opts.spawnImpl ?? nodeSpawn;
   const now = opts.now ?? Date.now;
   const timeoutMs = opts.timeoutMs ?? TURN_TIMEOUT_DEFAULT_MS;
+  const idleTimeoutMs = opts.idleTimeoutMs ?? IDLE_TIMEOUT_DEFAULT_MS;
+  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs < 0) {
+    throw new Error('[codex-cli] idleTimeoutMs must be a nonnegative finite number');
+  }
 
   const argsBuild: Parameters<typeof buildCodexArgs>[0] = {
     prompt: opts.prompt,
@@ -357,19 +375,30 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       force.unref?.();
     };
 
-    // Wallclock-based deadline poll. Node `setTimeout(timeoutMs)` pauses
-    // when macOS suspends the process, so a turn started just before
-    // sleep won't abort `timeoutMs` later — the timer effectively
-    // re-anchors to wake time and the user sees a multi-thousand-
-    // second hang. setInterval also pauses, but the first post-wake
-    // tick compares `Date.now()` to the precomputed wallclock
-    // `turnDeadline` and aborts within the poll period.
-    const turnDeadline = now() + timeoutMs;
+    const turnBudget = new AwakeBudget(timeoutMs);
+    let idleBudget = new AwakeBudget(idleTimeoutMs);
     const turnTimer = setInterval(() => {
       if (settled) return;
-      if (now() < turnDeadline) return;
-      killChild();
-      settleReject(new Error(`[codex-cli] turn timed out after ${Math.round(timeoutMs / 1000)}s`));
+      if (turnBudget.expired()) {
+        killChild();
+        settleReject(
+          new Error(
+            `[codex-cli] turn timed out after ${Math.round(timeoutMs / 1000)}s${turnBudget.describeSuspension()}`,
+          ),
+        );
+        return;
+      }
+      // A tool can legitimately run silently for a long time. Its own limit
+      // and the overall turn budget still apply; receiving its completion
+      // starts a fresh inactivity budget for the next model response.
+      if (idleTimeoutMs > 0 && state.pendingTools.size === 0 && idleBudget.expired()) {
+        killChild();
+        settleReject(
+          new Error(
+            `[codex-cli] no stream progress for ${Math.round(idleTimeoutMs / 1000)}s while ${state.currentPhase}; no tool is running${idleBudget.describeSuspension()}`,
+          ),
+        );
+      }
     }, 2_000);
     turnTimer.unref?.();
 
@@ -504,6 +533,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
         return;
       }
       state.lastEventAt = now();
+      idleBudget = new AwakeBudget(idleTimeoutMs);
       dispatchEvent(event);
     }
 

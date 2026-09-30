@@ -60,6 +60,26 @@ function fakeClient() {
 }
 
 describe('discoverOrSpawn', () => {
+  it.each([undefined, '0', '1'])(
+    'only opts into baseline WASM when explicitly enabled (%s)',
+    async (value) => {
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      await discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        env: value === undefined ? {} : { GEZEL_WASM_BASELINE: value },
+        timeoutMs: 20,
+        pollIntervalMs: 5,
+        spawnFn,
+        readRuntimeFn: async () => null,
+        isProcessAliveFn: () => false,
+        clientFactory: fakeClient,
+      }).catch(() => undefined);
+      expect(spawnFn.mock.calls[0]?.[1]).toEqual(
+        value === '1' ? ['--liftoff-only', '--no-wasm-tier-up', '/fake/gezeld.js'] : ['/fake/gezeld.js'],
+      );
+    },
+  );
+
   // Regression: the supervisor spawns `process.execPath`, which under Electron
   // is the app binary. Without this flag Electron ignores the script argument
   // and boots a second copy of the app — it never writes runtime files, so the

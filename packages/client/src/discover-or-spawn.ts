@@ -1,3 +1,10 @@
+/**
+ * Discover or start the single Gezel daemon for a user home, then verify its
+ * authenticated health before returning a client. Attached hosts own shutdown;
+ * detached CLI callers leave the daemon running. GEZEL_WASM_BASELINE=1 opts
+ * spawned daemons into V8 baseline WebAssembly compilation as a workaround for
+ * optimizing-compiler memory failures; adopting a daemon never changes it.
+ */
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -207,10 +214,15 @@ export async function discoverOrSpawn(
   }
 
   logger?.info?.(`[gezel] spawning daemon from ${daemonEntry}`);
-  const child = spawnFn(process.execPath, [daemonEntry], {
+  const daemonEnv = env ?? process.env;
+  // V8 compiler-zone OOM aborts the entire daemon, outside JS error handling.
+  // Keep this opt-in: baseline WASM may run slower, but avoids that compiler.
+  const runtimeArgs =
+    daemonEnv.GEZEL_WASM_BASELINE === '1' ? ['--liftoff-only', '--no-wasm-tier-up'] : [];
+  const child = spawnFn(process.execPath, [...runtimeArgs, daemonEntry], {
     detached,
     stdio,
-    env: daemonSpawnEnv(env ?? process.env, {
+    env: daemonSpawnEnv(daemonEnv, {
       shutdownOnStdinEof: !detached && stdio === 'pipe',
     }),
     // A detached Windows child gets its own console by default. The CLI uses

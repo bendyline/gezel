@@ -117,6 +117,46 @@ describe('task wait', () => {
     expect(result.task.status).toBe('paused');
     expect(result.questionIds).toBeUndefined();
   });
+  it('ignores historical pause cards after a retry without answering them', async () => {
+    const client = {
+      getTaskByRef: vi
+        .fn()
+        .mockResolvedValueOnce(task('active'))
+        .mockResolvedValue(task('complete')),
+      listTaskChildren: vi.fn(),
+      listQuestions: vi.fn().mockResolvedValue({
+        questions: [
+          {
+            id: 'old-pause',
+            taskRef: 'p/1',
+            sessionId: '',
+            intent: { kind: 'task-paused' },
+          },
+        ],
+      }),
+      answerQuestion: vi.fn(),
+    };
+    expect((await waitForTask(client, 'p/1', { timeoutMs: 100, pollMs: 1 })).outcome).toBe(
+      'complete',
+    );
+    expect(client.answerQuestion).not.toHaveBeenCalled();
+  });
+  it('still blocks real questions alongside a historical pause card', async () => {
+    const client = {
+      getTaskByRef: vi.fn().mockResolvedValue(task('active')),
+      listTaskChildren: vi.fn(),
+      listQuestions: vi.fn().mockResolvedValue({
+        questions: [
+          { id: 'old-pause', taskRef: 'p/1', sessionId: '', intent: { kind: 'task-paused' } },
+          { id: 'permission', taskRef: 'p/1', sessionId: 'session' },
+          { id: 'service-question', taskRef: 'p/1', sessionId: '' },
+        ],
+      }),
+    };
+    const result = await waitForTask(client, 'p/1', { timeoutMs: 100 });
+    expect(result.outcome).toBe('blocked');
+    expect(result.questionIds).toEqual(['permission', 'service-question']);
+  });
   it('times out without canceling the daemon task', async () => {
     const client = {
       getTaskByRef: vi.fn().mockResolvedValue(task('active')),

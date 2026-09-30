@@ -142,3 +142,7 @@ renders the Handboek — the same articles you're reading now — as a static we
 Run `gezel --help` (or `--help` on any subcommand) for the full surface.
 
 To automate work *inside* a project, continue with [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md). To let another application use Gezel, see [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md).
+
+## Watching tasks
+
+A task watch is an observer. Its timeout ends the command without canceling or pausing native work; watching the same task again follows that work. A task's current paused status or an unanswered question blocks the watch. Historical service pause cards do not block an already resumed task and are not answered by the observer.
