@@ -113,6 +113,109 @@ describe('llama.cpp reasoning request budgets', () => {
   );
 });
 
+describe('client-side thinking budget (engines without a native budget)', () => {
+  // Each chunk is 100 chars ≈ 25 tokens at the 4 chars/token estimate, so a
+  // 64-token budget is overrun on the third chunk. Visible content follows the
+  // reasoning so an un-enforced request is observable in the reply.
+  const overrunStream = () =>
+    sseResponse([
+      ...Array.from({ length: 6 }, () => ({
+        choices: [{ index: 0, delta: { reasoning_content: 'r'.repeat(100) } }],
+      })),
+      { choices: [{ index: 0, delta: { content: 'Thought long.' } }] },
+      { choices: [{ index: 0, finish_reason: 'stop' }] },
+      '[DONE]',
+    ]);
+  const actStream = () =>
+    sseResponse([
+      { choices: [{ index: 0, delta: { content: 'Acted.' } }] },
+      { choices: [{ index: 0, finish_reason: 'stop' }] },
+      '[DONE]',
+    ]);
+
+  async function runOverrunTurn(opts: {
+    shape: 'chat-template' | 'deepseek';
+    thinkingBudget?: number;
+  }): Promise<{ reply: string; requests: Array<Record<string, unknown>>; stdout: string }> {
+    const requests: Array<Record<string, unknown>> = [];
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://engine.test',
+      disableThinkingRequestShape: opts.shape,
+      fetchImpl: (async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return requests.length === 1 ? overrunStream() : actStream();
+      }) as typeof fetch,
+    });
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const session = await provider.createSession({
+        systemMessage: 'You are a test.',
+        model: 'deepseek-v4-flash-284b-q2',
+        tuning: resolveTuning({
+          catalog: {
+            sampling: { maxTokens: 16384 },
+            reasoning: {
+              enableThinking: true,
+              ...(opts.thinkingBudget !== undefined ? { thinkingBudget: opts.thinkingBudget } : {}),
+            },
+          },
+        }),
+      });
+      // A tight continuation cap proves the retry re-issues iteration 0
+      // rather than advancing to a wrap-up iteration.
+      const reply = await session.sendAndWait('Make the deck.', { continuationMaxTokens: 32 });
+      return { reply, requests, stdout: stdout.mock.calls.map((c) => String(c[0])).join('') };
+    } finally {
+      stdout.mockRestore();
+      await provider.shutdown();
+    }
+  }
+
+  it('cuts off an overrunning DS4 request and re-issues the same iteration with thinking off', async () => {
+    const { reply, requests, stdout } = await runOverrunTurn({
+      shape: 'deepseek',
+      thinkingBudget: 64,
+    });
+
+    expect(reply).toBe('Acted.');
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).not.toHaveProperty('reasoning_budget_tokens');
+    expect(requests[0]?.chat_template_kwargs).toMatchObject({ enable_thinking: true });
+    expect(requests[0]).not.toHaveProperty('thinking');
+    expect(requests[1]?.chat_template_kwargs).toMatchObject({ enable_thinking: false });
+    expect(requests[1]?.thinking).toEqual({ type: 'disabled' });
+    expect(requests[1]?.think).toBe(false);
+    expect(requests[1]?.max_tokens).toBe(16384);
+    const retryMessages = requests[1]?.messages as Array<{ role: string; content: string }>;
+    expect(retryMessages.at(-1)?.role).toBe('user');
+    expect(retryMessages.at(-1)?.content).toMatch(/thinking ran past its budget/i);
+    expect(retryMessages.at(-1)?.content).toMatch(/give your answer now/);
+    expect(stdout).toContain(
+      '[llama-cpp] thinking budget enforced client-side model=deepseek-v4-flash-284b-q2 budget=64 reasoningTokens≈75 → retrying iteration 0 with thinking off',
+    );
+  });
+
+  it('leaves a native-budget engine to enforce its own budget', async () => {
+    const { reply, requests, stdout } = await runOverrunTurn({
+      shape: 'chat-template',
+      thinkingBudget: 64,
+    });
+
+    expect(reply).toBe('Thought long.');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.reasoning_budget_tokens).toBe(64);
+    expect(stdout).not.toContain('thinking budget enforced client-side');
+  });
+
+  it('does not bound DS4 thinking when no budget is configured', async () => {
+    const { reply, requests, stdout } = await runOverrunTurn({ shape: 'deepseek' });
+
+    expect(reply).toBe('Thought long.');
+    expect(requests).toHaveLength(1);
+    expect(stdout).not.toContain('thinking budget enforced client-side');
+  });
+});
+
 describe('DS4 per-request reasoning effort', () => {
   it('preserves Qwen profile tuning and lets a session choice override it on chat and prefill', async () => {
     const requests: Array<Record<string, unknown>> = [];

@@ -105,7 +105,12 @@ import {
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { condensePresentedToolOutput } from './condense-presented-output.js';
-import { applyLlamaCppReasoningBudgetOverride } from './reasoning-launch.js';
+import {
+  applyLlamaCppReasoningBudgetOverride,
+  buildThinkingBudgetCorrective,
+  clientThinkingBudgetForRequest,
+  estimateReasoningTokens,
+} from './reasoning-launch.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
 // the same text-form abort, and existing tests import them from here.
@@ -3172,6 +3177,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // See `isLlamaServerOutputFormatRejection`.
     let wireSurfaceWidenedAfterRejection = false;
     let widenNextWireSurface = false;
+    // Set when the previous request was cut off for overrunning a thinking
+    // budget the engine cannot enforce itself; its re-issue runs thinking-off.
+    let thinkingOffRetryPending = false;
     const directFileWorkReadFilePaths: string[] = [];
     // Whether any earlier iteration of THIS turn fired an action tool —
     // drives `foldPostActionRumination` on later reply-only iterations
@@ -3302,10 +3310,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           this.deps.reasoningEffortRequestShape,
           this.deps.reasoningEffort,
         );
-        applyLlamaCppReasoningBudgetOverride(
+        const unenforcedThinkingBudget = applyLlamaCppReasoningBudgetOverride(
           body,
           this.deps.disableThinkingRequestShape === 'chat-template',
         );
+        if (thinkingOffRetryPending) {
+          disableThinkingForConstrainedTurn(
+            body,
+            this.deps.disableThinkingRequestShape,
+            this.deps.model,
+          );
+        }
         // Continuation-iteration output cap — see SendAndWaitOpts.
         // Iteration 0 keeps the catalog cap so a tool call is never cut
         // off before it starts; wrap-up iterations get the tight cap.
@@ -4445,11 +4460,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
 
         let res: Response;
         const requestStartedAt = Date.now();
+        // Resolved at the final request boundary, after every constrained-turn
+        // rewrite that may have switched thinking off for this request.
+        let clientThinkingBudget: number | null = null;
         try {
           // Constrained-turn rewrites above can lower the nested effort. Sync
           // only at the final boundary so the top-level field cannot retain a
           // stale, more expensive value.
           syncReasoningEffortRequest(body, this.deps.reasoningEffortRequestShape);
+          clientThinkingBudget = clientThinkingBudgetForRequest(body, unenforcedThinkingBudget);
           const reasoningDiagnostic = llamaCppReasoningRequestDiagnostic(body);
           if (reasoningDiagnostic) {
             log.debug(
@@ -4727,6 +4746,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         let iterationUsage: { prompt_tokens: number; completion_tokens: number } | null = null;
         let finishReason: string | null = null;
         let engineStreamError: string | null = null;
+        // Estimated reasoning tokens at the moment this request was cut off
+        // for overrunning `clientThinkingBudget`; null while within budget.
+        let thinkingBudgetOverrunTokens: number | null = null;
         const toolCallAccumulator = new ToolCallAccumulator();
         // Code-block salvage accumulator. When the ramble detector
         // aborts with NO recognizable tool-call markup but the buffered
@@ -4885,6 +4907,31 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // long hidden-reasoning stretch, so it never false-trips the
               // "looks stalled" banner.
               this.emitReasoningDelta(reasoningChunk);
+              // DS4 cannot take a request budget, so nothing else bounds its
+              // thinking: deepseek-v4-flash-284b-q2 (thinkingBudget 4096)
+              // twice spent the whole 16,384-token cap reasoning — ~18 min
+              // each, no content, no tool call — and both pptx trials died
+              // (2026-09-29 sweep). Stop at the budget and re-issue this
+              // iteration with thinking off. Only while nothing actionable
+              // has streamed: cutting a tool call or visible reply would
+              // discard real work.
+              if (
+                clientThinkingBudget !== null &&
+                turnContent.length === 0 &&
+                !sawStructuredToolSignal
+              ) {
+                const liveDecoded = (chunk as { timings?: { predicted_n?: unknown } }).timings
+                  ?.predicted_n;
+                const reasoningTokens = estimateReasoningTokens(
+                  turnReasoning.length,
+                  typeof liveDecoded === 'number' ? liveDecoded : undefined,
+                );
+                if (reasoningTokens > clientThinkingBudget) {
+                  thinkingBudgetOverrunTokens = reasoningTokens;
+                  ctrl.abort();
+                  break;
+                }
+              }
             }
             // Any usable delta — visible content OR a tool-call —
             // refreshes the post-reasoning silent-stall watchdog
@@ -5344,6 +5391,31 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         } finally {
           cleanupTurn();
           this.deps.markUsed();
+        }
+
+        thinkingOffRetryPending = false;
+        if (thinkingBudgetOverrunTokens !== null) {
+          log.info(
+            `[llama-cpp] thinking budget enforced client-side model=${this.deps.model ?? 'unknown'} budget=${clientThinkingBudget} reasoningTokens≈${thinkingBudgetOverrunTokens} → retrying iteration ${turn} with thinking off`,
+          );
+          // Keep what already streamed live in the reasoning expander.
+          this.lastTurnReasoning =
+            this.lastTurnReasoning.length > 0
+              ? `${this.lastTurnReasoning}\n\n${turnReasoning}`
+              : turnReasoning;
+          this.messages.push({
+            role: 'user',
+            content: buildThinkingBudgetCorrective(
+              Array.isArray(body.tools) && body.tools.length > 0,
+            ),
+          });
+          thinkingOffRetryPending = true;
+          // Re-issue the same iteration: the next index would pick up
+          // `continuationMaxTokens`, and a wrap-up cap can truncate the very
+          // tool call this retry exists to get. Bounded — a thinking-off
+          // request has no client budget, so it cannot land here again.
+          turn -= 1;
+          continue;
         }
 
         if (engineStreamError !== null) {

@@ -182,13 +182,24 @@ function stripFencedBlocks(text: string): string {
  */
 const TASK_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/\d+$/;
 
+/**
+ * An angle-bracketed token with neither a file extension nor a URL scheme is
+ * a template slot, not a citation. Same topic-only review, one notch over
+ * again: deepseek-v4 wrote "No fabricated `(source: <path/URL>)` entry
+ * exists." — describing the citation format — and `path/URL` read as a
+ * fabricated source, so the review step was rejected three times and the task
+ * paused with no deck (2026-09-30). A bracketed real file (`<reports/q3.md>`)
+ * or URL still counts and is still checked.
+ */
+const PLACEHOLDER_RE = /^<[^<>.:]*>$/;
+
 function extractCitations(text: string, re: RegExp): string[] {
   const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
   const global = new RegExp(re.source, flags);
   const out: string[] = [];
   for (const m of stripFencedBlocks(text).matchAll(global)) {
     const cap = m.slice(1).find((x) => x !== undefined) ?? m[0];
-    if (cap && !TASK_REF_RE.test(cap)) out.push(cap);
+    if (cap && !TASK_REF_RE.test(cap) && !PLACEHOLDER_RE.test(cap)) out.push(cap);
   }
   return out;
 }
@@ -349,9 +360,13 @@ export async function citationsResolve(
     };
   }
   if (unresolved.length > 0) {
+    const listed = unresolved
+      .slice(0, 5)
+      .map((u) => `\`${u}\``)
+      .join(', ');
     return {
       ok: false,
-      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${unresolved.slice(0, 5).join(', ')}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
+      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${listed}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
       resolved,
       unresolved,
       urls,
