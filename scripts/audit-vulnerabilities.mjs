@@ -8,7 +8,7 @@ import {
 } from './production-dependency-inventory.mjs';
 
 const levels = ['info', 'low', 'moderate', 'high', 'critical'];
-const requestedLevel = valueAfter('--audit-level') ?? 'high';
+const requestedLevel = valueAfter('--audit-level') ?? 'critical';
 const threshold = levels.indexOf(requestedLevel);
 if (threshold < 0) {
   throw new Error(`invalid --audit-level ${JSON.stringify(requestedLevel)}`);

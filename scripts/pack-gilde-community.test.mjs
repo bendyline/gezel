@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -97,6 +106,24 @@ describe('gilde community packing for bundles', () => {
     const community = await seedDeployedTree(root);
     process.env.GEZEL_GILDE_DATA_DIR = dirname(community);
     await assert.rejects(probePackedGildeCommunity(catalog, root), /should hold only/);
+  });
+
+  // macOS hands out tmp roots as /var/... while node resolution reports
+  // /private/var/...; the containment check must compare realpaths.
+  it('accepts a bundle root reached through a symlink', async () => {
+    const community = await seedDeployedTree(root);
+    await packDeployedGildeCommunity(root, { label: 'test', catalog });
+    const linkParent = await mkdtemp(join(tmpdir(), 'gezel-pack-link-'));
+    try {
+      const linked = join(linkParent, 'root');
+      await symlink(root, linked, 'dir');
+      process.env.GEZEL_GILDE_DATA_DIR = dirname(await realpath(community));
+      assert.deepEqual(await probePackedGildeCommunity(catalog, linked), {
+        listed: TOOL_IDS.length,
+      });
+    } finally {
+      await rm(linkParent, { recursive: true, force: true });
+    }
   });
 
   it('refuses a probe whose gilde resolves outside the bundle', async () => {
