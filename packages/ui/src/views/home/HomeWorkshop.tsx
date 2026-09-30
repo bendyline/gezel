@@ -78,9 +78,13 @@ export function HomeWorkshop({
   }, []);
   // Once the person is talking, the greeting steps aside for this visit: at
   // full height it squeezed the conversation to a third of the window. Not
-  // persisted, and a manual toggle always wins.
+  // persisted, and a manual toggle always wins. It latches the reconcile too:
+  // when the first message beats the reconcile effect, that effect would
+  // reopen the band as soon as it flushed.
   const collapseForConversation = useCallback(() => {
-    if (!userToggledCollapse.current) setCollapsed(true);
+    if (userToggledCollapse.current) return;
+    reconciledCollapse.current = true;
+    setCollapsed(true);
   }, []);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);

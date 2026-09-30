@@ -12,9 +12,11 @@ the full table.
 | Per-kind injection floors | `INJECTION_MIN_RELEVANCE`, `packages/service/src/search/project-retrieval.ts` | Behaviour-preserving quotients of the old absolute floor; rank-derived relevance means they only reject empty arms |
 | Keyword grounding | `isGrounded`, same file | FTS hits must name a query term in the injected text |
 | Knowledge caps | `KNOWLEDGE_MAX_CHUNKS`, `KNOWLEDGE_TOKEN_SHARE` | 2/2/4 chunks; 25/25/35% of the turn budget |
+| Knowledge vector floors | `KNOWLEDGE_VECTOR_FLOORS`, `packages/service/src/knowledge/vector-floors.ts`; `GEZEL_KNOWLEDGE_VECTOR_FLOORS` | Handboek 0.65, bge-small default 0.55, multilingual-e5-small 0.865; unjudged catalog hits need `vector` (KNOWLEDGE-CALIBRATION-2026-09-30.md) |
+| Knowledge relevance bar | `KNOWLEDGE_FILTER_MIN_RELEVANCE`, `packages/core/src/search-ranking.ts`; `GEZEL_RELEVANCE_KNOWLEDGE_KEEP` | 0.5 on filter surfaces, above the general keep 0.3 (KNOWLEDGE-CALIBRATION-2026-09-30.md) |
 | Catalog fusion | `ARM_WEIGHTS`, `RRF_K`, `packages/service/src/knowledge/manager.ts` | vector 1, doc FTS 1, chunk FTS 0.5; k=60 |
 | Reference-list grounding | `gatherTaskReferences`, `packages/service/src/tasks/references.ts` | Lexical: title/path/snippet must name a subject term outside the book's name |
-| Relevance model and threshold | `packages/service/src/relevance/registry.ts`, `search/relevance-stage.ts` | `ms-marco-minilm-l6@1` calibrated: drop 1e-5, keep 3e-5, strong 0.95 (RELEVANCE-CALIBRATION-2026-09-26.md); default off |
+| Relevance model and threshold | `packages/service/src/relevance/registry.ts`, `search/relevance-stage.ts` | `ms-marco-minilm-l6@1` calibrated: drop 1e-5, keep 3e-5, strong 0.95 (RELEVANCE-CALIBRATION-2026-09-26.md); logit-space mapping between drop and strong; on for new installs since 2026-09-30 |
 
 ## Run log
 

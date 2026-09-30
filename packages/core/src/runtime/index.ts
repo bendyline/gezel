@@ -31,6 +31,7 @@ export type {
 export * from './task-gates.js';
 export { assertPortableCraftbookSupported, taskActiveAssignee } from './tasks.js';
 export type { PortableContent, PortableCatalogModel } from './content.js';
+export { portableCatalogModels } from './portable-catalog.js';
 
 export { portableToolInputSchema, portableToolNames } from './product-tools.js';
 

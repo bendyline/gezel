@@ -421,13 +421,17 @@
       );
       t.scriptRuns = [];
       for (const call of calls) {
-        let result;
-        try {
-          result = JSON.parse(call.resultText);
-        } catch {
-          continue;
+        // llama.cpp turns read the desktop's `run <id> — status: …` text; the
+        // system-model paths still record the run as JSON.
+        let id = /^run (\S+) — status:/.exec(call.resultText ?? '')?.[1];
+        if (!id) {
+          try {
+            const result = JSON.parse(call.resultText);
+            id = result.runId || result.id;
+          } catch {
+            continue;
+          }
         }
-        const id = result.runId || result.id;
         if (id) t.scriptRuns.push(await api(`${projectPath(t.projectId)}/script-runs/${id}`));
       }
       assertion(
@@ -1260,7 +1264,8 @@
       if (!cases[id] && !fixture) throw new Error(`Unknown mobile scenario: ${id}`);
       const started = clock.awakeNow();
       const wallStarted = Date.now();
-      const budget = fixture?.timeoutMs || options.trialTimeoutMs || 180000;
+      // Desktop's smallest scenario budget; phones decode several times slower.
+      const budget = fixture?.timeoutMs || options.trialTimeoutMs || 1200000;
       const trial = {
         id,
         suite: fixture ? 'canonical-core-native' : 'mobile-product-v1',
@@ -1283,9 +1288,28 @@
       reports.set(trial, report);
       report.trials.push(trial);
       report.revision++;
-      const listener = await plugin.addListener('chatDelta', () => {
-        trial.nativeDeltas++;
+      const observed = (count) => {
+        trial.nativeDeltas += count;
         trial.firstNativeDeltaMs ??= clock.awakeNow() - started;
+      };
+      const listener = await plugin.addListener('chatDelta', () => observed(1));
+      // Structured chat (llama.cpp's own chat layer) streams chunks, not text deltas.
+      const chunkListener = await plugin.addListener('chatChunk', (event) =>
+        observed(Array.isArray(event?.chunks) ? event.chunks.length : 1),
+      );
+      // A hot phone holds a request until it cools. That wait is the device's,
+      // not the model's, so it stops the trial budget the way sleep does.
+      trial.coolingMs = 0;
+      let cooling = null;
+      const stopCooling = () => {
+        if (!cooling) return;
+        cooling.release();
+        trial.coolingMs += clock.awakeNow() - cooling.since;
+        cooling = null;
+      };
+      const phaseListener = await plugin.addListener('enginePhase', (event) => {
+        if (event?.phase !== 'cooling') stopCooling();
+        else cooling ??= { release: budgetClock.hold(), since: clock.awakeNow() };
       });
       try {
         trial.initialProjectIds = (await api('/api/projects')).projects.map((p) => p.id);
@@ -1375,6 +1399,9 @@
         }
       } finally {
         await listener.remove();
+        await chunkListener.remove();
+        await phaseListener.remove();
+        stopCooling();
         trial.finishedAt = now();
         trial.durationMs = clock.awakeNow() - started;
         trial.wallDurationMs = Date.now() - wallStarted;

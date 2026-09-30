@@ -10,6 +10,10 @@ export default defineConfig({
     'src/schemas/mobile-provider.ts',
     'src/mobile/inference.ts',
     'src/runtime/index.ts',
+    // `./local-loop` — the local-model turn loop the daemon's providers and
+    // the portable runtime share. Off the main entry so its classes have one
+    // identity per consumer and the UI never bundles it.
+    'src/local-loop/index.ts',
     'src/kokoro/index.ts',
     'src/poppetje/index.ts',
     'src/markdown/index.ts',

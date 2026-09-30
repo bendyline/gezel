@@ -1,4 +1,4 @@
-import { normalizeChatModelCatalogId } from '@bendyline/gezel';
+import { catalogReasoningBudget, normalizeChatModelCatalogId } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 
 /**
@@ -53,14 +53,8 @@ export async function resolveCatalogIdFromModelId(
 /**
  * Catalog-driven `--reasoning-budget N` lookup. Returns the integer
  * the supervisor passes to `llama-server`, or undefined to leave the
- * default unrestricted (-1).
- *
- * Why: qwen3-family models will think for ~15 K tokens and emit no
- * post-think content on hard prompts (qwen3.6 tankcombat
- * run: 25 min of empty Builder completions, daemon log showed
- * `reasoning-budget: activated, budget=2147483647` — Int32.MAX, the
- * llama-server default). Capping at the manifest's `thinkingBudget`
- * forces the model to wrap up `<think>` and produce something.
+ * default unrestricted (-1). The rule itself is shared with the phone's
+ * native chat layer: see `catalogReasoningBudget`.
  */
 export async function resolveCatalogReasoningBudget(
   catalog: CatalogService,
@@ -71,21 +65,7 @@ export async function resolveCatalogReasoningBudget(
     const resolvedCatalogId = (await resolveCatalogIdFromModelId(catalog, catalogId)) ?? catalogId;
     const detail = await catalog.get('chat-model', resolvedCatalogId);
     if (!detail || detail.manifest.kind !== 'chat-model') return undefined;
-    const tuning = detail.manifest.tuning;
-    // The `--reasoning-budget` flag is a SERVER-WIDE launch knob, but the
-    // primary worker (Developer/Builder) runs the `thinking-coding`
-    // profile — and that profile's budget is the most-demanding active
-    // role's intent, so it also bounds the lighter planner profiles.
-    // Prefer it so the coding budget is actually delivered; fall back to
-    // base tuning when no coding profile exists. Without this, a model
-    // whose base differs from its coding profile (e.g. nemotron-nano base
-    // 8192 vs coding 6144; qwen3.6 base 4096 vs coding 6144) never runs at
-    // the intended coding budget. See eval-sweep-2026-06-23 finding #6.
-    const budget =
-      tuning?.profiles?.['thinking-coding']?.reasoning?.thinkingBudget ??
-      tuning?.reasoning?.thinkingBudget;
-    if (typeof budget === 'number' && Number.isFinite(budget) && budget > 0) return budget;
-    return undefined;
+    return catalogReasoningBudget(detail.manifest.tuning);
   } catch {
     return undefined;
   }

@@ -1,15 +1,17 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import {
   artifactPathsOf,
   buildFileInventoryIndex,
+  createWorkspaceFileProbe,
   extractReferencedFiles,
   matchReferencedFilesInContent,
   matchReferencedFilesWithIndex,
   scanPathTokens,
+  unresolvedQualifiedPaths,
 } from './file-references.js';
 
 const artifact = (path: string) => ({ kind: 'artifact' as const, path });
@@ -264,6 +266,11 @@ describe('extractReferencedFiles (with Store)', () => {
   afterEach(async () => {
     await rm(tmp, { recursive: true, force: true });
   });
+  const writeWorkspaceFile = async (path: string, content: string) => {
+    const full = join(await store.projectWorkspaceDir('default'), path);
+    await mkdir(dirname(full), { recursive: true });
+    await writeFile(full, content);
+  };
 
   it('resolves real artifacts written to the project', async () => {
     expect(
@@ -293,5 +300,64 @@ describe('extractReferencedFiles (with Store)', () => {
     expect(
       await extractReferencedFiles(store, 'default', 'We should add `imaginary.html` later.'),
     ).toEqual([]);
+  });
+
+  it('links a workspace file the index has not listed yet', async () => {
+    // The turn that publishes a deck names it before the indexer's next
+    // pass, so the persisted listing never has it.
+    await writeWorkspaceFile('powerpoint/task-13/deck.pptx', 'PK');
+    expect(
+      await extractReferencedFiles(
+        store,
+        'default',
+        'Final path: `powerpoint/task-13/deck.pptx`; missing: `powerpoint/task-13/gone.pptx`.',
+        { workspaceFiles: ['README.md'] },
+      ),
+    ).toEqual([workspace('powerpoint/task-13/deck.pptx')]);
+  });
+
+  it('reads a drawer prefix as the drawer it names', async () => {
+    await writeWorkspaceFile('powerpoint/task-13/deck.pptx', 'PK');
+    await store.writeProjectArtifact('default', 'tasks/13/outline.md', '# Outline');
+    expect(
+      await extractReferencedFiles(
+        store,
+        'default',
+        'Deliverable `workspace/powerpoint/task-13/deck.pptx`, outline `artifacts/tasks/13/outline.md`.',
+      ),
+    ).toEqual([artifact('tasks/13/outline.md'), workspace('powerpoint/task-13/deck.pptx')]);
+  });
+});
+
+describe('unresolvedQualifiedPaths', () => {
+  it('offers only folder-qualified, extension-bearing workspace candidates', () => {
+    expect(
+      unresolvedQualifiedPaths(
+        'See `deck.pptx`, `docs/known.md`, `artifacts/tasks/1/x.md`, `workspace/out/deck.pptx`, and `src/notes`.',
+        [workspace('docs/known.md')],
+      ),
+    ).toEqual(['out/deck.pptx']);
+  });
+});
+
+describe('createWorkspaceFileProbe', () => {
+  it('spends a shared budget and never stats a path twice', async () => {
+    const statted: string[] = [];
+    const probe = createWorkspaceFileProbe(
+      {
+        statProjectWorkspacePath: async (_id: string, path: string) => {
+          statted.push(path);
+          return path === 'a/real.md' ? { kind: 'file' as const } : { kind: 'missing' as const };
+        },
+      },
+      'default',
+    );
+    const budget = { remaining: 2 };
+    expect(await probe(['a/real.md', 'b/none.md', 'c/over.md'], budget)).toEqual([
+      workspace('a/real.md'),
+    ]);
+    expect(budget.remaining).toBe(0);
+    expect(await probe(['a/real.md'], budget)).toEqual([workspace('a/real.md')]);
+    expect(statted).toEqual(['a/real.md', 'b/none.md']);
   });
 });

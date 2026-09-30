@@ -180,12 +180,16 @@ import { sanitizeSvg } from '../icon/sanitize.js';
 import type { MemoryKind } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
+  type DiskProbeBudget,
   type FileInventoryIndex,
   artifactPathsOf,
   buildFileInventoryIndex,
+  createWorkspaceFileProbe,
   hasQualifiedReferenceMismatch,
   matchReferencedFilesWithIndex,
+  mergeReferencedFiles,
   referencedFilesFromArtifactPaths,
+  unresolvedQualifiedPaths,
 } from '../references/file-references.js';
 import { matchReferencedTasksInContent } from '../references/task-references.js';
 import {
@@ -236,6 +240,12 @@ import {
 } from './tree.js';
 
 const log = createLogger('store');
+
+/**
+ * Stats one timeline page may spend linking workspace files its stored
+ * replies name but the indexer had not listed yet. Each is one `stat`.
+ */
+const TIMELINE_DISK_PROBE_BUDGET = 48;
 
 export type ProjectFindingStatus = 'open' | 'in_progress' | 'resolved';
 export interface ProjectFindingLifecycleEntry {
@@ -4321,6 +4331,13 @@ export class Store {
     return this.artifacts.projectArtifactSize(id, filePath);
   }
 
+  async statProjectArtifactPath(
+    id: string,
+    filePath: string,
+  ): Promise<{ kind: 'file' | 'dir' | 'missing'; size?: number; mtime?: string }> {
+    return this.artifacts.statProjectArtifactPath(id, filePath);
+  }
+
   /**
    * Read an artifact as raw bytes plus a MIME type guess (from the file
    * extension). Used by binary consumers — e.g. the image-layer resolver
@@ -5871,6 +5888,7 @@ export class Store {
             ? { origin: 'system' as const }
             : {}),
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
+          ...(m.deliverable ? { deliverable: m.deliverable } : {}),
           ...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
@@ -5895,6 +5913,7 @@ export class Store {
 
     const hasMore = rows.length > limit;
     const trimmed = hasMore ? rows.slice(rows.length - limit) : rows;
+    await this.linkUnindexedWorkspaceFiles(trimmed);
 
     // Unfiltered per-project queries also pull terminal entries from the
     // project's terminal threads. Returned as a sibling array; the UI
@@ -5915,6 +5934,36 @@ export class Store {
     }
 
     return { messages: trimmed, hasMore, ...(terminalEntries ? { terminalEntries } : {}) };
+  }
+
+  /**
+   * Link workspace files a stored reply names but its `referencedFiles` lack.
+   * That list was built against the indexer's persisted listing when the
+   * reply was saved, and a file written during the turn is routinely missing
+   * from it — so the deck a task just published stayed plain text in the
+   * reply announcing it, and would forever, since stored lists are forwarded
+   * as-is. Runs over the returned page only, newest first, with one stat
+   * budget for the whole page and one answer cache per project.
+   */
+  private async linkUnindexedWorkspaceFiles(rows: TimelineMessage[]): Promise<void> {
+    const budget: DiskProbeBudget = { remaining: TIMELINE_DISK_PROBE_BUDGET };
+    const probes = new Map<string, ReturnType<typeof createWorkspaceFileProbe>>();
+    for (let i = rows.length - 1; i >= 0 && budget.remaining > 0; i -= 1) {
+      const row = rows[i]!;
+      if (row.role !== 'assistant' || !row.content) continue;
+      const known = row.referencedFiles ?? [];
+      const missing = unresolvedQualifiedPaths(row.content, known);
+      if (missing.length === 0) continue;
+      let probe = probes.get(row.projectId);
+      if (!probe) {
+        probe = createWorkspaceFileProbe(this, row.projectId);
+        probes.set(row.projectId, probe);
+      }
+      const found = await probe(missing, budget);
+      if (found.length === 0) continue;
+      const merged = mergeReferencedFiles(known, found);
+      rows[i] = { ...row, referencedFiles: merged };
+    }
   }
 
   // ---------- terminal threads (per-project) ----------

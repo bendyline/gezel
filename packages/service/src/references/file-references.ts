@@ -1,4 +1,9 @@
-import { type ReferencedFile, type ReferencedFileKind, normalizeFileToken } from '@bendyline/gezel';
+import {
+  type ReferencedFile,
+  type ReferencedFileKind,
+  normalizeFileToken,
+  splitDrawerPrefix,
+} from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 
 /**
@@ -134,18 +139,120 @@ export function referencedFilesFromArtifactPaths(paths: readonly string[]): Refe
 }
 
 export async function extractReferencedFiles(
-  store: Store,
+  store: Pick<Store, 'listProjectArtifactsRecursive' | 'statProjectWorkspacePath'>,
   projectId: string,
   content: string,
   opts: { workspaceFiles?: readonly string[] } = {},
 ): Promise<ReferencedFile[]> {
   if (!content) return [];
+  const index = await projectFileInventoryIndex(store, projectId, opts.workspaceFiles);
+  const matched = matchReferencedFilesWithIndex(content, index);
+  const probe = createWorkspaceFileProbe(store, projectId);
+  return mergeReferencedFiles(
+    matched,
+    await probe(unresolvedQualifiedPaths(content, matched), {
+      remaining: MAX_DISK_PROBES_PER_MESSAGE,
+    }),
+  );
+}
+
+/** One project's lookup tables: a live artifact walk plus the given workspace listing. */
+export async function projectFileInventoryIndex(
+  store: Pick<Store, 'listProjectArtifactsRecursive'>,
+  projectId: string,
+  workspaceFiles?: readonly string[],
+): Promise<FileInventoryIndex> {
   const files = await store.listProjectArtifactsRecursive(projectId);
-  return matchReferencedFilesInContent(content, {
+  return buildFileInventoryIndex({
     // `ProjectFileEntry` — keep only leaf files, strip directory walks.
     artifacts: files.filter((f) => !f.isDirectory).map((f) => f.path),
-    ...(opts.workspaceFiles ? { workspace: opts.workspaceFiles } : {}),
+    ...(workspaceFiles ? { workspace: workspaceFiles } : {}),
   });
+}
+
+/**
+ * Most unindexed paths one message may stat. A reply names a handful of
+ * files; a pasted tree listing is not worth a stat per line.
+ */
+export const MAX_DISK_PROBES_PER_MESSAGE = 12;
+
+/**
+ * Folder-qualified, extension-bearing paths the message names that the
+ * inventory did not resolve. The workspace listing is the indexer's
+ * persisted `files.json`, refreshed on a timer that skips any project with
+ * a turn in flight — so the file a turn just wrote is exactly the one it
+ * lacks. The PowerPoint book's deck, published by `copy_artifact_to_workspace`
+ * moments before the closing reply, stayed plain text in every reply that
+ * named it. These are the candidates for a direct stat.
+ */
+export function unresolvedQualifiedPaths(
+  content: string,
+  resolved: readonly ReferencedFile[],
+): string[] {
+  const known = new Set(resolved.map((f) => f.path.toLowerCase()));
+  const out = new Set<string>();
+  for (const token of scanPathTokens(content)) {
+    if (!token.qualified || !token.extended) continue;
+    const drawer = splitDrawerPrefix(token.path);
+    // The artifact inventory is a live walk, so a drawer path it lacks does
+    // not exist; only workspace paths are worth a stat.
+    if (drawer?.kind === 'artifact') continue;
+    const path = drawer ? drawer.path : token.path;
+    if (known.has(path.toLowerCase())) continue;
+    out.add(path);
+  }
+  return [...out];
+}
+
+/** Stats a caller may still spend; shared across calls to cap a whole page. */
+export interface DiskProbeBudget {
+  remaining: number;
+}
+
+/**
+ * Stats workspace paths the index did not know, behind the store's path
+ * fence, remembering answers so one timeline page never stats a path twice.
+ * Each stat draws down `budget`; cached answers are free.
+ */
+export function createWorkspaceFileProbe(
+  store: Pick<Store, 'statProjectWorkspacePath'>,
+  projectId: string,
+  cache: Map<string, ReferencedFile | null> = new Map(),
+): (paths: readonly string[], budget: DiskProbeBudget) => Promise<ReferencedFile[]> {
+  return async (paths, budget) => {
+    const hits: ReferencedFile[] = [];
+    for (const path of paths) {
+      const key = path.toLowerCase();
+      let hit = cache.get(key);
+      if (hit === undefined) {
+        if (budget.remaining <= 0) continue;
+        budget.remaining -= 1;
+        const stat = await store
+          .statProjectWorkspacePath(projectId, path)
+          .catch(() => ({ kind: 'missing' as const }));
+        hit = stat.kind === 'file' ? { kind: 'workspace', path } : null;
+        cache.set(key, hit);
+      }
+      if (hit) hits.push(hit);
+    }
+    return hits;
+  };
+}
+
+/** Union two reference lists in the parser's canonical order. */
+export function mergeReferencedFiles(
+  a: readonly ReferencedFile[],
+  b: readonly ReferencedFile[],
+): ReferencedFile[] {
+  if (b.length === 0) return [...a];
+  const hits = new Map<string, ReferencedFile>();
+  for (const file of [...a, ...b]) {
+    if (hits.size >= MAX_REFERENCED_FILES) break;
+    hits.set(`${file.kind}:${file.path}`, file);
+  }
+  return [...hits.values()].sort(
+    (x, y) => kindRank(x.kind) - kindRank(y.kind) || (x.path < y.path ? -1 : 1),
+  );
 }
 
 interface PathToken {
@@ -210,7 +317,9 @@ function resolveToken(token: PathToken, index: FileInventoryIndex): ReferencedFi
   // silently turn `task-11/deck.pptx` into the unrelated `deck.pptx` at the
   // project root. Bare names may use the basename index, whose `null` entries
   // preserve ambiguity when more than one real file shares the name.
-  const hit = token.qualified ? index.byFullPath.get(lower) : index.byBasename.get(lower);
+  const hit = token.qualified
+    ? (index.byFullPath.get(lower) ?? resolveDrawerPrefixed(lower, index))
+    : index.byBasename.get(lower);
   if (!hit) return null;
   // A token with neither a slash nor an extension is an ordinary English
   // word until proven otherwise. Let one match the small, gezel-produced
@@ -219,4 +328,15 @@ function resolveToken(token: PathToken, index: FileInventoryIndex): ReferencedFi
   // real extension-less file is overwhelmingly a false positive.
   if (!token.extended && !token.qualified && hit.kind !== 'artifact') return null;
   return hit;
+}
+
+/** `workspace/decks/q3.pptx` → the workspace's `decks/q3.pptx`, and only that drawer's. */
+function resolveDrawerPrefixed(
+  lower: string,
+  index: FileInventoryIndex,
+): ReferencedFile | undefined {
+  const drawer = splitDrawerPrefix(lower);
+  if (!drawer) return undefined;
+  const hit = index.byFullPath.get(drawer.path);
+  return hit?.kind === drawer.kind ? hit : undefined;
 }

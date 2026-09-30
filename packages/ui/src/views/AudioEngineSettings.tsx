@@ -233,7 +233,8 @@ export function AudioEngineSettings() {
               <span>
                 Narrate assistant replies
                 <span className="muted small" style={{ marginLeft: '0.5rem' }}>
-                  — speak each completed gezel reply aloud using that gezel's voice.
+                  — speak each gezel reply aloud using that gezel's voice, once the reply is
+                  finished.
                 </span>
               </span>
             </label>
@@ -248,7 +249,7 @@ export function AudioEngineSettings() {
                 Include progress updates
                 <span className="muted small" style={{ marginLeft: '0.5rem' }}>
                   — also speak the short notes a gezel gives while it works, like "Now I'll draft
-                  the outline."
+                  the outline.", and start each reply as it arrives instead of when it is finished.
                 </span>
               </span>
             </label>

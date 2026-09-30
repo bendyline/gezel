@@ -5,6 +5,7 @@ import {
   type ScriptRun,
   createLogger,
   evaluateGateScripts,
+  formatGateVerdict,
   tailGateLogs,
   unresolvedGatePlaceholders,
   withSdkImportHint,
@@ -111,18 +112,11 @@ export async function evaluateStepGate(opts: {
     const result = await evaluateGate(gate.checks, ws, deps);
     checkResults = result.checks;
     if (!result.pass) {
-      // Cap the verdict at the first 6 failing bullets — it reaches small
-      // local models verbatim, and a 15-bullet wall buries the fix. The
+      // The verdict is capped (it reaches small local models verbatim); the
       // full set stays on checkResults for telemetry/diagnostics.
-      const MAX_VERDICT_BULLETS = 6;
-      const bullets = result.failures
-        .slice(0, MAX_VERDICT_BULLETS)
-        .map((f) => `- ${f}`)
-        .join('\n');
-      const overflow = result.failures.length - MAX_VERDICT_BULLETS;
       return {
         decision: 'reject',
-        message: overflow > 0 ? `${bullets}\n- … and ${overflow} more failing checks` : bullets,
+        message: formatGateVerdict(result.failures),
         skipped,
         runs,
         checkResults,

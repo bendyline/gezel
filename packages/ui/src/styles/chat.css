@@ -4189,6 +4189,12 @@ button.timeline-session-divider-child::before {
   margin-right: 0.25rem;
 }
 
+/* The task's deliverable, between its description and its notes. The card
+   recipe lives in shared-content.css; the rail only spaces it. */
+.chat-rail-task-deliverable .deliverable-card {
+  margin: 0.55rem 0 0.35rem;
+}
+
 /* Task progress at the top of the rail preview — the same chain-of-circles
    tracker the task view uses, sized for a narrow column. It never wraps:
    past the rail's width it scrolls horizontally (synthetic thumb above the

@@ -291,7 +291,7 @@ export type ChatMessage =
 export interface ChatRequest {
   /**
    * Qualified gezel model id: `<provider>:<model>` (e.g.
-   * `llama-cpp:qwen3-4b-instruct-q4_k_m`). Bare provider names
+   * `llama-cpp:gemma4-e2b-q4`). Bare provider names
    * (e.g. `copilot`) ask gezel to pick the provider's configured
    * default.
    */
@@ -433,7 +433,7 @@ export interface EmbeddingsResponse {
 }
 
 export interface EnsureModelInput {
-  /** Backend-qualified model id, e.g. `llama-cpp:qwen3-4b-instruct-q4_k_m`. */
+  /** Backend-qualified model id, e.g. `llama-cpp:gemma4-e2b-q4`. */
   model: string;
 }
 

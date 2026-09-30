@@ -123,6 +123,46 @@ describe('applyRelevanceModel', () => {
     expect(staged.report).toMatchObject({ applied: true, calibrated: false });
   });
 
+  it('holds a knowledge passage to the stricter knowledge bar on filter surfaces only', async () => {
+    const neighbour: UnifiedSearchResult = {
+      kind: 'knowledge',
+      id: 'knowledge:shelf:neighbour',
+      title: 'Encyclopedia neighbour',
+      snippet: 'a plausible-looking article score=0.4',
+      retrievalSource: 'knowledge',
+      catalogId: 'shelf',
+      uri: 'knowledge://pub/shelf/neighbour',
+      arm: 'vector',
+      similarity: 0.9,
+      ...scoreResult('knowledge', 1),
+    };
+    // Raw 0.4 maps to ~0.43: past keep (0.3), short of the knowledge bar (0.5).
+    const results = [neighbour, hit('project-note', { model: 0.4 })];
+    const run = async (mode: 'filter' | 'reorder', knowledgeKeep?: number) => {
+      clearRelevanceScoreCache();
+      const { scorer } = fakeScorer();
+      return applyRelevanceModel({
+        results,
+        query: 'q',
+        active: {
+          ...active(CALIBRATED),
+          ...(knowledgeKeep !== undefined ? { knowledgeKeep } : {}),
+        },
+        scorer,
+        mode,
+        window: 24,
+        passages,
+      });
+    };
+    const filtered = await run('filter');
+    expect(filtered.results.map((r) => r.id)).toEqual(['content:p1:src/project-note.md:1']);
+    expect(filtered.report.hidden.map((r) => r.id)).toEqual(['knowledge:shelf:neighbour']);
+    const reordered = await run('reorder');
+    expect(reordered.results).toHaveLength(2);
+    const lowered = await run('filter', 0.4);
+    expect(lowered.results).toHaveLength(2);
+  });
+
   it('drops below keep when filtering and only below drop when reordering', async () => {
     const results = [
       hit('off-topic', { model: 0.01 }),

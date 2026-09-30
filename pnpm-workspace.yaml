@@ -92,16 +92,17 @@ overrides:
   # major until it widens that range (GHSA-ggr8-5vv4-36mx).
   "deepmerge-ts": "8.0.1"
   "dompurify@>=3 <4": "3.4.13"
-  "fast-uri": "3.1.6"
+  "fast-uri": "3.1.8"
   "form-data": "4.0.6"
   "hono": "4.13.9"
   "ip-address": "10.3.1"
   "js-yaml@<4": "3.15.2"
   "js-yaml@>=4 <5": "4.3.2"
   "mermaid@>=11 <12": "11.16.1"
-  # mailparser and imapflow pin nodemailer 9.0.3 exactly; inbound mail reaches
-  # its DoS (fixed in 9.1.1).
-  "nodemailer": "9.1.1"
+  # mailparser and imapflow pin nodemailer exactly (imapflow 1.4.8 at 9.0.3), so
+  # the override keeps one copy that carries the addressparser fixes. 10.0.6
+  # fixed GHSA-v53p-9fqp-m79j; 9.x has no backport.
+  "nodemailer": "10.0.12"
   # Keep the single Transformers.js 3.x line on the reviewed native runtime;
   # the matching adm-zip override closes its transitive advisory.
   "onnxruntime-node": "1.24.3"

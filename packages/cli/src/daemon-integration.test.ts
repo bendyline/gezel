@@ -28,7 +28,7 @@ import {
 } from '@bendyline/gezel-client/node';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { connectForTui } from './connection.js';
+import { connectForTui, spawnedDaemonNotice } from './connection.js';
 
 let gezelHome: string;
 /**
@@ -409,10 +409,12 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     const headlessHome = await mkdtemp(join(tmpdir(), 'gezel-cli-headless-'));
     try {
       const result = await runCliAtHome(headlessHome, 'agent', 'list');
-      expect(result.stderr).toBe('');
       expect(result.stdout.trim().length).toBeGreaterThan(0);
       const runtime = await readRuntime(headlessHome);
       expect(runtime).not.toBeNull();
+      // No approval prompt: the only stderr is the notice that the daemon
+      // this command started keeps running.
+      expect(result.stderr).toBe(spawnedDaemonNotice(runtime?.pid));
       expect(runtime?.port).not.toBe(6228);
       expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
 

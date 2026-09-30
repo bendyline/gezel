@@ -5,6 +5,8 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BundledSource, gildeDataDir } from '@bendyline/gezel-catalog';
+import { portableCatalogModels } from '@bendyline/gezel/runtime';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import {
   androidInstrumentationCommand,
@@ -411,9 +413,16 @@ if (flags.has('--report-only')) {
         runner.evalModelPath = `/data/user/0/com.bendyline.gezel.mobile/${staged}`;
         runner.evalDeleteStaged = '1';
         runner.evalModelSha256 = sha;
+        // A catalog GGUF is staged as the download it is, so the phone runs it
+        // with its catalog tuning, as the desktop and a downloading user do.
+        const download = await catalogDownloadFor(sha, file.size);
+        if (download) {
+          runner.evalModelName = Buffer.from(download.name).toString('base64');
+          runner.evalModelSource = Buffer.from(JSON.stringify(download.source)).toString('base64');
+        }
         await writeFile(
           join(output, 'model-source.json'),
-          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, stagedSha256: stagedSha }, null, 2)}\n`,
+          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, stagedSha256: stagedSha, catalogId: download?.source.catalogId ?? null }, null, 2)}\n`,
         );
       }
       if (!flags.has('--build-only')) {
@@ -480,4 +489,13 @@ if (flags.has('--report-only')) {
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
   }
+}
+
+/** The phone catalog's download for this GGUF, matched by content hash. */
+async function catalogDownloadFor(sha256: string, sizeBytes: number) {
+  const catalog = new BundledSource({ dataDir: gildeDataDir() });
+  const model = portableCatalogModels(await catalog.list('chat-model')).find(
+    (entry) => entry.source.sha256 === sha256,
+  );
+  return model ? { name: model.name, source: { ...model.source, sizeBytes } } : undefined;
 }

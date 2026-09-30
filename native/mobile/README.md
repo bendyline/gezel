@@ -161,10 +161,18 @@ instead of decoding it again, which is what makes a multi-step tool loop usable
 on a phone. Plain attention models drop the rest of their KV cache and continue.
 Recurrent and hybrid models (Qwen 3.5, LFM2, Granite 4) cannot drop a suffix, and
 a sliding window (Gemma) has already evicted the positions a longer prompt needs,
-so the engine keeps one checkpoint of the state attention memory cannot rebuild,
-taken one token before the end of each prompt, and resumes from it when the next
-transcript extends that prompt. It is 19 MiB for Qwen 3.5 2B whatever the prompt
-length.
+so the engine keeps checkpoints of the state attention memory cannot rebuild and
+resumes from the longest one a new prompt still starts with. A chat request takes
+them where llama-server does: at the start of the last user message, and four
+tokens before the end, ahead of a generation prompt that renders differently once
+the reply is history. The text API takes one before its last token. Up to eight
+are kept, within 256 MiB; a checkpoint a new prompt has departed from is dropped.
+One per prompt, at its end, was not enough: Qwen's think opener made even the
+next request re-read everything, and a template that drops an older turn's
+reasoning made Gemma 4 E4B re-read 5,000 tokens (~150 s on a Galaxy S26+) every
+third request. A checkpoint is 19 MiB for Qwen 3.5 2B whatever the prompt length.
+With `GEZEL_CHAT_TEST_MODEL` set to a GGUF, `gezel-chat-tests` checks this on a
+real model.
 
 Prompts are formatted with llama.cpp's built-in chat templates. A template it
 does not know is refused, except Gemma 4's turn format (`<|turn>role … <turn|>`),

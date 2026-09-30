@@ -8,6 +8,7 @@
  */
 import type { McpServerSpec } from '../mcp-bridge.js';
 import { CraftbookSuggestionCompactor } from './craftbook-suggestion-compactor.js';
+import { DocblocksRootResolver } from './docblocks-root-resolver.js';
 import { OutboardStorage } from './outboard-storage.js';
 import { PlaywrightArgValidator } from './playwright-arg-validator.js';
 import { PlaywrightAutoScreenshot } from './playwright-auto-screenshot.js';
@@ -33,7 +34,8 @@ import { ZodErrorTranslator } from './zod-error-translator.js';
  *     decorator here; behavior-driven decorators run before the
  *     statics so the schema model the model sees is what the bridge
  *     publishes.
- *   - preProcess: Playwright validator rejects bad URLs.
+ *   - preProcess: Playwright validator rejects bad URLs; the DocBlocks
+ *     resolver names the read root a document source left out.
  *   - postProcess: snapshot inliner has to run before auto-screenshot
  *     so the image-attached note doesn't overlap the file-link
  *     replacement.
@@ -49,6 +51,7 @@ export const ALL_WRAPPERS: readonly McpToolWrapper[] = [
   CraftbookSuggestionCompactor,
   PlaywrightToolDescriptions,
   PlaywrightArgValidator,
+  DocblocksRootResolver,
   PlaywrightSnapshotInliner,
   PlaywrightAutoScreenshot,
   // OutboardStorage runs LAST in postProcess so any earlier wrapper's

@@ -23,7 +23,7 @@
  *     },
  *   });
  *
- *   const ensure = await app.ensureModel({ model: 'llama-cpp:qwen3-4b-instruct-q4_k_m' });
+ *   const ensure = await app.ensureModel({ model: 'llama-cpp:gemma4-e2b-q4' });
  *   if (ensure.status === 'downloading') {
  *     for await (const ev of app.streamEnsureEvents(ensure.job_id!)) {
  *       if (ev.type === 'progress') console.log(`${ev.bytesWritten}/${ev.totalBytes}`);
@@ -31,7 +31,7 @@
  *   }
  *
  *   const stream = await app.chat({
- *     model: 'llama-cpp:qwen3-4b-instruct-q4_k_m',
+ *     model: 'llama-cpp:gemma4-e2b-q4',
  *     messages: [{ role: 'user', content: 'Hello' }],
  *     stream: true,
  *   });

@@ -1,4 +1,4 @@
-import type { GezelSummary, Task, TaskNote, TaskStatus } from '@bendyline/gezel';
+import type { GezelSummary, ReferencedFile, Task, TaskNote, TaskStatus } from '@bendyline/gezel';
 import { hasReportActionFence, taskEffectiveStatus } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
@@ -21,6 +21,7 @@ import { DropdownChevron, DropdownMenu, Tabs } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
+import { DeliverableCard } from './DeliverableCard.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
 import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -30,8 +31,10 @@ import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
 import { gezelChatTheme } from './chat-theme.js';
+import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
+import { useTaskEvents, useTaskResult } from './useTaskResult.js';
 
 /**
  * `ChatReferences` wraps any chat-like surface with a right-hand rail
@@ -436,6 +439,9 @@ export function ChatReferences({
     (path: string, messageProjectId?: string) => {
       const ref = rememberReference('artifact', path, messageProjectId);
       setActiveRef(ref);
+      // A click is a request to read the file: bring the viewer forward even
+      // when the Tasks tab is showing (a deliverable card lives there).
+      setActiveTab('references');
       setCompactPane('references');
     },
     [rememberReference],
@@ -452,6 +458,9 @@ export function ChatReferences({
     (path: string, messageProjectId?: string) => {
       const ref = rememberReference('workspace', path, messageProjectId);
       setActiveRef(ref);
+      // A click is a request to read the file: bring the viewer forward even
+      // when the Tasks tab is showing (a deliverable card lives there).
+      setActiveTab('references');
       setCompactPane('references');
     },
     [rememberReference],
@@ -486,6 +495,12 @@ export function ChatReferences({
       setCompactPane('references');
     },
     [rememberReference],
+  );
+
+  const openTaskFile = useCallback(
+    (file: ReferencedFile, taskProjectId: string) =>
+      handleOpenReference({ key: '', kind: file.kind, path: file.path, projectId: taskProjectId }),
+    [handleOpenReference],
   );
 
   const referenceApi = useMemo<ChatReferencesApi>(
@@ -728,6 +743,7 @@ export function ChatReferences({
                 key={effectiveTaskRef}
                 taskRef={effectiveTaskRef}
                 onTaskChanged={onTaskChanged}
+                onOpenFile={openTaskFile}
                 onOpenTask={(ref) =>
                   window.dispatchEvent(
                     new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -879,6 +895,7 @@ export function ChatReferences({
                     key={effectiveTaskRef}
                     taskRef={effectiveTaskRef}
                     onTaskChanged={onTaskChanged}
+                    onOpenFile={openTaskFile}
                     onOpenTask={(ref) =>
                       window.dispatchEvent(
                         new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
@@ -927,10 +944,13 @@ function TaskRailCard({
   taskRef,
   onOpenTask,
   onTaskChanged,
+  onOpenFile,
 }: {
   taskRef: string;
   onOpenTask?: (ref: string) => void;
   onTaskChanged?: (task: Task) => void;
+  /** Open a file the task made (its deliverable, a path in a note) in the viewer. */
+  onOpenFile?: (file: ReferencedFile, projectId: string) => void;
 }) {
   const [task, setTask] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -976,6 +996,17 @@ function TaskRailCard({
     };
   }, [taskRef]);
 
+  // The card is a live view: a step advancing, a note landing, or the task
+  // settling re-reads it, so the tracker and the deliverable follow the run
+  // instead of freezing at whatever the task looked like when it mounted.
+  useTaskEvents(task?.projectId, task?.ref, () => {
+    api
+      .getTaskByRef(taskRef)
+      .then((t) => setTask(t))
+      .catch(() => {});
+  });
+  const result = useTaskResult(task, task?.updatedAt);
+
   useEffect(() => {
     if (!task) {
       setNotes([]);
@@ -984,9 +1015,9 @@ function TaskRailCard({
     }
 
     let cancelled = false;
-    setNotesState('loading');
+    setNotesState((prev) => (prev === 'ready' ? prev : 'loading'));
     api
-      .listTaskNotes(task.projectId, task.num)
+      .listTaskNotes(task.projectId, task.num, undefined, { withFileReferences: true })
       .then((res) => {
         if (cancelled) return;
         // Keep the compact history deterministic even if a future API source
@@ -1038,6 +1069,18 @@ function TaskRailCard({
   };
   const terminal = effectiveStatus === 'complete' || effectiveStatus === 'canceled';
   const steps = cb?.steps ?? [];
+  const openFile = onOpenFile
+    ? (file: ReferencedFile) => onOpenFile(file, task.projectId)
+    : undefined;
+  // Notes name files as inline code; the daemon resolved which are real.
+  const handleNoteClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!openFile) return;
+    const anchor = (e.target as HTMLElement | null)?.closest('a');
+    const file = anchor ? fileRefFromHref(anchor.getAttribute('href') ?? '') : null;
+    if (!file) return;
+    e.preventDefault();
+    openFile(file);
+  };
   // Where the work stands: the live step, or — once the task has ended —
   // the last one it reached, so a finished task still centres on its end.
   const currentStepId =
@@ -1139,6 +1182,16 @@ function TaskRailCard({
           <span className="muted small">From craftbook</span> {cb.name}
         </div>
       )}
+      {result?.deliverable && (
+        <div className="chat-rail-task-deliverable">
+          <DeliverableCard
+            deliverable={result.deliverable}
+            projectId={task.projectId}
+            state={effectiveStatus === 'complete' ? 'final' : 'draft'}
+            {...(openFile ? { onOpen: openFile } : {})}
+          />
+        </div>
+      )}
       <section className="chat-rail-task-history" aria-label="History and notes">
         <h5>History &amp; notes</h5>
         {notesState === 'loading' && <p className="muted small">Loading notes…</p>}
@@ -1176,12 +1229,19 @@ function TaskRailCard({
                     </time>
                     {step && <span className="chat-rail-task-note-step">{step.name}</span>}
                   </header>
-                  <RenderedMarkdownPreview
-                    markdown={note.text}
-                    projectId={task.projectId}
-                    articleId={`task-note-${note.id}`}
-                    compact
-                  />
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: event delegation to child <a> */}
+                  <div className="chat-rail-task-note-body" onClick={handleNoteClick}>
+                    <RenderedMarkdownPreview
+                      markdown={
+                        note.referencedFiles?.length
+                          ? linkifyFileRefs(note.text, note.referencedFiles)
+                          : note.text
+                      }
+                      projectId={task.projectId}
+                      articleId={`task-note-${note.id}`}
+                      compact
+                    />
+                  </div>
                 </li>
               );
             })}

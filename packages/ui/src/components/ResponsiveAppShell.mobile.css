@@ -130,8 +130,9 @@
 }
 
 /* Every key holds its width. All five 44px keys (menu, Updates, search,
-   queue, engine) need about 285px, so they fit any phone; only a desktop
-   window narrower than that can overflow them. */
+   queue, engine) need about 285px, and the stop-narration key that joins
+   them while a gezel speaks brings it to about 340px, so they fit any phone;
+   only a desktop window narrower than that can overflow them. */
 .app.app-compact .app-header > * {
   flex-shrink: 0;
 }
@@ -199,7 +200,8 @@
     .app-header-questions,
     .titlebar-search-trigger,
     .queue-meter-button,
-    .engine-pill
+    .engine-pill,
+    .narration-stop
   ) {
   flex: 0 0 30px;
   width: 30px;
@@ -214,7 +216,8 @@
     .app-header-questions-icon,
     .titlebar-search-trigger-icon,
     .queue-meter-key-icon,
-    .engine-pill-key-icon
+    .engine-pill-key-icon,
+    .narration-stop-icon
   ) {
   width: 16px;
   height: 16px;
@@ -276,7 +279,8 @@
 }
 
 /* Of the desktop status cluster, the compact header keeps two keys: the chat
-   queue (present only while something runs or waits) and the default engine.
+   queue (present only while something runs or waits) and the default engine,
+   plus the stop-narration key while a gezel is being read aloud.
    Further engines, quotas, and the task-speed menu wait for a wider window;
    the queue's panel still lists every busy engine. */
 .app.app-compact .app-header-right {
@@ -284,12 +288,12 @@
   margin-bottom: 0;
 }
 
-.app.app-compact .app-header-right > :not(.queue-meter, .engine-pill-root),
+.app.app-compact .app-header-right > :not(.queue-meter, .engine-pill-root, .narration-stop),
 .app.app-compact .app-header-right > .engine-pill-root ~ .engine-pill-root {
   display: none;
 }
 
-.app.app-compact :is(.queue-meter-button, .engine-pill) {
+.app.app-compact :is(.queue-meter-button, .engine-pill, .narration-stop) {
   position: relative;
   justify-content: center;
   width: 44px;
@@ -303,13 +307,13 @@
   border: 1px solid rgba(243, 237, 224, 0.35);
 }
 
-.app.app-compact :is(.queue-meter-button, .engine-pill):hover,
+.app.app-compact :is(.queue-meter-button, .engine-pill, .narration-stop):hover,
 .app.app-compact :is(.queue-meter-button-open, .engine-pill[aria-expanded="true"]) {
   background: rgba(255, 255, 255, 0.16);
   border-color: var(--titlebar-ink);
 }
 
-.app.app-compact .queue-meter-button > .queue-meter-chip {
+.app.app-compact :is(.queue-meter-button > .queue-meter-chip, .narration-stop-label) {
   display: none;
 }
 
@@ -319,7 +323,7 @@
   display: contents;
 }
 
-.app.app-compact :is(.queue-meter-key-icon, .engine-pill-key-icon) {
+.app.app-compact :is(.queue-meter-key-icon, .engine-pill-key-icon, .narration-stop-icon) {
   display: block;
   width: 19px;
   height: 19px;

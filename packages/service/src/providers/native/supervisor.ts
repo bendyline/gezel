@@ -21,6 +21,10 @@
  * so we can drive the lifecycle without a real binary.
  */
 
+import type { NativeEngineExitSnapshot, NativeEnginePanicKind } from '@bendyline/gezel/local-loop';
+
+// The exit snapshot is part of the local loop's engine contract.
+export type { NativeEngineExitSnapshot, NativeEnginePanicKind } from '@bendyline/gezel/local-loop';
 import type { ChildProcess } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { basename } from 'node:path';
@@ -55,56 +59,6 @@ export interface NativeEngineLaunch {
    * logs and crash snapshots. Never place prompts, tool arguments, secrets,
    * or other user content here.
    */
-  diagnostics?: Record<string, string | number | boolean>;
-}
-
-export type NativeEnginePanicKind =
-  | 'cuda-invalid-argument'
-  | 'cuda-out-of-memory'
-  | 'cuda-illegal-memory-access'
-  | 'cuda-device-assert'
-  | 'cuda-error'
-  | 'vulkan-out-of-memory'
-  | 'assertion-failed'
-  /**
-   * SIGILL. Every other kind is recognized from a line the engine
-   * printed; this one is inferred from the signal, because a binary
-   * whose instructions the CPU cannot decode usually dies without
-   * printing anything at all. That silence is exactly what made it hard
-   * to diagnose in the field — the crash reported a bare signal name and
-   * no attribution, so it read as a generic engine fault rather than
-   * "this build cannot run on this machine."
-   *
-   * Two distinct causes land here and both mean the same thing for the
-   * user: an instruction above the CPU's feature level (a build tuned to
-   * the CI runner rather than to the target), or a `ud2` trap on an
-   * unreachable/abort path inside GPU library init.
-   */
-  | 'illegal-instruction';
-
-export interface NativeEngineExitSnapshot {
-  /** Stable correlation key included in the lifecycle log and provider error. */
-  incidentId: string;
-  pid?: number;
-  startedAt: number;
-  exitedAt: number;
-  uptimeMs: number;
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  expected: boolean;
-  expectedReason?: string;
-  panicKind?: NativeEnginePanicKind;
-  panicLine?: string;
-  /**
-   * False when the engine died during startup, before it ever answered
-   * on its readiness endpoint. The distinction decides whether a crash
-   * is attributable to the BUILD (never worked here) or to the WORK (a
-   * model, a request, an allocation) — only the former is safe to
-   * quarantine a backend over.
-   */
-  reachedReady: boolean;
-  /** Bounded stdout/stderr tail retained in memory for diagnostics. */
-  outputTail: string;
   diagnostics?: Record<string, string | number | boolean>;
 }
 

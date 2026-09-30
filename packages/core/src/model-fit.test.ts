@@ -256,6 +256,9 @@ describe('estimateMlxResidentBytes', () => {
     { id: 'qwen3.6-27b-q8', approx: 29_528_164_409, footprint: 30_222_800_904 },
     { id: 'qwen3.6-35b-a3b-q8', approx: 37_748_365_642, footprint: 38_446_395_160 },
     { id: 'laguna-s-2.1-118b-q6', approx: 92_507_783_098, footprint: 92_902_328_032 },
+    // 2026-09-30, Apple M2 16 GB, mlx 0.32.3 / mlx-vlm 0.7.1, text-only
+    // launch; four of five launches landed within 4 MiB of this.
+    { id: 'gemma4-e4b (4bit-qat)', approx: 6_830_817_013, footprint: 7_797_479_736 },
   ];
 
   it('covers every measured model without over-reserving more than 30%', () => {

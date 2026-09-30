@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isEngagementAllowed } from '../engagement.js';
+import { normalizeArtifactPath, normalizeRelativeToolPath } from '../path-rules.js';
 import {
   type AskQuestionRequest,
   AskQuestionRequestSchema,
@@ -10,6 +11,14 @@ import type { ChatSession } from '../schemas/session.js';
 import { type CreateTaskRequest, CreateTaskRequestSchema } from '../schemas/task.js';
 import { roleHasTeamScope, roleToolNames } from '../tools/access.js';
 import { describeToolArgumentError } from '../tools/argument-errors.js';
+import {
+  ASSIGNEE_ARG_DESCRIPTION,
+  type AssigneeArg,
+  assigneeArg,
+  findGezelInRoster,
+  gezelNotFoundMessage,
+  normalizeAssigneeArg,
+} from '../tools/assignee-arg.js';
 import { TOOL_DESCRIPTIONS } from '../tools/descriptions.js';
 import {
   AddGezelToProjectInputSchema,
@@ -43,10 +52,13 @@ import {
   WriteFileInputSchema,
   WriteTaskNoteInputSchema,
 } from '../tools/inputs.js';
+import { findProjectByReference, projectNotFoundMessage } from '../tools/project-ref.js';
+import { countLineChanges, sliceWorkspaceText, workspaceReadRangeError } from '../tools/results.js';
 import { unionStepKit } from '../tools/step-kit.js';
 import { applyStepToolPolicy } from '../tools/step-policy.js';
 import { WorkspaceEditError } from '../workspace-edit-error.js';
 import { computeReplaceInFile, computeReplaceLines } from '../workspace-edits.js';
+import type { MemoryKind } from './memory-markdown.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
 import { taskActiveAssignee } from './tasks.js';
@@ -57,7 +69,23 @@ const definitions = {
     input: AskUserQuestionInputSchema,
   },
   list_gilde: { description: TOOL_DESCRIPTIONS.list_gilde, input: EmptyInputSchema },
-  create_task: { description: TOOL_DESCRIPTIONS.create_task, input: CreateTaskInputSchema },
+  create_task: {
+    description: TOOL_DESCRIPTIONS.create_task,
+    // The desktop's argument, so a model names an owner the same way on both.
+    input: CreateTaskInputSchema.extend({
+      assignee: assigneeArg()
+        .optional()
+        .describe(
+          `${ASSIGNEE_ARG_DESCRIPTION} Naming someone here just pins an owner the per-step roles override anyway.`,
+        ),
+      dispatch: z
+        .boolean()
+        .optional()
+        .describe(
+          'Hand the entry step to its assignee immediately as a task-scoped handoff (single-channel kickoff). Invalid on drafts and cron/fanout hosts.',
+        ),
+    }),
+  },
   advance_task_step: {
     description: TOOL_DESCRIPTIONS.advance_task_step,
     input: AdvanceTaskStepInputSchema,
@@ -141,7 +169,12 @@ export interface PortableToolActions {
   ): Promise<{ questionId: string; deduped?: boolean }>;
   recruit(role: string): Promise<{ id: string; name: string; role?: string }>;
   templates(): unknown;
-  createTask(input: CreateTaskRequest, projectId: string): Promise<unknown>;
+  /** `dispatch` hands the entry step to its assignee once this turn settles. */
+  createTask(
+    input: CreateTaskRequest,
+    projectId: string,
+    options?: { dispatch?: boolean },
+  ): Promise<unknown>;
   completeTask(ref: string, next?: string): Promise<unknown>;
   scripts?: {
     list(projectId: string): unknown;
@@ -224,6 +257,29 @@ export async function portableToolSurface(
     }));
 }
 
+/** Tools whose `path` is relative to the artifacts drawer. */
+const ARTIFACT_PATH_TOOLS: ReadonlySet<string> = new Set([
+  'list_artifacts',
+  'read_artifact',
+  'write_artifact',
+]);
+
+/**
+ * A call whose arguments the tool's schema rejected. `issues` are the schema's
+ * own findings, which the desktop-loop host turns into the MCP server's
+ * validation error so both hosts explain the mistake in the same words.
+ */
+export class PortableToolArgumentError extends Error {
+  constructor(
+    readonly toolName: string,
+    readonly issues: readonly unknown[],
+    message: string,
+  ) {
+    super(message);
+    this.name = 'PortableToolArgumentError';
+  }
+}
+
 /** Called only after durable call admission. All mutable grants are checked again. */
 export async function executePortableTool(
   store: PortableStore,
@@ -243,12 +299,27 @@ export async function executePortableTool(
     throw new Error(`Tool ${name} is unavailable to this gezel`);
   const schema = definitions[name as PortableToolName].input;
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) throw new Error(describeToolArgumentError(name, parsed.error, schema));
+  if (!parsed.success)
+    throw new PortableToolArgumentError(
+      name,
+      parsed.error.issues,
+      describeToolArgumentError(name, parsed.error, schema),
+    );
   const args = parsed.data as Record<string, unknown>;
+  if (typeof args.path === 'string')
+    args.path = normalizeRelativeToolPath(
+      ARTIFACT_PATH_TOOLS.has(name) ? normalizeArtifactPath(args.path) : args.path,
+    );
   const team = roleHasTeamScope(context.gezel.role, context.project.mode);
-  const target = typeof args.project === 'string' ? args.project : session.projectId;
-  if (target !== session.projectId && !team)
-    throw new Error('This gezel cannot act outside its project');
+  // As on the desktop: a project-confined gezel's project argument always
+  // means its own project, and a team gezel's names one by id or name.
+  let target = session.projectId;
+  if (team && typeof args.project === 'string' && args.project !== session.projectId) {
+    const projects = await store.listProjects();
+    const match = findProjectByReference(projects, args.project);
+    if (!match) throw new Error(projectNotFoundMessage(args.project, projects));
+    target = match.id;
+  }
   const readOnly = context.project.status === 'readonly';
   if (
     readOnly &&
@@ -270,40 +341,57 @@ export async function executePortableTool(
     const text = [question, prompt, description].find(
       (value): value is string => typeof value === 'string' && value.trim().length > 0,
     );
-    if (!text) throw new Error('Provide the question text');
+    // As on the desktop: a nudge to retry with the question, not a failure.
+    if (!text) return { emptyQuestion: true };
     return actions.askQuestion({ ...rest, prompt: text });
   }
   assertPortableTextBudget(args);
   if (name === 'append_to_file' || name === 'replace_in_file' || name === 'replace_lines') {
     const file = String(args.path);
-    return store.editWorkspaceFile(session.projectId, file, (before) => {
+    let prior = '';
+    let next = '';
+    const edited = await store.editWorkspaceFile(session.projectId, file, (before) => {
       if (before === null && !(name === 'append_to_file' && args.create === true))
         throw new WorkspaceEditError(
           `Cannot edit ${file}: file does not exist. Use write_file to create it first.`,
           'file-not-found',
         );
-      if (name === 'append_to_file') return (before ?? '') + String(args.content);
-      return name === 'replace_in_file'
-        ? computeReplaceInFile(before!, {
-            path: file,
-            find: String(args.find),
-            replace: String(args.replace),
-            occurrence: args.occurrence as number | 'all' | undefined,
-          })
-        : computeReplaceLines(before!, {
-            path: file,
-            startLine: Number(args.startLine),
-            endLine: Number(args.endLine),
-            content: String(args.content),
-          });
+      prior = before ?? '';
+      next =
+        name === 'append_to_file'
+          ? prior + String(args.content)
+          : name === 'replace_in_file'
+            ? computeReplaceInFile(prior, {
+                path: file,
+                find: String(args.find),
+                replace: String(args.replace),
+                occurrence: args.occurrence as number | 'all' | undefined,
+              })
+            : computeReplaceLines(prior, {
+                path: file,
+                startLine: Number(args.startLine),
+                endLine: Number(args.endLine),
+                content: String(args.content),
+              });
+      return next;
     });
+    // What the desktop's edit result reports: the line counts of the change
+    // and, for a line edit, the file as it now reads.
+    return { ...edited, ...countLineChanges(prior, next), totalChars: next.length, content: next };
   }
   if (name === 'list_gezels') return { items: await store.listGezels() };
   if (name === 'list_projects') return { items: await store.listProjects() };
-  if (name === 'list_project_gezels') return { items: await store.getProjectGezels(target) };
+  if (name === 'list_project_gezels')
+    return { items: await store.getProjectGezels(target), projectId: target };
   if (name === 'add_gezel_to_project') {
-    await store.addGezelToProject(target, String(args.gezel));
-    return { projectId: target, gezelId: args.gezel };
+    // An id or a display name, as the desktop resolves it.
+    const roster = await store.listGezels();
+    const member = findGezelInRoster(roster, String(args.gezel));
+    if (!member) throw new Error(gezelNotFoundMessage(String(args.gezel), roster));
+    const before = await store.getProject(target);
+    const added = !before?.gezelIds?.includes(member.id);
+    await store.addGezelToProject(target, member.id);
+    return { projectId: target, gezelId: member.id, added };
   }
   if (name === 'ensure_gezel') {
     const role = String(args.jobTitle).trim();
@@ -321,8 +409,21 @@ export async function executePortableTool(
     if (!destination) throw new Error('Project not found');
     if (destination.status === 'readonly' || destination.status === 'inactive')
       throw new Error('The destination project does not accept changes');
-    const { project: _project, ...request } = args;
-    return actions.createTask(CreateTaskRequestSchema.parse(request), destination.id);
+    const { project: _project, assignee: rawAssignee, dispatch, ...request } = args;
+    const named = normalizeAssigneeArg(rawAssignee as AssigneeArg | undefined);
+    let assignee: CreateTaskRequest['assignee'];
+    if (named?.kind === 'user') assignee = { kind: 'user' };
+    else if (named) {
+      const roster = await store.listGezels();
+      const member = findGezelInRoster(roster, named.ref);
+      if (!member) throw new Error(gezelNotFoundMessage(named.ref, roster));
+      assignee = { kind: 'gezel', gezelId: member.id };
+    }
+    return actions.createTask(
+      CreateTaskRequestSchema.parse({ ...request, ...(assignee ? { assignee } : {}) }),
+      destination.id,
+      { dispatch: dispatch === true },
+    );
   }
   if (name === 'advance_task_step') {
     const task = await store.getTask(String(args.ref));
@@ -336,7 +437,10 @@ export async function executePortableTool(
     if (assignee.kind === 'user') throw new Error('This step awaits the user');
     if (assignee.gezelId !== session.gezelId && context.project.voormanGezelId !== session.gezelId)
       throw new Error('Only the active step assignee or project lead can advance this task');
-    return actions.completeTask(task.ref, args.next as string | undefined);
+    const completed = await actions.completeTask(task.ref, args.next as string | undefined);
+    return completed && typeof completed === 'object'
+      ? { ...(completed as object), completedStepId: task.activeStepId }
+      : completed;
   }
 
   if (name === 'update_project') {
@@ -361,7 +465,10 @@ export async function executePortableTool(
     // Check before the roster write, not after: a refusal must leave nothing behind.
     actions.assertHandoffAllowed(member.id);
     await store.addGezelToProject(target, member.id);
-    return actions.message(member.id, target, String(args.message));
+    const sent = await actions.message(member.id, target, String(args.message));
+    return sent && typeof sent === 'object'
+      ? { ...(sent as object), toGezelName: member.name }
+      : sent;
   }
   if (name === 'read_task_notes' || name === 'write_task_note') {
     const task = await store.getTask(String(args.ref));
@@ -426,14 +533,19 @@ export async function executePortableTool(
   if (name === 'save_memory' || name === 'search_memory') {
     const scope = args.scope === 'project' ? 'project' : 'gezel';
     const id = scope === 'project' ? session.projectId : session.gezelId;
-    if (name === 'save_memory') return store.saveMemory({ scope, id, text: String(args.text) });
-    const found = await store.searchMemories({
+    if (name === 'save_memory')
+      return store.saveMemory({
+        scope,
+        id,
+        text: String(args.text),
+        ...(typeof args.kind === 'string' ? { kind: args.kind as MemoryKind } : {}),
+      });
+    return store.searchMemories({
       gezelId: session.gezelId,
       projectId: session.projectId,
       query: String(args.query),
+      ...(typeof args.topK === 'number' ? { topK: Math.min(50, args.topK) } : {}),
     });
-    const topK = typeof args.topK === 'number' ? args.topK : 10;
-    return Array.isArray(found) ? found.slice(0, topK) : found;
   }
   const area =
     name.endsWith('document') || name === 'list_documents'
@@ -450,6 +562,29 @@ export async function executePortableTool(
       // The artifacts drawer walks its subtree by default; the others list one level.
       typeof args.recursive === 'boolean' ? args.recursive : name === 'list_artifacts',
     );
+  if (name === 'read_file') {
+    const path = String(args.path);
+    const content = await store.readFile(area, projectId, path);
+    if (content === null) throw new Error(`read_file "${path}": File not found`);
+    const ranged = args.startLine !== undefined || args.endLine !== undefined;
+    // The desktop's contract: an unranged read is the whole file, a range is
+    // at most 400 lines with a header saying where it sits.
+    if (!ranged) return { path, content, ranged };
+    if (args.raw === true)
+      throw new Error(
+        '`raw: true` cannot be combined with a line range; omit `raw` for a numbered range',
+      );
+    const range = {
+      ...(typeof args.startLine === 'number' ? { startLine: args.startLine } : {}),
+      ...(typeof args.endLine === 'number' ? { endLine: args.endLine } : {}),
+    };
+    const invalid = workspaceReadRangeError(range);
+    if (invalid) throw new Error(`read_file "${path}": ${invalid}`);
+    const result = sliceWorkspaceText(path, content, range);
+    if (result.status === 'error')
+      throw new Error(`read_file "${path}": [${result.code}] ${result.error}`);
+    return { ...result, ranged };
+  }
   if (name.startsWith('read_')) {
     const content = await store.readFile(area, projectId, String(args.path));
     if (content === null) throw new Error('File not found');

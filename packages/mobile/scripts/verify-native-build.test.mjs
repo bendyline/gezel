@@ -11,7 +11,7 @@ async function fixture(run) {
   const repo = await mkdtemp(path.join(tmpdir(), 'gezel-native-manifest-'));
   const build = path.join(repo, 'output');
   try {
-    await mkdir(path.join(repo, 'native/engines/llama-cpp'), { recursive: true });
+    await mkdir(path.join(repo, 'native/engines/llama-cpp/patches'), { recursive: true });
     await mkdir(path.join(repo, 'native/mobile'), { recursive: true });
     await mkdir(path.join(build, 'jniLibs/arm64-v8a'), { recursive: true });
     const upstream = {
@@ -26,13 +26,18 @@ async function fixture(run) {
         .map(([key, value]) => `${key}=${value}`)
         .join('\n'),
     );
+    await writeFile(path.join(repo, 'native/engines/llama-cpp/patches/runtime.patch'), 'patch');
+    const patches = [{ name: 'runtime.patch', sha256: hash('patch') }];
     const bridgeSources = {};
     for (const name of [
       'gezel_llama.h',
       'gezel_llama.cpp',
+      'gezel_engine.h',
+      'gezel_chat.cpp',
       'utf8_stream.h',
       'chat_formats.h',
       'CMakeLists.txt',
+      'common-chat.cmake',
     ]) {
       await writeFile(path.join(repo, 'native/mobile', name), name);
       bridgeSources[name] = hash(name);
@@ -44,6 +49,7 @@ async function fixture(run) {
       target: 'android',
       gezelABIVersion: 1,
       upstream,
+      patches,
       bridgeSources,
       files: { [payload]: hash('verified fixture bytes') },
     };
@@ -59,7 +65,7 @@ test('accepts the current pinned source and exact payload', () =>
     assert.equal((await verifyNativeBuild(repo, build, 'android')).target, 'android');
   }));
 
-for (const mutation of ['payload', 'bridge', 'pin', 'extra', 'escape']) {
+for (const mutation of ['payload', 'bridge', 'pin', 'patch', 'extra', 'escape']) {
   test(`rejects native ${mutation} drift before sync`, () =>
     fixture(async ({ repo, build, payload, manifest }) => {
       if (mutation === 'payload') await writeFile(path.join(build, payload), 'changed');
@@ -69,6 +75,11 @@ for (const mutation of ['payload', 'bridge', 'pin', 'extra', 'escape']) {
         const file = path.join(repo, 'native/engines/llama-cpp/VERSION');
         await writeFile(file, (await readFile(file, 'utf8')).replace('build=1', 'build=2'));
       }
+      if (mutation === 'patch')
+        await writeFile(
+          path.join(repo, 'native/engines/llama-cpp/patches/runtime.patch'),
+          'changed',
+        );
       if (mutation === 'extra')
         await writeFile(path.join(build, 'jniLibs/arm64-v8a/extra.so'), 'extra');
       if (mutation === 'escape') {

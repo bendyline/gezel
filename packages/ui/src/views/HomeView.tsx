@@ -514,6 +514,30 @@ export function HomeView({
                   </div>
                 )}
               </div>
+              {/* On for new installs (first run writes it); the ~24 MB model
+                  downloads in the background. Saving through updateConfig
+                  starts or skips that download the same way Settings does. */}
+              <label className="debug-toggle" style={{ marginTop: '0.75rem' }}>
+                <input
+                  type="checkbox"
+                  checked={config?.relevanceModel?.enabled === true}
+                  onChange={async (e) => {
+                    try {
+                      const res = await api.updateConfig({
+                        relevanceModel: { ...config?.relevanceModel, enabled: e.target.checked },
+                      });
+                      setConfig(res);
+                    } catch {
+                      /* non-fatal — adjustable later in Settings */
+                    }
+                  }}
+                />
+                <span>Check that reference material is on topic before a gezel uses it</span>
+              </label>
+              <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
+                A small model on this device (about 24 MB) keeps unrelated articles out of your
+                conversations.
+              </p>
               <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
                 Adjustable any time in Settings.
               </p>

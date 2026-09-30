@@ -22,6 +22,7 @@
     "index-bench": "tsx src/bin/index-bench.ts",
     "embed-calibration": "tsx src/bin/embed-calibration.ts",
     "retrieval-bench": "tsx src/bin/retrieval-bench.ts",
+    "knowledge-calibration": "tsx src/bin/knowledge-calibration.ts",
     "ab-retrieval": "tsx src/bin/ab-retrieval.ts",
     "preflight": "tsx src/bin/preflight.ts",
     "all": "tsx src/bin/all.ts",

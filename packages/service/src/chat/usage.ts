@@ -5,19 +5,10 @@
  * per-provider cards.
  */
 
+import type { QuotaBucket } from '@bendyline/gezel/local-loop';
 import type { ProviderName, TurnUsage } from '../providers/types.js';
 
-export interface QuotaBucket {
-  /** Bucket identifier from the provider (e.g. "premium_interactions"). */
-  name: string;
-  isUnlimited: boolean;
-  limit: number;
-  used: number;
-  remaining: number;
-  remainingPercent: number;
-  overage: number;
-  resetDate?: string;
-}
+export type { QuotaBucket } from '@bendyline/gezel/local-loop';
 
 /**
  * @deprecated Use QuotaBucket. Kept as an alias for compatibility with

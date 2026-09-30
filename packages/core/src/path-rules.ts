@@ -177,3 +177,41 @@ export const DESKTOP_SEGMENT_RULES: PathRuleOptions = {
   forbidColon: true,
   forbidUnc: true,
 };
+
+/**
+ * A model's relative path the way the desktop resolves it: `.` and empty
+ * segments dropped, and a `..` folded into its parent while it stays inside
+ * the root. `./`, `./src//a.ts` and `src/../README.md` then mean what they
+ * mean to `path.join`. A path that climbs out of the root, or starts with a
+ * separator, is returned unchanged for the path rules to refuse.
+ */
+export function normalizeRelativeToolPath(input: string): string {
+  if (input.startsWith('/')) return input;
+  const out: string[] = [];
+  for (const segment of input.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (out.length === 0) return input;
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.join('/');
+}
+
+/**
+ * Models sometimes pass `artifacts/foo.md` because they see that folder
+ * name in workspace listings or the UI. The API already scopes the call
+ * to the artifacts root, so a leading `artifacts/` (or `./`) is always
+ * redundant — and passing it through caused real-world bugs like files
+ * landing in `<project>/artifacts/artifacts/foo.md`. Strip it once here
+ * so every artifact tool, on every host, is forgiving of this class of mistake.
+ */
+export function normalizeArtifactPath(path: string): string {
+  let p = path.replace(/^\.?\/+/, '');
+  // Strip repeated leading "artifacts/" segments (handles both `artifacts/`
+  // and the pathological `artifacts/artifacts/` case).
+  while (/^artifacts\/+/i.test(p)) p = p.replace(/^artifacts\/+/i, '');
+  return p;
+}

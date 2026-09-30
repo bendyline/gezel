@@ -3,15 +3,17 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
-const { listProjectCraftbooks, getConfig } = vi.hoisted(() => ({
+const { listProjectCraftbooks, getConfig, getTaskOutputs } = vi.hoisted(() => ({
   listProjectCraftbooks: vi.fn(),
   getConfig: vi.fn(),
+  getTaskOutputs: vi.fn(),
 }));
 
 vi.mock('../api.js', () => ({
   api: createMockApi({
     listProjectCraftbooks,
     getConfig,
+    getTaskOutputs,
   }),
 }));
 
@@ -50,6 +52,7 @@ function startCard(overrides?: Partial<Extract<ToolCallCard, { kind: 'craftbook-
 beforeEach(() => {
   listProjectCraftbooks.mockReset().mockResolvedValue({ items: [], missingToolsets: {} });
   getConfig.mockReset().mockResolvedValue({});
+  getTaskOutputs.mockReset().mockResolvedValue({ deliverable: null, outputs: [] });
   takePendingSettingsSection();
 });
 
@@ -182,5 +185,62 @@ describe('ToolCraftbookCard — step advance', () => {
       />,
     );
     expect(screen.getByText('Completed “Finish” — task complete.')).toBeInTheDocument();
+  });
+
+  it('points a finished receipt at what the task made', async () => {
+    getTaskOutputs.mockResolvedValue({
+      deliverable: { kind: 'workspace', path: 'powerpoint/task-3/deck.pptx' },
+      outputs: [{ kind: 'workspace', path: 'powerpoint/task-3/deck.pptx' }],
+    });
+    const onOpenReference = vi.fn();
+    projectSeq += 1;
+    const projectId = `proj-made-${projectSeq}`;
+    render(
+      <ToolCraftbookCard
+        onOpenReference={onOpenReference}
+        card={{
+          kind: 'task-step-advance',
+          craftbookId: 'powerpoint-deck',
+          craftbookName: 'PowerPoint from Content',
+          taskRef: `${projectId}/3`,
+          projectId,
+          status: 'complete',
+          completedStepId: 'finish',
+          completedStepName: 'Finish',
+          steps: [{ id: 'finish', name: 'Finish', status: 'done' }],
+        }}
+      />,
+    );
+    const link = await screen.findByRole('button', { name: /Your PowerPoint deck\s*deck\.pptx/ });
+    expect(getTaskOutputs).toHaveBeenCalledWith(projectId, 3);
+    fireEvent.click(link);
+    expect(onOpenReference).toHaveBeenCalledWith({
+      key: '',
+      kind: 'workspace',
+      path: 'powerpoint/task-3/deck.pptx',
+      projectId,
+    });
+  });
+
+  it('asks nothing of a receipt whose task is still running', () => {
+    render(
+      <ToolCraftbookCard
+        card={{
+          kind: 'task-step-advance',
+          craftbookId: 'ship',
+          craftbookName: 'Ship',
+          taskRef: 'default/4',
+          projectId: 'default',
+          status: 'active',
+          completedStepId: 'a',
+          activeStepId: 'b',
+          steps: [
+            { id: 'a', name: 'A', status: 'done' },
+            { id: 'b', name: 'B', status: 'active' },
+          ],
+        }}
+      />,
+    );
+    expect(getTaskOutputs).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { toolErrorText } from '@bendyline/gezel';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { type CanonicalToolName, TOOL_REGISTRY, canonicalToolName } from './tool-inventory.js';
@@ -335,13 +336,7 @@ export interface ToolErrorOptions {
  * forget in catch and business-rule branches.
  */
 export function errorResult(message: string, options: ToolErrorOptions = {}): CallToolResult {
-  const prefix = options.code ? `[${options.code}] ` : '';
-  const retry = options.retryable === undefined ? '' : `\nRetryable: ${options.retryable}`;
-  const hint = options.hint ? `\nNext: ${options.hint}` : '';
-  return {
-    content: [{ type: 'text', text: `${prefix}${message}${retry}${hint}` }],
-    isError: true,
-  };
+  return { content: [{ type: 'text', text: toolErrorText(message, options) }], isError: true };
 }
 
 /**

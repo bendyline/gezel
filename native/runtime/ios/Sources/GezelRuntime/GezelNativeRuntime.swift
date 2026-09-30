@@ -30,6 +30,47 @@ private func receiveLlamaChunk(_ bytes: UnsafePointer<CChar>?, _ length: Int, _ 
     return 0
 }
 
+/**
+ * Chat chunks travel to JavaScript in small batches: one bridge event per token
+ * costs more than the token, and the order must hold. Touched only on the
+ * inference thread; flushed about every 24 ms while tokens stream, and once
+ * more when the request ends.
+ */
+private final class NativeChatBatch {
+    weak var plugin: GezelNativeRuntime?
+    let requestId: String
+    private var pending: [String] = []
+    private var flushedAt = DispatchTime.now().uptimeNanoseconds
+    var generating = false
+    init(plugin: GezelNativeRuntime, requestId: String) {
+        self.plugin = plugin
+        self.requestId = requestId
+    }
+    func add(_ chunk: String) {
+        pending.append(chunk)
+        if DispatchTime.now().uptimeNanoseconds - flushedAt >= 24_000_000 { flush() }
+    }
+    func flush() {
+        flushedAt = DispatchTime.now().uptimeNanoseconds
+        guard !pending.isEmpty, let plugin else { return }
+        let chunks = pending, requestId = requestId
+        pending.removeAll()
+        DispatchQueue.main.async { plugin.notifyListeners("chatChunk", data: ["requestId": requestId, "chunks": chunks]) }
+    }
+}
+
+private func receiveLlamaJSON(_ bytes: UnsafePointer<CChar>?, _ length: Int, _ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let bytes, let context else { return 1 }
+    let batch = Unmanaged<NativeChatBatch>.fromOpaque(context).takeUnretainedValue()
+    guard let plugin = batch.plugin, !plugin.isCancelled(batch.requestId) else { return 1 }
+    if !batch.generating {
+        batch.generating = true
+        plugin.notifyPhase(batch.requestId, "generating")
+    }
+    batch.add(String(decoding: UnsafeRawBufferPointer(start: bytes, count: length), as: UTF8.self))
+    return plugin.isCancelled(batch.requestId) ? 1 : 0
+}
+
 #if canImport(GezelModelStorage)
 import GezelModelStorage
 #endif
@@ -565,6 +606,129 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         }
     }
 
+    /**
+     * An OpenAI-shaped chat request for an imported llama.cpp model, served by
+     * llama.cpp's own chat layer exactly as desktop's llama-server serves it:
+     * the model's template renders the tools and its parser returns structured
+     * tool calls. Every object llama-server would stream reaches JavaScript as a
+     * `chatChunk` event (batched, in order), including its error body.
+     */
+    public func chat(_ call: NativeCall) {
+        guard let requestId = call.getString("requestId"), !requestId.isEmpty, requestId.utf8.count <= 128,
+              let request = call.getObject("request") else {
+            call.reject("A request ID and chat request are required"); return
+        }
+        guard let modelId = call.getString("modelId"), !modelId.isEmpty else {
+            call.reject("Choose a model for this conversation"); return
+        }
+        guard !call.contains("contextSize") || call.getInt("contextSize") != nil else {
+            call.reject("Token budgets must be integers", "INVALID_REQUEST"); return
+        }
+        let contextSize = call.getInt("contextSize") ?? 4096
+        guard (512...16384).contains(contextSize) else {
+            call.reject("Context size is outside the supported range"); return
+        }
+        func encode(_ value: [String: Any]) -> Data? {
+            guard JSONSerialization.isValidJSONObject(value) else { return nil }
+            return try? JSONSerialization.data(withJSONObject: value, options: [.withoutEscapingSlashes])
+        }
+        guard let body = encode(request), body.count <= 1024 * 1024 else {
+            call.reject("Chat request is too large"); return
+        }
+        guard let config = call.getObject("chatConfig").map(encode) ?? Data("{}".utf8) else {
+            call.reject("Invalid chat settings"); return
+        }
+        guard engine != nil else { call.reject("The native inference engine could not initialize.", "UNAVAILABLE"); return }
+        operationLock.lock()
+        guard !backgrounded else { operationLock.unlock(); call.reject("Reopen the app to start a conversation", "BACKGROUND"); return }
+        guard activeId == nil, !modelMutation, !releasing else { operationLock.unlock(); call.reject("Another conversation is running", "BUSY"); return }
+        activeId = requestId; cancelled = false; activeFailure = nil
+        operationLock.unlock()
+        inferenceQueue.async {
+            self.runChat(call, requestId: requestId, modelId: modelId, contextSize: contextSize, body: body, config: config)
+        }
+    }
+
+    /// The `configure_chat` settings the loaded model holds; inference queue only.
+    private var appliedChatConfig: Data?
+
+    private func runChat(_ call: NativeCall, requestId: String, modelId: String, contextSize: Int, body: Data, config: Data) {
+        let batch = NativeChatBatch(plugin: self, requestId: requestId)
+        let cancellation = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+        cancellation.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50))
+        var ticks = 0
+        var lastProgress: (phase: UInt32, value: UInt32) = (UInt32.max, UInt32.max)
+        cancellation.setEventHandler { [weak self] in
+            guard let self else { return }
+            if self.isCancelled(requestId) {
+                self.cancelActive(requestId)
+                return
+            }
+            ticks += 1
+            if ticks % 5 == 0 { self.reportProgress(requestId, last: &lastProgress) }
+        }
+        cancellation.resume()
+        func nativeFailure(_ status: Int32, _ error: inout gezel_llama_error) -> NSError {
+            NSError(domain: "GezelLlama", code: Int(status), userInfo: [NSLocalizedDescriptionKey: errorText(&error)])
+        }
+        func perform() throws -> [String: Any] {
+            guard let engine, let store else { throw storeError ?? MobileStoreError.unknownModel }
+            let (model, url) = try store.modelURL(id: modelId)
+            var nativeError = gezel_llama_error()
+            if loadedModelId != model.id || loadedContextSize != contextSize {
+                try unloadLlama()
+                appliedChatConfig = nil
+                guard awaitCooling(requestId) else { return ["status": "cancelled"] }
+                try checkResources(additionalBytes: requiredBytes(path: url.path, sizeBytes: model.sizeBytes, contextSize: contextSize))
+                guard let operation = nextOperation(requestId) else { return ["status": "cancelled"] }
+                var options = loadOptions(contextSize: contextSize)
+                options.request_id = operation
+                notifyPhase(requestId, "loading_model")
+                sizingLock.lock()
+                let status = url.path.withCString { gezel_llama_load(engine, $0, &options, &nativeError) }
+                if status == 0 { loadedModelId = model.id; loadedPath = url.path; loadedContextSize = contextSize }
+                sizingLock.unlock()
+                guard status == 0 else {
+                    if isCancelled(requestId) { return ["status": "cancelled"] }
+                    throw nativeFailure(status, &nativeError)
+                }
+            }
+            if config != appliedChatConfig {
+                let status = config.withUnsafeBytes { raw in
+                    gezel_llama_configure_chat(engine, raw.bindMemory(to: CChar.self).baseAddress, raw.count, &nativeError)
+                }
+                guard status == 0 else { throw nativeFailure(status, &nativeError) }
+                appliedChatConfig = config
+            }
+            guard awaitCooling(requestId) else { return ["status": "cancelled"] }
+            try checkResources(additionalBytes: 64 * 1024 * 1024)
+            guard let operation = nextOperation(requestId) else { return ["status": "cancelled"] }
+            var options = gezel_llama_default_chat_options()
+            options.request_id = operation
+            options.timeout_ms = 600_000
+            var result = gezel_llama_result()
+            notifyPhase(requestId, "prefill")
+            let status = body.withUnsafeBytes { raw in
+                gezel_llama_chat(engine, raw.bindMemory(to: CChar.self).baseAddress, raw.count, &options, receiveLlamaJSON,
+                    Unmanaged.passUnretained(batch).toOpaque(), &result, &nativeError)
+            }
+            // Invalid options, busy and not-loaded end before a request starts,
+            // so no error body reached the batch; every other failure sent one.
+            if (1...3).contains(status) { throw nativeFailure(status, &nativeError) }
+            if status == 0 { return ["status": "ok"] }
+            if isCancelled(requestId) || status == 7 { return ["status": "cancelled"] }
+            return ["status": status == 8 ? "timeout" : "error"]
+        }
+        var terminal: Result<[String: Any], Error>
+        do { terminal = .success(try perform()) }
+        catch {
+            terminal = isCancelled(requestId) ? .success(["status": "cancelled"]) : .failure(error)
+        }
+        cancellation.cancel()
+        batch.flush()
+        finishGeneration(call, terminal: terminal)
+    }
+
     private func errorText(_ error: inout gezel_llama_error) -> String {
         withUnsafePointer(to: &error.message) { pointer in
             String(cString: UnsafeRawPointer(pointer).assumingMemoryBound(to: CChar.self))
@@ -581,6 +745,26 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         let thermal = ProcessInfo.processInfo.thermalState
         if thermal == .serious || thermal == .critical { return "The device is too warm for local inference. Let it cool down first." }
         return nil
+    }
+
+    /// How long a request waits for a hot device to cool before it is refused.
+    private static let coolingWaitSeconds: TimeInterval = 600
+
+    /// A hot device refuses new work rather than heating further, but the next
+    /// request of a tool loop already underway waits the heat out instead of
+    /// failing the turn: the same work, delayed, is what the person asked for.
+    /// Bounded, so a device that never cools still gets the refusal from
+    /// `checkResources`. False when the request was cancelled meanwhile.
+    private func awaitCooling(_ requestId: String) -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + Self.coolingWaitSeconds
+        var announced = false
+        while [.serious, .critical].contains(ProcessInfo.processInfo.thermalState) {
+            if isCancelled(requestId) { return false }
+            if ProcessInfo.processInfo.systemUptime >= deadline { return true }
+            if !announced { notifyPhase(requestId, "cooling"); announced = true }
+            Thread.sleep(forTimeInterval: 2)
+        }
+        return !isCancelled(requestId)
     }
 
     private func checkResources(additionalBytes: UInt64) throws {
@@ -618,7 +802,8 @@ public final class GezelNativeRuntime: @unchecked Sendable {
                     "id": id, "name": name, "locality": "on-device",
                     "availability": reason == nil ? "available" : "unavailable",
                     "contextTokens": context, "maxOutputTokens": output,
-                    "capabilities": ["text": true, "tools": id == "apple-foundation-models", "structuredOutput": false, "images": false, "foregroundOnly": true]
+                    // structuredChat: llama.cpp's own chat layer, as desktop's llama-server runs it.
+                    "capabilities": ["text": true, "tools": id == "apple-foundation-models", "structuredOutput": false, "images": false, "foregroundOnly": true, "structuredChat": id == "llama-cpp"]
                 ]
                 if let reason { value["reason"] = reason }
                 return value

@@ -18,6 +18,7 @@ import {
 } from '../catalog-model-config.js';
 import {
   CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
@@ -1042,12 +1043,13 @@ export async function buildLlamaCppProvider(opts: {
         if (ladderPlan !== null && envNumCtx === undefined) {
           const windowedNote = ladderPlan === admission ? '' : ' (windowed KV admission)';
           if (!ladderPlan.minimumSatisfied) {
-            throw new CapacityDeniedError(
-              formatContextCapacityDenial({
+            log.warn(
+              `[llama-cpp] ${formatContextCapacityDenial({
                 modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this local model',
                 plan: ladderPlan,
-              }),
+              })}`,
             );
+            throw new CapacityDeniedError(NOT_ENOUGH_MEMORY_MESSAGE);
           }
           if (ladderPlan.slots < slots) {
             log.info(

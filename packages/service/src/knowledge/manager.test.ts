@@ -275,6 +275,75 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     }
   });
 
+  describe('vector floors and arm labels', () => {
+    /** The dovetails chunk's exact embed input, so a steered query vector lands on it. */
+    async function dovetailsEmbedInput(): Promise<string> {
+      const stored = (
+        await profileManager.host.search({
+          query: 'dovetail',
+          shardBudget: 6,
+          finalK: 24,
+          includeChunkFts: true,
+          catalogKeys: ['gezel-tests/e5-notes'],
+        })
+      ).chunks.find((hit) => hit.documentId === 'dovetails');
+      if (!stored) throw new Error('fixture chunk missing');
+      const path = stored.headingPath.filter((h) => h !== stored.title);
+      const header =
+        path.length > 0 ? `${stored.title}\n${path.join(' > ')}\n` : `${stored.title}\n`;
+      return `passage: ${header}${stored.text}`;
+    }
+
+    /** Search 'Shellac' with the vector arm steered at dovetails, under a given floor. */
+    async function steeredSearch(floor: number | null | 'default') {
+      const input = await dovetailsEmbedInput();
+      const manager =
+        floor === 'default'
+          ? profileManager
+          : new KnowledgeManager({
+              home: profileHome,
+              host: await createInProcessCatalogHost(),
+              embedQueryForProfile: async () => testHashVector(input),
+              vectorFloors: { floorFor: () => floor },
+            });
+      if (manager !== profileManager) await manager.start();
+      embedOverride = () => testHashVector(input);
+      try {
+        return await manager.searchUnified('Shellac', { vector: null, maxResults: 5 });
+      } finally {
+        embedOverride = null;
+        if (manager !== profileManager) await manager.stop();
+      }
+    }
+
+    it('labels a hit `vector` with its similarity when it clears a measured floor', async () => {
+      const results = await steeredSearch(0.5);
+      const dovetails = results.find((r) => r.documentId === 'dovetails');
+      expect(dovetails?.arm).toBe('vector');
+      expect(dovetails?.similarity).toBeGreaterThan(0.9);
+      // Shellac was found by its title and body text only.
+      const shellac = results.find((r) => r.documentId === 'shellac');
+      expect(shellac?.arm).toBe('fts');
+      expect(shellac?.similarity).toBeUndefined();
+    });
+
+    it('drops a vector hit under its floor: it neither ranks nor appears', async () => {
+      // The fixture's hash vectors are not unit length, so its "cosine" can
+      // exceed 1; an infinite floor is unreachable whatever the scale.
+      const results = await steeredSearch(Number.POSITIVE_INFINITY);
+      expect(results.map((r) => r.documentId)).toEqual(['shellac']);
+    });
+
+    it('keeps an unmeasured profile ranking by vector, labelled `fts` so injection wants grounding', async () => {
+      // No floor is recorded for multilingual-e5-small@1 or this test catalog.
+      const results = await steeredSearch('default');
+      const dovetails = results.find((r) => r.documentId === 'dovetails');
+      expect(dovetails).toBeDefined();
+      expect(dovetails?.arm).toBe('fts');
+      expect(dovetails?.similarity).toBeUndefined();
+    });
+  });
+
   it('a document every arm names comes first, once', async () => {
     const results = await profileManager.searchUnified('Dovetail Joints', {
       vector: null,

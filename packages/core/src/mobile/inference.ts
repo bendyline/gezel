@@ -57,8 +57,30 @@ export interface PortableInference {
     /** Native engine phases (loading, prompt processing, first token), when reported. */
     hooks?: { onPhase?(event: MobileEnginePhaseEvent): void },
   ): Promise<{ text: string; stopReason: 'stop' | 'length' | 'cancelled' }>;
+  /**
+   * OpenAI-shaped chat for providers advertising `capabilities.structuredChat`:
+   * `body` is the `/v1/chat/completions` request desktop sends llama-server, and
+   * each object llama-server would stream (chunks, or its error body) reaches
+   * `onChunk` in order. `chatConfig` carries what llama-server takes from its
+   * launch flags. Resolves when the request ends.
+   */
+  chat?(
+    request: {
+      requestId: string;
+      providerId: 'llama-cpp';
+      modelId: string;
+      contextSize: number;
+      body: Record<string, unknown>;
+      chatConfig?: Record<string, unknown>;
+    },
+    onChunk: (chunk: Record<string, unknown>) => void,
+    hooks?: { onPhase?(event: MobileEnginePhaseEvent): void },
+  ): Promise<{ status: PortableChatStatus }>;
   cancel(requestId: string): Promise<void>;
 }
+
+/** How a native chat request ended; an `error` status has sent its error body as a chunk. */
+export type PortableChatStatus = 'ok' | 'cancelled' | 'timeout' | 'error';
 
 /** Minimal native bridge: no Capacitor, product storage, previews, or speech dependency. */
 export interface NativeInferencePlugin {
@@ -68,6 +90,15 @@ export interface NativeInferencePlugin {
     request: Parameters<PortableInference['generate']>[0],
   ): ReturnType<PortableInference['generate']>;
   cancel(options: { requestId: string }): Promise<void>;
+  /** Hosts whose llama.cpp provider advertises `structuredChat`. */
+  chat?(request: {
+    requestId: string;
+    providerId: 'llama-cpp';
+    modelId: string;
+    contextSize: number;
+    request: Record<string, unknown>;
+    chatConfig?: Record<string, unknown>;
+  }): Promise<{ status: PortableChatStatus }>;
   /** Hosts with native tool calling only. Exactly one of `output`/`error` is set. */
   completeToolCall?(options: {
     requestId: string;
@@ -83,6 +114,11 @@ export interface NativeInferencePlugin {
   addListener(
     event: 'toolCall',
     callback: (event: MobileNativeToolCall) => void,
+  ): Promise<NativeInferenceListener>;
+  /** A batch of chat chunks, each a JSON object as llama-server would stream it. */
+  addListener(
+    event: 'chatChunk',
+    callback: (event: { requestId: string; chunks: string[] }) => void,
   ): Promise<NativeInferenceListener>;
   /** Older native builds never emit this; callers must not depend on it. */
   addListener(
@@ -179,6 +215,59 @@ export function createNativeInference(plugin: NativeInferencePlugin): PortableIn
         }
       }
     },
+    ...(plugin.chat
+      ? {
+          async chat(request, onChunk, hooks) {
+            if (runs.size) throw new Error('A response is already running');
+            let release!: () => void;
+            const released = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            const run = { cancelled: false, started: false, released };
+            runs.set(request.requestId, run);
+            let chunkListener: NativeInferenceListener | undefined;
+            let phaseListener: NativeInferenceListener | undefined;
+            try {
+              if (hooks?.onPhase) {
+                const onPhase = hooks.onPhase;
+                phaseListener = await plugin.addListener('enginePhase', (raw) => {
+                  const event = MobileEnginePhaseEventSchema.safeParse(raw);
+                  if (!run.cancelled && event.success && event.data.requestId === request.requestId)
+                    onPhase(event.data);
+                });
+              }
+              chunkListener = await plugin.addListener('chatChunk', (event) => {
+                if (run.cancelled || event.requestId !== request.requestId) return;
+                for (const text of event.chunks) {
+                  let chunk: unknown;
+                  try {
+                    chunk = JSON.parse(text);
+                  } catch {
+                    continue;
+                  }
+                  if (chunk && typeof chunk === 'object' && !Array.isArray(chunk))
+                    onChunk(chunk as Record<string, unknown>);
+                }
+              });
+              if (run.cancelled) return { status: 'cancelled' as const };
+              run.started = true;
+              MobileModelSchema.shape.id.parse(request.modelId);
+              const { body, ...rest } = request;
+              return await plugin.chat!({ ...rest, request: body });
+            } finally {
+              run.cancelled = true;
+              try {
+                await Promise.all([chunkListener?.remove(), phaseListener?.remove()]);
+              } catch {
+                // Teardown cannot replace the request's authoritative result.
+              } finally {
+                runs.delete(request.requestId);
+                release();
+              }
+            }
+          },
+        }
+      : {}),
     cancel: async (requestId) => {
       const run = runs.get(requestId);
       if (!run) return;

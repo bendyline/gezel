@@ -57,15 +57,6 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
-  ClaudeCliPoolView,
-  ProviderCacheStatsResponse,
-  ProviderQueueState,
-  QueueStatusResponse,
-  SessionQueueState,
-  TaskHandoffBucket,
-  TaskRunnerState,
-} from '@bendyline/gezel/queue-status';
-import type {
   AiAppDetail,
   AmbientDashboardDisplayTarget,
   AmbientDashboardStatusResponse,
@@ -413,6 +404,7 @@ import type {
   SystemToolsetInstallSnapshot,
   Task,
   TaskAssignee,
+  TaskOutputsResponse,
   TaskStatus,
   TerminalThread,
   ToolsetsScope,
@@ -470,6 +462,15 @@ import type {
   EvalTrialDetail,
   EvalTrialListResponse,
 } from '@bendyline/gezel/eval';
+import type {
+  ClaudeCliPoolView,
+  ProviderCacheStatsResponse,
+  ProviderQueueState,
+  QueueStatusResponse,
+  SessionQueueState,
+  TaskHandoffBucket,
+  TaskRunnerState,
+} from '@bendyline/gezel/queue-status';
 import {
   AudioModelPullEventSchema,
   AudioSynthesizeEventSchema,
@@ -2444,8 +2445,7 @@ export class GezelClient {
 
   /**
    * Kick off a catalog install (file path, URL, or a gilde catalog id); poll
-   * the job or subscribe to its events. A 403 `network-blocked` means the
-   * security policy turns off app network access.
+   * the job or subscribe to its events.
    */
   installKnowledgeCatalog(
     body: KnowledgeInstallRequest,
@@ -7568,11 +7568,33 @@ export class GezelClient {
     );
   }
 
-  listTaskNotes(projectId: string, num: number, stepId?: string): Promise<ListTaskNotesResponse> {
-    const qs = stepId ? `?step=${encodeURIComponent(stepId)}` : '';
+  /**
+   * `withFileReferences` asks the daemon to resolve the project files each
+   * note names into `referencedFiles`, for surfaces that render notes with
+   * clickable paths.
+   */
+  listTaskNotes(
+    projectId: string,
+    num: number,
+    stepId?: string,
+    opts: { withFileReferences?: boolean } = {},
+  ): Promise<ListTaskNotesResponse> {
+    const params = new URLSearchParams();
+    if (stepId) params.set('step', stepId);
+    if (opts.withFileReferences) params.set('refs', '1');
+    const query = params.toString();
+    const qs = query ? `?${query}` : '';
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/notes${qs}`,
+    );
+  }
+
+  /** The task's deliverable (null until it exists) and every file it has made. */
+  getTaskOutputs(projectId: string, num: number): Promise<TaskOutputsResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/outputs`,
     );
   }
 

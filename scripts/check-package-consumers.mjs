@@ -91,6 +91,7 @@ const IMPORTABLE = [
   '@bendyline/gezel/markdown',
   '@bendyline/gezel/native',
   '@bendyline/gezel/checks',
+  '@bendyline/gezel/local-loop',
   '@bendyline/gezel-client',
   '@bendyline/gezel-client/node',
   '@bendyline/gezel-sdk',
@@ -420,12 +421,10 @@ try {
   }
 
   step('auditing the npm consumer graph');
-  // Stricter than the workspace gates (critical), on purpose. This graph is
-  // the one npm resolves for a consumer: the workspace's pnpm overrides never
-  // reach it, and npm prints "N vulnerabilities (… high)" at the end of every
-  // `npm install @bendyline/gezel-cli`. At `critical`, a clean rehearsal
-  // shipped a high-severity adm-zip advisory (2026-09-26 npm ship audit), as
-  // it had shipped a deepmerge-ts one in August. Accepted advisories go in
+  // This graph is the one npm resolves for a consumer: the workspace's pnpm
+  // overrides never reach it. It blocks at critical only, like the workspace
+  // gates; lower severities are printed below and in the daily supply-chain
+  // report. Accepted critical advisories go in
   // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
   const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
@@ -440,14 +439,14 @@ try {
     const blocking = blockingAdvisories(auditReport, readAuditAllowlist());
     if (blocking.length > 0) {
       fail(
-        `npm audit found high/critical advisories in the consumer graph:\n${blocking
+        `npm audit found critical advisories in the consumer graph:\n${blocking
           .map((a) => `    ${a.severity.padEnd(8)} ${a.id}  ${a.pkg}  ${a.title}`)
           .join(
             '\n',
           )}\n  Fix the dependency, or allowlist it with a reason and expiry in scripts/npm-consumer-audit-allowlist.json`,
       );
     } else {
-      ok('npm audit reports no un-allowlisted high or critical advisories');
+      ok('npm audit reports no un-allowlisted critical advisories');
     }
   }
   if (auditCounts) {
@@ -964,8 +963,38 @@ async function daemonSmoke(consumerDir, opts = {}) {
   } catch (err) {
     fail(`daemon smoke: ${err.message}\n${logs.join('')}`);
   } finally {
+    await stopDaemon(child);
+    removeScratchDir(home);
+  }
+}
+
+/**
+ * Stop the smoke daemon and wait for it to exit: its home cannot be removed
+ * while any process still holds files there. On Windows `kill()` is an
+ * immediate TerminateProcess that returns before the process is gone and
+ * leaves the daemon's own children running, so take down the whole tree.
+ */
+async function stopDaemon(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
     child.kill('SIGTERM');
-    rmSync(home, { recursive: true, force: true });
+  }
+  const gaveUp = await Promise.race([
+    exited.then(() => false),
+    new Promise((resolve) => setTimeout(() => resolve(true), 15_000).unref()),
+  ]);
+  if (gaveUp) child.kill('SIGKILL');
+}
+
+/** A leftover temp directory must not fail a run whose checks all passed. */
+function removeScratchDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    console.log(`  note could not remove ${dir}: ${err.message}`);
   }
 }
 

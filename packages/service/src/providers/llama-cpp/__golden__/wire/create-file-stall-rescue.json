@@ -1,0 +1,125 @@
+{
+  "requests": [
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "Please finish the requested work.\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `write_file` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Create or overwrite exactly reports/budget.rst. Do not write a helper script or any other path.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "reports/budget.rst"
+                  ],
+                  "description": "Must be exactly reports/budget.rst."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete file contents."
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    },
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "Please finish the requested work.\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `write_file` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]"
+        },
+        {
+          "role": "user",
+          "content": "[system] Your required file-write turn produced no `write_file` tool call. The required output file is `reports/budget.rst`. Retry immediately. Your next response must START with `write_file` for the required file, with the complete file contents in the `content` argument. Do not describe the result until after that tool succeeds."
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Create or overwrite exactly reports/budget.rst. Do not write a helper script or any other path.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "reports/budget.rst"
+                  ],
+                  "description": "Must be exactly reports/budget.rst."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete file contents."
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    }
+  ],
+  "executed": [
+    [
+      "write_file",
+      {
+        "path": "reports/budget.rst",
+        "content": "complete"
+      }
+    ]
+  ],
+  "result": "I wrote `reports/budget.rst` to the workspace.",
+  "deltas": "I will do that.",
+  "reasoning": "",
+  "warnings": []
+}

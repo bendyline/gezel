@@ -24,6 +24,13 @@ export const MobileProviderSchema = z
         structuredOutput: z.literal(false),
         images: z.literal(false),
         foregroundOnly: z.literal(true),
+        /**
+         * OpenAI-shaped chat served by llama.cpp's own chat layer
+         * (`PortableInference.chat`), the way desktop's llama-server serves it:
+         * the model's template renders the tools and its parser returns
+         * structured tool calls. Absent on older native builds.
+         */
+        structuredChat: z.boolean().optional(),
       })
       .strict(),
   })
@@ -184,11 +191,12 @@ export function resolveMobileInferenceBudget(
  * Live engine phase from a native runtime, for the status pill. `progress`
  * and the token counters are present only while the engine publishes them
  * (model loading and prompt processing); hosts that report nothing leave the
- * product runtime's own coarse phases in place.
+ * product runtime's own coarse phases in place. `cooling` is a request held
+ * until a hot phone cools, before its model load or prompt processing.
  */
 export const MobileEnginePhaseEventSchema = z.object({
   requestId: z.string(),
-  phase: z.enum(['loading_model', 'prefill', 'generating']),
+  phase: z.enum(['cooling', 'loading_model', 'prefill', 'generating']),
   progress: z.number().min(0).max(1).optional(),
   promptTokens: z.number().int().nonnegative().optional(),
   processedTokens: z.number().int().nonnegative().optional(),

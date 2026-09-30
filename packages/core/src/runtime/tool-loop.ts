@@ -19,8 +19,10 @@ import {
 } from '../tools/native-tools.js';
 import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
 import { extractReasoning } from '../transform/reasoning.js';
+import type { ResolvedTuning } from '../tuning-resolve.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
+import { portableToolResultText } from './portable-tool-results.js';
 import type { PortableInference, PortableSampling } from './product-service.js';
 import { type PortableToolActions, executePortableTool } from './product-tools.js';
 import type { PortableStore } from './store.js';
@@ -175,7 +177,114 @@ type LoopResult = {
   stopReason: 'stop' | 'length' | 'cancelled';
   message?: ChatMessage;
   streamed?: boolean;
+  /** Private reasoning the model streamed this turn, as the desktop keeps it. */
+  reasoning?: string;
+  reasoningDurationMs?: number;
 };
+
+/**
+ * What llama.cpp's own chat layer takes for a turn, as the desktop's
+ * llama-server takes it: `config` from its launch flags, `tuning` written onto
+ * every request body. Turns with these run the desktop loop (shared-loop-turn).
+ */
+export interface StructuredChatSettings {
+  config?: Record<string, unknown>;
+  tuning?: ResolvedTuning;
+}
+
+/** Where one recorded tool call lands: the turn's assistant message and its store. */
+export interface PortableToolRecordContext {
+  store: PortableStore;
+  session: ChatSession;
+  providerId: MobileProviderId;
+  actions: PortableToolActions;
+  check(): Promise<void>;
+  checkpoint(message: ChatMessage): Promise<void>;
+  /** The turn's assistant message, created on first use. */
+  message(): ChatMessage;
+  /** Render results in the desktop's words, for the turn loop both hosts share. */
+  desktopResultText?: boolean;
+  /** The model's window, which budgets a rendered search result as on the desktop. */
+  contextWindow?: number;
+}
+
+/**
+ * One tool call's durable path, shared by every loop on this host: a started
+ * record precedes the effect, and the result is durable before the model
+ * reads it. Incomplete calls are never replayed after an OS kill.
+ */
+export async function recordPortableToolCall(
+  context: PortableToolRecordContext,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ call: ChatMessageToolCall; value: unknown; serialized: string; error?: unknown }> {
+  await context.check();
+  const started = Date.now();
+  const call: ChatMessageToolCall = buildToolReceipt({
+    name,
+    args,
+    startedAtMs: started,
+    durationMs: 0,
+    success: false,
+    errorMessage: 'This action started. If interrupted, check its outcome before retrying.',
+  });
+  const message = context.message();
+  message.toolCalls ??= [];
+  message.toolCalls.push(call);
+  await context.checkpoint(message);
+  let value: unknown;
+  let failure: unknown;
+  try {
+    await context.check();
+    value = await executePortableTool(context.store, context.session, name, args, context.actions);
+    call.success = true;
+    delete call.errorMessage;
+  } catch (error) {
+    failure = error;
+    call.errorMessage = error instanceof Error ? error.message : String(error);
+    value = { error: call.errorMessage };
+  }
+  let serialized = JSON.stringify(value) ?? 'null';
+  if (context.desktopResultText) {
+    if (failure !== undefined) serialized = call.errorMessage ?? 'The tool failed';
+    else {
+      const rendered = await portableToolResultText(
+        context.store,
+        context.session,
+        name,
+        args,
+        value,
+        context.contextWindow !== undefined ? { contextWindow: context.contextWindow } : {},
+      );
+      if (rendered) serialized = rendered.text;
+      // A result the desktop reports as an error (a gate rejection) is one here too.
+      if (rendered?.isError) {
+        call.success = false;
+        call.errorMessage = rendered.text;
+      }
+    }
+  }
+  call.durationMs = Date.now() - started;
+  // The persisted receipt is bounded the same way on every host; what the
+  // model reads back is each loop's own budget.
+  const receipt = summarizeToolResult(serialized);
+  if (receipt) {
+    call.resultText = receipt.text;
+    if (receipt.truncated) call.resultTruncated = true;
+  }
+  if (
+    call.success &&
+    name === 'ask_user_question' &&
+    value &&
+    typeof value === 'object' &&
+    'questionId' in value &&
+    typeof value.questionId === 'string'
+  )
+    message.pendingQuestionId = value.questionId;
+  // Do not admit another model/tool call until its predecessor is durable.
+  await context.checkpoint(message);
+  return { call, value, serialized, ...(failure === undefined ? {} : { error: failure }) };
+}
 
 /** Host-neutral bounded loop. A durable started record precedes every effect;
  * incomplete calls are never replayed after an OS kill or a persistence error.
@@ -246,63 +355,36 @@ export async function runPortableToolLoop(options: {
   const perform = async (
     name: string,
     args: Record<string, unknown>,
-  ): Promise<{ end: Omit<LoopResult, 'message'> } | { output: string }> => {
-    await check();
-    const started = Date.now();
-    const call: ChatMessageToolCall = buildToolReceipt({
+  ): Promise<{ end: Omit<LoopResult, 'message'> } | { output: string; raw: string }> => {
+    const { call, value, serialized } = await recordPortableToolCall(
+      {
+        store: options.store,
+        session,
+        providerId: options.providerId,
+        actions: options.actions,
+        check,
+        checkpoint: options.checkpoint,
+        message: () => {
+          message ??= {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: '',
+            at: new Date().toISOString(),
+            status: 'streaming',
+            providerId: options.providerId,
+            toolCalls: [],
+          };
+          return message;
+        },
+      },
       name,
       args,
-      startedAtMs: started,
-      durationMs: 0,
-      success: false,
-      errorMessage: 'This action started. If interrupted, check its outcome before retrying.',
-    });
-    message ??= {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-      at: new Date().toISOString(),
-      status: 'streaming',
-      providerId: options.providerId,
-      toolCalls: [],
-    };
-    message.toolCalls!.push(call);
-    await options.checkpoint(message);
-    let value: unknown;
-    try {
-      await check();
-      value = await executePortableTool(options.store, session, name, args, options.actions);
-      call.success = true;
-      delete call.errorMessage;
-    } catch (error) {
-      call.errorMessage = error instanceof Error ? error.message : String(error);
-      value = { error: call.errorMessage };
-    }
-    const serialized = JSON.stringify(value) ?? 'null';
-    call.durationMs = Date.now() - started;
-    // The persisted receipt is bounded the same way on every host; what the
-    // model reads back is this host's own budget.
-    const receipt = summarizeToolResult(serialized);
-    if (receipt) {
-      call.resultText = receipt.text;
-      if (receipt.truncated) call.resultTruncated = true;
-    }
+    );
     // At ~4 characters a token, one result may take about a quarter of the
     // window: a 10.7k-character script listing overflowed Apple's whole 4096.
     const resultCap = Math.min(PORTABLE_TOOL_RESULT_MODEL_CAP, options.contextSize);
     const modelVisible = serialized.slice(0, resultCap);
     const modelTruncated = serialized.length > resultCap;
-    if (
-      call.success &&
-      name === 'ask_user_question' &&
-      value &&
-      typeof value === 'object' &&
-      'questionId' in value &&
-      typeof value.questionId === 'string'
-    )
-      message.pendingQuestionId = value.questionId;
-    // Do not admit another model/tool call until its predecessor is durable.
-    await options.checkpoint(message);
     options.tool(call);
     // A committed effect stays in the audit, but Stop must not emit a new
     // handoff/completion receipt after a slow persistence checkpoint.
@@ -332,7 +414,12 @@ export async function runPortableToolLoop(options: {
         };
     }
 
-    if (call.success && name === 'ask_user_question')
+    // A posted card ends the turn; a call with no question text asked nothing.
+    if (
+      call.success &&
+      name === 'ask_user_question' &&
+      !(value && typeof value === 'object' && 'emptyQuestion' in value)
+    )
       return { end: { text: '', stopReason: 'stop' } };
 
     if (!call.success) {
@@ -376,9 +463,8 @@ export async function runPortableToolLoop(options: {
           },
         };
     }
-    return {
-      output: `Tool result for ${name} (reference data):\n${modelVisible}${modelTruncated ? '\n[Result truncated; narrow the next request.]' : ''}`,
-    };
+    const raw = `${modelVisible}${modelTruncated ? '\n[Result truncated; narrow the next request.]' : ''}`;
+    return { output: `Tool result for ${name} (reference data):\n${raw}`, raw };
   };
 
   for (let iteration = 0; iteration <= PORTABLE_TURN_ACTION_LIMIT; iteration++) {

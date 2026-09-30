@@ -128,6 +128,7 @@ vi.mock('./home/IntroHandboekArticle.js', () => ({
 // don't need to mock the Poppetje engine.
 
 const { HomeView } = await import('./HomeView.js');
+const { HomeWorkshop } = await import('./home/HomeWorkshop.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 
@@ -488,6 +489,28 @@ describe('HomeView', () => {
         roleBasedNameOnlyMode: true,
         showPoppetjes: false,
       });
+    });
+  });
+
+  it('first run shows the relevance check as on for a new install and lets the person turn it off', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      hasGithubToken: false,
+      meesterGezelId: 'gz-meester',
+      relevanceModel: { enabled: true },
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({} as never);
+
+    render(<HomeView />);
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: /Check that reference material is on topic/,
+    });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ relevanceModel: { enabled: false } });
     });
   });
 
@@ -876,6 +899,32 @@ describe('HomeView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
     fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
     expect(screen.getByText('Tip of the day')).toBeInTheDocument();
+  });
+
+  // The saved preference is applied by an effect, and on a slow runner the
+  // first message in the test above landed before that effect had run — which
+  // then reopened the band. Arriving config must not undo a conversation's
+  // collapse.
+  it('keeps the greeting stepped aside when the saved preference arrives after the first message', async () => {
+    const props = {
+      projects: [],
+      meesterGezelId: 'gz-meester',
+      meesterName: 'Brigitte',
+      meesterIcon: null,
+      meesterPoppetje: null,
+      meesterIconOverride: false,
+    };
+    const { rerender } = render(<HomeWorkshop config={null} {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'mock send' }));
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+
+    rerender(
+      <HomeWorkshop
+        config={{ provider: 'copilot', homeGreetingCollapsed: false } as never}
+        {...props}
+      />,
+    );
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
   });
 
   it('starts collapsed when the saved preference says so', async () => {

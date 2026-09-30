@@ -1,4 +1,5 @@
 import { externalGezelModelId } from '@bendyline/gezel';
+import { sniffImageMime } from '@bendyline/gezel/local-loop';
 import { Hono } from 'hono';
 import { stream as honoStream } from 'hono/streaming';
 import { ZodError, z } from 'zod';
@@ -189,21 +190,6 @@ const PROVIDERS_FOR_TAGS: readonly ProviderName[] = [
   'llama-cpp',
   'mlx',
 ];
-
-/**
- * Sniff an image mime type from base64 magic bytes. Ollama's wire
- * format carries no mime — clients send whatever bytes they have — so
- * we recognize the common containers and default to PNG (vision
- * backends key off the bytes anyway; the mime mostly names the
- * attachment file).
- */
-function sniffImageMime(base64: string): string {
-  if (base64.startsWith('/9j/')) return 'image/jpeg';
-  if (base64.startsWith('iVBOR')) return 'image/png';
-  if (base64.startsWith('R0lGOD')) return 'image/gif';
-  if (base64.startsWith('UklGR')) return 'image/webp';
-  return 'image/png';
-}
 
 /** Bare-base64 (Ollama) → data-URI image_url part; data URIs pass through. */
 function toImageUrlPart(image: string): { type: 'image_url'; image_url: { url: string } } {

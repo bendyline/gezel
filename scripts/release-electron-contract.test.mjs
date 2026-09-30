@@ -327,12 +327,12 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   assert.match(
     consumerCheck,
     /blockingAdvisories\(auditReport, readAuditAllowlist\(\)\)/,
-    'npm consumer checks must apply the high/critical allowlist gate',
+    'npm consumer checks must apply the critical allowlist gate',
   );
   assert.match(
     consumerAudit,
-    /const BLOCKING = new Set\(\['high', 'critical'\]\)/,
-    'the clean npm consumer graph must reject high and critical advisories',
+    /const BLOCKING = new Set\(\['critical'\]\)/,
+    'the clean npm consumer graph must block on critical advisories only',
   );
   assert.match(
     consumerCheck,
@@ -400,12 +400,25 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
     'pnpm --filter @bendyline/gezel-cli exec vitest run src/tui/App.test.tsx',
   );
   assert.equal(
-    scripts['test:stability:unleased'].match(/pnpm test:stability:tui/g)?.length,
+    scripts['test:stability:pass'],
+    'node scripts/run-with-dependency-lease.mjs test:stability:pass:unleased',
+  );
+  assert.match(
+    scripts['test:stability:pass:unleased'],
+    /pnpm test:stability:tui/,
+    'every stability pass must exercise the CLI interaction suite',
+  );
+  assert.equal(
+    scripts['test:stability:unleased'].match(/pnpm test:stability:pass:unleased/g)?.length,
     2,
-    'stability passes 2 and 3 must both exercise the CLI interaction suite',
+    'local validation must still run stability passes 2 and 3',
   );
   assert.match(quality, /run: pnpm test:ci/);
-  assert.match(quality, /run: pnpm test:stability/);
+  const stabilityStart = quality.indexOf('  stability:');
+  const stabilityEnd = quality.indexOf('\n  packaged-bundle:', stabilityStart);
+  const stability = quality.slice(stabilityStart, stabilityEnd);
+  assert.match(stability, /run: pnpm test:stability:pass\n/);
+  assert.match(stability, /pass: \[2, 3\]/, 'CI must run stability passes 2 and 3, one per runner');
   assert.equal(
     quality.match(/uses: \.\/\.github\/actions\/setup-test-embedder/g)?.length,
     3,

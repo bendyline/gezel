@@ -16,7 +16,7 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -62,6 +62,14 @@ export async function packDeployedGildeCommunity(root, { label, catalog } = {}) 
   return result;
 }
 
+async function realpathOrSelf(path) {
+  try {
+    return await realpath(path);
+  } catch {
+    return path;
+  }
+}
+
 /**
  * The in-process half of `verifyPackedGildeCommunity`: through `catalog` (a
  * loaded `@bendyline/gezel-catalog`), the community directory the loader
@@ -71,7 +79,9 @@ export async function packDeployedGildeCommunity(root, { label, catalog } = {}) 
  */
 export async function probePackedGildeCommunity(catalog, root) {
   const dir = join(catalog.gildeDataDir(), 'community');
-  const within = relative(root, dir);
+  // Node resolution returns realpaths, so compare realpaths: on macOS the tmp
+  // root arrives as /var/folders/... while gilde resolves under /private/var/...
+  const within = relative(await realpathOrSelf(root), await realpathOrSelf(dir));
   if (within.startsWith('..') || isAbsolute(within)) {
     throw new Error(`gilde resolved outside ${root}: ${dir}`);
   }
