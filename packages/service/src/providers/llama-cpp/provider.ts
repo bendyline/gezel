@@ -174,6 +174,10 @@ export class LlamaCppProvider implements LLMProvider {
    * per-model opt-in, resolved in `buildLlamaCppProvider`.
    */
   private readonly visionEnabled: boolean;
+  /** Read by the machine engine's `/v1/remote/infer`, which refuses image history otherwise. */
+  get supportsImageInput(): boolean {
+    return this.visionEnabled;
+  }
   private readonly disableThinkingRequestShape: DisableThinkingRequestShape;
   /** Request-scoped effort shape for compatible wrappers such as ds4-server. */
   private readonly reasoningEffortRequestShape: ReasoningEffortRequestShape;

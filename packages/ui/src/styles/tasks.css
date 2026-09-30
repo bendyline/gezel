@@ -1362,6 +1362,13 @@ button.bench-step-foot:disabled {
    same fill, hidden seam — exactly like the step panel docks under a selected
    step's foot. The active tab (z-index 2, no bottom border) covers this
    panel's top border where they meet. */
+/* The task's deliverable, under the step tracker on every tab — the product
+   the tracker is walking toward. Recipe in shared-content.css. */
+.task-deliverable .deliverable-card {
+  max-width: 44rem;
+  margin: 0.75rem 0 0.25rem;
+}
+
 .task-view-panel {
   margin-top: calc(-1rem - 1px);
   margin-bottom: 0.75rem;

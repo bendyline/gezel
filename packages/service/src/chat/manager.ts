@@ -236,7 +236,7 @@ import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
-  loadTaskOutputs,
+  loadTaskResult,
   taskFinishedQuestion,
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
@@ -11370,16 +11370,17 @@ export class ChatManager extends LocalEngineRuntime {
     const thread = await findOwnerThread(this.store, task);
     if (!thread) return null;
 
-    const outputs = await loadTaskOutputs(this.store, task);
+    const { deliverable, outputs } = await loadTaskResult(this.store, task);
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
 
     const message: ChatMessage = {
       role: 'assistant',
-      content: composeTaskWrapUp(task, outputs, figures),
+      content: composeTaskWrapUp(task, outputs, figures, deliverable),
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
       ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+      ...(deliverable ? { deliverable } : {}),
     };
     const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
@@ -11406,6 +11407,7 @@ export class ChatManager extends LocalEngineRuntime {
         outputs,
         at: message.at,
         ...(figures ? { figures } : {}),
+        deliverable,
       });
       await this.store.writeQuestion(question);
       this.events.publish(scope, { type: 'question_asked', question });
@@ -15091,7 +15093,11 @@ export class ChatManager extends LocalEngineRuntime {
               )
           : [];
       const paths = [...new Set(structuredReadPaths)];
-      const rawPath = info.args?.path;
+      // The copy tool names its destination `dest`; recording it as the
+      // receipt's path is what lets the wrap-up and References pane see the
+      // deck a book copied into the workspace.
+      const rawPath =
+        info.name === 'copy_artifact_to_workspace' ? info.args?.dest : info.args?.path;
       const resolutionAwareRead =
         info.name === 'read_file' || info.name === 'read_artifact' || info.name === 'grep_artifact';
       const resolvedReadPath =

@@ -37,3 +37,22 @@ export function normalizeFileToken(raw: string): string {
   s = s.replace(/^\.\//, '').replace(/^\/+/, '');
   return s.trim();
 }
+
+/**
+ * Split a drawer prefix off a path token: `workspace/decks/q3.pptx` names the
+ * workspace's `decks/q3.pptx`, `artifacts/tasks/4/notes.md` the drawer's
+ * `tasks/4/notes.md`. Models write these because prompts tell them which
+ * store a file lives in — the PowerPoint book's closing note asks for
+ * `workspace/{{outputPath}}` verbatim — and neither store's inventory
+ * carries the prefix. Returns null for a path without one.
+ */
+export function splitDrawerPrefix(
+  path: string,
+): { kind: 'artifact' | 'workspace'; path: string } | null {
+  const match = /^(artifacts|workspace)\/+(.+)$/i.exec(path);
+  if (!match?.[2]) return null;
+  return {
+    kind: match[1]!.toLowerCase() === 'artifacts' ? 'artifact' : 'workspace',
+    path: match[2],
+  };
+}

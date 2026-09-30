@@ -266,6 +266,25 @@ export class ProjectArtifactsStore {
     return safeStatFileSize(this.projectArtifactsDir(id), filePath);
   }
 
+  /** The artifact twin of `Store.statProjectWorkspacePath`, behind the same fence. */
+  async statProjectArtifactPath(
+    id: string,
+    filePath: string,
+  ): Promise<{ kind: 'file' | 'dir' | 'missing'; size?: number; mtime?: string }> {
+    const cleaned = normalizeArtifactPath(filePath);
+    if (!cleaned) return { kind: 'missing' };
+    const full = await safeResolveRead(this.projectArtifactsDir(id), cleaned);
+    if (!full) return { kind: 'missing' };
+    try {
+      const s = await stat(full);
+      if (s.isDirectory()) return { kind: 'dir', mtime: s.mtime.toISOString() };
+      if (s.isFile()) return { kind: 'file', size: s.size, mtime: s.mtime.toISOString() };
+      return { kind: 'missing' };
+    } catch {
+      return { kind: 'missing' };
+    }
+  }
+
   async readProjectArtifactBinary(
     id: string,
     filePath: string,

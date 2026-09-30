@@ -51,6 +51,7 @@ export * from './json-schema/validate.js';
 export * from './roles/index.js';
 export * from './deliverable.js';
 export * from './task-owned-paths.js';
+export * from './task-deliverable.js';
 export * from './binary-document.js';
 export * from './scorecard/index.js';
 export * from './device-safety.js';

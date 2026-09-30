@@ -156,6 +156,31 @@ describe('TaskDetail', () => {
     expect(screen.getByRole('heading', { level: 3, name: 'Bake bread' })).toBeInTheDocument();
   });
 
+  it('features the deliverable under the tracker and opens it in the project files', async () => {
+    vi.mocked(api.getTaskOutputs).mockResolvedValue({
+      deliverable: { kind: 'workspace', path: 'bread/recipe.pdf' },
+      outputs: [{ kind: 'workspace', path: 'bread/recipe.pdf' }],
+    } as never);
+    let opened: unknown;
+    const onOpenFile = (event: Event) => {
+      opened = (event as CustomEvent).detail;
+    };
+    window.addEventListener('gezel:open-file', onOpenFile);
+    try {
+      render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+      const card = await screen.findByRole('region', { name: 'PDF · in progress' });
+      expect(api.getTaskOutputs).toHaveBeenCalledWith('pj-alpha', 42);
+      fireEvent.click(within(card).getByRole('button', { name: 'Open' }));
+      expect(opened).toEqual({
+        projectId: 'pj-alpha',
+        path: 'bread/recipe.pdf',
+        source: 'workspace',
+      });
+    } finally {
+      window.removeEventListener('gezel:open-file', onOpenFile);
+    }
+  });
+
   it('loads notes/sessions/children on mount', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
     await waitFor(() => {

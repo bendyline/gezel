@@ -9,6 +9,7 @@ import {
   SpawnTaskInstancesRequestSchema,
   StepPositionSchema,
   type Task,
+  type TaskNote,
   type TaskNoteAuthor,
   TaskStatusSchema,
   type TaskWaitState,
@@ -32,7 +33,17 @@ import {
 import type { CraftbookDocError, CraftbookDocFormat } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import {
+  type DiskProbeBudget,
+  MAX_DISK_PROBES_PER_MESSAGE,
+  createWorkspaceFileProbe,
+  matchReferencedFilesWithIndex,
+  mergeReferencedFiles,
+  projectFileInventoryIndex,
+  unresolvedQualifiedPaths,
+} from '../../references/file-references.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
+import { loadTaskResult } from '../../tasks/completion-wrapup.js';
 import { type TaskLaunchResult, launchErrorResponse } from '../../tasks/launcher.js';
 import {
   type CompleteStepOutcome,
@@ -97,6 +108,40 @@ async function resolveActor(
     // Fall through to user actor below.
   }
   return { kind: 'user' };
+}
+
+/**
+ * Resolve the files each note names, as the chat does for a reply, so a
+ * note's `powerpoint/task-13/deck.pptx` opens the deck instead of reading as
+ * inert code. Computed per read, never stored, so a file written after the
+ * note still links. One artifact walk and one index read serve every note.
+ */
+async function withNoteFileReferences(
+  ctx: ServiceContext,
+  projectId: string,
+  notes: TaskNote[],
+): Promise<TaskNote[]> {
+  if (notes.length === 0) return notes;
+  try {
+    const workspaceFiles = (await ctx.workspaceIndex.readFiles(projectId).catch(() => [])).map(
+      (f) => f.path,
+    );
+    const index = await projectFileInventoryIndex(ctx.store, projectId, workspaceFiles);
+    const probe = createWorkspaceFileProbe(ctx.store, projectId);
+    const budget: DiskProbeBudget = { remaining: MAX_DISK_PROBES_PER_MESSAGE * 2 };
+    const out: TaskNote[] = [];
+    for (const note of notes) {
+      const matched = matchReferencedFilesWithIndex(note.text, index);
+      const refs = mergeReferencedFiles(
+        matched,
+        await probe(unresolvedQualifiedPaths(note.text, matched), budget),
+      );
+      out.push(refs.length > 0 ? { ...note, referencedFiles: refs } : note);
+    }
+    return out;
+  } catch {
+    return notes;
+  }
 }
 
 export function projectTaskRoutes(ctx: ServiceContext): Hono {
@@ -514,7 +559,21 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const step = c.req.query('step') || undefined;
     const notes = await ctx.tasks.listNotes(projectId, num, step);
-    return c.json({ notes });
+    // Opt-in: the UI links the paths a note names; the MCP reader passes
+    // notes to a model, which has no use for them.
+    if (c.req.query('refs') !== '1') return c.json({ notes });
+    return c.json({ notes: await withNoteFileReferences(ctx, projectId, notes) });
+  });
+
+  // What the task has made so far — its deliverable and every other output.
+  // Read live so a running task's tracker shows the deck the moment it lands.
+  app.get('/:projectId/tasks/:num/outputs', async (c) => {
+    const projectId = c.req.param('projectId');
+    const num = parseNum(c.req.param('num'));
+    if (num == null) return c.json({ error: 'invalid num' }, 400);
+    const task = await ctx.tasks.get(projectId, num);
+    if (!task) return c.json({ error: 'not found' }, 404);
+    return c.json(await loadTaskResult(ctx.store, task));
   });
 
   app.post('/:projectId/tasks/:num/notes', async (c) => {

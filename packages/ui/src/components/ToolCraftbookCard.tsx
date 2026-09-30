@@ -1,14 +1,17 @@
-import type { ToolCallCard } from '@bendyline/gezel';
-import { resolveSecurityPolicy } from '@bendyline/gezel';
+import type { ReferencedFile, ToolCallCard } from '@bendyline/gezel';
+import { parseTaskRef, resolveSecurityPolicy } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { ProjectGlyph } from '../views/projects/new-project-meta.js';
 import { craftbookGlyph } from '../views/tasks/new-task-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
+import { DeliverableCard } from './DeliverableCard.js';
 import { StepTracker } from './StepTracker.js';
+import type { OpenChatReference } from './chat-open-command.js';
 import { useCraftbookCatalogArt } from './craftbook-catalog-art.js';
-import { navigateToTab } from './nav-actions.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
+import { useTaskResult } from './useTaskResult.js';
 
 /**
  * ─ ToolCraftbookCard ─────────────────────────────────────────────────
@@ -24,6 +27,11 @@ import { navigateToTab } from './nav-actions.js';
  * it reflects the CURRENT security policy (hidden once the capability is
  * on), because nudging toward a switch that is already flipped would be
  * the card lying about the present, not recording the past.
+ *
+ * A receipt that finished its task also names what the task made, read
+ * when the card mounts. That is a pointer to a file, not a claim about the
+ * task's state, so it does not break the snapshot rule: the tracker still
+ * shows the moment the step closed.
  */
 
 /**
@@ -95,10 +103,13 @@ function cardHeadline(card: ToolCallCard): string {
 export function ToolCraftbookCard({
   card,
   onFocusTask,
+  onOpenReference,
 }: {
   card: ToolCallCard;
   /** Opens the task beside the chat (rail Task pane). Absent → full task tab. */
   onFocusTask?: (ref: string) => void;
+  /** Opens a file in the chat rail's viewer. Absent → the project's file pane. */
+  onOpenReference?: (reference: OpenChatReference) => void;
 }) {
   const art = useCraftbookCatalogArt(card.projectId, card.craftbookId);
   const recommendation =
@@ -110,6 +121,24 @@ export function ToolCraftbookCard({
   };
   const activeStepId = card.activeStepId ?? null;
   const compact = card.kind === 'task-step-advance';
+  const finishedRef =
+    card.kind === 'task-step-advance' && card.status === 'complete'
+      ? parseTaskRef(card.taskRef)
+      : null;
+  const result = useTaskResult(finishedRef);
+  const openFile = (file: ReferencedFile) => {
+    if (onOpenReference) {
+      onOpenReference({ key: '', kind: file.kind, path: file.path, projectId: card.projectId });
+      return;
+    }
+    runNavActions(
+      openProjectFileActions({
+        projectId: card.projectId,
+        path: file.path,
+        source: file.kind === 'workspace' ? 'workspace' : 'artifacts',
+      }),
+    );
+  };
   return (
     <div className={`msg-tool-card${compact ? ' msg-tool-card-compact' : ''}`}>
       <div className="msg-tool-card-art" aria-hidden="true">
@@ -148,6 +177,14 @@ export function ToolCraftbookCard({
           <button type="button" className="msg-ref-chip" onClick={openTask} title="Open this task">
             Task {card.taskRef}
           </button>
+          {result?.deliverable && (
+            <DeliverableCard
+              compact
+              deliverable={result.deliverable}
+              projectId={card.projectId}
+              onOpen={openFile}
+            />
+          )}
         </div>
         {recommendation && externalAllowed === false && (
           <div className="msg-tool-card-nudge">

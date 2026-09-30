@@ -15,6 +15,7 @@ import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
+import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
@@ -22,7 +23,9 @@ import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
+import { openProjectFileActions, runNavActions } from '../components/nav-actions.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
+import { useTaskEvents, useTaskResult } from '../components/useTaskResult.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
@@ -155,6 +158,11 @@ export function TaskDetail({
   >(null);
   const [addStepOpen, setAddStepOpen] = useState(false);
   const [tab, setTab] = useState<'task' | 'chat'>('task');
+  // What the task has made. A run's own events re-read it, so the deck shows
+  // up here the moment it is published rather than on the next visit.
+  const [resultVersion, setResultVersion] = useState(0);
+  useTaskEvents(task.projectId, task.ref, () => setResultVersion((v) => v + 1));
+  const result = useTaskResult(task, `${task.updatedAt}:${resultVersion}`);
   // Task / Chat / each bench step form one mutually-exclusive tab set. A task
   // opens on the Task overview (no step selected); clicking a bench step opens
   // its panel, and clicking Task/Chat deselects the step again. `null` means a
@@ -658,6 +666,25 @@ export function TaskDetail({
           taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
         />
       </div>
+
+      {result?.deliverable && (
+        <div className="task-deliverable">
+          <DeliverableCard
+            deliverable={result.deliverable}
+            projectId={task.projectId}
+            state={effectiveStatus === 'complete' ? 'final' : 'draft'}
+            onOpen={(file) =>
+              runNavActions(
+                openProjectFileActions({
+                  projectId: task.projectId,
+                  path: file.path,
+                  source: file.kind === 'workspace' ? 'workspace' : 'artifacts',
+                }),
+              )
+            }
+          />
+        </div>
+      )}
 
       {selectedStepId !== null && (
         <TaskStepPanel

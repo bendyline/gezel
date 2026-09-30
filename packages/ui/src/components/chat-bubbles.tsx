@@ -6,6 +6,7 @@ import type {
   Question,
   ReferencedFile,
   SessionGpuTask,
+  TaskDeliverable,
   ToolCallAudio,
   ToolCallCard,
   ToolCallImage,
@@ -51,6 +52,7 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
+import { DeliverableCard } from './DeliverableCard.js';
 import { DraftPlanCard } from './DraftPlanCard.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
@@ -274,6 +276,12 @@ export interface MessageBubbleProps {
    * messages.
    */
   referencedFiles?: readonly ReferencedFile[];
+  /**
+   * The finished file a task wrap-up hands over. Rendered as a card that
+   * closes the bubble, so the deck the person asked for is the last thing
+   * they read rather than one path among the working files.
+   */
+  deliverable?: TaskDeliverable;
   /**
    * Task refs (`projectId/num`) the assistant reply mentioned. Same
    * shape as `referencedFiles` — populated by the server-side
@@ -614,6 +622,7 @@ export function MessageBubble({
   extraClass,
   mediaProvider,
   referencedFiles,
+  deliverable,
   referencedTasks,
   retrieval,
   onFileReference,
@@ -1093,6 +1102,13 @@ export function MessageBubble({
       )}
       {!isUser && question && (
         <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />
+      )}
+      {!isUser && deliverable && projectId && (
+        <DeliverableCard
+          deliverable={deliverable}
+          projectId={projectId}
+          {...(onFileReference ? { onOpen: onFileReference } : {})}
+        />
       )}
       {chips}
       {isUser && consultedSources}
@@ -3198,7 +3214,11 @@ function ToolActivityList({
             <div className="thinking-tool-error">{toolErrorSummary(t.errorMessage)}</div>
           )}
           {!suppressCards && t.card && (
-            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
+            <ToolCraftbookCard
+              card={t.card}
+              onFocusTask={onFocusTask}
+              {...(onOpenReference ? { onOpenReference } : {})}
+            />
           )}
           {!suppressMedia &&
             (t.videos && t.videos.length > 0 && t.projectId ? (
@@ -3312,7 +3332,11 @@ export function ToolHistoryExpando({
       {cardActivities.map((t, i) =>
         t.card ? (
           <div className="msg-tool-card-promoted" key={`card-${t.name}-${i}`}>
-            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
+            <ToolCraftbookCard
+              card={t.card}
+              onFocusTask={onFocusTask}
+              {...(onOpenReference ? { onOpenReference } : {})}
+            />
           </div>
         ) : null,
       )}

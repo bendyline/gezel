@@ -3509,6 +3509,7 @@ export function ChatTimelineView({
         projectId={m.projectId}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}
+        {...(m.deliverable ? { deliverable: m.deliverable } : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {})}

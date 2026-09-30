@@ -15,7 +15,12 @@
  * already-verified paths appear.
  */
 
-import { type ReferencedFile, type ReferencedFileKind, normalizeFileToken } from '@bendyline/gezel';
+import {
+  type ReferencedFile,
+  type ReferencedFileKind,
+  normalizeFileToken,
+  splitDrawerPrefix,
+} from '@bendyline/gezel';
 
 const SCHEMES: Record<ReferencedFileKind, string> = {
   artifact: '#artifact:',
@@ -95,7 +100,14 @@ function resolveCandidate(
   // A qualified label is an exact claim. Never turn
   // `powerpoint/task-11/deck.pptx` into a link to an unrelated root-level
   // `deck.pptx` just because the basename happens to be unique.
-  if (lastSlash >= 0) return full ?? null;
+  if (lastSlash >= 0) {
+    if (full) return full;
+    // `workspace/decks/q3.pptx` names the workspace's `decks/q3.pptx` — the
+    // daemon resolved it that way, so the span links to that file.
+    const drawer = splitDrawerPrefix(lower);
+    const hit = drawer ? byFullPath.get(drawer.path) : undefined;
+    return hit && hit.kind === drawer?.kind ? hit : null;
+  }
   const candidates = byBasename.get(lower);
   return candidates && candidates.length === 1 ? candidates[0]! : null;
 }

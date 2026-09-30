@@ -55,6 +55,7 @@ import {
   normalizeWorkspacePathForCompare,
   remainingPrerequisiteRepairReadPaths,
 } from './file-repair-policy.js';
+import { sniffImageMime } from './image-mime.js';
 import {
   findLoosePathArg,
   hasSalvageableImmediateFileWriteContent,
@@ -1407,7 +1408,7 @@ export interface LlamaCppSessionDeps {
   /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
   volatileContext?: string;
   priorMessages: Array<
-    | { role: 'user' | 'assistant'; content: string }
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
     | {
         role: 'assistant';
         content: string;
@@ -1629,7 +1630,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
     // ChatMessage schema. role:'tool' becomes a tool message carrying
     // `tool_call_id`; role:'assistant' with toolCalls carries the
     // `tool_calls` array OpenAI-style; plain user/assistant turns pass
-    // through verbatim.
+    // through verbatim. A user turn's images become attachments when the
+    // projector is loaded — the machine engine rebuilds every remote forward
+    // pass from this list, so it is the only way a tool's rendered slides
+    // reach a vision model there.
     for (const m of deps.priorMessages) {
       if (m.role === 'tool') {
         this.messages.push({
@@ -1649,6 +1653,18 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             function: { name: tc.name, arguments: tc.arguments },
           })),
           ...(deps.replayReasoningContent && m.reasoning ? { reasoning_content: m.reasoning } : {}),
+        });
+        continue;
+      }
+      if (m.role === 'user' && m.images?.length && deps.visionEnabled) {
+        this.messages.push({
+          role: 'user',
+          content: m.content,
+          attachments: m.images.map((base64, index) => ({
+            base64,
+            mimeType: sniffImageMime(base64),
+            filename: `prior-image-${index}`,
+          })),
         });
         continue;
       }
@@ -1983,7 +1999,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           '[llama.cpp] a tool-result continuation cannot include a new prompt or attachments',
         );
       }
-      if (this.messages.at(-1)?.role !== 'tool') {
+      // A tool's images follow its result as a user turn (the machine engine
+      // rebuilds that shape from a remote transcript), the same as MLX.
+      const last = this.messages.at(-1);
+      if (last?.role !== 'tool' && !(last?.role === 'user' && last.attachments?.length)) {
         throw new Error('[llama.cpp] a tool-result continuation requires a trailing tool result');
       }
     }

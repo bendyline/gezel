@@ -9,6 +9,7 @@ import {
   ChatTurnErrorDetailSchema,
   ProviderNameSchema,
   ReferencedFileSchema,
+  TaskDeliverableSchema,
 } from './gezel.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TaskLaunchSpecSchema } from './task-launch.js';
@@ -805,6 +806,8 @@ export const TimelineMessageSchema = z.object({
    * and backfilled on read for older messages that predate the parser.
    */
   referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /** Mirrors `ChatMessage.deliverable` — the finished file a task wrap-up hands over. */
+  deliverable: TaskDeliverableSchema.optional(),
   /**
    * Mirrors `ChatMessage.retrieval` — the indexed-context sources consulted
    * for this user turn, including the exact excerpts injected by newer

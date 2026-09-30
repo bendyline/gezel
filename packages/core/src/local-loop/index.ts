@@ -11,6 +11,7 @@ export * from './deliverable-read-pacing.js';
 export * from './direct-file-work-prompt.js';
 export * from './duplicate-tool-calls.js';
 export * from './file-repair-policy.js';
+export * from './image-mime.js';
 export * from './immediate-write-salvage.js';
 export * from './llama-cpp-session.js';
 export * from './local-tool-call-salvage.js';

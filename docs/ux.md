@@ -925,6 +925,36 @@ the *current* security policy: it hides the moment the capability is on,
 and its action **deep-links to Settings → Security & Compliance** — a
 security switch is never flipped from inside chat.
 
+**Work that made something ends on the thing it made.** A PowerPoint run
+used to end on prose: a wrap-up listing six paths newest-write-first, and a
+reviewer's reply naming `powerpoint/task-13/deck.pptx` as unlinked code. The
+deck the person asked for was the fifth item, under "…and 3 more". The
+deliverable is now a card
+([`DeliverableCard`](../packages/ui/src/components/DeliverableCard.tsx),
+`.deliverable-card*` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css)). It
+has a format tile, an uppercase eyebrow naming what the file is ("Your
+PowerPoint deck"), the file name at reading size, and a muted line saying where
+it lives. **Open** is the one filled key. *Show in folder* and *Save a copy…*
+are secondary keys, shown only where the desktop shell provides them. The whole
+face opens the file too: it is the big link. The card closes the wrap-up
+bubble. It also sits under the task tracker, both in the chat rail and on the
+task page. On a receipt that finished its task, it shrinks to a one-line chip
+beside the task chip. Three rules keep it honest:
+
+- **The daemon decides what the deliverable is, and only a file that exists
+  gets a card.** The resolver lives in
+  [task-deliverable.ts](../packages/core/src/task-deliverable.ts). It picks the
+  most finished-looking file the book's own gates name, prefers later steps,
+  and never picks a working paper like `outline.md` or `review.md`.
+- **A running task's copy is a draft.** It gets a dashed border and the eyebrow
+  "PowerPoint deck · in progress", because the tracker may point at the product
+  before the last step signs it off.
+- **A path in prose links only when the daemon has verified it.** The same holds
+  in chat replies and in task notes. When a reply names a file the workspace
+  index has not caught up with, the daemon checks it directly on disk, within a
+  fixed limit. It never guesses from a same-named file.
+
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
 salvage layer fails to promote a call it is literal tool-call markup.
