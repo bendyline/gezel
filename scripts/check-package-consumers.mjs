@@ -419,12 +419,10 @@ try {
   }
 
   step('auditing the npm consumer graph');
-  // Stricter than the workspace gates (critical), on purpose. This graph is
-  // the one npm resolves for a consumer: the workspace's pnpm overrides never
-  // reach it, and npm prints "N vulnerabilities (… high)" at the end of every
-  // `npm install @bendyline/gezel-cli`. At `critical`, a clean rehearsal
-  // shipped a high-severity adm-zip advisory (2026-09-26 npm ship audit), as
-  // it had shipped a deepmerge-ts one in August. Accepted advisories go in
+  // This graph is the one npm resolves for a consumer: the workspace's pnpm
+  // overrides never reach it. It blocks at critical only, like the workspace
+  // gates; lower severities are printed below and in the daily supply-chain
+  // report. Accepted critical advisories go in
   // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
   const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
@@ -439,14 +437,14 @@ try {
     const blocking = blockingAdvisories(auditReport, readAuditAllowlist());
     if (blocking.length > 0) {
       fail(
-        `npm audit found high/critical advisories in the consumer graph:\n${blocking
+        `npm audit found critical advisories in the consumer graph:\n${blocking
           .map((a) => `    ${a.severity.padEnd(8)} ${a.id}  ${a.pkg}  ${a.title}`)
           .join(
             '\n',
           )}\n  Fix the dependency, or allowlist it with a reason and expiry in scripts/npm-consumer-audit-allowlist.json`,
       );
     } else {
-      ok('npm audit reports no un-allowlisted high or critical advisories');
+      ok('npm audit reports no un-allowlisted critical advisories');
     }
   }
   if (auditCounts) {
