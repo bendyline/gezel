@@ -238,7 +238,7 @@ describe('ChatNarrationTracker', () => {
 function request(
   key: string,
   kind: Request['kind'] = 'progress',
-  place: { window?: number; sessionId?: string } = {},
+  place: { window?: number; sessionId?: string; turnKey?: string } = {},
 ): Request {
   const window = place.window ?? windowOf(key);
   return {
@@ -246,7 +246,7 @@ function request(
     kind,
     text: key,
     sessionId: place.sessionId ?? 's1',
-    turnKey: 'turn-1',
+    turnKey: place.turnKey ?? 'turn-1',
     window,
     ...SPEAKER,
   };
@@ -382,7 +382,7 @@ describe('NarrationQueue', () => {
     queue.stop();
     await flush();
     expect(played()).toEqual(['play x1']);
-    queue.enqueue(request('x3'));
+    queue.enqueue(request('x3', 'progress', { turnKey: 'turn-2' }));
     await flush();
     expect(played()).toEqual(['play x1', 'play x3']);
     expect(log).not.toContain('play x2');
@@ -399,6 +399,41 @@ describe('NarrationQueue', () => {
     await flush();
     await endCurrent();
     expect(played()).toEqual(['play c-a1', 'play c-b1']);
+  });
+
+  it('stop keeps the rest of a streaming turn quiet, and the next turn speaks', async () => {
+    const { player, played } = controlledPlayer();
+    const queue = new NarrationQueue(player);
+    const sentence = (key: string, turnKey: string) =>
+      request(key, 'progress', { turnKey, window: 0 });
+    queue.enqueue(sentence('m1', 'turn-a'));
+    await flush();
+    queue.stop();
+    // The reply is still streaming: its next sentence must not restart the voice.
+    queue.enqueue(sentence('m2', 'turn-a'));
+    queue.enqueue(sentence('m3', 'turn-b'));
+    await flush();
+    expect(played()).toEqual(['play m1', 'play m3']);
+  });
+
+  it('reports whether it is speaking, and tells subscribers when that changes', async () => {
+    const { player, endCurrent } = controlledPlayer();
+    const queue = new NarrationQueue(player);
+    const changes: boolean[] = [];
+    const unsubscribe = queue.subscribe(() => changes.push(queue.active));
+    expect(queue.active).toBe(false);
+    queue.enqueue(request('a1'));
+    await flush();
+    expect(queue.active).toBe(true);
+    await endCurrent();
+    expect(queue.active).toBe(false);
+    queue.enqueue(request('a2'));
+    await flush();
+    queue.stop();
+    unsubscribe();
+    queue.enqueue(request('a3'));
+    await flush();
+    expect(changes).toEqual([true, false, true, false]);
   });
 
   it('recognises a user message only the first time it is seen', () => {
@@ -425,8 +460,8 @@ describe('NarrationQueue', () => {
     expect(played()).toEqual(['play r1', 'play r2']);
     releaseB();
     await flush();
-    // 'r2' was cut and 'r3' dropped, so a new utterance starts at once.
-    queue.enqueue(request('r4'));
+    // 'r2' was cut and 'r3' dropped, so the next turn starts at once.
+    queue.enqueue(request('r4', 'progress', { turnKey: 'turn-2' }));
     await flush();
     expect(played()).toEqual(['play r1', 'play r2', 'play r4']);
   });

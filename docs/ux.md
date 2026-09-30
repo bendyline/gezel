@@ -378,7 +378,8 @@ notification badge. The word stays in its accessible name. At the right end
 the bar keeps two status keys from the desktop cluster: the chat queue (a
 stack glyph with a total badge, present only while something runs or waits)
 and the default engine (a chip glyph whose corner dot is the status light).
-Their popovers span the width of the phone. Further engines, quotas, and the
+While a gezel is being read aloud, the stop-narration key (a speaker glyph)
+joins them, left of the queue key. Their popovers span the width of the phone. Further engines, quotas, and the
 task-speed menu wait for a wider window. The keys follow the `engineStatus`
 capability, so the phone shows them too; there the engine popover reports status
 only — idle retention, health policy, memory and Hard Stop are desktop engine
@@ -1351,6 +1352,19 @@ named engine ("DwarfStar", "Video") is not a machine name and never goes.
 [header-density.ts](../packages/ui/src/components/header-density.ts) owns the
 measurement; a plain width media/container query cannot see this, because the
 bar overflows from *how much is happening*, not from how narrow the window is.
+
+**A control for a passing state lives in the titlebar only while the state
+does.** The stop-narration key appears at the head of the status cluster while
+a gezel is being read aloud, the way Output's restore key appears only while
+that pane is maximized. It wears the queue chip's recipe (`.narration-stop` is
+added to those selectors rather than styled on its own), says "Stop narration"
+beside its speaker glyph at full density and drops the words with the rest of
+the cluster, and becomes a 44px key in the compact bar. A state that flickers
+must not make its key blink: the voice goes quiet between two sentences of a
+streaming reply, so the key outlives it by about a second rather than shoving
+its neighbours in and out. Stopping silences the rest of that turn — a reply
+still streaming would otherwise start the voice again at its next sentence —
+while the next turn is read as usual; turning narration off stays in Settings.
 
 **Rows that differ only by state need the state named.** When one list holds
 items in two states that share a row shape — a queue's running turns above its

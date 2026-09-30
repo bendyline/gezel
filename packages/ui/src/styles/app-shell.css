@@ -364,7 +364,8 @@
    nav tabs can flush with the canvas below, but these pills don't
    have that baseline constraint. */
 .app-header .quota-meter,
-.app-header .queue-meter {
+.app-header .queue-meter,
+.narration-stop {
   align-self: center;
 }
 
@@ -1584,7 +1585,8 @@ button.machine-memory-unload-button {
   align-self: center;
 }
 
-.queue-meter-button {
+.queue-meter-button,
+.narration-stop {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -1597,7 +1599,8 @@ button.machine-memory-unload-button {
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
-.queue-meter-button:hover {
+.queue-meter-button:hover,
+.narration-stop:hover {
   border-color: rgba(243, 237, 224, 0.55);
   background: #728c6c;
 }
@@ -1611,7 +1614,8 @@ button.machine-memory-unload-button {
   background: #748a6f;
 }
 
-.queue-meter-chip {
+.queue-meter-chip,
+.narration-stop-label {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -1699,6 +1703,10 @@ button.machine-memory-unload-button {
   color: #e0b897;
   animation: queue-meter-preparing-pulse 1.2s ease-in-out infinite;
 }
+/* The far wave of the stop-narration glyph breathes while the voice speaks. */
+.narration-stop[data-speaking="true"] .narration-stop-wave-far {
+  animation: queue-meter-preparing-pulse 1.2s ease-in-out infinite;
+}
 @keyframes queue-meter-preparing-pulse {
   0%,
   100% {
@@ -1709,7 +1717,8 @@ button.machine-memory-unload-button {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .queue-meter-chip-preparing .queue-meter-chip-counts {
+  .queue-meter-chip-preparing .queue-meter-chip-counts,
+  .narration-stop-wave-far {
     animation: none;
   }
 }
