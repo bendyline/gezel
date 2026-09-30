@@ -156,6 +156,30 @@ export function ds4ResidentBytesForMode(
     : Math.max(catalogResidentBytes, DS4_FULL_RESIDENCY_RESERVATION_BYTES);
 }
 
+/** Allowance for ds4's compute and staging buffers beyond weights and KV rows. */
+export const DS4_RUNTIME_BUFFER_BYTES = 4 * GB;
+
+/**
+ * Accelerator bytes a launch actually wires, for device admission's GPU
+ * check. `ds4ResidentBytesForMode` floors the RAM reservation at 96 GiB, and
+ * handing that floor over as GPU bytes compared it against a unified host's
+ * 0.75 × RAM ceiling — 91.2 GiB on a 121.6 GiB DGX Spark — so every
+ * full-residency deepseek-v4-flash q2 launch was refused, although ds4 itself
+ * plans that model at ~84 GiB (2026-09-29). Undefined when the floor did not
+ * raise the reservation: the reservation is then the working set already.
+ */
+export function ds4AdmissionGpuBytes(opts: {
+  workingSetBytes: number;
+  reservationBytes: number;
+  kvBytesPerToken?: number | undefined;
+  numCtx: number;
+}): number | undefined {
+  if (opts.reservationBytes <= opts.workingSetBytes) return undefined;
+  const wired =
+    opts.workingSetBytes + (opts.kvBytesPerToken ?? 0) * opts.numCtx + DS4_RUNTIME_BUFFER_BYTES;
+  return Math.min(opts.reservationBytes, wired);
+}
+
 /**
  * DS4's resident footprint as a line in the context window:
  * `contextFreeBytes + kvBytesPerToken × ctx`.

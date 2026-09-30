@@ -505,6 +505,7 @@ export async function buildDs4Provider(opts: {
           : 'background',
       requirement: async () => {
         const {
+          ds4AdmissionGpuBytes,
           ds4BaseResidentBytes,
           ds4ResidentLine,
           ds4ProjectedResidentBytes,
@@ -519,12 +520,22 @@ export async function buildDs4Provider(opts: {
               projectedBytes: projected,
               modelSizeBytes: residentWeightBytes,
             });
+        const workingSetBytes =
+          base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0);
+        const bytes = ds4ResidentBytesForMode(
+          workingSetBytes,
+          ssdStreaming,
+          ds4Source?.ssdStreamingSupported,
+        );
+        const gpuBytes = ds4AdmissionGpuBytes({
+          workingSetBytes,
+          reservationBytes: bytes,
+          kvBytesPerToken: ds4Source?.kvBytesPerToken,
+          numCtx,
+        });
         return {
-          bytes: ds4ResidentBytesForMode(
-            base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0),
-            ssdStreaming,
-            ds4Source?.ssdStreamingSupported,
-          ),
+          bytes,
+          ...(gpuBytes !== undefined ? { gpuBytes } : {}),
           exclusive: !ssdStreaming,
         };
       },

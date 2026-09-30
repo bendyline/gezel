@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   DS4_FULL_RESIDENCY_RESERVATION_BYTES,
+  DS4_RUNTIME_BUFFER_BYTES,
   canUseDs4FullResidency,
+  ds4AdmissionGpuBytes,
   ds4BaseResidentBytes,
   ds4ProjectedResidentBytes,
   ds4ResidentBytesForMode,
@@ -168,6 +170,38 @@ describe('DS4 residency policy', () => {
     expect(ds4ResidentBytesForMode(36 * GB, true)).toBe(36 * GB);
     expect(ds4ResidentBytesForMode(36 * GB, false)).toBe(DS4_FULL_RESIDENCY_RESERVATION_BYTES);
     expect(ds4ResidentBytesForMode(52 * GB, false, false)).toBe(52 * GB);
+  });
+
+  it('admits the wired working set, not the RAM floor, as GPU bytes', () => {
+    // deepseek-v4-flash-284b-q2 on a 121.6 GiB DGX Spark: 80.76 GiB of resident
+    // weights, a 96 GiB RAM floor, and a 0.75 x RAM (91.2 GiB) GPU ceiling.
+    const workingSetBytes = Math.round(80.76 * GB);
+    const gpuBytes = ds4AdmissionGpuBytes({
+      workingSetBytes,
+      reservationBytes: DS4_FULL_RESIDENCY_RESERVATION_BYTES,
+      kvBytesPerToken: 8192,
+      numCtx: 131_072,
+    });
+    expect(gpuBytes).toBe(workingSetBytes + 1 * GB + DS4_RUNTIME_BUFFER_BYTES);
+    expect(gpuBytes!).toBeLessThan(0.75 * 121.6 * GB);
+  });
+
+  it('never quotes GPU bytes above the reservation, and omits them when the floor did not apply', () => {
+    expect(
+      ds4AdmissionGpuBytes({
+        workingSetBytes: 95 * GB,
+        reservationBytes: DS4_FULL_RESIDENCY_RESERVATION_BYTES,
+        kvBytesPerToken: 8192,
+        numCtx: 262_144,
+      }),
+    ).toBe(DS4_FULL_RESIDENCY_RESERVATION_BYTES);
+    expect(
+      ds4AdmissionGpuBytes({
+        workingSetBytes: 36 * GB,
+        reservationBytes: 36 * GB,
+        numCtx: 131_072,
+      }),
+    ).toBeUndefined();
   });
 
   it('re-bases the authored footprint onto another context window', () => {

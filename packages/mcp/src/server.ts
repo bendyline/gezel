@@ -139,6 +139,7 @@ import {
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
+import { resolveCraftbookVersionArg } from './craftbook-version-arg.js';
 import {
   registerArtifactReadTools,
   registerWorkspaceReadTools,
@@ -4946,7 +4947,13 @@ async function requestCraftbookToolsetInstalls(
 }
 
 type CraftbookLaunchResult =
-  | { kind: 'created'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
+  | {
+      kind: 'created';
+      task: Awaited<ReturnType<typeof api.createTask>>;
+      installed: string[];
+      /** A requested version the book does not offer; the latest ran instead. */
+      ignoredVersion?: string;
+    }
   | { kind: 'existing'; task: Awaited<ReturnType<typeof api.createTask>>; installed: string[] }
   | { kind: 'setup-required'; missing: CraftbookToolsetNeed[]; installed: string[] };
 
@@ -5057,20 +5064,31 @@ async function launchCraftbookTask(args: {
         : undefined,
     ...(args.params ? { params: args.params } : {}),
   });
+  const versionArg = resolveCraftbookVersionArg(
+    args.version,
+    declaredCraftbook?.manifest.kind === 'craftbook-template'
+      ? declaredCraftbook.manifest.availableVersions
+      : [],
+  );
   const resolvedAssignee = await resolveAssigneeArg(args.assignee);
   const task = await api.createTask(args.project, {
     ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
     description,
     craftbookId: args.craftbookId,
-    ...(args.version ? { craftbookVersion: args.version } : {}),
+    ...(versionArg.version ? { craftbookVersion: versionArg.version } : {}),
     ...(Object.keys(effectiveParams).length > 0 ? { craftbookParams: effectiveParams } : {}),
     ...(resolvedAssignee ? { assignee: resolvedAssignee } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
     dispatchEntry: true,
   });
-  return { kind: 'created', task, installed };
+  return {
+    kind: 'created',
+    task,
+    installed,
+    ...(versionArg.ignored ? { ignoredVersion: versionArg.ignored } : {}),
+  };
 }
 
 async function routeBinaryDocumentHandoff(args: {
@@ -5390,6 +5408,10 @@ server.tool(
         launch.installed.length > 0
           ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
           : '';
+      const versionText =
+        launch.kind === 'created' && launch.ignoredVersion
+          ? ` Version "${launch.ignoredVersion}" is not one this craftbook offers, so the latest ran.`
+          : '';
       const idempotentText = launched.reused
         ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
         : '';
@@ -5412,7 +5434,7 @@ server.tool(
           },
         },
         {
-          text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
+          text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText}`,
         },
       );
     } catch (err) {
