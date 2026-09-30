@@ -118,6 +118,8 @@ The pane works in the project that owns the document's folder. If there isn't on
 
 The **Allow edits** switch in the pane controls whether gezels may change the open document at all. Turn it off and they can still read it.
 
+Only the gezel you pick in the pane can use the document, and only while the pane is open; the rest of the project's gezels never see it. A gezel that runs on GitHub Copilot, Claude CLI, or Codex CLI can chat with you but cannot read or change the document, and the pane says so when you pick one.
+
 If the Gezel button does not appear, check that **optional connected experiences** are turned on in Office's privacy settings, then use **Clear Office cache** on the card with Office closed. Office on the web and Outlook are not supported.
 
 ## LibreOffice

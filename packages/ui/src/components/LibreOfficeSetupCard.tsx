@@ -1,5 +1,6 @@
 import type { LibreOfficeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { harnessStateLabel } from './harness-setup/useHarnessSetupCard.js';
@@ -15,14 +16,15 @@ function isLocalDesktopMode(): boolean {
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return apiErrorMessage(err);
 }
 
 /**
  * Settings → Connected Apps: install Gezel's extension into LibreOffice
  * Writer, Calc, and Impress for this account. The desktop app runs
- * LibreOffice's own installer; the extension asks for a connection code the
- * first time it connects.
+ * LibreOffice's own installer; the extension then connects by trading the
+ * owner credential (ADR 0018), and asks for a connection code only when it
+ * cannot read that credential.
  */
 export function LibreOfficeSetupCard({ onChanged }: { onChanged?: () => void | Promise<void> }) {
   const bridge = window.__GEZEL__?.libreoffice;
@@ -131,8 +133,8 @@ export function LibreOfficeSetupCard({ onChanged }: { onChanged?: () => void | P
           {status.state === 'configured' && (
             <p className="muted small">
               In Writer, Calc, or Impress, choose <strong>Tools &gt; Gezel</strong> or open the
-              Gezel panel in the sidebar. The first time, it shows a connection code; approve it
-              here under Connected Apps.
+              Gezel panel in the sidebar. It connects on its own. If it ever shows a connection code
+              instead, approve it here under Connected Apps.
             </p>
           )}
           {installLabel && <p className="muted small">Close LibreOffice before installing.</p>}

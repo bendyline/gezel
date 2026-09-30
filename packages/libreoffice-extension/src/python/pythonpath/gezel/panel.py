@@ -336,6 +336,9 @@ class PanelSession:
         if self.chat:
             self.chat.close()
         self.chat = ChatThread(self.http, self.token, self.project["id"], chosen)
+        if self.relay:
+            relay = self.relay
+            threading.Thread(target=lambda: relay.set_gezel(chosen), daemon=True).start()
         self.view.append(f"(Now talking with {self.roster[index].get('name', chosen)}.)\n\n")
 
     def on_edits_changed(self):
@@ -376,6 +379,7 @@ class PanelSession:
             self._tools(),
             run_on_main=lambda fn: self.main.call(fn, timeout=55),
             on_status=on_status,
+            gezel_id=self.gezel_id,
         )
         self.relay.start()
 

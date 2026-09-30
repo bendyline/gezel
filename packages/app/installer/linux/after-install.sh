@@ -196,7 +196,22 @@ fi
 # system file between the check and the chown/chmod — the account parses
 # untrusted model files, so it is the one to assume compromised. Stopping the
 # unit ends its cgroup; this also ends anything that escaped it.
+#
+# A uid is only a number, and this host is not the only thing using it. A
+# container's postgres, mysql or redis runs as 999 under rootful Docker, the
+# number useradd --system hands out first, and SIGKILLing them (then failing
+# the install when their restart policy brings them back) is not ours to do.
+# The same goes for the host's own accounts when this hook runs inside a
+# chroot image build with the host's /proc. Both are processes root placed in
+# another PID namespace or under another root while leaving them in OUR user
+# namespace, so those are spared. The account itself cannot get there: an
+# unprivileged process needs a user namespace of its own before it may create
+# a PID namespace, pivot or chroot, and one that did is still killed. A
+# namespace or root that cannot be read counts as ours.
 service_account_pids() {
+  own_user_ns=$(readlink "/proc/$$/ns/user" 2>/dev/null) || own_user_ns=
+  own_pid_ns=$(readlink "/proc/$$/ns/pid" 2>/dev/null) || own_pid_ns=
+  own_root=$(stat -L -c '%d:%i' / 2>/dev/null) || own_root=
   for status_file in /proc/[0-9]*/status; do
     fields=$(awk '$1 == "State:" { state = $2 } $1 == "Uid:" { uids = $2 " " $3 " " $4 " " $5 } END { print state, uids }' "$status_file" 2>/dev/null) || continue
     # shellcheck disable=SC2086
@@ -206,8 +221,17 @@ service_account_pids() {
     shift
     for id in "$@"; do
       if [ "$id" = "$account_uid" ]; then
-        pid=${status_file#/proc/}
-        echo "${pid%/status}"
+        pid_dir=${status_file%/status}
+        their_user_ns=$(readlink "$pid_dir/ns/user" 2>/dev/null) || their_user_ns=
+        if [ -n "$own_user_ns" ] && [ "$their_user_ns" = "$own_user_ns" ]; then
+          their_pid_ns=$(readlink "$pid_dir/ns/pid" 2>/dev/null) || their_pid_ns=
+          their_root=$(stat -L -c '%d:%i' "$pid_dir/root" 2>/dev/null) || their_root=
+          if { [ -n "$own_pid_ns" ] && [ -n "$their_pid_ns" ] && [ "$their_pid_ns" != "$own_pid_ns" ]; } ||
+            { [ -n "$own_root" ] && [ -n "$their_root" ] && [ "$their_root" != "$own_root" ]; }; then
+            break
+          fi
+        fi
+        echo "${pid_dir#/proc/}"
         break
       fi
     done

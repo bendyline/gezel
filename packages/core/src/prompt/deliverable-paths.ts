@@ -1,1 +1,4 @@
-export { isExpectedBinaryDocumentDeliverablePath, isExpectedImageDeliverablePath } from '../deliverable-paths.js';
+export {
+  isExpectedBinaryDocumentDeliverablePath,
+  isExpectedImageDeliverablePath,
+} from '../deliverable-paths.js';

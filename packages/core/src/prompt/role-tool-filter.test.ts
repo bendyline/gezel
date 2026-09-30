@@ -1,6 +1,6 @@
+import { describe, expect, it } from 'vitest';
 import { resolveSecurityPolicy, securityPolicyForLevel } from '../security/policy.js';
 import { BUILTIN_TOOLSETS, BUILTIN_TOOL_TO_GROUP } from '../tools/builtin-groups.js';
-import { describe, expect, it } from 'vitest';
 import {
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,

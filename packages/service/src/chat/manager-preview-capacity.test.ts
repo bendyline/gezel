@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { writeSyntheticGguf } from '../providers/llama-cpp/gguf-test-fixture.js';
+import { NOT_ENOUGH_MEMORY_MESSAGE } from '../providers/native/capacity-broker.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
@@ -163,7 +164,7 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
     useRouter(routerWithReservation({ otherModel: true }));
 
     await expect(manager.previewLocalEnginePlan('mlx', 'local-mlx')).rejects.toThrow(
-      /Not enough memory/,
+      NOT_ENOUGH_MEMORY_MESSAGE,
     );
   });
 
@@ -190,7 +191,7 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
     useRouter(routerWithReservation({ otherModel: true }));
 
     await expect(manager.previewContextWindowForModel('mlx', 'local-mlx')).rejects.toThrow(
-      /Not enough memory/,
+      NOT_ENOUGH_MEMORY_MESSAGE,
     );
     await expect(
       manager.previewContextWindowForModel('mlx', 'local-mlx', { standalone: true }),
@@ -212,7 +213,7 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
       manager.previewContextWindowForModel('mlx', 'local-mlx', {
         liveSystemPressure: true,
       }),
-    ).rejects.toThrow(/Not enough memory/);
+    ).rejects.toThrow(NOT_ENOUGH_MEMORY_MESSAGE);
     expect(availableSystemRamBytesMock).toHaveBeenCalledOnce();
   });
 
@@ -358,6 +359,6 @@ describe('previewLocalEnginePlan — before an engine router exists', () => {
       manager.previewContextWindowForModel('llama-cpp', 'local-12b', {
         liveSystemPressure: true,
       }),
-    ).rejects.toThrow(/Not enough memory/);
+    ).rejects.toThrow(NOT_ENOUGH_MEMORY_MESSAGE);
   });
 });

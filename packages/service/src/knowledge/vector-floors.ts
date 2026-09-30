@@ -36,6 +36,9 @@ export const KNOWLEDGE_VECTOR_FLOORS: Readonly<Record<string, number>> = {
   // and 2 of 25 off-topic prompts still reach it, so grounding and the
   // relevance model do the rest.
   'multilingual-e5-small@2': 0.865,
+  // Revision 1 has the same model, instructions and int8 vectors — only its
+  // stage-1 sign bits differ — so its rerank cosine is on the same scale.
+  'multilingual-e5-small@1': 0.865,
 };
 
 export interface KnowledgeVectorFloors {

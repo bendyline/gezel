@@ -5,7 +5,6 @@ import { resolveTuning } from '../../model-profile/tuning.js';
 import { buildStageOneNudge } from '../../tasks/gate-escalation.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { LlamaCppCacheAdapter } from './cache-adapter.js';
 import {
   LlamaCppProvider,
@@ -29,7 +28,6 @@ import {
   isRecoverableImmediateFileWriteError,
   isScenarioFileRepairTurn,
   llamaCppReasoningRequestDiagnostic,
-  mergeSystemMessagesIntoFirst,
   normalizeJsonSchemaForLlamaCpp,
   normalizeMalformedStructuredToolCalls,
   runNodeScriptWrongTargetError,
@@ -38,9 +36,7 @@ import {
   shouldStartScriptedDataFileWork,
   simplifyJsonSchemaForLlamaCpp,
   stripJsonSchemaPatternsForLlamaCpp,
-  tryParseContextOverflow,
   tryParseStrictAlternationTemplateError,
-  tryParseSystemMessageOrderingError,
   tryParseToolCallParseError,
   tryRepairMalformedWriteToolArguments,
 } from './provider.js';
@@ -9386,73 +9382,6 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
   });
 });
 
-describe('single-system-message template fallback', () => {
-  it('merges the stable + volatile system turns into one leading system message', () => {
-    const merged = mergeSystemMessagesIntoFirst([
-      { role: 'system', content: 'stable prompt' },
-      { role: 'system', content: 'volatile band' },
-      { role: 'user', content: 'start' },
-    ]);
-
-    expect(merged.map((m) => m.role)).toEqual(['system', 'user']);
-    expect(merged[0]?.content).toBe('stable prompt\n\nvolatile band');
-    expect(merged[1]?.content).toBe('start');
-  });
-
-  it('is a no-op shape for a single leading system message', () => {
-    const merged = mergeSystemMessagesIntoFirst([
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'hello' },
-    ]);
-
-    expect(merged.map((m) => m.role)).toEqual(['system', 'user', 'assistant']);
-    expect(merged[0]?.content).toBe('sys');
-  });
-
-  it('hoists a non-leading system turn into the single leading system message', () => {
-    const merged = mergeSystemMessagesIntoFirst([
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: 'hi' },
-      { role: 'system', content: 'mid-stream nudge' },
-      { role: 'assistant', content: 'ok' },
-    ]);
-
-    // Exactly one system message, at index 0 — what Qwen's template requires.
-    expect(merged.filter((m) => m.role === 'system')).toHaveLength(1);
-    expect(merged[0]?.role).toBe('system');
-    expect(merged[0]?.content).toBe('sys\n\nmid-stream nudge');
-    expect(merged.map((m) => m.role)).toEqual(['system', 'user', 'assistant']);
-  });
-
-  it('passes through untouched when there is no system message', () => {
-    const merged = mergeSystemMessagesIntoFirst([
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'hello' },
-    ]);
-
-    expect(merged.map((m) => m.role)).toEqual(['user', 'assistant']);
-  });
-
-  it('detects llama.cpp single-system-message template errors', () => {
-    expect(
-      tryParseSystemMessageOrderingError(
-        JSON.stringify({
-          error: {
-            message:
-              "While executing CallExpression: raise_exception('System message must be at the beginning of the conversation')",
-          },
-        }),
-      ),
-    ).toBe(true);
-    // Raw (non-JSON) body still matches on the stable substring.
-    expect(
-      tryParseSystemMessageOrderingError('...first %}\n  System message must be at the beginning'),
-    ).toBe(true);
-    expect(tryParseSystemMessageOrderingError('model load failed')).toBe(false);
-  });
-});
-
 describe('malformed structured tool-call argument repair', () => {
   const knownWriteTools = new Set(['write_file']);
 
@@ -9550,117 +9479,6 @@ describe('malformed structured tool-call argument repair', () => {
     expect(out.sanitized).toEqual(['write_file']);
     expect(out.sanitizedIds).toEqual(['call_write']);
     expect(out.toolCalls[0]?.function.arguments).toBe('{}');
-  });
-});
-
-describe('readSseEvents', () => {
-  function streamOf(text: string): ReadableStream<Uint8Array> {
-    const enc = new TextEncoder();
-    return new ReadableStream<Uint8Array>({
-      start(ctrl) {
-        ctrl.enqueue(enc.encode(text));
-        ctrl.close();
-      },
-    });
-  }
-
-  it('parses two JSON frames separated by LF-LF', async () => {
-    const events: unknown[] = [];
-    for await (const ev of readSseEvents(streamOf('data: {"a":1}\n\ndata: {"a":2}\n\n'))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ a: 1 }, { a: 2 }]);
-  });
-
-  it('handles CRLF-CRLF separators', async () => {
-    const events: unknown[] = [];
-    for await (const ev of readSseEvents(streamOf('data: {"a":1}\r\n\r\ndata: {"a":2}\r\n\r\n'))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ a: 1 }, { a: 2 }]);
-  });
-
-  it('emits the literal "[DONE]" for the terminator frame', async () => {
-    const events: unknown[] = [];
-    for await (const ev of readSseEvents(streamOf('data: {"x":1}\n\ndata: [DONE]\n\n'))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ x: 1 }, '[DONE]']);
-  });
-
-  it('ignores non-data lines (`event:`, `:keepalive`, etc.)', async () => {
-    const events: unknown[] = [];
-    const text = ': keepalive\n\nevent: ping\ndata: {"a":1}\n\n';
-    for await (const ev of readSseEvents(streamOf(text))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ a: 1 }]);
-  });
-
-  it('tolerates malformed data chunks without throwing', async () => {
-    const events: unknown[] = [];
-    const text = 'data: not-json\n\ndata: {"a":2}\n\n';
-    for await (const ev of readSseEvents(streamOf(text))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ a: 2 }]);
-  });
-
-  it('surfaces comment lines as SseComment objects when opted in', async () => {
-    // ds4-server pings `: prefill` every ~5s during prompt processing —
-    // the only wire signal for minutes on a 284B SSD-streamed model.
-    const events: unknown[] = [];
-    const text = ': prefill\n\n: prefill\n\ndata: {"a":1}\n\n';
-    for await (const ev of readSseEvents(streamOf(text), { comments: true })) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ sseComment: 'prefill' }, { sseComment: 'prefill' }, { a: 1 }]);
-    expect(isSseComment(events[0])).toBe(true);
-    expect(isSseComment(events[2])).toBe(false);
-  });
-
-  it('still drops comment lines by default', async () => {
-    const events: unknown[] = [];
-    for await (const ev of readSseEvents(streamOf(': prefill\n\ndata: {"a":1}\n\n'))) {
-      events.push(ev);
-    }
-    expect(events).toEqual([{ a: 1 }]);
-  });
-});
-
-describe('tryParseContextOverflow', () => {
-  it('extracts structured fields from the exceed_context_size_error body', () => {
-    const body = JSON.stringify({
-      error: {
-        code: 400,
-        type: 'exceed_context_size_error',
-        n_prompt_tokens: 48514,
-        n_ctx: 16384,
-        message: 'request (48514 tokens) exceeds the available context size (16384 tokens)',
-      },
-    });
-    expect(tryParseContextOverflow(body)).toEqual({ promptTokens: 48514, nCtx: 16384 });
-  });
-
-  it('falls back to regex-parsing the message when structured fields are missing', () => {
-    // Older llama-server builds may omit n_prompt_tokens / n_ctx —
-    // regex the human text as a backup.
-    const body = JSON.stringify({
-      error: {
-        code: 400,
-        type: 'exceed_context_size_error',
-        message: 'request (5000 tokens) exceeds the available context size (4096 tokens)',
-      },
-    });
-    expect(tryParseContextOverflow(body)).toEqual({ promptTokens: 5000, nCtx: 4096 });
-  });
-
-  it('returns null for unrelated 400 bodies', () => {
-    expect(
-      tryParseContextOverflow(JSON.stringify({ error: { code: 400, type: 'other' } })),
-    ).toBeNull();
-    expect(tryParseContextOverflow('not json at all')).toBeNull();
-    expect(tryParseContextOverflow('')).toBeNull();
   });
 });
 

@@ -18,7 +18,11 @@ function builtinIconSvg(id: string): string | undefined {
 }
 
 import { BUILTIN_TOOLSETS, type BuiltinToolsetGroup } from '@bendyline/gezel';
-export { BUILTIN_TOOL_TO_GROUP, BUILTIN_TOOLSETS, type BuiltinToolsetGroup } from '@bendyline/gezel';
+export {
+  BUILTIN_TOOL_TO_GROUP,
+  BUILTIN_TOOLSETS,
+  type BuiltinToolsetGroup,
+} from '@bendyline/gezel';
 
 const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((g) => [g.id, g]));
 

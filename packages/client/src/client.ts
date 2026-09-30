@@ -6,7 +6,7 @@
  */
 import { GezelApiError, describeTransportError } from './api-error.js';
 import { withReadTransportRetry } from './read-retry.js';
-export { GezelApiError } from './api-error.js';
+export { GezelApiError, apiErrorMessage } from './api-error.js';
 import type {
   AppToolCallResultRequest,
   AudioEngineStatusResponse,

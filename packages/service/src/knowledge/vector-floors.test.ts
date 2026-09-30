@@ -17,6 +17,17 @@ describe('resolveKnowledgeVectorFloors', () => {
     expect(floors.floorFor(shelf)).toBe(KNOWLEDGE_VECTOR_FLOORS['multilingual-e5-small@2']);
   });
 
+  it('measures every embedding profile a catalog can be built with', async () => {
+    const { KNOWLEDGE_EMBEDDING_PROFILES } = await import('@bendyline/gezel-knowledge');
+    const floors = resolveKnowledgeVectorFloors({});
+    for (const profile of KNOWLEDGE_EMBEDDING_PROFILES) {
+      expect(
+        floors.floorFor({ catalogKey: 'x/y', profileId: profile.id }),
+        profile.id,
+      ).not.toBeNull();
+    }
+  });
+
   it('reports an unmeasured embedder as null rather than guessing a scale', () => {
     const floors = resolveKnowledgeVectorFloors({});
     expect(floors.floorFor({ catalogKey: 'x/y', profileId: 'some-new-embedder@1' })).toBeNull();

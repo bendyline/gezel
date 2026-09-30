@@ -44,8 +44,17 @@ the Handboek's Connected Apps article.
    `/?embedded=chat&compact=1&projectId=…&gezelId=…`; the SPA seeds the
    recipient from `gezelId`.
 6. The pane registers its tools through the app-tool relay (ADR 0013) for the
-   project, re-publishes on the edits switch, and closes the relay on
+   project and **the chosen gezel only** (`gezelIds`), so the project's other
+   sessions (the Meester's chat, background work) never get a live document
+   writer. Changing the gezel re-registers (the LibreOffice panel re-publishes
+   the scope). The pane re-publishes on the edits switch, including a switch
+   made while the relay was still connecting, and closes the relay on
    `pagehide` (keepalive DELETE).
+7. Copilot, Claude CLI and Codex CLI run their own tool loop and never receive
+   app tools (`providerUsesManagedMcpBridge`). When the chosen gezel resolves
+   to one of them (its own provider, else the install default from
+   `/api/config`), the pane says so in one line under its header instead of
+   claiming the gezel can read the document.
 
 ## Tool catalogue (shared by both suites)
 

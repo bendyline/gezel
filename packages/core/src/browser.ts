@@ -69,6 +69,7 @@ export * from './suspend-clock.js';
 export * from './gezel-version.js';
 export * from './outside-in-paths.js';
 export * from './prompt-drafts.js';
+export * from './prompt/provider-capabilities.js';
 export * from './prompt-clock.js';
 export * from './shadow-paths.js';
 export * from './thread-title.js';

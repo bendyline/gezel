@@ -43,6 +43,27 @@ export function clearToken(storage: KeyValueStorage): void {
   }
 }
 
+/** `browser_registration_not_allowed`: a machine code, not a sentence for a person. */
+const ERROR_CODE = /^[a-z0-9_.:-]+$/;
+
+/**
+ * What the pane says when Gezel refuses a request: the daemon's own
+ * `message`, else its `error` when that is a sentence, else a plain line.
+ * Never "Gezel answered 500."
+ */
+export function paneErrorMessage(
+  status: number,
+  body: { error?: unknown; message?: unknown },
+): string {
+  if (typeof body.message === 'string' && body.message.trim()) return body.message;
+  if (typeof body.error === 'string' && body.error.trim() && !ERROR_CODE.test(body.error)) {
+    return body.error;
+  }
+  return status >= 500
+    ? 'Gezel ran into a problem. Close this pane and open it again; if that does not help, restart Gezel.'
+    : 'Gezel could not connect this document. Close this pane and open it again.';
+}
+
 export type ProbeResult = 'ok' | 'revoked' | 'down';
 
 /** Does this token still open the product API? */
@@ -106,7 +127,7 @@ export async function registerPane(deps: HttpDeps): Promise<RegisterResult> {
       message:
         body.error === 'browser_registration_not_allowed'
           ? 'Gezel did not recognize this page. Open the Gezel desktop app and set up Office again under Settings, Connected Apps.'
-          : (body.message ?? body.error ?? `Gezel answered ${res.status}.`),
+          : paneErrorMessage(res.status, body),
     };
   }
   if (body.status === 'approved' && body.token) return { kind: 'approved', token: body.token };
@@ -125,26 +146,74 @@ export type GrantOutcome =
   | { kind: 'expired' }
   | { kind: 'timeout' };
 
-/** Long-poll until the user decides in Gezel, or `timeoutMs` passes. */
+/** Past the server's hold, a poll that has not answered is a socket that died (usually in sleep). */
+const POLL_GRACE_MS = 15_000;
+const RETRY_MIN_MS = 1_000;
+const RETRY_MAX_MS = 8_000;
+
+/**
+ * Long-poll until the user decides in Gezel, or `timeoutMs` passes.
+ *
+ * A computer that sleeps while the code is on screen wakes with the poll's
+ * socket dead, and that fetch either rejects or never settles. Both are
+ * retried with backoff until the deadline, as is a daemon that is briefly
+ * unreachable, so approving the code after the lid opens still connects.
+ */
 export async function waitForGrant(
   deps: HttpDeps,
   grantRequestId: string,
-  opts: { timeoutMs?: number; now?: () => number; signal?: AbortSignal } = {},
+  opts: {
+    timeoutMs?: number;
+    now?: () => number;
+    signal?: AbortSignal;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): Promise<GrantOutcome> {
   const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const deadline = now() + (opts.timeoutMs ?? 5 * 60_000);
+  let backoff = RETRY_MIN_MS;
   while (now() < deadline) {
     if (opts.signal?.aborted) return { kind: 'timeout' };
     const waitSec = Math.min(30, Math.max(1, Math.floor((deadline - now()) / 1000)));
+    const answer = await pollGrant(deps, grantRequestId, waitSec, opts.signal);
+    if (answer === 'pending') {
+      backoff = RETRY_MIN_MS;
+      continue;
+    }
+    if (answer !== 'retry') return answer;
+    await sleep(Math.min(backoff, Math.max(0, deadline - now())));
+    backoff = Math.min(backoff * 2, RETRY_MAX_MS);
+  }
+  return { kind: 'timeout' };
+}
+
+async function pollGrant(
+  deps: HttpDeps,
+  grantRequestId: string,
+  waitSec: number,
+  signal: AbortSignal | undefined,
+): Promise<GrantOutcome | 'pending' | 'retry'> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, waitSec * 1000 + POLL_GRACE_MS);
+  try {
     const res = await deps.fetch(
       `${deps.baseUrl}/v1/apps/grant/${encodeURIComponent(grantRequestId)}?wait=${waitSec}`,
-      opts.signal ? { signal: opts.signal } : {},
+      { signal: controller.signal },
     );
-    if (!res.ok) return res.status === 404 ? { kind: 'expired' } : { kind: 'timeout' };
+    if (res.status === 404) return { kind: 'expired' };
+    if (!res.ok) return 'retry';
     const body = (await res.json()) as { status: string; token?: string };
     if (body.status === 'approved' && body.token) return { kind: 'approved', token: body.token };
     if (body.status === 'denied') return { kind: 'denied' };
     if (body.status === 'expired') return { kind: 'expired' };
+    return 'pending';
+  } catch {
+    return 'retry';
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
-  return { kind: 'timeout' };
 }

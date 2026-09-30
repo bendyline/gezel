@@ -58,7 +58,10 @@ Answer similarity against the highest similarity any off-topic prompt reached:
   the Handboek, so floors are keyed by catalog first and embedder second.
   `bge-small-en-v1.5@1` keeps the project index's measured 0.55 as the default
   for folder-built catalogs; `multilingual-e5-small@2` takes 0.865 for every
-  Wikipedia shelf, which share one build.
+  Wikipedia shelf, which share one build. `multilingual-e5-small@1` has the
+  same vectors and int8 rerank (only its stage-1 bits differ), so it takes
+  the same floor. Every registered profile has a floor, and
+  `vector-floors.test.ts` fails when a new profile is registered without one.
 
 5 of 23 Handboek answer documents never reached the candidate list at all
 (for example `security-model` for a question about file permissions): a

@@ -1,7 +1,9 @@
-"""Offer the extension's document tools to the project's gezels while the
-panel is open, through the daemon's app-tool relay (ADR 0013). Calls arrive
-on a background thread; `run_on_main` executes each handler where UNO
-document calls are safe."""
+"""Offer the extension's document tools, while the panel is open, to the one
+gezel it talks to in the project, through the daemon's app-tool relay
+(ADR 0013). Offering them project-wide put a live document writer in every
+other session there too, the Meester's chat and background work among them.
+Calls arrive on a background thread; `run_on_main` executes each handler
+where UNO document calls are safe."""
 
 from __future__ import annotations
 
@@ -14,11 +16,14 @@ from .client import HttpError
 
 
 class Relay:
-    def __init__(self, http, token, project_id, label, tools, run_on_main, on_status=None, sleep=time.sleep):
+    def __init__(
+        self, http, token, project_id, label, tools, run_on_main, on_status=None, sleep=time.sleep, gezel_id=None
+    ):
         """`tools` is a list of {name, description, inputSchema, timeoutMs?, handler}."""
         self.http = http
         self.token = token
         self.project_id = project_id
+        self.gezel_id = gezel_id
         self.label = label
         self._tools = {t["name"]: t for t in tools}
         self._run_on_main = run_on_main
@@ -45,7 +50,11 @@ class Relay:
         self.http.request_json(
             "PUT",
             f"/api/app-tools/relays/{urllib.parse.quote(relay_id)}/tools",
-            {"projectId": self.project_id, "tools": definitions},
+            {
+                "projectId": self.project_id,
+                **({"gezelIds": [self.gezel_id]} if self.gezel_id else {}),
+                "tools": definitions,
+            },
             token=self.token,
         )
 
@@ -117,6 +126,13 @@ class Relay:
 
     def update(self, tools):
         self._tools = {t["name"]: t for t in tools}
+        with self._lock:
+            if self._relay_id:
+                self._publish(self._relay_id)
+
+    def set_gezel(self, gezel_id):
+        """Hand the tools to the gezel the panel now talks to."""
+        self.gezel_id = gezel_id
         with self._lock:
             if self._relay_id:
                 self._publish(self._relay_id)

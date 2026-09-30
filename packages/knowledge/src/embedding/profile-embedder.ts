@@ -37,11 +37,21 @@ export interface ProfileEmbedder {
   dispose(): Promise<void>;
 }
 
+/**
+ * The `@huggingface/transformers` range this package supports, the same range
+ * as its optional peer dependency (a test holds the two together). Error
+ * messages quote it so the install command they print is exact.
+ */
+export const TRANSFORMERS_PEER_RANGE = '^3.8.1';
+
 export class EmbedderUnavailableError extends Error {
   readonly isActionable = true;
-  constructor(message: string) {
+  /** True when `@huggingface/transformers` could not be loaded at all, as opposed to a profile it cannot serve. */
+  readonly runtimeMissing: boolean;
+  constructor(message: string, options: { runtimeMissing?: boolean } = {}) {
     super(message);
     this.name = 'EmbedderUnavailableError';
+    this.runtimeMissing = options.runtimeMissing ?? false;
   }
 }
 
@@ -169,7 +179,8 @@ async function loadTransformers(): Promise<TransformersModule> {
     const message = err instanceof Error ? err.message : String(err);
     if (/Cannot find (module|package)/i.test(message)) {
       throw new EmbedderUnavailableError(
-        'the embedding runtime (@huggingface/transformers) is not installed — knowledge builds and semantic search need it; install it or run inside a gezel install that ships it',
+        `the embedding runtime is not installed — knowledge builds and semantic search need the optional peer @huggingface/transformers@${TRANSFORMERS_PEER_RANGE}; install it alongside @bendyline/gezel-knowledge`,
+        { runtimeMissing: true },
       );
     }
     throw err;

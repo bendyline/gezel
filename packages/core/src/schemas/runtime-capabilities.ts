@@ -14,6 +14,11 @@ export interface RuntimeCapabilities {
   taskStructureEditing: boolean;
   taskNoteEditing: boolean;
   taskGateOverride: boolean;
+  /**
+   * The host reports what a task made (`/tasks/:num/outputs`: its
+   * deliverable and every file). False where it cannot; omitted means it can.
+   */
+  taskOutputs?: boolean;
   structuredQuestions: boolean;
   terminal: boolean;
   git: boolean;
@@ -69,6 +74,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   taskStructureEditing: true,
   taskNoteEditing: true,
   taskGateOverride: true,
+  taskOutputs: true,
   structuredQuestions: true,
   terminal: true,
   git: true,
@@ -109,6 +115,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   taskStructureEditing: true,
   taskNoteEditing: true,
   taskGateOverride: false,
+  taskOutputs: false,
   structuredQuestions: true,
   terminal: false,
   git: false,

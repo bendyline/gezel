@@ -15,6 +15,14 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 ENGINE = HERE.parent / "engines" / "llama-cpp"
+# Hashed into the manifest; verify-build.mjs refuses a cached build whose copy differs.
+BRIDGE_SOURCES = ("gezel_llama.h", "gezel_llama.cpp", "gezel_engine.h", "gezel_chat.cpp", "utf8_stream.h",
+                  "chat_formats.h", "CMakeLists.txt", "common-chat.cmake")
+
+
+def llama_patches():
+    """Desktop's llama-server patches for the pin, in the order they apply."""
+    return sorted((ENGINE / "patches").glob("*.patch"))
 
 
 def run(args, *, capture=False):
@@ -257,7 +265,7 @@ def main():
     # Desktop's llama-server build applies these to the same pin; the chat layer
     # compiled into the bridge must be byte-identical to it.
     patches = []
-    for patch in sorted((ENGINE / "patches").glob("*.patch")):
+    for patch in llama_patches():
         # Not `git apply`: inside this repository it would resolve paths against Gezel's tree.
         run(["patch", "-p1", "-N", "-s", "-d", source, "-i", patch])
         patches.append({"name": patch.name, "sha256": hashlib.sha256(patch.read_bytes()).hexdigest()})
@@ -273,9 +281,7 @@ def main():
                  for path in sorted(packaged)}
     (output / "manifest.json").write_text(json.dumps({
         "schemaVersion": 1, "target": args.target, "upstream": pin, "patches": patches, "gezelABIVersion": 1,
-        "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in
-                          ("gezel_llama.h", "gezel_llama.cpp", "gezel_engine.h", "gezel_chat.cpp", "utf8_stream.h",
-                           "chat_formats.h", "CMakeLists.txt", "common-chat.cmake")},
+        "bridgeSources": {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in BRIDGE_SOURCES},
         "toolchains": toolchains, "settings": settings, "files": checksums,
         "verification": {"linkSmoke": "passed", "deviceInference": "not-run", "hostContractTests": "passed" if args.target == "host" else "not-run"},
     }, indent=2) + "\n")

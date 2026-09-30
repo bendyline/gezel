@@ -11,6 +11,7 @@ import {
 } from '@bendyline/gezel-knowledge';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  embeddingRuntimeMissingMessage,
   runKnowledgeBuild,
   runKnowledgeInit,
   runKnowledgeInspect,
@@ -208,5 +209,14 @@ describe('gezel knowledge build reads the outline a documentation tree already h
     expect(manifest.topics.map((t) => t.name).sort()).toEqual(['General', 'User Guide']);
     const guide = manifest.topics.find((t) => t.name === 'User Guide');
     expect(guide?.sortKey).toBe('2147483649');
+  });
+});
+
+describe('embeddingRuntimeMissingMessage', () => {
+  it('gives the exact install command for both kinds of npm install', () => {
+    const message = embeddingRuntimeMissingMessage();
+    expect(message).toContain('npm install -g @huggingface/transformers@^3.8.1');
+    expect(message).toMatch(/^ {2}npm install @huggingface\/transformers@\^3\.8\.1 /m);
+    expect(message).toContain('full-text search works without it');
   });
 });

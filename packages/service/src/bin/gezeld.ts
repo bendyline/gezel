@@ -12,10 +12,12 @@ import {
 // every tarball (2026-09-26 npm ship audit), and made two bundles whose
 // import.meta.url-relative asset probes both had to stay correct.
 import { startService } from '@bendyline/gezel-service';
+import { type DaemonLogFile, installDaemonLogFile } from './daemon-log-file.js';
 import { applyAutostartRuntimeArguments } from './runtime-args.js';
 
 let stopRunningService: (() => Promise<void>) | null = null;
 let fatalExitInFlight = false;
+let daemonLog: DaemonLogFile | null = null;
 
 async function stopServiceOnce(): Promise<void> {
   const stop = stopRunningService;
@@ -42,6 +44,8 @@ async function exitAfterFatalError(error: Error, source: FatalProcessErrorSource
       /* there may be no usable stderr left */
     }
   } finally {
+    // The fatal line above is the one a log file exists for.
+    await daemonLog?.flush();
     process.exit(1);
   }
 }
@@ -53,6 +57,9 @@ installProcessErrorHandlers(process, exitAfterFatalError);
 
 async function main() {
   applyAutostartRuntimeArguments(process.argv.slice(2));
+  // After the autostart home is applied, so the log lands in the home
+  // startService() resolves.
+  daemonLog = installDaemonLogFile();
   const portArg = process.env.GEZEL_PORT ? Number.parseInt(process.env.GEZEL_PORT, 10) : undefined;
   // Normalize because the env var may carry doubled separators when set by
   // installers (NSIS' nssm wiring on Windows historically wrote
@@ -81,6 +88,7 @@ async function main() {
     stopping = true;
     writeProcessOutput(process.stderr, `\ngezeld received ${signal}, shutting down\n`);
     await stopServiceOnce();
+    await daemonLog?.flush();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -146,7 +154,7 @@ main().catch((err) => {
   // already owns this home) — print just its message, not a stack.
   if (err instanceof Error && err.name === 'SingleInstanceError') {
     writeProcessOutput(process.stderr, `${err.message}\n`);
-    process.exit(1);
+    void (daemonLog?.flush() ?? Promise.resolve()).finally(() => process.exit(1));
   } else {
     void exitAfterFatalError(err instanceof Error ? err : new Error(String(err)), 'startup');
   }

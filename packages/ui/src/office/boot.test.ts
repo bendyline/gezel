@@ -224,6 +224,17 @@ describe('bootPane', () => {
     expect(states.at(-1)).toEqual({ kind: 'needs-revoke' });
   });
 
+  it("carries the install's provider, for gezels without their own", async () => {
+    const { ready } = await run(
+      {
+        ...HAPPY,
+        'GET /api/config': () => json({ meesterGezelId: 'meester', provider: 'copilot' }),
+      },
+      memoryStorage({ [TOKEN_KEY]: 'tok' }),
+    );
+    expect(ready?.defaultProvider).toBe('copilot');
+  });
+
   it('says so when Gezel is not running', async () => {
     const storage = memoryStorage({ [TOKEN_KEY]: 'tok' });
     const failing = {

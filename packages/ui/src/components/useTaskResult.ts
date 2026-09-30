@@ -72,7 +72,7 @@ export function useTaskResult(
   const num = task?.num;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `version` is the re-read trigger
   useEffect(() => {
-    if (!projectId || num === undefined) {
+    if (!projectId || num === undefined || runtimeCapabilities().taskOutputs === false) {
       setResult(null);
       return;
     }

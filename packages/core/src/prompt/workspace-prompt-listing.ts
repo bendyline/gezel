@@ -1,5 +1,5 @@
-import { type ProjectFileEntry } from '../schemas/project.js';
 import { resolveRoleId } from '../roles/registry.js';
+import type { ProjectFileEntry } from '../schemas/project.js';
 
 /**
  * The workspace inventory is orientation, not a substitute for search. Keep

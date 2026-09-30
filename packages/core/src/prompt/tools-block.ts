@@ -37,9 +37,9 @@
  * unsure.
  */
 
+import type { ModelTier } from '../model-profile/local-model-tier.js';
 import { BUILTIN_TOOLSETS, BUILTIN_TOOL_TO_GROUP } from '../tools/builtin-groups.js';
 import { canonicalToolName } from '../tools/tool-names.js';
-import type { ModelTier } from '../model-profile/local-model-tier.js';
 
 /** Subset of `ModelInfo` we actually render. */
 export interface AvailableToolInfo {

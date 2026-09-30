@@ -1,5 +1,7 @@
+import { providerUsesManagedMcpBridge } from '@bendyline/gezel';
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Root } from 'react-dom/client';
+import { providerLabel } from '../components/provider-label.js';
 import * as Select from '../primitives/Select.js';
 import {
   type PaneProject,
@@ -19,19 +21,25 @@ import {
 import { type OfficeRelay, type RelayStatus, startOfficeRelay } from './relay.js';
 import { toolsForHost } from './tools/index.js';
 
-const RELAY_LABELS: Record<RelayStatus, string> = {
-  connecting: 'Connecting the document…',
-  connected: 'Gezels can read this document',
-  reconnecting: 'Reconnecting…',
-  closed: 'Document tools are off',
-};
+function relayLabel(status: RelayStatus, gezelName: string | undefined): string {
+  switch (status) {
+    case 'connecting':
+      return 'Connecting the document…';
+    case 'connected':
+      return gezelName ? `${gezelName} can read this document` : 'The document is connected';
+    case 'reconnecting':
+      return 'Reconnecting…';
+    case 'closed':
+      return 'Document tools are off';
+  }
+}
 
 /**
  * The pane once connected: a slim header (project, who you are talking to,
  * whether gezels may edit) over the chat. The chat is the main UI's
  * `?embedded=chat` page in a same-origin frame, reading the pane's token
  * from this origin's storage. The pane also offers the document tools to
- * the project's gezels for as long as it is open.
+ * the gezel it talks to for as long as it is open.
  */
 export function chatFrameUrl(projectId: string, gezelId: string): string {
   const params = new URLSearchParams({ embedded: 'chat', compact: '1', projectId });
@@ -39,7 +47,7 @@ export function chatFrameUrl(projectId: string, gezelId: string): string {
   return `/?${params.toString()}`;
 }
 
-function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) {
+export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) {
   const [project, setProject] = useState<PaneProject>(ready.project);
   const [path, setPath] = useState(ready.documentPath);
   const [gezelId, setGezelId] = useState(ready.gezelId);
@@ -75,6 +83,8 @@ function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) 
       }),
     [host, edits],
   );
+  const toolsRef = useRef(tools);
+  toolsRef.current = tools;
 
   useEffect(() => {
     let cancelled = false;
@@ -88,26 +98,37 @@ function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) 
     };
   }, [baseUrl, ready.token]);
 
-  // One relay per project: tools are bound to the project they serve.
+  // One relay per project and gezel: the tools are bound to the project they
+  // serve and offered only to the gezel this pane talks to.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tools change through update(), not a new relay.
   useEffect(() => {
+    if (!gezelId) {
+      setRelayStatus('closed');
+      return;
+    }
     let closed = false;
     let relay: OfficeRelay | null = null;
+    const sent = toolsRef.current;
     void startOfficeRelay({
       baseUrl,
       token: ready.token,
       projectId: project.id,
+      gezelId,
       label: `${OFFICE_HOST_LABELS[host]}: ${documentTitle(path)}`,
-      tools,
+      tools: sent,
       onStatus: setRelayStatus,
       onUnauthorized: () => setUnauthorized(true),
     })
       .then((r) => {
-        if (closed) void r.close();
-        else {
-          relay = r;
-          relayRef.current = r;
+        if (closed) {
+          void r.close();
+          return;
         }
+        relay = r;
+        relayRef.current = r;
+        // "Allow edits" switched while the relay was still connecting: the
+        // update below found no relay then, so the old tools went out.
+        if (toolsRef.current !== sent) void r.update(toolsRef.current).catch(() => undefined);
       })
       .catch(() => setRelayStatus('closed'));
     const onHide = () => void relay?.close();
@@ -118,7 +139,7 @@ function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) 
       relayRef.current = null;
       void relay?.close();
     };
-  }, [project.id]);
+  }, [project.id, gezelId]);
 
   useEffect(() => {
     void relayRef.current?.update(tools).catch(() => undefined);
@@ -154,6 +175,16 @@ function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) 
     writeDocChoices(window.localStorage, path, { edits: on });
     setEdits(on);
   };
+
+  const chosen = roster.find((g) => g.id === gezelId);
+  const provider = chosen ? (chosen.provider ?? ready.defaultProvider) : undefined;
+  // Copilot and the CLI providers run their own tool loop, which cannot
+  // reach tools an app registers; the daemon withholds them, so say so here.
+  const outOfReach = provider !== undefined && !providerUsesManagedMcpBridge(provider);
+  const relayTitle =
+    outOfReach && chosen
+      ? `${chosen.name} cannot use document tools`
+      : relayLabel(relayStatus, chosen?.name);
 
   if (unauthorized) {
     return (
@@ -208,13 +239,19 @@ function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHostApp }) 
             <span>Allow edits</span>
           </label>
           <span
-            className={`office-pane-relay office-pane-relay--${relayStatus}`}
+            className={`office-pane-relay office-pane-relay--${outOfReach ? 'closed' : relayStatus}`}
             role="img"
-            aria-label={RELAY_LABELS[relayStatus]}
-            title={RELAY_LABELS[relayStatus]}
+            aria-label={relayTitle}
+            title={relayTitle}
           />
         </div>
       </header>
+      {outOfReach && chosen && provider && (
+        <output className="office-pane-notice">
+          {chosen.name} runs on {providerLabel(provider)}, which can't reach this document. Choose
+          another gezel to read or edit it.
+        </output>
+      )}
       <iframe
         key={`${project.id}:${gezelId}`}
         className="office-pane-chat"

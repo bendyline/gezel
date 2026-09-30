@@ -202,6 +202,8 @@ export async function connectForTui(globals: CliGlobals): Promise<TuiConnection>
     daemonEntry: resolveDaemonEntry(import.meta.url),
     detached: false,
     stdio: 'pipe',
+    // The pipes below are drained and discarded, so the daemon keeps its own log.
+    writeLogFile: true,
     env: cliUserDaemonEnv(process.env.GEZEL_HOME, await shouldPreferCanonicalPort()),
     ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     timeoutMs: 20_000,

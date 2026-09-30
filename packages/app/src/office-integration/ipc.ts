@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '@bendyline/gezel-client/node';
 import type { IpcMain } from 'electron';
 import {
   type OfficeIntegrationClient,
@@ -32,8 +33,9 @@ export function parseOfficeApps(value: unknown): OfficeApp[] | null {
   return apps.length === value.length ? [...new Set(apps)] : null;
 }
 
+/** The daemon's own sentence, never "Gezel API error 409 on PUT /api/office-setup". */
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return apiErrorMessage(err);
 }
 
 export function registerOfficeIntegrationIpc(ipcMain: IpcMain, clientSource: OfficeClientSource) {

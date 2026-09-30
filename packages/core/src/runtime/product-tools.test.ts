@@ -272,7 +272,13 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('artifacts', session.projectId, 'cabinet-note.md')).toBe(
       'ORCHARD-7284',
     );
-    await executePortableTool(store, session, 'write_file', { path: './notes//a.md', content: 'a' }, actions);
+    await executePortableTool(
+      store,
+      session,
+      'write_file',
+      { path: './notes//a.md', content: 'a' },
+      actions,
+    );
     expect(await store.readFile('workspace', session.projectId, 'notes/a.md')).toBe('a');
   });
 

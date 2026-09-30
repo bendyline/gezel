@@ -60,3 +60,16 @@ test('counts a module as test surface only when it has something to execute', ()
   }
   assert.equal(hasRuntimeCode('export const View = () => <div />;', 'View.tsx'), true);
 });
+
+test('leaves out a shim that only forwards another package', () => {
+  // Its code and its tests live in the package it forwards, which counts them.
+  const shim = [
+    '// Moved to core so the portable runtime runs the same loop.',
+    "export * from '@bendyline/gezel/local-loop';",
+    "export { apiErrorMessage } from '@bendyline/gezel-client';",
+  ].join('\n');
+  assert.equal(hasRuntimeCode(shim), false);
+  // A local re-export is this package's own code.
+  assert.equal(hasRuntimeCode(`${shim}\nexport * from './client.js';`), true);
+  assert.equal(hasRuntimeCode(`${shim}\nexport const limit = 3;`), true);
+});

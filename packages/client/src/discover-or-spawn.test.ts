@@ -75,7 +75,9 @@ describe('discoverOrSpawn', () => {
         clientFactory: fakeClient,
       }).catch(() => undefined);
       expect(spawnFn.mock.calls[0]?.[1]).toEqual(
-        value === '1' ? ['--liftoff-only', '--no-wasm-tier-up', '/fake/gezeld.js'] : ['/fake/gezeld.js'],
+        value === '1'
+          ? ['--liftoff-only', '--no-wasm-tier-up', '/fake/gezeld.js']
+          : ['/fake/gezeld.js'],
       );
     },
   );
@@ -182,6 +184,50 @@ describe('discoverOrSpawn', () => {
         clientFactory: fakeClient,
       }).catch(() => undefined);
       expect(spawnFn.mock.calls[0]?.[2].env?.GEZEL_SHUTDOWN_ON_STDIN_EOF).toBeUndefined();
+    });
+
+    it('asks a detached daemon to keep its own log, since nothing else sees its output', async () => {
+      const callerEnv: NodeJS.ProcessEnv = { GEZEL_HOME: '/tmp/home' };
+      const spawned = await spawnAndCaptureEnv(undefined, callerEnv);
+      expect(spawned?.GEZEL_DAEMON_LOG_FILE).toBe('1');
+      expect(callerEnv.GEZEL_DAEMON_LOG_FILE).toBeUndefined();
+    });
+
+    it('keeps a pipe-owned daemon off its own log even when the caller env carries the flag', async () => {
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      await discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        detached: false,
+        stdio: 'pipe',
+        env: { GEZEL_HOME: '/tmp/home', GEZEL_DAEMON_LOG_FILE: '1' },
+        timeoutMs: 100,
+        pollIntervalMs: 1,
+        spawnFn,
+        readRuntimeFn: async () => sampleRuntime,
+        isProcessAliveFn: () => true,
+        clientFactory: fakeClient,
+        forceSpawn: true,
+      });
+      expect(spawnFn.mock.calls[0]?.[2].env?.GEZEL_DAEMON_LOG_FILE).toBeUndefined();
+    });
+
+    it('lets a caller that discards piped output opt into the log file', async () => {
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      await discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        detached: false,
+        stdio: 'pipe',
+        writeLogFile: true,
+        env: { GEZEL_HOME: '/tmp/home' },
+        timeoutMs: 100,
+        pollIntervalMs: 1,
+        spawnFn,
+        readRuntimeFn: async () => sampleRuntime,
+        isProcessAliveFn: () => true,
+        clientFactory: fakeClient,
+        forceSpawn: true,
+      });
+      expect(spawnFn.mock.calls[0]?.[2].env?.GEZEL_DAEMON_LOG_FILE).toBe('1');
     });
   });
 

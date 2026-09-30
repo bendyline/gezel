@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { build, defineConfig } from 'tsup';
+import { ensureHandboekGezk } from '../../scripts/handboek-gezk-lock.mjs';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
@@ -220,6 +221,13 @@ export default defineConfig({
       recursive: true,
       filter: (source) => resolve(source) !== authoringGuide,
     });
+    // Refresh the committed catalog when its sources moved (docs, the
+    // Handboek engine, the catalog loader, or the Gilde pin). A fast input
+    // hash on every build; a rebuild only when the rendered articles changed.
+    // Runs here because the builder renders through this build's own
+    // dist/handboek.js. Under CI a stale archive that cannot be rebuilt fails
+    // the build — v1.26273.82 shipped the previous release's notes that way.
+    ensureHandboekGezk({ watch: process.argv.includes('--watch') });
     const handboekGezk = resolve(__dirname, 'assets', 'handboek', 'handboek.gezk');
     if (!existsSync(handboekGezk)) {
       throw new Error(

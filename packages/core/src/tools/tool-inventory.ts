@@ -368,7 +368,6 @@ export const HOST_CALLBACK_TOOLS: ReadonlySet<string> = Object.freeze(
   new Set<string>(['request_tool_permission']),
 );
 
-
 // Every legacy spelling must resolve to a tool this server registers.
 RENAMED_TOOLS satisfies Record<string, AlwaysRegisteredToolName | ConditionallyRegisteredToolName>;
 

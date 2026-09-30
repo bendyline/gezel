@@ -1,4 +1,8 @@
-import { CANONICAL_TOOL_NAMES, TOOL_NAME_TOMBSTONES, TOOL_REGISTRY } from '../tools/tool-inventory.js';
+import {
+  CANONICAL_TOOL_NAMES,
+  TOOL_NAME_TOMBSTONES,
+  TOOL_REGISTRY,
+} from '../tools/tool-inventory.js';
 import { RENAMED_TOOLS } from '../tools/tool-names.js';
 
 export type PromptToolContractSeverity = 'error' | 'warning';

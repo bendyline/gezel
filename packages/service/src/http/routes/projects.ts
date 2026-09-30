@@ -44,6 +44,7 @@ import { writeFileAtomic } from '../../fs/atomic.js';
 import {
   ArtifactPathExistsError,
   ArtifactPathNotFoundError,
+  ArtifactRootDeniedError,
   ConnectorCorpusWriteDeniedError,
   PromptDraftPathWriteDeniedError,
   ShadowPathWriteDeniedError,
@@ -1245,6 +1246,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         err instanceof TaskInputPathWriteDeniedError
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
+      }
+      if (err instanceof ArtifactRootDeniedError) {
+        return c.json({ error: err.message, code: err.code }, 400);
       }
       throw err;
     }

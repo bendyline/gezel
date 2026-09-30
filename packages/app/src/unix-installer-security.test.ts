@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -791,6 +792,15 @@ describe('root permission passes over writable trees', () => {
     expect(shellFunction(linuxPostinstall, 'stop_service_account_processes', 'brace')).toContain(
       'kill -KILL $account_pids',
     );
+    // A uid is not an account: a container's uid-999 database or, in a chroot
+    // image build, a host account that happens to share the number must be
+    // left alone. Only root can put a process in another PID namespace or
+    // root while it keeps our user namespace, so that is the one exception.
+    const listPids = shellFunction(linuxPostinstall, 'service_account_pids', 'brace');
+    for (const probe of ['/ns/user', '/ns/pid', "stat -L -c '%d:%i'"]) {
+      expect(listPids, probe).toContain(probe);
+    }
+    expect(listPids).toContain('[ "$their_user_ns" = "$own_user_ns" ]');
     const macStop = shellFunction(macPostinstall, 'stop_service_account_processes', 'brace');
     expect(macStop).toContain('/usr/bin/pkill -KILL -U "$DAEMON_USER"');
     expect(macStop).toContain('/usr/bin/pkill -KILL -u "$DAEMON_USER"');
@@ -1129,6 +1139,96 @@ publish_service_tree
       child.kill('SIGKILL');
     }
   });
+
+  /** Host pid of the `sleep <marker>` whose cmdline matches, waiting briefly for it. */
+  async function sleeperPid(marker: string, launcher: { exitCode: number | null }) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      for (const entry of readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        try {
+          if (readFileSync(`/proc/${entry}/cmdline`, 'utf8') === `sleep\0${marker}\0`) return entry;
+        } catch {
+          /* exited while we looked */
+        }
+      }
+      if (launcher.exitCode !== null) return null;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return null;
+  }
+
+  const listServiceAccountPids = (uid: string) =>
+    execFileSync(
+      '/bin/sh',
+      [
+        '-c',
+        `${shellFunction(linuxPostinstall, 'service_account_pids', 'brace')}\nservice_account_pids`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, account_uid: uid } },
+    ).split('\n');
+
+  linuxOnly(
+    'still finds a process of the account that moved itself into new namespaces',
+    async () => {
+      // What a compromised account can do without privilege: a user namespace
+      // of its own and, inside it, a PID namespace — still on the host's files.
+      const marker = String(31_000 + (process.pid % 1000));
+      const launcher = spawn(
+        'unshare',
+        ['--user', '--map-root-user', '--pid', '--fork', '--mount-proc', 'sleep', marker],
+        { stdio: 'ignore' },
+      );
+      const sleeper = await sleeperPid(marker, launcher);
+      try {
+        // A kernel that refuses unprivileged user namespaces leaves nothing to escape into.
+        if (!sleeper) return;
+        expect(listServiceAccountPids(String(process.getuid?.()))).toContain(sleeper);
+      } finally {
+        launcher.kill('SIGKILL');
+        if (sleeper) process.kill(Number(sleeper), 'SIGKILL');
+      }
+    },
+  );
+
+  (process.platform === 'linux' && process.getuid?.() === 0 ? it : it.skip)(
+    "spares a process that root placed in another PID namespace, like a container's (root only)",
+    async () => {
+      // Rootful Docker: a uid-999 postgres in its own PID namespace, still in
+      // the host's user namespace. It shares the number, not the account.
+      const onHost = spawn(
+        'setpriv',
+        ['--reuid=4243', '--regid=4243', '--clear-groups', 'sleep', '32061'],
+        { stdio: 'ignore' },
+      );
+      const contained = spawn(
+        'unshare',
+        [
+          '--pid',
+          '--fork',
+          '--mount-proc',
+          'setpriv',
+          '--reuid=4243',
+          '--regid=4243',
+          '--clear-groups',
+          'sleep',
+          '32062',
+        ],
+        { stdio: 'ignore' },
+      );
+      const hostPid = await sleeperPid('32061', onHost);
+      const containedPid = await sleeperPid('32062', contained);
+      try {
+        const listed = listServiceAccountPids('4243');
+        expect(listed).toContain(hostPid);
+        expect(containedPid).not.toBeNull();
+        expect(listed).not.toContain(containedPid);
+      } finally {
+        onHost.kill('SIGKILL');
+        contained.kill('SIGKILL');
+        if (containedPid) process.kill(Number(containedPid), 'SIGKILL');
+      }
+    },
+  );
 
   (process.platform === 'linux' && process.getuid?.() === 0 ? it : it.skip)(
     'kills every process of the service account before returning (root only)',

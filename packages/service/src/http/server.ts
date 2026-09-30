@@ -356,7 +356,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // any localhost dev server) can hit the daemon. The middleware
   // attaches headers AFTER auth has run, so a 401 / 403 still carries
   // the CORS headers required for the browser to read the error.
-  app.use('/v1/*', v1Cors());
+  const corsOptions = { officeHostOrigin: () => ctx.officeHostOrigin?.() ?? null };
+  app.use('/v1/*', v1Cors(corsOptions));
 
   // Global error handler. Without this, a ZodError thrown from a route's
   // inline `Schema.parse(await c.req.json())` becomes a generic Hono 500
@@ -616,7 +617,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/ollama/v1/*` — Ollama-compatible facade (tags + chat). Auth +
   // openai scope match `/v1/*`. CORS is also enabled so browser apps
   // targeting Ollama can swap baseUrl without origin grief.
-  app.use('/ollama/v1/*', v1Cors());
+  app.use('/ollama/v1/*', v1Cors(corsOptions));
   app.use('/ollama/v1/*', openaiEndpointsGate);
   app.use('/ollama/v1/*', bearerAuth(ctx.tokenStore));
   app.use('/ollama/v1/*', requireScope('openai'));

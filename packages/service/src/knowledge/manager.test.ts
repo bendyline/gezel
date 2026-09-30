@@ -335,8 +335,8 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     });
 
     it('keeps an unmeasured profile ranking by vector, labelled `fts` so injection wants grounding', async () => {
-      // No floor is recorded for multilingual-e5-small@1 or this test catalog.
-      const results = await steeredSearch('default');
+      // A profile with no recorded floor (every registered one has one today).
+      const results = await steeredSearch(null);
       const dovetails = results.find((r) => r.documentId === 'dovetails');
       expect(dovetails).toBeDefined();
       expect(dovetails?.arm).toBe('fts');

@@ -1,34 +1,43 @@
-import { type ExpectedDeliverable } from '../schemas/session.js';
-import { type GeneralistMode } from '../generalist-mode.js';
-import { type GezelGender } from '../schemas/gezel.js';
-import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '../security/policy.js';
-import { NATIVE_TOOL_NOTE } from '../tools/native-tools.js';
-import { PROMPT_FOOTPRINT_POLICY, capAboutForFootprint, renderProjectBrief } from '../prompt-footprint.js';
-import { type ProjectFileEntry } from '../schemas/project.js';
-import { type PromptTaskContext, isGatedStep, renderTaskContextBlock, renderTaskOutline } from '../tasks/prompt-context.js';
-import { type Task, type TaskCraftbookStep } from '../schemas/task.js';
-import { createLogger } from '../log.js';
+import type { GeneralistMode } from '../generalist-mode.js';
 import { displayName } from '../gezel-display.js';
-import { leaksUntaggedReasoning } from '../ollama-models.js';
-import { normalizeScriptRefs } from '../schemas/script.js';
-import { normalizeStepGate } from '../schemas/gate.js';
+import { createLogger } from '../log.js';
 import { pronounFormsForGender, pronounsForGender } from '../names.js';
+import { leaksUntaggedReasoning } from '../ollama-models.js';
+import {
+  PROMPT_FOOTPRINT_POLICY,
+  capAboutForFootprint,
+  renderProjectBrief,
+} from '../prompt-footprint.js';
+import { normalizeStepGate } from '../schemas/gate.js';
+import type { GezelGender } from '../schemas/gezel.js';
+import type { ProjectFileEntry } from '../schemas/project.js';
+import { normalizeScriptRefs } from '../schemas/script.js';
+import type { ExpectedDeliverable } from '../schemas/session.js';
+import type { Task, TaskCraftbookStep } from '../schemas/task.js';
+import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '../security/policy.js';
+import {
+  type PromptTaskContext,
+  isGatedStep,
+  renderTaskContextBlock,
+  renderTaskOutline,
+} from '../tasks/prompt-context.js';
+import { NATIVE_TOOL_NOTE } from '../tools/native-tools.js';
 
 export type { PromptTaskContext };
 export { renderTaskOutline };
-import { canonicalToolName } from '../tools/tool-names.js';
+import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
-import { SQUISQ_DIALECT_BRIEF } from './squisq-dialect.js';
 import type { ProviderName } from '../schemas/gezel.js';
+import { canonicalToolName } from '../tools/tool-names.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
 } from './deliverable-paths.js';
-import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import { filterPromptToolDirectives } from './prompt-tool-contract.js';
 import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { isPureDelegationRole } from './role-tool-filter.js';
 import { scopeProjectAboutForTier } from './scope-instructions.js';
+import { SQUISQ_DIALECT_BRIEF } from './squisq-dialect.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
 import {
   WORKSPACE_PROMPT_ENTRY_CAP,

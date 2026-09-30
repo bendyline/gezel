@@ -65,7 +65,7 @@ runs the same stalled-write, read/patch, failed-patch escalation, malformed-call
 unknown-tool, budget-exhaustion, and cancellation cases against both real provider
 loops with mocked inference streams and tool boundaries. It includes multiple
 filenames and ordinary paraphrases outside the original evaluation templates.
-[Policy tests](../packages/service/src/providers/local-turn-policy.test.ts) additionally
+[Policy tests](../packages/core/src/local-loop/local-turn-policy.test.ts) additionally
 exercise compaction and text salvage;
 [queue tests](../packages/service/src/chat/manager-file-intent.test.ts) and the remote
 route/session suites verify metadata transport. These are deterministic runtime

@@ -1,9 +1,3 @@
-import type { GezelConfig } from '../schemas/api.js';
-import type { ProviderName } from '../schemas/gezel.js';
-import type { ResolvedSecurityPolicy } from '../security/policy.js';
-import { resolveRoleId, toolsetGroupsForRole } from '../roles/registry.js';
-import { BUILTIN_TOOLSETS } from '../tools/builtin-groups.js';
-import { canonicalToolName } from '../tools/tool-names.js';
 import {
   isDirectCreateSourceWritePrompt,
   isFileRepairPrompt,
@@ -16,6 +10,12 @@ import {
   isSingleFileSourceRepairRequest,
 } from '../local-loop/direct-file-work-prompt.js';
 import { classifyLocalModelTier, classifyModelTier } from '../model-profile/local-model-tier.js';
+import { resolveRoleId, toolsetGroupsForRole } from '../roles/registry.js';
+import type { GezelConfig } from '../schemas/api.js';
+import type { ProviderName } from '../schemas/gezel.js';
+import type { ResolvedSecurityPolicy } from '../security/policy.js';
+import { BUILTIN_TOOLSETS } from '../tools/builtin-groups.js';
+import { canonicalToolName } from '../tools/tool-names.js';
 
 /**
  * Configured backend for the `web_search` MCP tool. Mirrors the enum in

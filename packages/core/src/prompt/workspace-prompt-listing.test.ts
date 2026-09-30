@@ -1,5 +1,5 @@
-import type { ProjectFileEntry } from '../schemas/project.js';
 import { describe, expect, it } from 'vitest';
+import type { ProjectFileEntry } from '../schemas/project.js';
 import {
   filterWorkspaceFilesForPrompt,
   roleGetsWorkspaceOrientation,
