@@ -7495,6 +7495,7 @@ async function runBinaryDocumentProject(
       about: normalizeMarkdown(brief.about),
       missionObjectives: normalizeMarkdown(brief.missionObjectives),
       mode: 'crew',
+      lead: 'none',
     });
     const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
     const voorman = await api.createGezelFromTemplate('voorman', {
@@ -7575,6 +7576,7 @@ async function runPromotedStartJobAsProject(input: {
       about: normalizeMarkdown(brief.about),
       missionObjectives: normalizeMarkdown(brief.missionObjectives),
       mode: 'crew',
+      lead: 'none',
     });
     const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
     const voorman = await api.createGezelFromTemplate('voorman', {
@@ -7708,6 +7710,7 @@ server.tool(
         about: normalizeMarkdown(brief.about),
         missionObjectives: normalizeMarkdown(brief.missionObjectives),
         mode: 'crew',
+        lead: 'none',
       });
       const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
       const voorman = await api.createGezelFromTemplate('voorman', {

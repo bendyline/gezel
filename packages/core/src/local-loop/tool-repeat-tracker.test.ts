@@ -222,6 +222,33 @@ describe('ToolRepeatTracker', () => {
     expect(hard.shouldAbort).toBe(true);
   });
 
+  it('lets a batch of distinct landed edits to one file through', () => {
+    const t = new ToolRepeatTracker();
+    let last = { shouldAbort: false, count: 0 };
+    for (let slide = 1; slide <= 7; slide += 1) {
+      last = t.recordCall(
+        'replace_in_file',
+        { path: 'deck.md', find: `## Slide ${slide} — Title`, replace: '# Title' },
+        'Edited deck.md (+1 −1).',
+      );
+      expect(last.shouldAbort).toBe(false);
+    }
+    expect(last.count).toBe(1);
+  });
+
+  it('still aborts when the same landed edit repeats', () => {
+    const t = new ToolRepeatTracker();
+    let last = { shouldAbort: false, count: 0 };
+    for (let i = 0; i < 5; i += 1) {
+      last = t.recordCall(
+        'replace_in_file',
+        { path: 'deck.md', find: 'a', replace: 'b' },
+        'Edited deck.md (+1 −1).',
+      );
+    }
+    expect(last.shouldAbort).toBe(true);
+  });
+
   it('counts cumulatively across the turn — interleaved calls still trip the threshold', () => {
     // Replicates the Atari Combat bug shape: read_task_notes,
     // [other reads], read_task_notes, [more reads], read_task_notes.

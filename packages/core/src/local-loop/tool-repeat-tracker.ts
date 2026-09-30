@@ -99,8 +99,13 @@ const ARG_KEY_NORMALIZERS: Record<
   // detection never fired and the turn ran until the broad 96-loop cap.
   write_file: ({ path }) => ({ path }),
   // Surgical-edit loops have the same failure shape when the model keeps
-  // changing the `find` string for one file. Count those by target path.
-  replace_in_file: ({ path }) => ({ path }),
+  // changing the `find` string for one file. Count failed edits by target
+  // path. A landed edit is progress, keyed by what it changed: seven distinct
+  // heading fixes to one deck.md, each `Edited … (+1 −1)`, were aborted at five
+  // as "without making progress", leaving two slides unfixed and burning a
+  // gate attempt (deepseek-v4 powerpoint-deck, 2026-09-30).
+  replace_in_file: ({ path, find }, output) =>
+    output.startsWith('Edited ') ? { path, find } : { path },
   // Task procedures commonly require one acceptance-criteria note before a
   // build. Weak models can rewrite that checklist indefinitely, changing the
   // prose enough that raw-args fingerprints never repeat. Notes in the same

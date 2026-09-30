@@ -494,6 +494,32 @@ describe('projects API', () => {
     expect(proj.workingDir).toBe('/tmp');
   });
 
+  // The Meester's kickoff macros seat their own Voorman; with the route
+  // seating one too, every kickoff roster carried two, one idle.
+  it('seats a lead by default and none when the caller asks for none', async () => {
+    const gezelCount = async () =>
+      ((await (await api('GET', '/api/gezels')).json()) as { gezels: unknown[] }).gezels.length;
+    const brief = {
+      about: 'A project used to verify the lead a new crew project gets.',
+      missionObjectives: 'Exactly one lead per project.',
+    };
+
+    const auto = await api('POST', '/api/projects', { name: 'LeadAuto', mode: 'crew', ...brief });
+    expect(auto.status).toBe(201);
+    expect(((await auto.json()) as { voormanGezelId?: string }).voormanGezelId).toBeTruthy();
+
+    const before = await gezelCount();
+    const none = await api('POST', '/api/projects', {
+      name: 'LeadNone',
+      mode: 'crew',
+      lead: 'none',
+      ...brief,
+    });
+    expect(none.status).toBe(201);
+    expect(((await none.json()) as { voormanGezelId?: string }).voormanGezelId).toBeUndefined();
+    expect(await gezelCount()).toBe(before);
+  });
+
   it('rebuilds project tool surfaces when its edit permission changes', async () => {
     const create = await api('POST', '/api/projects', {
       name: 'PermissionRefresh',

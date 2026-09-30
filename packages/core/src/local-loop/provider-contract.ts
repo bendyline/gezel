@@ -467,4 +467,16 @@ export interface ActiveCraftbookStep {
    * so a step that writes FROM an outline can open the outline first.
    */
   requiredInputs?: ReadonlyArray<{ path: string; artifact: boolean }>;
+  /**
+   * Workspace `advanceWhen.file` steps only: true when {@link deliverableFile}
+   * on disk passes the same check the end-of-turn auto-advance applies, for
+   * the step that is still active and owned by this session's gezel.
+   * `writtenThisTurn` stands in for the turn's drained writes so a
+   * `requireChange` step agrees with the end-of-turn verdict.
+   *
+   * The local loop reads it mid-turn: `advanceWhen` is otherwise judged
+   * only when the turn ends, and a turn that never ends on its own runs to
+   * the 96-iteration cap. See `DeliverableReadySteer`.
+   */
+  deliverableReady?: (ctx: { writtenThisTurn: boolean }) => Promise<boolean>;
 }
