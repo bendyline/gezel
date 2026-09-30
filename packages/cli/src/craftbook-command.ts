@@ -121,10 +121,28 @@ async function readTaskObservation<T>(
       signal.throwIfAborted();
       if (!transientTaskReadError(error) || retries >= READ_RETRY_DELAYS.length || budget.expired())
         throw error;
-      await delay(Math.min(READ_RETRY_DELAYS[retries]!, budget.remainingMs()), undefined, {
-        signal,
-      });
+      await sleepWithinBudget(READ_RETRY_DELAYS[retries]!, budget, signal);
     }
+  }
+}
+
+/**
+ * A backoff the budget cannot hold ends only once the budget reads spent.
+ * Linux timers can resolve a millisecond before `Date.now()` agrees the time
+ * has passed, and a clamped sleep that wakes that tick early would buy one
+ * more read the budget had already ruled out.
+ */
+async function sleepWithinBudget(
+  backoffMs: number,
+  budget: AwakeBudget,
+  signal: AbortSignal,
+): Promise<void> {
+  if (budget.remainingMs() > backoffMs) {
+    await delay(backoffMs, undefined, { signal });
+    return;
+  }
+  while (!budget.expired()) {
+    await delay(Math.max(1, budget.remainingMs()), undefined, { signal });
   }
 }
 
