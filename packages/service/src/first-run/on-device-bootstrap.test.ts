@@ -382,6 +382,123 @@ describe('bootstrapOnDeviceFirstRun', () => {
   });
 });
 
+function fakeMachineEngine(opts: {
+  models?: string[];
+  activeInstalls?: number;
+  failWithStatus?: number;
+  connected?: boolean;
+}) {
+  const requests: Array<{ path: string; sourcePrefix: string; targetPrefix: string }> = [];
+  const machineEngine = {
+    isConnected: () => opts.connected ?? true,
+    isRequired: () => opts.connected ?? true,
+    proxy: async (request: Request, sourcePrefix: string, targetPrefix: string) => {
+      const path = new URL(request.url).pathname;
+      requests.push({ path, sourcePrefix, targetPrefix });
+      if (opts.failWithStatus) {
+        return Response.json(
+          { error: 'machine_engine_unavailable' },
+          { status: opts.failWithStatus },
+        );
+      }
+      if (path.endsWith('/active-installs')) {
+        return Response.json({
+          installs: Array.from({ length: opts.activeInstalls ?? 0 }, (_, i) => ({
+            catalogId: `in-flight-${i}`,
+          })),
+        });
+      }
+      return Response.json({ models: (opts.models ?? []).map((id) => ({ id, name: id })) });
+    },
+  };
+  return { machineEngine, requests };
+}
+
+describe('bootstrapOnDeviceFirstRun with an adopted machine engine', () => {
+  // The broker's store is what `/api/mlx/models` and every chat turn read, so
+  // it is the inventory. Wild-caught on a 128 GB Mac: a July pin sat in the
+  // per-user store only, the re-check read that store and never ran, and the
+  // first-run banner kept offering the stale pin as "recommended".
+  async function run(
+    machineEngine: ReturnType<typeof fakeMachineEngine>['machineEngine'],
+    localInstalled: Array<{ id: string }>,
+  ) {
+    const warnings: string[] = [];
+    const { manager: mlx, calls } = fakeMlxManager([], localInstalled);
+    await bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: fakeModelManager().manager,
+      mlxModels: mlx,
+      catalog: new CatalogService(),
+      machineEngine,
+      logger: { info: () => {}, warn: (m) => warnings.push(m) },
+      platformOverride: 'darwin',
+      archOverride: 'arm64',
+    });
+    return { warnings, calls, config: await store.readConfig() };
+  }
+
+  beforeEach(async () => {
+    await store.writeConfig({
+      provider: 'mlx',
+      defaultModel: { mlx: 'stale-local-pin' },
+      firstRunCompleted: true,
+    });
+  });
+
+  it('re-pins when only the per-user store holds the pinned model', async () => {
+    const { machineEngine, requests } = fakeMachineEngine({
+      models: ['broker-model-a', 'broker-model-b'],
+    });
+    const { config, calls } = await run(machineEngine, [{ id: 'stale-local-pin' }]);
+
+    expect(config.defaultModel?.mlx).not.toBe('stale-local-pin');
+    expect(await recommendedChatModelIds()).toContain(config.defaultModel?.mlx);
+    expect(calls).toEqual([]);
+    expect(requests).toEqual([
+      {
+        path: '/api/mlx/active-installs',
+        sourcePrefix: '/api/mlx',
+        targetPrefix: '/v1/remote/manage/mlx',
+      },
+      { path: '/api/mlx/models', sourcePrefix: '/api/mlx', targetPrefix: '/v1/remote/manage/mlx' },
+    ]);
+  });
+
+  it("adopts the broker's only model, not the per-user store's", async () => {
+    const { machineEngine } = fakeMachineEngine({ models: ['broker-only-model'] });
+    const { config } = await run(machineEngine, [{ id: 'local-a' }]);
+    expect(config.defaultModel?.mlx).toBe('broker-only-model');
+  });
+
+  it('keeps the pin when the broker holds it, even with an empty per-user store', async () => {
+    const { machineEngine } = fakeMachineEngine({ models: ['stale-local-pin', 'other'] });
+    const { config } = await run(machineEngine, []);
+    expect(config.defaultModel?.mlx).toBe('stale-local-pin');
+  });
+
+  it('leaves the pin alone while the broker has a download in flight', async () => {
+    const { machineEngine, requests } = fakeMachineEngine({ activeInstalls: 1 });
+    const { config } = await run(machineEngine, []);
+    expect(config.defaultModel?.mlx).toBe('stale-local-pin');
+    expect(requests.map((r) => r.path)).toEqual(['/api/mlx/active-installs']);
+  });
+
+  it('skips the re-check rather than guessing when the broker cannot answer', async () => {
+    const { machineEngine } = fakeMachineEngine({ failWithStatus: 503 });
+    const { config, warnings } = await run(machineEngine, []);
+    expect(config.defaultModel?.mlx).toBe('stale-local-pin');
+    expect(warnings.join('\n')).toMatch(/could not read installed mlx models from machine engine/);
+  });
+
+  it('reads the per-user store when no broker was ever adopted', async () => {
+    const { machineEngine, requests } = fakeMachineEngine({ connected: false });
+    const { config } = await run(machineEngine, [{ id: 'stale-local-pin' }]);
+    expect(config.defaultModel?.mlx).toBe('stale-local-pin');
+    expect(requests).toEqual([]);
+  });
+});
+
 describe('resolveFirstRunTarget', () => {
   it('routes Apple Silicon to MLX', () => {
     // The catalog id stays the same on every platform — the provider

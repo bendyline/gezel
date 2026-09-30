@@ -2831,7 +2831,13 @@ export async function startProductService(
   // tree.
   if (!skipBootstrap) {
     const { bootstrapOnDeviceFirstRun } = await import('./first-run/on-device-bootstrap.js');
-    void bootstrapOnDeviceFirstRun({ store, llamaCppModels, mlxModels, catalog }).catch((err) => {
+    void bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels,
+      mlxModels,
+      catalog,
+      ...(machineEngine ? { machineEngine } : {}),
+    }).catch((err) => {
       log.error('[first-run] on-device bootstrap crashed:', err);
     });
   }
