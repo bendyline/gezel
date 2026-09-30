@@ -48,6 +48,26 @@
   min-height: 0;
 }
 
+/* Phone width: the list and an entry take turns instead of splitting 390px
+   (see HistoryView). The panes set their own display, which would beat the
+   bare `hidden` attribute. */
+.history-view-compact .history-split {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.history-view-compact .history-split-grip {
+  display: none;
+}
+
+.history-view-compact [hidden] {
+  display: none !important;
+}
+
+.history-back {
+  align-self: flex-start;
+  min-height: 44px;
+}
+
 /* Fill the 10px track rather than keeping .chat-rail-grip's fixed 14px,
    which would overhang the detail pane and push the two indicator lines
    off the centre of the gutter. */

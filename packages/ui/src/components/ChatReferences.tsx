@@ -693,29 +693,34 @@ export function ChatReferences({
   // Keep Chat mounted while another tab is selected so streaming state,
   // session focus, and an in-progress draft survive the round trip.
   if (isCompact) {
+    const compactPanes = [
+      { value: 'chat', label: 'Chat', icon: 'chat' as const },
+      ...(hasTasks ? [{ value: 'tasks', label: 'Task', icon: 'tasks' as const }] : []),
+      ...(hasSkills ? [{ value: 'skills', label: 'Skills', icon: 'skills' as const }] : []),
+      ...(hasReferences
+        ? [{ value: 'references', label: 'References', icon: 'references' as const }]
+        : []),
+    ];
+    const onlyChat = compactPanes.length === 1;
     return (
       <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
         {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
 
         <Tabs.Root
           className="chat-rail-compact-root"
-          value={compactPane}
+          value={onlyChat ? 'chat' : compactPane}
           onValueChange={(value) => setCompactPane(value as CompactPane)}
         >
-          <FittedTabsList
-            ariaLabel="Conversation panels"
-            className="chat-rail-compact-tabs"
-            triggerClassName="chat-rail-compact-tab"
-            value={compactPane}
-            items={[
-              { value: 'chat', label: 'Chat', icon: 'chat' as const },
-              ...(hasTasks ? [{ value: 'tasks', label: 'Task', icon: 'tasks' as const }] : []),
-              ...(hasSkills ? [{ value: 'skills', label: 'Skills', icon: 'skills' as const }] : []),
-              ...(hasReferences
-                ? [{ value: 'references', label: 'References', icon: 'references' as const }]
-                : []),
-            ]}
-          />
+          {/* A lone Chat tab is a row of chrome with nothing to switch to. */}
+          {!onlyChat && (
+            <FittedTabsList
+              ariaLabel="Conversation panels"
+              className="chat-rail-compact-tabs"
+              triggerClassName="chat-rail-compact-tab"
+              value={compactPane}
+              items={compactPanes}
+            />
+          )}
 
           <Tabs.Content
             forceMount

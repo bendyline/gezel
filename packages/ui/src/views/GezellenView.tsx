@@ -330,7 +330,7 @@ export function GezellenView({
         {compact && (
           <button
             type="button"
-            className="gezellen-back"
+            className="secondary gezellen-back"
             onClick={() => setShowCompactDetail(false)}
           >
             Back to gezellen

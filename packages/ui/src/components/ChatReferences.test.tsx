@@ -183,6 +183,21 @@ describe('ChatReferences responsive split', () => {
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
   });
 
+  it('spends no row on a lone Chat tab when a narrow chat has nothing beside it', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [] });
+    apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
+
+    const { container } = renderProjectRail();
+
+    await waitFor(() => {
+      expect(container.querySelector('.chat-rail-body-compact')).not.toBeNull();
+      expect(apiMocks.getProjectSkills).toHaveBeenCalledWith('project-1');
+    });
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(container.querySelector('.chat-rail-compact-chat')).toBeVisible();
+  });
+
   it('replaces the right pane with full-width tabs below the split threshold', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
     const user = userEvent.setup();

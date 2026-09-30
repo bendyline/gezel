@@ -264,6 +264,7 @@
 
 .provider-override-group {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
 }
@@ -286,4 +287,15 @@
 
 .provider-chip:hover:not(.provider-chip-active):not(:disabled) {
   border-color: var(--accent);
+}
+
+/* The editor toolbar leaves this key a sliver on a phone, where the words
+   stacked one per line. It keeps one line and says only "Draft"; the full
+   action stays in its accessible name and title. */
+.gezel-about-draft {
+  white-space: nowrap;
+}
+
+.app.app-compact .gezel-about-draft-tail {
+  display: none;
 }

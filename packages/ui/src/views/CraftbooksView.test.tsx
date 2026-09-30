@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
+const layout = vi.hoisted(() => ({ compact: false }));
+vi.mock('../components/useCompactLayout.js', () => ({ useCompactLayout: () => layout.compact }));
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 vi.mock('./CraftbookEditor.js', () => ({
@@ -35,7 +37,32 @@ const CRAFTBOOKS: CraftbookSummary[] = [
 
 describe('CraftbooksView', () => {
   beforeEach(() => {
+    layout.compact = false;
     vi.mocked(api.listCraftbooks).mockResolvedValue({ craftbooks: CRAFTBOOKS } as never);
+  });
+
+  it('on a phone, shows the library first and opens a book in its place', async () => {
+    layout.compact = true;
+    const user = userEvent.setup();
+    const { container } = render(<CraftbooksView />);
+
+    const rail = container.querySelector('.craftbooks-sidebar')!;
+    const editor = container.querySelector('.craftbooks-detail')!;
+    await screen.findByText('Release review');
+    // The first book is selected for desktop, but a phone lands on the list.
+    expect(rail).not.toHaveAttribute('hidden');
+    expect(editor).toHaveAttribute('hidden');
+
+    await user.click(screen.getByRole('button', { name: /Historical battle report/ }));
+    expect(rail).toHaveAttribute('hidden');
+    expect(editor).not.toHaveAttribute('hidden');
+    expect(within(editor as HTMLElement).getByTestId('mock-craftbook-editor')).toHaveTextContent(
+      'battle-report',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Back to craftbooks' }));
+    expect(rail).not.toHaveAttribute('hidden');
+    expect(editor).toHaveAttribute('hidden');
   });
 
   it('keeps creation, search, and the list together in the left rail', async () => {
