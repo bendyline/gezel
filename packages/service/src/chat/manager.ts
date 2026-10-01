@@ -605,6 +605,30 @@ function resolveTurnMessageOrigin(
   return 'direct-user';
 }
 
+function buildUserTurnMessage(
+  userText: string,
+  opts:
+    | (Parameters<typeof resolveTurnMessageOrigin>[0] & {
+        hidden?: boolean;
+        draftId?: string;
+      })
+    | undefined,
+): ChatMessage {
+  return {
+    role: 'user',
+    content: userText,
+    at: nowIso(),
+    ...(opts?.from ? { from: opts.from } : {}),
+    ...(opts?.hidden ? { hidden: true } : {}),
+    ...(opts?.nudge ? { nudge: true } : {}),
+    ...(opts?.draftId ? { draftId: opts.draftId } : {}),
+    // A dispatch seed or handoff is a user turn only because that is the
+    // role providers accept; mark it so the transcript never attributes
+    // the machinery's words to the person.
+    ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
+  };
+}
+
 /** Include provider-qualified and unqualified spellings in capability checks. */
 function liveTurnToolNames(session: LLMSession | null | undefined): string[] {
   const names = new Set<string>();
@@ -6518,6 +6542,56 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Record a turn that failed before a provider session existed — a
+   * capacity refusal, an engine that would not start — the same way a
+   * mid-turn failure is recorded. Without this nothing was persisted: the
+   * user's message was dropped, no `lastTurnError` was set, and a new
+   * thread sat on its own optimistic bubble with no failure card and no
+   * Retry (Retry needs both), then emptied on reload. Wild-caught
+   * 2026-10-01: gemma4-e4b refused for memory on every send read as a
+   * stuck app.
+   */
+  private async recordPreTurnFailure(
+    sessionId: string,
+    userText: string,
+    opts: Parameters<typeof buildUserTurnMessage>[1],
+    err: unknown,
+    scope: PublishScope,
+  ): Promise<void> {
+    const message = redactCredentials(err instanceof Error ? err.message : String(err));
+    const userMessage = buildUserTurnMessage(userText, opts);
+    const apply = (record: ChatSession): void => {
+      record.messages.push(userMessage, {
+        role: 'assistant',
+        content: '',
+        at: nowIso(),
+        synthetic: 'turn-aborted',
+        warnings: [message],
+      });
+      record.lastTurnError = message.slice(0, 500);
+      record.lastTurnErrorDetail = describeTurnError(err);
+      record.turnStartedAt = undefined;
+    };
+    try {
+      const live = this.states.get(sessionId);
+      if (live) {
+        apply(live.record);
+        await this.store.writeSession(live.record);
+      } else {
+        const record = await this.store.findSessionById(sessionId);
+        if (!record) return;
+        await this.store.mutateSession(record.gezelId, record.id, apply);
+      }
+    } catch (writeErr) {
+      log.warn(
+        `failed to record pre-turn failure for ${sessionId}: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
+      );
+      return;
+    }
+    this.events.publish(scope, { type: 'user_message', message: userMessage });
+  }
+
+  /**
    * Durable record of a handoff that parked waiting for its sender to go
    * idle. Serialized through one lock because several gezels can park at the
    * same instant and this is a read-modify-write of a whole-file queue.
@@ -7316,6 +7390,9 @@ export class ChatManager extends LocalEngineRuntime {
     try {
       state = await this.ensureState(sessionId, userText);
     } catch (err) {
+      if (preflightScope && !inflightTurn.cancelled) {
+        await this.recordPreTurnFailure(sessionId, userText, opts, err, preflightScope);
+      }
       fail(err);
       throw err; // unreachable — fail throws — but keeps TS narrowing happy
     } finally {
@@ -7359,19 +7436,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
       state.toolCapWarnings = undefined;
     }
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: userText,
-      at: nowIso(),
-      ...(opts?.from ? { from: opts.from } : {}),
-      ...(opts?.hidden ? { hidden: true } : {}),
-      ...(opts?.nudge ? { nudge: true } : {}),
-      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
-      // A dispatch seed or handoff is a user turn only because that is the
-      // role providers accept; mark it so the transcript never attributes
-      // the machinery's words to the person.
-      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
-    };
+    const userMessage = buildUserTurnMessage(userText, opts);
     state.record.messages.push(userMessage);
     // Stamped here rather than at cancel time: this write already happens,
     // and a process that dies without unwinding never reaches a cancel path

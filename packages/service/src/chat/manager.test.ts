@@ -9,6 +9,10 @@ import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
 import { resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { MockProvider } from '../providers/mock.js';
+import {
+  CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
+} from '../providers/native/capacity-broker.js';
 import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
@@ -383,6 +387,41 @@ describe('ChatManager — send + persistence', () => {
       expect.objectContaining({ type: 'error', error: 'local model could not start' }),
     );
     expect(received.at(-1)).toEqual(expect.objectContaining({ type: 'done' }));
+  });
+
+  it('records a cold-start refusal as a failed turn that Retry can replay', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: Array<{ type: string }> = [];
+    events.subscribeProject('default', (envelope) => {
+      if (envelope.sessionId === session.id) received.push(envelope.event);
+    });
+    const realCreate = mock.createSession.bind(mock);
+    mock.createSession = vi
+      .fn(realCreate)
+      .mockRejectedValueOnce(new CapacityDeniedError(NOT_ENOUGH_MEMORY_MESSAGE));
+
+    await expect(manager.send(session.id, 'hey there')).rejects.toThrow(
+      NOT_ENOUGH_MEMORY_MESSAGE,
+    );
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.messages.map((m) => [m.role, m.content, m.synthetic])).toEqual([
+      ['user', 'hey there', undefined],
+      ['assistant', '', 'turn-aborted'],
+    ]);
+    expect(disk!.lastTurnError).toBe(NOT_ENOUGH_MEMORY_MESSAGE);
+    expect(disk!.lastTurnErrorDetail).toMatchObject({ code: 'capacity-denied' });
+    const types = received.map((event) => event.type);
+    expect(types).toContain('user_message');
+    expect(types.indexOf('user_message')).toBeLessThan(types.indexOf('error'));
+
+    mock.script('Hello!');
+    await manager.retryLastTurn(session.id);
+    await manager.drainBackground();
+
+    const after = await store.getSession('ada', session.id);
+    expect(after!.lastTurnError).toBeUndefined();
+    expect(after!.messages.at(-1)).toMatchObject({ role: 'assistant', content: 'Hello!' });
   });
 
   it('threads the session project into interactive provider queue metadata', async () => {
