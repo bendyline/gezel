@@ -5975,26 +5975,41 @@ export class GezelClient {
     options?: { createOnly?: boolean },
   ): Promise<{ ok: true; path: string }> {
     const create = options?.createOnly ? '&create=1' : '';
-    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}${create}`;
+    const path = `/api/projects/${encodeURIComponent(projectId)}/artifacts/raw?path=${encodeURIComponent(filePath)}${create}`;
     const body =
       data instanceof Blob
         ? data
         : data instanceof Uint8Array
           ? data
           : new Uint8Array(data as ArrayBuffer);
-    const res = await this.fetchImpl(url, {
-      method: 'PUT',
-      headers: {
-        'content-type': mimeType,
-        Authorization: `Bearer ${this.token}`,
-      },
-      body,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`artifact binary write failed (${res.status}): ${text}`);
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: {
+          'content-type': mimeType,
+          Authorization: `Bearer ${this.token}`,
+        },
+        body,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new GezelApiError(
+          `artifact binary write failed (${res.status}): ${text}`,
+          res.status,
+        );
+      }
+      return (await res.json()) as { ok: true; path: string };
+    } catch (error) {
+      if (error instanceof GezelApiError || error instanceof SyntaxError) throw error;
+      const message = describeTransportError(error);
+      // Keep the method, path and nested socket cause for caller-owned recovery.
+      // This write is never replayed here: createOnly may already have succeeded.
+      throw new GezelApiError(`Gezel API transport unavailable on PUT ${path}: ${message}`, 0, {
+        kind: 'transport',
+        cause: message,
+        causeName: error instanceof Error ? error.name : undefined,
+      });
     }
-    return res.json() as Promise<{ ok: true; path: string }>;
   }
 
   renderImage(req: RenderImageRequest): Promise<RenderImageResponse> {

@@ -1,3 +1,7 @@
+/** Shared client error envelope and transport diagnostics. Keep nested socket
+ * codes visible so callers can distinguish connection loss from HTTP rejection
+ * without logging credentials or request bodies. This module does not retry.
+ */
 export class GezelApiError extends Error {
   constructor(
     message: string,
@@ -40,12 +44,18 @@ export function apiErrorMessage(err: unknown): string {
 /** A transport failure message that keeps the underlying cause (ECONNREFUSED, …). */
 export function describeTransportError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
-  const cause = (error as Error & { cause?: unknown }).cause;
-  if (cause instanceof Error && cause.message && cause.message !== error.message) {
-    return `${error.message} (${cause.message})`;
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const code = 'code' in current && typeof current.code === 'string' ? current.code : '';
+    const message = current instanceof Error ? current.message : '';
+    const detail = code && !message.includes(code) ? `${code}: ${message}`.trim() : message || code;
+    if (detail && !messages.includes(detail)) messages.push(detail);
+    current = 'cause' in current ? current.cause : undefined;
   }
-  if (cause && typeof cause === 'object' && 'code' in cause) {
-    return `${error.message} (${String((cause as { code?: unknown }).code)})`;
-  }
-  return error.message;
+  return messages.length > 1
+    ? `${messages[0]} (${messages.slice(1).join('; ')})`
+    : (messages[0] ?? error.message);
 }
