@@ -202,7 +202,9 @@ final class MobileBridgeTests: XCTestCase {
             await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
             await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
             const modelId = (await plugin.listModels()).selectedModelId;
-            await api('/api/config', 'PUT', {provider:'llama-cpp',meesterGezelId:crew.id,modelContextOverrides:{['llama-cpp:'+modelId]:8192},modelTuning:{[modelId]:{sampling:{maxTokens:256}}}});
+            // The fixture's tokenizer spends a token per byte, so the desktop's standard prompt
+            // (~15K bytes) overflows its 8K trained context; a 4K window selects the minimal footprint.
+            await api('/api/config', 'PUT', {provider:'llama-cpp',meesterGezelId:crew.id,modelContextOverrides:{['llama-cpp:'+modelId]:4096},modelTuning:{[modelId]:{sampling:{maxTokens:256}}}});
             await api('/api/documents/write', 'PUT', {path:'iOS notes.md',content:'# iOS notes\n\nSaved through the shared product API.'});
             await api('/api/projects/' + project.id + '/artifacts/write', 'PUT', {path:'Native report.md',content:'# Native report\n\nThe same artifact drawer works on iOS.'});
             return {projectId:project.id,gezelId:crew.id};
@@ -266,7 +268,8 @@ final class MobileBridgeTests: XCTestCase {
             // Send reads the composer's draft, which Squisq reports a task after the edit.
             await until(async () => (await api('/api/projects/' + projectId + '/prompt-drafts')).drafts.some(item => item.title.includes('Say hello.')), 'editor change saved before Send');
             let streamed = '';
-            const listener = await plugin.addListener('chatDelta', event => { streamed += event.delta; });
+            // Product turns stream llama.cpp's own chat chunks, not generate's plain deltas.
+            const listener = await plugin.addListener('chatChunk', event => { for (const chunk of event.chunks) streamed += JSON.parse(chunk).choices?.[0]?.delta?.content ?? ''; });
             const phases = [];
             const phaseListener = await plugin.addListener('enginePhase', event => { if (phases.at(-1) !== event.phase) phases.push(event.phase); });
             try {
