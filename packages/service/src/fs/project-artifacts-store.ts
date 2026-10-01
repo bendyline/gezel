@@ -1,6 +1,6 @@
 import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import {
   artifactSegments,
@@ -180,6 +180,27 @@ export class ArtifactPathExistsError extends Error {
 }
 
 /**
+ * A path that names the drawer itself. `.`, `./`, and `notes/..` all collapse
+ * to zero segments, which slipped past every per-subtree guard and handed
+ * `rm -rf` the drawer root: task inputs, prompt drafts, change proposals and
+ * connector corpora, gone in one call.
+ */
+export class ArtifactRootDeniedError extends Error {
+  readonly code = 'artifact-root' as const;
+  constructor(action: 'deleted' | 'renamed' | 'replaced') {
+    super(`the artifacts folder itself cannot be ${action}; name a file or folder inside it`);
+    this.name = 'ArtifactRootDeniedError';
+  }
+}
+
+/** True when an artifacts-relative path names the drawer root, however it is spelled. */
+function namesArtifactsRoot(base: string, cleaned: string, full: string | null): boolean {
+  return (
+    artifactSegments(cleaned).length === 0 || (full !== null && resolve(full) === resolve(base))
+  );
+}
+
+/**
  * Owns the project-level artifacts tree.
  *
  * Store remains the public facade for callers. Keeping the artifact-specific
@@ -264,6 +285,25 @@ export class ProjectArtifactsStore {
   /** On-disk byte size of an artifact, or null when it is not a readable file. */
   async projectArtifactSize(id: string, filePath: string): Promise<number | null> {
     return safeStatFileSize(this.projectArtifactsDir(id), filePath);
+  }
+
+  /** The artifact twin of `Store.statProjectWorkspacePath`, behind the same fence. */
+  async statProjectArtifactPath(
+    id: string,
+    filePath: string,
+  ): Promise<{ kind: 'file' | 'dir' | 'missing'; size?: number; mtime?: string }> {
+    const cleaned = normalizeArtifactPath(filePath);
+    if (!cleaned) return { kind: 'missing' };
+    const full = await safeResolveRead(this.projectArtifactsDir(id), cleaned);
+    if (!full) return { kind: 'missing' };
+    try {
+      const s = await stat(full);
+      if (s.isDirectory()) return { kind: 'dir', mtime: s.mtime.toISOString() };
+      if (s.isFile()) return { kind: 'file', size: s.size, mtime: s.mtime.toISOString() };
+      return { kind: 'missing' };
+    } catch {
+      return { kind: 'missing' };
+    }
   }
 
   async readProjectArtifactBinary(
@@ -508,7 +548,9 @@ export class ProjectArtifactsStore {
   ): Promise<void> {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
-    if (!cleaned) return;
+    if (!cleaned || namesArtifactsRoot(base, cleaned, null)) {
+      throw new ArtifactRootDeniedError('deleted');
+    }
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
     }
@@ -517,6 +559,7 @@ export class ProjectArtifactsStore {
     }
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
+    if (namesArtifactsRoot(base, cleaned, full)) throw new ArtifactRootDeniedError('deleted');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
   }
@@ -560,7 +603,8 @@ export class ProjectArtifactsStore {
     const base = this.projectArtifactsDir(id);
     const from = normalizeArtifactPath(fromPath);
     const to = normalizeArtifactPath(toPath);
-    if (!from || !to) throw new Error('the artifacts root cannot be renamed');
+    if (!from || namesArtifactsRoot(base, from, null)) throw new ArtifactRootDeniedError('renamed');
+    if (!to || namesArtifactsRoot(base, to, null)) throw new ArtifactRootDeniedError('replaced');
     assertNoTemplatePlaceholderPath(to);
     if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
       throw new ShadowPathWriteDeniedError();
@@ -583,6 +627,8 @@ export class ProjectArtifactsStore {
     const fromFull = safeJoin(base, from);
     const toFull = safeJoin(base, to);
     if (!fromFull || !toFull) throw new Error('path traversal blocked');
+    if (namesArtifactsRoot(base, from, fromFull)) throw new ArtifactRootDeniedError('renamed');
+    if (namesArtifactsRoot(base, to, toFull)) throw new ArtifactRootDeniedError('replaced');
     if (fromFull === toFull) return { fromPath: from, toPath: to };
 
     let sourceStat: Stats;

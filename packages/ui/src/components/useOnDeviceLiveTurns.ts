@@ -24,7 +24,7 @@ import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 export interface LiveTurnState {
   phase: 'starting' | 'loading_model' | 'prefill' | 'generating' | 'ready';
   /** Concrete local engine that emitted the phase for this session. */
-  provider?: 'llama-cpp' | 'mlx' | 'ds4';
+  provider?: Extract<ChatEventEnvelope['event'], { type: 'engine_phase' }>['provider'];
   /** Human-readable label from the phase event's `detail` (or a fallback). */
   label: string;
   /**
@@ -158,12 +158,6 @@ export function useOnDeviceLiveTurns(
         })) {
           const { sessionId, gezelId, projectId, event } = env as ChatEventEnvelope;
           if (event.type === 'engine_phase') {
-            if (
-              event.provider !== 'llama-cpp' &&
-              event.provider !== 'mlx' &&
-              event.provider !== 'ds4'
-            )
-              continue;
             const phase = event.phase;
             const detail = event.detail;
             const progress = event.progress;
@@ -247,6 +241,16 @@ export function useOnDeviceLiveTurns(
               projectId: pending?.projectId ?? projectId,
             });
             queueOutputFlush();
+          } else if (event.type === 'queued') {
+            // Still waiting for the engine: keep the turn alive past the
+            // silence sweep, since a one-slot engine can hold it for minutes.
+            setLiveTurns((prev) => {
+              const prior = prev.get(sessionId);
+              if (!prior) return prev;
+              const next = new Map(prev);
+              next.set(sessionId, { ...prior, lastEventAt: Date.now() });
+              return next;
+            });
           } else if (event.type === 'done' || event.type === 'error') {
             pendingOutputRef.current.delete(sessionId);
             setLiveTurns((prev) => {

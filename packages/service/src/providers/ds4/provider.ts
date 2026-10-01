@@ -62,6 +62,10 @@ export class Ds4Provider implements LLMProvider {
     return this.inner;
   }
 
+  get supportsImageInput(): boolean {
+    return this.inner.supportsImageInput;
+  }
+
   isEngineBusy(): boolean {
     return this.inner.isEngineBusy();
   }

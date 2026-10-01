@@ -1,9 +1,16 @@
 import {
+  GEZEL_TOOL_DESCRIPTIONS,
   type ReadWorkspaceFilesResponse,
   WORKSPACE_READ_MAX_FILES,
   WORKSPACE_READ_MAX_RANGE_LINES,
   type WorkspaceReadFileRequest,
   type WorkspaceReadFileSuccess,
+  formatWorkspaceRead,
+  renderExactToolCall,
+  withLineNumbers,
+  workspaceReadHint,
+  workspaceReadRangeError,
+  workspaceReadRangeLabel,
 } from '@bendyline/gezel';
 import {
   ReadArtifactInputSchema,
@@ -16,9 +23,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { LinkedWorkspaceTarget } from './linked-workspace.js';
 import { closestFileNames } from './near-miss.js';
-import { withLineNumbers } from './reanchor.js';
 import { errorResult } from './tool-contracts.js';
-import { renderExactToolCall } from './workspace-grep-result.js';
 
 type ConcreteWorkspaceTarget = Exclude<LinkedWorkspaceTarget, { kind: 'links-root' }>;
 
@@ -47,45 +52,6 @@ type ArtifactSliceArgs = {
   head?: number;
   tail?: number;
 };
-
-function workspaceReadRangeError(args: {
-  startLine?: number;
-  endLine?: number;
-}): string | null {
-  const start = args.startLine ?? 1;
-  if (args.endLine !== undefined && args.endLine < start) {
-    return `endLine (${args.endLine}) must be greater than or equal to startLine (${start})`;
-  }
-  if (args.endLine !== undefined && args.endLine - start + 1 > WORKSPACE_READ_MAX_RANGE_LINES) {
-    return `a read range may contain at most ${WORKSPACE_READ_MAX_RANGE_LINES} lines`;
-  }
-  return null;
-}
-
-function formatWorkspaceRead(result: WorkspaceReadFileSuccess, raw: boolean): string {
-  const body = raw ? result.content : withLineNumbers(result.content, result.startLine);
-  if (raw) return body;
-  return `[read_file path=${JSON.stringify(result.path)} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}]\n${body || '(no lines returned)'}${workspaceReadHint(result)}`;
-}
-
-function workspaceReadRangeLabel(result: WorkspaceReadFileSuccess): string {
-  const total = result.totalLines === undefined ? '?' : String(result.totalLines);
-  if (result.linesReturned === 0) return `lines=none totalLines=${total}`;
-  return `lines=${result.startLine}-${result.endLine} totalLines=${total}`;
-}
-
-function workspaceReadHint(result: WorkspaceReadFileSuccess): string {
-  if (result.nextStartLine === undefined && !result.truncated) return '';
-  const parts: string[] = [];
-  if (result.nextStartLine !== undefined) {
-    const nextEnd = result.nextStartLine + WORKSPACE_READ_MAX_RANGE_LINES - 1;
-    parts.push(
-      `next: read_file({"path":${JSON.stringify(result.path)},"startLine":${result.nextStartLine},"endLine":${nextEnd}})`,
-    );
-  }
-  if (result.truncationReason) parts.push(`truncated=${result.truncationReason}`);
-  return `\n\n…[${parts.join('; ')}]`;
-}
 
 async function artifactCollisionForWorkspacePath(
   dependencies: CrossDrawerReadDependencies,
@@ -256,7 +222,7 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
 
   server.tool(
     'read_file',
-    'Read one project-workspace file, optionally only an inclusive line range. This tool never reads the separate artifacts drawer; use read_artifact for artifact inputs. For files over ~200 lines, pass `startLine`/`endLine` from grep_files, outline_file, or an error instead of loading the whole file. Omit both range fields for the backward-compatible full read. Output uses `N→` line gutters for precise edits; the gutter is display-only and is never part of the file. Pass `raw: true` for text without gutters.',
+    GEZEL_TOOL_DESCRIPTIONS.read_file,
     ReadFileInputSchema.extend({
       endLine: z
         .number()
@@ -609,7 +575,7 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
 
   server.tool(
     'read_artifact',
-    'Read one artifact, using a path returned by `list_artifacts`. Paths are relative to the artifact root: use "reports/summary.md", never add "artifacts/" (a legacy redundant prefix is still accepted). Use the same inclusive `startLine`/`endLine` range shape as `read_file`; the older `lines`/`head`/`tail` shapes remain accepted for compatibility. If the exact path is actually a workspace file and `read_file` is authorized, this read is safely rerouted and reports its resolved surface. Use `read_artifacts` for several known artifact paths.',
+    GEZEL_TOOL_DESCRIPTIONS.read_artifact,
     ReadArtifactInputSchema.extend({
       endLine: z
         .number()

@@ -178,6 +178,28 @@ public final class GezelNativeRuntime {
         }
     }
 
+    /** How long a request waits for a hot phone to cool before it is refused. */
+    private static final long COOLING_WAIT_MS = 10 * 60 * 1000;
+
+    /** A hot phone refuses new work rather than heating further, but the next
+     * request of a tool loop already underway waits the heat out instead of
+     * failing the turn: the same work, delayed, is what the person asked for.
+     * Bounded, so a phone that never cools still gets the clear refusal from
+     * {@link #checkResources}. False when the request was cancelled meanwhile. */
+    private boolean awaitCooling(String requestId) throws InterruptedException {
+        if (Build.VERSION.SDK_INT < 29) return true;
+        PowerManager power = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(COOLING_WAIT_MS);
+        boolean announced = false;
+        while (power.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE) {
+            if (isCancelled(requestId)) return false;
+            if (System.nanoTime() >= deadline) return true;
+            if (!announced) { emitPhase(requestId, "cooling"); announced = true; }
+            Thread.sleep(2000);
+        }
+        return !isCancelled(requestId);
+    }
+
     private interface StoreAction { NativeObject run() throws Exception; }
     private void storage(NativeCall call, StoreAction action) { storage(call, action, () -> {}); }
     private void storage(NativeCall call, StoreAction action, Runnable completion) {
@@ -196,17 +218,18 @@ public final class GezelNativeRuntime {
 
     public void listModels(NativeCall call) { storage(call, () -> withFittedContext(store.listModels())); }
 
-    /** The window the phone can hold for the model it would run next, which the
-     * product runtime uses unless the person chose one. Only the selected model
-     * is sized, so a long library costs no dry runs. */
+    /** The window the phone can hold for each model, which the product runtime
+     * uses unless the person chose one. Every model is sized, not only the
+     * selected one: a conversation keeps the model it started with, and a
+     * Gemma 4 E2B thread sized as if it were the selected Qwen 3.5 2B asked for
+     * a 16K window it could not hold (iPhone, 2026-09-30). Dry runs are cached
+     * per file and window. */
     private NativeObject withFittedContext(NativeObject library) throws Exception {
-        String selected = library.optString("selectedModelId", null);
-        if (selected == null) return library;
         org.json.JSONArray models = library.getJSONArray("models");
         for (int index = 0; index < models.length(); index++) {
             org.json.JSONObject model = models.getJSONObject(index);
-            if (!selected.equals(model.getString("id"))) continue;
-            Integer context = fitContext(selected, store.model(selected)[1]);
+            String id = model.getString("id");
+            Integer context = fitContext(id, store.model(id)[1]);
             if (context != null) model.put("contextTokens", context.intValue());
         }
         return library;
@@ -262,9 +285,8 @@ public final class GezelNativeRuntime {
         }
         // Field evidence for the fit, once per change: the listing is read at
         // every turn start, several times a second while a turn is set up.
-        String decision = id + ':' + chosen;
-        if (!decision.equals(lastFit)) {
-            lastFit = decision;
+        Integer previous = lastFit.put(id, chosen);
+        if (previous == null || previous != chosen) {
             android.util.Log.i("GezelRuntime", "Context window " + chosen + " for " + id + ": needs " +
                 mib(allocation(path, 16384)) + " MiB at 16K, " + mib(allocation(path, 8192)) + " at 8K, " +
                 mib(allocation(path, FLOOR_CONTEXT)) + " at 4K; " + mib(available) + " MiB available");
@@ -272,7 +294,8 @@ public final class GezelNativeRuntime {
         return chosen;
     }
 
-    private volatile String lastFit;
+    /** Last window per model; every model is sized on each listing. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> lastFit = new java.util.concurrent.ConcurrentHashMap<>();
 
     private static long mib(long bytes) { return bytes < 0 ? -1 : bytes / (1024 * 1024); }
 
@@ -340,7 +363,10 @@ public final class GezelNativeRuntime {
         } catch (Exception error) { llamaReason = "Import a GGUF model first"; }
         if (inactive) { availability = "unavailable"; aiReason = llamaReason; }
         JSONArray providers = new JSONArray();
-        providers.put(descriptor("llama-cpp", "Imported model", llamaReason == null ? "available" : "unavailable", llamaReason, 16384, 4096));
+        NativeObject llama = descriptor("llama-cpp", "Imported model", llamaReason == null ? "available" : "unavailable", llamaReason, 16384, 4096);
+        // Structured chat: llama.cpp's own chat layer, as desktop's llama-server runs it.
+        try { llama.getJSONObject("capabilities").put("structuredChat", true); } catch (org.json.JSONException ignored) {}
+        providers.put(llama);
         providers.put(descriptor("android-mlkit", "Android on-device AI", availability, aiReason, context, MlKitPrompt.MAX_OUTPUT_TOKENS));
         return new NativeObject().put("providers", providers);
     }
@@ -527,8 +553,12 @@ public final class GezelNativeRuntime {
         Throwable failure = null;
         List<NativeCall> waiting;
         try {
+            final long[] lastProgress = {-1, -1};
+            final int[] ticks = {0};
             cancelTimer = cancellationQueue.scheduleAtFixedRate(() -> {
-                if (isCancelled(requestId)) cancelActive(requestId);
+                if (isCancelled(requestId)) { cancelActive(requestId); return; }
+                // Every fifth tick (~250 ms) is plenty for a status pill.
+                if (++ticks[0] % 5 == 0) reportProgress(requestId, lastProgress);
             }, 50, 50, TimeUnit.MILLISECONDS);
             result = performGeneration(requestId, modelId, roles, contents, maxTokens, contextSize, sampling, text);
         }
@@ -558,7 +588,9 @@ public final class GezelNativeRuntime {
             if (isCancelled(requestId)) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             if ("android-mlkit".equals(activeProvider)) {
                 unloadLlama();
+                if (!awaitCooling(requestId)) return new NativeObject().put("text", "").put("stopReason", "cancelled");
                 checkResources(256L * 1024 * 1024);
+                emitPhase(requestId, "prefill");
                 MlKitPrompt.Reply reply = mlkit.generate(roles, contents, maxTokens, contextSize, () -> isCancelled(requestId),
                     delta -> emitDelta(requestId, text, delta));
                 return new NativeObject().put("text", reply.text).put("stopReason", reply.stopReason);
@@ -567,17 +599,21 @@ public final class GezelNativeRuntime {
             String[] model = store.model(modelId);
             if (!model[0].equals(loadedId) || contextSize != loadedContext) {
                 unloadLlama();
+                if (!awaitCooling(requestId)) return new NativeObject().put("text", "").put("stopReason", "cancelled");
                 checkResources(requiredBytes(model[1], contextSize));
                 long operation = nextOperation(requestId);
                 if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
+                emitPhase(requestId, "loading_model");
                 synchronized (sizing) {
                     LlamaRuntime.load(engine, model[1], operation, contextSize);
                     loadedId = model[0]; loadedPath = model[1]; loadedContext = contextSize;
                 }
             }
+            if (!awaitCooling(requestId)) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             long operation = nextOperation(requestId);
             if (operation == 0) return new NativeObject().put("text", "").put("stopReason", "cancelled");
             checkResources(64L * 1024 * 1024);
+            emitPhase(requestId, "prefill");
             int reason = LlamaRuntime.generate(engine, roles, contents, operation, maxTokens,
                 sampling.temperature, sampling.topK, sampling.topP, sampling.minP, sampling.repeatPenalty,
                 sampling.repeatLastN, sampling.seed, utf8 -> {
@@ -589,11 +625,184 @@ public final class GezelNativeRuntime {
             return new NativeObject().put("text", text.toString()).put("stopReason", isCancelled(requestId) || reason == 3 ? "cancelled" : reason == 2 ? "length" : "stop");
     }
 
+    /**
+     * An OpenAI-shaped chat request for an imported llama.cpp model, served by
+     * llama.cpp's own chat layer exactly as desktop's llama-server serves it:
+     * the model's template renders the tools and its parser returns structured
+     * tool calls. Every object llama-server would stream reaches JavaScript as a
+     * `chatChunk` event (batched, in order), including its error body.
+     */
+    public void chat(NativeCall call) {
+        String requestId = call.getString("requestId");
+        String modelId = call.getString("modelId");
+        // JSON text, passed through as sent: re-encoding could reorder keys, and
+        // with them the tool definitions at the top of the prompt.
+        String body = call.getString("requestJson");
+        String chatConfig = call.getString("chatConfigJson");
+        if (call.contains("contextSize") && call.getInt("contextSize") == null) { call.reject("Token budgets must be integers", "INVALID_REQUEST"); return; }
+        int contextSize = call.getInt("contextSize", 4096);
+        try {
+            if (engine == 0) throw new IllegalStateException(initializationError == null ? "Native engine unavailable" : initializationError);
+            if (modelId == null || modelId.isEmpty()) throw new IllegalArgumentException("Choose a model for this conversation");
+            if (requestId == null || requestId.isEmpty() || requestId.getBytes(StandardCharsets.UTF_8).length > 128 || body == null)
+                throw new IllegalArgumentException("A request ID and chat request are required");
+            if (contextSize < 512 || contextSize > 16384) throw new IllegalArgumentException("Context size is outside the supported range");
+            if (body.getBytes(StandardCharsets.UTF_8).length > 1024 * 1024) throw new IllegalArgumentException("Chat request is too large");
+            new JSONObject(body);
+            String config = chatConfig == null ? "{}" : chatConfig;
+            new JSONObject(config);
+            synchronized (this) {
+                if (destroyed || backgrounded) { call.reject("Reopen the app to start a conversation", "BACKGROUND"); return; }
+                if (activeId != null || modelMutation || releaseRequested) { call.reject("Another conversation or memory cleanup is running", "BUSY"); return; }
+                activeId = requestId; activeProvider = "llama-cpp"; cancelled = false;
+                inferenceQueue.execute(() -> runChat(call, requestId, modelId, contextSize, body, config));
+            }
+        } catch (Exception error) { call.reject(failureMessage(error)); }
+    }
+
+    private String appliedChatConfig;
+
+    private void runChat(NativeCall call, String requestId, String modelId, int contextSize, String body, String config) {
+        ScheduledFuture<?> cancelTimer = null;
+        NativeObject result = null;
+        Throwable failure = null;
+        List<NativeCall> waiting;
+        ChatBatch batch = new ChatBatch(requestId);
+        try {
+            final long[] lastProgress = {-1, -1};
+            final int[] ticks = {0};
+            cancelTimer = cancellationQueue.scheduleAtFixedRate(() -> {
+                if (isCancelled(requestId)) { cancelActive(requestId); return; }
+                if (++ticks[0] % 5 == 0) reportProgress(requestId, lastProgress);
+            }, 50, 50, TimeUnit.MILLISECONDS);
+            result = performChat(requestId, modelId, contextSize, body, config, batch);
+        }
+        catch (Exception | LinkageError | OutOfMemoryError error) {
+            if (!(error instanceof OutOfMemoryError) && isCancelled(requestId)) result = new NativeObject().put("status", "cancelled");
+            else failure = error;
+        }
+        finally {
+            if (cancelTimer != null) cancelTimer.cancel(false);
+            batch.flush();
+            try {
+                boolean release;
+                synchronized (this) { release = releaseRequested || backgrounded || destroyed; }
+                if (release) unloadLlama();
+            } catch (Exception | LinkageError | OutOfMemoryError error) { if (failure == null) failure = error; }
+            synchronized (this) {
+                activeId = null; activeProvider = null; nativeId = 0;
+                waiting = new ArrayList<>(cancelWaiters); cancelWaiters.clear();
+            }
+        }
+        if (failure == null) call.resolve(result);
+        else call.reject(failureMessage(failure));
+        for (NativeCall waiter : waiting) waiter.resolve();
+    }
+
+    private NativeObject performChat(String requestId, String modelId, int contextSize, String body, String config, ChatBatch batch) throws Exception {
+        if (isCancelled(requestId)) return new NativeObject().put("status", "cancelled");
+        if (store == null) throw new IllegalStateException("Model storage is unavailable");
+        String[] model = store.model(modelId);
+        if (!model[0].equals(loadedId) || contextSize != loadedContext) {
+            unloadLlama();
+            appliedChatConfig = null;
+            if (!awaitCooling(requestId)) return new NativeObject().put("status", "cancelled");
+            checkResources(requiredBytes(model[1], contextSize));
+            long operation = nextOperation(requestId);
+            if (operation == 0) return new NativeObject().put("status", "cancelled");
+            emitPhase(requestId, "loading_model");
+            synchronized (sizing) {
+                LlamaRuntime.load(engine, model[1], operation, contextSize);
+                loadedId = model[0]; loadedPath = model[1]; loadedContext = contextSize;
+            }
+        }
+        if (!config.equals(appliedChatConfig)) {
+            LlamaRuntime.configureChat(engine, config);
+            appliedChatConfig = config;
+        }
+        if (!awaitCooling(requestId)) return new NativeObject().put("status", "cancelled");
+        long operation = nextOperation(requestId);
+        if (operation == 0) return new NativeObject().put("status", "cancelled");
+        checkResources(64L * 1024 * 1024);
+        emitPhase(requestId, "prefill");
+        final boolean[] generating = {false};
+        int status = LlamaRuntime.chat(engine, body, operation, 600_000, utf8 -> {
+            if (isCancelled(requestId)) return false;
+            if (!generating[0]) { generating[0] = true; emitPhase(requestId, "generating"); }
+            batch.add(new String(utf8, StandardCharsets.UTF_8));
+            return !isCancelled(requestId);
+        });
+        String outcome = status == LlamaRuntime.STATUS_OK ? "ok" : isCancelled(requestId) || status == LlamaRuntime.STATUS_CANCELLED
+            ? "cancelled" : status == LlamaRuntime.STATUS_TIMEOUT ? "timeout" : "error";
+        return new NativeObject().put("status", outcome);
+    }
+
+    /**
+     * Chunks travel to JavaScript in small batches: one bridge event per token
+     * costs more than the token, and the order must hold. Flushed about every
+     * 24 ms while tokens stream, and once more when the request ends.
+     */
+    private final class ChatBatch {
+        private final String requestId;
+        private final JSONArray pending = new JSONArray();
+        private long flushedAt = System.nanoTime();
+        ChatBatch(String requestId) { this.requestId = requestId; }
+        synchronized void add(String chunk) {
+            pending.put(chunk);
+            if (System.nanoTime() - flushedAt >= 24_000_000L) flush();
+        }
+        synchronized void flush() {
+            flushedAt = System.nanoTime();
+            if (pending.length() == 0) return;
+            JSONArray chunks = new JSONArray();
+            for (int index = 0; index < pending.length(); index++) chunks.put(pending.opt(index));
+            while (pending.length() > 0) pending.remove(0);
+            notifyListeners("chatChunk", new NativeObject().put("requestId", requestId).put("chunks", chunks));
+        }
+    }
+
     private synchronized void emitDelta(String requestId, StringBuilder text, String delta) {
         if (isCancelled(requestId)) return;
         if (delta.length() > 64_000 - text.length()) throw new IllegalStateException("The model response exceeded the supported size");
+        // The first chunk is when decoding began; say so before it arrives.
+        if (text.length() == 0) emitPhase(requestId, "generating");
         text.append(delta);
         notifyListeners("chatDelta", new NativeObject().put("requestId", requestId).put("delta", delta));
+    }
+
+    /**
+     * Model-loading and prompt-processing progress for the status pill, polled
+     * from the cancellation timer. Reports only changes, and nothing at all
+     * from a native library too old to have the counters.
+     */
+    private void reportProgress(String requestId, long[] last) {
+        long handle = engine;
+        if ("android-mlkit".equals(activeProvider) || handle == 0) return;
+        long[] progress;
+        try { progress = LlamaRuntime.progress(handle); }
+        catch (LinkageError error) { return; }
+        if (progress == null || progress.length < 6) return;
+        long phase = progress[0];
+        long value = phase == 1 ? progress[1] : phase == 2 ? progress[3] : -1;
+        if (value < 0 || (phase == last[0] && value == last[1])) return;
+        last[0] = phase;
+        last[1] = value;
+        NativeObject event = new NativeObject().put("requestId", requestId);
+        if (phase == 1) {
+            event.put("phase", "loading_model").put("progress", Math.min(1.0, progress[1] / 1000.0));
+        } else {
+            long prompt = progress[2];
+            event.put("phase", "prefill").put("promptTokens", prompt)
+                .put("processedTokens", progress[3]).put("reusedTokens", progress[4]);
+            if (prompt > 0) event.put("progress", Math.min(1.0, progress[3] / (double) prompt));
+        }
+        if (!isCancelled(requestId)) notifyListeners("enginePhase", event);
+    }
+
+    /** Engine phase for the status pill, on the inference thread so it stays ordered with chatDelta. */
+    private void emitPhase(String requestId, String phase) {
+        if (isCancelled(requestId)) return;
+        notifyListeners("enginePhase", new NativeObject().put("requestId", requestId).put("phase", phase));
     }
 
     private void unloadLlama() {

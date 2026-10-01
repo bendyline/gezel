@@ -32,6 +32,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
+import { coreEntryPath, readCoreBuiltEntry } from './core-built-entry.mjs';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
 import { writeReleasePackageState } from './release-package-state.mjs';
 import {
@@ -153,10 +154,10 @@ if (result.error) {
 }
 if (result.status !== 0) process.exit(result.status ?? 1);
 
-const built = readFileSync(resolve(repoRoot, 'packages/core/dist/index.js'), 'utf8');
+const built = readCoreBuiltEntry(coreEntryPath(repoRoot));
 if (!built.includes(version)) {
   console.error(
-    `prepare-package: core rebuilt but dist/index.js does not carry ${version} — refusing to publish a mis-stamped core`,
+    `prepare-package: core rebuilt but its built entry (dist/index.js and its chunks) does not carry ${version} — refusing to publish a mis-stamped core`,
   );
   process.exit(1);
 }
@@ -164,7 +165,7 @@ if (!built.includes(version)) {
 // dev build, silently disabling the gate for every consumer of this release.
 if (!new RegExp(`GEZEL_CONTENT_COMPAT\\s*=\\s*"${contentCompat}"`).test(built)) {
   console.error(
-    `prepare-package: core rebuilt but dist/index.js does not carry GEZEL_CONTENT_COMPAT ${contentCompat} — refusing to publish a build that cannot honour content floors`,
+    `prepare-package: core rebuilt but its built entry (dist/index.js and its chunks) does not carry GEZEL_CONTENT_COMPAT ${contentCompat} — refusing to publish a build that cannot honour content floors`,
   );
   process.exit(1);
 }

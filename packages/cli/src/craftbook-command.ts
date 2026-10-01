@@ -204,7 +204,15 @@ export async function waitForTask(
           ),
         );
         const questionIds = questions
-          .filter((q) => q.taskRef && refs.has(q.taskRef))
+          .filter(
+            (q) =>
+              q.taskRef &&
+              refs.has(q.taskRef) &&
+              // A service pause card is a historical notification. Actual task
+              // status above decides whether it is still paused; real session
+              // questions and permissions must continue to block observation.
+              !(q.sessionId === '' && q.intent?.kind === 'task-paused'),
+          )
           .map((q) => q.id);
         if (questionIds.length) return { task, outcome: 'blocked', exitCode: 2, questionIds };
       }

@@ -32,7 +32,9 @@ typedef enum gezel_llama_finish_reason {
     GEZEL_LLAMA_FINISH_LENGTH = 2,
     GEZEL_LLAMA_FINISH_CANCELLED = 3,
     GEZEL_LLAMA_FINISH_TIMEOUT = 4,
-    GEZEL_LLAMA_FINISH_ERROR = 5
+    GEZEL_LLAMA_FINISH_ERROR = 5,
+    /** Chat only: the reply ended with structured tool calls. */
+    GEZEL_LLAMA_FINISH_TOOL_CALLS = 6
 } gezel_llama_finish_reason;
 
 typedef struct gezel_llama_error {
@@ -62,7 +64,11 @@ typedef struct gezel_llama_generation_options {
     uint32_t struct_size;
     uint32_t abi_version;
     uint64_t request_id;
+    /** Ceiling on the reply, 1-4096. The reply gets whatever context the prompt
+     * leaves, up to this; GEZEL_LLAMA_CONTEXT_LIMIT only when the prompt leaves
+     * less than min(max_tokens, 256). */
     uint32_t max_tokens;
+    /** Covers prompt processing and decoding; at most 600000. */
     uint32_t timeout_ms;
     uint32_t max_output_bytes;
     /** Zero uses greedy decoding. Positive values use top-k/top-p/min-p/temperature. */
@@ -148,6 +154,86 @@ int32_t gezel_llama_generate(gezel_llama_engine * engine,
     const gezel_llama_message * messages, size_t message_count,
     const gezel_llama_generation_options * options,
     gezel_llama_chunk_callback on_chunk, void * user_data,
+    gezel_llama_result * result, gezel_llama_error * error);
+
+/** What the engine's current operation is doing, for a host's status display. */
+typedef enum gezel_llama_phase {
+    GEZEL_LLAMA_PHASE_IDLE = 0,
+    GEZEL_LLAMA_PHASE_LOADING = 1,
+    GEZEL_LLAMA_PHASE_PROMPT = 2,
+    GEZEL_LLAMA_PHASE_GENERATING = 3
+} gezel_llama_phase;
+
+typedef struct gezel_llama_progress {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    /** A gezel_llama_phase value. */
+    uint32_t phase;
+    /** Model loading fraction in [0, 1]; meaningful while loading. */
+    float load_fraction;
+    /** Tokens in the formatted prompt, and how many of them are in memory so
+     * far — reused from the previous request or processed by this one. */
+    uint32_t prompt_tokens;
+    uint32_t processed_tokens;
+    uint32_t reused_tokens;
+    uint32_t generated_tokens;
+} gezel_llama_progress;
+
+/** Thread-safe snapshot of the current operation's counters; hosts poll it from
+ * their cancellation timer while load or generate runs. Never blocks. Requires
+ * struct_size and abi_version; returns INVALID_ARGUMENT otherwise. Added after
+ * ABI 1 shipped; hosts that must run against older libraries check the symbol. */
+int32_t gezel_llama_get_progress(gezel_llama_engine * engine, gezel_llama_progress * progress);
+
+/*
+ * OpenAI-shaped chat, the way desktop's llama-server serves it with --jinja.
+ *
+ * The request is the `/v1/chat/completions` body desktop sends llama-server:
+ * messages (assistant `tool_calls`, `tool` results), tools, tool_choice,
+ * sampling fields, max_tokens, stop, chat_template_kwargs, reasoning budget.
+ * llama.cpp's own chat layer renders it through the model's Jinja template,
+ * constrains tool calls with the template's lazy grammar, and parses the
+ * model's native call syntax back into structured tool calls. Unknown keys are
+ * ignored, as llama-server ignores them.
+ *
+ * on_event receives each object llama-server would send as an SSE `data:`
+ * payload, in order: `chat.completion.chunk` deltas (content,
+ * reasoning_content, tool_calls), then the finish chunk (`finish_reason`
+ * stop, length or tool_calls) and a usage chunk with timings. A request that
+ * fails instead delivers one `{"error":{code,message,type,...}}` object shaped
+ * like llama-server's error body; the call returns a failure status either way.
+ * A cancelled or timed-out request ends without a finish chunk, like a dropped
+ * connection. Returning non-zero from on_event cancels the request.
+ */
+typedef int32_t (*gezel_llama_json_callback)(const char * json, size_t length, void * user_data);
+
+typedef struct gezel_llama_chat_options {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t request_id;
+    /** Covers prompt processing and decoding; at most 600000. */
+    uint32_t timeout_ms;
+    /** Ceiling on the text generated for one reply. */
+    uint32_t max_output_bytes;
+    /** GEZEL_LLAMA_CHAT_RENDER_ONLY: deliver one object describing the rendered
+     * prompt, grammar and triggers instead of generating (tests, diagnostics). */
+    uint32_t flags;
+} gezel_llama_chat_options;
+
+#define GEZEL_LLAMA_CHAT_RENDER_ONLY 1u
+
+gezel_llama_chat_options gezel_llama_default_chat_options(void);
+
+/** Settings llama-server takes from its launch flags, as JSON:
+ * {chat_template?, reasoning_format?, reasoning_budget?, reasoning_budget_message?,
+ *  enable_thinking?, prefill_assistant?, chat_template_kwargs?}. Applies to the
+ * next chat request; a loaded model keeps them until the next call. */
+int32_t gezel_llama_configure_chat(gezel_llama_engine * engine, const char * config_json, size_t length,
+    gezel_llama_error * error);
+
+/** One chat completion. Blocks until it ends; the engine must be loaded. */
+int32_t gezel_llama_chat(gezel_llama_engine * engine, const char * request_json, size_t length,
+    const gezel_llama_chat_options * options, gezel_llama_json_callback on_event, void * user_data,
     gezel_llama_result * result, gezel_llama_error * error);
 
 /** Thread-safe cooperative cancellation of the matching CURRENT request only.

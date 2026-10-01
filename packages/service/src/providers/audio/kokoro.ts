@@ -1,14 +1,11 @@
 /**
  * KokoroProvider — local TTS via the Apache 2.0 Kokoro-82M model,
  * driven through `kokoro-js` (Transformers.js + ONNX runtime under the
- * hood). Inference runs in-process; there is no native subprocess and
- * no `NativeEngineSupervisor` involvement, unlike whisper.cpp.
- *
- * Why in-process: the audio-chat future requires streaming TTS, and
- * the chunked-output API is a first-class feature of `kokoro-js`. A
- * native HTTP shim would have to retrofit streaming later. See the
- * plan's "Architectural gaps to design around now (cheap) vs later
- * (expensive)" section.
+ * hood). There is no native subprocess and no `NativeEngineSupervisor`
+ * involvement, unlike whisper.cpp: inference runs on a worker thread of the
+ * daemon (kokoro-worker.ts), because an ONNX run blocks the thread it is on.
+ * The engine itself is kokoro-engine.ts; this file is the provider surface —
+ * install records, voices, progress, and WAV assembly.
  *
  * Model layout on disk:
  *
@@ -17,7 +14,7 @@
  *   └── snapshots/<commit>/    (`kokoro-js`'s HF cache layout — ONNX +
  *                               voice .bin files extracted by Transformers.js)
  *
- * The provider pins `@huggingface/transformers`'s `env.cacheDir` to a
+ * The engine pins `@huggingface/transformers`'s `env.cacheDir` to a
  * writable engine-scoped directory before each `from_pretrained()` call
  * (via the shared `pinTransformersCacheDir` — see transformers-cache.ts
  * for why this is mandatory). kokoro-js requires the same transformers
@@ -26,10 +23,18 @@
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
 import { resolveModelDirectory } from '../../models/model-id.js';
-import { type LoadTransformersEnv, pinTransformersCacheDir } from '../../transformers-cache.js';
-import { KokoroFrontend } from './kokoro-frontend.js';
+import type { LoadTransformersEnv } from '../../transformers-cache.js';
+import {
+  InProcessKokoroBackend,
+  KOKORO_HF_REPO,
+  type KokoroBackend,
+  type KokoroEngineConfig,
+  type KokoroJsModule,
+  type KokoroTensorConstructor,
+  type KokoroVoiceTable,
+} from './kokoro-engine.js';
+import { KokoroWorkerBackend } from './kokoro-worker-host.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -41,7 +46,15 @@ import type {
   TextToSpeechProvider,
 } from './types.js';
 
-const log = createLogger('audio');
+export {
+  type KokoroAudioOutput,
+  type KokoroInputIds,
+  type KokoroJsModule,
+  type KokoroTensorConstructor,
+  type KokoroTextSplitterStream,
+  KokoroTimeoutError,
+  type KokoroTTSInstance,
+} from './kokoro-engine.js';
 
 export interface KokoroProviderOptions {
   /** Absolute path to `~/.gezel/engines/kokoro/models`. */
@@ -57,6 +70,9 @@ export interface KokoroProviderOptions {
    * `import('kokoro-js')` is deferred until first use because the
    * package pulls Transformers.js into memory (≈40 MB heap) and we
    * don't want every gezel boot to pay that cost.
+   *
+   * Injecting this, or either loader below, runs synthesis in-process:
+   * functions cannot cross into the worker thread.
    */
   loadKokoroJs?: () => Promise<KokoroJsModule>;
   /** Directory holding the staged pronunciation dictionaries. */
@@ -81,14 +97,13 @@ export interface KokoroProviderOptions {
    */
   defaultDtype?: 'q4' | 'q8' | 'fp16' | 'fp32';
   /**
-   * Watchdog for a *single* sentence's inference (or the one-shot
-   * `generate()` fallback). Deliberately per-chunk rather than a budget
-   * for the whole call: narrating a long reply is legitimately slow, so
-   * a whole-operation deadline would have to be enormous and a wedged
-   * engine would take that long to surface. Kokoro truncates each
-   * inference at 510 tokens, so one chunk is bounded work no matter how
-   * much text was handed in. Defaults to 60s — roughly 50x the observed
-   * ~600ms/sentence on an M-series laptop.
+   * Watchdog for a *single* sentence's inference. Deliberately per-chunk
+   * rather than a budget for the whole call: narrating a long reply is
+   * legitimately slow, so a whole-operation deadline would have to be
+   * enormous and a wedged engine would take that long to surface. Kokoro
+   * truncates each inference at 510 tokens, so one chunk is bounded work no
+   * matter how much text was handed in. Defaults to 60s — roughly 50x the
+   * observed ~600ms/sentence on an M-series laptop.
    */
   inferenceTimeoutMs?: number;
   /**
@@ -99,139 +114,10 @@ export interface KokoroProviderOptions {
   loadTimeoutMs?: number;
 }
 
-/**
- * Raised when the engine stops producing audio within its watchdog
- * budget. Distinct from a generic Error so callers can tell "wedged
- * engine" apart from "bad input" — the route layer turns both into a
- * 500, but the message is what reaches the user.
- */
-export class KokoroTimeoutError extends Error {
-  readonly isTimeout = true;
-  constructor(message: string) {
-    super(message);
-    this.name = 'KokoroTimeoutError';
-  }
-}
-
 const DEFAULT_INFERENCE_TIMEOUT_MS = 60_000;
 const DEFAULT_LOAD_TIMEOUT_MS = 300_000;
 
-/**
- * Reject with {@link KokoroTimeoutError} if `operation` hasn't settled
- * within `ms`.
- *
- * Two properties this relies on:
- *
- * - `Promise.race` attaches handlers to every input, so a rejection that
- *   arrives *after* we've given up is still considered handled and won't
- *   trip an unhandledRejection.
- * - The timer is `unref`'d so a pending watchdog never by itself keeps
- *   the daemon (or a test worker) alive.
- *
- * Note this can only fire while the event loop is free. ONNX inference
- * blocks the thread in embedded mode, so the watchdog effectively guards
- * the gaps *between* chunks — which is exactly where the hang this was
- * written for lives, and means a busy CPU is never mistaken for a stall.
- */
-async function withTimeout<T>(operation: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new KokoroTimeoutError(message)), ms);
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/**
- * Subset of the kokoro-js public API we depend on. Kept narrow so
- * tests can mock it without pulling in Transformers.js, and so an
- * upstream shape change surfaces as a concrete TypeScript error
- * rather than a runtime mystery.
- */
-export interface KokoroJsModule {
-  KokoroTTS: {
-    from_pretrained(
-      modelId: string,
-      opts?: { dtype?: string; device?: string },
-    ): Promise<KokoroTTSInstance>;
-  };
-  /**
-   * Sentence splitter feeding {@link KokoroTTSInstance.stream}. We must
-   * construct and `close()` this ourselves — see `synthesize` for why
-   * handing `stream()` a bare string deadlocks.
-   */
-  TextSplitterStream?: new () => KokoroTextSplitterStream;
-}
-
-export interface KokoroTextSplitterStream {
-  push(...text: string[]): void;
-  close(): void;
-}
-
-/**
- * `@huggingface/transformers`'s Tensor, narrowed to the one shape we build.
- * Declared structurally so tests can supply a stub without the real package.
- */
-export interface KokoroTensorConstructor {
-  new (type: 'int64', data: BigInt64Array, dims: readonly number[]): KokoroInputIds;
-}
-
-/** Opaque to us; kokoro-js only reads `dims` before handing it to ONNX. */
-export interface KokoroInputIds {
-  readonly dims: readonly number[];
-}
-
-export interface KokoroTTSInstance {
-  generate(text: string, opts?: { voice?: string; speed?: number }): Promise<KokoroAudioOutput>;
-  /**
-   * Synthesize from phoneme ids. This is the entry point Gezel uses: it skips
-   * kokoro-js's own text handling, which reaches for eSpeak NG through
-   * `phonemizer`. See kokoro-frontend.ts.
-   */
-  generate_from_ids(
-    inputIds: KokoroInputIds,
-    opts?: { voice?: string; speed?: number },
-  ): Promise<KokoroAudioOutput>;
-  /**
-   * Sentence-level streaming variant. Each yielded `audio` is a small
-   * RawAudio chunk (~1-2s of speech) instead of one mega-inference for
-   * the entire text. We prefer this in `synthesize` so the event loop
-   * gets to drain between sentences — in Electron's embedded mode the
-   * service shares the main process thread, and a multi-sentence
-   * one-shot freezes the UI for the entire inference window.
-   */
-  stream?(
-    text: string | KokoroTextSplitterStream,
-    opts?: { voice?: string; speed?: number; split_pattern?: RegExp | null },
-  ): AsyncIterable<{ text: string; phonemes: string; audio: KokoroAudioOutput }>;
-  // kokoro-js exposes voices as a getter on the prototype; `list_voices()`
-  // exists but only `console.table()`s and returns undefined, so we never
-  // call it.
-  voices?: Record<string, { name?: string; language?: string; gender?: string }>;
-}
-
-export interface KokoroAudioOutput {
-  audio: Float32Array;
-  sampling_rate: number;
-  /**
-   * kokoro-js v1.2+ inherits `toWav()` from @huggingface/transformers's
-   * `RawAudio`. It returns an `ArrayBuffer` (not a `Uint8Array`) — the
-   * earlier shape was wrong and crashed `audioToWav` at runtime with
-   * "first argument must be ... Received undefined" when we tried to
-   * read `.buffer` / `.byteOffset` off an ArrayBuffer.
-   */
-  toWav?: () => ArrayBuffer;
-  save?: (path: string) => Promise<void>;
-}
-
 export const KOKORO_DEFAULT_MODEL_ID = 'kokoro-82m-v1.0';
-const KOKORO_HF_REPO = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 const KOKORO_APPROX_BYTES_BY_ID: Readonly<Record<string, number>> = {
   [KOKORO_DEFAULT_MODEL_ID]: 95_000_000,
 };
@@ -328,48 +214,34 @@ export class KokoroProvider implements TextToSpeechProvider {
   readonly name = 'kokoro';
   private readonly modelsRoot: string;
   private readonly cacheDir: string;
-  private readonly loadKokoroJs: () => Promise<KokoroJsModule>;
-  private readonly loadTransformersEnv: LoadTransformersEnv | undefined;
   private readonly defaultDtype: 'q4' | 'q8' | 'fp16' | 'fp32';
-  private readonly inferenceTimeoutMs: number;
-  private readonly loadTimeoutMs: number;
-  private readonly frontend: KokoroFrontend;
-  private readonly loadTransformers: () => Promise<{ Tensor: KokoroTensorConstructor }>;
-  private cachedTensor: Promise<KokoroTensorConstructor> | null = null;
-  private cachedTts: KokoroTTSInstance | null = null;
-  private cachedModule: KokoroJsModule | null = null;
-  private loadingPromise: Promise<KokoroTTSInstance> | null = null;
+  private readonly backend: KokoroBackend;
+  private voices: KokoroVoiceTable | undefined;
+  private installVerified = false;
 
   constructor(opts: KokoroProviderOptions) {
     this.modelsRoot = opts.modelsRoot;
     // `<engines>/hf-cache` (sibling of the per-engine `kokoro/` dir) so a
     // future in-process transformers.js user shares one managed HF cache.
     this.cacheDir = opts.cacheDir ?? join(dirname(dirname(opts.modelsRoot)), 'hf-cache');
-    this.loadKokoroJs = opts.loadKokoroJs ?? defaultKokoroLoader;
-    // Undefined → pinTransformersCacheDir uses its own default env loader.
-    this.loadTransformersEnv = opts.loadTransformersEnv;
     this.defaultDtype = opts.defaultDtype ?? 'q8';
-    this.frontend = new KokoroFrontend(
-      opts.lexiconDir === undefined ? {} : { lexiconDir: opts.lexiconDir },
-    );
-    this.loadTransformers =
-      opts.loadTransformers ??
-      (async () =>
-        (await import('@huggingface/transformers')) as unknown as {
-          Tensor: KokoroTensorConstructor;
-        });
-    this.inferenceTimeoutMs = opts.inferenceTimeoutMs ?? DEFAULT_INFERENCE_TIMEOUT_MS;
-    this.loadTimeoutMs = opts.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
-  }
-
-  /** Point transformers.js at our writable cache dir before the first load. */
-  private configureCache(): Promise<void> {
-    return pinTransformersCacheDir(this.cacheDir, this.loadTransformersEnv);
-  }
-
-  private async module(): Promise<KokoroJsModule> {
-    this.cachedModule ??= await this.loadKokoroJs();
-    return this.cachedModule;
+    const config: KokoroEngineConfig = {
+      cacheDir: this.cacheDir,
+      dtype: this.defaultDtype,
+      inferenceTimeoutMs: opts.inferenceTimeoutMs ?? DEFAULT_INFERENCE_TIMEOUT_MS,
+      loadTimeoutMs: opts.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
+      ...(opts.lexiconDir === undefined ? {} : { lexiconDir: opts.lexiconDir }),
+    };
+    const injected = opts.loadKokoroJs ?? opts.loadTransformers ?? opts.loadTransformersEnv;
+    // Vitest cannot load a `.ts` worker entry, so tests always run in-process.
+    this.backend =
+      injected || process.env.VITEST
+        ? new InProcessKokoroBackend(config, {
+            ...(opts.loadKokoroJs ? { loadKokoroJs: opts.loadKokoroJs } : {}),
+            ...(opts.loadTransformers ? { loadTransformers: opts.loadTransformers } : {}),
+            ...(opts.loadTransformersEnv ? { loadTransformersEnv: opts.loadTransformersEnv } : {}),
+          })
+        : new KokoroWorkerBackend(config);
   }
 
   async synthesize(input: SynthesizeInput): Promise<SynthesizeOutput> {
@@ -381,69 +253,41 @@ export class KokoroProvider implements TextToSpeechProvider {
       input.onProgress?.({ phase, completedCharacters, totalCharacters, completedChunks });
     input.signal?.throwIfAborted();
     await report('loading');
-    const tts = await this.ensureLoaded();
+    await this.ensureInstalled();
+    this.voices = (await this.backend.load({ deadline: true })) ?? this.voices;
     input.signal?.throwIfAborted();
     await report('synthesizing');
     const voice = input.voice ?? DEFAULT_VOICE_ID;
     const speed = clamp(input.speed ?? 1, 0.5, 2);
 
-    // Kokoro reads phoneme ids. `kokoro-js` will derive them itself, but only
-    // through `phonemizer`, which embeds eSpeak NG — GPL-3 code that cannot
-    // ship inside an MIT app on the app stores. So the text is phonemized by
-    // the shared frontend (the same one the mobile host runs, against the same
-    // dictionary) and fed to `generate_from_ids` one sentence at a time.
-    //
-    // Driving the loop ourselves also retires the `TextSplitterStream`
-    // deadlock the old streaming path had to work around: handing `stream()` a
-    // bare string made kokoro-js build an internal splitter it never closed,
-    // so the trailing sentence hung forever. There is no splitter now.
-    const utterances = await this.frontend.plan(input.text, voice);
-    const Tensor = await this.tensorConstructor();
-    const chunks: Float32Array[] = [];
+    const parts: Uint8Array[] = [];
     let sampleRate: number | undefined;
-    for (const utterance of utterances) {
-      input.signal?.throwIfAborted();
-      // The model wants int64 ids shaped [batch, tokens].
-      const inputIds = new Tensor(
-        'int64',
-        BigInt64Array.from(utterance.tokens, (id) => BigInt(id)),
-        [1, utterance.tokens.length],
-      );
-      // Each sentence keeps its own watchdog so one stall cannot pin the
-      // request open forever.
-      const audio = await withTimeout(
-        tts.generate_from_ids(inputIds, { voice, speed }),
-        this.inferenceTimeoutMs,
-        `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s after ${chunks.length} chunk(s) — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
-      );
-      input.signal?.throwIfAborted();
-      chunks.push(audio.audio);
-      sampleRate ??= audio.sampling_rate;
-      completedCharacters = Math.min(totalCharacters, completedCharacters + utterance.text.length);
-      completedChunks += 1;
-      await report('synthesizing');
-      await input.onChunk?.({
-        index: completedChunks - 1,
-        wav: encodeWavPcm16(audio.audio, audio.sampling_rate),
-        sampleRate: audio.sampling_rate,
-        durationSeconds: audio.audio.length / audio.sampling_rate,
-      });
-      // Yield to the event loop before the next sentence's inference starts.
-      // setImmediate sits after IO/timers in the Node event loop, which is what
-      // we want — UI ticks and pending HTTP work catch up before we re-saturate
-      // the CPU. Critical in Electron's embedded mode, where this runs on the
-      // main process thread.
-      await new Promise<void>((r) => setImmediate(r));
-    }
+    await this.backend.synthesize(
+      { text: input.text, voice, speed },
+      input.signal,
+      async (audio) => {
+        parts.push(audio.pcm);
+        sampleRate ??= audio.sampleRate;
+        completedCharacters = Math.min(totalCharacters, completedCharacters + audio.characters);
+        completedChunks += 1;
+        await report('synthesizing');
+        await input.onChunk?.({
+          index: completedChunks - 1,
+          wav: wavFromPcm16le([audio.pcm], audio.sampleRate),
+          sampleRate: audio.sampleRate,
+          durationSeconds: audio.pcm.byteLength / 2 / audio.sampleRate,
+        });
+      },
+    );
+    input.signal?.throwIfAborted();
 
-    if (chunks.length === 0 || sampleRate === undefined) {
+    if (parts.length === 0 || sampleRate === undefined) {
       throw new Error('kokoro stream produced no audio (empty text?)');
     }
     completedCharacters = totalCharacters;
     await report('encoding');
-    const combined = concatFloat32(chunks);
-    const wav = encodeWavPcm16(combined, sampleRate);
-    const durationSeconds = combined.length / sampleRate;
+    const wav = wavFromPcm16le(parts, sampleRate);
+    const durationSeconds = (wav.length - WAV_HEADER_BYTES) / 2 / sampleRate;
     return {
       wav,
       meta: {
@@ -493,32 +337,19 @@ export class KokoroProvider implements TextToSpeechProvider {
 
   async *pullModel(id: string, spec: AudioModelPullSpec): AsyncIterable<AudioModelPullEvent> {
     // kokoro-js handles the actual download via Transformers.js's
-    // own cache fetcher. We point it at our managed dir via
-    // `cache_dir`, then drop a manifest so list/health agree on
-    // "installed". Progress reporting is coarse — Transformers.js
-    // doesn't expose per-byte progress through `from_pretrained`,
-    // so we emit one start, one mid-pull tick, and a final done.
+    // own cache fetcher, into the cache dir the engine pins. We then
+    // drop a manifest so list/health agree on "installed". Progress
+    // reporting is coarse — Transformers.js doesn't expose per-byte
+    // progress through `from_pretrained`, so we emit one start and a
+    // final done.
     const itemDir = join(this.modelsRoot, id);
     await mkdir(itemDir, { recursive: true });
     const totalBytes = spec.files.reduce((n, f) => n + f.approxSizeBytes, 0);
     yield { type: 'progress', bytesWritten: 0, totalBytes };
 
     try {
-      await this.configureCache();
-      const mod = await this.module();
-      // kokoro-js's `from_pretrained` doesn't accept a cache_dir option —
-      // it delegates to @huggingface/transformers, whose cache dir we've
-      // pinned via `configureCache()` above. We record the install in our
-      // managed dir via the manifest below so listInstalledModels / health
-      // agree on "installed"; the ONNX weights live in the pinned
-      // transformers cache and are re-used on every subsequent load.
-      this.cachedTts = await mod.KokoroTTS.from_pretrained(KOKORO_HF_REPO, {
-        dtype: this.defaultDtype,
-      });
+      this.voices = (await this.backend.load({ deadline: false })) ?? this.voices;
     } catch (err) {
-      log.error(
-        `kokoro model load failed (cacheDir=${this.cacheDir}): ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-      );
       yield {
         type: 'error',
         error: `kokoro model load failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -547,6 +378,7 @@ export class KokoroProvider implements TextToSpeechProvider {
       ),
       'utf8',
     );
+    this.installVerified = true;
 
     yield { type: 'progress', bytesWritten: totalBytes, totalBytes };
     yield { type: 'done', id };
@@ -555,24 +387,19 @@ export class KokoroProvider implements TextToSpeechProvider {
   async deleteModel(id: string): Promise<void> {
     const itemDir = resolveModelDirectory(this.modelsRoot, id);
     await rm(itemDir, { recursive: true, force: true });
-    // If we deleted the loaded model out from under us, drop the cache
-    // so the next synthesize re-loads (and fails loudly if no replacement
-    // is installed).
-    this.cachedTts = null;
-    this.loadingPromise = null;
+    // If we deleted the loaded model out from under us, drop it so the
+    // next synthesize re-checks the install (and fails loudly if no
+    // replacement is installed).
+    this.installVerified = false;
+    this.voices = undefined;
+    await this.backend.unload();
   }
 
   async listVoices(): Promise<AudioVoiceInfo[]> {
-    if (!this.cachedTts) {
-      // Engine isn't loaded yet — return the curated default list. The
-      // real instance carries the full 54+ voices and replaces this on
-      // first synthesize.
-      return [...KOKORO_DEFAULT_VOICES];
-    }
-    // kokoro-js exposes voices as a prototype getter that always returns
-    // the frozen VOICES dict. The sibling `list_voices()` method only
-    // calls console.table() and returns undefined — never call it.
-    const raw = this.cachedTts.voices ?? {};
+    // Before the first load, the curated default list. The loaded model
+    // carries the full 54+ voices and replaces it.
+    const raw = this.voices;
+    if (!raw) return [...KOKORO_DEFAULT_VOICES];
     const out: AudioVoiceInfo[] = [];
     for (const [id, info] of Object.entries(raw)) {
       out.push({
@@ -598,102 +425,41 @@ export class KokoroProvider implements TextToSpeechProvider {
   }
 
   async shutdown(): Promise<void> {
-    this.cachedTts = null;
-    this.loadingPromise = null;
+    this.voices = undefined;
+    await this.backend.shutdown();
   }
 
-  /** Resolve the tensor constructor once; the import is heavy. */
-  private tensorConstructor(): Promise<KokoroTensorConstructor> {
-    if (!this.cachedTensor) {
-      const pending = this.loadTransformers().then((mod) => mod.Tensor);
-      // A failed import must not be cached as a permanent failure.
-      void pending.catch(() => {
-        this.cachedTensor = null;
-      });
-      this.cachedTensor = pending;
-    }
-    return this.cachedTensor;
-  }
-
-  private async ensureLoaded(): Promise<KokoroTTSInstance> {
-    if (this.cachedTts) return this.cachedTts;
-    if (this.loadingPromise) return this.loadingPromise;
-
-    this.loadingPromise = (async () => {
-      // Require a manifest from a prior pull so synthesize doesn't silently
-      // trigger a model download on the first turn. If none exists, surface
-      // a clear error (the route layer turns this into a 503 the UI guides
-      // on). The weights themselves live in @huggingface/transformers's
-      // cache, not in our managed dir — see pullModel for context.
-      const installed = await this.listInstalledModels();
-      if (installed.length === 0) {
-        throw new Error(
-          'No TTS model is available locally. Download Kokoro from Settings → Audio before synthesizing.',
-        );
-      }
-      await this.configureCache();
-      const mod = await this.module();
-      const tts = await withTimeout(
-        mod.KokoroTTS.from_pretrained(KOKORO_HF_REPO, { dtype: this.defaultDtype }),
-        this.loadTimeoutMs,
-        `Loading the Kokoro model timed out after ${Math.round(this.loadTimeoutMs / 1000)}s. If the weights are being re-downloaded this may just be a slow connection — retry, or re-pull the model from Settings → Audio.`,
-      );
-      this.cachedTts = tts;
-      return tts;
-    })().finally(() => {
-      this.loadingPromise = null;
-    });
-
-    return this.loadingPromise;
-  }
-}
-
-async function defaultKokoroLoader(): Promise<KokoroJsModule> {
-  // Imported via dynamic specifier so unit tests can run without
-  // kokoro-js being installed (mocked via `loadKokoroJs`). The cast
-  // assumes upstream's CommonJS-flavored module shape — kokoro-js
-  // re-exports `KokoroTTS` directly.
-  try {
-    return (await import('kokoro-js')) as unknown as KokoroJsModule;
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    if (detail.includes('kokoro-js')) {
+  /**
+   * Require a manifest from a prior pull so synthesize doesn't silently
+   * trigger a model download on the first turn. If none exists, surface
+   * a clear error (the route layer turns this into a 503 the UI guides
+   * on). The weights themselves live in @huggingface/transformers's
+   * cache, not in our managed dir — see pullModel for context.
+   */
+  private async ensureInstalled(): Promise<void> {
+    if (this.installVerified) return;
+    const installed = await this.listInstalledModels();
+    if (installed.length === 0) {
       throw new Error(
-        'Local text-to-speech is an optional npm feature. Install kokoro-js@^1.2.1 and @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).',
+        'No TTS model is available locally. Download Kokoro from Settings → Audio before synthesizing.',
       );
     }
-    throw err;
+    this.installVerified = true;
   }
 }
 
-/**
- * Concatenate the Float32 PCM chunks yielded by kokoro-js's stream API
- * into a single Float32Array we can hand to {@link encodeWavPcm16}.
- * One allocation up front beats N growing-buffer copies.
- */
-function concatFloat32(chunks: ReadonlyArray<Float32Array>): Float32Array {
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const out = new Float32Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.length;
-  }
-  return out;
-}
+const WAV_HEADER_BYTES = 44;
 
 /**
- * Encode a mono Float32 PCM stream (samples in [-1, 1]) to a
- * 16-bit PCM WAV buffer. Standard RIFF / "fmt " / "data" header.
+ * A mono 16-bit PCM WAV from little-endian sample data, in one allocation.
+ * Standard RIFF / "fmt " / "data" header.
  */
-function encodeWavPcm16(samples: Float32Array, sampleRate: number): Buffer {
+function wavFromPcm16le(parts: ReadonlyArray<Uint8Array>, sampleRate: number): Buffer {
+  let dataSize = 0;
+  for (const part of parts) dataSize += part.byteLength;
   const numChannels = 1;
   const bitsPerSample = 16;
-  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
-  const blockAlign = numChannels * (bitsPerSample / 8);
-  const dataSize = samples.length * 2;
-  const buf = Buffer.alloc(44 + dataSize);
+  const buf = Buffer.alloc(WAV_HEADER_BYTES + dataSize);
 
   buf.write('RIFF', 0);
   buf.writeUInt32LE(36 + dataSize, 4);
@@ -703,17 +469,16 @@ function encodeWavPcm16(samples: Float32Array, sampleRate: number): Buffer {
   buf.writeUInt16LE(1, 20); // PCM
   buf.writeUInt16LE(numChannels, 22);
   buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(byteRate, 28);
-  buf.writeUInt16LE(blockAlign, 32);
+  buf.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28);
+  buf.writeUInt16LE(numChannels * (bitsPerSample / 8), 32);
   buf.writeUInt16LE(bitsPerSample, 34);
   buf.write('data', 36);
   buf.writeUInt32LE(dataSize, 40);
 
-  for (let i = 0; i < samples.length; i++) {
-    let s = samples[i] ?? 0;
-    if (s > 1) s = 1;
-    else if (s < -1) s = -1;
-    buf.writeInt16LE(Math.round(s * 32767), 44 + i * 2);
+  let offset = WAV_HEADER_BYTES;
+  for (const part of parts) {
+    buf.set(part, offset);
+    offset += part.byteLength;
   }
   return buf;
 }

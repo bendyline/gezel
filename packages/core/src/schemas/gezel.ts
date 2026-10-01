@@ -8,10 +8,13 @@ import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
+import { ReferencedFileSchema, TaskDeliverableSchema } from './referenced-file.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
+
+export * from './referenced-file.js';
 
 /**
  * Agent frontmatter lives at the top of `agent.md`. It describes the agent's
@@ -645,28 +648,6 @@ export const ChatSessionSourceSchema = z.object({
 export type ChatSessionSource = z.infer<typeof ChatSessionSourceSchema>;
 
 /**
- * Which store a referenced file lives in. Documents are deliberately not a
- * third kind: the shared library is a project (ADR 0006), so its files
- * arrive as that project's `workspace`.
- */
-export const ReferencedFileKindSchema = z.enum(['artifact', 'workspace']);
-export type ReferencedFileKind = z.infer<typeof ReferencedFileKindSchema>;
-
-/**
- * One real file an assistant reply named in its body text. `path` is
- * relative to the store named by `kind` — the project's `artifacts/`
- * drawer or its workspace root — and is always the canonical on-disk
- * spelling, never the model's. Any `:line` / `#Lnn` locator the model
- * wrote is stripped before matching; the inline link keeps it as label
- * text, but nothing downstream resolves a path with one attached.
- */
-export const ReferencedFileSchema = z.object({
-  kind: ReferencedFileKindSchema,
-  path: z.string(),
-});
-export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
-
-/**
  * User-facing facts about a persisted automatic context compaction.
  *
  * This metadata is deliberately display-only: the synthesized message's
@@ -730,6 +711,13 @@ export const ChatMessageSchema = z.object({
    * "AI wrote a file outside the MCP tools" path.
    */
   referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /**
+   * The finished file a `task-wrapup` message hands over. The chat renders
+   * it as a card closing the bubble rather than one path in a list, so the
+   * deck the person asked for is not buried among the sources and outlines
+   * the task made on the way. Always also present in `referencedFiles`.
+   */
+  deliverable: TaskDeliverableSchema.optional(),
   /**
    * The artifact-only projection of {@link referencedFiles}, still
    * written so an older `@bendyline/gezel-cli` (or any out-of-tree
@@ -845,7 +833,7 @@ export const ChatMessageSchema = z.object({
    *   before the granted recovery continuation runs.
    * - `'task-wrapup'` — a task launched from this thread finished; the
    *   thread's gezel tells the owner what was made, with the files it wrote
-   *   as `referencedFiles`.
+   *   as `referencedFiles` and the finished one as `deliverable`.
    * - `'crew-introduction'` — a gezel was hired for a task launched from
    *   this thread; the thread's gezel introduces them before they start.
    *
@@ -1407,7 +1395,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    */
   z.object({
     type: z.literal('engine_phase'),
-    provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+    /** Desktop engines, and a phone's on-device providers. */
+    provider: z.enum(['llama-cpp', 'mlx', 'ds4', 'apple-foundation-models', 'android-mlkit']),
     phase: z.enum(['starting', 'loading_model', 'prefill', 'generating', 'ready']),
     /**
      * Human-readable subject for an ephemeral background completion. Unlike

@@ -7,7 +7,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { type HealthResponse, type ServiceRole, pickRandomNameWithGender } from '@bendyline/gezel';
+import {
+  type HealthResponse,
+  type ServiceRole,
+  getLogLevel,
+  getLogOutput,
+  pickRandomNameWithGender,
+  setLogLevel,
+  setLogOutput,
+} from '@bendyline/gezel';
 import {
   GezelSdkError,
   type LocalAuthorizedConnection,
@@ -31,6 +39,7 @@ import {
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { installSignalCleanup } from './signal-cleanup.js';
 
 /** Global flags shared across commands (defined on the root program). */
 export interface CliGlobals {
@@ -127,7 +136,18 @@ export function resolveDevHome(globals: CliGlobals): void {
  * compute-only and is discovered by the user daemon, never used directly as
  * the CLI's product API.
  */
-export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
+export interface ConnectOwnedOptions {
+  /**
+   * Say on stderr when this call had to start the daemon (default true).
+   * `gezel start` turns it off: starting the daemon is that command's job.
+   */
+  announceSpawn?: boolean;
+}
+
+export async function connectOwned(
+  globals: CliGlobals,
+  options: ConnectOwnedOptions = {},
+): Promise<GezelClient> {
   applyHome(globals);
   const preferred = await connectPreferredService(globals);
   if (preferred) return preferred.client;
@@ -144,6 +164,9 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
       ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     },
   });
+  if (authorized.daemon.mode === 'spawned' && options.announceSpawn !== false) {
+    process.stderr.write(spawnedDaemonNotice(authorized.daemon.pid));
+  }
   const connected = await connectionFromAuthorization(
     authorized,
     'The local Gezel owner authorization',
@@ -179,6 +202,8 @@ export async function connectForTui(globals: CliGlobals): Promise<TuiConnection>
     daemonEntry: resolveDaemonEntry(import.meta.url),
     detached: false,
     stdio: 'pipe',
+    // The pipes below are drained and discarded, so the daemon keeps its own log.
+    writeLogFile: true,
     env: cliUserDaemonEnv(process.env.GEZEL_HOME, await shouldPreferCanonicalPort()),
     ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     timeoutMs: 20_000,
@@ -404,6 +429,57 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
     return stopPromise;
   };
   return { kind: 'owned', client, baseUrl, stop };
+}
+
+/**
+ * The stderr line for a command that had to start the daemon. The detached
+ * daemon outlives the command, so saying nothing left a ~350 MB process
+ * running unnoticed (2026-09-30 npm ship audit).
+ */
+export function spawnedDaemonNotice(pid: number | undefined): string {
+  const which = pid === undefined ? '' : ` (pid ${pid})`;
+  return `Started the Gezel background service${which}; it keeps running after this command. Stop it with \`gezel stop --daemon\`.\n`;
+}
+
+/**
+ * Run a read-only command without leaving a daemon behind: use the running
+ * one, or answer from an in-process service that stops with the command —
+ * `gezel run`'s fallback. Diagnostics such as `gezel native status` are what
+ * someone runs before anything is set up, and they used to spawn a resident
+ * daemon that outlived the command by 20+ minutes (2026-09-30 npm ship audit).
+ *
+ * Service log records go to stderr at warn level for the command's lifetime,
+ * so stdout carries only the command's result.
+ */
+export async function withTransientConnection<T>(
+  globals: CliGlobals,
+  fn: (client: GezelClient) => Promise<T>,
+): Promise<T> {
+  const previousLogOutput = getLogOutput();
+  setLogOutput('stderr');
+  const previousLogLevel = getLogLevel();
+  if (!process.env.GEZEL_LOG_LEVEL && previousLogLevel === 'info') setLogLevel('warn');
+  let conn: RunConnection | undefined;
+  let removeSignalCleanup: (() => void) | undefined;
+  try {
+    conn = await connectForRun(globals);
+    removeSignalCleanup = installSignalCleanup(conn.stop, {
+      onError: (error) => {
+        process.stderr.write(
+          `shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      },
+    });
+    return await fn(conn.client);
+  } finally {
+    removeSignalCleanup?.();
+    try {
+      if (conn?.stop) await conn.stop();
+    } finally {
+      setLogOutput(previousLogOutput);
+      setLogLevel(previousLogLevel);
+    }
+  }
 }
 
 const CLI_APP_ID_PREFIX = 'gezel-cli';

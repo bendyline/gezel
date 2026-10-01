@@ -1,0 +1,245 @@
+{
+  "requests": [
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "The validator found an issue; please address it.\n\n[Local-model repair mode: your next output must start with one tool call, not planning prose. Follow the concrete tool instruction in the repair request: if it names `append_to_file`, call `append_to_file`; if it names `replace_in_file`, call `replace_in_file`; if it names `write_file({ path: \"...\", content: ... })`, call `write_file` for that named path with the corrected complete content. Expand or patch the named file and preserve unrelated files. Do not reply with verification prose.]\n\n[Local-model provenance-read mode: this repair explicitly requires successful reads before any final claim mutation. While the read-only tool surface is active, call `read_file` for one of the remaining allowed source paths immediately. Do not plan, summarize, or edit early. After every required source read succeeds, the tool surface will switch to file mutations for the grounded repair.]"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "description": "Read a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "lib/payment.py"
+                  ],
+                  "description": "Must be one of the remaining prerequisite source paths."
+                },
+                "raw": {
+                  "type": "boolean",
+                  "description": "When true, return raw contents without line gutters."
+                },
+                "startLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based first line to read (inclusive)."
+                },
+                "endLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based last line to read (inclusive)."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    },
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "The validator found an issue; please address it.\n\n[Local-model repair mode: your next output must start with one tool call, not planning prose. Follow the concrete tool instruction in the repair request: if it names `append_to_file`, call `append_to_file`; if it names `replace_in_file`, call `replace_in_file`; if it names `write_file({ path: \"...\", content: ... })`, call `write_file` for that named path with the corrected complete content. Expand or patch the named file and preserve unrelated files. Do not reply with verification prose.]\n\n[Local-model provenance-read mode: this repair explicitly requires successful reads before any final claim mutation. While the read-only tool surface is active, call `read_file` for one of the remaining allowed source paths immediately. Do not plan, summarize, or edit early. After every required source read succeeds, the tool surface will switch to file mutations for the grounded repair.]"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-1",
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\":\"lib/payment.py\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "bad code",
+          "tool_call_id": "call-1"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "description": "Read a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Workspace-relative path."
+                },
+                "raw": {
+                  "type": "boolean",
+                  "description": "When true, return raw contents without line gutters."
+                },
+                "startLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based first line to read (inclusive)."
+                },
+                "endLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based last line to read (inclusive)."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Create or overwrite one UTF-8 text file in the project workspace. Use the exact workspace-relative path and the complete file contents.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Workspace-relative output path."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete file contents."
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "replace_in_file",
+            "description": "Replace a literal substring in an existing workspace file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Workspace-relative path."
+                },
+                "find": {
+                  "type": "string",
+                  "description": "Exact text to replace."
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text."
+                },
+                "occurrence": {
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Optional occurrence selector, e.g. 1 or all."
+                }
+              },
+              "required": [
+                "path",
+                "find",
+                "replace"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_dir",
+            "description": "List workspace files.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    }
+  ],
+  "executed": [
+    [
+      "read_file",
+      {
+        "path": "lib/payment.py"
+      }
+    ],
+    [
+      "replace_in_file",
+      {
+        "path": "lib/payment.py",
+        "find": "bad",
+        "replace": "good"
+      }
+    ]
+  ],
+  "result": "",
+  "deltas": "",
+  "reasoning": "",
+  "warnings": []
+}

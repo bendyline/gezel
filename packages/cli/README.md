@@ -45,7 +45,13 @@ With no connection flags, the CLI follows this order:
 2. Discover the logged-in user's product daemon through the same pinned
    runtime discovery used by the Gezel app SDK. Its actual dynamic port and
    pinned TLS certificate come from `~/.gezel/runtime`; management commands
-   may start that user-role daemon when it is absent. The interactive TUI
+   may start that user-role daemon when it is absent, and say so on stderr
+   because it keeps running afterwards (`gezel stop --daemon` ends it). A
+   daemon the CLI starts keeps its own log in
+   `~/.gezel/logs/service-YYYY-MM-DD.log` (rolled at 10 MB, kept 7 days).
+   Read-only diagnostics such as `gezel native status` and `native list`
+   never leave one behind: with no daemon running they answer from a
+   service that stops with the command. The interactive TUI
    retains ownership when it starts a daemon itself, so exiting the TUI runs
    the daemon's complete shutdown path and cleans up its local engine children.
 3. On first use, the terminal waits while the Gezel app asks you to approve
@@ -218,6 +224,21 @@ you can use:
 - Gezel and project management (`gezel agent`, `gezel project`, `gezel task`)
 - Skills and handbook export (`gezel skills convert`, `gezel handboek export`) —
   these need no running daemon at all
+- Knowledge catalogs you already have: `gezel knowledge validate`, `inspect`
+  and full-text `search` work offline, with no daemon
+
+Building a catalog (`gezel knowledge build`) and `gezel knowledge search
+--semantic` also need the embedding runtime, which an npm install leaves out.
+Add it where Gezel is installed (drop `-g` for a project install); the desktop
+app already includes it:
+
+```bash
+npm install -g @huggingface/transformers@^3.8.1
+```
+
+In a project install, also add the `overrides` from the
+[`@bendyline/gezel-service` README](https://www.npmjs.com/package/@bendyline/gezel-service):
+Transformers still asks for a `sharp` release that `npm audit` flags.
 
 ## Running models on your own machine
 

@@ -18,6 +18,8 @@ import {
 } from '../llama-cpp/tool-grammar.js';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import { computeToolBudgetChars } from '../mcp-bridge.js';
+import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from '../mlx/tool-image-retention.js';
+import { unseenToolImagesNote, withoutImages } from '../mlx/vision-mode.js';
 import { CapacityDeniedError, EngineBusyError } from '../native/capacity-broker.js';
 import {
   PROJECT_MACRO_FAILURE_CAP,
@@ -65,6 +67,17 @@ const MID_LOOP_COMPACT_RATIO = 0.7;
 const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
 type RemoteToolGrammarFallback = 'none' | 'simplified' | 'permissive';
+
+/** B's engine for this model takes no image input, so it refused a request whose history carried images. */
+class ImageHistoryRefusedError extends Error {}
+
+function imageCount(messages: readonly PriorMessageWire[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (message.role === 'user') count += message.images?.length ?? 0;
+  }
+  return count;
+}
 
 function nativeProviderFromModel(model: string): 'llama-cpp' | 'mlx' | 'ds4' | null {
   const separator = model.indexOf(':');
@@ -120,6 +133,15 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
    * rejected rich-schema request after every locally executed tool call.
    */
   private toolGrammarFallback: RemoteToolGrammarFallback = 'none';
+  /**
+   * Set once B refuses image history for this model. From then on the session
+   * behaves like an in-process text-only engine: tool images are dropped with a
+   * note instead of riding the next request. Without it, the first tool that
+   * returned pictures (`preview_document`'s slide renders) failed the whole
+   * turn with HTTP 422 against a llama.cpp machine engine (default/13,
+   * 2026-09-30).
+   */
+  private engineRefusesImages = false;
   numCtx: number;
   readonly model: string;
 
@@ -159,9 +181,19 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 
   estimatePromptChars(): number {
     return this.estimatePromptCharsFor(
-      this.activePriorMessages ?? this.transcript,
+      this.activePriorMessages ?? this.retainedTranscript(),
       this.pendingPrompt,
     );
+  }
+
+  /**
+   * The transcript as the next request will send it. A turn that ends on the
+   * model's answer still holds the tool images it just inspected; they are
+   * retired on that next request, so pressure checks and cache warming must
+   * not count or refuse on them in the meantime.
+   */
+  private retainedTranscript(): PriorMessageWire[] {
+    return retireInspectedToolImages(this.transcript);
   }
 
   /**
@@ -170,7 +202,8 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
    * from disk: system bands, transcript, tuning, and A's local tool schemas.
    */
   async prewarm(sessionId: string): Promise<void> {
-    if (this.transcript.some((m) => m.role === 'user' && m.images?.length)) return;
+    const transcript = this.retainedTranscript();
+    if (imageCount(transcript) > 0) return;
     const connection = this.deps.resolveConnection?.() ?? this.deps;
     const tools = this.advertisedTools();
     const body: RemoteCacheWarmRequest = {
@@ -180,7 +213,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       systemMessage: this.systemMessage,
       ...(this.deps.systemPromptLayers ? { systemPromptLayers: this.deps.systemPromptLayers } : {}),
       ...(this.deps.volatileContext ? { volatileContext: this.deps.volatileContext } : {}),
-      priorMessages: [...this.transcript],
+      priorMessages: [...transcript],
       ...(tools ? { tools } : {}),
       ...(this.deps.tuning ? { tuning: this.deps.tuning } : {}),
     };
@@ -226,7 +259,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     this.capturedCalls = [];
     this.compactedThisTurn = false;
     let deadline = Date.now() + (opts?.timeoutMs ?? this.deps.timeoutMs);
-    const priorMessages: PriorMessageWire[] = [...this.transcript];
+    const priorMessages: PriorMessageWire[] = [...this.retainedTranscript()];
     let currentTurnStartIdx = priorMessages.length;
     let userMessageAdded = false;
     let nextPrompt = prompt;
@@ -356,7 +389,8 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
               output = rich.text;
               outputIsError = rich.isError;
               if (!rich.isError) {
-                toolImages.push(...rich.images.map((image) => image.base64));
+                if (this.engineRefusesImages) output += unseenToolImagesNote(rich.images.length);
+                else toolImages.push(...rich.images.map((image) => image.base64));
                 approvalPending ||= rich.approvalPending === true;
               }
             } catch (err) {
@@ -430,12 +464,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           return fullText ? `${fullText}\n${closing}` : closing;
         }
         if (toolImages.length)
-          priorMessages.push({
-            role: 'user',
-            content:
-              'Images returned by the preceding tools. Inspect the pixels before judging them.',
-            images: toolImages,
-          });
+          priorMessages.push({ role: 'user', content: TOOL_IMAGES_MESSAGE, images: toolImages });
         if (approvalPending) {
           // The user daemon owns approval and queues its answer as a new turn.
           // Preserve complete tool pairs, then free the turn for that answer.
@@ -508,6 +537,18 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     queueWaitMs: number;
   }> {
     for (;;) {
+      // Tool images ride the one request after the tool that returned them,
+      // as on an in-process MLX engine (tool-image-retention.ts): resending a
+      // deck review's slide renders with every later request re-encoded them
+      // and forfeited the prefix cache each time. A text-only engine gets none.
+      // In place: the tool loop, pressure estimation, and the transcript saved
+      // at the end of the turn all read this array.
+      if (imageCount(priorMessages) > 0) {
+        const kept = this.engineRefusesImages
+          ? withoutImages(priorMessages)
+          : retireInspectedToolImages(priorMessages);
+        if (kept !== priorMessages) priorMessages.splice(0, priorMessages.length, ...kept);
+      }
       try {
         return await this.postInferOnce(
           prompt,
@@ -517,6 +558,13 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           this.toolGrammarFallback,
         );
       } catch (err) {
+        if (err instanceof ImageHistoryRefusedError && !this.engineRefusesImages) {
+          this.engineRefusesImages = true;
+          log.warn(
+            `[remote] ${this.deps.model} takes no image input; continuing without the ${imageCount(priorMessages)} image(s) in this conversation`,
+          );
+          continue;
+        }
         const detail = err instanceof Error ? err.message : String(err);
         if (
           nativeProviderFromModel(this.deps.model) !== 'llama-cpp' ||
@@ -633,26 +681,27 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         queueWaitMs += Date.now() - waitStartedAt;
         continue;
       }
+      let payload: { error?: string; message?: string; requestId?: string } = {};
       try {
-        const payload = JSON.parse(detail) as {
-          error?: string;
-          message?: string;
-          requestId?: string;
-        };
-        if (payload.error === 'capacity_denied') {
-          const error = new CapacityDeniedError(
-            payload.message ??
-              'This machine does not currently have enough memory to start the model.',
-          );
-          if (payload.requestId) Object.assign(error, { incidentId: payload.requestId });
-          throw error;
-        }
-      } catch (err) {
-        if (err instanceof CapacityDeniedError) throw err;
+        const parsed: unknown = JSON.parse(detail);
+        if (parsed && typeof parsed === 'object') payload = parsed as typeof payload;
+      } catch {
         // Mixed-version brokers may return plain text; keep the diagnostic
         // fallback below for failures without a structured availability code.
       }
-      throw new Error(`[remote] /v1/remote/infer returned HTTP ${res.status} ${detail}`.trim());
+      if (payload.error === 'capacity_denied') {
+        const error = new CapacityDeniedError(
+          payload.message ??
+            'This machine does not currently have enough memory to start the model.',
+        );
+        if (payload.requestId) Object.assign(error, { incidentId: payload.requestId });
+        throw error;
+      }
+      const message = `[remote] /v1/remote/infer returned HTTP ${res.status} ${detail}`.trim();
+      if (res.status === 422 && payload.error === 'image_history_not_supported_by_engine') {
+        throw new ImageHistoryRefusedError(message);
+      }
+      throw new Error(message);
     }
 
     let text = '';

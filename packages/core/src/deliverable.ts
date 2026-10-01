@@ -526,10 +526,25 @@ function stepGateFingerprints(step: Pick<CraftbookStep, 'gate'>): {
 export function stepDeliverablePath(
   step: Pick<CraftbookStep, 'advanceWhen' | 'gate'>,
 ): string | null {
-  if (step.advanceWhen?.file) return step.advanceWhen.file;
+  return stepDeliverableTarget(step)?.path ?? null;
+}
+
+/**
+ * {@link stepDeliverablePath} plus the drawer it resolves in: `artifact`
+ * when the `advanceWhen` / gate check that names it reads the artifacts
+ * drawer, otherwise the workspace.
+ */
+export function stepDeliverableTarget(
+  step: Pick<CraftbookStep, 'advanceWhen' | 'gate'>,
+): { path: string; artifact: boolean } | null {
+  if (step.advanceWhen?.file) {
+    return { path: step.advanceWhen.file, artifact: step.advanceWhen.artifact === true };
+  }
   const { checks } = stepGateFingerprints(step);
   for (const c of checks) {
-    if ('file' in c && typeof c.file === 'string' && c.file) return c.file;
+    if ('file' in c && typeof c.file === 'string' && c.file) {
+      return { path: c.file, artifact: 'artifact' in c && c.artifact === true };
+    }
   }
   return null;
 }

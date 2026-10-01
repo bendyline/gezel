@@ -110,6 +110,12 @@ describe('speakableMessageText', () => {
     ).toBe('Plan. Research the city. Draft slides.');
   });
 
+  it('does not add a stop after a sentence that already ends inside quotes or brackets', () => {
+    expect(speakableMessageText('It is one "app."\n(Mostly true.)\nThat is all')).toBe(
+      'It is one "app." (Mostly true.) That is all.',
+    );
+  });
+
   it('never reads code aloud', () => {
     expect(speakableMessageText('Here is the fix:\n\n```ts\nconst x = 1;\n```\n\nAll set.')).toBe(
       'Here is the fix: All set.',

@@ -274,6 +274,8 @@ export type CurrentTurnStepReactivatedHook = (ctx: {
   task: Task;
   newStep: TaskCraftbookStep;
   gatedStep: TaskCraftbookStep;
+  /** `newStep`'s `lastActivatedAt` before this reactivation replaced it. */
+  previousActivationAt: string | undefined;
 }) => void;
 
 /**
@@ -2676,6 +2678,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           task: updated,
           newStep,
           gatedStep: newStep,
+          previousActivationAt: completedStep.lastActivatedAt,
         });
       }
     }
@@ -3913,6 +3916,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           task: next,
           newStep,
           gatedStep,
+          previousActivationAt: target.lastActivatedAt,
         });
       } catch (err) {
         log.error('[tasks] current-turn step reactivation hook failed:', err);

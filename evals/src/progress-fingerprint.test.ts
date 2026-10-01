@@ -1,10 +1,13 @@
 import type { SessionTelemetry } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
+import type { GezelClient } from '@bendyline/gezel-client/node';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type DaemonActivityCounters,
   type ProgressFingerprint,
+  captureFingerprint,
   digestFingerprint,
   parseDaemonActivityText,
+  rejectedFileMutationsBySession,
   telemetryToActivityCounters,
 } from './progress-fingerprint.ts';
 
@@ -174,6 +177,199 @@ describe('telemetryToActivityCounters', () => {
       imageGenerationActive: false,
       source: 'service-telemetry',
     });
+  });
+
+  // INCIDENT (craftbook-spreadsheet-model, 2026-09-30): three edits refused
+  // with `stale_task_step` — nothing reached the workspace — read as
+  // "3 re-writes without sniff movement" and fired the retry-loop FAST path.
+  it('does not count a write the daemon rejected as a mutation', () => {
+    const counters = telemetryToActivityCounters(
+      [
+        session({ sessionId: 'build-1', toolCalls: 15, fileMutations: 2 }),
+        session({ sessionId: 'build-2', toolCalls: 11, fileMutations: 2 }),
+      ],
+      new Map([
+        ['build-1', 1],
+        ['build-2', 2],
+      ]),
+    );
+    expect(counters.writeCalls).toBe(1);
+    // Tool calls still count as activity; only the write classification moves.
+    expect(counters.toolCalls).toBe(26);
+  });
+
+  it('never lets a session go below zero writes', () => {
+    const counters = telemetryToActivityCounters(
+      [session({ sessionId: 's1', fileMutations: 1 })],
+      new Map([['s1', 4]]),
+    );
+    expect(counters.writeCalls).toBe(0);
+  });
+});
+
+describe('rejectedFileMutationsBySession', () => {
+  let seq = 0;
+  const toolCalled = (details: Record<string, unknown>) => ({
+    id: `ev-${++seq}`,
+    entryType: 'event',
+    kind: 'tool.called',
+    details,
+  });
+
+  it('counts only failed file-mutation calls, per session', () => {
+    const rejected = rejectedFileMutationsBySession([
+      toolCalled({ name: 'write_file', sessionId: 'a', success: true }),
+      toolCalled({
+        name: 'replace_in_file',
+        sessionId: 'a',
+        success: false,
+        errorMessage: '[stale_task_step] Step "build" no longer owns project writes.',
+      }),
+      toolCalled({ name: 'write_file', sessionId: 'b', success: false }),
+      toolCalled({ name: 'write_file', sessionId: 'b', errorMessage: 'ERROR: path denied' }),
+      // A failed READ is not a rejected write.
+      toolCalled({ name: 'read_file', sessionId: 'a', success: false }),
+      // Other event kinds and session entries are ignored.
+      { entryType: 'event', kind: 'project.updated', details: { sessionId: 'a' } },
+      { entryType: 'session', id: 'a' },
+    ]);
+    expect(Object.fromEntries(rejected)).toEqual({ a: 1, b: 2 });
+  });
+
+  it('counts one event once however often it is read', () => {
+    const refused = toolCalled({ name: 'write_file', sessionId: 'a', success: false });
+    expect(Object.fromEntries(rejectedFileMutationsBySession([refused, refused]))).toEqual({
+      a: 1,
+    });
+  });
+});
+
+describe('captureFingerprint — write accounting', () => {
+  const telemetryRow = (fileMutations: number): SessionTelemetry =>
+    ({
+      sessionId: 'build-1',
+      gezelId: 'malai',
+      projectId: 'p1',
+      inflight: false,
+      turnsStarted: 1,
+      providerRequestsStarted: 1,
+      deltaChunks: 0,
+      streamedContentChars: 0,
+      wirePulses: 0,
+      heartbeats: 0,
+      enginePhaseEvents: 0,
+      generationSpurts: 0,
+      toolCalls: fileMutations,
+      toolArgChars: 0,
+      fileMutations,
+      gpuEvents: 0,
+      gpuTaskActive: null,
+      lastStreamActivityAt: null,
+      lastToolActivityAt: null,
+      lastMutationAt: null,
+      lastGpuActivityAt: null,
+      lastProgressAt: null,
+      currentTurn: null,
+    }) as SessionTelemetry;
+
+  function client(fileMutations: () => number, entries: () => object[]) {
+    return {
+      listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      listSessionTelemetry: vi.fn(async () => ({ sessions: [telemetryRow(fileMutations())] })),
+      listHistory: vi.fn(async () => ({ entries: entries() })),
+    };
+  }
+
+  it('subtracts rejected writes the history log reports', async () => {
+    const c = client(
+      () => 3,
+      () => [
+        {
+          entryType: 'event',
+          kind: 'tool.called',
+          details: { name: 'write_file', sessionId: 'build-1', success: true },
+        },
+        {
+          entryType: 'event',
+          kind: 'tool.called',
+          details: { name: 'replace_in_file', sessionId: 'build-1', success: false },
+        },
+        {
+          entryType: 'event',
+          kind: 'tool.called',
+          details: { name: 'write_file', sessionId: 'build-1', success: false },
+        },
+      ],
+    );
+    const fp = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(fp.daemonActivity?.writeCalls).toBe(1);
+    expect(c.listHistory).toHaveBeenCalledWith({ kind: 'tool.called', limit: 2000 });
+  });
+
+  // The history route answers only the newest N events, so an old refusal
+  // ages out of later reads. It must stay subtracted, or the write count
+  // jumps up with no write having happened.
+  it('keeps counting a rejection that aged out of the history window', async () => {
+    let mutations = 1;
+    let entries: object[] = [
+      {
+        id: 'ev-1',
+        entryType: 'event',
+        kind: 'tool.called',
+        details: { name: 'write_file', sessionId: 'build-1', success: false },
+      },
+    ];
+    const c = client(
+      () => mutations,
+      () => entries,
+    );
+    const first = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(first.daemonActivity?.writeCalls).toBe(0);
+    mutations = 2;
+    entries = [
+      {
+        id: 'ev-2',
+        entryType: 'event',
+        kind: 'tool.called',
+        details: { name: 'write_file', sessionId: 'build-1', success: true },
+      },
+    ];
+    const second = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(second.daemonActivity?.writeCalls).toBe(1);
+  });
+
+  // The daemon bumps telemetry a moment before it appends the history
+  // event, so a new count is re-read once before it is trusted.
+  it('re-reads a new count once, then serves it from cache', async () => {
+    let entries: object[] = [];
+    const c = client(
+      () => 1,
+      () => entries,
+    );
+    const first = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(first.daemonActivity?.writeCalls).toBe(1);
+    entries = [
+      {
+        entryType: 'event',
+        kind: 'tool.called',
+        details: { name: 'write_file', sessionId: 'build-1', success: false },
+      },
+    ];
+    const second = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(second.daemonActivity?.writeCalls).toBe(0);
+    await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(c.listHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the attempt count when the history read fails', async () => {
+    const c = client(
+      () => 2,
+      () => [],
+    );
+    c.listHistory.mockRejectedValue(new Error('boom'));
+    const fp = await captureFingerprint(c as unknown as GezelClient, 'meester', null);
+    expect(fp.daemonActivity?.writeCalls).toBe(2);
   });
 });
 

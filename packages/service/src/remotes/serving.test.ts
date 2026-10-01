@@ -34,6 +34,26 @@ describe('RemoteServingController', () => {
     }
   });
 
+  it('refuses to serve the LAN without a device identity', async () => {
+    const controller = createRemoteServingController({
+      cert: await generateLoopbackCert(),
+      deviceFingerprint: null,
+      fetch: () => () => Promise.resolve(new Response('ok')),
+    });
+    try {
+      await expect(
+        controller.reconfigure({ enabled: true, bindAddress: '127.0.0.1', port: 0 }),
+      ).rejects.toThrow('requires a device identity');
+      expect(controller.status()).toEqual({ listening: false });
+      // Staying off needs no identity.
+      await expect(controller.reconfigure({ enabled: false })).resolves.toEqual({
+        listening: false,
+      });
+    } finally {
+      await controller.stop();
+    }
+  });
+
   it('fails closed when TLS is unavailable', async () => {
     const controller = createRemoteServingController({
       cert: null,

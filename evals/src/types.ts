@@ -111,6 +111,13 @@ export interface EvalContext {
      */
     repairFilePath?: string;
     /**
+     * Artifacts-drawer path of the deliverable selected for the next repair,
+     * set when that deliverable is graded in the drawer. The harness kicks
+     * then name `write_artifact` instead of `write_file`. Not part of the
+     * retry-loop plateau key.
+     */
+    repairArtifactPath?: string;
+    /**
      * The file the scenario is currently asking to be fixed does not exist,
      * or exists empty. Set it whenever the driver KNOWS that; leaving it
      * undefined means "not evaluated" and preserves the older inference.
@@ -661,6 +668,8 @@ export interface TrialFinalSniff {
   failReason?: string;
   /** Workspace-relative file selected by the scenario for the next repair. */
   repairFilePath?: string;
+  /** Artifacts-drawer path selected for the next repair; see `recordSniff`. */
+  repairArtifactPath?: string;
   /**
    * The file the scenario is currently asking to be fixed does not exist,
    * or exists empty. Set it whenever the driver KNOWS that; leaving it

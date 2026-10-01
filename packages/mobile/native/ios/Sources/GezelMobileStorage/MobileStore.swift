@@ -6,6 +6,20 @@ import Foundation
 public final class MobileStore: MobileModelStore, @unchecked Sendable {
     public let productFiles: ProductFiles
     private let root: URL
+    private let workLock = NSLock()
+    private var work: ProductFiles?
+    /// The person's work in their iCloud Drive once its container resolves. Nil
+    /// keeps everything in the one app-owned tree.
+    public var workFiles: ProductFiles? {
+        get { workLock.lock(); defer { workLock.unlock() }; return work }
+        set { workLock.lock(); work = newValue; workLock.unlock() }
+    }
+    /// The tree a product call addresses: `work` for the person's work, else the app's own.
+    public func files(root name: String?) throws -> ProductFiles {
+        guard name == "work" else { return productFiles }
+        guard let workFiles else { throw ProductFileError.missingDirectory }
+        return workFiles
+    }
     private let fm = FileManager.default
     private let stateLock = NSLock()
     public override init(root: URL, recoverModels: Bool = true) throws {

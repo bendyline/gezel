@@ -1,3 +1,10 @@
+/**
+ * Discover or start the single Gezel daemon for a user home, then verify its
+ * authenticated health before returning a client. Attached hosts own shutdown;
+ * detached CLI callers leave the daemon running. GEZEL_WASM_BASELINE=1 opts
+ * spawned daemons into V8 baseline WebAssembly compilation as a workaround for
+ * optimizing-compiler memory failures; adopting a daemon never changes it.
+ */
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -84,6 +91,15 @@ export interface DiscoverOrSpawnOptions {
    * to the caller's terminal — useful for `gezel start --foreground`.
    */
   stdio?: 'ignore' | 'pipe' | 'inherit';
+  /**
+   * Ask the daemon to keep its own output in
+   * `<home>/logs/service-YYYY-MM-DD.log`, rotated like the desktop app's.
+   * Defaults to true when `stdio` is `'ignore'`, the one mode where nothing
+   * else can see that output. A caller that pipes and persists the output
+   * (the Electron supervisor) leaves it off, or every line lands twice; one
+   * that pipes and discards it (the TUI) turns it on.
+   */
+  writeLogFile?: boolean;
   /** Max total time to wait for the daemon to come up. Default 5000 ms. */
   timeoutMs?: number;
   /**
@@ -154,6 +170,7 @@ export async function discoverOrSpawn(
     detached = true,
     env,
     stdio = detached ? 'ignore' : 'pipe',
+    writeLogFile = stdio === 'ignore',
     timeoutMs = 5000,
     pollIntervalMs = 100,
     healthTimeoutMs = Math.min(5000, timeoutMs),
@@ -207,11 +224,17 @@ export async function discoverOrSpawn(
   }
 
   logger?.info?.(`[gezel] spawning daemon from ${daemonEntry}`);
-  const child = spawnFn(process.execPath, [daemonEntry], {
+  const daemonEnv = env ?? process.env;
+  // V8 compiler-zone OOM aborts the entire daemon, outside JS error handling.
+  // Keep this opt-in: baseline WASM may run slower, but avoids that compiler.
+  const runtimeArgs =
+    daemonEnv.GEZEL_WASM_BASELINE === '1' ? ['--liftoff-only', '--no-wasm-tier-up'] : [];
+  const child = spawnFn(process.execPath, [...runtimeArgs, daemonEntry], {
     detached,
     stdio,
-    env: daemonSpawnEnv(env ?? process.env, {
+    env: daemonSpawnEnv(daemonEnv, {
       shutdownOnStdinEof: !detached && stdio === 'pipe',
+      writeLogFile,
     }),
     // A detached Windows child gets its own console by default. The CLI uses
     // detachment so a background daemon can outlive it, but that must not
@@ -270,7 +293,7 @@ export async function discoverOrSpawn(
  * daemons and foreground/inherited-stdio daemons must not treat the caller's
  * terminal EOF as an ownership signal.
  *
- * Always use a fresh object when adding either flag: `env` is usually
+ * Always build a fresh object: `env` is usually
  * `process.env` itself, and mutating that would leak ownership semantics into
  * later detached/foreground spawns.
  *
@@ -279,13 +302,17 @@ export async function discoverOrSpawn(
  */
 function daemonSpawnEnv(
   env: NodeJS.ProcessEnv,
-  options: { shutdownOnStdinEof: boolean },
+  options: { shutdownOnStdinEof: boolean; writeLogFile: boolean },
 ): NodeJS.ProcessEnv {
-  if (!process.versions.electron && !options.shutdownOnStdinEof) return env;
+  // The log-file flag is decided here, never inherited: a caller's env that
+  // already carries it (a daemon's own children, a shell that exported it)
+  // must not make a supervisor-owned daemon write every line a second time.
+  const { GEZEL_DAEMON_LOG_FILE: _inherited, ...rest } = env;
   return {
-    ...env,
+    ...rest,
     ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     ...(options.shutdownOnStdinEof ? { GEZEL_SHUTDOWN_ON_STDIN_EOF: '1' } : {}),
+    ...(options.writeLogFile ? { GEZEL_DAEMON_LOG_FILE: '1' } : {}),
   };
 }
 

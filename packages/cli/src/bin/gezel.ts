@@ -13,7 +13,6 @@ import {
   setLogOutput,
 } from '@bendyline/gezel';
 import {
-  GezelApiError,
   type KnowledgeInstallEvent,
   type LlamaCppInstallEvent,
   type MlxInstallEvent,
@@ -48,6 +47,7 @@ import {
   resolveTuiProject,
   shouldPreferCanonicalPort,
   validateGlobals,
+  withTransientConnection,
 } from '../connection.js';
 import {
   parseCraftbookParams,
@@ -251,7 +251,7 @@ program
       return;
     }
 
-    const client = await connectOwned(cliGlobals());
+    const client = await connectOwned(cliGlobals(), { announceSpawn: false });
     const health = await client.health();
     console.log(`gezeld running (version ${health.version})`);
   });
@@ -1147,17 +1147,7 @@ knowledge
         ...(opts.private ? { privatePlacement: true } : {}),
       });
       const client = await connectOwned(cliGlobals());
-      let started: { jobId: string; alreadyRunning: boolean };
-      try {
-        started = await client.installKnowledgeCatalog({ source: installSource });
-      } catch (err) {
-        if (err instanceof GezelApiError && err.status === 403) {
-          throw new CliError(
-            'Downloading knowledge catalogs needs app network access, which the security policy turns off (Settings → Security).',
-          );
-        }
-        throw err;
-      }
+      const started = await client.installKnowledgeCatalog({ source: installSource });
       if (started.alreadyRunning)
         console.error('Attaching to the install that is already running.');
       let done: Extract<KnowledgeInstallEvent, { type: 'done' }> | undefined;
@@ -1772,6 +1762,7 @@ program
         `speech synthesis failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    if (!res.artifactPath) throw new CliError('speech synthesis returned no saved audio');
     const dest = await saveArtifact(client, projectId, res.artifactPath, opts.output);
     const m = res.meta;
     console.log(dest);
@@ -1809,16 +1800,20 @@ native
   .command('list')
   .description('List native executables and their install state')
   .action(async () => {
-    const client = await connectOwned(cliGlobals());
-    console.log(formatNativeList(await client.getNativeEngineStatus()));
+    const status = await withTransientConnection(cliGlobals(), (client) =>
+      client.getNativeEngineStatus(),
+    );
+    console.log(formatNativeList(status));
   });
 
 native
   .command('status')
   .description('Show native release, platform, backend, and toolkit status')
   .action(async () => {
-    const client = await connectOwned(cliGlobals());
-    console.log(formatNativeStatus(await client.getNativeEngineStatus()));
+    const status = await withTransientConnection(cliGlobals(), (client) =>
+      client.getNativeEngineStatus(),
+    );
+    console.log(formatNativeStatus(status));
   });
 
 // ── Image model management (pull/list for the create-image engine) ──

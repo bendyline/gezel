@@ -1,6 +1,16 @@
-/** Rebuild the immutable Handboek knowledge catalog shipped by gezeld. */
+/**
+ * Rebuild the immutable Handboek knowledge catalog shipped by gezeld, and the
+ * `handboek.gezk.lock.json` beside it.
+ *
+ *   --if-stale  what the service build runs when the lock's input hash no
+ *               longer matches: re-render, and rebuild only if the rendered
+ *               content changed (otherwise just refresh the lock). See
+ *               scripts/handboek-gezk-lock.mjs.
+ */
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -13,14 +23,24 @@ import {
   HANDBOEK_KNOWLEDGE_CATALOG,
   HANDBOEK_KNOWLEDGE_PUBLISHER,
   createHandboekEngine,
-  findHandboekContent,
+  handboekKnowledgeFingerprint,
   handboekKnowledgeSource,
   siteDeviceInfo,
 } from '@bendyline/gezel-service/handboek';
+import {
+  handboekInputsHash,
+  readHandboekLock,
+  writeHandboekLock,
+} from '../../../scripts/handboek-gezk-lock.mjs';
 
 const root = resolve(import.meta.dirname, '..', '..', '..');
-const contentDir = findHandboekContent();
-if (!contentDir) throw new Error('Handboek content tree not found');
+// The tree the lock's input hash covers. findHandboekContent() prefers
+// dist/handboek-content, the copy the last service build staged, so a run
+// outside the build rendered stale articles and locked them against new inputs.
+const contentDir = join(root, 'docs', 'handboek');
+if (!existsSync(join(contentDir, 'conceptual'))) {
+  throw new Error(`Handboek content tree not found at ${contentDir}`);
+}
 const servicePackage = JSON.parse(
   await readFile(join(root, 'packages/service/package.json'), 'utf8'),
 ) as { version: string };
@@ -29,13 +49,27 @@ const engine = createHandboekEngine({
   device: siteDeviceInfo,
   contentDir,
 });
+const inputs = handboekInputsHash(root);
 const source = await handboekKnowledgeSource(engine, contentDir);
+const content = createHash('sha256')
+  .update(
+    `${handboekKnowledgeFingerprint(source)}\n${BGE_SMALL_EN_V15_1.id}\n${MARKDOWN_CHUNKS_2.id}\n`,
+  )
+  .digest('hex');
 const outputPath = join(root, 'packages/service/assets/handboek/handboek.gezk');
+if (process.argv.includes('--if-stale') && existsSync(outputPath)) {
+  const lock = readHandboekLock(root);
+  if (lock?.content === content) {
+    writeHandboekLock({ inputs, content }, root);
+    process.stdout.write('[handboek] rendered content unchanged; refreshed the lock only\n');
+    process.exit(0);
+  }
+}
 await mkdir(join(root, 'packages/service/assets/handboek'), { recursive: true });
 const workDir = await mkdtemp(join(tmpdir(), 'handboek-gezk-'));
 const cacheDir =
   process.env.GEZEL_HF_CACHE_DIR ??
-  join(process.env.GEZEL_HOME ?? join(process.env.USERPROFILE ?? '', '.gezel'), 'engines/hf-cache');
+  join(process.env.GEZEL_HOME ?? join(homedir(), '.gezel'), 'engines/hf-cache');
 const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1, { cacheDir });
 try {
   const report = await compileKnowledgeCatalog({
@@ -70,6 +104,7 @@ try {
       if (total > 0 && done % 100 === 0) process.stdout.write(`${phase}: ${done}/${total}\n`);
     },
   });
+  writeHandboekLock({ inputs, content }, root);
   process.stdout.write(
     `Wrote ${outputPath}: ${report.documents} documents, ${report.chunks} chunks, ${report.archiveBytes} bytes\n`,
   );

@@ -27,6 +27,8 @@ test('release stamping updates packages, runtime constant, service metadata, and
         join(here, 'verify-release-version.mjs'),
         join(root, 'scripts', 'verify-release-version.mjs'),
       ),
+      // verify-release-version reads the built core entry through it.
+      copyFile(join(here, 'core-built-entry.mjs'), join(root, 'scripts', 'core-built-entry.mjs')),
     ]);
 
     for (const path of [

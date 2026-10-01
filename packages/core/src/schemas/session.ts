@@ -9,6 +9,7 @@ import {
   ChatTurnErrorDetailSchema,
   ProviderNameSchema,
   ReferencedFileSchema,
+  TaskDeliverableSchema,
 } from './gezel.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TaskLaunchSpecSchema } from './task-launch.js';
@@ -643,6 +644,19 @@ export type LaunchTaskFromSessionResponse = z.infer<typeof LaunchTaskFromSession
  * 160-char `preview`, `text` is the full message body — the edit
  * affordance on ghost queue bubbles loads it lazily through this shape.
  */
+/**
+ * Strong provenance for a user-role turn; the role alone is ambiguous.
+ * Per-turn behavior hooks and queue coalescing read it.
+ */
+export const TurnMessageOriginSchema = z.enum([
+  'direct-user',
+  'question-answer',
+  'cross-gezel',
+  'background-nudge',
+  'system',
+]);
+export type TurnMessageOrigin = z.infer<typeof TurnMessageOriginSchema>;
+
 export const QueuedMessageSchema = z.object({
   queueId: z.string(),
   /** Full message text (the SSE event only carries a truncated preview). */
@@ -792,6 +806,8 @@ export const TimelineMessageSchema = z.object({
    * and backfilled on read for older messages that predate the parser.
    */
   referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /** Mirrors `ChatMessage.deliverable` — the finished file a task wrap-up hands over. */
+  deliverable: TaskDeliverableSchema.optional(),
   /**
    * Mirrors `ChatMessage.retrieval` — the indexed-context sources consulted
    * for this user turn, including the exact excerpts injected by newer

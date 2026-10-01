@@ -16,10 +16,12 @@ import {
 import type {
   FileTurnIntent,
   MapRepoResponse,
+  QueuedMessage,
   RetrievalDecisionTrace,
   SendToSessionRequest,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
+  TurnMessageOrigin,
 } from '@bendyline/gezel';
 import {
   type AIEngagementMode,
@@ -52,6 +54,7 @@ import {
   type ToolsetManifest,
   type TurnCancelReason,
   appToolsToolsetId,
+  buildStepDispatchSeed,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -94,6 +97,8 @@ import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import type { SessionQueueState } from '@bendyline/gezel/queue-status';
+import { SessionSendQueue } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
@@ -231,7 +236,7 @@ import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
-  loadTaskOutputs,
+  loadTaskResult,
   taskFinishedQuestion,
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
@@ -323,6 +328,7 @@ import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import {
+  completionGateWorkspaceFiles,
   deliverableWrittenThisTurn,
   evaluateDeliverableGate,
   hookOwnedAdvanceHasModelOutput,
@@ -347,7 +353,6 @@ import {
   checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
-  renderEntryPreface,
   renderWriteBailContinuation,
   sessionContextPoisoned,
 } from './generalist-continuity.js';
@@ -359,7 +364,11 @@ import {
   extractGeneratedImageModel,
   extractGeneratedImageSeed,
 } from './image-refinement.js';
-import { type PromptTaskContext, buildInstructions } from './instructions.js';
+import {
+  type PromptTaskContext,
+  buildInstructions,
+  formatTaskNotesDigest,
+} from './instructions.js';
 import {
   type LocalModelTier,
   classifyLocalModelTier,
@@ -401,6 +410,11 @@ import {
   shouldConstrainToImmediateFileWrite,
   shouldConstrainToScenarioFileRepair,
 } from './role-tool-filter.js';
+import {
+  bindStepActivation,
+  currentStepActivation,
+  servesEarlierActivation,
+} from './session-step-activation.js';
 import { SessionTelemetryTracker } from './session-telemetry.js';
 import {
   SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
@@ -572,28 +586,7 @@ function hasSocialConnectorBinding(
   );
 }
 
-/**
- * Two send-paths share a `from` bucket when they're either both
- * user-initiated (no `from`) or both originate from the same sender
- * gezel. Used by the queue coalescer — we never merge a user follow-up
- * into a gezel→gezel handoff or vice versa, even if both were opted
- * into coalescing.
- */
-function sameFromBucket(
-  a: { gezelId: string; gezelName: string } | undefined,
-  b: { gezelId: string; gezelName: string } | undefined,
-): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.gezelId === b.gezelId;
-}
-
-export type TurnMessageOrigin =
-  | 'direct-user'
-  | 'question-answer'
-  | 'cross-gezel'
-  | 'background-nudge'
-  | 'system';
+export type { TurnMessageOrigin };
 
 function resolveTurnMessageOrigin(
   opts:
@@ -950,51 +943,6 @@ interface InflightTurn {
   };
 }
 
-/**
- * One entry in the per-session `pendingSends` FIFO queue. When a
- * caller's send would collide with an in-flight turn, the queue
- * either appends a new entry or, if the tail is coalescable and
- * shares the same `from` bucket, merges into the tail.
- *
- * Merging lets follow-up status messages (e.g. a batch of
- * `[npm_install follow-up: …]` notifications fired as each install
- * completes) pile into one turn rather than one-turn-each, which
- * was wasting entire LLM turns on trivial notifications.
- *
- * `waiters` holds every enqueue-side caller's `{resolve, reject}`
- * so all of them settle when the merged turn runs.
- */
-interface PendingSendEntry {
-  id: string;
-  userText: string;
-  enqueuedAt: number;
-  from: NonNullable<ChatMessage['from']> | undefined;
-  coalescable: boolean;
-  lane: Lane | undefined;
-  /** Ambient housekeeping turn — see `EnqueueRequest.ambient`. */
-  ambient: boolean;
-  /** Strong provenance for behavior hooks; user-role alone is ambiguous. */
-  messageOrigin: TurnMessageOrigin;
-  /** See send() opts — forwarded to the provider request. */
-  continuationMaxTokens: number | undefined;
-  fileTurnIntent?: FileTurnIntent;
-  /** Persist + deliver to the model but never render a transcript bubble. */
-  hidden: boolean;
-  /**
-   * Queued as a mid-turn nudge. Nudges stay separate entries while
-   * queued (individually editable/discardable), then contiguous
-   * same-bucket nudges merge into ONE turn at drain time — the
-   * user-facing counterpart of enqueue-time coalescing. The persisted
-   * user message carries `ChatMessage.nudge` for the transcript chip.
-   */
-  nudge: boolean;
-  /** The prompt draft this send was written in, if any. */
-  draftId: string | undefined;
-  /** See send() opts — a queued turn keeps its route opt-out. */
-  turnIntent: TurnIntentMode | undefined;
-  waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
-}
-
 type TurnIntentMode = NonNullable<SendToSessionRequest['turnIntent']>;
 
 export interface ChatManagerOptions {
@@ -1315,13 +1263,18 @@ export class ChatManager extends LocalEngineRuntime {
    * then contiguous same-bucket nudges merge into ONE turn at drain
    * time (`drainNextQueued`).
    *
+   * The queue itself is core's `SessionSendQueue`, shared with the phone
+   * runtime; this class decides when a session is busy and runs turns.
    * In-memory only — queued messages don't survive a service
    * restart. The persisted `record.messages` still contains prior
    * user turns; only the *unstarted* queued entries are lost. Regression
    * coverage lives under "ChatManager — per-session message queue" in
    * `manager.test.ts`.
    */
-  private readonly pendingSends = new Map<string, PendingSendEntry[]>();
+  private readonly sendQueue = new SessionSendQueue<ChatMessage>({
+    publish: (sessionId, event) => this.publishWithScopeLookup(sessionId, event),
+    log,
+  });
   /**
    * Background work that must not start until the current turn is idle.
    * Cross-gezel fire-and-forget handoffs use this when invoked from inside
@@ -2153,6 +2106,36 @@ export class ChatManager extends LocalEngineRuntime {
   private taskAdvancer?: TaskAdvancerFn;
 
   /**
+   * A completion gate re-activated a step while the turn that triggered it
+   * keeps the repair (TaskManager's current-turn reactivation hook — the chat
+   * twin of `TaskRunner.adoptActiveDispatchActivation`). Rebind that turn's
+   * session to the new pass, or the observable advance would read the
+   * repaired deliverable as an earlier pass's work and never move the step.
+   * Only a mid-turn session bound to the pass just replaced qualifies: a
+   * session from an older pass stays stale.
+   */
+  adoptStepActivation(args: {
+    taskRef: string;
+    stepId: string;
+    previousActivationAt: string | undefined;
+    activationAt: string;
+  }): void {
+    if (!args.previousActivationAt) return;
+    for (const [sessionId, state] of this.states) {
+      const record = state.record;
+      if (record.taskRef !== args.taskRef || record.stepId !== args.stepId) continue;
+      if (record.stepActivationId !== args.previousActivationAt) continue;
+      if (!this.inflight.has(sessionId)) continue;
+      bindStepActivation(record, args.activationAt);
+      void this.store.writeSession(record).catch((err) => {
+        log.warn(
+          `session ${sessionId.slice(0, 8)}: persisting adopted step activation failed: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }
+  }
+
+  /**
    * Wire the diffpack draft overlay (set by service.ts once the
    * DiffpackManager exists — same cycle-avoidance as `setTaskAdvancer`).
    * The observable-progress watcher must judge a drafting task's
@@ -2334,6 +2317,19 @@ export class ChatManager extends LocalEngineRuntime {
       // an owner step advances only when the owner says so.
       const owner = stepOwnerGezelId(task, step);
       if (owner !== gezelId) continue;
+      // A loop re-enters a step under a NEW session; a turn ending in the
+      // session of an earlier pass is not this pass's work. Wild-caught on
+      // spreadsheet-model (qwen3.8-flash-next, 2026-09-30): a nudge into
+      // build's first-pass session ended after evaluate looped back to build,
+      // advanced the new pass on the unchanged index.html, and took the write
+      // lease from the session actually rebuilding it.
+      if (servesEarlierActivation(state.record, task.ref, step)) {
+        log.info(
+          `skip observable advance: session ${sessionId} belongs to an earlier activation of ` +
+            `${task.ref}/${step.id} (bound ${state.record.stepActivationId}, current ${step.lastActivatedAt})`,
+        );
+        continue;
+      }
 
       // A fixed-action evidence step intentionally hides
       // `advance_task_step`: the only useful model action is opening the
@@ -2399,15 +2395,12 @@ export class ChatManager extends LocalEngineRuntime {
         continue;
       }
 
-      // A drafting task's workspace deliverable lives in the diffpack
-      // overlay — judge the proposed tree, not the untouched real one.
-      // Artifact deliverables are real in both modes.
-      const content = await (adv.artifact
-        ? this.store.readProjectArtifact(projectId, adv.file)
-        : task.diffpackId && this.draftReader
-          ? this.draftReader.read(projectId, task.diffpackId, adv.file)
-          : this.store.readProjectWorkspaceFile(projectId, adv.file)
-      ).catch(() => null);
+      const content = await this.readStepDeliverable(
+        projectId,
+        task,
+        adv.file,
+        adv.artifact === true,
+      );
       // `requireChange` steps (edit-an-existing-file deliverables) gate on
       // the model having written to `adv.file` THIS turn — presence alone
       // would advance on turn 1 since the source already exists. The
@@ -2469,6 +2462,65 @@ export class ChatManager extends LocalEngineRuntime {
       return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
     }
     return unmetEditGate ? { unmetEditGate } : {};
+  }
+
+  /**
+   * A step deliverable as the observable-progress check reads it. A drafting
+   * task's workspace deliverable lives in the diffpack overlay — judge the
+   * proposed tree, not the untouched real one. Artifact deliverables are
+   * real in both modes.
+   */
+  private readStepDeliverable(
+    projectId: string,
+    task: Task,
+    file: string,
+    artifact: boolean,
+  ): Promise<string | null> {
+    return (
+      artifact
+        ? this.store.readProjectArtifact(projectId, file)
+        : task.diffpackId && this.draftReader
+          ? this.draftReader.read(projectId, task.diffpackId, file)
+          : this.store.readProjectWorkspaceFile(projectId, file)
+    ).catch(() => null);
+  }
+
+  /**
+   * Mid-turn twin of the workspace branch of
+   * {@link maybeAutoAdvanceOnObservableProgress}: the same task status,
+   * step ownership, read and {@link evaluateDeliverableGate} verdict, so the
+   * local loop's "deliverable is ready" footer never fires on a file the
+   * end-of-turn advance would hold. It additionally waits for every other
+   * workspace file the completion gate reads (see
+   * {@link completionGateWorkspaceFiles}).
+   */
+  private async workspaceDeliverableReady(
+    projectId: string,
+    taskNum: number,
+    stepId: string,
+    session: ChatSession,
+    writtenThisTurn: boolean,
+  ): Promise<boolean> {
+    const task = await this.readEffectiveTask(projectId, taskNum);
+    if (!task || taskEffectiveStatus(task) !== 'active' || task.activeStepId !== stepId) {
+      return false;
+    }
+    const step = task.craftbook.steps.find((s) => s.id === stepId);
+    const adv = step?.advanceWhen;
+    if (!step || !adv || adv.artifact) return false;
+    if (stepOwnerGezelId(task, step) !== session.gezelId) return false;
+    // The live record: a gate self-loop adopts its new activation there.
+    const record = this.states.get(session.id)?.record ?? session;
+    if (servesEarlierActivation(record, task.ref, step)) return false;
+    const content = await this.readStepDeliverable(projectId, task, adv.file, false);
+    const writes = writtenThisTurn ? [{ name: 'write_file', path: adv.file, success: true }] : [];
+    if (!evaluateDeliverableGate({ content, spec: adv, writes }).satisfied) return false;
+    const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
+    if (gate?.at !== 'completion') return true;
+    for (const file of completionGateWorkspaceFiles(gate.checks, adv.file)) {
+      if ((await this.readStepDeliverable(projectId, task, file, false)) === null) return false;
+    }
+    return true;
   }
 
   /**
@@ -2683,7 +2735,7 @@ export class ChatManager extends LocalEngineRuntime {
    * that state and can omit a turn while ensureState is still initializing.
    */
   isSessionTurnPending(sessionId: string): boolean {
-    return this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0;
+    return this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0;
   }
 
   /**
@@ -2834,40 +2886,8 @@ export class ChatManager extends LocalEngineRuntime {
    * `inflight` surface. Returns a flat array keyed by `sessionId`
    * with a short preview of each queued message's userText.
    */
-  listQueued(): Array<{
-    sessionId: string;
-    providerName?: ProviderName;
-    depth: number;
-    nextPreview: string;
-    entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
-  }> {
-    const out: Array<{
-      sessionId: string;
-      providerName?: ProviderName;
-      depth: number;
-      nextPreview: string;
-      entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
-    }> = [];
-    for (const [sessionId, q] of this.pendingSends) {
-      if (q.length === 0) continue;
-      const head = q[0]!.userText;
-      const nextPreview = head.length > 120 ? `${head.slice(0, 117)}…` : head;
-      const entries = q.map((e) => ({
-        queueId: e.id,
-        preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
-        enqueuedAt: new Date(e.enqueuedAt).toISOString(),
-        ...(e.nudge ? { nudge: true } : {}),
-      }));
-      const providerName = this.states.get(sessionId)?.record.providerName;
-      out.push({
-        sessionId,
-        ...(providerName ? { providerName } : {}),
-        depth: q.length,
-        nextPreview,
-        entries,
-      });
-    }
-    return out;
+  listQueued(): SessionQueueState[] {
+    return this.sendQueue.list((id) => this.states.get(id)?.record.providerName);
   }
 
   /**
@@ -2877,18 +2897,8 @@ export class ChatManager extends LocalEngineRuntime {
    * carries the complete `text` so the ghost bubble's edit affordance
    * can load it lazily. Empty array when the session has no queue.
    */
-  listSessionQueue(
-    sessionId: string,
-  ): Array<{ queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean }> {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return [];
-    return q.map((e) => ({
-      queueId: e.id,
-      text: e.userText,
-      preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
-      enqueuedAt: new Date(e.enqueuedAt).toISOString(),
-      nudge: e.nudge,
-    }));
+  listSessionQueue(sessionId: string): QueuedMessage[] {
+    return this.sendQueue.listSession(sessionId);
   }
 
   /**
@@ -3136,10 +3146,7 @@ export class ChatManager extends LocalEngineRuntime {
   }> {
     this.engagementMode = 'reactive';
 
-    const clearedQueuedMessages = Array.from(this.pendingSends.values()).reduce(
-      (total, queue) => total + queue.length,
-      0,
-    );
+    const clearedQueuedMessages = this.sendQueue.totalDepth();
     const clearedDeferredActions = Array.from(this.afterSessionIdle.values()).reduce(
       (total, actions) => total + actions.length,
       0,
@@ -3149,7 +3156,7 @@ export class ChatManager extends LocalEngineRuntime {
     // the session slot synchronously, and the unwind path may otherwise drain
     // one of these callbacks before all cancellations have settled.
     this.afterSessionIdle.clear();
-    for (const sessionId of Array.from(this.pendingSends.keys())) {
+    for (const sessionId of this.sendQueue.sessionIds()) {
       this.rejectQueuedForSession(sessionId, 'emergency stop', 'emergency-stop');
     }
 
@@ -3211,48 +3218,28 @@ export class ChatManager extends LocalEngineRuntime {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
-    const queueDepth = this.pendingSends.get(sessionId)?.length ?? 0;
+    const queueDepth = this.sendQueue.depth(sessionId);
     if (!this.inflight.has(sessionId) && queueDepth === 0) {
       return this.send(sessionId, userText, opts?.draftId ? { draftId: opts.draftId } : {});
     }
-    return new Promise<ChatMessage>((resolve, reject) => {
-      const q = this.pendingSends.get(sessionId) ?? [];
-      const entry: PendingSendEntry = {
-        id: randomUUID(),
-        userText,
-        enqueuedAt: Date.now(),
-        from: undefined,
-        coalescable: false,
-        lane: undefined,
-        ambient: false,
-        messageOrigin: 'direct-user',
-        continuationMaxTokens: undefined,
-        hidden: false,
-        nudge: false,
-        draftId: opts?.draftId,
-        turnIntent: undefined,
-        waiters: [{ resolve, reject }],
-      };
-      q.unshift(entry);
-      this.pendingSends.set(sessionId, q);
-      log.debug(
-        `queue#${sessionId.slice(0, 8)} INTERRUPT entry=${entry.id.slice(0, 8)} depth=${q.length}`,
-      );
-      this.publishQueueEnqueued(sessionId, entry);
-      void this.cancelInflight(sessionId, 'user-interrupt')
-        .catch((err) => {
-          // Cancel is best-effort teardown; the entry is already queued
-          // and will drain either below or via the unwind. Never reject
-          // the waiter here — that would double-settle when it drains.
-          log.warn(
-            `interrupt: cancelInflight failed for ${sessionId}:`,
-            err instanceof Error ? err.message : String(err),
-          );
-        })
-        .then(() => {
-          if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
-        });
+    const { result } = this.sendQueue.enqueueFront(sessionId, userText, {
+      messageOrigin: 'direct-user',
+      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
     });
+    void this.cancelInflight(sessionId, 'user-interrupt')
+      .catch((err) => {
+        // Cancel is best-effort teardown; the entry is already queued
+        // and will drain either below or via the unwind. Never reject
+        // the waiter here — that would double-settle when it drains.
+        log.warn(
+          `interrupt: cancelInflight failed for ${sessionId}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      })
+      .then(() => {
+        if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
+      });
+    return result;
   }
 
   async getSessionRecord(sessionId: string): Promise<ChatSession | null> {
@@ -3541,7 +3528,7 @@ export class ChatManager extends LocalEngineRuntime {
               .listActive()
               .some((activity) => activity.sessionId === sessionId)
           ? 'in-progress'
-          : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+          : this.sendQueue.depth(sessionId) > 0
             ? 'queued'
             : 'idle',
       recentMessages,
@@ -3620,6 +3607,8 @@ export class ChatManager extends LocalEngineRuntime {
     projectId?: string;
     taskRef?: string;
     stepId?: string;
+    /** Activation of `stepId` this session serves — see session-step-activation.ts. */
+    stepActivationId?: string;
     /** Durable parent session for delegated/consulted/task-spawned work. */
     parentSession?: SessionParent;
     /** Immediate workflow step that handed work to this task session. */
@@ -3720,6 +3709,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.stepId && args.stepActivationId ? { stepActivationId: args.stepActivationId } : {}),
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(args.handoffFrom ? { handoffFrom: args.handoffFrom } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
@@ -3836,32 +3826,62 @@ export class ChatManager extends LocalEngineRuntime {
       gezelId: args.gezelId,
       projectId: args.projectId,
     });
-    const active = existing.find(
+    const candidates = existing.filter(
       (session) =>
         !session.archived &&
         session.taskRef === args.taskRef &&
         (args.stepId === undefined || session.stepId === args.stepId),
     );
-    if (active) {
-      const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) {
-        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
-        if (args.parentSession && !full.parentSession) {
-          full.parentSession = args.parentSession;
-          await this.store.writeSession(full);
-        }
-        return full;
-      }
-    }
     const parsedTaskRef = parseTaskRef(args.taskRef);
     const task = parsedTaskRef
       ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
       : null;
+    // A runtime re-drive is for the step's CURRENT pass. Recency alone can
+    // pick an earlier pass's session — any nudge into it bumps its activity —
+    // and that session may no longer advance the step, so the re-drive would
+    // spend itself on a thread that cannot finish.
+    const activation =
+      args.stepId && task?.activeStepId === args.stepId
+        ? currentStepActivation(task, args.stepId)
+        : undefined;
+    let chosen = candidates[0];
+    if (activation && candidates.length > 1) {
+      for (const candidate of candidates) {
+        const record =
+          this.states.get(candidate.id)?.record ??
+          (await this.store.getSession(args.gezelId, candidate.id));
+        if (record?.stepActivationId === activation) {
+          chosen = candidate;
+          break;
+        }
+      }
+    }
+    if (chosen) {
+      const full = await this.store.getSession(args.gezelId, chosen.id);
+      if (full) {
+        let changed = false;
+        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          changed = true;
+        }
+        // No session carries this pass (its dispatch failed, or predates the
+        // binding): the one being re-driven now serves it.
+        if (activation && bindStepActivation(full, activation)) {
+          const live = this.states.get(full.id);
+          if (live) bindStepActivation(live.record, activation);
+          changed = true;
+        }
+        if (changed) await this.store.writeSession(full);
+        return full;
+      }
+    }
     return this.createSession({
       gezelId: args.gezelId,
       projectId: args.projectId,
       taskRef: args.taskRef,
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(activation ? { stepActivationId: activation } : {}),
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(task?.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
@@ -4176,6 +4196,12 @@ export class ChatManager extends LocalEngineRuntime {
     const taskRecord = parsedTaskRef
       ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
       : null;
+    // The pass this dispatch serves. Whatever session carries it — fresh,
+    // resumed, or continued across steps — is bound to it, so a session from
+    // an earlier pass of a looping step can be told apart from this one.
+    const dispatchActivationId = taskRecord
+      ? currentStepActivation(taskRecord, dispatchStepId)
+      : undefined;
     const candidates =
       args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
     const previous = candidates.find(
@@ -4233,7 +4259,7 @@ export class ChatManager extends LocalEngineRuntime {
       // drain, so the queued input runs under the old step before the
       // prompt and surface flip. A fresh session would strand it in a
       // thread nobody reads again.
-      ((this.pendingSends.get(previous.id)?.length ?? 0) === 0 || generalistTask)
+      (this.sendQueue.depth(previous.id) === 0 || generalistTask)
     ) {
       const prior = await this.store.getSession(args.gezelId, previous.id);
       if (prior && taskTranscriptCompatible(prior, transcriptTarget)) {
@@ -4361,6 +4387,10 @@ export class ChatManager extends LocalEngineRuntime {
         session.handoffFrom = handoffFrom;
         lineageChanged = true;
       }
+      // An adjacent-step transcript is rebound at its re-pin below instead.
+      if (session.stepId === dispatchStepId && bindStepActivation(session, dispatchActivationId)) {
+        lineageChanged = true;
+      }
       if (lineageChanged) await this.store.writeSession(session);
     }
     session ??= await this.createSession({
@@ -4368,6 +4398,7 @@ export class ChatManager extends LocalEngineRuntime {
       projectId: args.projectId,
       taskRef: args.taskRef,
       stepId: dispatchStepId,
+      ...(dispatchActivationId ? { stepActivationId: dispatchActivationId } : {}),
       roleBasedNameOnlyMode,
       ...(parentSession ? { parentSession } : {}),
       ...(handoffFrom ? { handoffFrom } : {}),
@@ -4410,19 +4441,6 @@ export class ChatManager extends LocalEngineRuntime {
           log.warn(`[chat] model-routing history event failed: ${err}`);
         });
     }
-    const entryPreface =
-      args.kind === 'entry' && taskRecord ? renderEntryPreface(taskRecord, dispatchStepId) : '';
-    // Seed wording: deliberately does NOT name `read_task_notes` as the
-    // first action. The system prompt already carries the step procedure
-    // and (for gated steps) a recency anchor that tells the model the
-    // FIRST tool to call — and explicitly says "Do NOT call
-    // `read_task_notes` to find the procedure; it's in the prompt above."
-    // The old seed mandated `read_task_notes` first, which head-on
-    // contradicted that anchor; a small/verbose model can't arbitrate two
-    // opposite "first move" instructions and spends the turn deliberating
-    // (then aborts on the ramble cap before any tool fires). So the seed
-    // now defers to the in-prompt instructions and leaves note-reading to
-    // the model's judgement (it's only needed on a resume / loop-back).
     // A step advance can land back on the gezel who just finished the
     // previous step (a craftbook whose steps collapse onto one specialist).
     // Naming them as their own sender — "Koray has handed step `report` to
@@ -4442,14 +4460,9 @@ export class ChatManager extends LocalEngineRuntime {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
-    // What has this task already put on disk? A restart mid-batch is the
-    // moment a model most needs to know that its own partial deliverable
-    // survived — otherwise its only recovery is to re-read every source
-    // record, which is precisely the loop that cannot converge when the
-    // evidence is larger than any replay budget. Naming the artifacts turns
-    // "read all 25 records again" into "read back what I already wrote and
-    // continue from there".
-    let persistedWork = '';
+    // A restarted service names what this task already wrote, so the model
+    // reads its own partial work back instead of every source again.
+    let persistedArtifacts: string[] = [];
     if (resumedExisting) {
       const parsedForResume = parseTaskRef(args.taskRef);
       const resumeTask = parsedForResume
@@ -4459,95 +4472,23 @@ export class ChatManager extends LocalEngineRuntime {
         : null;
       const dir = resumeTask?.artifactDir ?? (resumeTask ? `tasks/${resumeTask.num}` : null);
       if (dir && parsedForResume) {
-        const written = await this.store
+        persistedArtifacts = await this.store
           .listProjectArtifactsRecursive(parsedForResume.projectId, { subpath: dir })
           .catch(() => [])
           .then((entries) => entries.filter((e) => !e.isDirectory).map((e) => e.path));
-        if (written.length > 0) {
-          persistedWork = ` ${[
-            `You have already written these artifacts for this task: ${written
-              .map((f) => `\`${f}\``)
-              .join(', ')}.`,
-            'Read them back with `read_artifact` before re-reading any source — they hold the work',
-            'you already did, and continuing them is cheaper and more reliable than reconstructing it.',
-            'Persist each finding as you go rather than holding every source in your head;',
-            'that is what makes a restart cheap.',
-          ].join(' ')}`;
-        }
       }
     }
-    const dispatchStep = taskRecord?.craftbook.steps.find((step) => step.id === dispatchStepId);
-    const explicitOutputMedium = dispatchStep?.toolPolicy?.outputMedium;
-    const additionalOutputMedia = dispatchStep?.toolPolicy?.additionalOutputMedia ?? [];
-    const secondaryClause =
-      additionalOutputMedia.length > 0
-        ? ` The procedure also authorizes secondary output in: ${additionalOutputMedia.join(', ')}; those writes do not substitute for the primary result.`
-        : '';
-    const progressClause =
-      explicitOutputMedium === 'workspace'
-        ? ` Persist the primary result to the workspace path named by the procedure.${secondaryClause}`
-        : explicitOutputMedium === 'artifact'
-          ? ` Persist the primary result to the artifacts-drawer path named by the procedure.${secondaryClause}`
-          : explicitOutputMedium === 'task-note'
-            ? ` Persist the primary result with \`write_task_note\`.${secondaryClause}`
-            : explicitOutputMedium === 'none'
-              ? ' This step has no persisted output; inspect or route as instructed without creating a file, artifact, or task note.'
-              : ' Append focused notes with `write_task_note` as you go.';
-    // A tiny fixed-action entry step is especially vulnerable to the
-    // generic seed's final "advance when done" sentence: local instruct
-    // models sometimes jump straight to the completion tool without doing
-    // the one read/routing action in the system band. Repeat only this
-    // bounded procedure at the END of the user-visible seed, where recency
-    // makes the required first action unambiguous. Larger/output-producing
-    // steps keep the non-duplicated prompt.
-    const exactStepAutoAdvances =
-      (dispatchStep?.toolPolicy?.allowTools?.length ?? 0) > 0 &&
-      !dispatchStep?.toolPolicy?.allowTools?.includes('advance_task_step');
-    const dispatchGate = dispatchStep?.gate ? normalizeStepGate(dispatchStep.gate) : undefined;
-    const fixedEvidenceOutcome =
-      dispatchStep?.toolPolicy?.outputMedium === 'none' &&
-      dispatchGate?.at === 'completion' &&
-      dispatchGate.checks.length > 0 &&
-      dispatchGate.checks.every(
-        (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
-      ) &&
-      dispatchGate.scripts.length === 0;
-    const artifactCheckpointOutcome =
-      dispatchStep?.toolPolicy?.outputMedium === 'artifact' &&
-      dispatchStep.advanceWhen?.artifact === true &&
-      dispatchGate?.at === 'completion';
-    const requiresExactOutcome = fixedEvidenceOutcome || artifactCheckpointOutcome;
-    const completionClause = exactStepAutoAdvances
-      ? ' The runtime evaluates the declared evidence after your required action and advances the step when it passes; `advance_task_step` is intentionally unavailable.'
-      : " When the step is done, call `advance_task_step` to hand off to whoever's next.";
-    const fixedEntryProcedure =
-      args.kind === 'entry' &&
-      explicitOutputMedium === 'none' &&
-      (dispatchStep?.toolPolicy?.allowTools?.length ?? 0) > 0 &&
-      dispatchStep?.prompt?.trim()
-        ? `\n\nFIXED-ACTION ENTRY — call the procedure's named tool now. The runtime will end this turn and evaluate its durable evidence after the first successful action; do not narrate, repeat the call, or call \`advance_task_step\`:\n${dispatchStep.prompt.trim()}`
-        : '';
-    const retrySeed =
-      exactStepAutoAdvances && dispatchStep?.prompt?.trim()
-        ? `Task ${args.taskRef} is still active on fixed-action step \`${dispatchStepId}\`. The previous provider turn failed before its required action completed. Call the procedure's named tool now; the runtime will evaluate its durable evidence and advance automatically. Do not call \`read_task_notes\` or \`advance_task_step\` — neither is available on this exact step:\n\n${dispatchStep.prompt.trim()}`
-        : `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`;
-    const generalistClause = generalistTask
-      ? " The Task outline in your prompt shows where this step sits in the whole task; only the active step's procedure is in force now."
-      : '';
-    const seed =
-      args.kind === 'retry'
-        ? retrySeed
-        : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
-          : args.kind === 'entry'
-            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}${fixedEntryProcedure}`
-            : selfHandoff
-              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well.${generalistClause} Please continue: follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`
-              : `${
-                  fromGezelDisplayName
-                    ? `${fromGezelDisplayName} has`
-                    : 'The previous step has been completed and'
-                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}`;
+    const { seed, dispatchStep, requiresExactOutcome, artifactCheckpointOutcome } =
+      buildStepDispatchSeed({
+        ...(args.kind ? { kind: args.kind } : {}),
+        task: taskRecord,
+        taskRef: args.taskRef,
+        stepId: dispatchStepId,
+        selfHandoff,
+        ...(fromGezelDisplayName ? { fromGezelDisplayName } : {}),
+        resumedExisting,
+        persistedArtifacts,
+      });
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
@@ -4591,6 +4532,7 @@ export class ChatManager extends LocalEngineRuntime {
           await this.reset(handoffSession.id);
           const previousStepId = record.stepId ?? '(unpinned)';
           record.stepId = dispatchStepId;
+          bindStepActivation(record, dispatchActivationId);
           record.lastActivityAt = nowIso();
           await this.store.writeSession(record);
           if (live) live.record = record;
@@ -6556,7 +6498,7 @@ export class ChatManager extends LocalEngineRuntime {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     if (!record.lastTurnError) throw new Error('this session has no failed turn to retry');
-    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+    if (this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0) {
       throw new Error('a turn is already in progress for this session');
     }
 
@@ -6746,7 +6688,7 @@ export class ChatManager extends LocalEngineRuntime {
   private async resumeInterruptedTurn(sessionId: string): Promise<boolean> {
     const record = await this.getSessionRecord(sessionId);
     if (!record?.turnStartedAt) return false;
-    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+    if (this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0) {
       return false;
     }
     const input = [...record.messages].reverse().find((message) => message.role === 'user');
@@ -6803,21 +6745,10 @@ export class ChatManager extends LocalEngineRuntime {
     reason: string,
     cancel?: TurnCancelReason,
   ): void {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return;
-    this.pendingSends.delete(sessionId);
+    if (this.sendQueue.depth(sessionId) === 0) return;
     const err = new Error(`send rejected: ${reason} (session ${sessionId})`);
     if (cancel) markTurnCancelled(err, cancel);
-    for (const entry of q) {
-      for (const w of entry.waiters) {
-        try {
-          w.reject(err);
-        } catch {
-          /* ignore — best-effort cleanup */
-        }
-      }
-      this.publishQueueRemoved(sessionId, entry.id, 'rejected');
-    }
+    this.sendQueue.rejectSession(sessionId, err);
   }
 
   /**
@@ -6829,22 +6760,12 @@ export class ChatManager extends LocalEngineRuntime {
    * between turns. `inflight` is intentionally untouched.
    */
   onEngagementModeChangedToOff(): void {
-    const sessionIds = Array.from(this.pendingSends.keys());
-    for (const sessionId of sessionIds) {
-      const q = this.pendingSends.get(sessionId);
-      if (!q || q.length === 0) continue;
-      this.pendingSends.delete(sessionId);
-      const err = new Error('engagement-off: AI disabled before this queued message ran');
-      for (const entry of q) {
-        for (const w of entry.waiters) {
-          try {
-            w.reject(err);
-          } catch {
-            /* ignore — best-effort cleanup */
-          }
-        }
-        this.publishQueueRemoved(sessionId, entry.id, 'rejected');
-      }
+    for (const sessionId of this.sendQueue.sessionIds()) {
+      if (this.sendQueue.depth(sessionId) === 0) continue;
+      this.sendQueue.rejectSession(
+        sessionId,
+        new Error('engagement-off: AI disabled before this queued message ran'),
+      );
     }
   }
 
@@ -6859,23 +6780,7 @@ export class ChatManager extends LocalEngineRuntime {
    * don't want a queued message to run after all.
    */
   cancelQueuedMessage(sessionId: string, queueId: string): boolean {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return false;
-    const i = q.findIndex((e) => e.id === queueId);
-    if (i === -1) return false;
-    const [entry] = q.splice(i, 1);
-    if (q.length === 0) this.pendingSends.delete(sessionId);
-    if (!entry) return false;
-    const err = new Error('queued message canceled by user');
-    for (const w of entry.waiters) {
-      try {
-        w.reject(err);
-      } catch {
-        /* ignore */
-      }
-    }
-    this.publishQueueRemoved(sessionId, entry.id, 'canceled');
-    return true;
+    return this.sendQueue.cancel(sessionId, queueId);
   }
 
   /**
@@ -6888,60 +6793,8 @@ export class ChatManager extends LocalEngineRuntime {
    * gone (the entry already started or was discarded — the PATCH
    * route maps that to 404).
    */
-  updateQueuedMessage(
-    sessionId: string,
-    queueId: string,
-    text: string,
-  ): { queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean } | null {
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) return null;
-    const entry = q.find((e) => e.id === queueId);
-    if (!entry) return null;
-    entry.userText = text;
-    this.publishQueueEnqueued(sessionId, entry);
-    return {
-      queueId: entry.id,
-      text: entry.userText,
-      preview: entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText,
-      enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
-      nudge: entry.nudge,
-    };
-  }
-
-  /**
-   * Publish `queue_enqueued` on the session's project + global buses
-   * so timelines can render a ghost bubble. If the session isn't in
-   * `this.states` yet (possible during the enqueue-during-prologue
-   * race), fall back to a disk lookup — the ghost bubble appears a
-   * microtask later but correctness is preserved.
-   */
-  private publishQueueEnqueued(
-    sessionId: string,
-    entry: { id: string; userText: string; enqueuedAt: number; nudge?: boolean },
-  ): void {
-    const preview =
-      entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText;
-    const event = {
-      type: 'queue_enqueued' as const,
-      queueId: entry.id,
-      preview,
-      enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
-      ...(entry.nudge ? { nudge: true } : {}),
-    };
-    this.publishWithScopeLookup(sessionId, event);
-  }
-
-  /** Counterpart to {@link publishQueueEnqueued}. */
-  private publishQueueRemoved(
-    sessionId: string,
-    queueId: string,
-    reason: 'started' | 'canceled' | 'rejected',
-  ): void {
-    this.publishWithScopeLookup(sessionId, {
-      type: 'queue_removed' as const,
-      queueId,
-      reason,
-    });
+  updateQueuedMessage(sessionId: string, queueId: string, text: string): QueuedMessage | null {
+    return this.sendQueue.update(sessionId, queueId, text);
   }
 
   private publishWithScopeLookup(sessionId: string, event: ChatEvent): void {
@@ -7058,7 +6911,7 @@ export class ChatManager extends LocalEngineRuntime {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Public send. Serializes messages per session via {@link pendingSends}:
+   * Public send. Serializes messages per session via {@link sendQueue}:
    * if the session already has a turn in flight (or queued items ahead),
    * this message waits its turn instead of throwing. FIFO ordering within
    * a session is preserved by checking the queue *before* the direct
@@ -7098,7 +6951,8 @@ export class ChatManager extends LocalEngineRuntime {
        * chores). On local engine queues with ambient admission control
        * the turn dispatches only after a quiet window with no
        * user-facing activity — see `EnqueueRequest.ambient` in
-       * providers/queue.ts. Implies nothing about `lane`; pass both.
+       * core's runtime/provider-queue.ts. Implies nothing about `lane`;
+       * pass both.
        */
       ambient?: boolean;
       /** Cap output tokens on tool-loop continuation iterations — see
@@ -7145,90 +6999,19 @@ export class ChatManager extends LocalEngineRuntime {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
-    const existingQueue = this.pendingSends.get(sessionId);
     const messageOrigin = resolveTurnMessageOrigin(opts);
-    const shouldQueue =
-      this.inflight.has(sessionId) || (existingQueue !== undefined && existingQueue.length > 0);
-
-    if (shouldQueue) {
-      return new Promise<ChatMessage>((resolve, reject) => {
-        const q = this.pendingSends.get(sessionId) ?? [];
-        const tail = q.length > 0 ? q[q.length - 1] : undefined;
-        // Enqueue-time coalescing never mixes nudge and non-nudge
-        // semantics — nudges stay separate entries so each remains
-        // individually editable/discardable until drain merges them.
-        const canMerge =
-          opts?.fileTurnIntent === undefined &&
-          tail?.fileTurnIntent === undefined &&
-          opts?.coalescable === true &&
-          opts?.nudge !== true &&
-          tail?.coalescable === true &&
-          tail.nudge !== true &&
-          tail.messageOrigin === messageOrigin &&
-          sameFromBucket(tail.from, opts.from);
-
-        if (canMerge && tail) {
-          // Merge: join the body with a separator, append this caller
-          // as another waiter on the existing entry. Both senders'
-          // promises resolve with the same final assistant reply.
-          tail.userText = `${tail.userText}\n\n${userText}`;
-          // The merged turn is only hidden if BOTH parts are — coalescing
-          // a visible user message onto a hidden seed (or vice-versa) must
-          // surface, never silently swallow a real message.
-          tail.hidden = tail.hidden && opts?.hidden === true;
-          tail.waiters.push({ resolve, reject });
-          if (this.debug?.isEnabled() === true) {
-            log.info(
-              `coalesced send onto pending entry ${tail.id} ` +
-                `(session ${sessionId}, waiters=${tail.waiters.length})`,
-            );
-          }
-          // Re-publish the enqueue event with the *same* queueId so
-          // the UI upserts its ghost bubble with the updated preview
-          // rather than adding a second one.
-          this.publishQueueEnqueued(sessionId, {
-            id: tail.id,
-            userText: tail.userText,
-            enqueuedAt: tail.enqueuedAt,
-          });
-          return;
-        }
-
-        const entry: PendingSendEntry = {
-          id: randomUUID(),
-          userText,
-          enqueuedAt: Date.now(),
-          from: opts?.from,
-          coalescable: opts?.coalescable === true,
-          lane: opts?.lane,
-          ambient: opts?.ambient === true,
-          messageOrigin,
-          continuationMaxTokens: opts?.continuationMaxTokens,
-          fileTurnIntent: opts?.fileTurnIntent,
-          hidden: opts?.hidden === true,
-          nudge: opts?.nudge === true,
-          draftId: opts?.draftId,
-          turnIntent: opts?.turnIntent,
-          waiters: [{ resolve, reject }],
-        };
-        q.push(entry);
-        this.pendingSends.set(sessionId, q);
-        log.debug(
-          `queue#${sessionId.slice(0, 8)} ENQUEUED entry=${entry.id.slice(0, 8)} ` +
-            `depth=${q.length} reason=${this.inflight.has(sessionId) ? 'inflight' : 'queue-non-empty'}`,
+    const busy = this.inflight.has(sessionId);
+    const admission = this.sendQueue.admit(sessionId, busy, userText, { ...opts, messageOrigin });
+    if (admission.queued) {
+      if (admission.merged && this.debug?.isEnabled() === true) {
+        log.info(
+          `coalesced send onto pending entry ${admission.queueId} ` +
+            `(session ${sessionId}, waiters=${admission.waiters})`,
         );
-        this.publishQueueEnqueued(sessionId, entry);
-      });
+      }
+      return admission.result;
     }
-
-    // A nudge that never queued (session idle by the time it landed)
-    // is just a normal send — strip the flag so the persisted message
-    // doesn't claim mid-turn delivery.
-    return this.runSendAndDrain(
-      sessionId,
-      userText,
-      opts?.nudge ? { ...opts, nudge: false, messageOrigin } : { ...opts, messageOrigin },
-    );
+    return this.runSendAndDrain(sessionId, userText, admission.runOptions);
   }
 
   /**
@@ -7353,95 +7136,9 @@ export class ChatManager extends LocalEngineRuntime {
     // Broker adoption closes the old local session + its tool bridges before
     // a queued follow-up is allowed to rebuild on the machine remote.
     if (this.machineEngineSessionTeardowns.has(sessionId)) return;
-    const tag = sessionId.slice(0, 8);
-    const q = this.pendingSends.get(sessionId);
-    if (!q || q.length === 0) {
-      this.pendingSends.delete(sessionId);
-      log.debug(`drain#${tag} empty`);
-      return;
-    }
-    const next = q.shift();
-    if (!next) return;
-    // Merged nudge delivery: contiguous same-bucket nudges collapse
-    // into ONE user message / ONE turn, joined the same way
-    // enqueue-time coalescing joins ("all pending nudges get inserted
-    // in the context" rather than one reply per nudge). Non-nudge
-    // entries keep strict one-per-turn drain, and a non-nudge entry
-    // (or a bucket change) breaks the merge run.
-    if (next.nudge) {
-      while (q.length > 0) {
-        const peek = q[0]!;
-        if (
-          !peek.nudge ||
-          peek.hidden !== next.hidden ||
-          peek.messageOrigin !== next.messageOrigin ||
-          next.fileTurnIntent !== undefined ||
-          peek.fileTurnIntent !== undefined ||
-          !sameFromBucket(peek.from, next.from)
-        ) {
-          break;
-        }
-        q.shift();
-        next.userText = `${next.userText}\n\n${peek.userText}`;
-        next.waiters.push(...peek.waiters);
-        this.publishQueueRemoved(sessionId, peek.id, 'started');
-      }
-    }
-    log.debug(
-      `drain#${tag} dispatch entry=${next.id.slice(0, 8)} ` +
-        `remaining=${q.length} waiters=${next.waiters.length}${next.nudge ? ' nudge' : ''}`,
+    this.sendQueue.dispatchNext(sessionId, (text, opts) =>
+      this.runSendAndDrain(sessionId, text, opts),
     );
-    if (q.length === 0) this.pendingSends.delete(sessionId);
-    // Tell listeners the ghost bubble is about to convert into a
-    // real user_message. The UI drops the ghost; the regular
-    // user_message event fires inside runSend right after.
-    this.publishQueueRemoved(sessionId, next.id, 'started');
-    const runOpts: {
-      from?: NonNullable<ChatMessage['from']>;
-      lane?: Lane;
-      ambient?: boolean;
-      continuationMaxTokens?: number;
-      fileTurnIntent?: FileTurnIntent;
-      hidden?: boolean;
-      nudge?: boolean;
-      draftId?: string;
-      messageOrigin?: TurnMessageOrigin;
-      turnIntent?: TurnIntentMode;
-    } = {};
-    if (next.from) runOpts.from = next.from;
-    if (next.turnIntent) runOpts.turnIntent = next.turnIntent;
-    if (next.lane) runOpts.lane = next.lane;
-    if (next.ambient) runOpts.ambient = true;
-    if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
-    if (next.fileTurnIntent) runOpts.fileTurnIntent = next.fileTurnIntent;
-    if (next.hidden) runOpts.hidden = true;
-    if (next.nudge) runOpts.nudge = true;
-    // Merged nudges keep the FIRST entry's draft: the run is that draft's
-    // turn, and the later nudges are text appended to it.
-    if (next.draftId) runOpts.draftId = next.draftId;
-    runOpts.messageOrigin = next.messageOrigin;
-    void this.runSendAndDrain(sessionId, next.userText, runOpts)
-      .then((msg) => {
-        // Every caller that coalesced into this entry gets the
-        // same final assistant message — they all contributed to
-        // the same turn, so they all see the same reply.
-        for (const w of next.waiters) {
-          try {
-            w.resolve(msg);
-          } catch {
-            /* ignore per-waiter resolve failures */
-          }
-        }
-      })
-      .catch((err) => {
-        for (const w of next.waiters) {
-          try {
-            w.reject(err);
-          } catch {
-            /* ignore */
-          }
-        }
-      });
   }
 
   /**
@@ -11214,7 +10911,7 @@ export class ChatManager extends LocalEngineRuntime {
     // Parked handoffs must not dispatch as their sender unwinds.
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
-    for (const sessionId of Array.from(this.pendingSends.keys())) {
+    for (const sessionId of this.sendQueue.sessionIds()) {
       this.rejectQueuedForSession(sessionId, 'service shutting down', 'service-restart');
     }
     await Promise.allSettled(
@@ -11823,16 +11520,17 @@ export class ChatManager extends LocalEngineRuntime {
     const thread = await findOwnerThread(this.store, task);
     if (!thread) return null;
 
-    const outputs = await loadTaskOutputs(this.store, task);
+    const { deliverable, outputs } = await loadTaskResult(this.store, task);
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
 
     const message: ChatMessage = {
       role: 'assistant',
-      content: composeTaskWrapUp(task, outputs, figures),
+      content: composeTaskWrapUp(task, outputs, figures, deliverable),
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
       ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+      ...(deliverable ? { deliverable } : {}),
     };
     const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
@@ -11859,6 +11557,7 @@ export class ChatManager extends LocalEngineRuntime {
         outputs,
         at: message.at,
         ...(figures ? { figures } : {}),
+        deliverable,
       });
       await this.store.writeQuestion(question);
       this.events.publish(scope, { type: 'question_asked', question });
@@ -13967,6 +13666,14 @@ export class ChatManager extends LocalEngineRuntime {
     const previous = record.stepId ?? '(unpinned)';
     record.stepId = stepId;
     if (!record.taskRef) record.taskRef = taskRef;
+    // Only reached after this session's own advance attempt judged the step,
+    // so it is serving that step's current pass — not the stale binding of
+    // the step it was pinned to before.
+    const parsedRef = parseTaskRef(taskRef);
+    const pinnedTask = parsedRef
+      ? await this.readEffectiveTask(parsedRef.projectId, parsedRef.num)
+      : null;
+    bindStepActivation(record, pinnedTask ? currentStepActivation(pinnedTask, stepId) : undefined);
     await this.store.writeSession(record).catch((err) => {
       log.warn(
         `session ${record.id.slice(0, 8)}: persisting re-pinned step failed: ${err instanceof Error ? err.message : err}`,
@@ -15202,6 +14909,23 @@ export class ChatManager extends LocalEngineRuntime {
       // routing, so that's the one the anti-spin corrective names.
       const exitRefs = normalizeScriptRefs(step.onExit);
       const lastExit = exitRefs[exitRefs.length - 1];
+      // Workspace deliverables only: an artifact checkpoint already ends
+      // the turn on its write (terminalToolPolicy below), and a file the
+      // step's onEnter hook wrote proves nothing about the model's work.
+      const readyTask = taskContext.task;
+      const deliverableReady =
+        step.advanceWhen?.file &&
+        !step.advanceWhen.artifact &&
+        !stepOnEnterProducesAdvanceFile(step)
+          ? ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
+              this.workspaceDeliverableReady(
+                readyTask.projectId,
+                readyTask.num,
+                step.id,
+                record,
+                writtenThisTurn,
+              )
+          : undefined;
       opts.activeCraftbookStep = {
         name: step.name,
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
@@ -15215,6 +14939,7 @@ export class ChatManager extends LocalEngineRuntime {
               })),
             }
           : {}),
+        ...(deliverableReady ? { deliverableReady } : {}),
       };
       const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
       const fixedEvidenceAction =
@@ -15544,7 +15269,11 @@ export class ChatManager extends LocalEngineRuntime {
               )
           : [];
       const paths = [...new Set(structuredReadPaths)];
-      const rawPath = info.args?.path;
+      // The copy tool names its destination `dest`; recording it as the
+      // receipt's path is what lets the wrap-up and References pane see the
+      // deck a book copied into the workspace.
+      const rawPath =
+        info.name === 'copy_artifact_to_workspace' ? info.args?.dest : info.args?.path;
       const resolutionAwareRead =
         info.name === 'read_file' || info.name === 'read_artifact' || info.name === 'grep_artifact';
       const resolvedReadPath =
@@ -16645,27 +16374,6 @@ export class ChatManager extends LocalEngineRuntime {
     }
     return env;
   }
-}
-
-/**
- * Render the most recent task notes as a compact digest for prompt
- * injection. Newest first, capped to keep the system prompt manageable.
- * Each entry shows time, author, and the first lines of the note text.
- */
-function formatTaskNotesDigest(notes: TaskNote[], limit = 10): string {
-  if (notes.length === 0) return '';
-  const lines: string[] = [];
-  for (const n of notes.slice(0, limit)) {
-    const author = n.author.kind === 'user' ? 'User' : n.author.name;
-    const body = n.text.trim();
-    lines.push(`- _${n.at}_ — **${author}**:\n${body}`);
-  }
-  if (notes.length > limit) {
-    lines.push(
-      `_(…${notes.length - limit} older note(s) — call \`read_task_notes\` for the full feed.)_`,
-    );
-  }
-  return lines.join('\n\n');
 }
 
 /**

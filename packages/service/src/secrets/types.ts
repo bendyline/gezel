@@ -1,12 +1,14 @@
 /**
  * SecretStore — the one place secrets (API tokens, webhook keys, OAuth
- * access tokens) live at rest. Two implementations ship:
+ * access tokens) live at rest. Three implementations ship:
  *
  *   - KeyringSecretStore: native OS keychain (macOS Keychain / Windows
  *     Credential Manager / Linux Secret Service). Preferred.
  *   - FileSecretStore:    AES-256-GCM encrypted file with a 0600 key.
  *     Fallback when the OS keyring is unavailable (headless CI, locked
  *     session, missing libsecret on bare Linux, etc).
+ *   - MemorySecretStore:  process memory only, nothing at rest. For the
+ *     embedded inference profile, which keeps no credentials.
  *
  * Toolset secrets are keyed globally by `(toolsetId, fieldId)` — there's
  * one config per toolset regardless of which scope uses it. Per-scope
@@ -58,7 +60,7 @@ export interface SecretStore {
   readonly backend: SecretStoreBackend;
 }
 
-export type SecretStoreBackend = 'keyring' | 'file';
+export type SecretStoreBackend = 'keyring' | 'file' | 'memory';
 
 /** A backend outage must never be mistaken for an absent credential. */
 export class SecretBackendUnavailableError extends Error {

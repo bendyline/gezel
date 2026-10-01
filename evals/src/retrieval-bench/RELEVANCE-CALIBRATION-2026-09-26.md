@@ -60,3 +60,7 @@ that surface — so its improvement is suggestive, not established.
   scored window. Raising keep does not remove them.
 - The model stays default-off. These thresholds apply only to installs that
   turn the relevance check on.
+- 2026-09-30: the real-catalog run this record asked for is
+  [KNOWLEDGE-CALIBRATION-2026-09-30.md](KNOWLEDGE-CALIBRATION-2026-09-30.md).
+  It adds a stricter knowledge bar and logit-space mapping on top of these
+  thresholds, and the check is now on for new installs.

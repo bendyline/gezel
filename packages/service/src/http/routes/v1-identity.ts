@@ -19,11 +19,13 @@ export function v1IdentityRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
 
   app.get('/', async (c) => {
+    const identity = ctx.deviceIdentity;
+    if (!identity) return c.json({ error: 'remote_identity_unavailable' }, 404);
     const sig = await ctx.signIdentityCertificate();
     return c.json({
-      deviceId: ctx.deviceIdentity.deviceId,
-      publicKeyPem: ctx.deviceIdentity.publicKeyPem,
-      fingerprint: ctx.deviceIdentity.fingerprint,
+      deviceId: identity.deviceId,
+      publicKeyPem: identity.publicKeyPem,
+      fingerprint: identity.fingerprint,
       ...(ctx.tlsCertSha256 ? { tlsCertFingerprint: ctx.tlsCertSha256 } : {}),
       ...(ctx.tlsCertPem ? { tlsCertPem: ctx.tlsCertPem } : {}),
       ...(sig ? { sig } : {}),

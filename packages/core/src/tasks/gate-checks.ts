@@ -303,3 +303,19 @@ export function gateCheckLabel(c: GateCheck): string {
       return `planStructure ${c.file}`;
   }
 }
+
+/** Failing checks shown in a gate verdict before the rest are summarized. */
+export const MAX_GATE_VERDICT_BULLETS = 6;
+
+/**
+ * A rejected gate's message: each failing check as a bullet, capped so a
+ * small local model reading it verbatim is not buried under a wall of them.
+ */
+export function formatGateVerdict(failures: readonly string[]): string {
+  const bullets = failures
+    .slice(0, MAX_GATE_VERDICT_BULLETS)
+    .map((f) => `- ${f}`)
+    .join('\n');
+  const overflow = failures.length - MAX_GATE_VERDICT_BULLETS;
+  return overflow > 0 ? `${bullets}\n- … and ${overflow} more failing checks` : bullets;
+}

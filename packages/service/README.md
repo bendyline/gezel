@@ -12,6 +12,9 @@ npm install @bendyline/gezel-service
 npx gezeld
 ```
 
+`gezeld` runs in the foreground and is configured through environment
+variables (see [Environment](#environment)); `npx gezeld --help` lists them.
+
 ## What it contains
 
 - Hono HTTP API on loopback, bearer-token authenticated
@@ -53,13 +56,16 @@ npm install @huggingface/transformers@^3.8.1 kokoro-js@^1.2.1
 
 Until their upstream dependency ranges move to the fixed releases, npm
 consumers should also pin the secure transitive versions in the application's
-root `package.json` (npm ignores overrides declared by dependencies):
+root `package.json` (npm ignores overrides declared by dependencies).
+Transformers 3.8 still asks for `sharp` 0.34, which `npm audit` flags;
+`sharp` 0.35.4 and `adm-zip` 0.6.1 are the first releases that clear their
+advisories:
 
 ```json
 {
   "overrides": {
-    "adm-zip": "0.6.0",
-    "sharp": "0.35.3"
+    "adm-zip": "0.6.1",
+    "sharp": "0.35.5"
   }
 }
 ```
@@ -87,6 +93,8 @@ Cloud providers need none of this.
 | `GEZEL_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` \| `silent` |
 | `GEZEL_MOCK_PROVIDER=1` | Deterministic provider, no credentials needed |
 | `GEZEL_SKIP_SYSTEM_BOOTSTRAP=1` | Skip first-boot background downloads |
+| `GEZEL_EMBEDDED_INFERENCE_ONLY=1` | Start `gezeld` in the embedded inference profile an app hosts for its own model calls: inference and model management only, no secret store, no device identity, no remote pairing or LAN serving. The app SDK sets it for an `inferenceOnly` child-hosted daemon |
+| `GEZEL_DAEMON_LOG_FILE=1` | Also write the daemon's output to `<home>/logs/service-YYYY-MM-DD.log` (10 MB rolls, 7 days kept). The CLI and app SDK set it when they start `gezeld` in the background |
 | `GEZEL_NATIVE_ENGINE_VERSION` | Override the pinned native release |
 
 ## Stability

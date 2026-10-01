@@ -5,6 +5,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { portableCatalogModels } from '@bendyline/gezel/runtime';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import {
   androidInstrumentationCommand,
@@ -15,6 +16,7 @@ import {
 import { requireMobileBuildIdentity } from '../mobile/build-identity.ts';
 import { writeMobileEvalClock, writeMobileTestResource } from '../mobile/clock.ts';
 import { canonicalMobileFixtures } from '../mobile/fixtures.ts';
+import { iosDeviceCopyFrom, iosDeviceCopyTo, requireReadyIosDevice } from '../mobile/ios-device.ts';
 import { withNativeFeedback } from '../mobile/native-feedback.ts';
 import { type MobileReport, writeMobileEvaluationReport } from '../mobile/report.ts';
 
@@ -49,17 +51,24 @@ const allowed = new Set([
   '--contracts-only',
   '--physical-device',
   '--cooldown-ms',
+  '--discard-backup',
 ]);
 for (const key of flags.keys()) if (!allowed.has(key)) throw new Error(`Unknown flag: ${key}`);
 const platform = flags.get('--platform');
 if (!['ios', 'android'].includes(platform ?? ''))
   throw new Error('--platform must be ios or android');
-if (platform === 'ios' && (flags.has('--trained-model') || flags.has('--model-id')))
+if (platform === 'ios' && flags.has('--model-id'))
   throw new Error(
-    'Model import/selection flags currently target Android; iOS evaluates its selected native provider.',
+    '--model-id selects an installed Android model; iOS stages one with --trained-model.',
   );
-if (platform === 'ios' && flags.has('--cooldown-ms'))
-  throw new Error('--cooldown-ms reads Android thermal status; iOS has no equivalent here.');
+if (platform === 'ios' && flags.has('--trained-model') && !flags.has('--physical-device'))
+  throw new Error('iOS model staging goes through devicectl, so it needs --physical-device.');
+if (
+  flags.has('--discard-backup') &&
+  (platform !== 'ios' ||
+    !/^product-eval-backup-[0-9A-F-]{36}$/.test(flags.get('--discard-backup')!))
+)
+  throw new Error('--discard-backup names one iOS eval backup folder, as the refusal printed it');
 if (flags.has('--cooldown-ms') && !/^\d+$/.test(flags.get('--cooldown-ms')!))
   throw new Error('--cooldown-ms must be a whole number of milliseconds');
 if (flags.has('--build-only') && flags.has('--contracts-only'))
@@ -172,6 +181,13 @@ if (flags.has('--report-only')) {
     let nativeCode = 0;
     if (platform === 'ios') {
       const buildDir = resolve(flags.get('--native-build-dir') ?? '/tmp/gezel-mobile-ios-build');
+      const physical = flags.has('--physical-device');
+      // A physical device runs only development-signed code, and its team is
+      // the operator's; nothing in the repository can choose it.
+      const team = process.env.GEZEL_IOS_DEVELOPMENT_TEAM;
+      if (physical && !team)
+        throw new Error('A physical iPhone/iPad needs GEZEL_IOS_DEVELOPMENT_TEAM for signing.');
+      if (physical && !flags.has('--build-only')) await requireReadyIosDevice(device);
       const common = [
         '-project',
         'packages/mobile/ios/App/App.xcodeproj',
@@ -180,7 +196,7 @@ if (flags.has('--report-only')) {
         '-configuration',
         'Debug',
         '-destination',
-        `platform=iOS Simulator,id=${device}`,
+        physical ? `id=${device}` : `platform=iOS Simulator,id=${device}`,
         '-derivedDataPath',
         buildDir,
         '-clonedSourcePackagesDirPath',
@@ -195,16 +211,76 @@ if (flags.has('--report-only')) {
         '-default-test-execution-time-allowance',
         flags.has('--contracts-only') ? '300' : String(8 * 3600 + 120),
         '-only-testing:AppTests/MobileProductEvalTests',
-        'CODE_SIGNING_ALLOWED=NO',
+        ...(physical
+          ? [
+              '-allowProvisioningUpdates',
+              `DEVELOPMENT_TEAM=${team}`,
+              'CODE_SIGN_STYLE=Automatic',
+              // No iCloud entitlement, so an eval cannot reach the person's
+              // iCloud Gezel folder, whatever the trials do.
+              'CODE_SIGN_ENTITLEMENTS=',
+            ]
+          : ['CODE_SIGNING_ALLOWED=NO']),
       ];
+      const modelEnv: Record<string, string> = {};
+      const modelPath = flags.get('--trained-model');
+      let built = false;
+      if (modelPath && !flags.has('--build-only') && !flags.has('--contracts-only')) {
+        const absolute = resolve(modelPath);
+        const file = await stat(absolute);
+        if (file.size <= 1024 * 1024 || file.size > 4 * 1024 ** 3)
+          throw new Error('Expected a trained GGUF within the mobile 4 GiB model cap');
+        const hash = createHash('sha256');
+        for await (const bytes of createReadStream(absolute)) hash.update(bytes);
+        const sha = hash.digest('hex');
+        // iOS publishes only as a catalog download, so the phone runs the
+        // model with the catalog tuning a person who downloaded it gets.
+        const download = await catalogDownloadFor(sha, file.size);
+        if (!download)
+          throw new Error(
+            'iOS stages catalog GGUFs only; this file matches no catalog chat model.',
+          );
+        // Build and install first: the data container must exist, and the
+        // test's own install then keeps the staged file in place.
+        if ((await command('xcodebuild', [...common, 'build-for-testing'])).code !== 0)
+          throw new Error('iOS eval compilation failed; see native.log');
+        built = true;
+        await required('xcrun', [
+          'devicectl',
+          'device',
+          'install',
+          'app',
+          '--device',
+          device,
+          join(buildDir, 'Build/Products/Debug-iphoneos/App.app'),
+        ]);
+        const staged = `mobile-eval-${runId}.gguf`;
+        await iosDeviceCopyTo(device, absolute, `Library/Caches/${staged}`);
+        Object.assign(modelEnv, {
+          TEST_RUNNER_GEZEL_EVAL_MODEL_FILE: staged,
+          TEST_RUNNER_GEZEL_EVAL_MODEL_SHA256: sha,
+          TEST_RUNNER_GEZEL_EVAL_MODEL_NAME: Buffer.from(download.name).toString('base64'),
+          TEST_RUNNER_GEZEL_EVAL_MODEL_SOURCE: Buffer.from(
+            JSON.stringify(download.source),
+          ).toString('base64'),
+        });
+        await writeFile(
+          join(output, 'model-source.json'),
+          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, catalogId: download.source.catalogId }, null, 2)}\n`,
+        );
+      }
       const result = await withNativeFeedback(
-        { platform: 'ios', device, runId, output, log: (line) => log.write(`${line}\n`) },
+        { platform: 'ios', device, runId, output, physical, log: (line) => log.write(`${line}\n`) },
         () =>
           command(
             'xcodebuild',
             [
               ...common,
-              flags.has('--build-only') ? 'build-for-testing' : 'test',
+              flags.has('--build-only')
+                ? 'build-for-testing'
+                : built
+                  ? 'test-without-building'
+                  : 'test',
               '-resultBundlePath',
               join(output, 'native.xcresult'),
             ],
@@ -213,6 +289,13 @@ if (flags.has('--report-only')) {
                 TEST_RUNNER_GEZEL_MOBILE_EVAL: '1',
                 TEST_RUNNER_GEZEL_EVAL_RUN_ID: runId,
                 TEST_RUNNER_GEZEL_EVAL_PROVIDER: provider,
+                ...modelEnv,
+                ...(flags.has('--cooldown-ms')
+                  ? { TEST_RUNNER_GEZEL_EVAL_COOLDOWN_MS: flags.get('--cooldown-ms')! }
+                  : {}),
+                ...(flags.has('--discard-backup')
+                  ? { TEST_RUNNER_GEZEL_EVAL_DISCARD_BACKUP: flags.get('--discard-backup')! }
+                  : {}),
                 ...(flags.has('--contracts-only')
                   ? { TEST_RUNNER_GEZEL_EVAL_CONTRACTS_ONLY: '1' }
                   : {}),
@@ -233,7 +316,10 @@ if (flags.has('--report-only')) {
           ),
       );
       nativeCode = result.code;
-      if (!flags.has('--build-only')) {
+      if (physical && !flags.has('--build-only')) {
+        reportPath = join(output, 'device-report.json');
+        await iosDeviceCopyFrom(device, `Documents/mobile-evals/${runId}.json`, reportPath);
+      } else if (!flags.has('--build-only')) {
         // XCTest may shut its dedicated simulator down after a failure. Preserve
         // the completed report without depending on another successful simctl call.
         const emitted = result.stdout
@@ -411,9 +497,16 @@ if (flags.has('--report-only')) {
         runner.evalModelPath = `/data/user/0/com.bendyline.gezel.mobile/${staged}`;
         runner.evalDeleteStaged = '1';
         runner.evalModelSha256 = sha;
+        // A catalog GGUF is staged as the download it is, so the phone runs it
+        // with its catalog tuning, as the desktop and a downloading user do.
+        const download = await catalogDownloadFor(sha, file.size);
+        if (download) {
+          runner.evalModelName = Buffer.from(download.name).toString('base64');
+          runner.evalModelSource = Buffer.from(JSON.stringify(download.source)).toString('base64');
+        }
         await writeFile(
           join(output, 'model-source.json'),
-          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, stagedSha256: stagedSha }, null, 2)}\n`,
+          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, stagedSha256: stagedSha, catalogId: download?.source.catalogId ?? null }, null, 2)}\n`,
         );
       }
       if (!flags.has('--build-only')) {
@@ -480,4 +573,15 @@ if (flags.has('--report-only')) {
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
   }
+}
+
+/** The phone catalog's download for this GGUF, matched by content hash. */
+async function catalogDownloadFor(sha256: string, sizeBytes: number) {
+  // Loaded only when staging a model: CI's --contracts-only runner never builds the catalog package.
+  const { BundledSource, gildeDataDir } = await import('@bendyline/gezel-catalog');
+  const catalog = new BundledSource({ dataDir: gildeDataDir() });
+  const model = portableCatalogModels(await catalog.list('chat-model')).find(
+    (entry) => entry.source.sha256 === sha256,
+  );
+  return model ? { name: model.name, source: { ...model.source, sizeBytes } } : undefined;
 }

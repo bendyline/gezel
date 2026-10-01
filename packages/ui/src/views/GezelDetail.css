@@ -256,6 +256,19 @@
   margin-top: 0.35rem;
 }
 
+/* Each labelled control wraps as one unit, so a label never ends a line while
+   its keys start the next, and a wrapped group starts flush left. */
+.provider-override-grouped {
+  column-gap: 1.05rem;
+}
+
+.provider-override-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .provider-chip {
   padding: 0.15rem 0.6rem;
   border: 1px solid var(--border);
@@ -274,4 +287,15 @@
 
 .provider-chip:hover:not(.provider-chip-active):not(:disabled) {
   border-color: var(--accent);
+}
+
+/* The editor toolbar leaves this key a sliver on a phone, where the words
+   stacked one per line. It keeps one line and says only "Draft"; the full
+   action stays in its accessible name and title. */
+.gezel-about-draft {
+  white-space: nowrap;
+}
+
+.app.app-compact .gezel-about-draft-tail {
+  display: none;
 }

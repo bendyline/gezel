@@ -67,7 +67,11 @@ export interface EngineContext {
   token: string;
   tokenStore: TokenStore;
   grants: GrantManager;
-  deviceIdentity: DeviceIdentity;
+  /**
+   * This device's pairing identity. Null in the embedded inference profile,
+   * which keeps no secrets and offers no remote connectivity.
+   */
+  deviceIdentity: DeviceIdentity | null;
   machineEngine?: {
     isConnected(): boolean;
     isRequired(): boolean;

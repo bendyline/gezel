@@ -1459,15 +1459,27 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
   };
 }
 
-/** Human-readable refusal for a model that cannot retain its viable context. */
+/**
+ * What a person sees when a model cannot retain its viable context. The
+ * arithmetic behind the refusal is ours, not theirs: launch paths log it via
+ * {@link formatContextCapacityDenial}.
+ */
+export const NOT_ENOUGH_MEMORY_MESSAGE =
+  'There is not enough memory to run this model. Please select another model or close some applications on this device.';
+
+/**
+ * Log-side diagnostic for a context refusal. Never the thrown message — see
+ * {@link NOT_ENOUGH_MEMORY_MESSAGE}. The eval harness reads the
+ * `with its required <n>-token working window` shape from daemon.log
+ * (evals/src/engine-context.ts), so keep that phrase intact.
+ */
 export function formatContextCapacityDenial(opts: {
   modelLabel: string;
   plan: CtxMemoryAdmissionPlanResult;
 }): string {
   const minimum = opts.plan.minimumPerTurnCtxTokens.toLocaleString('en-US');
   const safe = opts.plan.perTurnCtxTokens.toLocaleString('en-US');
-  return `Not enough memory to run ${opts.modelLabel} with its required ${minimum}-token working window. Even at one engine slot, this machine could safely admit only about ${safe} tokens per turn. ${opts.plan.reason ?? ''} Free memory or unload another local model, then restart the engine; otherwise choose a model that fits. Gezel will not silently launch the full tool surface below the required context.`.replace(
-    /\s+/g,
-    ' ',
-  );
+  return `Not enough memory to run ${opts.modelLabel} with its required ${minimum}-token working window. Even at one engine slot, this machine could safely admit only about ${safe} tokens per turn. ${opts.plan.reason ?? ''}`
+    .replace(/\s+/g, ' ')
+    .trim();
 }

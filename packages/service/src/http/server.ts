@@ -356,7 +356,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // any localhost dev server) can hit the daemon. The middleware
   // attaches headers AFTER auth has run, so a 401 / 403 still carries
   // the CORS headers required for the browser to read the error.
-  app.use('/v1/*', v1Cors());
+  const corsOptions = { officeHostOrigin: () => ctx.officeHostOrigin?.() ?? null };
+  app.use('/v1/*', v1Cors(corsOptions));
 
   // Global error handler. Without this, a ZodError thrown from a route's
   // inline `Schema.parse(await c.req.json())` becomes a generic Hono 500
@@ -544,7 +545,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/storage', storageRoutes(ctx));
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
-  app.route('/api/remotes', remotesRoutes(ctx));
+  // Like every remote surface below, absent from the embedded inference
+  // profile, which has no device identity and offers no remote connectivity.
+  if (!options.embeddedInferenceOnly) app.route('/api/remotes', remotesRoutes(ctx));
   // Machine-broker LAN-serving administration, proxied to
   // /v1/remote/manage/serving with the bridge credential; 503 without a broker.
   app.route('/api/machine-serving', machineServingRoutes(ctx));
@@ -611,12 +614,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
 
   // `/v1/identity` — unauth device-identity handshake for remote model
   // execution pairing (public material only; no token exists yet at pairing).
-  app.route('/v1/identity', v1IdentityRoutes(ctx));
+  if (!options.embeddedInferenceOnly) app.route('/v1/identity', v1IdentityRoutes(ctx));
 
   // `/ollama/v1/*` — Ollama-compatible facade (tags + chat). Auth +
   // openai scope match `/v1/*`. CORS is also enabled so browser apps
   // targeting Ollama can swap baseUrl without origin grief.
-  app.use('/ollama/v1/*', v1Cors());
+  app.use('/ollama/v1/*', v1Cors(corsOptions));
   app.use('/ollama/v1/*', openaiEndpointsGate);
   app.use('/ollama/v1/*', bearerAuth(ctx.tokenStore));
   app.use('/ollama/v1/*', requireScope('openai'));
@@ -655,9 +658,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/remote/*` — inference-only surface for paired client devices. Gated by
   // the `remote-inference` scope, so a remote token reaches ONLY inference and
   // gets 403 on every project/fs `/api/*` route.
-  app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
-  app.use('/v1/remote/*', requireScope('remote-inference'));
-  app.route('/v1/remote', v1RemoteRoutes(ctx));
+  if (!options.embeddedInferenceOnly) {
+    app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
+    app.use('/v1/remote/*', requireScope('remote-inference'));
+    app.route('/v1/remote', v1RemoteRoutes(ctx));
+  }
 
   app.use('/v1/embeddings', openAiErrorEnvelope());
   app.use('/v1/embeddings', openaiEndpointsGate);

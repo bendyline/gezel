@@ -91,25 +91,50 @@ describe('serviceNotice', () => {
   // nothing is off, and its advice (reinstall) does not apply to an app the
   // store manages.
   it('explains a store build running its own service without alarming', () => {
-    for (const code of ['store-service-unhealthy', 'store-service-incompatible'] as const) {
-      const notice = serviceNotice({ reason: 'generation 2 vs 1', code, platform: 'darwin' });
-      expect(notice?.id).toBe('store-service-separate');
-      expect(notice?.railLabel).toBe('Running its own service');
-      expect(notice?.reportable).toBe(false);
+    const notice = serviceNotice({
+      reason: 'connection refused',
+      code: 'store-service-unhealthy',
+      platform: 'darwin',
+    });
+    expect(notice?.id).toBe('store-service-separate');
+    expect(notice?.railLabel).toBe('Running its own service');
+    expect(notice?.reportable).toBe(false);
+    expect(notice?.body).not.toMatch(/Background work is off/);
+    expect(notice?.body).not.toMatch(/[Rr]einstall/);
+    expect(notice?.technical).toBe('connection refused');
+  });
+
+  // Startup no longer stops to ask about an incompatible shared service; it
+  // runs without it and leaves this in the rail. Both sources are the same
+  // situation to the user, and the fix is the same download.
+  it('points a version mismatch with the shared service at the full download', () => {
+    for (const code of ['machine-engine-incompatible', 'store-service-incompatible'] as const) {
+      const notice = serviceNotice({
+        reason: 'The installed Gezel service is version 1.26247.65',
+        code,
+        platform: 'darwin',
+      });
+      expect(notice?.id).toBe('shared-service-version-mismatch');
+      expect(notice?.railLabel).toBe('Shared services are off');
+      expect(notice?.title).toMatch(/version mismatch/);
+      expect(notice?.body).toMatch(/[Dd]ownload the full version/);
       expect(notice?.body).not.toMatch(/Background work is off/);
-      expect(notice?.body).not.toMatch(/[Rr]einstall/);
-      expect(notice?.technical).toBe('generation 2 vs 1');
+      expect(notice?.link).toEqual({
+        href: 'https://gezel.com/',
+        label: 'Download the full version',
+      });
+      expect(notice?.reportable).toBe(false);
+      expect(notice?.technical).toContain('1.26247.65');
     }
   });
 
-  it('tells an incompatible store build what would fix it', () => {
-    const notice = serviceNotice({
-      reason: 'generation mismatch',
-      code: 'store-service-incompatible',
-      platform: 'win32',
+  it('puts the shared-service mismatch in the rail', () => {
+    const notices = railSystemNotices({
+      reason: 'mismatch',
+      code: 'machine-engine-incompatible',
+      update: null,
     });
-    expect(notice?.body).toMatch(/different version/i);
-    expect(notice?.body).toMatch(/[Uu]pdating both/);
+    expect(notices.map((n) => n.id)).toEqual(['shared-service-version-mismatch']);
   });
 
   it('names the right installer per platform', () => {

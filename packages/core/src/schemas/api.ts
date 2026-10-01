@@ -2145,9 +2145,10 @@ export const GezelConfigSchema = z.object({
     .optional(),
   /**
    * The relevance model: a small on-device cross-encoder that checks each
-   * indexed passage against the request before it reaches a prompt. Default
-   * off; enabling downloads the selected model (pinned in the service's
-   * relevance registry) when app network access is allowed.
+   * indexed passage against the request before it reaches a prompt. First
+   * run turns it on for new installs; absent means off, which is what
+   * existing installs keep. Enabling downloads the selected model (pinned in
+   * the service's relevance registry) when app network access is allowed.
    */
   relevanceModel: z
     .object({
@@ -3118,6 +3119,9 @@ export const ModelInfoSchema = z.object({
   reasoningEfforts: z.array(z.string()).optional(),
   defaultReasoningEffort: z.string().optional(),
   contextWindow: z.number().optional(),
+  /** Reply ceiling this host applies by default. Phones report it with the
+   * window they actually run the model at, not the provider maximum. */
+  maxOutputTokens: z.number().int().positive().optional(),
   /**
    * Whether the model supports structured tool / function calling. Cloud
    * providers can assume true for their current chat models; Ollama sets
@@ -4033,6 +4037,14 @@ export const CreateProjectRequestSchema = z.object({
    * sessions on this project.
    */
   mode: z.enum(['crew', 'solo']).optional(),
+  /**
+   * `none` skips the lead the route otherwise seats (a Voorman for a crew
+   * project, a Builder for a solo folder project). For callers that seat their
+   * own lead right after creating the project: the Meester's kickoff macros
+   * mint a fresh Voorman, and with the route minting one too every kickoff
+   * roster carried two, one of them idle.
+   */
+  lead: z.enum(['auto', 'none']).optional(),
   /**
    * Opt out of structural and content indexing for this project's workspace.
    * Missing/true keeps the historical indexing behavior.
@@ -5608,6 +5620,12 @@ export const UnifiedSearchResultSchema = z.object({
    * cleared a cosine floor and shares no words by nature.
    */
   arm: z.enum(['vector', 'fts']).optional(),
+  /**
+   * Cosine similarity of the hit's best vector evidence, when that evidence
+   * cleared its embedder's floor. On that embedder's own scale — never
+   * compare it across embedders or catalogs.
+   */
+  similarity: z.number().optional(),
   /** 1-based line for content/symbol hits. */
   line: z.number().int().positive().optional(),
   /** Inclusive end line when the underlying index provides a span. */

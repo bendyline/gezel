@@ -6,7 +6,10 @@ import {
   isSupportedOnDevicePlatform as coreIsSupportedOnDevicePlatform,
   resolveOnDeviceProvider,
 } from '@bendyline/gezel/native';
+import { z } from 'zod';
 import type { Store } from '../fs/store.js';
+import { usesMachineEngine } from '../http/routes/machine-engine-proxy.js';
+import type { MachineEngineBridge } from '../machine-engine/bridge.js';
 
 const firstRunLog = createLogger('first-run');
 import { detectModelTier } from '../providers/llama-cpp/hardware-tier.js';
@@ -49,6 +52,60 @@ export function resolveFirstRunTarget(
   return { provider: resolveOnDeviceProvider(p, a), modelId: tier };
 }
 
+type OnDeviceProvider = 'llama-cpp' | 'mlx';
+
+/** The model store that actually serves this daemon's turns, for one provider. */
+interface ModelInventory {
+  /** Named in log lines, so a pin decision says which store it read. */
+  label: string;
+  installedIds(): Promise<string[]>;
+  activeInstallCount(): Promise<number>;
+}
+
+const BrokerModelsSchema = z.object({ models: z.array(z.object({ id: z.string() })) });
+const BrokerActiveInstallsSchema = z.object({ installs: z.array(z.unknown()) });
+
+/**
+ * Once a machine engine is adopted, `/api/<provider>/*` and every chat turn
+ * go to the broker's model store, not this home's. Reading the local store
+ * here instead let a July pin survive on a 128 GB Mac: the model sat in
+ * `~/.gezel/engines/mlx/models`, so the re-check saw it installed and never
+ * ran, while the broker had no copy and the banner offered it for download
+ * as the "recommended" model. Uses the same predicate and routes as
+ * `machineEngineProxy`, so this can never disagree with the UI.
+ */
+function modelInventory(
+  provider: OnDeviceProvider,
+  managers: { llamaCppModels: LlamaCppModelManager; mlxModels: MlxModelManager },
+  machineEngine: Pick<MachineEngineBridge, 'isConnected' | 'isRequired' | 'proxy'> | undefined,
+): ModelInventory {
+  if (machineEngine && usesMachineEngine({ machineEngine })) {
+    const sourcePrefix = `/api/${provider}`;
+    const brokerJson = async (path: string): Promise<unknown> => {
+      const res = await machineEngine.proxy(
+        new Request(`http://gezel.local${sourcePrefix}${path}`),
+        sourcePrefix,
+        `/v1/remote/manage/${provider}`,
+      );
+      if (!res.ok) throw new Error(`the machine engine answered HTTP ${res.status} for ${path}`);
+      return res.json();
+    };
+    return {
+      label: 'machine engine',
+      installedIds: async () =>
+        BrokerModelsSchema.parse(await brokerJson('/models')).models.map((m) => m.id),
+      activeInstallCount: async () =>
+        BrokerActiveInstallsSchema.parse(await brokerJson('/active-installs')).installs.length,
+    };
+  }
+  const manager = provider === 'mlx' ? managers.mlxModels : managers.llamaCppModels;
+  return {
+    label: 'this home',
+    installedIds: async () => (await manager.listInstalled()).map((m) => m.id),
+    activeInstallCount: async () => manager.getActiveInstalls().length,
+  };
+}
+
 /** The catalog's chat-model manifests — the recommendation candidate pool. */
 async function listChatModelManifests(catalog: CatalogService): Promise<ChatModelManifest[]> {
   const items = await catalog.list('chat-model');
@@ -84,6 +141,8 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   llamaCppModels: LlamaCppModelManager;
   mlxModels: MlxModelManager;
   catalog: CatalogService;
+  /** The adopted machine broker, when there is one; its store is the inventory. */
+  machineEngine?: Pick<MachineEngineBridge, 'isConnected' | 'isRequired' | 'proxy'>;
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
   /** Test seams — production callers use ambient `process.platform` / `process.arch`. */
   platformOverride?: NodeJS.Platform;
@@ -114,6 +173,20 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   if (!storedConfig.securityPolicy) {
     await store.writeConfig({ securityPolicy: config.securityPolicy });
   }
+  // New installs start with the relevance check on: without it, installed
+  // knowledge catalogs (the bundled Handboek included) inject their nearest
+  // neighbour into turns it has nothing to do with. Same new-install test as
+  // the security posture above; an existing install keeps its absent (off)
+  // setting, and any explicit choice is left alone. The ~24 MB model
+  // downloads at the relevance manager's boot step, network permitting.
+  if (
+    storedConfig.relevanceModel === undefined &&
+    !storedConfig.firstRunCompleted &&
+    storedConfig.provider === undefined
+  ) {
+    await store.writeConfig({ relevanceModel: { enabled: true } });
+    log.info('[first-run] relevance check on for this new install');
+  }
   if (!isSupportedOnDevicePlatform(effPlatform, effArch)) {
     // Intel Mac and other platforms we don't ship a bundled engine
     // for. Auto-enrolling here would download 3-10 GB of model that
@@ -141,7 +214,8 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   //   - the user is still on an on-device provider matching what the
   //     bootstrap chose (don't undo a manual switch to Copilot)
   //   - no install is currently in flight (don't race a live download)
-  //   - the pinned model isn't actually installed (deleting from
+  //   - the pinned model isn't actually installed in the store that serves
+  //     turns — the machine broker's once one is adopted (deleting from
   //     Settings counts; abandoned downloads count)
   // Then: a lone installed model wins the pin, because there is no ambiguity
   // about which one the user meant and nothing else on the machine can serve a
@@ -153,11 +227,24 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   // banner will re-fire that install on its own.
   if (config.firstRunCompleted && (config.provider === 'llama-cpp' || config.provider === 'mlx')) {
     const provider = config.provider;
-    const installer = provider === 'mlx' ? mlxModels : llamaCppModels;
-    if (installer.getActiveInstalls().length === 0) {
+    const inventory = modelInventory(provider, { llamaCppModels, mlxModels }, opts.machineEngine);
+    let activeInstalls: number;
+    let installed: string[];
+    try {
+      activeInstalls = await inventory.activeInstallCount();
+      installed = activeInstalls === 0 ? await inventory.installedIds() : [];
+    } catch (err) {
+      // Re-pinning against an inventory we could not read would guess, and a
+      // wrong guess replaces a working pin. The next boot asks again.
+      log.warn(
+        `[first-run] skipping the pin re-check: could not read installed ${provider} models from ` +
+          `${inventory.label}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+    if (activeInstalls === 0) {
       const pinned = config.defaultModel?.[provider];
-      const installed = await installer.listInstalled();
-      const pinnedIsOnDisk = pinned ? installed.some((m) => m.id === pinned) : false;
+      const pinnedIsOnDisk = pinned ? installed.includes(pinned) : false;
       if (!pinnedIsOnDisk) {
         // One installed model, and it isn't the pinned one: adopt it. The tier
         // re-resolution below cannot rescue this case — on hardware whose
@@ -167,10 +254,10 @@ export async function bootstrapOnDeviceFirstRun(opts: {
         // `model_not_loaded`. Wild-caught on a 122 GB host that pinned
         // `qwen3.6-27b-q8`, abandoned the download at 257 MB, and then had
         // `gemma4-e4b-q4` installed by hand.
-        const soleInstalled = installed.length === 1 ? installed[0]?.id : undefined;
+        const soleInstalled = installed.length === 1 ? installed[0] : undefined;
         if (soleInstalled) {
           log.info(
-            `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed; repinning ` +
+            `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed in ${inventory.label}; repinning ` +
               `to ${soleInstalled} — the only model on this machine — so chat works without a download.`,
           );
           await store.writeConfig({
@@ -183,7 +270,7 @@ export async function bootstrapOnDeviceFirstRun(opts: {
         const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
         if (target.provider === provider && target.modelId !== pinned) {
           log.info(
-            `[first-run] re-evaluating: pinned ${provider}/${pinned ?? '<none>'} not installed; ` +
+            `[first-run] re-evaluating: pinned ${provider}/${pinned ?? '<none>'} not installed in ${inventory.label}; ` +
               `resolver now picks ${target.modelId} (${decision.reason}). Updating pin; ` +
               `${installed.length} other installed model(s) remain available as alternatives.`,
           );
@@ -237,17 +324,29 @@ export async function bootstrapOnDeviceFirstRun(opts: {
     firstRunInstallError: null as unknown as undefined,
   });
 
-  const targetManager = target.provider === 'mlx' ? mlxModels : llamaCppModels;
-  const installed = await targetManager.listInstalled();
-  const installedTarget = installed.find((model) => model.id === target.modelId);
-  if (installedTarget) {
+  const inventory = modelInventory(
+    target.provider,
+    { llamaCppModels, mlxModels },
+    opts.machineEngine,
+  );
+  let installed: string[];
+  try {
+    installed = await inventory.installedIds();
+  } catch (err) {
+    log.warn(
+      `[first-run] pinned ${target.provider}/${target.modelId}; could not list installed models from ` +
+        `${inventory.label}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+  if (installed.includes(target.modelId)) {
     log.info(
-      `[first-run] recommended ${target.provider}/${target.modelId} is already available among ${installed.length} user/shared model(s).`,
+      `[first-run] recommended ${target.provider}/${target.modelId} is already available among ${installed.length} model(s) in ${inventory.label}.`,
     );
   } else if (installed.length > 0) {
     log.info(
       `[first-run] retaining hardware recommendation ${target.provider}/${target.modelId}; ` +
-        `${installed.length} other user/shared model(s) remain available as picker alternatives.`,
+        `${installed.length} other model(s) in ${inventory.label} remain available as picker alternatives.`,
     );
   }
 }

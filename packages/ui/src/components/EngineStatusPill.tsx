@@ -44,6 +44,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
@@ -70,7 +71,7 @@ import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition
 
 type LiveTurn = LiveTurnState;
 type TurnStats = TurnStatsEntry;
-type OnDeviceProvider = 'llama-cpp' | 'mlx' | 'ds4';
+type OnDeviceProvider = 'llama-cpp' | 'mlx' | 'ds4' | 'apple-foundation-models' | 'android-mlkit';
 type UserDeviceSafetyMode = 'observe' | 'guard';
 type EngineRetentionMs = 60_000 | 300_000 | 1_800_000;
 type InflightTurn = {
@@ -85,7 +86,18 @@ type InflightTurn = {
   lastProgressAgoMs?: number;
 };
 
-const ON_DEVICE_PROVIDER_ORDER: readonly OnDeviceProvider[] = ['llama-cpp', 'mlx', 'ds4'];
+const ON_DEVICE_PROVIDER_ORDER: readonly OnDeviceProvider[] = [
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+  'android-mlkit',
+];
+/** A phone's system models; their inventory comes from the generic model route. */
+const PHONE_SYSTEM_PROVIDERS: ReadonlySet<OnDeviceProvider> = new Set([
+  'apple-foundation-models',
+  'android-mlkit',
+]);
 
 /** Retention for per-turn stats in the rolling-average computation. */
 const STATS_WINDOW_MS = 60_000;
@@ -126,9 +138,13 @@ export function EngineStatusPill() {
     void api
       .getConfig()
       .then(async (next) => {
-        const retention = await api.getEngineRetention().catch(() => ({
+        const fallback = {
           idleTimeoutMs: next.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
-        }));
+        };
+        // Retention is engine management, which only the daemon offers.
+        const retention = runtimeCapabilities().daemonSettings
+          ? await api.getEngineRetention().catch(() => fallback)
+          : fallback;
         if (mountedRef.current) {
           setConfig({ ...next, localEngineIdleTimeoutMs: retention.idleTimeoutMs });
         }
@@ -159,13 +175,16 @@ export function EngineStatusPill() {
   }, [refreshGezels]);
 
   const refreshActivity = useCallback(() => {
-    void Promise.all([api.getQueueStatus(), api.listInflightTurns()])
-      .then(([status, inflight]) => {
+    // Settled separately: a host without a queue snapshot still reports the
+    // turns it is running, and the pill should keep showing them.
+    void Promise.allSettled([api.getQueueStatus(), api.listInflightTurns()]).then(
+      ([status, inflight]) => {
         if (!mountedRef.current) return;
-        setQueueStatus(status);
-        setInflightTurns((inflight.inflight ?? []) as InflightTurn[]);
-      })
-      .catch(() => {});
+        if (status.status === 'fulfilled') setQueueStatus(status.value);
+        if (inflight.status === 'fulfilled')
+          setInflightTurns((inflight.value.inflight ?? []) as InflightTurn[]);
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -393,6 +412,9 @@ function EngineStatusPillForProvider({
   // commonly has no provider until getConfig resolves; calling this hook only
   // after that transition changes the component's hook order.
   const density = useHeaderDensity();
+  // Engine management (retention, health policy, memory, Hard Stop) belongs
+  // to the desktop daemon; a phone's pill reports status only.
+  const manages = runtimeCapabilities().daemonSettings;
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
   // install finishing (or being deleted) without needing a page reload.
@@ -559,17 +581,21 @@ function EngineStatusPillForProvider({
     const refresh = async () => {
       try {
         const res =
-          onDeviceProvider === 'mlx'
-            ? await api.listMlxModels()
-            : onDeviceProvider === 'ds4'
-              ? await api.listDs4Models()
-              : await api.listLlamaCppModels();
+          PHONE_SYSTEM_PROVIDERS.has(onDeviceProvider) || !runtimeCapabilities().daemonSettings
+            ? await api.listProviderModels(onDeviceProvider)
+            : onDeviceProvider === 'mlx'
+              ? await api.listMlxModels()
+              : onDeviceProvider === 'ds4'
+                ? await api.listDs4Models()
+                : await api.listLlamaCppModels();
         if (cancelled) return;
         setInstalledModels(
           res.models.map((m) => ({
             id: m.id,
             name: m.name,
-            ...(m.plannedSlots !== undefined ? { plannedSlots: m.plannedSlots } : {}),
+            ...('plannedSlots' in m && m.plannedSlots !== undefined
+              ? { plannedSlots: m.plannedSlots }
+              : {}),
           })),
         );
         setModelsListed(true);
@@ -623,7 +649,8 @@ function EngineStatusPillForProvider({
   // so the slow timer is a backstop for turns this page didn't witness
   // (another window, a scheduled job) rather than the primary trigger.
   const refreshModelSpeeds = useCallback(() => {
-    if (!onDeviceProvider) {
+    // The per-model speed record lives in the daemon's usage tracker.
+    if (!onDeviceProvider || !runtimeCapabilities().daemonSettings) {
       setModelSpeeds([]);
       setLastTurn(undefined);
       return;
@@ -800,8 +827,14 @@ function EngineStatusPillForProvider({
   // cases are rare (local engine serializes to one at a time), but
   // if they happen we pick the newest so the pill shows what's
   // *right now*, not what's waiting.
-  const current = pickCurrent(liveTurns);
-  const currentInflight = pickCurrentInflight(providerInflightTurns);
+  // A turn still waiting for the engine is not what it is doing right now.
+  const waitingSessions = new Set(
+    (onDeviceProvider ? (queueStatus?.providers[onDeviceProvider]?.pending ?? []) : []).flatMap(
+      (item) => (item.sessionId ? [item.sessionId] : []),
+    ),
+  );
+  const current = pickCurrent(liveTurns, waitingSessions);
+  const currentInflight = pickCurrentInflight(providerInflightTurns, waitingSessions);
   // A turn is in flight per the server's inflight snapshot. This is the
   // backstop for the case the user hit: a slow cold model load emits no
   // engine_phase events, the 90s sweeper drops `current`, but the turn
@@ -1006,6 +1039,9 @@ function EngineStatusPillForProvider({
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
+        {/* Shown only as the compact header's key, where the label goes
+            visually hidden and the dot becomes the key's status light. */}
+        <EngineKeyIcon />
         <span className={dotClassName} aria-hidden />
         <span className="engine-pill-label">
           {busy ? (
@@ -1096,16 +1132,20 @@ function EngineStatusPillForProvider({
                 <dd>{formatBytes(ramAllocBytes)}</dd>
               </>
             )}
-            <dt>Memory</dt>
-            <dd className="engine-pill-memory">
-              <MachineMemoryStrip
-                modelNames={installedModelNames}
-                modelConcurrentSlots={installedModelConcurrentSlots}
-              />
-            </dd>
+            {manages && (
+              <>
+                <dt>Memory</dt>
+                <dd className="engine-pill-memory">
+                  <MachineMemoryStrip
+                    modelNames={installedModelNames}
+                    modelConcurrentSlots={installedModelConcurrentSlots}
+                  />
+                </dd>
+              </>
+            )}
             <dt>Status</dt>
             <dd>{statusText}</dd>
-            {!activeMedia && (
+            {manages && !activeMedia && (
               <>
                 <dt>Idle models</dt>
                 <dd className="engine-pill-retention-policy">
@@ -1154,44 +1194,46 @@ function EngineStatusPillForProvider({
                 <dd>{healthPresentation.detail}</dd>
               </>
             )}
-            <dt>Health policy</dt>
-            <dd className="engine-pill-health-policy">
-              <fieldset className="gz-tray engine-pill-health-mode">
-                <legend className="sr-only">Machine health policy</legend>
-                <button
-                  type="button"
-                  aria-pressed={deviceSafetyMode === 'observe'}
-                  className={`gz-key${deviceSafetyMode === 'observe' ? ' gz-key-active' : ''}`}
-                  disabled={deviceSafetySaving}
-                  onClick={() => void onDeviceSafetyModeChange('observe')}
-                >
-                  Observe
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={deviceSafetyMode === 'guard'}
-                  className={`gz-key${deviceSafetyMode === 'guard' ? ' gz-key-active' : ''}`}
-                  disabled={deviceSafetySaving}
-                  onClick={() => void onDeviceSafetyModeChange('guard')}
-                >
-                  Manage
-                </button>
-              </fieldset>
-              <span className="engine-pill-health-policy-note">
-                {deviceSafetySaving
-                  ? 'Saving\u2026'
-                  : deviceSafetyMode === 'guard'
-                    ? 'Gezel waits for safe temperature and throttle readings.'
-                    : deviceSafetyMode === 'off'
-                      ? 'Machine health management is off.'
-                      : 'Gezel reports machine health without pausing below the 95\u00b0C hard limit.'}
-              </span>
-              {deviceSafetyError && (
-                <span className="engine-pill-health-policy-error" role="alert">
-                  {deviceSafetyError}
+            {manages && <dt>Health policy</dt>}
+            {manages && (
+              <dd className="engine-pill-health-policy">
+                <fieldset className="gz-tray engine-pill-health-mode">
+                  <legend className="sr-only">Machine health policy</legend>
+                  <button
+                    type="button"
+                    aria-pressed={deviceSafetyMode === 'observe'}
+                    className={`gz-key${deviceSafetyMode === 'observe' ? ' gz-key-active' : ''}`}
+                    disabled={deviceSafetySaving}
+                    onClick={() => void onDeviceSafetyModeChange('observe')}
+                  >
+                    Observe
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={deviceSafetyMode === 'guard'}
+                    className={`gz-key${deviceSafetyMode === 'guard' ? ' gz-key-active' : ''}`}
+                    disabled={deviceSafetySaving}
+                    onClick={() => void onDeviceSafetyModeChange('guard')}
+                  >
+                    Manage
+                  </button>
+                </fieldset>
+                <span className="engine-pill-health-policy-note">
+                  {deviceSafetySaving
+                    ? 'Saving\u2026'
+                    : deviceSafetyMode === 'guard'
+                      ? 'Gezel waits for safe temperature and throttle readings.'
+                      : deviceSafetyMode === 'off'
+                        ? 'Machine health management is off.'
+                        : 'Gezel reports machine health without pausing below the 95\u00b0C hard limit.'}
                 </span>
-              )}
-            </dd>
+                {deviceSafetyError && (
+                  <span className="engine-pill-health-policy-error" role="alert">
+                    {deviceSafetyError}
+                  </span>
+                )}
+              </dd>
+            )}
             {activeMedia && (
               <>
                 <dt>Note</dt>
@@ -1274,7 +1316,7 @@ function EngineStatusPillForProvider({
               </>
             )}
           </dl>
-          {includeMedia && (
+          {includeMedia && manages && (
             <div className="engine-pill-emergency-stop">
               <div className="engine-pill-emergency-copy">
                 <strong>Need everything to pause?</strong>
@@ -1299,8 +1341,28 @@ function EngineStatusPillForProvider({
   );
 }
 
+/** A chip with its pins: the engine the model runs on. */
+function EngineKeyIcon() {
+  return (
+    <svg
+      className="engine-pill-key-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" />
+      <path d="M8 2.5v3M12 2.5v3M8 14.5v3M12 14.5v3M2.5 8h3M2.5 12h3M14.5 8h3M14.5 12h3" />
+    </svg>
+  );
+}
+
 function toOnDeviceProvider(provider: ProviderName | undefined): OnDeviceProvider | null {
-  return provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4' ? provider : null;
+  return ON_DEVICE_PROVIDER_ORDER.find((candidate) => candidate === provider) ?? null;
 }
 
 function visibleOnDeviceProviders({
@@ -1339,21 +1401,37 @@ function visibleOnDeviceProviders({
   ];
 }
 
-function pickCurrent(turns: Map<string, LiveTurn>): LiveTurn | null {
+/** The newest turn, preferring one that is not just waiting for the engine. */
+function pickCurrent(
+  turns: Map<string, LiveTurn>,
+  waiting: ReadonlySet<string> = new Set(),
+): LiveTurn | null {
   if (turns.size === 0) return null;
   let newest: LiveTurn | null = null;
-  for (const t of turns.values()) {
+  let newestRunning: LiveTurn | null = null;
+  for (const [sessionId, t] of turns) {
     if (!newest || t.startedAt > newest.startedAt) newest = t;
+    if (!waiting.has(sessionId) && (!newestRunning || t.startedAt > newestRunning.startedAt))
+      newestRunning = t;
   }
-  return newest;
+  return newestRunning ?? newest;
 }
 
-function pickCurrentInflight(turns: readonly InflightTurn[]): InflightTurn | null {
+function pickCurrentInflight(
+  turns: readonly InflightTurn[],
+  waiting: ReadonlySet<string> = new Set(),
+): InflightTurn | null {
   let newest: InflightTurn | null = null;
+  let newestRunning: InflightTurn | null = null;
   for (const turn of turns) {
     if (!newest || turn.startedAt > newest.startedAt) newest = turn;
+    if (
+      !waiting.has(turn.sessionId) &&
+      (!newestRunning || turn.startedAt > newestRunning.startedAt)
+    )
+      newestRunning = turn;
   }
-  return newest;
+  return newestRunning ?? newest;
 }
 
 function phaseLabelIncludesTokenCount(label: string): boolean {

@@ -24,6 +24,7 @@ import {
   StepRunWhenSchema,
 } from './craftbook.js';
 import { HookSpecSchema } from './hook.js';
+import { ReferencedFileSchema, TaskDeliverableSchema } from './referenced-file.js';
 import { RetrievalPolicySchema } from './retrieval.js';
 import { ScriptRefListSchema } from './script.js';
 import { TaskInputRecordSchema, TaskInputSourceSchema } from './task-inputs.js';
@@ -1087,6 +1088,12 @@ export const TaskNoteSchema = z.object({
   author: TaskNoteAuthorSchema,
   stepId: z.string().optional(),
   text: z.string(),
+  /**
+   * Real project files the note names, resolved when notes are read — never
+   * persisted, so a file written after the note still links. Same resolver
+   * and same meaning as `ChatMessage.referencedFiles`.
+   */
+  referencedFiles: z.array(ReferencedFileSchema).optional(),
 });
 export type TaskNote = z.infer<typeof TaskNoteSchema>;
 
@@ -1094,6 +1101,18 @@ export const ListTaskNotesResponseSchema = z.object({
   notes: z.array(TaskNoteSchema),
 });
 export type ListTaskNotesResponse = z.infer<typeof ListTaskNotesResponseSchema>;
+
+/**
+ * `GET /api/projects/:id/tasks/:num/outputs` — what a task has made so far.
+ * Read live, so an in-flight task shows its deliverable the moment it lands.
+ */
+export const TaskOutputsResponseSchema = z.object({
+  /** The finished file, or null while the task has not made one. */
+  deliverable: TaskDeliverableSchema.nullable(),
+  /** Every file the task made that still exists, the deliverable first. */
+  outputs: z.array(ReferencedFileSchema),
+});
+export type TaskOutputsResponse = z.infer<typeof TaskOutputsResponseSchema>;
 
 export const AppendTaskNoteRequestSchema = z.object({
   text: z.string().min(1),

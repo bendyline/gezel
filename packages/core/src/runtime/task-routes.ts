@@ -24,9 +24,26 @@ import type { PortableStore } from './store.js';
 import { taskActiveAssignee } from './tasks.js';
 import type { PortableTaskGateResult } from './tasks.js';
 
+/**
+ * Awake time one drive may spend before a task pauses. On a phone one turn can
+ * take minutes (a long prompt, then a whole file written at ~20 tokens a
+ * second), so a multi-step task needs most of an hour. Time a step spends
+ * queued behind other work is not charged.
+ */
+const DEFAULT_TASK_DRIVE_MS = 60 * 60_000;
+
 export interface PortableTaskRunnerOptions {
   store: PortableStore;
-  runStep(task: Task, activationId?: string): Promise<void>;
+  /**
+   * `holdBudget` stops the run's awake-time budget while the step waits for
+   * the engine behind other conversations; call its release once the step
+   * holds the engine.
+   */
+  runStep(
+    task: Task,
+    activationId: string | undefined,
+    control: { holdBudget(): () => void },
+  ): Promise<void>;
   cancelStep?(): Promise<void>;
   canRun?(): void;
   evaluateGate?(
@@ -121,7 +138,7 @@ export class PortableTaskRunner {
     controller: AbortController,
   ) {
     const releaseMonitor = acquireSuspendMonitor();
-    const timeout = createAwakeTimeout(this.options.maxDurationMs ?? 30 * 60_000);
+    const timeout = createAwakeTimeout(this.options.maxDurationMs ?? DEFAULT_TASK_DRIVE_MS);
     const stop = () => {
       controller.abort();
       // The native model host must stop too; aborting the task alone only stops hooks.
@@ -156,7 +173,7 @@ export class PortableTaskRunner {
         const waitingForAnswer = await this.awaitingAnswer(task);
         if (!waitingForAnswer && autoAdvance) await this.complete(task.ref, step.id);
         else if (!waitingForAnswer && taskActiveAssignee(task).kind !== 'user') {
-          await this.options.runStep(task, activation);
+          await this.options.runStep(task, activation, { holdBudget: () => budget.hold() });
           this.check(controller.signal);
           const current = await store.getTask(task.ref);
           if (

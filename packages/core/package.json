@@ -33,6 +33,10 @@
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
     },
+    "./local-loop": {
+      "types": "./dist/local-loop/index.d.ts",
+      "import": "./dist/local-loop/index.js"
+    },
     "./poppetje": {
       "types": "./dist/poppetje/index.d.ts",
       "import": "./dist/poppetje/index.js"
@@ -80,6 +84,10 @@
     "./eval": {
       "types": "./dist/eval/index.d.ts",
       "import": "./dist/eval/index.js"
+    },
+    "./queue-status": {
+      "types": "./dist/schemas/queue-status.d.ts",
+      "import": "./dist/schemas/queue-status.js"
     },
     "./svg": {
       "types": "./dist/svg/index.d.ts",

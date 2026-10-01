@@ -245,7 +245,11 @@ describe('Windows machine-service installer security', () => {
     // and only the Gezel CA leaves the user's (not the machine's) Root store.
     expect(block).toContain("-like '*\\.gezel\\integrations\\office\\manifests\\*'");
     expect(block).toContain('Cert:\\CurrentUser\\Root');
-    expect(block).toContain("-like 'CN=Gezel Office Local CA*'");
+    // By common name on a self-issued cert: Windows prints the Subject RDNs
+    // last-first ("O=Gezel, CN=…"), so a Subject prefix match never fired.
+    expect(block).toContain("GetNameInfo('SimpleName', $$false) -like 'Gezel Office Local CA*'");
+    expect(block).toContain('$$_.Subject -eq $$_.Issuer');
+    expect(block).not.toContain("-like 'CN=Gezel Office Local CA*'");
     expect(block).not.toContain('LocalMachine');
     // NSIS needs `$$` for a literal PowerShell `$`.
     expect(block).not.toMatch(/[^$]\$k\b/);

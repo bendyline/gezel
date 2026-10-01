@@ -206,6 +206,8 @@ export function speakableMessageText(raw: string): string {
     .split(/\n+/)
     .map((line) => flattenMessageMarkdown(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')))
     .filter(Boolean);
-  const spoken = lines.map((line) => (/[.!?:;,…]$/.test(line) ? line : `${line}.`)).join(' ');
+  const spoken = lines
+    .map((line) => (/[.!?:;,…]["'”’)\]]*$/.test(line) ? line : `${line}.`))
+    .join(' ');
   return /\p{L}/u.test(spoken) ? spoken : '';
 }

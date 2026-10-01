@@ -321,14 +321,17 @@ describe('KnowledgeCatalogsCard', () => {
     );
   });
 
-  it('explains a network-blocked install in terms of the security policy', async () => {
+  it('reports a refused install with the daemon message, never as a security-policy block', async () => {
+    // A person's download is never gated on the security policy, so a 403
+    // must not be rewritten into "the security policy turns off app network".
     vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [OFFERED_ITEM] });
     vi.mocked(api.listAvailableKnowledgeCatalogs).mockResolvedValue({ catalogs: [OFFERED] });
     vi.mocked(api.installKnowledgeCatalogFromCatalog).mockRejectedValue(
-      new GezelApiError('network-blocked', 403),
+      new GezelApiError('forbidden', 403),
     );
     render(<KnowledgeCatalogsCard />);
     fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
-    expect((await screen.findAllByText(/app network access/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/download failed: forbidden/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/security policy/)).toBeNull();
   });
 });

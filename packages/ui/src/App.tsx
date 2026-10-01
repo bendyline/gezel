@@ -18,6 +18,7 @@ import { EngineStatusPill } from './components/EngineStatusPill.js';
 import { GrantConsentDialog } from './components/GrantConsentDialog.js';
 import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
+import { NarrationStopButton } from './components/NarrationStopButton.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
 import { ResponsiveAppShell } from './components/ResponsiveAppShell.js';
@@ -830,11 +831,12 @@ function FullApp() {
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
+            <NarrationStopButton />
+            {runtimeCapabilities().engineStatus && <QueueMeter />}
+            {runtimeCapabilities().daemonSettings && <BoekwachterPill />}
+            {runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {runtimeCapabilities().daemonSettings && (
               <>
-                <QueueMeter />
-                <BoekwachterPill />
-                <EngineStatusPill />
                 <ClaudeCliPoolPill />
                 <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
                 <TaskSpeedMenu

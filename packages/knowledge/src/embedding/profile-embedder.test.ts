@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezk';
@@ -13,6 +13,7 @@ import {
 import {
   EmbedderUnavailableError,
   type PipelineFn,
+  TRANSFORMERS_PEER_RANGE,
   type TransformersModule,
   createProfileEmbedder,
   resolveTransformersModelOptions,
@@ -271,5 +272,14 @@ describe('verifyProfileArtifacts', () => {
     } finally {
       await rm(cacheDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('TRANSFORMERS_PEER_RANGE', () => {
+  it('is the optional peer range npm publishes, so printed install commands stay exact', async () => {
+    const manifest = JSON.parse(
+      await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    ) as { peerDependencies: Record<string, string> };
+    expect(manifest.peerDependencies['@huggingface/transformers']).toBe(TRANSFORMERS_PEER_RANGE);
   });
 });

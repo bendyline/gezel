@@ -153,6 +153,8 @@ globalThis.__gezelMobileEvalClock = {};
     startedAt;
     deadline;
     abortAfterSuspensionMs;
+    holds = 0;
+    heldSince;
     constructor(budgetMs, opts = {}) {
       this.budgetMs = budgetMs;
       this.startedAt = Date.now();
@@ -161,7 +163,21 @@ globalThis.__gezelMobileEvalClock = {};
         opts.abortAfterSuspensionMs ?? exports.DEFAULT_ABORT_AFTER_SUSPENSION_MS;
     }
     remainingMs() {
-      return Math.max(0, this.deadline - awakeNow());
+      const now = awakeNow();
+      const held = this.heldSince === undefined ? 0 : now - this.heldSince;
+      return Math.max(0, this.deadline + held - now);
+    }
+    hold() {
+      if (this.holds++ === 0) this.heldSince = awakeNow();
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        if (--this.holds === 0 && this.heldSince !== undefined) {
+          this.deadline += awakeNow() - this.heldSince;
+          this.heldSince = undefined;
+        }
+      };
     }
     suspendedMs() {
       let total = 0;

@@ -605,11 +605,11 @@ cache locality.
 
 ### 5.1 L1 — `ProviderQueue` (the primary gate)
 
-Each local provider owns one `ProviderQueue` (`providers/queue.ts`) — effectively per-engine. It
+Each local provider owns one `ProviderQueue` (`packages/core/src/runtime/provider-queue.ts`, shared with the phone runtime) — effectively per-engine. It
 is a bounded-concurrency scheduler with two priority lanes (`interactive` / `background`) and
 **cache-affinity scoring**, not a plain FIFO:
 
-- `affinityScore` (`queue.ts:556`) prefers a `sessionId` match (score 2 = full-prefix warmth) >
+- `affinityScore` (`provider-queue.ts`) prefers a `sessionId` match (score 2 = full-prefix warmth) >
   `gezelId` match (score 1 = system-prompt warmth) > unrelated. **This is the explicit cache-warmth
   scheduler** — same-session turns dispatch back-to-back so the engine's KV prefix stays hot.
 - Interactive drains before background (capped at `interactiveConcurrency: 1`), with a
@@ -1296,7 +1296,7 @@ an A/B arm without them is not evidence.
 - `packages/service/src/model-profile/behaviors/` — late-band content shapers (compact-tool-schemas, cookbook-condensed, preamble-folding, flatten-tool-transcript).
 
 **Turn management / serialization**
-- `packages/service/src/providers/queue.ts` — lanes + cache-affinity scheduler, `runInQueue`.
+- `packages/core/src/runtime/provider-queue.ts` — lanes + cache-affinity scheduler, `runInQueue` (the service re-exports it from `providers/queue.ts`).
 - `packages/service/src/providers/mlx/provider.ts` — `runExclusive` single-stream mutex; `providers/llama-cpp/provider.ts` — slot/lane wiring, shutdown flush.
 - `packages/service/src/providers/native/{capacity-broker,provider-pool,engine-router,engine-key,supervisor,port}.ts` — admission, pooling, session-sticky routing, two-stage idle-freeze, orphan reaper.
 - `packages/service/src/providers/gpu-arbiter.ts` — LLM↔image GPU tenancy.

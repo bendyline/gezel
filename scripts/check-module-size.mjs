@@ -18,19 +18,24 @@ export const HEADROOM_MULTIPLIER = 1.05;
 export const GRANDFATHERED = new Map([
   ['packages/service/src/chat/manager.ts', 16_898],
   ['packages/mcp/src/server.ts', 12_293],
-  ['packages/service/src/providers/llama-cpp/provider.test.ts', 10_290],
+  // Moved from service/providers/llama-cpp/provider.test.ts (10_290) with the
+  // session it tests; re-measured at the move.
+  ['packages/core/src/local-loop/llama-cpp-session.test.ts', 9_783],
   ['packages/client/src/client.ts', 8_172],
   ['packages/service/src/fs/store.ts', 7_204],
-  ['packages/service/src/providers/llama-cpp/provider.ts', 7_166],
   ['packages/core/src/schemas/api.ts', 7_046],
   ['packages/service/src/chat/manager.test.ts', 7_045],
+  // Moved from service/providers/llama-cpp/provider.ts (7_166) into the loop
+  // the phone shares; re-measured at the move, so the ratchet only tightened.
+  ['packages/core/src/local-loop/llama-cpp-session.ts', 6_444],
   ['packages/ui/src/views/SettingsView.tsx', 4_505],
   ['packages/service/src/tasks/manager.ts', 4_429],
   ['packages/ui/src/views/ProjectsView.tsx', 4_114],
   ['packages/ui/src/components/ChatTimelineView.tsx', 4_102],
   ['packages/ui/src/components/chat-bubbles.tsx', 3_802],
   ['packages/service/src/providers/mlx/provider.ts', 3_795],
-  ['packages/service/src/providers/local-tool-call-salvage.ts', 3_643],
+  // Moved from service/providers/local-tool-call-salvage.ts (3_643) with the loop.
+  ['packages/core/src/local-loop/local-tool-call-salvage.ts', 3_585],
   ['packages/service/src/index-store/index-store.ts', 3_473],
   ['packages/service/src/product-service.ts', 3_044],
   ['packages/app/src/main.ts', 3_188],

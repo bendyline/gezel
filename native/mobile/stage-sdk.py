@@ -52,8 +52,11 @@ def verify_build(build, target):
     # Keep verification errors visible; stdout is the machine-readable manifest.
     result = run(["node", HERE / "verify-build.mjs", target, build], stdout=subprocess.PIPE, text=True)
     manifest = json.loads(result.stdout)
-    if manifest.get("patches") != [] or manifest.get("verification", {}).get("linkSmoke") != "passed":
-        raise ValueError("Expected the verified, unpatched mobile llama runtime")
+    # The bridge carries llama.cpp's chat layer, so it applies desktop's patch list.
+    engine_patches = [{"name": patch.name, "sha256": digest(patch)}
+                      for patch in sorted((HERE.parent / "engines" / "llama-cpp" / "patches").glob("*.patch"))]
+    if manifest.get("patches") != engine_patches or manifest.get("verification", {}).get("linkSmoke") != "passed":
+        raise ValueError("Expected the verified mobile llama runtime, patched exactly as desktop's llama-server")
     for name in LICENSES:
         if name not in manifest["files"]:
             raise ValueError(f"Native build is missing its verified license: {name}")

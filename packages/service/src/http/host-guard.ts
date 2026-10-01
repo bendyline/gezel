@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 
 /**
  * Host literals we accept. The daemon binds `127.0.0.1` only, so these
@@ -46,7 +46,7 @@ function hostnameOf(host: string): string {
  */
 export function hostGuard(opts: { allowLanIpHosts?: () => boolean } = {}): MiddlewareHandler {
   return async (c, next) => {
-    const host = c.req.header('host') ?? authorityFromUrl(c.req.url);
+    const host = requestHost(c);
     if (!host) return c.json({ error: 'forbidden_host' }, 403);
     const lower = host.toLowerCase();
     if (LOOPBACK_HOSTS.has(lower) || LOOPBACK_HOSTS.has(hostnameOf(lower))) {
@@ -59,6 +59,11 @@ export function hostGuard(opts: { allowLanIpHosts?: () => boolean } = {}): Middl
     if (opts.allowLanIpHosts?.() && isIP(hostname) !== 0) return next();
     return c.json({ error: 'forbidden_host' }, 403);
   };
+}
+
+/** The host a request addressed: its Host header, else the HTTP/2 authority Hono folds into the URL. */
+export function requestHost(c: Context): string | null {
+  return c.req.header('host') ?? authorityFromUrl(c.req.url);
 }
 
 function authorityFromUrl(url: string): string | null {

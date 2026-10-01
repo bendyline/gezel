@@ -19,6 +19,13 @@ a removable event subscription. Results do not include invented token usage.
 Provider implementations are internal; callers select an explicit provider and
 model through the host so they cannot bypass its shared admission gate.
 
+Generation also emits `enginePhase` events: `loading_model` on a cold load,
+`prefill` before the prompt pass, `generating` at the first chunk. The llama
+path polls the engine's progress counters from its cancellation timer (about
+every 250 ms, changes only) and adds load fraction and token counts. iOS posts
+them on the main queue so they stay ordered with `chatDelta`; Android emits
+them from the inference thread.
+
 iOS observes application foreground/background, memory pressure and thermal
 notifications. A native Android host forwards its foreground/background lifecycle
 to `onForeground()` / `onBackground()`; the Capacitor adapter does this itself.

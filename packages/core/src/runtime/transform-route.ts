@@ -23,6 +23,12 @@ export function createPortableTextOperation(
   raw: unknown,
   signal: AbortSignal,
   resolveKlerk: PortableTransformOptions['resolveKlerk'],
+  /**
+   * Wait for the engine before the transform starts, so its own timeout
+   * never spends time queued behind a chat turn. `onQueued` fires when the
+   * engine is busy, so the editor can say so.
+   */
+  admit?: (signal: AbortSignal, onQueued: () => void) => Promise<() => void>,
 ): PortableTextOperation {
   const body =
     kind === 'rewrite'
@@ -63,21 +69,32 @@ export function createPortableTextOperation(
       : undefined;
   const finished = Promise.resolve()
     .then(async () => {
-      emit({ type: 'status', phase: 'started' });
-      const options: PortableTransformOptions = {
-        resolveKlerk,
-        signal: controller.signal,
-        hooks: {
-          onThinking: (text) => emit({ type: 'thinking-delta', text }),
-          onOutput: (text) => emit({ type: 'output-delta', text }),
-        },
-      };
-      const text =
-        kind === 'rewrite'
-          ? await portableRewriteText(inference, RewriteTextRequestSchema.parse(body), options)
-          : await portableTransformText(inference, TransformTextRequestSchema.parse(body), options);
-      if (!text) throw new Error(`${kind} returned empty content`);
-      return text;
+      const release = admit
+        ? await admit(controller.signal, () => emit({ type: 'status', phase: 'queued' }))
+        : undefined;
+      try {
+        emit({ type: 'status', phase: 'started' });
+        const options: PortableTransformOptions = {
+          resolveKlerk,
+          signal: controller.signal,
+          hooks: {
+            onThinking: (text) => emit({ type: 'thinking-delta', text }),
+            onOutput: (text) => emit({ type: 'output-delta', text }),
+          },
+        };
+        const text =
+          kind === 'rewrite'
+            ? await portableRewriteText(inference, RewriteTextRequestSchema.parse(body), options)
+            : await portableTransformText(
+                inference,
+                TransformTextRequestSchema.parse(body),
+                options,
+              );
+        if (!text) throw new Error(`${kind} returned empty content`);
+        return text;
+      } finally {
+        release?.();
+      }
     })
     .finally(() => signal.removeEventListener('abort', abort));
   const response = stream

@@ -95,19 +95,20 @@ export function remotesRoutes(ctx: ServiceContext): Hono {
     }
     // Best-effort: ask B to revoke the token it issued us, so unpairing is
     // mutual. Failure (B offline) is non-fatal — we forget it locally anyway.
-    try {
-      const fetchImpl = getPairedRemoteFetch(remote, ctx.remotes);
-      const response = await fetchImpl(
-        `${remote.baseUrl}/v1/apps/${ctx.deviceIdentity.deviceId}/token`,
-        {
+    // A service with no device identity never paired, so B holds no grant.
+    const identity = ctx.deviceIdentity;
+    if (identity) {
+      try {
+        const fetchImpl = getPairedRemoteFetch(remote, ctx.remotes);
+        const response = await fetchImpl(`${remote.baseUrl}/v1/apps/${identity.deviceId}/token`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${remote.token}` },
           signal: AbortSignal.timeout(10_000),
-        },
-      ).catch(() => null);
-      await response?.body?.cancel().catch(() => {});
-    } catch {
-      // ignore — local removal is the source of truth for A.
+        }).catch(() => null);
+        await response?.body?.cancel().catch(() => {});
+      } catch {
+        // ignore — local removal is the source of truth for A.
+      }
     }
     await ctx.remotes.remove(remoteId);
     await closePairedRemoteFetches(ctx.remotes, remoteId);

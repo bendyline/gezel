@@ -181,7 +181,7 @@ describe('ordinary client crew messages on the portable host', () => {
     expect(f.requests).toEqual([]);
   });
 
-  it('rejects simultaneous deliveries and background admission without losing the original turn', async () => {
+  it('queues a second delivery behind the running turn and refuses new work in the background', async () => {
     let finish!: () => void;
     const pending = new Promise<void>((resolve) => {
       finish = resolve;
@@ -191,19 +191,18 @@ describe('ordinary client crew messages on the portable host', () => {
       return { text: 'Complete', stopReason: 'stop' };
     });
     const first = await f.client.messageGezel(f.recipient.id, f.body);
-    await expect(f.client.messageGezel(f.recipient.id, f.body)).rejects.toMatchObject({
-      status: 409,
-      details: { error: expect.stringContaining('current response') },
-    });
+    const second = await f.client.messageGezel(f.recipient.id, f.body);
+    expect(second).toMatchObject({ sessionId: first.sessionId, deliveryState: 'queued' });
     finish();
     await settle(f.service);
     const session = await f.client.getChatSession(first.sessionId);
-    expect(session.messages.filter((m) => m.role === 'user')).toHaveLength(1);
+    expect(session.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+    expect(f.requests).toHaveLength(2);
     await f.service.suspend();
     await expect(f.client.messageGezel(f.recipient.id, f.body)).rejects.toMatchObject({
       status: 409,
       details: { error: expect.stringContaining('Return to Gezel') },
     });
-    expect(f.requests).toHaveLength(1);
+    expect(f.requests).toHaveLength(2);
   });
 });

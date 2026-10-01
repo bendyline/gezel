@@ -29,6 +29,12 @@ Two more cloud options:
 
 Cloud models are the strongest option and need no hardware to speak of. The trade is that conversation content goes to that provider to be processed, under their terms.
 
+### Codex turn recovery
+
+Gezel ends a Codex turn after ten minutes without a valid stream event when no tool is running. This catches silent model turns before the longer overall turn limit. Active tool calls keep their own limits and the overall turn limit; diagnostic heartbeats and stderr do not reset the inactivity timer. Both budgets count awake time, so a short machine sleep does not consume them.
+
+For task handoffs, a failed turn enters the existing bounded recovery: at most three sends, using the task's original procedure and completion gates. If recovery fails, the task pauses with a note containing the provider error. Retrying a paused task keeps its task identity and available session evidence.
+
 ## Local engines
 
 Gezel bundles and manages native engines that run models directly on your machine — llama.cpp and friends, with Ollama supported too if you already use it. Local means private and free per use; the trade is that model quality depends on what your hardware can lift. The [Models and tiers](../conceptual/local-models-and-tiers.md) article explains how gezel matches local models to roles, and the built-in fitness check ("de proeve") verifies a model actually behaves before your crew relies on it.

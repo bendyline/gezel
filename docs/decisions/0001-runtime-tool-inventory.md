@@ -38,7 +38,7 @@ the same resolved surface used by both dispatch and prompt rendering.
 
 ## Regression map
 
-- [`packages/service/src/chat/tools-block.test.ts`](../../packages/service/src/chat/tools-block.test.ts)
+- [`packages/core/src/prompt/tools-block.test.ts`](../../packages/core/src/prompt/tools-block.test.ts)
   covers grouping, truncation, tier behavior, custom overrides, and rendering.
 - [`packages/service/src/chat/manager.test.ts`](../../packages/service/src/chat/manager.test.ts)
   checks that the block tracks the actual per-turn allowlist across roles and

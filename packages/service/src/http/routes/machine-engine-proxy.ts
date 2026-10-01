@@ -16,7 +16,9 @@ export function isMachineEngineProvider(name: string): name is MachineEngineProv
  * disconnected adopted broker still returns true: falling back to the user
  * daemon would create a second GPU owner while the system service restarts.
  */
-export function usesMachineEngine(ctx: EngineContext): boolean {
+export function usesMachineEngine(ctx: {
+  machineEngine?: Pick<NonNullable<EngineContext['machineEngine']>, 'isConnected' | 'isRequired'>;
+}): boolean {
   const bridge = ctx.machineEngine;
   return Boolean(bridge && (bridge.isConnected() || bridge.isRequired()));
 }

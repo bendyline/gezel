@@ -24,6 +24,13 @@ export const MobileProviderSchema = z
         structuredOutput: z.literal(false),
         images: z.literal(false),
         foregroundOnly: z.literal(true),
+        /**
+         * OpenAI-shaped chat served by llama.cpp's own chat layer
+         * (`PortableInference.chat`), the way desktop's llama-server serves it:
+         * the model's template renders the tools and its parser returns
+         * structured tool calls. Absent on older native builds.
+         */
+        structuredChat: z.boolean().optional(),
       })
       .strict(),
   })
@@ -156,7 +163,15 @@ export const MobileInferenceBudgetSchema = z
   });
 export type MobileInferenceBudget = z.infer<typeof MobileInferenceBudgetSchema>;
 
-/** Explicit choices fail instead of being silently replaced by defaults. */
+/**
+ * Explicit choices fail instead of being silently replaced by defaults.
+ *
+ * The default reply budget is half the window, up to what the provider allows.
+ * It has to hold a whole file in one tool call: at the old 1024-token default a
+ * phone could not write a small HTML page, and the call arrived cut off. The
+ * llama.cpp bridge spends only the room the prompt leaves, so a generous budget
+ * costs the prompt nothing; the system models cap their own replies at 1024.
+ */
 export function resolveMobileInferenceBudget(
   provider: Pick<MobileProvider, 'contextTokens' | 'maxOutputTokens'>,
   requested: Partial<MobileInferenceBudget> = {},
@@ -165,9 +180,28 @@ export function resolveMobileInferenceBudget(
   const budget = MobileInferenceBudgetSchema.parse({
     contextSize,
     maxTokens:
-      requested.maxTokens ?? Math.min(1024, provider.maxOutputTokens, Math.floor(contextSize / 4)),
+      requested.maxTokens ?? Math.min(provider.maxOutputTokens, Math.floor(contextSize / 2)),
   });
   if (budget.contextSize > provider.contextTokens || budget.maxTokens > provider.maxOutputTokens)
     throw new Error('These token limits exceed what this on-device provider supports');
   return budget;
 }
+
+/**
+ * Live engine phase from a native runtime, for the status pill. `progress`
+ * and the token counters are present only while the engine publishes them
+ * (model loading and prompt processing); hosts that report nothing leave the
+ * product runtime's own coarse phases in place. `cooling` is a request held
+ * until a hot phone cools, before its model load or prompt processing.
+ */
+export const MobileEnginePhaseEventSchema = z.object({
+  requestId: z.string(),
+  phase: z.enum(['cooling', 'loading_model', 'prefill', 'generating']),
+  progress: z.number().min(0).max(1).optional(),
+  promptTokens: z.number().int().nonnegative().optional(),
+  processedTokens: z.number().int().nonnegative().optional(),
+  reusedTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  tokensPerSec: z.number().nonnegative().optional(),
+});
+export type MobileEnginePhaseEvent = z.infer<typeof MobileEnginePhaseEventSchema>;

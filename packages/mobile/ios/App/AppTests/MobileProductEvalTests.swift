@@ -1,6 +1,7 @@
 import XCTest
 import CryptoKit
 import WebKit
+import GezelModelStorage
 @testable import App
 
 /// Runs only when explicitly selected. The suite is a test-bundle resource, not an app hook.
@@ -11,6 +12,11 @@ final class MobileProductEvalTests: XCTestCase {
         guard env["GEZEL_MOBILE_EVAL"] == "1" else {
             throw XCTSkip("Quality evals are opt-in; use the mobile eval launcher")
         }
+        // On a physical device Auto-Lock would background the app mid-run,
+        // which suspends inference; the eval owns the screen until it ends.
+        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        addTeardownBlock { @MainActor in UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled }
         var candidate: WKWebView?
         var host: MainViewController?
         for _ in 0..<100 {
@@ -62,6 +68,16 @@ final class MobileProductEvalTests: XCTestCase {
         let fm = FileManager.default
         let support = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let root = support.appendingPathComponent("Gezel", isDirectory: true)
+        // An operator who has looked inside a stale backup names it to discard
+        // it. Nothing is discarded on its own: the backup exists so a killed
+        // run cannot lose the person's product. devicectl cannot delete files.
+        if let named = env["GEZEL_EVAL_DISCARD_BACKUP"] {
+            guard named.range(of: "^product-eval-backup-[0-9A-F-]{36}$", options: .regularExpression) != nil,
+                  fm.fileExists(atPath: root.appendingPathComponent(named).appendingPathComponent("snapshot.json").path) else {
+                throw NSError(domain: "MobileEval", code: 10, userInfo: [NSLocalizedDescriptionKey: "\(named) is not an eval backup on this device"])
+            }
+            try fm.removeItem(at: root.appendingPathComponent(named, isDirectory: true))
+        }
         let unresolved = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .first { $0.lastPathComponent.hasPrefix("product-eval-backup-") || $0.lastPathComponent.hasPrefix("product-smoke-backup-") }
         guard unresolved == nil else {
@@ -116,11 +132,22 @@ final class MobileProductEvalTests: XCTestCase {
         }
         stage("isolating-product")
         try await unloadProduct()
+        // Preservation covers the app-owned tree only. With iCloud attached,
+        // trials would write test projects into the person's real Gezel folder,
+        // so the eval runs without it and the reloaded product sees one tree.
+        let mobileStore = Mirror(reflecting: plugin).children.first(where: { $0.label == "store" })?.value as? MobileStore
+        let iCloudWork = mobileStore?.workFiles
+        mobileStore?.workFiles = nil
+        addTeardownBlock { mobileStore?.workFiles = iCloudWork }
         let preservation = try EvalDataPreservation.begin(root: root)
+        // Preservation restores inventory bytes, not model files, so a model
+        // this run published is deleted here once the product has released it.
+        var importedModel: URL?
         addTeardownBlock { @MainActor in
             do {
                 // A failed native drain is not permission to replace live files.
                 try await unloadProduct()
+                if let importedModel { try? fm.removeItem(at: importedModel) }
                 view.stopLoading()
                 view.configuration.userContentController.removeAllScriptMessageHandlers()
                 let verified = try preservation.restoreAndVerify()
@@ -131,6 +158,12 @@ final class MobileProductEvalTests: XCTestCase {
                 try? recordRestoration(["passed": false, "error": String(describing: error), "backupPath": preservation.backup.path])
                 throw error
             }
+        }
+        if env["GEZEL_EVAL_PROVIDER"] == "llama-cpp", let staged = env["GEZEL_EVAL_MODEL_FILE"] {
+            stage("publishing-staged-model")
+            importedModel = try Self.publishStagedCatalogModel(
+                named: staged, runId: runId, root: root,
+                source: env["GEZEL_EVAL_MODEL_SOURCE"], name: env["GEZEL_EVAL_MODEL_NAME"])
         }
         view.navigationDelegate = appNavigationDelegate
         view.load(URLRequest(url: appURL))
@@ -147,11 +180,12 @@ final class MobileProductEvalTests: XCTestCase {
         var options: [String: Any] = [
             "runId": runId,
             "provider": env["GEZEL_EVAL_PROVIDER"] ?? "apple-foundation-models",
-            "trialTimeoutMs": Int(env["GEZEL_EVAL_TRIAL_TIMEOUT_MS"] ?? "180000") ?? 180000,
+            "trialTimeoutMs": Int(env["GEZEL_EVAL_TRIAL_TIMEOUT_MS"] ?? "1200000") ?? 1200000,
             "identity": ["os": UIDevice.current.systemName, "osVersion": UIDevice.current.systemVersion,
                          "device": UIDevice.current.model, "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                          "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
-                         "nativeHarness": "XCTest packaged WKWebView", "harnessSourceSha256": sourceHash, "productIndexSha256": productIndexHash],
+                         "nativeHarness": "XCTest packaged WKWebView", "harnessSourceSha256": sourceHash, "productIndexSha256": productIndexHash,
+                         "modelSourceSha256": env["GEZEL_EVAL_MODEL_SHA256"] ?? "unavailable"],
         ]
         if let raw = env["GEZEL_EVAL_CONTEXT"], let value = Int(raw) { options["contextSize"] = value }
         if let raw = env["GEZEL_EVAL_MAX_TOKENS"], let value = Int(raw) { options["maxTokens"] = value }
@@ -195,8 +229,10 @@ final class MobileProductEvalTests: XCTestCase {
                     lastRevision = revision
                 }
                 let receiptURL = URL(fileURLWithPath: reportURL.path + ".receipt.json")
-                if let receiptData = try? Data(contentsOf: receiptURL) {
-                    let receipt = try JSONSerialization.jsonObject(with: receiptData)
+                // A physical device receives this file through devicectl, which
+                // may land it non-atomically; an unreadable copy is read next poll.
+                if let receiptData = try? Data(contentsOf: receiptURL),
+                   let receipt = try? JSONSerialization.jsonObject(with: receiptData) {
                     _ = try await view.callAsyncJavaScript("window.__gezelMobileEvalGradeReceipt=receipt;return true;", arguments: ["receipt": receipt], in: nil, contentWorld: .page)
                 }
                 if state["complete"] as? Bool == true { break }
@@ -239,7 +275,9 @@ final class MobileProductEvalTests: XCTestCase {
         if env["GEZEL_EVAL_CONTRACTS_ONLY"] != "1" {
             let fixtures = options["canonicalFixtures"] as? [[String: Any]] ?? []
             let defaults = (try await view.evaluateJavaScript("window.__gezelMobileEval.scenarios") as? [String] ?? []) + fixtures.compactMap { $0["id"] as? String }
+            let cooldownMs = Int(env["GEZEL_EVAL_COOLDOWN_MS"] ?? "0") ?? 0
             for scenario in options["scenarios"] as? [String] ?? defaults {
+                try await Self.coolDown(maxMs: cooldownMs, stage: stage)
                 stage("isolated-trial \(scenario)")
                 try await resetProduct()
                 var phaseOptions = options
@@ -259,5 +297,58 @@ final class MobileProductEvalTests: XCTestCase {
         XCTAssertEqual((report["contracts"] as? [String: Any])?["passed"] as? Bool, true, "Authored scripts and shared question UI contracts must pass")
         let failures = (report["trials"] as? [[String: Any]] ?? []).filter { !["pass", "ungraded"].contains($0["status"] as? String ?? "") }
         XCTAssertTrue(failures.isEmpty, "Quality failures are retained, never skipped: \(failures.map { $0["id"] as? String ?? "unknown" }.joined(separator: ", "))")
+    }
+
+    /// A catalog GGUF the launcher staged in Caches is published the way its
+    /// download publishes it, so the product runs it with its catalog tuning,
+    /// as a person who downloaded it does. Mirrors the Android eval test.
+    private static func publishStagedCatalogModel(named staged: String, runId: String, root: URL, source: String?, name: String?) throws -> URL {
+        func fail(_ message: String) -> NSError { NSError(domain: "MobileEval", code: 9, userInfo: [NSLocalizedDescriptionKey: message]) }
+        guard staged == "mobile-eval-\(runId).gguf" else { throw fail("Only the eval-owned staged model may be published") }
+        guard let sourceData = source.flatMap({ Data(base64Encoded: $0) }),
+              let nameData = name.flatMap({ Data(base64Encoded: $0) }) else { throw fail("A staged model needs its catalog identity") }
+        let identity = try JSONDecoder().decode(MobileModelSource.self, from: sourceData)
+        let fm = FileManager.default
+        let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        // devicectl can copy files in but cannot delete them, so a run that
+        // died before publishing leaves its staged GGUF for the next run to sweep.
+        for stale in try fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil)
+        where stale.lastPathComponent.hasPrefix("mobile-eval-") && stale.pathExtension == "gguf" && stale.lastPathComponent != staged {
+            try? fm.removeItem(at: stale)
+        }
+        let file = caches.appendingPathComponent(staged)
+        let handle = try FileHandle(forReadingFrom: file)
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 8 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        try handle.close()
+        guard hasher.finalize().map({ String(format: "%02x", $0) }).joined() == identity.sha256 else {
+            throw fail("The staged GGUF must be the catalog's file")
+        }
+        let store = try MobileModelStore(root: root, recoverModels: false)
+        let id = UUID().uuidString.lowercased()
+        let folder = try store.downloadsDirectory().appendingPathComponent(id, isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? fm.removeItem(at: folder) }
+        let partial = folder.appendingPathComponent("model.part")
+        try fm.moveItem(at: file, to: partial)
+        _ = try store.publishDownloadedModel(id: id, name: String(decoding: nameData, as: UTF8.self), source: identity, file: partial)
+        _ = try store.selectModel(id: id)
+        return try store.downloadModelURL(id: id)
+    }
+
+    /// iOS reports only a four-step thermal state, and the runtime refuses
+    /// inference at .serious and aborts a turn that reaches it. So a trial
+    /// starts only at .nominal: on a charging iPhone 14 Pro Max the first trial
+    /// reached .serious inside its first generation and every later trial was
+    /// refused (2026-09-30).
+    @MainActor
+    private static func coolDown(maxMs: Int, stage: (String) -> Void) async throws {
+        guard maxMs > 0 else { return }
+        let started = Date()
+        while ProcessInfo.processInfo.thermalState != .nominal,
+              Date().timeIntervalSince(started) * 1000 < Double(maxMs) {
+            try await Task.sleep(nanoseconds: 15_000_000_000)
+        }
+        stage("cooldown waitedMs=\(Int(Date().timeIntervalSince(started) * 1000)) thermalState=\(ProcessInfo.processInfo.thermalState.rawValue)")
     }
 }

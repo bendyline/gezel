@@ -11,6 +11,7 @@ import { noModelYetMessage } from '../active-install-message.js';
 import { estimateExactPerSlotKvBytesF16 } from '../llama-cpp/offload-planner.js';
 import {
   CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
@@ -515,12 +516,13 @@ export async function buildMlxProvider(opts: {
       vramBytes: 0,
     });
     if (!admission.minimumSatisfied) {
-      throw new CapacityDeniedError(
-        formatContextCapacityDenial({
+      log.warn(
+        `[mlx] ${formatContextCapacityDenial({
           modelLabel: modelCatalogInfo?.name ?? defaultModelId ?? 'this MLX model',
           plan: admission,
-        }),
+        })}`,
       );
+      throw new CapacityDeniedError(NOT_ENOUGH_MEMORY_MESSAGE);
     }
     if (admission.slots < mlxSlots) {
       log.info(

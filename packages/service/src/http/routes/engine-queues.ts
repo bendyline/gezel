@@ -1,3 +1,9 @@
+import type {
+  ProviderQueueActiveItem,
+  ProviderQueueState,
+  QueueProviderName,
+  QueueStatusResponse,
+} from '@bendyline/gezel/queue-status';
 import { Hono } from 'hono';
 import { liveProviderConcurrency } from '../../providers/native/provider-pool.js';
 import type { ProviderName } from '../../providers/types.js';
@@ -68,8 +74,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
-function brokerIdentityFields(value: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
+type QueueItemIdentity = Pick<
+  ProviderQueueActiveItem,
+  'sessionId' | 'gezelId' | 'projectId' | 'actorLabel' | 'job'
+>;
+function brokerIdentityFields(value: Record<string, unknown>): QueueItemIdentity {
+  const out: QueueItemIdentity = {};
   for (const key of ['sessionId', 'gezelId', 'projectId'] as const) {
     if (typeof value[key] === 'string') out[key] = userOwnedIdFromBroker(value[key]);
   }
@@ -77,7 +87,7 @@ function brokerIdentityFields(value: Record<string, unknown>): Record<string, st
   if (typeof value.job === 'string') out.job = value.job;
   return out;
 }
-export function sanitizeBrokerProviderQueue(value: unknown): Record<string, unknown> | null {
+export function sanitizeBrokerProviderQueue(value: unknown): ProviderQueueState | null {
   if (!isRecord(value)) return null;
   const running = finiteNumber(value.running);
   const queuedInteractive = finiteNumber(value.queuedInteractive);
@@ -102,7 +112,7 @@ export function sanitizeBrokerProviderQueue(value: unknown): Record<string, unkn
       })
     : [];
   const pending = Array.isArray(value.pending)
-    ? value.pending.flatMap((entry) => {
+    ? value.pending.flatMap((entry): ProviderQueueState['pending'] => {
         if (!isRecord(entry)) return [];
         const id = finiteNumber(entry.id);
         const waitedMs = finiteNumber(entry.waitedMs);
@@ -190,9 +200,9 @@ export function sanitizeBrokerCacheStats(
 
 export function providerQueueSnapshot(
   ctx: EngineContext,
-  names: readonly ProviderName[],
-): Record<string, unknown> {
-  const providers: Record<string, unknown> = {};
+  names: readonly QueueProviderName[],
+): QueueStatusResponse['providers'] {
+  const providers: QueueStatusResponse['providers'] = {};
   for (const name of names) {
     const provider = ctx.chat.getProviderIfReady(name);
     if (!provider?.queue) continue;

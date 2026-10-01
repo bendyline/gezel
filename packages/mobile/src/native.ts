@@ -25,7 +25,7 @@ import type {
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { type ExportFilePlugin, type ExportedFile, saveNativeExport } from './export-file.js';
 import type { PublishHtmlPreview } from './html-preview.js';
-import { type ProductFilePlugin, createNativeProductFiles } from './product-files.js';
+import { type ProductFilePlugin, createRoutedProductFiles } from './product-files.js';
 import { createNativeSpeech } from './speech.js';
 
 export type { MobileModel } from '@bendyline/gezel/schemas';
@@ -108,7 +108,7 @@ export function createNativeHost(nativePlugin: GezelMobilePlugin = plugin): Mobi
         },
       };
     },
-    files: createNativeProductFiles(nativePlugin),
+    files: createRoutedProductFiles(nativePlugin),
     resolveModelSource: async (source) =>
       MobileModelSourceSchema.parse(
         (

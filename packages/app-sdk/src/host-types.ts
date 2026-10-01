@@ -79,8 +79,15 @@ export interface HostOptions {
   /**
    * Start only the inference and model-management surface needed by an
    * embedding app. This skips the standalone product's schedulers, channels,
-   * editor bridges, indexing, and background maintenance. In `in-process`
-   * mode it also removes the need for a separate Node executable.
+   * editor bridges, indexing, and background maintenance.
+   *
+   * It also keeps the daemon out of everything a standalone Gezel needs for
+   * remote connectivity: it opens no secret store (nothing reaches the OS
+   * keychain or a secrets file), creates no device identity, and offers no
+   * pairing, identity, or LAN-serving endpoints.
+   *
+   * Honored in both modes. In `in-process` mode it also removes the need for a
+   * separate Node executable.
    */
   inferenceOnly?: boolean;
   /**

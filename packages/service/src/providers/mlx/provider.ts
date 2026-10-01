@@ -112,6 +112,7 @@ import {
   StreamingSessionBase,
 } from '../streaming-session.js';
 import {
+  DeliverableReadySteer,
   TERMINAL_ACTION_SKIPPED_OUTPUT,
   terminalToolClosingText,
 } from '../terminal-tool-policy.js';
@@ -1335,6 +1336,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       prompt,
       opts?.fileTurnIntent,
     );
+    const deliverableReadySteer = DeliverableReadySteer.forStep(this.deps.activeCraftbookStep);
     // Per-turn `ask_user_question` guard. Once a question card lands
     // successfully, additional ask_user_question calls in the same
     // turn are intercepted with a synthetic "you already asked, end
@@ -3056,7 +3058,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             dropped.name,
             dropped.args,
             requestMaxTokens,
-            { availableToolNames: liveToolNames },
+            {
+              availableToolNames: liveToolNames,
+              taskStep: this.deps.activeCraftbookStep !== undefined,
+            },
           );
           const noRemedy = steer.includes('No incremental edit tool is wired this turn');
           log.info(
@@ -3682,13 +3687,26 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // narrative-spinning loop the user reported on Ada.
           const repeated = repeatTracker.recordCall(call.function.name, args, tracked.output);
           const paced = deliverableReadPaceTracker?.recordCall(call.function.name, repeated.output);
+          const readyFooter = await deliverableReadySteer?.footerFor(
+            call.function.name,
+            args,
+            output,
+            () => knownToolNames,
+          );
+          if (readyFooter) {
+            log.info(
+              `turn#${seq} deliverable-ready footer appended tool=${call.function.name} path=${deliverableReadySteer?.deliverableFile} fired=${deliverableReadySteer?.firedCount}`,
+            );
+          }
           // Always push the (possibly-augmented) tool message so the
           // transcript reflects what the model would see — even on
           // hard abort, debugging the runaway is easier with the
           // last context preserved.
           this.messages.push({
             role: 'tool',
-            content: paced?.output ?? repeated.output,
+            content: readyFooter
+              ? `${paced?.output ?? repeated.output}\n\n${readyFooter}`
+              : (paced?.output ?? repeated.output),
             tool_call_id: call.id,
           });
           if (tracked.shouldAbort) {
@@ -3750,6 +3768,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           const closing = 'Updated the requested file.';
           this.messages.push({ role: 'assistant', content: closing });
           return closing;
+        }
+        if (!terminalActionClosing && deliverableReadySteer) {
+          const backstop = await deliverableReadySteer.backstopClosing();
+          if (backstop) {
+            log.info(
+              `turn#${seq} deliverable-ready backstop: ${deliverableReadySteer.deliverableFile} stayed ready through the grace iterations; ending turn for the end-of-turn advance`,
+            );
+            terminalActionClosing = backstop;
+          }
         }
         if (terminalActionClosing) {
           // The action itself is the terminal outcome. Do not spend another

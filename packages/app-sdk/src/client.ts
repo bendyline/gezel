@@ -57,7 +57,7 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
    * One chat turn.
    *
    *   const resp = await app.chat({
-   *     model: 'llama-cpp:qwen3-4b',
+   *     model: 'llama-cpp:gemma4-e2b-q4',
    *     messages: [{role: 'user', content: 'hi'}],
    *   });
    *   console.log(resp.choices[0].message.content);

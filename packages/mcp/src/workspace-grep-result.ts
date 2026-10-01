@@ -21,9 +21,7 @@ export function equivalentWorkspaceGrepArgs(
   };
 }
 
-export function renderExactToolCall(name: string, args: Record<string, unknown>): string {
-  return `${name}(${JSON.stringify(args)})`;
-}
+export { renderExactToolCall } from '@bendyline/gezel';
 
 export function workspaceGrepResult(
   args: SearchFilesRequest,

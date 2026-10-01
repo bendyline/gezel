@@ -22,6 +22,7 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
         CAPPluginMethod(name: "appendExport", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveExport", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelExport", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "productStorage", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readProductFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeProductFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listProductFiles", returnType: CAPPluginReturnPromise),
@@ -63,7 +64,25 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
             listener = runtime.listen { [weak self] event, data in self?.notifyListeners(event, data: data) }
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             store = try MobileStore(root: support.appendingPathComponent("Gezel", isDirectory: true), recoverModels: false)
+            // Ahead of every product call on the same serial queue, and off the
+            // main thread: the first container lookup can wait on iCloud.
+            storageQueue.async { self.resolveWorkRoot() }
         } catch { storeError = error }
+    }
+
+    /// The app's iCloud Drive folder, "Gezel" in the Files app. A desktop on the
+    /// same account sees it as ~/Library/Mobile Documents/iCloud~com~bendyline~gezel.
+    static let iCloudContainer = "iCloud.com.bendyline.gezel"
+
+    private func resolveWorkRoot() {
+        guard let store, let container = FileManager.default.url(forUbiquityContainerIdentifier: Self.iCloudContainer) else { return }
+        store.workFiles = try? ProductFiles(root: container.appendingPathComponent("Documents", isDirectory: true), ubiquitous: true)
+    }
+
+    @objc public func productStorage(_ call: CAPPluginCall) {
+        withStore(call) { store in
+            ["work": store.workFiles == nil ? NSNull() : ["kind": "icloud", "name": "iCloud Drive"] as [String: Any]]
+        }
     }
     deinit { if let listener { runtime?.removeListener(listener) } }
     private func reserveModelMutation() -> Bool { runtime?.reserveModelMutation() == true }
@@ -115,7 +134,7 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
     @objc public func readProductFile(_ call: CAPPluginCall) {
         guard let path = call.getString("path") else { call.reject("A product path is required"); return }
         withStore(call) { store in
-            ["data": try store.productFiles.read(path)?.base64EncodedString() as Any? ?? NSNull()]
+            ["data": try store.files(root: call.getString("root")).read(path)?.base64EncodedString() as Any? ?? NSNull()]
         }
     }
 
@@ -124,7 +143,7 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
               encoded.utf8.count <= ((ProductFiles.maximumFileBytes + 2) / 3) * 4 else { call.reject("A product path and valid base64 file up to 16 MiB are required"); return }
         withStore(call) { store in
             guard let data = Data(base64Encoded: encoded), data.base64EncodedString() == encoded else { throw ProductFileError.notFile }
-            try store.productFiles.write(path, data: data)
+            try store.files(root: call.getString("root")).write(path, data: data)
             return [:]
         }
     }
@@ -132,7 +151,7 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
     @objc public func listProductFiles(_ call: CAPPluginCall) {
         guard let path = call.getString("path") else { call.reject("A product path is required"); return }
         withStore(call) { store in
-            ["entries": try store.productFiles.list(path).map { entry in
+            ["entries": try store.files(root: call.getString("root")).list(path).map { entry in
                 ["name": entry.name, "isDirectory": entry.isDirectory, "size": entry.size, "mtime": entry.mtime] as [String: Any]
             }]
         }
@@ -140,17 +159,17 @@ public final class GezelMobilePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPic
 
     @objc public func mkdirProductDirectory(_ call: CAPPluginCall) {
         guard let path = call.getString("path") else { call.reject("A product path is required"); return }
-        withStore(call) { store in try store.productFiles.mkdir(path); return [:] }
+        withStore(call) { store in try store.files(root: call.getString("root")).mkdir(path); return [:] }
     }
 
     @objc public func removeProductPath(_ call: CAPPluginCall) {
         guard let path = call.getString("path") else { call.reject("A product path is required"); return }
-        withStore(call) { store in try store.productFiles.remove(path); return [:] }
+        withStore(call) { store in try store.files(root: call.getString("root")).remove(path); return [:] }
     }
 
     @objc public func renameProductPath(_ call: CAPPluginCall) {
         guard let from = call.getString("from"), let to = call.getString("to") else { call.reject("Source and destination product paths are required"); return }
-        withStore(call) { store in try store.productFiles.rename(from, to: to); return [:] }
+        withStore(call) { store in try store.files(root: call.getString("root")).rename(from, to: to); return [:] }
     }
 
 

@@ -70,6 +70,24 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_cancel(JNIEnv *, jclass, jlong handl
     gezel_llama_cancel(engine(handle), static_cast<uint64_t>(request));
 }
 
+/** {phase, load per-mille, prompt, processed, reused, generated}; never throws. */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_progress(JNIEnv * env, jclass, jlong handle) {
+    gezel_llama_progress progress{};
+    progress.struct_size = sizeof(progress);
+    progress.abi_version = GEZEL_LLAMA_ABI_VERSION;
+    if (gezel_llama_get_progress(engine(handle), &progress) != GEZEL_LLAMA_OK) return nullptr;
+    const jlong values[] = {static_cast<jlong>(progress.phase),
+                            static_cast<jlong>(progress.load_fraction * 1000.0f),
+                            static_cast<jlong>(progress.prompt_tokens),
+                            static_cast<jlong>(progress.processed_tokens),
+                            static_cast<jlong>(progress.reused_tokens),
+                            static_cast<jlong>(progress.generated_tokens)};
+    jlongArray result = env->NewLongArray(6);
+    if (result) env->SetLongArrayRegion(result, 0, 6, values);
+    return result;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_bendyline_gezel_llama_LlamaRuntime_load(JNIEnv * env, jclass, jlong handle, jstring path, jlong request, jint context) try {
     std::string nativePath = utf8(env, path);
@@ -161,3 +179,45 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_generate(JNIEnv * env, jclass, jlong
     return 0;
 }
 
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_configureChat(JNIEnv * env, jclass, jlong handle, jstring config) try {
+    const std::string json = utf8(env, config);
+    if (env->ExceptionCheck()) return;
+    gezel_llama_error error{};
+    if (gezel_llama_configure_chat(engine(handle), json.data(), json.size(), &error) != GEZEL_LLAMA_OK) fail(env, error.message);
+} catch (...) {
+    fail(env, "Native chat configuration ran out of resources");
+}
+
+/**
+ * One OpenAI-shaped chat request (see gezel_llama_chat). Each object llama-server
+ * would stream reaches `callback.onEvent` as UTF-8 bytes, including an error body
+ * when the request fails, so a failed request is not an exception here: the
+ * status code says how it ended. Only a call the engine refuses outright (busy,
+ * nothing loaded) throws.
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_chat(JNIEnv * env, jclass, jlong handle, jstring request, jlong requestId,
+        jint timeoutMs, jobject callback) try {
+    if (!request || !callback) { fail(env, "Chat request and event callback are required"); return 0; }
+    const std::string json = utf8(env, request);
+    if (env->ExceptionCheck()) return 0;
+    jclass callbackType = env->GetObjectClass(callback);
+    if (!callbackType) return 0;
+    jmethodID method = env->GetMethodID(callbackType, "onEvent", "([B)Z");
+    env->DeleteLocalRef(callbackType);
+    if (!method) return 0;
+    Stream stream{env, callback, method};
+    auto options = gezel_llama_default_chat_options();
+    options.request_id = static_cast<uint64_t>(requestId);
+    options.timeout_ms = static_cast<uint32_t>(std::clamp<jint>(timeoutMs, 1, 600000));
+    gezel_llama_result result{};
+    gezel_llama_error error{};
+    const int32_t status = gezel_llama_chat(engine(handle), json.data(), json.size(), &options, chunk, &stream, &result, &error);
+    if (status == GEZEL_LLAMA_BUSY || status == GEZEL_LLAMA_NOT_LOADED) fail(env, error.message);
+    return status;
+} catch (...) {
+    fail(env, "Native chat ran out of resources");
+    return 0;
+}

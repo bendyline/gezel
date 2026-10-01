@@ -45,13 +45,26 @@ export async function verifyNativeBuild(repo, build, target) {
   for (const name of [
     'gezel_llama.h',
     'gezel_llama.cpp',
+    'gezel_engine.h',
+    'gezel_chat.cpp',
     'utf8_stream.h',
     'chat_formats.h',
     'CMakeLists.txt',
+    'common-chat.cmake',
   ]) {
     if (manifest.bridgeSources?.[name] !== (await digest(path.join(repo, 'native/mobile', name))))
       throw new Error(`Cached native bridge differs from ${name}; rebuild the native engine.`);
   }
+  // The chat layer compiled into the bridge must match desktop's llama-server:
+  // same pin, same patches.
+  const patchDir = path.join(repo, 'native/engines/llama-cpp/patches');
+  const patches = [];
+  for (const name of (await readdir(patchDir)).filter((file) => file.endsWith('.patch')).sort())
+    patches.push({ name, sha256: await digest(path.join(patchDir, name)) });
+  if (JSON.stringify(manifest.patches ?? []) !== JSON.stringify(patches))
+    throw new Error(
+      "Cached mobile engine's patch list differs from desktop's; rebuild the native engine.",
+    );
   const files = manifest.files;
   if (
     !files ||

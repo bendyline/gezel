@@ -28,9 +28,12 @@ const STORE = {
   readTask: async () => null,
 } as unknown as Store;
 
+/** A catalog hit whose vector evidence cleared its catalog's cosine floor. */
 function knowledgeHit(n: number, relevance = 0.8): UnifiedSearchResult {
   return {
     kind: 'knowledge',
+    arm: 'vector',
+    similarity: 0.8,
     id: `knowledge:shop-notes:chunk${n}`,
     title: `Dovetail Joints › Section ${n}`,
     snippet:
@@ -296,7 +299,7 @@ describe('keyword hits must be grounded in what they inject', () => {
     expect(result?.hits).toHaveLength(1);
   });
 
-  it('leaves an unlabelled hit alone — older callers and knowledge catalogs', async () => {
+  it('leaves an unlabelled hit alone — older callers', async () => {
     const result = await runQuery(
       [ftsHit({ arm: undefined })],
       'Can you create a PowerPoint about France',
@@ -373,6 +376,58 @@ describe('knowledge injection ceilings', () => {
     // 120/370 ≈ 0.324 — 0.2 is under the floor.
     const result = await run([knowledgeHit(1, 0.2)], 'balanced');
     expect(result).toBeNull();
+  });
+
+  it('an unjudged keyword-only catalog hit injects nothing, even when it names a query term', async () => {
+    // "Olive Oil Times" for "What is 17 times 23?": an encyclopedia always has
+    // a title sharing a word with the request, so a catalog hit needs vector
+    // evidence above its floor unless the relevance model judged it.
+    const keywordOnly = { ...knowledgeHit(1), arm: 'fts' as const, similarity: undefined };
+    const unlabelled = { ...knowledgeHit(2), arm: undefined, similarity: undefined };
+    let trace: import('@bendyline/gezel').RetrievalDecisionTrace | null = null;
+    const search = {
+      searchProject: async () => ({ results: [keywordOnly, unlabelled], truncated: false }),
+    } as unknown as SearchService;
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+      onDecisionTrace: (t) => {
+        trace = t;
+      },
+    });
+    expect(result).toBeNull();
+    const finished = trace as unknown as import('@bendyline/gezel').RetrievalDecisionTrace;
+    expect(finished.candidates.map((c) => c.reason)).toEqual(['floor', 'floor']);
+  });
+
+  it('carries a catalog hit similarity into the decision trace', async () => {
+    let trace: import('@bendyline/gezel').RetrievalDecisionTrace | null = null;
+    const search = {
+      searchProject: async () => ({ results: [knowledgeHit(1)], truncated: false }),
+    } as unknown as SearchService;
+    await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+      onDecisionTrace: (t) => {
+        trace = t;
+      },
+    });
+    const finished = trace as unknown as import('@bendyline/gezel').RetrievalDecisionTrace;
+    expect(finished.candidates[0]).toMatchObject({
+      arm: 'vector',
+      similarity: 0.8,
+      reason: 'kept',
+    });
   });
 
   it('zero qualifying hits ⇒ zero injection', async () => {

@@ -20,7 +20,10 @@ const log = createLogger('mlx');
  * - Sliding-window (gemma4): `layer_types` of
  *   `sliding_attention`/`full_attention`, `sliding_window`, SWA layers at
  *   `head_dim` × `num_key_value_heads`, global layers at
- *   `global_head_dim` × `num_global_key_value_heads`.
+ *   `global_head_dim` × `num_global_key_value_heads`. The E-series also sets
+ *   `num_kv_shared_layers`: mlx-vlm's `make_cache` builds caches only for the
+ *   layers before the shared tail, so E4B holds 4 full-attention caches, not
+ *   7 — pricing all 7 overstated its KV ~1.75x.
  * - Linear-attention hybrids (qwen3.6-a3b): `linear_attention` layers
  *   carry a small context-independent recurrent state; approximated as a
  *   window-capped layer with a synthetic 1024-token window — the right
@@ -113,12 +116,14 @@ export function readMlxModelGeometry(
   }
   const LINEAR_STATE_WINDOW_TOKENS = 1024;
   const slidingWindow = num('sliding_window') ?? LINEAR_STATE_WINDOW_TOKENS;
+  const sharedKvLayers = num('num_kv_shared_layers');
   return {
     blockCount,
     headCountKv,
     headCountKvPerLayer: pattern.map((bounded) => (bounded ? headCountKv : globalKvHeads)),
     slidingWindow,
     slidingWindowPattern: pattern,
+    ...(sharedKvLayers !== undefined ? { sharedKvLayers } : {}),
     keyLength: globalKeyLength,
     valueLength: globalHeadDim,
     keyLengthSwa: headDim,

@@ -30,6 +30,7 @@
       "**/ux-screenshots/**",
       "**/.import-state/**",
       "**/.import-cache/**",
+      "**/__golden__/**",
       "evals/runs/**",
       "artifacts/**",
       "reports/**",

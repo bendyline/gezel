@@ -198,6 +198,21 @@ class RelayTests(unittest.TestCase):
         relay._thread.join(2)
         self.assertEqual(statuses[-1], "unauthorized")
 
+    def test_offers_the_tools_to_the_chosen_gezel_only(self):
+        http = FakeHttp()
+        tool = {"name": "echo", "description": "d", "inputSchema": {"type": "object"}, "handler": lambda a: ""}
+        relay = Relay(http, "t", "p1", "x", [tool], lambda fn: fn(), sleep=lambda _s: None, gezel_id="lead")
+        relay.start()
+        for _ in range(100):
+            if any(c[0] == "PUT" for c in http.calls):
+                break
+            threading.Event().wait(0.02)
+        relay.set_gezel("writer")
+        relay.stop()
+        published = [c[2] for c in http.calls if c[0] == "PUT"]
+        self.assertEqual(published[0]["gezelIds"], ["lead"])
+        self.assertEqual(published[-1]["gezelIds"], ["writer"])
+
 
 if __name__ == "__main__":
     unittest.main()

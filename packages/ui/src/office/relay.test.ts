@@ -9,10 +9,15 @@ describe('startOfficeRelay', () => {
     const register = vi.fn(
       async (
         connection: { fetch?: typeof fetch },
-        input: { projectId: string; label?: string },
+        input: { projectId: string; gezelIds?: string[]; label?: string },
       ) => {
         capturedFetch = connection.fetch;
-        expect(input).toMatchObject({ projectId: 'p1', label: 'Word: Plan.docx' });
+        // Only the gezel the pane talks to, never the whole project.
+        expect(input).toMatchObject({
+          projectId: 'p1',
+          gezelIds: ['lead'],
+          label: 'Word: Plan.docx',
+        });
         return { relayId: 'r1', ready: Promise.resolve(), update, close };
       },
     );
@@ -21,6 +26,7 @@ describe('startOfficeRelay', () => {
       baseUrl: 'https://localhost:4000',
       token: 't',
       projectId: 'p1',
+      gezelId: 'lead',
       label: 'Word: Plan.docx',
       tools: [],
       onStatus: (s) => statuses.push(s),
@@ -48,6 +54,7 @@ describe('startOfficeRelay', () => {
         baseUrl: 'https://localhost:4000',
         token: 't',
         projectId: 'p1',
+        gezelId: 'lead',
         label: 'x',
         tools: [],
         onStatus: () => undefined,

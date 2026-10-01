@@ -42,7 +42,7 @@ const app = await connect({
 
 // Make sure the model is downloaded and warm.
 const ensure = await app.ensureModel({
-  model: 'llama-cpp:qwen3-4b-instruct-q4_k_m',
+  model: 'llama-cpp:gemma4-e2b-q4',
 });
 if (ensure.status === 'downloading') {
   for await (const ev of app.streamEnsureEvents(ensure.job_id!)) {
@@ -54,7 +54,7 @@ if (ensure.status === 'downloading') {
 
 // Stream a chat completion.
 const stream = await app.chat({
-  model: 'llama-cpp:qwen3-4b-instruct-q4_k_m',
+  model: 'llama-cpp:gemma4-e2b-q4',
   messages: [{ role: 'user', content: 'Hello!' }],
   stream: true,
 });
@@ -224,7 +224,7 @@ await gezel.close();
 - **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
 - **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
 - **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
-- **An inference-only profile.** `host: { mode: 'in-process', inferenceOnly: true }` keeps on-device model listing, installation, and OpenAI-compatible inference, but does not start the standalone product's schedulers, channels, editor bridges, machine-service discovery, indexing, or maintenance jobs. The SDK calls the service through its direct in-process Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
+- **An inference-only profile.** `host: { mode: 'in-process', inferenceOnly: true }` keeps on-device model listing, installation, and OpenAI-compatible inference, but does not start the standalone product's schedulers, channels, editor bridges, machine-service discovery, indexing, or maintenance jobs. Nor does it set up remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. The SDK calls the service through its direct in-process Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
 
 Install `@bendyline/gezel-service` alongside this SDK to host — it is an optional peer dependency, so apps that only connect never download it.
 Keep the SDK and service on compatible releases. Inference-only hosting verifies

@@ -54,6 +54,7 @@ import {
   taskEffectiveStatus,
   withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
+import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
 import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
@@ -74,7 +75,7 @@ const log = createLogger('tasks');
  * turns on its own. Split from `'engagement-off'` so the UI can name
  * the setting the user actually chose.
  */
-export type TaskHandoffHoldReason = 'engagement-off' | 'engagement-paused' | 'provider-busy';
+export type { TaskHandoffHoldReason };
 
 export interface PendingHandoff {
   /** `{projectId}/{num}` ref of the task. */

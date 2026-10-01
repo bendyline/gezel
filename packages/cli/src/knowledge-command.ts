@@ -20,6 +20,7 @@ import {
   EmbedderUnavailableError,
   KNOWLEDGE_EMBEDDING_PROFILES,
   MARKDOWN_CHUNKS_2,
+  TRANSFORMERS_PEER_RANGE,
   compileKnowledgeCatalog,
   createProfileEmbedder,
   detectTableOfContents,
@@ -75,9 +76,30 @@ async function defaultCreateEmbedder(profileId: string): Promise<ProfileEmbedder
   try {
     return await createProfileEmbedder(profile, { cacheDir: hfCacheDir() });
   } catch (err) {
-    if (err instanceof EmbedderUnavailableError) throw new CliError(err.message);
+    if (err instanceof EmbedderUnavailableError) {
+      // A missing runtime is the one unavailability with a known fix; keep the
+      // library's own message for the others (a profile it cannot serve).
+      throw new CliError(err.runtimeMissing ? embeddingRuntimeMissingMessage() : err.message);
+    }
     throw err;
   }
+}
+
+/**
+ * What a person can do when the embedding runtime is missing. The npm packages
+ * leave `@huggingface/transformers` out on purpose (docs/npm-release.md), so a
+ * plain npm install of the CLI builds no catalog until it is added where Gezel
+ * is installed. Only building and `--semantic` search need it.
+ */
+export function embeddingRuntimeMissingMessage(): string {
+  const spec = `@huggingface/transformers@${TRANSFORMERS_PEER_RANGE}`;
+  return [
+    'Building a catalog and --semantic search need the embedding runtime, which an npm install of Gezel leaves out.',
+    'Add it where Gezel is installed:',
+    `  npm install -g ${spec}    if you installed gezel with npm install -g`,
+    `  npm install ${spec}       in the project where you installed gezel`,
+    'The Gezel desktop app already includes it, and full-text search works without it.',
+  ].join('\n');
 }
 
 // ── init ────────────────────────────────────────────────────────────────────

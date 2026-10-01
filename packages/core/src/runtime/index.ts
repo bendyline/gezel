@@ -1,5 +1,6 @@
 /** Browser-safe product runtime: same entities and API, injected host services. */
 export * from './files.js';
+export * from './tiered-files.js';
 export * from './entities.js';
 export * from './meester.js';
 export * from './store.js';
@@ -8,6 +9,8 @@ export type { PortableStoreOptions } from './repository.js';
 export type { PortableFileArea, PortableListOptions } from './project-files.js';
 export type { CreatePortableSession } from './sessions.js';
 export * from './chat-events.js';
+export * from './provider-queue.js';
+export * from './session-send-queue.js';
 
 export * from './script-host.js';
 export * from './script-tasks.js';
@@ -29,6 +32,7 @@ export type {
 export * from './task-gates.js';
 export { assertPortableCraftbookSupported, taskActiveAssignee } from './tasks.js';
 export type { PortableContent, PortableCatalogModel } from './content.js';
+export { portableCatalogModels } from './portable-catalog.js';
 
 export { portableToolInputSchema, portableToolNames } from './product-tools.js';
 

@@ -218,6 +218,25 @@ describe('childHostEnvironment', () => {
     expect('GEZEL_SYSTEM_SCOPE' in env).toBe(false);
   });
 
+  it('tells a spawned daemon to start the inference-only profile', () => {
+    const { env } = childHostEnvironment(
+      'qualla',
+      { ...base, inferenceOnly: true },
+      {
+        PATH: '/usr/bin',
+      },
+    );
+    expect(env.GEZEL_EMBEDDED_INFERENCE_ONLY).toBe('1');
+  });
+
+  it('never lets an inherited profile flag shrink a full daemon', () => {
+    const { env } = childHostEnvironment('qualla', base, {
+      PATH: '/usr/bin',
+      GEZEL_EMBEDDED_INFERENCE_ONLY: '1',
+    });
+    expect('GEZEL_EMBEDDED_INFERENCE_ONLY' in env).toBe(false);
+  });
+
   it('hands the spawned daemon an ephemeral port', () => {
     const { env } = childHostEnvironment('qualla', base, { PATH: '/usr/bin', GEZEL_PORT: '6228' });
     expect(env.GEZEL_PORT).toBe('0');

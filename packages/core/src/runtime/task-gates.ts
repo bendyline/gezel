@@ -10,6 +10,7 @@ import type { Task, TaskCraftbookStep } from '../schemas/task.js';
 import {
   type GateWorkspaceReader,
   evaluateDeclarativeCheck,
+  formatGateVerdict,
   isSharedGateCheck,
 } from '../tasks/gate-checks.js';
 import { evaluateGateScripts } from '../tasks/gate-scripts.js';
@@ -82,14 +83,18 @@ export async function evaluatePortableTaskGate(
         `Gate configuration error: ${unresolved.join(', ')} still contains an unresolved template placeholder. Correct the craftbook or launch parameters; writing to the literal placeholder cannot satisfy this gate.`,
       );
     const ws = reader(store, task.projectId);
+    // Every check runs and every failure is reported, as on the desktop: a
+    // missing file reads as "0 bytes" to one check and "not found" to the next.
+    const failures: string[] = [];
     for (const item of checks) {
       // Regex and executable syntax checks belong in bounded QuickJS, not the
       // UI thread. Unsupported declarative checks fail closed here.
       if (!isSharedGateCheck(item))
         throw new Error(`The ${item.kind} gate requires a supported script or desktop execution`);
       const result = await evaluateDeclarativeCheck(item, ws);
-      if (!result.ok) return { approved: false, message: result.detail };
+      if (!result.ok) failures.push(result.detail);
     }
+    if (failures.length) return { approved: false, message: formatGateVerdict(failures) };
     const scripts = await evaluateGateScripts(
       gate?.scripts ?? [],
       (ref) => {

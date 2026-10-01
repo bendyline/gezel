@@ -57,11 +57,19 @@ export function audioRoutes(ctx: ServiceContext): Hono {
       `[synthesize] start chars=${req.text.length} voice=${resolvedVoice ?? '(default)'} gezelId=${req.gezelId ?? '(none)'}`,
     );
     const provider = await ctx.tts.providerForModel(req.model);
+    let chunked = false;
     const out = await provider.synthesize({
       text: req.text,
       signal,
       ...(onProgress ? { onProgress } : {}),
-      ...(onChunk ? { onChunk } : {}),
+      ...(onChunk
+        ? {
+            onChunk: (chunk: SynthesizeChunk) => {
+              chunked = true;
+              return onChunk(chunk);
+            },
+          }
+        : {}),
       ...(resolvedVoice ? { voice: resolvedVoice } : {}),
       ...(req.model ? { model: req.model } : {}),
       ...(req.speed !== undefined ? { speed: req.speed } : {}),
@@ -69,7 +77,23 @@ export function audioRoutes(ctx: ServiceContext): Hono {
     log.info(
       `[synthesize] done in ${Date.now() - synthStarted}ms (${out.meta.durationSeconds.toFixed(1)}s audio, ${out.wav.length}B wav)`,
     );
+    // Streaming callers may play chunks alone, so an engine that cannot
+    // split its output still delivers its audio as one.
+    if (onChunk && !chunked && out.meta.durationSeconds > 0) {
+      await onChunk({
+        index: 0,
+        wav: out.wav,
+        sampleRate: out.meta.sampleRate,
+        durationSeconds: out.meta.durationSeconds,
+      });
+    }
 
+    if (req.persist === false) {
+      return {
+        meta: out.meta,
+        ...(req.inline ? { b64Wav: out.wav.toString('base64') } : {}),
+      };
+    }
     const filename = audioArtifactFilename(req.sessionId);
     const relPath = `audio/${filename}`;
     const writtenPath = await ctx.store.writeProjectArtifactBinary(projectId, relPath, out.wav);

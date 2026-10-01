@@ -3,12 +3,11 @@ import type {
   KnowledgeCatalogItemManifest,
   KnowledgeInstallRequest,
 } from '@bendyline/gezel';
-import {
-  GezelApiError,
-  type IncompleteKnowledgeDownload,
-  type KnowledgeAvailableCatalog,
-  type KnowledgeCatalogStatus,
-  type KnowledgeInstallEvent,
+import type {
+  IncompleteKnowledgeDownload,
+  KnowledgeAvailableCatalog,
+  KnowledgeCatalogStatus,
+  KnowledgeInstallEvent,
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -58,15 +57,11 @@ interface ActiveInstall {
   source?: InstallSource;
 }
 
-const NETWORK_BLOCKED_MESSAGE =
-  'Downloading knowledge catalogs needs app network access, which the security policy turns off (Settings → Security).';
-
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
 function installErrorMessage(err: unknown): string {
-  if (err instanceof GezelApiError && err.status === 403) return NETWORK_BLOCKED_MESSAGE;
   return `download failed: ${describe(err)}`;
 }
 

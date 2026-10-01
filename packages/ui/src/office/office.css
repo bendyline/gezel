@@ -80,6 +80,16 @@
   background: var(--warning);
 }
 
+/* One muted line under the header: why the document is out of reach. */
+.office-pane-notice {
+  display: block;
+  margin: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .office-boot {
   display: flex;
   flex-direction: column;

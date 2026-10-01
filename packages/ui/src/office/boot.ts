@@ -1,10 +1,11 @@
-import type { InferProjectForPathResponse } from '@bendyline/gezel';
+import type { InferProjectForPathResponse, ProviderName } from '@bendyline/gezel';
 import {
   type HttpDeps,
   type KeyValueStorage,
   clearToken,
   enrollPane,
   loadToken,
+  paneErrorMessage,
   probeToken,
   registerPane,
   saveToken,
@@ -35,6 +36,8 @@ export interface PaneReady {
   matchedBy: InferProjectForPathResponse['matchedBy'];
   created: boolean;
   gezelId: string;
+  /** The install's provider, for gezels without their own. */
+  defaultProvider?: ProviderName;
   documentPath: string | null;
   edits: boolean;
 }
@@ -74,9 +77,7 @@ async function apiJson<T>(
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-    const err = new Error(
-      body.message ?? body.error ?? `Gezel answered ${res.status}.`,
-    ) as Error & {
+    const err = new Error(paneErrorMessage(res.status, body)) as Error & {
       status?: number;
     };
     err.status = res.status;
@@ -126,6 +127,8 @@ export interface RosterGezel {
   id: string;
   name: string;
   role?: string;
+  /** This gezel's own provider; absent means the install's default. */
+  provider?: ProviderName;
 }
 
 export async function listGezels(deps: HttpDeps, token: string): Promise<RosterGezel[]> {
@@ -219,9 +222,11 @@ export async function bootPane(
     const resolved = await resolveProject(deps, token, deps.documentPath);
     const [roster, config] = await Promise.all([
       listGezels(deps, token),
-      apiJson<{ meesterGezelId?: string }>(deps, token, '/api/config').catch(
-        () => ({}) as { meesterGezelId?: string },
-      ),
+      apiJson<{ meesterGezelId?: string; provider?: ProviderName }>(
+        deps,
+        token,
+        '/api/config',
+      ).catch(() => ({}) as { meesterGezelId?: string; provider?: ProviderName }),
     ]);
     const gezelId = pickDefaultGezel(
       resolved.project,
@@ -235,6 +240,7 @@ export async function bootPane(
       matchedBy: resolved.matchedBy,
       created: resolved.created,
       gezelId,
+      ...(config.provider ? { defaultProvider: config.provider } : {}),
       documentPath: deps.documentPath,
       edits: remembered.edits !== false,
     };

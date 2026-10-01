@@ -132,20 +132,37 @@ const exclusions = [
 ];
 
 export function parseArgs(args) {
-  const options = { reportOnly: false, packageIds: [] };
+  const options = { reportOnly: false, packageIds: [], excludedPackageIds: [] };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--report-only') options.reportOnly = true;
-    else if (arg === '--package') {
+    else if (arg === '--package' || arg === '--exclude-package') {
       const packageId = args[index + 1];
-      if (!packageId) throw new Error('--package requires a package id');
-      options.packageIds.push(packageId);
+      if (!packageId) throw new Error(`${arg} requires a package id`);
+      (arg === '--package' ? options.packageIds : options.excludedPackageIds).push(packageId);
       index += 1;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
   return options;
+}
+
+// CI shards the pass by exclusion (`--package service` on one runner,
+// `--exclude-package service` on the other) so a target added above lands in
+// a shard without anyone editing the workflow. A misspelled id or a shard left
+// with nothing to measure must fail loudly, not report an empty success.
+export function selectTargets(configuredTargets, options) {
+  const named = [...options.packageIds, ...options.excludedPackageIds];
+  const unknown = named.filter((id) => !configuredTargets.some((target) => target.id === id));
+  if (unknown.length > 0) throw new Error(`Unknown coverage package(s): ${unknown.join(', ')}`);
+  const requested = new Set(options.packageIds);
+  const excluded = new Set(options.excludedPackageIds);
+  const selected = configuredTargets.filter(
+    (target) => (requested.size === 0 || requested.has(target.id)) && !excluded.has(target.id),
+  );
+  if (selected.length === 0) throw new Error('No coverage packages left to measure');
+  return selected;
 }
 
 // pnpm goes through spawnPnpm: a bare `spawn('pnpm')` cannot resolve
@@ -209,11 +226,7 @@ export async function main() {
     throw new Error(`Invalid coverage configuration:\n${configurationFailures.join('\n')}`);
   }
   const options = parseArgs(process.argv.slice(2));
-  const requested = new Set(options.packageIds);
-  const selected =
-    requested.size > 0 ? targets.filter((target) => requested.has(target.id)) : targets;
-  const unknown = [...requested].filter((id) => !targets.some((target) => target.id === id));
-  if (unknown.length > 0) throw new Error(`Unknown coverage package(s): ${unknown.join(', ')}`);
+  const selected = selectTargets(targets, options);
 
   await rm(reportRoot, { recursive: true, force: true });
   await mkdir(reportRoot, { recursive: true });

@@ -122,6 +122,12 @@ export const MLX_WEIGHTS_MULTIPLIER = 1.02;
  * that same 1.4→86 GiB span. Flat over a 60× range, which is what makes a
  * bare multiplier the wrong shape here: the old `× 1.05` under-reserved a
  * 1.4 GiB model by 633 MiB while wasting 1.1 GiB on a 35 GiB one.
+ *
+ * Gemma sits at the top of that range and sets the floor. gemma4-e4b on an
+ * M2 (2026-09-30) runs ~950 MiB above its MLX allocation after load and
+ * ~970 MiB after a 12K-token turn — 790–820 MiB beyond `approxSizeBytes ×
+ * 1.02`. 768 MiB looked safe against the M5 Max samples alone and would have
+ * under-reserved it; do not lower this without re-measuring a Gemma.
  */
 export const MLX_FIXED_ENGINE_BYTES = 1024 * 1024 ** 2;
 

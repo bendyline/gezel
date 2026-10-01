@@ -131,8 +131,13 @@ The **enforcement layers** a model-driven action passes through, outermost first
 - **CORS is scoped and never `*`-with-credentials.** `v1Cors()` reflects a specific Origin
   (so `Allow-Credentials: true` is legal) and is mounted **only on `/v1/*`**, never `/api/*`
   (the `/api/*` surface returns no CORS headers, so a browser can't read its responses).
-  CORS is **deliberately not served on `/v1/apps/*`** (the unauthenticated app-grant surface)
-  so a drive-by page can't script the register→token-poll flow cross-origin.
+  CORS is **deliberately not served on the unauthenticated endpoints**: `/v1/apps/*` (the
+  app-grant surface, so a drive-by page can't script the register→token-poll flow),
+  `/v1/identity` (the device id, which survives cookie clearing), and `/v1/openapi.json`
+  (the version). On the **Office listener** it answers only the task pane's own origin:
+  that listener has a stable port and a certificate every browser on the machine trusts,
+  so echoing any Origin there would let every website read from Gezel. A page can still
+  tell the port answers (an opaque `no-cors` probe); it cannot read what it says.
 
 **Net:** the loopback + host-guard + scoped-CORS triad keeps "localhost only" from becoming
 remotely reachable. The residual edge risks are local-multi-user (§1 actor #4), handled by

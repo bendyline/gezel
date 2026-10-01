@@ -1,4 +1,27 @@
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { isOfficeListenerRequest } from '../office-host/static-routes.js';
+import { requestHost } from './host-guard.js';
+
+/**
+ * Unauthenticated `/v1` endpoints. None is meant for a web page, so none is
+ * ever readable cross-origin:
+ *
+ *   - `/v1/apps/*` is how an app requests and polls for its token. With CORS
+ *     a drive-by page could script register → poll and read an issued token.
+ *     The legitimate flow runs from a native/desktop context, which isn't
+ *     subject to CORS.
+ *   - `/v1/identity` publishes the device id, a stable identifier that
+ *     survives cookie clearing, plus the Gezel version. Its callers are
+ *     pairing peers and the machine-engine bridge (native) and the app's own
+ *     UI (same-origin).
+ *   - `/v1/openapi.json` carries the Gezel version. Reading the schema in a
+ *     browser is a navigation, not a cross-origin fetch.
+ */
+const NO_CORS_PREFIXES = ['/v1/apps', '/v1/identity', '/v1/openapi.json'];
+
+function isNoCorsPath(path: string): boolean {
+  return NO_CORS_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
 
 /**
  * CORS middleware for the public `/v1/*` surface. Browser-based apps
@@ -15,6 +38,11 @@ import type { MiddlewareHandler } from 'hono';
  *   - Restricted to `/v1/*` paths only. The internal `/api/*` surface
  *     stays origin-locked to the static UI bundle (which has no
  *     `Origin` and bypasses CORS anyway).
+ *   - Never on the unauthenticated endpoints in {@link NO_CORS_PREFIXES}.
+ *   - On the Office listener, only the task pane's own origin. That
+ *     listener has a stable port and a certificate every browser on the
+ *     machine trusts, so echoing any Origin there lets every website read
+ *     from Gezel. The pane is its only browser client.
  *   - Methods + headers are the standard set the SDK needs: GET, POST,
  *     DELETE, OPTIONS; Authorization, Content-Type, Accept.
  *   - `Access-Control-Max-Age: 86400` so a browser caches the preflight
@@ -23,17 +51,9 @@ import type { MiddlewareHandler } from 'hono';
  * Auth is still enforced per route. The bearer token gates access;
  * CORS just lets the browser execute the request in the first place.
  */
-export function v1Cors(): MiddlewareHandler {
+export function v1Cors(opts: { officeHostOrigin?: () => string | null } = {}): MiddlewareHandler {
   return async (c, next) => {
-    // The app-grant endpoints (/v1/apps/*) are unauthenticated by
-    // necessity — they're how an app requests + polls for its token.
-    // Deliberately DON'T serve CORS for them: otherwise a drive-by web
-    // page could script the register → poll flow cross-origin and read
-    // an issued token. The legitimate app-SDK flow runs from a native/
-    // desktop context, which isn't subject to CORS. The inference
-    // endpoints (/v1/chat etc.) still get CORS so browser apps work.
-    const isAppGrantPath = c.req.path.startsWith('/v1/apps/');
-    const origin = isAppGrantPath ? undefined : c.req.header('origin');
+    const origin = allowedOrigin(c, opts.officeHostOrigin?.() ?? null);
 
     if (c.req.method === 'OPTIONS') {
       // Preflight short-circuit. The browser already decided this is a
@@ -60,4 +80,14 @@ export function v1Cors(): MiddlewareHandler {
       c.res.headers.set('access-control-allow-credentials', 'true');
     }
   };
+}
+
+/** The Origin this request may be answered for, or undefined for no CORS headers at all. */
+function allowedOrigin(c: Context, officeOrigin: string | null): string | undefined {
+  const requested = c.req.header('origin');
+  if (!requested || isNoCorsPath(c.req.path)) return undefined;
+  if (isOfficeListenerRequest(requestHost(c) ?? undefined, officeOrigin)) {
+    return requested === officeOrigin ? requested : undefined;
+  }
+  return requested;
 }

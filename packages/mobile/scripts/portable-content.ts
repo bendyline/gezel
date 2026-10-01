@@ -3,9 +3,9 @@ import { dirname, join } from 'node:path';
 import type { Plugin } from 'vite';
 import { BundledSource } from '../../catalog/src/source.js';
 import { craftbookFromDoc, parseCraftbookDoc } from '../../core/src/browser.js';
+import { portableCatalogModels } from '../../core/src/runtime/portable-catalog.js';
 import { portableToolNames } from '../../core/src/runtime/product-tools.js';
 import { supportsPortableContent } from './portable-content-support.js';
-import { portableCatalogModels } from './portable-models.js';
 
 const ID = 'virtual:gezel-portable-content';
 const require = createRequire(new URL('../../catalog/package.json', import.meta.url));

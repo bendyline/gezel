@@ -466,11 +466,15 @@ describe('split user + machine services', () => {
       identity: { deviceId: string; fingerprint: string };
     };
     expect(body.status.listening).toBe(false);
+    // Both are full daemons, so both carry a device identity.
+    const brokerIdentity = machine.context.deviceIdentity;
+    const userIdentity = user.context.deviceIdentity;
+    if (!brokerIdentity || !userIdentity) throw new Error('a full daemon has no device identity');
     // The panel shows the fingerprint peers must verify — the BROKER's, not
     // this user daemon's.
-    expect(body.identity.deviceId).toBe(machine.context.deviceIdentity.deviceId);
-    expect(body.identity.fingerprint).toBe(machine.context.deviceIdentity.fingerprint);
-    expect(body.identity.fingerprint).not.toBe(user.context.deviceIdentity.fingerprint);
+    expect(body.identity.deviceId).toBe(brokerIdentity.deviceId);
+    expect(body.identity.fingerprint).toBe(brokerIdentity.fingerprint);
+    expect(body.identity.fingerprint).not.toBe(userIdentity.fingerprint);
   });
 
   it('flips the broker LAN listener through the proxy', async () => {

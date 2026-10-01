@@ -48,7 +48,12 @@ async function walk(dir) {
  * Whether a module carries anything to execute. A file of interfaces and type
  * aliases has no behavior a test could exercise, so counting it as untested
  * surface only lowers a package's rate whenever one lands — a types-only
- * `remote-serving.ts` took the client under its floor that way.
+ * `remote-serving.ts` took the client under its floor that way. A shim that
+ * only forwards another package (`export * from '@bendyline/gezel/local-loop'`)
+ * is the same: its code and its tests live in that package, which counts
+ * them. Moving the local loop into core left about a hundred such shims in
+ * the service and took it under its floor. A re-export of a local file still
+ * counts, since that file is this package's own code.
  */
 export function hasRuntimeCode(source, fileName = 'module.ts') {
   const kind = /\.[jt]sx$/.test(fileName) ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -58,7 +63,12 @@ export function hasRuntimeCode(source, fileName = 'module.ts') {
 
 function isTypeOnlyStatement(statement) {
   if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) return true;
-  if (ts.isExportDeclaration(statement)) return statement.isTypeOnly;
+  if (ts.isExportDeclaration(statement)) {
+    const from = statement.moduleSpecifier;
+    return (
+      statement.isTypeOnly || (!!from && ts.isStringLiteral(from) && !from.text.startsWith('.'))
+    );
+  }
   if (ts.isImportDeclaration(statement)) {
     const clause = statement.importClause;
     if (!clause) return false; // a side-effect import runs the module

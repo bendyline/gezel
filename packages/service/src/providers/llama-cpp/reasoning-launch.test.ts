@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  REASONING_CHARS_PER_TOKEN,
   applyLlamaCppReasoningBudgetOverride,
+  buildThinkingBudgetCorrective,
+  clientThinkingBudgetForRequest,
+  estimateReasoningTokens,
   parseReasoningBudgetEnv,
   parseReasoningPreserveEnv,
   reasoningLaunchOverridesFromEnv,
@@ -58,7 +62,40 @@ describe('llama.cpp reasoning request budget override', () => {
 
   it('removes llama-specific request budgets for DS4 without reading the llama experiment setting', () => {
     const body = { reasoning_budget_tokens: 2048, max_tokens: 8192 };
-    applyLlamaCppReasoningBudgetOverride(body, false, '4k');
+    expect(applyLlamaCppReasoningBudgetOverride(body, false, '4k')).toBe(2048);
     expect(body).toEqual({ max_tokens: 8192 });
+  });
+
+  it('hands back no unenforced budget when the engine enforces its own', () => {
+    expect(applyLlamaCppReasoningBudgetOverride({ reasoning_budget_tokens: 2048 }, true, '')).toBe(
+      undefined,
+    );
+    expect(applyLlamaCppReasoningBudgetOverride({}, false, '')).toBeUndefined();
+  });
+});
+
+describe('client-side thinking budget', () => {
+  it('enforces an unenforced budget only while the request still thinks', () => {
+    expect(clientThinkingBudgetForRequest({}, 4096)).toBe(4096);
+    expect(
+      clientThinkingBudgetForRequest({ chat_template_kwargs: { enable_thinking: true } }, 4096),
+    ).toBe(4096);
+    expect(clientThinkingBudgetForRequest({}, undefined)).toBeNull();
+    expect(
+      clientThinkingBudgetForRequest({ chat_template_kwargs: { enable_thinking: false } }, 4096),
+    ).toBeNull();
+    expect(clientThinkingBudgetForRequest({ thinking: { type: 'disabled' } }, 4096)).toBeNull();
+    expect(clientThinkingBudgetForRequest({ think: false }, 4096)).toBeNull();
+  });
+
+  it('prefers the engine decode count and otherwise estimates from reasoning chars', () => {
+    expect(estimateReasoningTokens(10_000, 1234)).toBe(1234);
+    expect(estimateReasoningTokens(10_000, 0)).toBe(10_000 / REASONING_CHARS_PER_TOKEN);
+    expect(estimateReasoningTokens(4097 * REASONING_CHARS_PER_TOKEN)).toBe(4097);
+  });
+
+  it('only names a tool call when the request offered tools', () => {
+    expect(buildThinkingBudgetCorrective(true)).toMatch(/make your next tool call now/);
+    expect(buildThinkingBudgetCorrective(false)).not.toMatch(/tool/);
   });
 });

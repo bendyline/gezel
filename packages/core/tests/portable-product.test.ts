@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from '../../client/src/client.js';
 import { poppetjeFromSeed } from '../src/poppetje/seed.js';
 import type { PortableFileEntry, PortableFileSystem } from '../src/runtime/files.js';
@@ -387,9 +387,12 @@ describe('ordinary client against offline product runtime', () => {
     const reader = stream.body!.getReader();
     try {
       const first = new TextDecoder().decode((await reader.read()).value);
-      const second = new TextDecoder().decode((await reader.read()).value);
       expect(first).toContain('user_message');
-      expect(second).toContain('Visible partial reply');
+      // The replay also carries the engine's phase lines, as on desktop.
+      let replayed = '';
+      for (let i = 0; i < 5 && !replayed.includes('Visible partial reply'); i++)
+        replayed += new TextDecoder().decode((await reader.read()).value);
+      expect(replayed).toContain('Visible partial reply');
     } finally {
       await reader.cancel();
       finish({ text: 'Visible partial reply', stopReason: 'stop' });
@@ -529,10 +532,18 @@ describe('ordinary client against offline product runtime', () => {
     await client.sendToChatSession(session.id, { message: 'Say hello.' });
     await settled(service);
     expect(requests.at(-1)).toMatchObject({ contextSize: 16384, maxTokens: 1000 });
+    // The listing reports the budget turns get, not the provider's maximum.
+    expect((await client.listProviderModels('llama-cpp')).models).toEqual([
+      expect.objectContaining({ id: 'fixture', contextWindow: 16384, maxOutputTokens: 1000 }),
+    ]);
     await client.updateConfig({ modelContextOverrides: { 'llama-cpp:fixture': 4096 } });
     await client.sendToChatSession(session.id, { message: 'Once more.' });
     await settled(service);
     expect(requests.at(-1)).toMatchObject({ contextSize: 4096 });
+    expect((await client.listProviderModels('llama-cpp')).models[0]).toMatchObject({
+      contextWindow: 4096,
+      maxOutputTokens: 1000,
+    });
   });
 
   it("passes a downloaded model's catalog sampling to the engine, and none for an imported file", async () => {
@@ -796,8 +807,9 @@ describe('ordinary client against offline product runtime', () => {
       '{"ok":true}',
     );
   });
-  it('waits for native cancellation before releasing the turn and permits unrelated navigation writes', async () => {
-    let finish!: (value: { text: string; stopReason: 'cancelled' }) => void;
+  it('waits for native cancellation before releasing the turn, then runs what queued behind it', async () => {
+    let finish!: (value: { text: string; stopReason: 'cancelled' | 'stop' }) => void;
+    let calls = 0;
     let release!: () => void;
     const released = new Promise<void>((resolve) => {
       release = resolve;
@@ -805,6 +817,7 @@ describe('ordinary client against offline product runtime', () => {
     const { client, service } = await setup({
       generate: () =>
         new Promise((resolve) => {
+          calls++;
           finish = resolve;
         }),
       cancel: async () => {
@@ -819,16 +832,25 @@ describe('ordinary client against offline product runtime', () => {
     const stopping = client.cancelChatSessionTurn(session.id);
     await expect(
       client.sendToChatSession(session.id, { message: 'Too soon' }),
-    ).rejects.toMatchObject({ status: 409 });
+    ).resolves.toMatchObject({ accepted: true });
     expect(service.busy).toBe(true);
     release();
     await stopping;
-    const saved = await client.getChatSession(session.id);
-    expect(saved.messages.at(-1)).toMatchObject({
-      content: 'Partial answer',
+    const stopped = await client.getChatSession(session.id);
+    expect(stopped.messages.find((m) => m.content === 'Partial answer')).toMatchObject({
       status: 'interrupted',
       stopReason: 'cancelled',
     });
+    await vi.waitFor(() => expect(calls).toBe(2));
+    finish({ text: 'Now answered', stopReason: 'stop' });
+    await settled(service);
+    const saved = await client.getChatSession(session.id);
+    expect(saved.messages.map((m) => m.content)).toEqual([
+      'Start',
+      'Partial answer',
+      'Too soon',
+      'Now answered',
+    ]);
     expect(saved.turnStartedAt).toBeUndefined();
   });
   it('closing an event reader does not abort the turn; follow-ups retain referenced file context', async () => {

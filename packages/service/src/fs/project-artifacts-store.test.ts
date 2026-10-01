@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ProjectArtifactsStore } from './project-artifacts-store.js';
+import { ArtifactRootDeniedError, ProjectArtifactsStore } from './project-artifacts-store.js';
 
 describe('ProjectArtifactsStore recursive listings', () => {
   it('enumerates connector corpora larger than the generic 500-entry walk cap', async () => {
@@ -24,6 +24,41 @@ describe('ProjectArtifactsStore recursive listings', () => {
 
       expect(result.truncated).toBe(false);
       expect(result.entries.filter((entry) => !entry.isDirectory)).toHaveLength(509);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('ProjectArtifactsStore drawer root', () => {
+  it('refuses to delete or rename the drawer itself, however the path spells it', async () => {
+    // `DELETE …/artifacts/delete?path=.` removed the whole drawer on the RC
+    // daemon: task inputs, prompt drafts, proposals.
+    const home = await mkdtemp(join(tmpdir(), 'gezel-artifact-root-test-'));
+    try {
+      const artifacts = new ProjectArtifactsStore({ home, touchProject: async () => {} });
+      await artifacts.writeProjectArtifact('p', 'notes/a.md', 'kept');
+      await artifacts.writeProjectArtifact('p', 'tasks/1/inputs/brief/x.md', 'input');
+      for (const path of ['.', './', 'notes/..', './notes/../', '...', 'notes/./..']) {
+        for (const initiatedByGezel of [false, true]) {
+          await expect(
+            artifacts.deleteProjectArtifact('p', path, { initiatedByGezel }),
+            `${path} (${initiatedByGezel ? 'gezel' : 'user'})`,
+          ).rejects.toBeInstanceOf(ArtifactRootDeniedError);
+        }
+      }
+      await expect(
+        artifacts.renameProjectArtifactPath('p', 'notes/..', 'archive'),
+      ).rejects.toBeInstanceOf(ArtifactRootDeniedError);
+      await expect(
+        artifacts.renameProjectArtifactPath('p', 'notes/a.md', '.'),
+      ).rejects.toBeInstanceOf(ArtifactRootDeniedError);
+      expect(await artifacts.readProjectArtifact('p', 'notes/a.md')).toBe('kept');
+      expect(await artifacts.readProjectArtifact('p', 'tasks/1/inputs/brief/x.md')).toBe('input');
+
+      // Ordinary deletes are unaffected.
+      await artifacts.deleteProjectArtifact('p', 'notes/a.md');
+      expect(await artifacts.readProjectArtifact('p', 'notes/a.md')).toBeNull();
     } finally {
       await rm(home, { recursive: true, force: true });
     }

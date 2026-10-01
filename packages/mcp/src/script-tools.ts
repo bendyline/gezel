@@ -1,3 +1,4 @@
+import { scriptRunText } from '@bendyline/gezel';
 /**
  * Project-type script tools — dynamic per-session MCP registrations.
  *
@@ -117,20 +118,9 @@ export function formatScriptRunResult(res: RunScriptResponse): CallToolResult {
   const header = `run ${res.runId} — status: ${res.status}${
     res.error ? ` — error: ${res.error}` : ''
   }`;
-  const callsSummary = res.callsSummary.length
-    ? `\ncalls:\n${res.callsSummary
-        .map((c) => `  - ${c.kind} (${c.durationMs}ms)${c.error ? ` — ${c.error}` : ''}`)
-        .join('\n')}`
-    : '';
-  const outputBlock =
-    res.output === undefined ? '' : `\noutput:\n${JSON.stringify(res.output, null, 2)}`;
-  // A failed tool row already carries a red ✗ and error styling. Lead with
-  // the actionable script message instead of repeating a run UUID, status,
-  // and "error" label that are useful to machinery but noisy in the chat.
-  if (res.status === 'error') {
-    return errorResult(`${res.error ?? 'Script failed.'}${outputBlock}${callsSummary}`);
-  }
-  const text = `${header}${outputBlock}${callsSummary}`;
+  const rendered = scriptRunText(res);
+  if (rendered.isError) return errorResult(rendered.text);
+  const text = rendered.text;
   return okResult(
     ExecutionToolOutputSchema,
     {

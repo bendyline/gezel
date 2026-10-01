@@ -9,7 +9,7 @@ import {
 describe('portable inference budget admission', () => {
   const llama = { contextTokens: 16384, maxOutputTokens: 4096 };
   it('uses sustainable defaults while preserving explicit per-model choices', () => {
-    expect(resolveMobileInferenceBudget(llama)).toEqual({ contextSize: 4096, maxTokens: 1024 });
+    expect(resolveMobileInferenceBudget(llama)).toEqual({ contextSize: 4096, maxTokens: 2048 });
     expect(resolveMobileInferenceBudget(llama, { contextSize: 8192, maxTokens: 4096 })).toEqual({
       contextSize: 8192,
       maxTokens: 4096,
@@ -17,8 +17,11 @@ describe('portable inference budget admission', () => {
     // The window the device reported it fits for the model, 16K at most.
     expect(resolveMobileInferenceBudget(llama, { contextSize: 16384 })).toEqual({
       contextSize: 16384,
-      maxTokens: 1024,
+      maxTokens: 4096,
     });
+    // A whole-file write needs thousands of tokens; the 8K window a mid-range
+    // phone fits gets the bridge's full reply ceiling.
+    expect(resolveMobileInferenceBudget(llama, { contextSize: 8192 }).maxTokens).toBe(4096);
     expect(() =>
       resolveMobileInferenceBudget(
         { contextTokens: 32768, maxOutputTokens: 4096 },
@@ -32,6 +35,7 @@ describe('portable inference budget admission', () => {
   });
   it('respects provider limits without silently reducing explicit settings', () => {
     const apple = { contextTokens: 4096, maxOutputTokens: 1024 };
+    expect(resolveMobileInferenceBudget(apple)).toEqual({ contextSize: 4096, maxTokens: 1024 });
     expect(() => resolveMobileInferenceBudget(apple, { contextSize: 8192 })).toThrow('exceed');
     expect(() => resolveMobileInferenceBudget(apple, { maxTokens: 2048 })).toThrow('exceed');
     for (const maxTokens of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 4097])

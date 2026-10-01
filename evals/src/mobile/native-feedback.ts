@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { androidShellCommand } from './android-runner.ts';
 import { runMobileFeedbackPump } from './feedback.ts';
+import { iosDeviceCopyTo, readIosDeviceFile } from './ios-device.ts';
 import { writeNativeReceipt } from './receipt-transport.ts';
 import type { MobileReport } from './report.ts';
 
@@ -16,6 +17,8 @@ export async function withNativeFeedback<T>(
     runId: string;
     output: string;
     adb?: string;
+    /** An iOS run on a physical device, whose container only devicectl reaches. */
+    physical?: boolean;
     log: (line: string) => void;
   },
   run: () => Promise<T>,
@@ -42,6 +45,14 @@ export async function withNativeFeedback<T>(
           );
           return JSON.parse(result.stdout) as MobileReport;
         }
+        if (options.physical) {
+          const text = await readIosDeviceFile(
+            options.device,
+            `Documents/mobile-evals/${options.runId}.json`,
+            abort.signal,
+          );
+          return text ? (JSON.parse(text) as MobileReport) : null;
+        }
         iosContainer ??= (
           await exec(
             'xcrun',
@@ -65,10 +76,17 @@ export async function withNativeFeedback<T>(
       const encoded = JSON.stringify(receipt);
       const directory = join(options.output, 'grading-receipts');
       await mkdir(directory, { recursive: true });
-      await writeFile(
-        join(directory, `${String(receiptNumber++).padStart(4, '0')}.json`),
-        `${encoded}\n`,
-      );
+      const local = join(directory, `${String(receiptNumber++).padStart(4, '0')}.json`);
+      await writeFile(local, `${encoded}\n`);
+      if (options.platform === 'ios' && options.physical) {
+        await iosDeviceCopyTo(
+          options.device,
+          local,
+          `Documents/mobile-evals/${options.runId}.json.receipt.json`,
+          { signal: abort.signal, timeout: 30000 },
+        );
+        return;
+      }
       if (options.platform === 'ios') {
         if (!iosContainer) throw new Error('iOS test container has not been discovered');
         const path = join(

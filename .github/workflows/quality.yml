@@ -81,10 +81,23 @@ jobs:
           retention-days: 30
 
   coverage:
-    name: Executable V8 coverage
+    name: Executable V8 coverage (${{ matrix.shard.id }})
     needs: workflow-policy
     runs-on: ubuntu-latest
     continue-on-error: true
+    # Two runners since 2026-09-30: instrumented, the service suite alone runs
+    # ~32 min, and one job measuring every package had reached 51 of its 60
+    # min. The other shard is chosen by exclusion, so a package added to
+    # scripts/run-vitest-coverage.mjs is measured without editing this file.
+    # Not fail-fast: one shard's failure says nothing about the other's report.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - id: service
+            args: --package service
+          - id: packages
+            args: --exclude-package service
     # A FOURTH execution of the UI, service and package suites, this one under
     # V8 instrumentation. It is a separate job because it reports rather than
     # gates: `unit` (stability pass 1) and `stability` (passes 2 and 3) have
@@ -114,12 +127,12 @@ jobs:
         # Without it those tests silently skip and the report under-counts.
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
       - name: Measure executable V8 coverage
-        run: pnpm test:coverage
+        run: pnpm test:coverage -- ${{ matrix.shard.args }}
       - name: Preserve executable coverage reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: runtime-coverage
+          name: runtime-coverage-${{ matrix.shard.id }}
           path: artifacts/coverage/
           if-no-files-found: ignore
           retention-days: 30
@@ -168,25 +181,31 @@ jobs:
           src/machine-engine/bridge.integration.test.ts
 
   stability:
-    name: Test stability (UI, service, and CLI TUI repeats)
+    name: Test stability pass ${{ matrix.pass }} of 3 (UI, service, and CLI TUI)
     needs: workflow-policy
     runs-on: ubuntu-latest
     # Passes 2 and 3 run here rather than tailing the `unit` job, which
     # reached ~30 min sequentially and was cancelled at that ceiling on
-    # 2026-07-27. The two repeats then ran ui+service concurrently in 19.7
-    # min; serialising them (see test:stability) trades roughly 4 min of wall
-    # clock for timings that do not depend on what else shares the 4 vCPUs.
-    # The CLI repeat is intentionally limited to its interaction-heavy App
-    # suite; repeating daemon integration here would consume the timeout
-    # without adding coverage for render/input timing regressions.
-    # A progressing run reached the previous 40 min ceiling on 2026-08-15;
-    # leave enough headroom for ordinary hosted-runner variance. On 2026-08-31
-    # the 50 min ceiling caught a healthy run mid-pass-3 with ~45s of work
-    # left, and the run before it had passed with 8s to spare — the margin,
-    # not the suite, was deciding the result. A job timeout surfaces as
-    # "The operation was canceled", indistinguishable from a concurrency
-    # cancel, so read the elapsed time before hunting for a hung test.
-    timeout-minutes: 70
+    # 2026-07-27. Each pass runs its suites one after another (see
+    # test:stability:pass) so its timings do not depend on what else shares
+    # the 4 vCPUs. The CLI repeat is intentionally limited to its
+    # interaction-heavy App suite; repeating daemon integration here would
+    # consume the timeout without adding coverage for render/input timing
+    # regressions.
+    # Both passes shared one job until 2026-09-30, and its ceiling went 40 ->
+    # 50 -> 70 min as the service suite grew; with a pass at ~34 min (service
+    # alone ~29) two back to back overran 70 on every push to main, and the
+    # green PR runs cleared it by two minutes. A runner per pass keeps each
+    # pass's timings independent and puts each job near half its ceiling. Not
+    # fail-fast: whether a flake reproduces in the other pass is the point.
+    # A job timeout surfaces as "The operation was canceled", indistinguishable
+    # from a concurrency cancel, so read the elapsed time before hunting for a
+    # hung test.
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [2, 3]
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -201,8 +220,8 @@ jobs:
         # Without this the repeat passes would silently skip tests that pass 1
         # runs, which is precisely the flake this job exists to catch.
         run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
-      - name: Repeat UI, service, and CLI TUI suites (stability passes 2 and 3)
-        run: pnpm test:stability
+      - name: Repeat UI, service, and CLI TUI suites (stability pass ${{ matrix.pass }} of 3)
+        run: pnpm test:stability:pass
 
   packaged-bundle:
     name: Release-stamped packaged and published-artifact contracts

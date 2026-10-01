@@ -59,7 +59,11 @@ import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
+import {
+  DeliverableReadySteer,
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from './terminal-tool-policy.js';
 import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
 import { ToolFailureTracker } from './tool-failure-tracker.js';
 import { ToolRepeatTracker } from './tool-repeat-tracker.js';
@@ -750,6 +754,13 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
     // duplicates) — this one catches non-consecutive same-args
     // repeats, the narrative-spinning loop the user reported on Ada.
     const repeatTracker = new ToolRepeatTracker();
+    const deliverableReadySteer = DeliverableReadySteer.forStep(this.deps.activeCraftbookStep);
+    const liveToolNames = () =>
+      new Set(
+        (tools ?? [])
+          .map((t) => (t as { function?: { name?: unknown } }).function?.name)
+          .filter((name): name is string => typeof name === 'string'),
+      );
     // Per-turn ask_user_question dedup + post-question prose-fold
     // signal. See the matching block in MlxSession for the rationale.
     let askedQuestionThisTurn = false;
@@ -1609,7 +1620,21 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           output,
         );
         const repeated = repeatTracker.recordCall(fn.name, fn.arguments ?? {}, tracked.output);
-        this.messages.push({ role: 'tool', content: repeated.output });
+        const readyFooter = await deliverableReadySteer?.footerFor(
+          fn.name,
+          fn.arguments ?? {},
+          output,
+          liveToolNames,
+        );
+        if (readyFooter) {
+          log.info(
+            `[ollama] deliverable-ready footer appended tool=${fn.name} path=${deliverableReadySteer?.deliverableFile} fired=${deliverableReadySteer?.firedCount}`,
+          );
+        }
+        this.messages.push({
+          role: 'tool',
+          content: readyFooter ? `${repeated.output}\n\n${readyFooter}` : repeated.output,
+        });
         if (tracked.shouldAbort) {
           abortDueToFailureLoop = {
             tool: fn.name,
@@ -1643,6 +1668,15 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
             : {}),
           ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
         });
+      }
+      if (!terminalActionClosing && deliverableReadySteer) {
+        const backstop = await deliverableReadySteer.backstopClosing();
+        if (backstop) {
+          log.info(
+            `[ollama] deliverable-ready backstop: ${deliverableReadySteer.deliverableFile} stayed ready through the grace iterations; ending turn for the end-of-turn advance`,
+          );
+          terminalActionClosing = backstop;
+        }
       }
       if (terminalActionClosing) {
         this.messages.push({ role: 'assistant', content: terminalActionClosing });

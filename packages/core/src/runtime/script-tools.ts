@@ -7,6 +7,7 @@ import type { PortableStore } from './store.js';
 export function portableScriptTools(
   store: PortableStore,
   scripts: PortableScripts,
+  signal?: AbortSignal,
 ): NonNullable<PortableToolActions['scripts']> {
   return {
     async list(projectId) {
@@ -36,6 +37,8 @@ export function portableScriptTools(
         scope,
         inputs,
         trigger: { kind: 'chat', gezelId: session.gezelId, sessionId: session.id },
+        admission: 'wait',
+        ...(signal ? { signal } : {}),
       });
       if (run.status !== 'ok')
         throw new Error(

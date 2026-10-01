@@ -22,7 +22,8 @@ export interface RemoteServingController {
 
 export function createRemoteServingController(opts: {
   cert: LoopbackCert | null;
-  deviceFingerprint: string;
+  /** Null when this service has no device identity (embedded inference). */
+  deviceFingerprint: string | null;
   fetch: () => ServeFetch;
 }): RemoteServingController {
   let server: ServerType | null = null;
@@ -45,6 +46,12 @@ export function createRemoteServingController(opts: {
       }
       if (!opts.cert) {
         throw new Error('Remote serving requires HTTPS; insecure transport cannot be exposed');
+      }
+      // Paired devices pin this identity; without one there is nothing they
+      // could verify, so the LAN listener stays down.
+      const deviceFingerprint = opts.deviceFingerprint;
+      if (!deviceFingerprint) {
+        throw new Error('Remote serving requires a device identity, and this service has none');
       }
       // Enforced here rather than as a zod refine: a schema failure fails the
       // ENTIRE config read at boot, which would brick an install over one
@@ -79,7 +86,7 @@ export function createRemoteServingController(opts: {
       });
       log.warn(
         `[remote-serving] LAN listener on ${host}:${next.port} ` +
-          `(identity ${opts.deviceFingerprint.slice(0, 16)}…). Paired devices can run inference here.`,
+          `(identity ${deviceFingerprint.slice(0, 16)}…). Paired devices can run inference here.`,
       );
       return { ...current };
     },

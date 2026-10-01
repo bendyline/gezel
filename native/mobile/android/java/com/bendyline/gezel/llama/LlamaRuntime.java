@@ -25,4 +25,29 @@ public final class LlamaRuntime {
         return generate(engine, roles, contents, requestId, maxTokens, 0f, 40, 0.95f, 0f, 1f, 64, 1, delta);
     }
     public static native void cancel(long engine, long requestId);
+    /**
+     * Live counters for the current load or generate, safe from any thread:
+     * {phase (0 idle, 1 loading, 2 prompt, 3 generating), load per-mille,
+     * prompt tokens, processed tokens, reused tokens, generated tokens}.
+     */
+    public static native long[] progress(long engine);
+
+    /** One streamed object from a chat request, as UTF-8 JSON; return false to stop. */
+    public interface Event { boolean onEvent(byte[] utf8); }
+    /** Status codes a chat call returns (gezel_llama_status). */
+    public static final int STATUS_OK = 0;
+    public static final int STATUS_CANCELLED = 7;
+    public static final int STATUS_TIMEOUT = 8;
+    /**
+     * Settings llama-server takes from its launch flags, as JSON: chat_template,
+     * reasoning_format, reasoning_budget, enable_thinking, chat_template_kwargs.
+     */
+    public static native void configureChat(long engine, String configJson);
+    /**
+     * An OpenAI-shaped chat request, served by llama.cpp's own chat layer the way
+     * desktop's llama-server serves it. Every chunk llama-server would stream, or
+     * its error body, arrives through `event`. Returns the status code; throws only
+     * when the engine refuses the call outright (busy, nothing loaded).
+     */
+    public static native int chat(long engine, String requestJson, long requestId, int timeoutMs, Event event);
 }

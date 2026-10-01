@@ -1,0 +1,233 @@
+{
+  "requests": [
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "List the workspace."
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "description": "Read a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Write a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "replace_in_file",
+            "description": "Edit an existing workspace file with a literal find/replace.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "find": {
+                  "type": "string"
+                },
+                "replace": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "find",
+                "replace"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_dir",
+            "description": "List workspace files.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    },
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "List the workspace."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "json-envelope-repair-<ms>-0",
+              "type": "function",
+              "function": {
+                "name": "list_dir",
+                "arguments": "{\"path\":\".\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "a.md\nb.md",
+          "tool_call_id": "json-envelope-repair-<ms>-0"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "description": "Read a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Write a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "replace_in_file",
+            "description": "Edit an existing workspace file with a literal find/replace.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "find": {
+                  "type": "string"
+                },
+                "replace": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "find",
+                "replace"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_dir",
+            "description": "List workspace files.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    }
+  ],
+  "executed": [
+    [
+      "list_dir",
+      {
+        "path": "."
+      }
+    ]
+  ],
+  "result": "Two files.",
+  "deltas": "{\"name\":\"list_dir\",\"arguments\":{\"path\":\".\"}}Two files.",
+  "reasoning": "",
+  "warnings": []
+}

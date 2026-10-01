@@ -315,7 +315,7 @@ where a link needs forcing back to sans.
 gap above it; notices, errors, and progress boxes stay tight to the section
 they belong to. Stacked cards in a flat settings pane sit 2.5rem apart, since
 spacing is the only separator once the card chrome is stripped. Both rules
-live in [styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css);
+live in [styles/catalog.css](../packages/ui/src/styles/catalog.css);
 don't set a section's top margin inline.
 
 ## Foundation
@@ -340,8 +340,10 @@ operations that require the desktop daemon. Do not build a second mobile
 project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
 
-The compact layout runs one notch denser than desktop: `html[data-layout="mobile"]`
-sets the root to 87.5%, so the whole `--text-*` rem scale shrinks together.
+The compact layout runs one notch denser than desktop on Android and in a narrow
+desktop window: `html[data-layout="mobile"]` sets the root to 87.5%, so the whole
+`--text-*` rem scale shrinks together. iOS uses a 19px root instead (118.75%),
+because iPhone text read too small at 87.5%, at the desktop 16px, and at 17px.
 Never shrink a single view to compensate. Editable fields are the one floor:
 on iOS they stay at 16px or more, because iOS zooms the page into a focused
 field with smaller text. It also narrows the main gutter
@@ -370,11 +372,29 @@ desktop window driven by a mouse keeps the desktop navigation's row heights
 and caret column. Project and conversation tabs drop to icons only when
 their labels no longer fit (see [Tab rows fit by shedding labels](#patterns)),
 and narrow file browsers use list → detail/back while keeping editors mounted.
+Every master/detail area does the same below 640px of its own width — Tasks,
+Craftbooks, History, Gezellen: the list first, the item in its place when
+tapped, and a secondary "Back to …" key above it. Side by side at phone width
+they left the editor about 70px wide. A chat whose only pane is Chat shows no
+pane tab row. A described tray stays one row on a phone, its keys sharing the
+width and wrapping their words, because the stem to its readout can only reach
+from the first row. The composer's keys, the Settings group chevrons, and the
+row action menus take the 44px hit area; the gezel header's Context and
+Sandbox chips do not yet.
 The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search
 keys beside it, with its count raised onto the key's top-right corner as a
-notification badge. The word stays in its accessible name. On macOS the
+notification badge. The word stays in its accessible name. At the right end
+the bar keeps two status keys from the desktop cluster: the chat queue (a
+stack glyph with a total badge, present only while something runs or waits)
+and the default engine (a chip glyph whose corner dot is the status light).
+While a gezel is being read aloud, the stop-narration key (a speaker glyph)
+joins them, left of the queue key. Their popovers span the width of the phone. Further engines, quotas, and the
+task-speed menu wait for a wider window. The keys follow the `engineStatus`
+capability, so the phone shows them too; there the engine popover reports status
+only — idle retention, health policy, memory and Hard Stop are desktop engine
+management (`daemonSettings`). On macOS the
 compact bar is still the window titlebar, so it keeps the desktop bar's 39px
 height and 30px keys, which centres them on the traffic lights (a trackpad
 needs no 44px target). The phone preview keeps phone sizes. Compact layouts spend no row on a heading that only repeats a name: a
@@ -384,6 +404,9 @@ tiles, 60px wide and 24px tall (WCAG's minimum target), that show the status
 dot and the start of the title. This is a deliberate exception to the 44px
 rule. The strip stays a glance at the state of the work, not a second pane,
 and each tile's accessible name still carries the full summary.
+On touch screens and windows up to 600px, where a message's action row sits
+in the flow instead of floating in the gutter, it shows only the debug-bundle
+key, and only while debug mode is on; Copy and Save stay desktop affordances.
 A narrow composer (under 480px) moves its thread bar into the editor toolbar
 beside the attach keys, as an icon-only picker plus the context meter. New
 thread and New draft are rows in that picker, which lists them at every width,
@@ -485,7 +508,12 @@ edge, because Radix measures the room and leaves the clamping to CSS. The
 shared `.app-nav-menu` panel takes
 `max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem)` and
 scrolls; a menu that opts out of that class owes itself the same pair. Vertical
-scrollers keep the native bar, so nothing else is needed.
+scrollers keep the native bar, so nothing else is needed — except in a Select:
+Radix hides its viewport's scrollbar and opens scrolled to the selected row,
+so in a short panel (a phone with the keyboard up) the rows above the
+selection disappear without a trace. A Select that leads with actions passes
+`openAtTop` to `Select.Content`; the compact thread picker does, which is what
+keeps New thread on screen.
 
 **Resizable splits.** A two-pane split that a user might want to rebalance
 gets a grip, not a fixed track: a full-height `role="separator"` element with
@@ -914,6 +942,36 @@ the *current* security policy: it hides the moment the capability is on,
 and its action **deep-links to Settings → Security & Compliance** — a
 security switch is never flipped from inside chat.
 
+**Work that made something ends on the thing it made.** A PowerPoint run
+used to end on prose: a wrap-up listing six paths newest-write-first, and a
+reviewer's reply naming `powerpoint/task-13/deck.pptx` as unlinked code. The
+deck the person asked for was the fifth item, under "…and 3 more". The
+deliverable is now a card
+([`DeliverableCard`](../packages/ui/src/components/DeliverableCard.tsx),
+`.deliverable-card*` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css)). It
+has a format tile, an uppercase eyebrow naming what the file is ("Your
+PowerPoint deck"), the file name at reading size, and a muted line saying where
+it lives. **Open** is the one filled key. *Show in folder* and *Save a copy…*
+are secondary keys, shown only where the desktop shell provides them. The whole
+face opens the file too: it is the big link. The card closes the wrap-up
+bubble. It also sits under the task tracker, both in the chat rail and on the
+task page. On a receipt that finished its task, it shrinks to a one-line chip
+beside the task chip. Three rules keep it honest:
+
+- **The daemon decides what the deliverable is, and only a file that exists
+  gets a card.** The resolver lives in
+  [task-deliverable.ts](../packages/core/src/task-deliverable.ts). It picks the
+  most finished-looking file the book's own gates name, prefers later steps,
+  and never picks a working paper like `outline.md` or `review.md`.
+- **A running task's copy is a draft.** It gets a dashed border and the eyebrow
+  "PowerPoint deck · in progress", because the tracker may point at the product
+  before the last step signs it off.
+- **A path in prose links only when the daemon has verified it.** The same holds
+  in chat replies and in task notes. When a reply names a file the workspace
+  index has not caught up with, the daemon checks it directly on disk, within a
+  fixed limit. It never guesses from a same-named file.
+
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
 salvage layer fails to promote a call it is literal tool-call markup.
@@ -941,7 +999,7 @@ mistake.
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in
-[styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css)):
+[styles/catalog.css](../packages/ui/src/styles/catalog.css)):
 an instruction
 field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
@@ -1123,6 +1181,11 @@ intentions and collapsing them is what left empty threads behind. And the
 composer's save state is the toolbar's quiet autosave status — a dot while
 dirty, a word while saving — never a chip and never a banner: a person typing
 should not be told that typing is working.
+
+On a phone a thread row names only the model that answered ("Qwen 3.5 2B"),
+never "This Device": every conversation there runs on the device, so the
+label says nothing. Phone model ids are opaque store keys, so a row whose
+model has no known name shows no engine at all rather than the id.
 
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped
@@ -1310,6 +1373,33 @@ named engine ("DwarfStar", "Video") is not a machine name and never goes.
 [header-density.ts](../packages/ui/src/components/header-density.ts) owns the
 measurement; a plain width media/container query cannot see this, because the
 bar overflows from *how much is happening*, not from how narrow the window is.
+
+**A control for a passing state lives in the titlebar only while the state
+does.** The stop-narration key appears at the head of the status cluster while
+a gezel is being read aloud, the way Output's restore key appears only while
+that pane is maximized. It wears the queue chip's recipe (`.narration-stop` is
+added to those selectors rather than styled on its own), says "Stop narration"
+beside its speaker glyph at full density and drops the words with the rest of
+the cluster, and becomes a 44px key in the compact bar. A state that flickers
+must not make its key blink: the voice goes quiet between two sentences of a
+streaming reply, so the key outlives it by about a second rather than shoving
+its neighbours in and out. Stopping silences the rest of that turn — a reply
+still streaming would otherwise start the voice again at its next sentence —
+while the next turn is read as usual; turning narration off stays in Settings.
+
+**A list of things set up in Settings is rows, not bullets.** Connected apps,
+paired servers, and project connections share `.settings-list` with
+`.connected-app-row` rows: a bordered `--radius-md` row naming the thing on the
+left (`.connected-app-name` over a muted detail line) and its actions on the
+right, wrapping under it when narrow. A bare `<ul>` in a settings panel renders
+browser bullets and strands its buttons on their own line — Remote Servers
+shipped that way. Facts about the install (About → Version) use
+`.settings-facts`: muted label, value beside it.
+
+**A label travels with its control.** In a wrapping row of labelled controls —
+the gezel header's Model, Context, Sandbox — wrap each label and its keys in one
+non-wrapping group (`.provider-override-group`), so a line never ends on
+"Sandbox:" with its keys starting the next.
 
 **Rows that differ only by state need the state named.** When one list holds
 items in two states that share a row shape — a queue's running turns above its

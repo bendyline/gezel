@@ -2030,9 +2030,9 @@ export function ChatTimelineView({
         // sessions; one round-trip per iteration is the same cost
         // as before this change.
         void refreshLatest();
-        // Spoken narration holds the reply until `done`: `complete` fires
-        // per continuation iteration, and a later one (a stall recovery,
-        // more tool work) can still supersede it.
+        // What is left of the reply waits for `done`: `complete` fires per
+        // continuation iteration, and a later one (a stall recovery, more
+        // tool work) can still turn it into an update.
         narrationRef.current!.complete(sessionId, event.message.content, {
           gezelId,
           projectId,
@@ -2078,8 +2078,10 @@ export function ChatTimelineView({
         // Retire the live bubble without attaching an error; the manager
         // emits this event again after it persists any salvaged partial
         // response, so the refresh below converges on the durable row.
-        // A stopped turn has no reply to read.
+        // A stopped turn has no reply to read, and whatever of it was
+        // already being spoken stops with it.
         narrationRef.current!.forget(sessionId);
+        chatNarrationQueue.silence(sessionId);
         if (liveRef.current.delete(sessionId)) {
           liveStore.markStructureChanged();
         }
@@ -3507,6 +3509,7 @@ export function ChatTimelineView({
         projectId={m.projectId}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}
+        {...(m.deliverable ? { deliverable: m.deliverable } : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {})}

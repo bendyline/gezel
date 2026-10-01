@@ -32,14 +32,17 @@ export async function createProjectWithLead(
   // CLI and desktop open Chat immediately. Best-effort; never blocks creation.
   const ensureLead =
     body.workingDir && body.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
-  const ensured = await ensureLead(
-    { store: deps.store, chat: deps.chat, home: deps.home, catalog: deps.catalog },
-    created.id,
-  ).catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    log.warn(`[projects] ensure-lead failed for ${created.id}: ${message}`);
-    return {} as EnsureProjectLeadResult;
-  });
+  const ensured =
+    body.lead === 'none'
+      ? ({} as EnsureProjectLeadResult)
+      : await ensureLead(
+          { store: deps.store, chat: deps.chat, home: deps.home, catalog: deps.catalog },
+          created.id,
+        ).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`[projects] ensure-lead failed for ${created.id}: ${message}`);
+          return {} as EnsureProjectLeadResult;
+        });
   if (ensured.createdGezel) {
     deps.chatEvents.publishGlobalEvent({
       type: 'gezel_created',

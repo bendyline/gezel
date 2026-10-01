@@ -124,9 +124,14 @@ take it.
 on-device model listing, model installation, and OpenAI-compatible inference
 without running a second copy of the Gezel product. It skips schedulers,
 channels, editor bridges, machine-service discovery, indexing, and background
-maintenance. With `mode: 'in-process'`, the SDK uses the service's direct Fetch
-handler, so it needs neither a separate Node executable nor a loopback client
-connection under Electron.
+maintenance. It also sets up none of a standalone Gezel's remote connectivity:
+the daemon opens no secret store, so nothing reaches the OS keychain or a
+secrets file in the app's home; it creates no device identity; and it serves no
+pairing, `/v1/identity`, `/v1/remote`, or LAN-serving endpoints. Both host
+modes honor it — a `child` daemon receives it as
+`GEZEL_EMBEDDED_INFERENCE_ONLY=1`. With `mode: 'in-process'`, the SDK uses the
+service's direct Fetch handler, so it needs neither a separate Node executable
+nor a loopback client connection under Electron.
 
 The service reports the profile it actually started. An inference-only SDK
 request requires both `profile: 'embedded-inference'` and the direct Fetch

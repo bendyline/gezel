@@ -1,0 +1,233 @@
+{
+  "requests": [
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "Write result.json with {\"ok\":true}.\n\n[Local-model file-work mode: this turn has a concrete workspace file deliverable. Use reads only to inspect required inputs, then write the named output file. Do not answer with a plan or paste file contents in chat. The turn is not complete until `write_file`, `append_to_file`, `replace_in_file`, `replace_lines`, or a workspace-writing `run_nodejs_script` has succeeded.]"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "description": "Read a workspace text file.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Workspace-relative path."
+                },
+                "raw": {
+                  "type": "boolean",
+                  "description": "When true, return raw contents without line gutters."
+                },
+                "startLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based first line to read (inclusive)."
+                },
+                "endLine": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000,
+                  "description": "Optional 1-based last line to read (inclusive)."
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Create or overwrite exactly result.json. Do not write a helper script or any other path.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "result.json"
+                  ],
+                  "description": "Must be exactly result.json."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete file contents."
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "replace_in_file",
+            "description": "Replace a literal substring in exactly result.json. Do not patch any other path.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "result.json"
+                  ],
+                  "description": "Must be exactly result.json."
+                },
+                "find": {
+                  "type": "string",
+                  "description": "Exact text to replace."
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text."
+                },
+                "occurrence": {
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Optional occurrence selector, e.g. 1 or all."
+                }
+              },
+              "required": [
+                "path",
+                "find",
+                "replace"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_dir",
+            "description": "List workspace files.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    },
+    {
+      "model": "llama-cpp",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful assistant."
+        },
+        {
+          "role": "user",
+          "content": "Write result.json with {\"ok\":true}.\n\n[Local-model file-work mode: this turn has a concrete workspace file deliverable. Use reads only to inspect required inputs, then write the named output file. Do not answer with a plan or paste file contents in chat. The turn is not complete until `write_file`, `append_to_file`, `replace_in_file`, `replace_lines`, or a workspace-writing `run_nodejs_script` has succeeded.]\n\n[Local-model rejected-write recovery: the previous `write_file` call for `result.json` was rejected atomically. THE FILE WAS NOT WRITTEN by that call; the rejected draft does not exist on disk. Re-emit the complete corrected file now with `write_file` for exactly `result.json`. Do not call read_file, append_to_file, replace_in_file, or replace_lines against the rejected draft; there is nothing from that call to inspect or patch.]"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-1",
+              "type": "function",
+              "function": {
+                "name": "write_file",
+                "arguments": "{\"path\":\"/abs/result.json\",\"content\":\"{\\\"ok\\\":true}\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ERROR: This constrained repair turn must write exactly `result.json`, but you called write_file for `/abs/result.json`. Do not write helper scripts or intermediate files. Retry write_file with path exactly `result.json` and the complete file contents.\n\n[runtime] This `write_file` was rejected atomically: THE FILE WAS NOT WRITTEN by this call, and the rejected draft does not exist on disk. Retry `result.json` with one complete corrected `write_file` call. Do not read, append to, or patch the rejected draft.",
+          "tool_call_id": "call-1"
+        }
+      ],
+      "stream": true,
+      "timings_per_token": true,
+      "max_tokens": 4096,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "tool_choice": "required",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      },
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "description": "Create or overwrite exactly result.json. Do not write a helper script or any other path.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "enum": [
+                    "result.json"
+                  ],
+                  "description": "Must be exactly result.json."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Complete file contents."
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        }
+      ],
+      "cache_prompt": true
+    }
+  ],
+  "executed": [
+    [
+      "write_file",
+      {
+        "path": "result.json",
+        "content": "{\"ok\":true}"
+      }
+    ]
+  ],
+  "result": "",
+  "deltas": "",
+  "reasoning": "",
+  "warnings": []
+}

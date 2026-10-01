@@ -7,10 +7,29 @@ are imported by a lazy React view are intentionally absent from the manifest:
 their CSS arrives in the same chunk as its owner, so there is no unstyled
 intermediate render.
 
+`../surfaces.css` is the second ordered manifest, for sheets whose rules only
+draw inside a view but are shared by too many views to import from each one.
+Every destination loader in `../components/tab-content-loaders.ts` waits for it
+beside its module, and the office pane, embedded webview, and `EmbeddedChat`
+import it statically, so it is never on the startup path and never late. Only
+the startup manifest counts against `scripts/check-ui-startup-budget.mjs`.
+
+Which manifest a rule belongs in depends on where it can draw, not on the
+feature it serves. A rule that can match markup the shell renders before any
+view loads — the title bar, sidebar, app-level dialogs, and anything the
+Updates panel shows (it renders chat bubbles and tool cards) — goes in a
+startup sheet. Everything else can live in a surface sheet.
+
+Surface sheets load after every startup sheet, so a surface rule wins a tie of
+equal specificity that it would lose to a later startup file. When you move a
+sheet or rule across, check each same-specificity rule elsewhere that can
+target the same element; `settings-and-status.css`'s mode-select hover rule is
+an example of restoring the old winner explicitly.
+
 | File | Owner |
 | --- | --- |
 | `foundation.css` | Tokens, themes, reset, typography, focus, reduced motion, and document roots |
-| `app-shell.css` | App notices, title bar, global navigation, meters, overlays, and primary sidebar |
+| `app-shell.css` | App notices, title bar and its status pills, global navigation, meters, overlays, and primary sidebar |
 | `primary-navigation.css` | Shared navigation rows and groups used by desktop and native hosts |
 | `../components/ResponsiveAppShell.css` | Shared navigation/content pane layout |
 | `../components/ResponsiveAppShell.mobile.css` | **On demand:** Phone navigation and the desktop mobile preview, loaded by `useResponsiveLayout` |
@@ -20,24 +39,25 @@ intermediate render.
 | `gezels.css` | Shared gezel icons, identity badges, and cross-surface form utilities |
 | `../views/GezellenView.css` | **On demand:** Gezellen roster/detail split and compact navigation (owned by `GezellenView`) |
 | `../views/GezelDetail.css` | **On demand:** Gezel appearance and accessory customization (owned by `GezelDetail`) |
-| `settings-and-status.css` | Settings navigation/panels, machine policy, and project status/index controls |
+| `settings-and-status.css` | **Surface:** Settings navigation/panels, machine policy, and project status/index controls |
 | `history.css` | **On demand:** History master/detail view (owned by `HistoryView`) |
 | `../views/BenchmarksView.css` | **On demand:** Settings → Benchmarks run planner, live job, and results (owned by `BenchmarksView`) |
-| `tasks.css` | Task lists, detail, status controls, step tracker, and phase editor |
-| `home.css` | Shared article, provider/status, session, and settings recipes |
+| `tasks.css` | Task lists, detail, status controls, step tracker, phase editor, and the draft/outcome cards chat bubbles show |
+| `home.css` | **Surface:** Shared article, provider/status, session, and settings recipes |
 | `home-view.css` | **On demand:** Home workshop, first-run setup, media downloads, and intro surface (owned by `HomeView`) |
 | `chat.css` | Project chat, tool output, references, timeline, memories, commands, and chat task rail |
-| `catalog-and-primitives.css` | Engine/model settings, catalog/toolsets, transformation flow, and base Radix primitives |
+| `primitives.css` | Base Radix primitives (dialog, select, tabs), the link button, and the dialogs the shell opens over any view |
+| `catalog.css` | **Surface:** Engine/model settings, catalog/toolsets, and transformation flow |
 | `project-surfaces.css` | Project output, remaining tab primitives, questions, creation galleries, mail, and connected project surfaces |
 | `../views/ProjectsView.css` | **On demand:** Responsive project master/detail and phone project controls |
 | `../views/ProjectToolsTab.css` | **On demand:** Project Tools tab — packages, scripts, and approvals (owned by `ProjectToolsTab`) |
 | `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
 | `fitted-tabs.css` | **On demand:** Tab faces (label / icon / both) and the hidden probe row for `FittedTabsList` |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
-| `github-and-growth.css` | GitHub workspace and gezel growth surfaces |
+| `github-and-growth.css` | **Surface:** GitHub workspace and gezel growth surfaces |
 | `diffpacks.css` | **On demand:** Change-proposal review pane (owned by `DiffpackReviewView`) |
-| `scripts-and-craftbooks.css` | Script editor, craftbook editor, automation, and gates |
-| `village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
+| `scripts-and-craftbooks.css` | **Surface:** Script editor, craftbook editor, automation, and gates |
+| `village-and-overview.css` | **Surface:** Village, project overview, machine budget, and remote serving |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |
 | `squisq-theme.css` | Rebinds the vendored Squisq editor's `--squisq-*` chrome palette onto gezel's tokens |
 | `handbook.css` | Legacy Handboek master/detail surface, retained for compatibility tests |
@@ -51,6 +71,10 @@ intermediate render.
 - Do not reorder manifest imports casually. Several legacy aliases
   intentionally rely on the late keys-in-trays recipe in
   `controls-handbook-and-admin.css`.
+- **Surface** sheets are listed in `../surfaces.css`, not `../styles.css`. A
+  new destination loader must go through `destination()` in
+  `tab-content-loaders.ts`, and a new entry point that renders views outside
+  the shell must import `../surfaces.css` after `../styles.css`.
 - Keep on-demand styles surface-scoped. A lazy stylesheet must not define a
   prerequisite for a component that can render before its owning view.
 - Avoid cross-file overrides. If a component needs to override a shared recipe,

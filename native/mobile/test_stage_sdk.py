@@ -10,6 +10,11 @@ import zipfile
 spec = importlib.util.spec_from_file_location("stage_sdk", Path(__file__).with_name("stage-sdk.py"))
 sdk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sdk)
+# The fixture's manifest must look like one build-llama.py writes, so it reads
+# the same bridge-source and patch lists instead of keeping copies that drift.
+llama_spec = importlib.util.spec_from_file_location("build_llama", Path(__file__).with_name("build-llama.py"))
+llama = importlib.util.module_from_spec(llama_spec)
+llama_spec.loader.exec_module(llama)
 
 
 class StageSdkTest(unittest.TestCase):
@@ -32,9 +37,9 @@ class StageSdkTest(unittest.TestCase):
                 key, value = line.split('=', 1)
                 pin[key] = value
         manifest = {"schemaVersion": 1, "target": "ios", "gezelABIVersion": 1,
-                    "upstream": pin, "patches": [], "verification": {"linkSmoke": "passed"},
-                    "bridgeSources": {name: sdk.digest(sdk.HERE / name) for name in
-                                      ("gezel_llama.h", "gezel_llama.cpp", "utf8_stream.h", "chat_formats.h", "CMakeLists.txt")},
+                    "upstream": pin, "verification": {"linkSmoke": "passed"},
+                    "patches": [{"name": patch.name, "sha256": sdk.digest(patch)} for patch in llama.llama_patches()],
+                    "bridgeSources": {name: sdk.digest(sdk.HERE / name) for name in llama.BRIDGE_SOURCES},
                     "settings": {"minimumOS": "16.4"},
                     "files": {name: sdk.digest(build / name) for name in files}}
         (build / "manifest.json").write_text(json.dumps(manifest))

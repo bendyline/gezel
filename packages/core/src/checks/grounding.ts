@@ -182,13 +182,38 @@ function stripFencedBlocks(text: string): string {
  */
 const TASK_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*\/\d+$/;
 
+/**
+ * A citation-shaped token that names no file is a template slot — the model
+ * describing the citation format, not citing. Same topic-only review, one
+ * notch over again (deepseek-v4, 2026-09-30): "No fabricated
+ * `(source: <path/URL>)` entry exists" read as the fabricated source
+ * `path/URL`; after that was carved out, the reviewer paraphrased the recipe's
+ * own criterion as "maps to a real `(source: …)` entry" and the ellipsis read
+ * as a fabricated source instead — three rejections, task paused, no deck.
+ * Slots: an angle-bracketed token with no file extension or URL scheme
+ * (`<path/URL>`), a token with no letter or digit (`…`, `—`, `...`), and the
+ * bare slot words a recipe's own instructions use (`path`, `url`, `none`).
+ * A bracketed real file (`<reports/q3.md>`) or URL still counts and is checked.
+ */
+const ANGLE_SLOT_RE = /^<[^<>.:]*>$/;
+const NO_NAME_RE = /^[^\p{L}\p{N}]+$/u;
+const SLOT_WORDS = new Set(['path', 'url', 'path/url', 'file', 'none', 'n/a', 'tbd']);
+
+function isTemplateSlot(cap: string): boolean {
+  return (
+    ANGLE_SLOT_RE.test(cap) ||
+    NO_NAME_RE.test(cap) ||
+    SLOT_WORDS.has(cleanCitation(cap).toLowerCase())
+  );
+}
+
 function extractCitations(text: string, re: RegExp): string[] {
   const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
   const global = new RegExp(re.source, flags);
   const out: string[] = [];
   for (const m of stripFencedBlocks(text).matchAll(global)) {
     const cap = m.slice(1).find((x) => x !== undefined) ?? m[0];
-    if (cap && !TASK_REF_RE.test(cap)) out.push(cap);
+    if (cap && !TASK_REF_RE.test(cap) && !isTemplateSlot(cap)) out.push(cap);
   }
   return out;
 }
@@ -349,9 +374,13 @@ export async function citationsResolve(
     };
   }
   if (unresolved.length > 0) {
+    const listed = unresolved
+      .slice(0, 5)
+      .map((u) => `\`${u}\``)
+      .join(', ');
     return {
       ok: false,
-      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${unresolved.slice(0, 5).join(', ')}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
+      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${listed}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
       resolved,
       unresolved,
       urls,

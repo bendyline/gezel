@@ -503,6 +503,17 @@ Republican Party vice presidential candidate selection" fell out of its own
 top 5. The same query backs the compiler's smoke verification and the
 validator, so seal-time and install-time checks agree with search.
 
+Shard routing only reaches what its budget covers (S = 6 explicit, 3 proactive),
+so a catalog with more shards than S loses the neighbours that live in unrouted
+shards. The spec's topic-order fill (gezk §8.1) puts an artist, their albums
+and their songs in different slices; the compiler's opt-in `shardFill:
+'semantic'` fills shards by balanced k-means over each document's mean chunk
+vector instead (within a shard, topic order still holds), embedding each chunk
+once. Measured on a 1.85M-chunk Wikipedia music catalog, routed recall@8 went
+from 82.6% to 85.7% at S = 6 and from 52.1% to 63.9% at S = 3 over 10 shards;
+recut to 37 shards, from 36.0% to 55.5% at S = 6. It helps; it does not make a
+catalog of dozens of shards routable at S = 6 — split those by subject.
+
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest
 keywords and compiler-emitted topic centroids, to select a bounded set. Explicit
@@ -559,7 +570,7 @@ Suggested first-party routes:
 | `GET /api/knowledge/catalogs` | This user's catalog refs, storage scope, versions, health, size, enabled state |
 | `GET /api/knowledge/available` | Every gilde `knowledge-catalog` entry joined with this user's registry, the machine-shared inventory, live installs and partial downloads; offline-safe (gilde is local) |
 | `GET /api/knowledge/updates` | Installed catalogs with a strictly newer version in the shipped gilde content (`source: 'gilde'`; no network) |
-| `POST /api/knowledge/install` | `{ source }` (file, URL, or a gilde `catalog` id) → `{ jobId, alreadyRunning }`; URL and catalog sources 403 `network-blocked` when the security policy turns off app network |
+| `POST /api/knowledge/install` | `{ source }` (file, URL, or a gilde `catalog` id) → `{ jobId, alreadyRunning }`; never gated on the security policy (see below) |
 | `POST /api/knowledge/catalogs/:id/install?version=&placement=` | Install a gilde entry and stream its events as SSE; the job id is the catalog id, so a second request attaches to the running install |
 | `DELETE /api/knowledge/catalogs/:id/install` | Cancel a running catalog install (disconnecting never cancels) |
 | `GET /api/knowledge/active-installs` | Every running install with its latest progress (the polled twin of the SSE) |
@@ -578,9 +589,15 @@ The model-facing project search route does not accept arbitrary project ids;
 likewise it must resolve catalog ids against the session project's effective
 policy rather than trusting request input.
 
-Manual network downloads and automatic update checks both honor the app-network
-security policy. Local `.gezk` import remains available offline. Search and
-browsing of installed data never use the network. The shared install path uses a
+A person can always download a catalog, at every security level. The security
+policy governs what gezels do, and the install routes are first-party only (the
+scope guard refuses session tokens), so an install is never a gezel's egress —
+and a catalog is precisely how a locked-down, offline-first machine gets
+knowledge it can use without the network. The same holds for the query
+embedding model an install warms. Automatic update checks are background
+traffic nobody asked for in the moment, so they stay on the app-network policy
+(`allowAppNetwork`). Local `.gezk` import works offline. Search and browsing of
+installed data never use the network. The shared install path uses a
 separate user-daemon-to-broker client and allowlisted machine route, not these
 renderer-facing product routes. A future machine-wide reclaim endpoint should live
 with the other `/api/machine-*` management proxies and must not be confused with

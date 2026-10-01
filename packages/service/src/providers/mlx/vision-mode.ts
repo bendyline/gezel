@@ -75,7 +75,7 @@ export function unseenToolImagesNote(count: number): string {
     : '';
 }
 
-function withoutImages<T extends VisionMessage>(messages: T[]): T[] {
+export function withoutImages<T extends VisionMessage>(messages: T[]): T[] {
   return messages.map((message) => {
     if (!message.images?.length) return message;
     const { images, ...rest } = message;

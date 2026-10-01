@@ -368,6 +368,15 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* In the flow the row costs a line under every message, and only the
+     debug bundle earns that — Copy and Save do not, and the row itself goes
+     whenever debug mode is off, which is the usual case. */
+  .msg-action-button:not(.msg-action-button-debug) {
+    display: none;
+  }
+  .msg-actions-anchor:not(:has(.msg-action-button-debug)) {
+    display: none;
+  }
 }
 
 /* Debug-only "copy debug bundle" button — same shape as the regular
@@ -850,9 +859,12 @@
    links. Keeps the code-span visual weight (monospace + subtle surface)
    while tagging them as clickable with the accent underline. Both schemes
    render identically on purpose: which store a file lives in is the
-   viewer's business, not something to weigh at click time. */
+   viewer's business, not something to weigh at click time. Task notes in the
+   chat rail get the same links, resolved by the same daemon parser. */
 .msg-body-rendered a[href^="#artifact:"],
-.msg-body-rendered a[href^="#workspace:"] {
+.msg-body-rendered a[href^="#workspace:"],
+.chat-rail-task-note-body a[href^="#artifact:"],
+.chat-rail-task-note-body a[href^="#workspace:"] {
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.92em;
   color: var(--accent-text);
@@ -865,9 +877,191 @@
 }
 
 .msg-body-rendered a[href^="#artifact:"]:hover,
-.msg-body-rendered a[href^="#workspace:"]:hover {
+.msg-body-rendered a[href^="#workspace:"]:hover,
+.chat-rail-task-note-body a[href^="#artifact:"]:hover,
+.chat-rail-task-note-body a[href^="#workspace:"]:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-bottom-style: solid;
+}
+
+/* ─── Deliverable card ─────────────────────────────────────────────────
+   The one file a task hands its owner (DeliverableCard.tsx): closing a
+   wrap-up bubble, under the rail's task tracker, and on the task page. A
+   file tile, an eyebrow naming what it is ("Your PowerPoint deck"), the
+   file name at reading size, where it lives, and Open as the one filled
+   key. The whole face opens the file too — it is the big link. A draft
+   (the latest copy of a task still running) takes a dashed border, the
+   same "not settled yet" cue as a suggested task strip. */
+.deliverable-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0.25rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  font-family: var(--font-ui);
+}
+
+.deliverable-card--draft {
+  border-style: dashed;
+  background: var(--panel);
+}
+
+.deliverable-card-face {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.deliverable-card-face:disabled {
+  cursor: default;
+}
+
+.deliverable-card-face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.deliverable-card-tile {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--accent-text);
+}
+
+.deliverable-card-tile-icon {
+  font-size: 1.35rem;
+}
+
+.deliverable-card-tile-ext {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.deliverable-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.deliverable-card-eyebrow {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.deliverable-card-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.deliverable-card-face:hover:not(:disabled) .deliverable-card-name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.deliverable-card-meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.deliverable-card-folder {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+/* Keys sit under the text column, not under the tile. */
+.deliverable-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-left: calc(3.25rem + 0.8rem);
+}
+
+.deliverable-card-actions button {
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.deliverable-card-open {
+  font-weight: 600;
+}
+
+@media (any-pointer: coarse) {
+  .deliverable-card-actions button {
+    min-height: 44px;
+  }
+}
+
+.deliverable-card-error {
+  margin: 0;
+}
+
+/* One-line form for a step receipt: sits beside the task chip. */
+.deliverable-card-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.deliverable-card-compact:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.deliverable-card-compact-icon {
+  color: var(--accent-text);
+}
+
+.deliverable-card-compact-eyebrow {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.deliverable-card-compact-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Inline @-mention chip in rendered chat bubbles. Squisq's MarkdownRenderer

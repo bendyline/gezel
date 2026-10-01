@@ -20,6 +20,7 @@ export type SystemNoticeId =
   | 'machine-service-not-installed'
   | 'machine-service-home-fresh'
   | 'machine-engine-unavailable'
+  | 'shared-service-version-mismatch'
   | 'legacy-machine-data'
   | 'service-version-mismatch'
   | 'service-unavailable'
@@ -68,6 +69,8 @@ const REINSTALL_HINT: Record<string, string> = {
   linux: 'Reinstall the Gezel .deb or .rpm package.',
 };
 
+const GEZEL_DOWNLOAD_URL = 'https://gezel.com/';
+
 function reinstallHint(platform?: string): string {
   return (platform && REINSTALL_HINT[platform]) ?? 'Run the Gezel installer again.';
 }
@@ -104,6 +107,22 @@ export function serviceNotice(input: {
       body: `Gezel is keeping your projects, chats, tools, scheduled work, and credentials in this account as usual. Local model work is running here instead, so downloads, memory use, and GPU queues are not shared with other Gezel users on this machine. Gezel will retry the shared engine automatically; if it remains unavailable, ${reinstallHint(platform).replace(/^./, (letter) => letter.toLowerCase())}`,
       technical: reason,
       reportable: true,
+    };
+  }
+
+  // The installed shared service is a different version than this app, so
+  // the app runs its own instead of stopping to ask. The app is not broken;
+  // the only fix is an installer whose shared service matches, which is why
+  // this carries a download link rather than a report link.
+  if (code === 'machine-engine-incompatible' || code === 'store-service-incompatible') {
+    return {
+      id: 'shared-service-version-mismatch',
+      railLabel: 'Shared services are off',
+      title: 'Gezel is running without shared services because of a version mismatch.',
+      body: 'The shared Gezel service installed on this computer is a different version than this app, so the two cannot work together. Everything still works — this app runs its own service instead — but it does not share models or memory with the installed service, so Gezel may not coordinate memory use as effectively. Download the full version of Gezel, which includes a matching shared service, to turn shared services back on.',
+      technical: reason,
+      link: { href: GEZEL_DOWNLOAD_URL, label: 'Download the full version' },
+      reportable: false,
     };
   }
 
@@ -146,25 +165,17 @@ export function serviceNotice(input: {
     };
   }
 
-  // Both store codes describe the SAME outcome — this app is running its own
-  // service instead of sharing the installed one — so they share copy shaped
-  // around that, not around the failure. The distinction the user can act on
-  // is only in `technical`.
-  //
   // Deliberately NOT the "Background work is off" notice below. That one warns
   // that scheduled work stops and nothing resumes on its own, which is true of
   // an embedded fallback in a direct install. Here the app's own service is a
   // complete, working service; the only thing lost is sharing one daemon (and
   // its already-loaded models) with the other installation.
-  if (code === 'store-service-unhealthy' || code === 'store-service-incompatible') {
+  if (code === 'store-service-unhealthy') {
     return {
       id: 'store-service-separate',
       railLabel: 'Running its own service',
       title: 'Gezel is running its own background service.',
-      body:
-        code === 'store-service-incompatible'
-          ? 'Another copy of Gezel is installed on this computer, but it is a different version than this app can share a service with. This app started its own instead, so everything works normally — the two simply keep separate services, and a model loaded in one is not reused by the other. Updating both copies to current versions lets them share again.'
-          : 'Another copy of Gezel is installed on this computer, but its background service was not responding, so this app started its own. Everything works normally; the two simply keep separate services for now. They will try to share again the next time you open Gezel.',
+      body: 'Another copy of Gezel is installed on this computer, but its background service was not responding, so this app started its own. Everything works normally; the two simply keep separate services for now. They will try to share again the next time you open Gezel.',
       technical: reason,
       // Nothing is broken and nothing to report — this is the design working.
       reportable: false,

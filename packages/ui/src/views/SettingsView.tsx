@@ -4179,7 +4179,7 @@ function DaemonSettingsView() {
               <section style={{ marginBottom: '2rem' }}>
                 <h3>About</h3>
                 {health && (
-                  <dl>
+                  <dl className="settings-facts">
                     <dt>Version</dt>
                     <dd>{health.version === '0.0.0' ? 'development build' : health.version}</dd>
                     <dt>Running since</dt>

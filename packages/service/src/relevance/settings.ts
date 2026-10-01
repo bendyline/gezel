@@ -1,9 +1,10 @@
 import { availableParallelism } from 'node:os';
-import type {
-  GezelConfig,
-  RelevanceModelSpec,
-  RelevanceThresholds,
-  RetrievalTraceSurface,
+import {
+  type GezelConfig,
+  KNOWLEDGE_FILTER_MIN_RELEVANCE,
+  type RelevanceModelSpec,
+  type RelevanceThresholds,
+  type RetrievalTraceSurface,
 } from '@bendyline/gezel';
 import { relevanceModelDir } from './install.js';
 import { DEFAULT_RELEVANCE_MODEL_ID, findRelevanceModel } from './registry.js';
@@ -18,6 +19,7 @@ import type { ResolvedRelevanceModel } from './relevance-core.js';
  *   GEZEL_RELEVANCE_SURFACES    turn,references,search
  *   GEZEL_RELEVANCE_THRESHOLDS  drop,keep,strong   (activated-score space)
  *   GEZEL_RELEVANCE_BUDGET_MS   turn:250,references:700,search:400
+ *   GEZEL_RELEVANCE_KNOWLEDGE_KEEP  0.5   (relevance space; knowledge on filter surfaces)
  *   GEZEL_RELEVANCE_ORDER       weighted | flat
  */
 
@@ -31,6 +33,8 @@ export interface ResolvedRelevanceSetting {
   budgets: Record<RetrievalTraceSurface, number>;
   /** `flat`: order by model relevance across corpora instead of weighted score. */
   order: 'weighted' | 'flat';
+  /** Relevance a knowledge passage needs to survive a filter surface. */
+  knowledgeKeep: number;
 }
 
 const DEFAULT_BUDGETS: Record<RetrievalTraceSurface, number> = {
@@ -71,7 +75,14 @@ export function resolveRelevanceSetting(
     thresholds: parseThresholds(env.GEZEL_RELEVANCE_THRESHOLDS) ?? spec?.thresholds ?? null,
     budgets: { ...DEFAULT_BUDGETS, ...parseBudgets(env.GEZEL_RELEVANCE_BUDGET_MS) },
     order: env.GEZEL_RELEVANCE_ORDER === 'flat' ? 'flat' : 'weighted',
+    knowledgeKeep: parseUnit(env.GEZEL_RELEVANCE_KNOWLEDGE_KEEP) ?? KNOWLEDGE_FILTER_MIN_RELEVANCE,
   };
+}
+
+function parseUnit(raw: string | undefined): number | null {
+  if (!raw?.trim()) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 }
 
 function parseThresholds(raw: string | undefined): RelevanceThresholds | null {

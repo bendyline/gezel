@@ -45,11 +45,18 @@ so an availability probe cannot start a large download.
 - Text messages (`system`, `user`, `assistant`), streaming, explicit model ID,
   and `max_tokens` are supported. Tools, images, JSON constraints, sampling
   options and other unsupported controls reject with `unsupported_capability`.
+- Without `max_tokens`, a reply may use up to half the context window (at most
+  4096 tokens on llama.cpp, 1024 on the system models). On llama.cpp that is a
+  ceiling within whatever room the prompt leaves, not a reservation.
 - Replies preserve `stop`, `length`, and `cancelled`. Usage is absent when the
   provider cannot measure it. Desktop's existing `GezelApp` default types remain
   unchanged; portable clients use `GezelApp<'portable'>`.
 - Pass `{ signal }` as the second `chat` argument to cancel. Breaking out of a
   stream or closing its client also cancels and waits for native release.
+- `enginePhase` events report `loading_model`, `prefill`, and `generating` for a
+  `requestId`, with load progress and prompt/processed/reused/output token
+  counts where the engine measures them. They are advisory: older native builds
+  and platform providers send fewer, so never wait on one.
 - Clients share one process runtime and admission gate. Closing an idle client
   does not stop another client's generation. `releaseModel()` is explicitly
   process-wide and may cancel active work. A closed client cannot be reused.

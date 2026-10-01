@@ -82,27 +82,13 @@ export interface ConnectOptions {
   storeProfile?: boolean;
   /** User-visible app version, supplied by Electron for compatibility copy. */
   appVersion?: string;
-  /**
-   * Startup recovery for an installed service this app cannot safely share.
-   * Electron owns the user-facing choice; the supervisor owns applying it
-   * before the embedded service starts.
-   */
-  onInstalledServiceIncompatible?: (
-    issue: InstalledServiceCompatibilityIssue,
-  ) => Promise<'self-hosted' | 'quit'>;
 }
 
-export interface InstalledServiceCompatibilityIssue {
+interface InstalledServiceCompatibilityIssue {
   source: 'machine-engine' | 'store-service';
   installedVersion: string | null;
-  appVersion: string | null;
-}
-
-export class InstalledServiceCompatibilityDeclinedError extends Error {
-  constructor() {
-    super('The installed Gezel service is incompatible and local startup was declined.');
-    this.name = 'InstalledServiceCompatibilityDeclinedError';
-  }
+  /** The broker capability this app needs and the installed one lacks. */
+  capability?: string;
 }
 
 interface LocalAdoptRuntime {
@@ -126,6 +112,7 @@ export type ServiceFallbackCode =
   | 'machine-service-not-installed'
   | 'machine-service-home-fresh'
   | 'machine-engine-unavailable'
+  | 'machine-engine-incompatible'
   | 'legacy-machine-data'
   | 'system-service-unhealthy'
   | 'system-service-version-mismatch'
@@ -995,32 +982,60 @@ export class SupervisedService extends EventEmitter {
 
 export type Connection = SupervisedService;
 
+/**
+ * Run this app without shared services, and say why in the notice rail.
+ *
+ * There is no prompt: the app works either way, and the fix — installing a
+ * release whose shared service matches — happens outside the app. A modal
+ * that blocked startup to offer that choice only ever had one sensible answer.
+ */
 async function useLocalInfrastructureForCompatibility(
   opts: ConnectOptions,
-  issue: MachineEngineCompatibilityIssue | Omit<InstalledServiceCompatibilityIssue, 'appVersion'>,
-): Promise<void> {
-  if (!opts.onInstalledServiceIncompatible) return;
-  const decision = await opts.onInstalledServiceIncompatible({
-    source: issue.source,
-    installedVersion: issue.installedVersion,
-    appVersion: opts.appVersion ?? (await shippedServiceVersion()),
-  });
-  if (decision !== 'self-hosted') throw new InstalledServiceCompatibilityDeclinedError();
+  issue: MachineEngineCompatibilityIssue | InstalledServiceCompatibilityIssue,
+): Promise<ServiceFallbackReason> {
   // Deliberately process-local and non-persistent. The next launch probes
   // again, so installing a compatible retail service heals automatically.
   process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY = 'local';
   process.env.GEZEL_DISABLE_MACHINE_ENGINE = '1';
   opts.logger?.warn?.(
-    '[supervisor] user selected local infrastructure without shared services for this app run',
+    '[supervisor] running without shared services for this app run: the installed service is incompatible',
   );
+  const appVersion = opts.appVersion ?? (await shippedServiceVersion());
+  return {
+    code:
+      issue.source === 'store-service'
+        ? 'store-service-incompatible'
+        : 'machine-engine-incompatible',
+    sourceMode: issue.source === 'store-service' ? 'store-connect' : 'embedded',
+    message: sharedServiceMismatchMessage(issue, appVersion),
+  };
 }
 
-async function prepareDevelopmentMachineInfrastructure(opts: ConnectOptions): Promise<void> {
+function sharedServiceMismatchMessage(
+  issue: MachineEngineCompatibilityIssue | InstalledServiceCompatibilityIssue,
+  appVersion: string | null,
+): string {
+  const installed = issue.installedVersion
+    ? `The installed Gezel service is version ${issue.installedVersion}`
+    : 'The installed Gezel service is a different version';
+  const app =
+    appVersion === '0.0.0'
+      ? ' and this app is a development build (0.0.0)'
+      : appVersion
+        ? ` and this app is version ${appVersion}`
+        : '';
+  const missing = issue.capability ? ` The installed service lacks ${issue.capability}.` : '';
+  return `${installed}${app}. They cannot use shared services together, so this app is running without them.${missing}`;
+}
+
+async function prepareDevelopmentMachineInfrastructure(
+  opts: ConnectOptions,
+): Promise<ServiceFallbackReason | null> {
   // Normal development runs embed the service built from this checkout. They
   // intentionally skip installed-broker inference, but the service's capacity
   // layer still consults that broker so two engine owners cannot overcommit the
   // device. Detect an older broker before provisioning runtimes or starting the
-  // service, then let Electron offer an explicit per-run escape hatch.
+  // service, and run this launch without it.
   //
   // Keep this scoped to forced embedded development: an adopted/spawned daemon
   // has its own environment, and a packaged installation must resolve its
@@ -1029,34 +1044,31 @@ async function prepareDevelopmentMachineInfrastructure(opts: ConnectOptions): Pr
   if (
     opts.packaged ||
     !opts.forceEmbedded ||
-    !opts.onInstalledServiceIncompatible ||
     process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local'
   ) {
-    return;
+    return null;
   }
 
   const issue = await inspectMachineEngineCompatibility({ logger: opts.logger });
-  if (!issue) return;
+  if (!issue) return null;
   opts.logger?.warn?.(
     `[supervisor] installed machine engine${issue.installedVersion ? ` v${issue.installedVersion}` : ''} lacks ${issue.capability}`,
   );
-  await useLocalInfrastructureForCompatibility(opts, issue);
+  return useLocalInfrastructureForCompatibility(opts, issue);
 }
 
-async function prepareStoreMachineInfrastructure(opts: ConnectOptions): Promise<void> {
-  if (
-    !opts.storeProfile ||
-    !opts.onInstalledServiceIncompatible ||
-    process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local'
-  ) {
-    return;
+async function prepareStoreMachineInfrastructure(
+  opts: ConnectOptions,
+): Promise<ServiceFallbackReason | null> {
+  if (!opts.storeProfile || process.env.GEZEL_NATIVE_CAPACITY_AUTHORITY === 'local') {
+    return null;
   }
   const issue = await inspectMachineEngineCompatibility({ logger: opts.logger });
-  if (!issue) return;
+  if (!issue) return null;
   opts.logger?.warn?.(
     `[supervisor] installed machine engine${issue.installedVersion ? ` v${issue.installedVersion}` : ''} lacks ${issue.capability}`,
   );
-  await useLocalInfrastructureForCompatibility(opts, issue);
+  return useLocalInfrastructureForCompatibility(opts, issue);
 }
 
 /**
@@ -1066,7 +1078,7 @@ async function prepareStoreMachineInfrastructure(opts: ConnectOptions): Promise<
  * silent drift into embedded mode.
  */
 export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedService> {
-  await prepareDevelopmentMachineInfrastructure(opts);
+  const developmentCompatibility = await prepareDevelopmentMachineInfrastructure(opts);
 
   // Most Electron E2Es use a fresh home and the system Node/pnpm already
   // running the checkout. Reinstalling and repeatedly hashing the ~110 MB
@@ -1472,17 +1484,22 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
 
   // A Store build with no adoptable product daemon starts its own service,
   // which may still discover the separately installed machine engine. Apply
-  // the same compatibility choice before that embedded service can route a
+  // the same compatibility check before that embedded service can route a
   // model request to an older broker.
-  if (mode.kind === 'embedded') await prepareStoreMachineInfrastructure(opts);
+  const storeCompatibility =
+    mode.kind === 'embedded' ? await prepareStoreMachineInfrastructure(opts) : null;
 
-  return connectResolved(opts, mode, { inheritedReason: null, allowMachineRecheck: true });
+  return connectResolved(opts, mode, {
+    inheritedReason: developmentCompatibility ?? storeCompatibility,
+    allowMachineRecheck: true,
+  });
 }
 
 /**
  * State threaded through the mode dispatch so a deliberate machine-service
- * decline (fresh machine home) carries its notice into whichever per-user
- * branch ends up serving, and so the pre-spawn machine re-check cannot
+ * decline (fresh machine home, or an installed broker too old to share)
+ * carries its notice into whichever per-user branch ends up serving, and so
+ * the pre-spawn machine re-check cannot
  * bounce straight back to a service we just declined.
  */
 interface ConnectFlow {
@@ -2209,16 +2226,11 @@ async function connectStoreService(
   const verdict = evaluateStoreCompat(health);
   if (!verdict.compatible) {
     opts.logger?.info?.(`[supervisor] declining the installed Gezel service: ${verdict.reason}`);
-    await useLocalInfrastructureForCompatibility(opts, {
+    const reason = await useLocalInfrastructureForCompatibility(opts, {
       source: 'store-service',
       installedVersion: health.version,
     });
-    const appVersion = opts.appVersion ?? (await shippedServiceVersion());
-    return buildEmbedded(opts, {
-      code: 'store-service-incompatible',
-      sourceMode: 'store-connect',
-      message: `The installed Gezel service${health.version ? ` is version ${health.version}` : ''}${appVersion ? ` and this app is version ${appVersion}` : ''}. They cannot use shared services together, so this app is running without them.`,
-    });
+    return buildEmbedded(opts, reason);
   }
 
   opts.logger?.info?.(

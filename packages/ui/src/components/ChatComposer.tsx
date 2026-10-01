@@ -142,6 +142,13 @@ export interface ChatComposerProps {
    * parent (and any session switcher) can update.
    */
   sessionId: string | undefined;
+  /**
+   * The person chose a new thread (or the view opened on one on purpose).
+   * The first send then always creates a session, never adopting the newest
+   * existing one: that reuse is only for typing before the picker's auto-pick
+   * lands.
+   */
+  freshThread?: boolean;
   onSessionCreated?: (sessionId: string) => void;
   /**
    * Tool activities observed during the composer's own send turn. The
@@ -334,6 +341,7 @@ export function ChatComposer({
   onPrimaryRecipientChange,
   projectId,
   sessionId,
+  freshThread = false,
   onSessionCreated,
   onToolActivity,
   recentReferences = [],
@@ -444,6 +452,8 @@ export function ChatComposer({
   const draftEnsureRef = useRef<() => Promise<string>>(async () => '');
   const draftNoteFileRef = useRef<() => void>(() => {});
   const draftFreshThreadRef = useRef(false);
+  const freshThreadRef = useRef(freshThread);
+  freshThreadRef.current = freshThread;
   // Tracks the length of the previous draft so we can detect "the
   // user just started typing a new draft" — the signal for the
   // terminal escape. Only the first transition out of an essentially-
@@ -693,7 +703,11 @@ export function ChatComposer({
     // below, which exists for the opposite case (typing before the picker's
     // auto-pick landed) and would otherwise silently drop the message into
     // whatever thread happened to be newest.
-    if (draftFreshThreadRef.current) return createFreshSession();
+    // The draft only learns it is a fresh thread once the server has filed
+    // it, so the parent's explicit choice has to count on its own: a short
+    // message sent right after New thread on a phone went into the newest
+    // old thread, pinned to the model that thread started with (2026-09-30).
+    if (draftFreshThreadRef.current || freshThreadRef.current) return createFreshSession();
     // Look for an existing unarchived session before creating a fresh
     // one. The user-facing bug this protects: if the user navigates
     // (Home → back to Chat) and types fast enough that the

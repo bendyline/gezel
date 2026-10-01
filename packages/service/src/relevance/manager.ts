@@ -91,6 +91,7 @@ export class RelevanceModelManager implements RelevanceStageProvider {
       thresholds,
       budgetMs: override?.budgetMs ?? setting.budgets[surface],
       order: setting.order,
+      knowledgeKeep: override?.knowledgeKeep ?? setting.knowledgeKeep,
     };
   }
 
@@ -176,7 +177,14 @@ export class RelevanceModelManager implements RelevanceStageProvider {
     await this.install(setting.spec.id);
   }
 
-  /** Deferred boot step: log what is resolved and warm an installed, enabled model. */
+  /**
+   * Deferred boot step: log what is resolved, then warm an installed, enabled
+   * model — or download it when it is enabled but missing. New installs turn
+   * the check on in first-run, which writes config without passing through
+   * the Settings route that would otherwise start the download; so does a
+   * download that failed or was interrupted last session. `install` keeps the
+   * security policy's app-network gate.
+   */
   async bootWarm(): Promise<void> {
     const setting = await this.setting();
     const installed = setting.spec
@@ -185,8 +193,14 @@ export class RelevanceModelManager implements RelevanceStageProvider {
     log.info(
       `[relevance] resolved enabled=${setting.enabled} model=${setting.spec?.id ?? 'none'} source=${setting.source} surfaces=${[...setting.surfaces].join(',')} installed=${installed}`,
     );
-    if (setting.enabled && setting.spec && installed) {
+    if (!setting.enabled || !setting.spec) return;
+    if (installed) {
       await this.scorer.warm(toResolvedModel(this.opts.home, setting.spec));
+      return;
+    }
+    const started = await this.install(setting.spec.id);
+    if (!started.started && !started.installed && started.reason) {
+      log.info(`[relevance] not downloading ${setting.spec.id}: ${started.reason}`);
     }
   }
 

@@ -48,10 +48,12 @@ export function remoteServingManageRoutes(ctx: EngineContext): Hono {
       // truth-over-config merge; the persisted flag can lag a failed bind.
       config: { ...(config ?? {}), enabled: status.listening },
       status,
-      identity: {
-        deviceId: ctx.deviceIdentity.deviceId,
-        fingerprint: ctx.deviceIdentity.fingerprint,
-      },
+      identity: ctx.deviceIdentity
+        ? {
+            deviceId: ctx.deviceIdentity.deviceId,
+            fingerprint: ctx.deviceIdentity.fingerprint,
+          }
+        : null,
     };
   };
 

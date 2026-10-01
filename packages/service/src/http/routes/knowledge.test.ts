@@ -10,6 +10,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { securityPolicyForLevel } from '@bendyline/gezel';
 import { GezelClient, type KnowledgeInstallEvent } from '@bendyline/gezel-client';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { knowledgeDownloadsDir } from '@bendyline/gezel/paths';
@@ -184,11 +185,58 @@ describe('knowledge routes', () => {
     }
   }, 60_000);
 
+  it('lets a person download catalogs under super-lockdown', async () => {
+    // The security policy governs gezels. A catalog is how a locked-down
+    // machine gets knowledge it can use offline, so the person's own
+    // download must never be refused by it.
+    const bytes = await readFile(archivePath);
+    const server: Server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-length': String(bytes.length) });
+      res.end(bytes);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const prior = (await svc.context.store.readConfig()).securityPolicy;
+    await svc.context.store.writeConfig({
+      securityPolicy: securityPolicyForLevel('super-lockdown'),
+    });
+    try {
+      await client.removeKnowledgeCatalog('test-notes').catch(() => {});
+      const { jobId } = await client.installKnowledgeCatalog({
+        source: { kind: 'url', url: `http://127.0.0.1:${port}/test-notes.gezk` },
+      });
+      const job = await waitForJob(jobId);
+      expect(job.error, JSON.stringify(job)).toBeUndefined();
+      const { catalogs } = await client.listKnowledgeCatalogs();
+      expect(catalogs.find((c) => c.ref.catalogId === 'test-notes')?.mounted).toBe(true);
+
+      // The gilde route reaches catalog resolution rather than a policy refusal.
+      const events: KnowledgeInstallEvent[] = [];
+      await client.installKnowledgeCatalogFromCatalog('no-such-locked-catalog', (event) => {
+        events.push(event);
+      });
+      const last = events.at(-1);
+      expect(last?.type).toBe('error');
+      if (last?.type === 'error') expect(last.error).toContain('no knowledge catalog');
+    } finally {
+      await svc.context.store.writeConfig({ securityPolicy: prior ?? null });
+      server.close();
+    }
+  }, 60_000);
+
   it('read_document-style URI resolution rejects unknown catalogs', async () => {
     await expect(client.readKnowledgeDocument('no-such-catalog', 'x')).rejects.toThrow();
   });
 
-  it('a chat turn proactively injects cited knowledge within budget (Phase 4)', async () => {
+  it('a keyword-only catalog is searchable but never injected into a turn unjudged', async () => {
+    // The fixture catalog's embedding profile cannot load in tests, so every
+    // hit it returns is keyword evidence. Per-turn injection admits an
+    // unjudged catalog hit only when it cleared its catalog's cosine floor:
+    // a shared word is no evidence against an encyclopedia ("Olive Oil
+    // Times" for "What is 17 times 23?"). The search tool still finds it.
+    // Ceilings and provenance of injected knowledge are pinned in
+    // search/project-retrieval.test.ts with vector-labelled hits.
     const gezels = await client.listGezels();
     const gezelId = gezels.gezels[0]?.id;
     expect(gezelId).toBeDefined();
@@ -236,51 +284,29 @@ describe('knowledge routes', () => {
       );
     };
 
-    await sendAndWait('How do dovetail joints hold together without glue in fine woodworking?');
+    const question = 'How do dovetail joints hold together without glue in fine woodworking?';
+    await sendAndWait(question);
 
     const injected = await client.listHistory({ kind: 'retrieval.context-injected' });
     const events = injected.entries.filter(
       (entry): entry is Extract<typeof entry, { details?: Record<string, unknown> }> =>
         'details' in entry,
     );
-    const withKnowledge = events.find((entry) => {
-      const hits = (entry.details as { hits?: Array<{ source?: string; uri?: string }> })?.hits;
-      return hits?.some((h) => h.source === 'knowledge');
-    });
-    expect(withKnowledge, 'no retrieval event carried a knowledge hit').toBeDefined();
-    const details = withKnowledge?.details as {
-      estimatedTokens: number;
-      maxTokens: number;
-      hits: Array<{ source: string; uri?: string; catalogId?: string; path?: string }>;
-    };
-    expect(details.estimatedTokens).toBeLessThanOrEqual(details.maxTokens);
-    const knowledgeHits = details.hits.filter((h) => h.source === 'knowledge');
-    expect(knowledgeHits.length).toBeLessThanOrEqual(2); // balanced ceiling
-    for (const hit of knowledgeHits) {
-      expect(hit.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
-      expect(hit.catalogId).toBe('test-notes');
-    }
-
-    // Disable the catalog: the next turn injects no reference content.
-    await client.updateKnowledgeCatalog('test-notes', { enabled: false });
-    await sendAndWait('Tell me more about mortise and tenon joinery techniques please.');
-    const after = await client.listHistory({ kind: 'retrieval.context-injected' });
-    const newest = after.entries.filter(
-      (e): e is Extract<typeof e, { details?: Record<string, unknown> }> =>
-        'details' in e && !injected.entries.some((p) => p.id === e.id),
-    );
     // Retrieval always leaves a trace: hits above the floor log the
     // injection, and nothing above the floor logs the zero-injection probe.
     // No event at all means the turn under test never ran retrieval.
     expect(
-      newest.length,
-      'the second turn logged no retrieval event — it never ran retrieval',
+      events.length,
+      'the turn logged no retrieval event — it never ran retrieval',
     ).toBeGreaterThan(0);
-    for (const entry of newest) {
+    for (const entry of events) {
       const hits = (entry.details as { hits?: Array<{ source?: string }> })?.hits ?? [];
       expect(hits.every((h) => h.source !== 'knowledge')).toBe(true);
     }
-    await client.updateKnowledgeCatalog('test-notes', { enabled: true });
+
+    const { results } = await client.searchKnowledge({ query: 'dovetail joints' });
+    expect(results.some((r) => r.documentId === 'dovetails')).toBe(true);
+    expect(results.every((r) => r.arm === 'fts')).toBe(true);
   }, 60_000);
 
   it('answers the gilde-backed browse, update and job surfaces', async () => {

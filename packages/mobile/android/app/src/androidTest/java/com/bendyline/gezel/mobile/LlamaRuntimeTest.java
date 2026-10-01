@@ -112,9 +112,23 @@ public final class LlamaRuntimeTest {
             LlamaRuntime.generate(engine, ROLES, new String[] { "Mismatch" }, nextRequest(), 8, unexpected));
         assertThrows(IllegalStateException.class, () ->
             LlamaRuntime.generate(engine, new String[] { "user" }, new String[] { null }, nextRequest(), 8, unexpected));
+        String crowded = "Hello ".repeat(400);
         assertThrows(IllegalStateException.class, () ->
-            LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 512, unexpected));
+            LlamaRuntime.generate(engine, ROLES, new String[] { "Brief replies.", crowded }, nextRequest(), 256, unexpected));
         assertEquals(0, chunks.get());
+        assertEightTokens();
+    }
+
+    @Test public void replyBudgetIsACeilingWithinTheRoomThePromptLeaves() {
+        load();
+        StringBuilder text = new StringBuilder();
+        assertEquals(FINISH_LENGTH, LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 512, bytes -> {
+            text.append(new String(bytes, StandardCharsets.UTF_8));
+            return true;
+        }));
+        long[] done = LlamaRuntime.progress(engine);
+        assertEquals(512 - done[2], text.length());
+        assertEquals(text.length(), done[5]);
         assertEightTokens();
     }
 
@@ -173,5 +187,21 @@ public final class LlamaRuntimeTest {
             LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8, bytes -> { throw expected; }));
         assertSame(expected, actual);
         assertEightTokens();
+    }
+
+    @Test public void progressReportsPhasesAndFinalCounts() {
+        assertEquals(0L, LlamaRuntime.progress(engine)[0]);
+        load();
+        AtomicInteger phaseDuringStream = new AtomicInteger(-1);
+        assertEquals(FINISH_LENGTH, LlamaRuntime.generate(engine, ROLES, CONTENTS, nextRequest(), 8, bytes -> {
+            phaseDuringStream.compareAndSet(-1, (int) LlamaRuntime.progress(engine)[0]);
+            return true;
+        }));
+        assertEquals(3, phaseDuringStream.get());
+        long[] done = LlamaRuntime.progress(engine);
+        assertEquals(0L, done[0]);
+        assertTrue("Prompt tokens must be counted", done[2] > 0);
+        assertEquals(done[2], done[3]);
+        assertEquals(8L, done[5]);
     }
 }

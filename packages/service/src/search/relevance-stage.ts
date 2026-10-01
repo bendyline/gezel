@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  KNOWLEDGE_FILTER_MIN_RELEVANCE,
   MODEL_RELEVANCE_ANCHORS,
   type RelevanceModelOverride,
   type RelevanceThresholds,
@@ -32,6 +33,8 @@ export interface ActiveRelevance {
   budgetMs: number;
   /** `flat`: order by model relevance across corpora instead of the weighted score. */
   order: 'weighted' | 'flat';
+  /** Filter surfaces: the relevance a knowledge passage needs (default KNOWLEDGE_FILTER_MIN_RELEVANCE). */
+  knowledgeKeep?: number;
 }
 
 /** What SearchService needs from the relevance model manager. */
@@ -136,10 +139,23 @@ export function relevancePassage(result: UnifiedSearchResult, chunkText?: string
   return `${result.title}\n${text}`.slice(0, PASSAGE_CHARS);
 }
 
-/** The cutoff in calibrated-relevance space, or null when the model may not drop. */
-function cutoffFor(mode: RelevanceStageMode, thresholds: RelevanceThresholds | null) {
+/**
+ * The cutoff in calibrated-relevance space, or null when the model may not
+ * drop. On a filter surface a knowledge passage has to clear the stricter
+ * knowledge bar: "not off topic" is enough for the user's own project, not
+ * for an encyclopedia that always has a plausible-looking neighbour.
+ */
+function cutoffFor(
+  mode: RelevanceStageMode,
+  thresholds: RelevanceThresholds | null,
+  kind: UnifiedSearchResult['kind'],
+  knowledgeKeep: number,
+) {
   if (!thresholds) return null;
-  return mode === 'filter' ? MODEL_RELEVANCE_ANCHORS.keep : MODEL_RELEVANCE_ANCHORS.drop;
+  if (mode === 'reorder') return MODEL_RELEVANCE_ANCHORS.drop;
+  return kind === 'knowledge'
+    ? Math.max(MODEL_RELEVANCE_ANCHORS.keep, knowledgeKeep)
+    : MODEL_RELEVANCE_ANCHORS.keep;
 }
 
 export async function applyRelevanceModel(args: {
@@ -212,7 +228,7 @@ export async function applyRelevanceModel(args: {
   }
   if (scores.size === 0) return { results: args.results, report: report(status) };
 
-  const cutoff = cutoffFor(args.mode, thresholds);
+  const knowledgeKeep = args.active.knowledgeKeep ?? KNOWLEDGE_FILTER_MIN_RELEVANCE;
   const judged: UnifiedSearchResult[] = [];
   const unscored: UnifiedSearchResult[] = [];
   const hidden: UnifiedSearchResult[] = [];
@@ -223,6 +239,7 @@ export async function applyRelevanceModel(args: {
       continue;
     }
     const relevance = relevanceFromModelScore(score, thresholds);
+    const cutoff = cutoffFor(args.mode, thresholds, result.kind, knowledgeKeep);
     if (cutoff !== null && relevance < cutoff) {
       hidden.push(result);
       continue;

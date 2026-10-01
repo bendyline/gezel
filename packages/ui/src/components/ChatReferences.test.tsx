@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   listGezels: vi.fn(),
   listTaskNotes: vi.fn(),
+  getTaskOutputs: vi.fn(),
   setTaskStatus: vi.fn(),
   previewReference: vi.fn(),
   fetchProjectArtifactBlob: vi.fn(),
@@ -72,6 +73,7 @@ beforeEach(() => {
   apiMocks.getConfig.mockResolvedValue({ showPoppetjes: true });
   apiMocks.listGezels.mockResolvedValue({ gezels: [] });
   apiMocks.listTaskNotes.mockResolvedValue({ notes: [] });
+  apiMocks.getTaskOutputs.mockResolvedValue({ deliverable: null, outputs: [] });
   apiMocks.previewReference.mockImplementation(async (_projectId, request) => ({
     mode: 'text',
     content: `# ${request.path}`,
@@ -179,6 +181,21 @@ describe('ChatReferences responsive split', () => {
     expect(container.querySelector('.chat-rail-body-split')).toBeNull();
     expect(container.querySelector('.chat-rail-side')).toBeNull();
     expect(screen.queryByTestId('commands-panel')).not.toBeInTheDocument();
+  });
+
+  it('spends no row on a lone Chat tab when a narrow chat has nothing beside it', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX - 1;
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [] });
+    apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
+
+    const { container } = renderProjectRail();
+
+    await waitFor(() => {
+      expect(container.querySelector('.chat-rail-body-compact')).not.toBeNull();
+      expect(apiMocks.getProjectSkills).toHaveBeenCalledWith('project-1');
+    });
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(container.querySelector('.chat-rail-compact-chat')).toBeVisible();
   });
 
   it('replaces the right pane with full-width tabs below the split threshold', async () => {
@@ -484,7 +501,9 @@ describe('ChatReferences task picker', () => {
 
     expect(await screen.findByRole('heading', { name: 'History & notes' })).toBeInTheDocument();
     await waitFor(() => {
-      expect(apiMocks.listTaskNotes).toHaveBeenCalledWith('project-1', 1);
+      expect(apiMocks.listTaskNotes).toHaveBeenCalledWith('project-1', 1, undefined, {
+        withFileReferences: true,
+      });
     });
 
     const rail = container.querySelector('.chat-rail-task');
@@ -504,6 +523,59 @@ describe('ChatReferences task picker', () => {
     expect(noteBodies[0]?.querySelector('.gezel-icon-poppetje')).not.toBeNull();
     expect(noteBodies[0]).toHaveTextContent('Inspect');
     expect(noteBodies[1]).toHaveTextContent('Older note');
+  });
+
+  it('features the deliverable and opens it, and a note path, in the viewer', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
+    apiMocks.getTaskOutputs.mockResolvedValue({
+      deliverable: { kind: 'workspace', path: 'powerpoint/task-1/deck.pptx', bytes: 2048 },
+      outputs: [{ kind: 'workspace', path: 'powerpoint/task-1/deck.pptx' }],
+    });
+    apiMocks.listTaskNotes.mockResolvedValue({
+      notes: [
+        {
+          id: 'n1',
+          at: '2026-07-28T10:00:00.000Z',
+          author: { kind: 'user' },
+          text: 'Outline at `tasks/1/outline.md`.',
+          referencedFiles: [{ kind: 'artifact', path: 'tasks/1/outline.md' }],
+        },
+      ],
+    });
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1')}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    const card = await screen.findByRole('region', { name: 'PowerPoint deck · in progress' });
+    expect(within(card).getByText('deck.pptx')).toBeInTheDocument();
+    expect(within(card).getByText(/In the project folder/)).toBeInTheDocument();
+
+    await user.click(within(card).getByRole('button', { name: 'Open' }));
+    await waitFor(() => {
+      expect(apiMocks.previewReference).toHaveBeenCalledWith('project-1', {
+        kind: 'workspace',
+        path: 'powerpoint/task-1/deck.pptx',
+      });
+    });
+
+    await user.click(screen.getByRole('tab', { name: 'Task' }));
+    await user.click(await screen.findByRole('link', { name: 'tasks/1/outline.md' }));
+    await waitFor(() => {
+      expect(apiMocks.previewReference).toHaveBeenCalledWith('project-1', {
+        kind: 'artifact',
+        path: 'tasks/1/outline.md',
+      });
+    });
   });
 
   it('tracks the task through its steps and opens the full task from one', async () => {

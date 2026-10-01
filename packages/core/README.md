@@ -22,6 +22,7 @@ npm install @bendyline/gezel
 | `@bendyline/gezel/native` | Native binary discovery and platform keys |
 | `@bendyline/gezel/checks` | Gate-check primitives used by craftbook scripts |
 | `@bendyline/gezel/mobile-providers` | Zod schemas for on-device mobile inference: providers, model sources, downloads, inventory, and generation budgets |
+| `@bendyline/gezel/queue-status` | Zod schemas for `GET /api/queues`: provider queues, session send queues, task handoffs, and the engine cache and pool views |
 | `@bendyline/gezel/mobile-inference` | `createNativeInference()`, which adapts a native mobile inference plugin to the portable streaming, tool-calling, and cancellation contract |
 
 ```ts

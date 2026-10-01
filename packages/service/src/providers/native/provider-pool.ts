@@ -18,6 +18,7 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import type { ProviderQueueDescription } from '@bendyline/gezel/queue-status';
 import type { LLMProvider } from '../types.js';
 import {
   type CapacityBroker,
@@ -197,39 +198,7 @@ export interface PoolSnapshot {
  * it in the same slot it uses for singleton providers. See
  * {@link ProviderPool.queueSummaries}.
  */
-export interface PooledQueueSummary {
-  running: number;
-  /** See {@link ProviderQueue.describe}. Summed across replicas like `running`. */
-  runningInteractive: number;
-  runningBackground: number;
-  queuedInteractive: number;
-  queuedBackground: number;
-  /** Pending ambient entries held by the admission gate across replicas. */
-  ambientHeld: number;
-  concurrency: number;
-  interactiveConcurrency: number;
-  backgroundConcurrency: number;
-  maxConcurrency: number;
-  active: Array<{
-    sessionId?: string;
-    gezelId?: string;
-    projectId?: string;
-    actorLabel?: string;
-    job?: string;
-    runningForMs: number;
-  }>;
-  pending: Array<{
-    id: number;
-    lane: 'interactive' | 'background';
-    ambient?: boolean;
-    sessionId?: string;
-    gezelId?: string;
-    projectId?: string;
-    actorLabel?: string;
-    job?: string;
-    waitedMs: number;
-  }>;
-}
+export type PooledQueueSummary = ProviderQueueDescription & { maxConcurrency: number };
 
 function emptyPooledQueueSummary(): PooledQueueSummary {
   return {

@@ -32,6 +32,9 @@ const RESULTS: UnifiedSearchResult[] = [
     retrievalSource: 'knowledge',
     catalogId: 'shop-notes',
     uri: 'knowledge://gezel-tests/shop-notes/dovetails#chunk=a',
+    // As the knowledge manager labels a hit that cleared its catalog's floor.
+    arm: 'vector',
+    similarity: 0.8,
     ...scoreResult('knowledge', 0.8),
   },
 ];

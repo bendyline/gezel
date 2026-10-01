@@ -32,6 +32,17 @@ describe('linkifyFileRefs', () => {
     ).toBe('Wrote [powerpoint/task-11/deck.pptx](#artifact:powerpoint/task-11/deck.pptx).');
   });
 
+  it('links a drawer-prefixed span to the file in that drawer', () => {
+    const files = [workspace('powerpoint/task-13/deck.pptx'), artifact('tasks/13/deck.pptx')];
+    expect(linkifyFileRefs('Deliverable: `workspace/powerpoint/task-13/deck.pptx`', files)).toBe(
+      'Deliverable: [workspace/powerpoint/task-13/deck.pptx](#workspace:powerpoint/task-13/deck.pptx)',
+    );
+    // The prefix names a drawer; it never borrows a same-path file from the other one.
+    expect(linkifyFileRefs('`artifacts/powerpoint/task-13/deck.pptx`', files)).toBe(
+      '`artifacts/powerpoint/task-13/deck.pptx`',
+    );
+  });
+
   it('links a span carrying a line locator, keeping the locator in the label', () => {
     expect(
       linkifyFileRefs('(`packages/cli/src/commands/image.ts:84,230`)', [

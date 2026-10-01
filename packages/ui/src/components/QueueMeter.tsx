@@ -49,6 +49,8 @@ const PROVIDER_ORDER = Object.keys({
   'codex-cli': null,
   ollama: null,
   'llama-cpp': null,
+  'apple-foundation-models': null,
+  'android-mlkit': null,
   mlx: null,
   ds4: null,
 } satisfies Record<QueueProviderName, null>) as QueueProviderName[];
@@ -81,9 +83,24 @@ function totalQueued(state: ProviderQueueState): number {
   return state.queuedInteractive + state.queuedBackground;
 }
 
-/** Engines that run models on the user's own hardware. All three publish
- *  live phase events, so any of them can annotate a queue row. */
-const LOCAL_ENGINE_PROVIDERS: readonly QueueProviderName[] = ['llama-cpp', 'mlx', 'ds4'];
+/** Engines that run models on the user's own hardware, desktop or phone. All
+ *  of them publish live phase events, so any can annotate a queue row. */
+const LOCAL_ENGINE_PROVIDERS: readonly QueueProviderName[] = [
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+  'android-mlkit',
+];
+
+/** Lets a "preparing" chip open its panel before the first snapshot arrives. */
+const EMPTY_QUEUE_STATUS: QueueStatusResponse = {
+  providers: {},
+  taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+  sessions: [],
+  cache: [],
+  at: '',
+};
 
 function isLocalEngineProvider(name: QueueProviderName): boolean {
   return LOCAL_ENGINE_PROVIDERS.includes(name);
@@ -626,13 +643,7 @@ export function QueueMeter() {
   // window (when the provider is missing from `status.providers`). A
   // cloud-only user resolves to null and never holds a connection.
   const onDeviceProvider: QueueProviderName | null =
-    activeProvider === 'llama-cpp'
-      ? 'llama-cpp'
-      : activeProvider === 'mlx'
-        ? 'mlx'
-        : activeProvider === 'ds4'
-          ? 'ds4'
-          : null;
+    LOCAL_ENGINE_PROVIDERS.find((name) => name === activeProvider) ?? null;
   const liveTurns = useOnDeviceLiveTurns(onDeviceProvider !== null);
 
   // Only work waiting on the engine counts here. Night-shift handoffs are
@@ -662,6 +673,11 @@ export function QueueMeter() {
   // header clean on the common idle case.
   if (busyProviders.length === 0 && taskRunnerPending === 0 && preparingTurns.length === 0)
     return null;
+
+  const queueTotal =
+    busyProviders.reduce((sum, { state }) => sum + state.running + totalQueued(state), 0) +
+    preparingTurns.length +
+    taskRunnerPending;
 
   let queueButtonTitle = 'AI chat queue — click for details';
   if (!boringMode) {
@@ -697,6 +713,12 @@ export function QueueMeter() {
         aria-label="AI chat queue — click for details"
         title={queueButtonTitle}
       >
+        {/* The compact header's face for this button: the chips below give
+            way to a glyph and one total, and the panel still has it all. */}
+        <span className="queue-meter-key" aria-hidden="true">
+          <QueueKeyIcon />
+          <span className="queue-meter-key-count">{queueTotal}</span>
+        </span>
         {busyProviders.map(({ name, state }) => {
           const queued = totalQueued(state);
           const representative = providerRepresentative(state, gezels);
@@ -767,10 +789,10 @@ export function QueueMeter() {
           </span>
         )}
       </button>
-      {open && status && (
+      {open && (
         <QueueMeterPanel
           style={popoverStyle}
-          status={status}
+          status={status ?? EMPTY_QUEUE_STATUS}
           gezels={gezels}
           projects={projects}
           liveTurns={liveTurns}
@@ -782,6 +804,26 @@ export function QueueMeter() {
         />
       )}
     </div>
+  );
+}
+
+/** A card with two more stacked behind it: work waiting its turn. */
+function QueueKeyIcon() {
+  return (
+    <svg
+      className="queue-meter-key-icon"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="3" y="8.5" width="14" height="8.5" rx="1.8" />
+      <path d="M5 5.75h10M7.5 3h5" />
+    </svg>
   );
 }
 

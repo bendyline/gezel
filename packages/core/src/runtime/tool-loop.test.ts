@@ -4,6 +4,7 @@ import type { PortableInference } from './product-service.js';
 import { type PortableToolActions, portableToolSurface } from './product-tools.js';
 import { portableFixture } from './test-files.js';
 import {
+  PORTABLE_TURN_ACTION_LIMIT,
   type PortableToolListing,
   type PortableToolSpec,
   runPortableToolLoop,
@@ -582,7 +583,7 @@ describe('native tool calling', () => {
   it('stops at the action limit', async () => {
     const generate = vi.fn<PortableInference['generate']>(
       async (_request, _onDelta, onToolCall) => {
-        for (let call = 0; call < 9; call++)
+        for (let call = 0; call <= PORTABLE_TURN_ACTION_LIMIT; call++)
           await onToolCall!({
             requestId: 'req',
             callId: `c${call}`,

@@ -10,6 +10,10 @@ export default defineConfig({
     'src/schemas/mobile-provider.ts',
     'src/mobile/inference.ts',
     'src/runtime/index.ts',
+    // `./local-loop` — the local-model turn loop the daemon's providers and
+    // the portable runtime share. Off the main entry so its classes have one
+    // identity per consumer and the UI never bundles it.
+    'src/local-loop/index.ts',
     'src/kokoro/index.ts',
     'src/poppetje/index.ts',
     'src/markdown/index.ts',
@@ -34,12 +38,22 @@ export default defineConfig({
     // `./eval` — the in-app eval runner's contract. Kept off the main entry
     // so its schemas stay out of the UI's startup bundle (see src/eval/index.ts).
     'src/eval/index.ts',
+    // `./queue-status` — `GET /api/queues` wire shapes. Off the main entry for
+    // the same reason as `./eval`: the UI only needs the types, and a
+    // re-export would ship the zod schemas twice in its startup bundle (once
+    // in `browser.js`, once in `schemas/index.js` via the client).
+    'src/schemas/queue-status.ts',
   ],
   format: ['esm'],
   dts: true,
   sourcemap: true,
   clean: true,
   target: 'es2022',
-  splitting: false,
+  // Entries share most of their code: the schemas, and the local loop that
+  // both `./local-loop` and `./runtime` run. Unsplit, every entry carried its
+  // own copy, which put the published tarball at 3.36 MB (budget 2.6 MB) and
+  // gave a consumer of two entries two copies of each class. Shared modules
+  // now live in chunks every entry imports.
+  splitting: true,
   onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

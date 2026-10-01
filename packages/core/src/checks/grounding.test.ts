@@ -203,6 +203,73 @@ describe('valueGrounding — inline emphasis', () => {
   });
 });
 
+describe('citationsResolve — template slots are not citations', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+
+  // Wild-caught on the powerpoint-deck topic-only review (deepseek-v4,
+  // 2026-09-30): describing the format read as a fabricated citation.
+  it('ignores a bracketed placeholder beside a real citation', async () => {
+    const report = [
+      'Evidence: (source: powerpoint/eval/deck.md).',
+      'No fabricated `(source: <path/URL>)` entry exists. PASS.',
+    ].join('\n');
+    const r = await citationsResolve(
+      ws({ 'review.md': report, 'powerpoint/eval/deck.md': 'y' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it.each(['(source: …)', '(source: —)', '(source: ...)', '(source: path)', '(source: none)'])(
+    'ignores the slot %s beside a real citation',
+    async (slot) => {
+      const report = [
+        `4. Every claim maps to a real \`${slot}\` entry — PASS.`,
+        'Evidence: (source: powerpoint/eval/deck.md).',
+      ].join('\n');
+      const r = await citationsResolve(
+        ws({ 'review.md': report, 'powerpoint/eval/deck.md': 'y' }),
+        'review.md',
+        { minCitations: 1 },
+      );
+      expect(r.ok).toBe(true);
+    },
+  );
+
+  it('still checks a real file whose name starts like a slot word', async () => {
+    const r = await citationsResolve(
+      ws({ 'review.md': 'Per (source: notes/pathology.md).' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('still checks a bracketed file path and quotes what failed', async () => {
+    const r = await citationsResolve(
+      ws({ 'review.md': 'Numbers from (source: <reports/q3.md>).' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('`reports/q3.md`');
+  });
+
+  it('still treats a bracketed URL as a URL', async () => {
+    const r = await citationsResolve(
+      ws({ 'review.md': 'See (source: <https://example.com/a>).' }),
+      'review.md',
+      { minCitations: 1 },
+    );
+    expect(r.urls.length).toBe(1);
+  });
+});
+
 describe('citationsResolve — task refs are not citations', () => {
   const ws = (files: Record<string, string>) => ({
     read: async (f: string) => files[f] ?? null,

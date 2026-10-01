@@ -212,6 +212,8 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
   // its own system-home config here: serving policy lives with whichever
   // daemon owns the LAN listener.
   app.get('/models', async (c) => {
+    const identity = ctx.deviceIdentity;
+    if (!identity) return c.json({ error: 'remote_identity_unavailable' }, 404);
     const config = await ctx.store.readConfig().catch(() => null);
     const auth = c.get('auth') as { scopes?: readonly string[] } | undefined;
     const allow = isFirstPartyMachineTenant(auth) ? undefined : config?.remoteServing?.allowModels;
@@ -240,7 +242,7 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
         }
       }),
     );
-    return c.json({ deviceId: ctx.deviceIdentity.deviceId, models });
+    return c.json({ deviceId: identity.deviceId, models });
   });
 
   // --- Image generation (inference-only; A persists the artifact) ---------

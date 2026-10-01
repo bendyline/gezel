@@ -25,6 +25,7 @@ import {
   shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';
+import { turnCancelReasonOf } from './turn-cancel-marker.js';
 
 describe('consultationIdleTimeoutMsForModel', () => {
   it('protects DS4 and frontier local models from too-short caller guesses', () => {
@@ -2095,15 +2096,6 @@ describe('ChatManager — inflight visibility + cancel', () => {
     let parkedRan = false;
     const internals = manager as unknown as {
       inflight: Map<string, { userText: string; startedAt: number }>;
-      pendingSends: Map<
-        string,
-        Array<{
-          id: string;
-          userText: string;
-          enqueuedAt: number;
-          waiters: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }>;
-        }>
-      >;
       afterSessionIdle: Map<string, Array<() => void>>;
       engineRouterCache: typeof engineRouter | null;
     };
@@ -2112,20 +2104,15 @@ describe('ChatManager — inflight visibility + cancel', () => {
       userText: 'keep working until stopped',
       startedAt: Date.now(),
     });
-    internals.pendingSends.set(session.id, [
-      {
-        id: 'queued-after-current',
-        userText: 'run this next',
-        enqueuedAt: Date.now(),
-        waiters: [{ resolve: vi.fn(), reject: queuedReject }],
-      },
-    ]);
+    manager.setEngagementMode('proactive');
+    // Queued behind the seeded in-flight turn through the real send path.
+    const queued = manager.send(session.id, 'run this next').catch(queuedReject);
+    expect(manager.listQueued()).toHaveLength(1);
     internals.afterSessionIdle.set(session.id, [
       () => {
         parkedRan = true;
       },
     ]);
-    manager.setEngagementMode('proactive');
 
     const result = await manager.emergencyStop();
 
@@ -2138,9 +2125,11 @@ describe('ChatManager — inflight visibility + cancel', () => {
     expect(manager.inflightInfo(session.id)).toBeNull();
     expect(manager.listQueued()).toHaveLength(0);
     expect(internals.afterSessionIdle.size).toBe(0);
+    await queued;
     expect(queuedReject).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.any(String) }),
     );
+    expect(turnCancelReasonOf(queuedReject.mock.calls[0]?.[0])).toBe('emergency-stop');
     expect(parkedRan).toBe(false);
     expect(engineRouter.shutdown).toHaveBeenCalledOnce();
   });
@@ -2642,18 +2631,6 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     const internals = manager as unknown as {
       inflight: Map<string, { userText: string; startedAt: number }>;
       afterSessionIdle: Map<string, Array<() => void>>;
-      pendingSends: Map<
-        string,
-        Array<{
-          id: string;
-          userText: string;
-          enqueuedAt: number;
-          from: { gezelId: string; gezelName: string } | undefined;
-          coalescable: boolean;
-          lane: undefined;
-          waiters: Array<{ resolve: (msg: unknown) => void; reject: (err: Error) => void }>;
-        }>
-      >;
       finishSessionTurn(sessionId: string): void;
     };
 
@@ -2666,17 +2643,12 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     });
     expect(internals.afterSessionIdle.has(adaSession.id)).toBe(true);
 
-    internals.pendingSends.set(adaSession.id, [
-      {
-        id: 'queued-nudge',
-        userText: '[scenario check] index.html is still missing',
-        enqueuedAt: Date.now(),
+    const queued = manager
+      .send(adaSession.id, '[scenario check] index.html is still missing', {
         from: { gezelId: 'maya', gezelName: 'Maya' },
-        coalescable: false,
-        lane: undefined,
-        waiters: [{ resolve: () => {}, reject: () => {} }],
-      },
-    ]);
+      })
+      .catch(() => undefined);
+    expect(manager.listSessionQueue(adaSession.id)).toHaveLength(1);
 
     internals.inflight.delete(adaSession.id);
     internals.finishSessionTurn(adaSession.id);
@@ -2689,6 +2661,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     const mayaDisk = await store.getSession('maya', res.sessionId);
     expect(mayaDisk!.messages[0]?.content).toBe('[Message from Ada]: please create index.html');
+    await queued;
   });
 
   it("delivers Maya's reply into Ada's session as its own handoff message and auto-triggers a response", async () => {
@@ -4149,6 +4122,10 @@ describe('ChatManager — per-session message queue', () => {
     for (const id of queuedIds) {
       expect(recorded).toContain(`rm:started:${id}`);
     }
+    // Absorbed entries leave the queue before the head that carries them.
+    expect(recorded.indexOf(`rm:started:${queuedIds[1]}`)).toBeLessThan(
+      recorded.indexOf(`rm:started:${queuedIds[0]}`),
+    );
   });
 
   it('a non-nudge queued message breaks the nudge merge run', async () => {
@@ -4314,6 +4291,58 @@ describe('ChatManager — per-session message queue', () => {
     const rec = await store.getSession('ada', session.id);
     expect(rec?.messages[0]?.content).toBe('not really a nudge');
     expect(rec?.messages[0]?.nudge).toBeUndefined();
+  });
+
+  it('an idle nudge keeps its background origin after losing the marker', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply');
+    const pending = manager.send(session.id, 'not really a nudge', { nudge: true });
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    expect(manager.isUserDirectedTurn(session.id)).toBe(false);
+    stall.release();
+    await pending;
+  });
+
+  it('a merged queued turn stays visible when any part of it was visible', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply-A');
+    mock.script('merged-reply');
+    const pA = manager.send(session.id, 'start');
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pHidden = manager.send(session.id, 'seed', { coalescable: true, hidden: true });
+    const pVisible = manager.send(session.id, 'shown', { coalescable: true });
+    expect(manager.listQueued()[0]?.depth).toBe(1);
+    stall.release();
+    await Promise.all([pA, pHidden, pVisible]);
+    const rec = await store.getSession('ada', session.id);
+    const users = rec?.messages.filter((m) => m.role === 'user') ?? [];
+    expect(users[1]?.content).toBe('seed\n\nshown');
+    expect(users[1]?.hidden).not.toBe(true);
+  });
+
+  it('a file-turn intent keeps a coalescable send from merging into the queue tail', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply-A');
+    mock.script('reply-B', 'reply-C');
+    const pA = manager.send(session.id, 'start');
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pB = manager.send(session.id, 'plain follow-up', { coalescable: true });
+    const pC = manager.send(session.id, 'fix the parser', {
+      coalescable: true,
+      fileTurnIntent: { kind: 'repair-file', path: 'lib/parser.py' },
+    });
+    expect(manager.listQueued()[0]?.depth).toBe(2);
+    stall.release();
+    await Promise.all([pA, pB, pC]);
   });
 });
 

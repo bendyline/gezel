@@ -218,12 +218,16 @@ export class PortableSpeechRoutes {
       throw new Error('The selected Kokoro model is not installed.');
     if (voice && !status.voices.some((item) => item.id === voice))
       throw new Error('The selected Kokoro voice is not installed.');
+    let chunked = false;
     const output = await this.speech.synthesize(
       { text: req.text, model: req.model, voice, speed: req.speed },
       signal,
       {
         onProgress: (progress) => emit?.({ type: 'progress', progress }),
-        onChunk: (chunk) => emit?.({ type: 'chunk', chunk }),
+        onChunk: (chunk) => {
+          chunked = true;
+          emit?.({ type: 'chunk', chunk });
+        },
       },
     );
     signal.throwIfAborted();
@@ -233,6 +237,18 @@ export class PortableSpeechRoutes {
     if (meta.model !== status.kokoro.model || !status.voices.some((item) => item.id === meta.voice))
       throw new Error('The speech engine returned an unavailable model or voice.');
     const b64Wav = speechBase64(output.wav);
+    if (emit && !chunked && meta.durationSeconds > 0) {
+      emit({
+        type: 'chunk',
+        chunk: {
+          index: 0,
+          b64Wav,
+          sampleRate: meta.sampleRate,
+          durationSeconds: meta.durationSeconds,
+        },
+      });
+    }
+    if (req.persist === false) return { meta, ...(req.inline ? { b64Wav } : {}) };
     const relative = `audio/tts-${crypto.randomUUID()}.wav`;
     await this.store.writeFileBytes('artifacts', projectId, relative, output.wav, {
       createOnly: true,

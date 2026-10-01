@@ -35,6 +35,9 @@ export class RetrievalTraceBuilder {
         ...(result.arm ? { arm: result.arm } : {}),
         fusedRank: index,
         ...(result.relevance !== undefined ? { fusedRelevance: result.relevance } : {}),
+        ...(result.similarity !== undefined
+          ? { similarity: Math.round(result.similarity * 10_000) / 10_000 }
+          : {}),
         kept: false,
         reason: 'budget',
       });

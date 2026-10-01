@@ -255,6 +255,14 @@
   font-size: var(--text-xl);
   line-height: 1.3;
 }
+
+/* A step above the panel headings around it, and after them: both are one
+   class and an element, so order decides. */
+.engagement-mode-panel h3 {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+  font-size: 1.15rem;
+}
 .settings-panel h4 {
   font-size: var(--text-lg);
   line-height: 1.3;
@@ -670,40 +678,61 @@
   margin-bottom: 0;
 }
 
-.grant-verification {
-  margin: var(--space-md) 0;
-  padding: var(--space-md);
+.connected-app-code {
+  min-width: 8.5rem;
+}
+
+/* Facts about this install (About → Version, Running since): the label in
+   muted ink with its value beside it, not the browser's indented <dl>. */
+.settings-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.75rem;
+  font-size: var(--text-sm);
+}
+
+.settings-facts dt {
+  color: var(--text-muted);
+}
+
+.settings-facts dd {
+  margin: 0;
+}
+
+/* Lists of things set up in Settings — connected apps, paired servers,
+   project connections. Each row names the thing on the left and holds its
+   actions on the right. */
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connected-app-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-md);
+  padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
-.grant-verification label,
-.connected-app-code span {
-  display: block;
-  margin-bottom: var(--space-xs);
-  color: var(--text);
-  font-size: var(--text-sm);
+.connected-app-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.connected-app-name {
   font-weight: 600;
-}
-
-.grant-verification input,
-.connected-app-code input {
-  width: 8.5rem;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: var(--text-lg);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.grant-verification p {
-  margin: var(--space-sm) 0 0;
-}
-
-.connected-app-code {
-  min-width: 8.5rem;
 }
 
 .connected-app-actions {
@@ -1402,19 +1431,6 @@
   color: var(--text);
   margin-bottom: 0.5rem;
   animation: gezel-icon-pulse 1.8s ease-in-out infinite;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1.25rem;
-}
-
-.dialog-actions button:first-child {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
 }
 
 /* ── Per-project git status bar ──
@@ -2193,6 +2209,14 @@
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
   color: color-mix(in srgb, var(--warning) 72%, var(--text));
   background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+/* This sheet loads after the shared select recipe, so without this the mode
+   borders above would hold through hover instead of taking its accent. */
+.project-codex-mode-reviewed.gz-select-trigger:hover,
+.project-codex-mode-full.gz-select-trigger:hover,
+.project-claude-mode-bypassPermissions.gz-select-trigger:hover {
+  border-color: var(--accent, #b0724c);
 }
 
 /* Super-lockdown: a calm, neutral-toned sibling of the writes pill. It's a

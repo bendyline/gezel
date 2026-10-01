@@ -95,6 +95,23 @@ describe('embedded chat framing', () => {
   });
 });
 
+describe('the Office listener and other websites', () => {
+  it('never lets a page read the device identity or the public API', async () => {
+    const site = 'https://tracker.example';
+    const prior = svc.context.officeHostOrigin;
+    svc.context.officeHostOrigin = () => `https://localhost:${svc.port}`;
+    try {
+      const identity = await httpFetch(`${baseUrl}/v1/identity`, { headers: { origin: site } });
+      expect(identity.status).toBe(200);
+      expect(identity.headers.get('access-control-allow-origin')).toBeNull();
+      const models = await httpFetch(`${baseUrl}/v1/models`, { headers: { origin: site } });
+      expect(models.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      svc.context.officeHostOrigin = prior;
+    }
+  });
+});
+
 describe('isOfficeListenerRequest', () => {
   const origin = 'https://localhost:31234';
   it.each([

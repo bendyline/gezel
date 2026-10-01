@@ -188,7 +188,7 @@ import {
   type ExtraSearchCatalogs,
   SearchService,
 } from './search/search-service.js';
-import { openSecretStore } from './secrets/index.js';
+import { MemorySecretStore, openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { DEFAULT_PORT, type RunningService, type StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
@@ -502,16 +502,23 @@ export async function startProductService(
     catalog,
     sharedProject?.created ? { recruitProjectIds: [sharedProject.id] } : {},
   );
-  const secrets = await openSecretStore(home);
+  // An app embedding Gezel for its own model calls keeps no credentials: the
+  // embedded inference profile never opens the OS keychain, never writes a
+  // secrets file into the app's home, and never ingests an env file of
+  // provider keys.
+  const secrets = embeddedInferenceOnly ? new MemorySecretStore() : await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   // The engine broker needs its device-identity key, but must never ingest
   // cloud/provider credentials from an install-time env file. Those remain
   // exclusively in each account's user daemon.
-  await seedSecretsFromEnvFile(secrets);
+  if (!embeddedInferenceOnly) await seedSecretsFromEnvFile(secrets);
   // Stable device identity (Ed25519) + the registry of servers this device has
   // paired with — both for remote model execution. Identity needs the secret
-  // store (private key lives there); the registry is plain 0600 JSON.
-  const deviceIdentity = await loadOrCreateDeviceIdentity(home, secrets);
+  // store (private key lives there); the registry is plain 0600 JSON. The
+  // embedded profile offers no remote connectivity, so it has no identity.
+  const deviceIdentity = embeddedInferenceOnly
+    ? null
+    : await loadOrCreateDeviceIdentity(home, secrets);
   const remotes = await createRemotesRegistry({ home });
   const systemStatus = new SystemStatusBus();
   const mlxRuntimeStatus = new MlxRuntimeStatusBus();
@@ -837,7 +844,17 @@ export async function startProductService(
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
   // TaskRunner's live dispatch to the new activation timestamp immediately so
   // its stale-dispatch pruning does not cancel that same recovery turn.
-  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
+  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep, gatedStep, previousActivationAt }) => {
+    // The turn's session follows too. Only a self-loop stays with this turn;
+    // a route to another step gets its own dispatch, which binds its session.
+    if (newStep.id === gatedStep.id && newStep.lastActivatedAt) {
+      chat.adoptStepActivation({
+        taskRef: task.ref,
+        stepId: newStep.id,
+        previousActivationAt,
+        activationAt: newStep.lastActivatedAt,
+      });
+    }
     const gezelId = isOwnerStep(newStep)
       ? undefined
       : newStep.assignee?.kind === 'gezel'
@@ -2138,7 +2155,7 @@ export async function startProductService(
   const remoteFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
   const remoteServing = createRemoteServingController({
     cert,
-    deviceFingerprint: deviceIdentity.fingerprint,
+    deviceFingerprint: deviceIdentity?.fingerprint ?? null,
     fetch: () => {
       if (!remoteFetchRef.value) {
         throw new Error('remote serving cannot start before the HTTP app is ready');
@@ -2446,7 +2463,9 @@ export async function startProductService(
     firstPartyApps,
     deviceIdentity,
     signIdentityCertificate: () =>
-      cert ? signCertFingerprint(secrets, home, cert.sha256Hex) : Promise.resolve(null),
+      cert && deviceIdentity
+        ? signCertFingerprint(secrets, home, cert.sha256Hex)
+        : Promise.resolve(null),
     remotes,
     ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
@@ -2831,7 +2850,13 @@ export async function startProductService(
   // tree.
   if (!skipBootstrap) {
     const { bootstrapOnDeviceFirstRun } = await import('./first-run/on-device-bootstrap.js');
-    void bootstrapOnDeviceFirstRun({ store, llamaCppModels, mlxModels, catalog }).catch((err) => {
+    void bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels,
+      mlxModels,
+      catalog,
+      ...(machineEngine ? { machineEngine } : {}),
+    }).catch((err) => {
       log.error('[first-run] on-device bootstrap crashed:', err);
     });
   }

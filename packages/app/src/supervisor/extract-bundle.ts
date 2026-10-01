@@ -610,6 +610,8 @@ const TRUST_PATHS = [
   'dist',
   join('dist', 'bin'),
   join('dist', 'bin', 'gezeld.js'),
+  // gezeld.js is a Node-version launcher; the daemon entry it loads is here.
+  join('dist', 'bin', 'gezeld-main.js'),
 ] as const;
 
 /**

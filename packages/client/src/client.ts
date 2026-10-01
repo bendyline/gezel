@@ -6,7 +6,7 @@
  */
 import { GezelApiError, describeTransportError } from './api-error.js';
 import { withReadTransportRetry } from './read-retry.js';
-export { GezelApiError } from './api-error.js';
+export { GezelApiError, apiErrorMessage } from './api-error.js';
 import type {
   AppToolCallResultRequest,
   AudioEngineStatusResponse,
@@ -404,6 +404,7 @@ import type {
   SystemToolsetInstallSnapshot,
   Task,
   TaskAssignee,
+  TaskOutputsResponse,
   TaskStatus,
   TerminalThread,
   ToolsetsScope,
@@ -461,7 +462,15 @@ import type {
   EvalTrialDetail,
   EvalTrialListResponse,
 } from '@bendyline/gezel/eval';
-import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
+import type {
+  ClaudeCliPoolView,
+  ProviderCacheStatsResponse,
+  ProviderQueueState,
+  QueueStatusResponse,
+  SessionQueueState,
+  TaskHandoffBucket,
+  TaskRunnerState,
+} from '@bendyline/gezel/queue-status';
 import {
   AudioModelPullEventSchema,
   AudioSynthesizeEventSchema,
@@ -659,128 +668,20 @@ export interface UsageResponse {
 export type { NightShiftQuotaHoldReason, NightShiftStatusResponse };
 
 /**
- * Per-provider queue state — lets the UI render a "3 waiting on
- * Copilot" indicator and (on click) a breakdown of what's running
- * and pending.
+ * Queue status wire types live in `@bendyline/gezel/queue-status`, which
+ * the daemon, the phone runtime and the provider queue share; re-exported
+ * here so the long-standing `@bendyline/gezel-client` import path keeps
+ * working.
  */
-export interface ProviderQueueState {
-  running: number;
-  /**
-   * In-flight slots split by lane. Chat turns take the `interactive`
-   * lane; one-shot housekeeping (index enrichment, memory extraction,
-   * digests) takes `background`. Read `runningInteractive` — not
-   * `running` — for anything that calls the number a "chat". Absent
-   * from brokers older than the lane split.
-   */
-  runningInteractive?: number;
-  runningBackground?: number;
-  queuedInteractive: number;
-  queuedBackground: number;
-  /** Ambient jobs currently held until the provider has been quiet long enough. */
-  ambientHeld?: number;
-  concurrency: number;
-  /**
-   * Cap on how many of the `concurrency` slots can be held by the
-   * interactive lane at once. Equal to `concurrency` when no cap is
-   * configured (cloud providers). On a local engine it equals
-   * `maxConcurrency` — chats may fill every slot the engine owns; it is
-   * `backgroundConcurrency` that is held one below, so a live turn can
-   * always start.
-   */
-  interactiveConcurrency?: number;
-  /**
-   * Cap on how many slots the background lane can hold — the dual of
-   * `interactiveConcurrency`. `concurrency - backgroundConcurrency` is the
-   * headroom reserved for interactive turns under the adaptive batched-
-   * inference policy.
-   */
-  backgroundConcurrency?: number;
-  /**
-   * The engine's slot count: `--parallel N` for llama-cpp,
-   * `--max-concurrency N` for MLX, 1 for a cloud or external server whose
-   * width we don't control. This is the same number the capacity broker
-   * reserved KV for — what we hold memory for is what can generate.
-   *
-   * The denominator for "in flight"; prefer it over `concurrency`, which
-   * carries an extra logical lane so a mid-turn one-shot can enter the
-   * queue without deadlocking behind the turn awaiting it.
-   */
-  maxConcurrency?: number;
-  active: Array<{
-    sessionId?: string;
-    gezelId?: string;
-    /** Project that owns this queued work, when it is session-scoped. */
-    projectId?: string;
-    /** Display owner for service work that is not attached to a persisted gezel. */
-    actorLabel?: string;
-    /**
-     * Short, human-readable label describing what this turn is doing
-     * — e.g. "atari/3 · plan", "summary", "icon · Maya". Set by the
-     * call site; surfaced verbatim in the QueueMeter.
-     */
-    job?: string;
-    runningForMs: number;
-  }>;
-  pending: Array<{
-    /**
-     * Queue-internal id used to target this entry from the cancel and
-     * reorder routes. Stable for the lifetime of the entry; once the
-     * entry runs or is cancelled, the id is gone.
-     */
-    id: number;
-    lane: 'interactive' | 'background';
-    sessionId?: string;
-    gezelId?: string;
-    /** Project that owns this queued work, when it is session-scoped. */
-    projectId?: string;
-    /** Display owner for service work that is not attached to a persisted gezel. */
-    actorLabel?: string;
-    /** See active[].job. */
-    job?: string;
-    /** Housekeeping work that yields until the provider is otherwise idle. */
-    ambient?: boolean;
-    waitedMs: number;
-  }>;
-}
-
-/**
- * TaskRunner pending-handoff summary — a separate layer from the
- * provider queue (phase handoffs that haven't been dispatched yet).
- */
-/** One side of the pending-handoff split. */
-export interface TaskHandoffBucket {
-  count: number;
-  byGezel: Record<string, number>;
-}
-
-export interface TaskRunnerState {
-  /** Every queued handoff, whatever is holding it. */
-  pendingCount: number;
-  pendingByGezel: Record<string, number>;
-  pendingByProject: Record<string, number>;
-  /**
-   * Handoffs waiting on a free provider slot — a real backlog, and the
-   * only bucket the header's Tasks chip counts. Optional so a UI newer
-   * than its daemon degrades to the `pending*` totals.
-   */
-  dispatchable?: TaskHandoffBucket;
-  /**
-   * Handoffs parked until the next Night Shift window. Not a backlog:
-   * nobody is waiting on them and there is nothing to act on, so they
-   * stay out of the header badge and live in the Night Shift menu.
-   */
-  scheduled?: TaskHandoffBucket;
-  /** Why `dispatchable` work isn't moving. Absent when it is. */
-  holdReason?: 'engagement-off' | 'engagement-paused' | 'provider-busy';
-  /** Night Shift state, for dating the `scheduled` bucket. */
-  nightShift?: {
-    active: boolean;
-    /** ISO time the next window opens; null when Night Shift is off. */
-    opensAt: string | null;
-    /** True while night work is held by the cloud quota reserve. */
-    quotaHold?: boolean;
-  };
-}
+export type {
+  ClaudeCliPoolView,
+  ProviderCacheStatsResponse,
+  ProviderQueueState,
+  QueueStatusResponse,
+  SessionQueueState,
+  TaskHandoffBucket,
+  TaskRunnerState,
+};
 
 /**
  * Outcome of `retryTask`. `dispatched: false` still means the task was
@@ -809,79 +710,6 @@ export interface ProjectContinuationResponse {
   /** Active Night Shift work left parked because the shift is currently off. */
   deferredNightShiftTaskRefs: string[];
   holdReason?: 'engagement-off' | 'engagement-paused' | 'provider-busy';
-}
-
-/**
- * Per-session pending messages from the SessionQueue layer. Distinct
- * from `ProviderQueueState.pending` — those are at the provider level
- * (rate-limiting across sessions); these are per-session (serializing
- * messages within a single conversation).
- */
-export interface SessionQueueState {
-  sessionId: string;
-  /** Session-pinned provider, used to attribute this backlog to an engine. */
-  providerName?: ProviderName;
-  depth: number;
-  nextPreview: string;
-  entries: Array<{
-    queueId: string;
-    preview: string;
-    enqueuedAt: string;
-    /** Queued as a mid-turn nudge — merges with adjacent nudges on drain. */
-    nudge?: boolean;
-  }>;
-}
-
-export interface QueueStatusResponse {
-  providers: {
-    copilot?: ProviderQueueState;
-    openai?: ProviderQueueState;
-    anthropic?: ProviderQueueState;
-    'anthropic-cli'?: ProviderQueueState;
-    'codex-cli'?: ProviderQueueState;
-    ollama?: ProviderQueueState;
-    'llama-cpp'?: ProviderQueueState;
-    mlx?: ProviderQueueState;
-    ds4?: ProviderQueueState;
-  };
-  taskRunner: TaskRunnerState;
-  /** Per-session queued messages keyed implicitly by `sessionId` inside each entry. */
-  sessions: SessionQueueState[];
-  /**
-   * Per-provider prompt-cache stats. Empty array when no local provider
-   * has been initialized or no controller is wired. Entries may represent
-   * chat-specific state or reusable `prefix-*` state; renderers must use the
-   * included session ids when they need to distinguish the two.
-   */
-  cache: ProviderCacheStatsResponse[];
-  /** Latest normalized accelerator health used by the local-engine pill. */
-  deviceHealth?: DeviceHealthStatusSnapshot;
-  /**
-   * Claude CLI worker pool snapshot when the `anthropic-cli` provider
-   * has been initialized. Drives the header `ClaudeCliPoolPill`:
-   * always-visible "N/M warm" indicator with a per-worker dropdown
-   * showing the (gezel, project) pinned to each warm `claude`
-   * subprocess and a live "active" light per busy worker.
-   */
-  anthropicCliPool?: ClaudeCliPoolView;
-  /** Server clock at the time this snapshot was taken (ISO 8601). */
-  at: string;
-}
-
-export interface ClaudeCliPoolView {
-  size: number;
-  poolSize: number;
-  workers: Array<{
-    sessionId: string;
-    gezelId: string;
-    gezelName: string;
-    projectId: string;
-    projectName: string;
-    idle: boolean;
-    alive: boolean;
-    lastUsedAt: number;
-    claudeSessionId: string | null;
-  }>;
 }
 
 export interface EngineStatusEntry {
@@ -952,29 +780,6 @@ export interface UnloadIdleEngineRequest {
   provider: 'llama-cpp' | 'mlx' | 'ds4';
   modelId: string;
   replicaIdx: number;
-}
-
-export interface ProviderCacheStatsResponse {
-  providerName: string;
-  totalBytes: number;
-  budgetBytes: number;
-  /** RAM-aware suggested budget for this machine (override-independent). */
-  defaultBudgetBytes?: number;
-  /** Physical system RAM — upper bound for the Settings budget slider. */
-  systemRamBytes?: number;
-  /** All entries, including reusable `prefix-*` entries; legacy field name. */
-  warmSessionCount: number;
-  hits: number;
-  misses: number;
-  recentHitRate: number;
-  sessions: Array<{
-    sessionId: string;
-    gezelId?: string;
-    tokenCount: number;
-    bytes: number;
-    lastUsedAt: number;
-    evictionPriority: 'low' | 'normal';
-  }>;
 }
 
 export interface ConfigResponse {
@@ -2640,8 +2445,7 @@ export class GezelClient {
 
   /**
    * Kick off a catalog install (file path, URL, or a gilde catalog id); poll
-   * the job or subscribe to its events. A 403 `network-blocked` means the
-   * security policy turns off app network access.
+   * the job or subscribe to its events.
    */
   installKnowledgeCatalog(
     body: KnowledgeInstallRequest,
@@ -7764,11 +7568,33 @@ export class GezelClient {
     );
   }
 
-  listTaskNotes(projectId: string, num: number, stepId?: string): Promise<ListTaskNotesResponse> {
-    const qs = stepId ? `?step=${encodeURIComponent(stepId)}` : '';
+  /**
+   * `withFileReferences` asks the daemon to resolve the project files each
+   * note names into `referencedFiles`, for surfaces that render notes with
+   * clickable paths.
+   */
+  listTaskNotes(
+    projectId: string,
+    num: number,
+    stepId?: string,
+    opts: { withFileReferences?: boolean } = {},
+  ): Promise<ListTaskNotesResponse> {
+    const params = new URLSearchParams();
+    if (stepId) params.set('step', stepId);
+    if (opts.withFileReferences) params.set('refs', '1');
+    const query = params.toString();
+    const qs = query ? `?${query}` : '';
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/notes${qs}`,
+    );
+  }
+
+  /** The task's deliverable (null until it exists) and every file it has made. */
+  getTaskOutputs(projectId: string, num: number): Promise<TaskOutputsResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/outputs`,
     );
   }
 

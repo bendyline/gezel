@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { build, defineConfig } from 'tsup';
+import { ensureHandboekGezk } from '../../scripts/handboek-gezk-lock.mjs';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
@@ -77,7 +78,11 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     gezapp: 'src/gezapp-entry.ts',
-    'bin/gezeld': 'src/bin/gezeld.ts',
+    // `bin/gezeld` is the path every host spawns; it is a dependency-free
+    // launcher that refuses an unsupported Node before loading the daemon
+    // entry, whose imports would otherwise crash first (see node-version.ts).
+    'bin/gezeld': 'src/bin/gezeld-launcher.ts',
+    'bin/gezeld-main': 'src/bin/gezeld.ts',
     // Spawned as a separate process by sandbox-convert.ts to parse untrusted
     // attachments in isolation; must exist as its own file, not bundled into
     // index.js. squisq stays external (see below), so this stays small.
@@ -106,6 +111,11 @@ export default defineConfig({
     // never stall text embedding and its crashes never count against the
     // embed worker's limit.
     'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
+    // Kokoro speech synthesis. An ONNX run blocks its thread for a whole
+    // sentence; in embedded mode the event loop it would block is Electron's
+    // main process, which beachballed the app for as long as a chat reply
+    // took to narrate.
+    'providers/audio/kokoro-worker': 'src/providers/audio/kokoro-worker.ts',
     // Portable guest execution must never occupy the daemon/Electron event loop.
     'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
@@ -169,7 +179,7 @@ export default defineConfig({
   // and fragile. `@xmldom/xmldom` backs the DOMParser polyfill the DOCX importer
   // needs under node (no browser DOMParser global).
   external: [
-    // bin/gezeld imports the daemon through the package's own name so it
+    // bin/gezeld-main imports the daemon through the package's own name so it
     // stays a thin launcher over dist/index.js instead of a second bundle.
     '@bendyline/gezel-service',
     '@github/copilot-sdk',
@@ -211,6 +221,13 @@ export default defineConfig({
       recursive: true,
       filter: (source) => resolve(source) !== authoringGuide,
     });
+    // Refresh the committed catalog when its sources moved (docs, the
+    // Handboek engine, the catalog loader, or the Gilde pin). A fast input
+    // hash on every build; a rebuild only when the rendered articles changed.
+    // Runs here because the builder renders through this build's own
+    // dist/handboek.js. Under CI a stale archive that cannot be rebuilt fails
+    // the build — v1.26273.82 shipped the previous release's notes that way.
+    ensureHandboekGezk({ watch: process.argv.includes('--watch') });
     const handboekGezk = resolve(__dirname, 'assets', 'handboek', 'handboek.gezk');
     if (!existsSync(handboekGezk)) {
       throw new Error(

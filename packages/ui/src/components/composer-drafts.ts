@@ -129,6 +129,29 @@ export function forgetDraft(draftId: string): void {
   notifyDraftText();
 }
 
+/**
+ * Drafts this window has sent. A host may accept a send before it marks the
+ * draft sent (the phone does while the thread is still busy and the message
+ * queues), so for a moment the draft still lists as open. Reopening it in
+ * that window binds the composer to a draft that is sent a second later, and
+ * everything typed next fails to save and fails to send.
+ */
+const sentDrafts = new Set<string>();
+
+export function noteDraftSent(draftId: string): void {
+  sentDrafts.delete(draftId);
+  sentDrafts.add(draftId);
+  while (sentDrafts.size > MAX_ENTRIES) {
+    const oldest = sentDrafts.values().next();
+    if (oldest.done) break;
+    sentDrafts.delete(oldest.value);
+  }
+}
+
+export function wasDraftSent(draftId: string): boolean {
+  return sentDrafts.has(draftId);
+}
+
 /** Re-point a slot's draft — used when an address moves under a live composer. */
 export function moveActiveDraftId(
   fromKey: string,
@@ -144,5 +167,6 @@ export function moveActiveDraftId(
 export function resetComposerDrafts(): void {
   activeDrafts.clear();
   draftText.clear();
+  sentDrafts.clear();
   notifyDraftText();
 }

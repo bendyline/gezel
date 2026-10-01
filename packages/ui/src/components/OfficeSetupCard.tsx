@@ -1,5 +1,6 @@
 import type { OfficeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -19,7 +20,7 @@ function isLocalDesktopMode(): boolean {
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return apiErrorMessage(err);
 }
 
 /**

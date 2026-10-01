@@ -127,6 +127,10 @@ export function computeHostEnvironment(
   if (opts.distributionProfile) {
     variables.set('GEZEL_DISTRIBUTION_PROFILE', opts.distributionProfile);
   }
+  // A spawned daemon takes its profile from the environment; an in-process
+  // host also passes it to `startService` directly. Either way an inherited
+  // value never decides it.
+  variables.set('GEZEL_EMBEDDED_INFERENCE_ONLY', opts.inferenceOnly === true ? '1' : undefined);
 
   const needsNode = opts.mode !== 'in-process' || opts.inferenceOnly !== true;
   const nodePath = needsNode
