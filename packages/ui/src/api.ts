@@ -443,8 +443,10 @@ export const api = new GezelClient({
   fetch: instrumentFetch(injectedFetch ?? ((input, init) => globalThis.fetch(input, init))),
 });
 
-setPerfReportSink((report) => {
-  api.reportClientPerf(report).catch(() => {
-    /* an older daemon without the endpoint — timing is best-effort */
+if (window.__GEZEL__?.capabilities?.perfReports !== false) {
+  setPerfReportSink((report) => {
+    api.reportClientPerf(report).catch(() => {
+      /* an older daemon without the endpoint — timing is best-effort */
+    });
   });
-});
+}
