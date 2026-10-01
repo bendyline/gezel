@@ -3473,6 +3473,8 @@ export function appendCapTruncationHintToRejectedWrite(
      * (older callers and unit fixtures).
      */
     availableToolNames?: ReadonlySet<string>;
+    /** The session is executing a craftbook step (it has an active step). */
+    taskStep?: boolean;
   },
 ): string {
   if (!PAYLOAD_MUTATION_TOOL_NAMES.has(toolName)) return toolResult;
@@ -3490,13 +3492,27 @@ export function appendCapTruncationHintToRejectedWrite(
   const capLabel = maxTokens !== null ? ` (max_tokens=${maxTokens})` : '';
   const target = path ? ` for \`${path}\`` : '';
   const what = path ? 'the file body' : 'the payload';
-  const diagnosis = `${toolResult}\n\n[runtime] Your \`${toolName}\` call${target} hit the per-turn output token cap${capLabel} mid-content — ${what} never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite.`;
-  const remedies = capRecoveryRemedies(toolName, opts?.availableToolNames);
+  const head = `${toolResult}\n\n[runtime] Your \`${toolName}\` call${target} hit the per-turn output token cap${capLabel} mid-content — ${what} never finished, the write was rejected, and the file on disk is unchanged.`;
+  const diagnosis = `${head} Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite.`;
+  const roster = opts?.availableToolNames;
+  const remedies = capRecoveryRemedies(toolName, roster);
+  if (
+    remedies.length === 0 &&
+    opts?.taskStep &&
+    ARTIFACT_PAYLOAD_TOOL_NAMES.has(toolName) &&
+    (!roster || roster.has(toolName))
+  ) {
+    // A step's artifact is usually prose with a byte FLOOR, not a ceiling —
+    // api-contract-review's review.md gates on 120 bytes — so a condensed
+    // rewrite converges where "stop retrying" strands the step. Shorten the
+    // sections rather than drop them: the step's gate checks their headings.
+    return `${head} Sending the same content again WILL hit the same cap. No incremental edit tool is wired this turn, so write a condensed version that fits under the cap: keep every section the step requires, shorten each one, and drop repeated material. Send it as one \`${toolName}\` call. ${capBlockerEscalation(roster, { taskStep: true, afterCondensed: true })}`;
+  }
   if (remedies.length === 0) {
     // No incremental path exists for this drawer. Retrying is the one thing
     // guaranteed not to work, so name the ceiling and route to the honest
     // exit rather than inventing a call the roster cannot satisfy.
-    const escalation = capBlockerEscalation(opts?.availableToolNames);
+    const escalation = capBlockerEscalation(roster, { taskStep: opts?.taskStep === true });
     return `${diagnosis} No incremental edit tool is wired this turn, so this deliverable cannot be emitted in one call at the current cap. Stop retrying it. ${escalation}`;
   }
   // Without a recovered path the parameterized examples would read
@@ -3550,8 +3566,22 @@ function capRecoveryRemedies(
   return INCREMENTAL_EDIT_REMEDIES.filter((remedy) => roster.has(remedy.tool));
 }
 
-function capBlockerEscalation(roster: ReadonlySet<string> | undefined): string {
+function capBlockerEscalation(
+  roster: ReadonlySet<string> | undefined,
+  opts: { taskStep?: boolean; afterCondensed?: boolean } = {},
+): string {
   const canNote = !roster || roster.has('write_task_note');
+  if (opts.taskStep) {
+    // Never steer a step session to pause itself. Since faa5675a a session
+    // cannot resume its own paused task and `advance_task_step` refuses a
+    // paused one, so the self-pause this text used to prescribe locked an
+    // api-contract-review `review` step for good after one over-cap
+    // `write_artifact` (2026-09-30).
+    const lead = opts.afterCondensed ? 'If even that cannot fit, record' : 'Record';
+    return canNote
+      ? `${lead} the blocker with \`write_task_note\` (the tool, the path, and the cap) and end your turn.`
+      : `${opts.afterCondensed ? 'If even that cannot fit, state' : 'State'} the blocker in your reply (the tool, the path, and the cap) and end your turn.`;
+  }
   const canPause = !roster || roster.has('set_task_status');
   if (canNote && canPause) {
     return 'Record the blocker with `write_task_note` (name the tool, the path, and the cap), then `set_task_status` to paused so a human can raise the budget or split the deliverable.';

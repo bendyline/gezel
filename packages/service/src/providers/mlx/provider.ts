@@ -3058,7 +3058,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             dropped.name,
             dropped.args,
             requestMaxTokens,
-            { availableToolNames: liveToolNames },
+            {
+              availableToolNames: liveToolNames,
+              taskStep: this.deps.activeCraftbookStep !== undefined,
+            },
           );
           const noRemedy = steer.includes('No incremental edit tool is wired this turn');
           log.info(

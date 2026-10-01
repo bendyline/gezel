@@ -352,7 +352,13 @@ function partitionRepairPaths(
   return { failing, passing };
 }
 
-function craftbookMissingDeliverableRepairDirective(
+/**
+ * Pass the RESOLVED spec. Failure text names resolved paths
+ * (`tasks/1/repro.md`), so a raw `{{task.dir}}/repro.md` matched none of them
+ * and every artifact deliverable was fenced off as "Already passing — do NOT
+ * re-create" while bug-fix-tdd's repro.md did not exist (2026-09-30).
+ */
+export function craftbookMissingDeliverableRepairDirective(
   spec: CraftbookEvalSpec,
   failures: readonly string[] = [],
 ): string {
@@ -364,7 +370,7 @@ function craftbookMissingDeliverableRepairDirective(
   const lines = [
     '[craftbook eval repair]',
     seededPaths.length > 0
-      ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`read_file\` on that exact path; do not ask the user for it and do not use artifact/document/library tools.`
+      ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`read_file\` on that exact path; do not ask the user for it and do not read it with artifact/document/library tools.`
       : null,
     passingText.length > 0
       ? `Already passing — do NOT rewrite, shorten, or re-create: ${passingText.map((path) => `\`${path}\``).join(', ')}. Those files are complete; touching them regresses checks that already pass.`
@@ -372,9 +378,7 @@ function craftbookMissingDeliverableRepairDirective(
     workspaceText.failing.length > 0
       ? `Text workspace deliverables must be written with \`write_file\`: ${workspaceText.failing.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
       : null,
-    artifactsText.failing.length > 0
-      ? `Text artifact deliverables must be written with \`write_artifact\`: ${artifactsText.failing.map(describeArtifactPath).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
-      : null,
+    artifactsText.failing.length > 0 ? artifactWriteDirective(artifactsText.failing) : null,
     binaryProductionInstruction(outputs.workspace.binary),
     artifactBinaryProductionInstruction(outputs.artifacts.binary),
     outputs.workspace.binary.length + outputs.artifacts.binary.length > 0
@@ -382,6 +386,15 @@ function craftbookMissingDeliverableRepairDirective(
       : 'If you invoked a craftbook task, do not wait for another assignee before producing the eval deliverable. Execute the active step yourself or make an explicit file-deliverable handoff, then write the required file.',
   ].filter((line): line is string => !!line);
   return lines.join('\n');
+}
+
+function artifactWriteDirective(paths: readonly string[]): string {
+  const only = paths.length === 1 ? paths[0]! : null;
+  const call =
+    only && !/\{\{/.test(only)
+      ? `write_artifact({ path: "${only}", content: <the full deliverable contents> })`
+      : 'write_artifact({ path, content })';
+  return `Text artifact deliverables go in the artifacts drawer — write each with \`${call}\`: ${paths.map(describeArtifactPath).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`;
 }
 
 async function craftbookExistingDeliverableRepairDirective(
@@ -1001,12 +1014,54 @@ function taskProgressFingerprint(tasks: Task[]): string {
   return tasks
     .map((task) => {
       const steps = task.craftbook.steps
-        .map((step) => `${step.id}:${(step as { attemptCount?: number }).attemptCount ?? 0}`)
+        .map((step) => `${step.id}:${stepActivations(step)}`)
         .join(',');
       return `${task.ref}|${task.status}|${task.activeStepId ?? '-'}|${steps}`;
     })
     .sort()
     .join('\n');
+}
+
+function stepActivations(step: object): number {
+  const count = (step as { attemptCount?: unknown }).attemptCount;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+/**
+ * Activations of one step that still count as progress. A loop that keeps
+ * re-entering the same steps stops earning milestones here, so an unbounded
+ * `evaluate → build` cycle holds the plateau key and the retry loop can still
+ * judge it.
+ */
+export const CRAFTBOOK_STEP_MILESTONE_CAP = 3;
+
+/**
+ * How far the craftbook task has walked, as a number the retry-loop plateau
+ * key can carry (`TrialFinalSniff.milestones`): Σ min(activations, cap) over
+ * every step, plus one per completed task.
+ *
+ * Without it the plateau key held through real step transitions. On
+ * craftbook-spreadsheet-model (2026-09-30) the task went scope → build →
+ * evaluate → build while the check score sat at 5/6, because the one failing
+ * check was "has not reached a terminal step" — a condition the whole walk
+ * leaves unchanged — and the retry loop charged the entire walk to one
+ * plateau.
+ *
+ * Counts ACTIVATIONS (`attemptCount`) only. Gate rejections
+ * (`gateAttempts`) hold a step active without re-activating it, so a model
+ * resubmitting the same failing deliverable does not move this.
+ */
+export function craftbookStepMilestones(
+  tasks: ReadonlyArray<{ status?: string; craftbook: { steps: readonly object[] } }>,
+): number {
+  let total = 0;
+  for (const task of tasks) {
+    for (const step of task.craftbook.steps) {
+      total += Math.min(stepActivations(step), CRAFTBOOK_STEP_MILESTONE_CAP);
+    }
+    if (task.status === 'complete') total += 1;
+  }
+  return total;
 }
 
 async function taskGraphTextForSpec(
@@ -1021,6 +1076,8 @@ async function taskGraphTextForSpec(
   matchingCraftbookTaskCount: number;
   authoringGezelId?: string;
   workflowRunning: boolean;
+  /** Set for workflow / terminal-step specs; see `craftbookStepMilestones`. */
+  stepMilestones?: number;
 }> {
   const listed = await client.listProjectTasks(projectId);
   const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
@@ -1148,6 +1205,7 @@ async function taskGraphTextForSpec(
     // "still going", which a structural guess cannot.
     workflowRunning: matching.some((task) => task.status === 'active'),
     ...(authoringTask ? { authoringGezelId: taskAssigneeGezelId(authoringTask) } : {}),
+    ...(requireTerminalStep ? { stepMilestones: craftbookStepMilestones(matching) } : {}),
   };
 }
 
@@ -2088,6 +2146,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             matchingCraftbookTaskCount: number;
             authoringGezelId?: string;
             workflowRunning: boolean;
+            stepMilestones?: number;
           }
         | undefined;
       let gateWorkspace = workspace;
@@ -2177,12 +2236,24 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         primaryDeliverable !== undefined
           ? (primaryText?.length ?? 0)
           : (taskNotes?.text.length ?? taskGraph?.text.length ?? 0);
+      // Step progress rides the plateau key so a real step transition restarts
+      // the retry-loop clock. EVERY recordSniff below must carry the same
+      // value, or the key flips between polls and the plateau never ages.
+      const stepMilestones =
+        taskGraph?.stepMilestones !== undefined ? { milestones: taskGraph.stepMilestones } : {};
       ctx.recordSniff?.({
         key: spec.scenarioId,
         score: passed,
         bytes: sniffBytes,
         failReason: repairFailures[0],
+        ...stepMilestones,
       });
+      if (taskGraph?.stepMilestones !== undefined) {
+        ctx.logChanged(
+          `craftbook:${spec.scenarioId}:steps`,
+          `[craftbook:${spec.craftbookId}] step milestones=${taskGraph.stepMilestones} (${taskGraph.progress.replace(/\n/g, ' ; ') || 'no task yet'})`,
+        );
+      }
       ctx.logChanged(
         `craftbook:${spec.scenarioId}`,
         `[scenario] ${spec.scenarioId} bytes=${sniffBytes} checks=${passed}/${checkCount} failures=${failures.join(' | ') || 'none'}`,
@@ -2353,9 +2424,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             ? await readDeliverable(workspace, repairDeliverable)
             : null;
       // Refine the sniff now that the repair target has been read. Only
-      // `deliverableMissing` is added, deliberately: it is absent from
-      // `retryLoopSniffKey`, so this cannot churn the plateau the way a
-      // late-arriving `repairFilePath` would.
+      // `deliverableMissing` and `repairArtifactPath` are added, deliberately:
+      // both are absent from `retryLoopSniffKey`, so this cannot churn the
+      // plateau the way a late-arriving `repairFilePath` would. The drawer
+      // path lets the runner's kicks name `write_artifact` for it.
       if (repairDeliverable) {
         ctx.recordSniff?.({
           key: spec.scenarioId,
@@ -2363,6 +2435,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           bytes: sniffBytes,
           failReason: repairFailures[0],
           deliverableMissing: repairText === null || repairText.length === 0,
+          ...(repairDeliverable.artifact && !/\{\{/.test(repairDeliverable.path)
+            ? { repairArtifactPath: repairDeliverable.path }
+            : {}),
+          ...stepMilestones,
         });
       }
       if (repairDeliverable) {
@@ -2379,7 +2455,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             ...(taskGraph?.authoringGezelId ? { targetGezelId: taskGraph.authoringGezelId } : {}),
             nearMiss,
             expectedSurface: repairDeliverable.artifact ? 'artifact' : 'workspace',
-            repairDirective: craftbookMissingDeliverableRepairDirective(spec, failures),
+            repairDirective: craftbookMissingDeliverableRepairDirective(resolvedSpec, failures),
           });
           return { done: false };
         }

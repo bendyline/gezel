@@ -6,6 +6,7 @@ import {
   type TaskCraftbookStep,
   type TaskInputRecord,
   applyStepToolPolicy,
+  createLogger,
   deliverableKindForStep,
   isLocalProvider,
   normalizeScriptRefs,
@@ -43,6 +44,8 @@ import {
 } from './step-tool-kit.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { shouldConstrainToExactCraftbookInvocation } from './turn-intent-plan.js';
+
+const log = createLogger('chat');
 
 /**
  * Procedure-text scanning is lexical and re-runs on every turn of a
@@ -520,6 +523,9 @@ export async function resolveSessionToolSurface(
     ...(opts.onCapTrim ? { onTrim: opts.onCapTrim } : {}),
   });
 
+  // Every message-shaped clamp below returns its input untouched when it does
+  // not fire, so a different reference afterwards means one of them narrowed.
+  const cappedAllowlist = allowlist;
   const allowlistBeforeRetrievalFirst = allowlist;
   if (isLocalProvider(opts.provider)) {
     allowlist = constrainAllowlistForProjectRetrievalFirst(allowlist, {
@@ -674,6 +680,25 @@ export async function resolveSessionToolSurface(
     ) {
       withStepCompletion.add('run_installed_script');
     }
+    // The clamps' tool lists are WORKSPACE writers, and an artifact-medium
+    // step already lost `workspace-fs-write` to its policy, so clamp ∩ roster
+    // left readers only. A bug-fix-tdd `reproduce` session fell from 18 tools
+    // to 8 after a harness "[scenario check]" message — no `write_artifact`
+    // for its repro.md, no `run_package_script` its procedure requires — and
+    // an api-contract-review `review` session fell to 9 after a "write_file"
+    // kick. Both paused themselves as blocked, and since the scope guard
+    // stops a session resuming its own task, both stayed locked (2026-09-30).
+    // A step keeps the writer for its own output drawer and every tool its
+    // procedure names, through any clamp.
+    if (allowlist !== cappedAllowlist) {
+      const restored: string[] = [];
+      for (const name of new Set([...stepOutputWriters(surfaceSteps), ...mandatedStepTools])) {
+        if (!rawAllowlist.has(name) || withStepCompletion.has(name)) continue;
+        withStepCompletion.add(name);
+        restored.push(name);
+      }
+      if (restored.length > 0) logStepFloorRestore(opts.session.id, opts.session.stepId, restored);
+    }
     allowlist = withStepCompletion;
   }
 
@@ -819,6 +844,49 @@ const STEP_COMPLETION_TOOLS: readonly string[] = [
   'advance_task_step',
   'set_task_status',
 ];
+
+/**
+ * The tool that lands a step's result in each drawer it writes. `write_file`
+ * alone for the workspace: it can always do the job, and the clamps that keep
+ * the surgical editors already keep them. Task notes ride the completion floor.
+ */
+function stepOutputWriters(steps: ReadonlyArray<StepSurfaceInput>): string[] {
+  const out = new Set<string>();
+  for (const step of steps) {
+    const media = outputMediaForStep(step);
+    if (media.has('artifact')) out.add('write_artifact');
+    if (media.has('workspace')) out.add('write_file');
+  }
+  return [...out];
+}
+
+/**
+ * The surface resolves on every turn and on both surfaces, so log a restore
+ * only when what it restored changes for that session. Bounded because a
+ * daemon accumulates sessions over a long uptime.
+ */
+const LOGGED_STEP_FLOOR_RESTORES = new Map<string, string>();
+const LOGGED_STEP_FLOOR_RESTORES_MAX = 256;
+
+function logStepFloorRestore(
+  sessionId: string,
+  stepId: string | undefined,
+  restored: readonly string[],
+): void {
+  const key = `${stepId ?? '-'}:${[...restored].sort().join(',')}`;
+  if (LOGGED_STEP_FLOOR_RESTORES.get(sessionId) === key) return;
+  if (
+    !LOGGED_STEP_FLOOR_RESTORES.has(sessionId) &&
+    LOGGED_STEP_FLOOR_RESTORES.size >= LOGGED_STEP_FLOOR_RESTORES_MAX
+  ) {
+    const oldest = LOGGED_STEP_FLOOR_RESTORES.keys().next();
+    if (!oldest.done) LOGGED_STEP_FLOOR_RESTORES.delete(oldest.value);
+  }
+  LOGGED_STEP_FLOOR_RESTORES.set(sessionId, key);
+  log.info(
+    `tool-clamp: restored step floor for session ${sessionId.slice(0, 8)} step=${stepId ?? '-'} after a message clamp: ${restored.join(', ')}`,
+  );
+}
 
 const MEESTER_TOOL_CAP_PRIORITY = [
   'start_project',

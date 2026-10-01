@@ -5668,7 +5668,12 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
               call.function.name,
               args,
               requestMaxTokens,
-              { argsLostToCap, pathHint: recoveredPath, availableToolNames: liveToolNames },
+              {
+                argsLostToCap,
+                pathHint: recoveredPath,
+                availableToolNames: liveToolNames,
+                taskStep: this.deps.activeCraftbookStep !== undefined,
+              },
             );
             if (output.length !== before) {
               const path =

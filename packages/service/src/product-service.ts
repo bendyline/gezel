@@ -837,7 +837,17 @@ export async function startProductService(
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
   // TaskRunner's live dispatch to the new activation timestamp immediately so
   // its stale-dispatch pruning does not cancel that same recovery turn.
-  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
+  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep, gatedStep, previousActivationAt }) => {
+    // The turn's session follows too. Only a self-loop stays with this turn;
+    // a route to another step gets its own dispatch, which binds its session.
+    if (newStep.id === gatedStep.id && newStep.lastActivatedAt) {
+      chat.adoptStepActivation({
+        taskRef: task.ref,
+        stepId: newStep.id,
+        previousActivationAt,
+        activationAt: newStep.lastActivatedAt,
+      });
+    }
     const gezelId = isOwnerStep(newStep)
       ? undefined
       : newStep.assignee?.kind === 'gezel'

@@ -1660,6 +1660,66 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     expect(after).toContain('set_task_status');
   });
 
+  it('tells a craftbook step to condense an over-cap write_artifact and never to pause', () => {
+    // A paused step cannot resume itself, so "pause" locked api-contract-review
+    // `review` for good after one over-cap review.md (2026-09-30).
+    const roster = new Set([
+      'write_artifact',
+      'read_artifact',
+      'write_task_note',
+      'set_task_status',
+      'advance_task_step',
+    ]);
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_artifact',
+      { path: 'tasks/1/review.md', content: 'A'.repeat(30000) },
+      6144,
+      { availableToolNames: roster, taskStep: true },
+    );
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('tasks/1/review.md');
+    expect(after).toContain('condensed version that fits under the cap');
+    expect(after).toContain('keep every section the step requires');
+    expect(after).toContain('one `write_artifact` call');
+    expect(after).toContain('`write_task_note`');
+    expect(after).toContain('end your turn');
+    expect(after).not.toContain('set_task_status');
+    expect(after).not.toMatch(/\bpause/i);
+    expect(after).not.toContain('Stop retrying it');
+
+    // Roster-aware: no note tool means the reply carries the blocker.
+    const noNote = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_artifact',
+      { path: 'tasks/1/review.md', content: 'A'.repeat(30000) },
+      6144,
+      { availableToolNames: new Set(['write_artifact', 'set_task_status']), taskStep: true },
+    );
+    expect(noNote).toContain('condensed version');
+    expect(noNote).not.toContain('write_task_note');
+    expect(noNote).not.toContain('set_task_status');
+    expect(noNote).toContain('state the blocker in your reply');
+  });
+
+  it('never prescribes pausing to a step session whose workspace write has no incremental tool', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_file',
+      { path: 'src/app.js', content: 'A'.repeat(30000) },
+      6144,
+      {
+        availableToolNames: new Set(['write_file', 'write_task_note', 'set_task_status']),
+        taskStep: true,
+      },
+    );
+    expect(after).toContain('Stop retrying it');
+    expect(after).toContain('`write_task_note`');
+    expect(after).toContain('end your turn');
+    expect(after).not.toContain('set_task_status');
+    expect(after).not.toContain('condensed');
+  });
+
   it('falls back to a plain explanation when no task tools are wired either', () => {
     const after = appendCapTruncationHintToRejectedWrite(
       REJECTED,

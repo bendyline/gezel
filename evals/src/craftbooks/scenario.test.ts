@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MockServicesRuntime } from '../mock/mock-server.ts';
 import type { EvalContext } from '../types.ts';
 import {
+  CRAFTBOOK_STEP_MILESTONE_CAP,
   RUNNING_WORKFLOW_GRACE_POLLS,
   craftbookScenarioFromSpec,
+  craftbookStepMilestones,
   evaluateHistoryExpectations,
   prioritizeRepairFailures,
   repairDeliverableForFailures,
@@ -2812,5 +2814,139 @@ describe('virtual repair target does not starve deliverables', () => {
     const passed = 8;
     if (state.score !== passed) state = { score: passed, polls: 0 };
     expect(holdsChannel(state.polls)).toBe(true);
+  });
+});
+
+describe('craftbook step milestones', () => {
+  const walk = (
+    steps: Array<{ id: string; attemptCount?: number; gateAttempts?: number }>,
+    status = 'active',
+  ) => [{ status, craftbook: { steps } }];
+
+  // INCIDENT (craftbook-spreadsheet-model, 2026-09-30): scope → build →
+  // evaluate → build held one plateau key at checks=5/6, because the failing
+  // check ("has not reached a terminal step") is unchanged by the whole walk.
+  it('rises when the task loops back into a step', () => {
+    const firstPass = craftbookStepMilestones(
+      walk([
+        { id: 'scope', attemptCount: 1 },
+        { id: 'build', attemptCount: 1 },
+        { id: 'evaluate', attemptCount: 1 },
+      ]),
+    );
+    const loopedBack = craftbookStepMilestones(
+      walk([
+        { id: 'scope', attemptCount: 1 },
+        { id: 'build', attemptCount: 2 },
+        { id: 'evaluate', attemptCount: 1 },
+      ]),
+    );
+    expect(firstPass).toBe(3);
+    expect(loopedBack).toBe(4);
+  });
+
+  it('stops rising once a looping step passes the cap', () => {
+    const atCap = craftbookStepMilestones(
+      walk([
+        { id: 'build', attemptCount: CRAFTBOOK_STEP_MILESTONE_CAP },
+        { id: 'evaluate', attemptCount: CRAFTBOOK_STEP_MILESTONE_CAP },
+      ]),
+    );
+    const pastCap = craftbookStepMilestones(
+      walk([
+        { id: 'build', attemptCount: CRAFTBOOK_STEP_MILESTONE_CAP + 6 },
+        { id: 'evaluate', attemptCount: CRAFTBOOK_STEP_MILESTONE_CAP + 5 },
+      ]),
+    );
+    expect(pastCap).toBe(atCap);
+    expect(atCap).toBe(2 * CRAFTBOOK_STEP_MILESTONE_CAP);
+  });
+
+  it('does not count gate rejections, which hold a step without re-activating it', () => {
+    const before = craftbookStepMilestones(walk([{ id: 'build', attemptCount: 1 }]));
+    const afterRejections = craftbookStepMilestones(
+      walk([{ id: 'build', attemptCount: 1, gateAttempts: 7 }]),
+    );
+    expect(afterRejections).toBe(before);
+  });
+
+  it('counts finishing the task', () => {
+    const steps = [{ id: 'build', attemptCount: 1 }];
+    expect(craftbookStepMilestones(walk(steps, 'complete'))).toBe(
+      craftbookStepMilestones(walk(steps, 'active')) + 1,
+    );
+    expect(craftbookStepMilestones([])).toBe(0);
+  });
+
+  it('rides every workflow sniff, and only workflow sniffs', async () => {
+    const task = {
+      projectId: 'project-1',
+      num: 1,
+      ref: 'T-1',
+      title: 'Run workflow',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'runner-1' },
+      activeStepId: 'evaluate',
+      craftbook: {
+        id: 'sample-book',
+        steps: [
+          { id: 'build', name: 'Build', attemptCount: 2 },
+          { id: 'evaluate', name: 'Evaluate', attemptCount: 1, gateAttempts: 4 },
+          { id: 'finish', name: 'Finish', terminal: true },
+        ],
+      },
+      sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+    };
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({ tasks: [task] }),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      listInflightTurns: vi.fn().mockResolvedValue({ inflight: [] }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: 'x' }),
+    };
+    const recordSniff = vi.fn();
+    const workflow = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      mode: 'workflow',
+      success: { summary: 'The real workflow completes.' },
+    });
+    await workflow.successCheck({
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+      recordSniff,
+    } as unknown as EvalContext);
+    expect(recordSniff).toHaveBeenCalled();
+    for (const [sniff] of recordSniff.mock.calls) {
+      expect(sniff.milestones).toBe(3);
+    }
+
+    const artifactRecord = vi.fn();
+    const artifactTask = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      success: {
+        summary: 'workspace/out.md exists.',
+        deliverables: [{ path: 'out.md', kind: 'generic-file', minBytes: 10 }],
+      },
+    });
+    await artifactTask.successCheck({
+      client: {
+        ...client,
+        fetchProjectWorkspaceBlob: vi.fn().mockResolvedValue(new Blob(['complete output'])),
+      },
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+      recordSniff: artifactRecord,
+    } as unknown as EvalContext);
+    expect(artifactRecord).toHaveBeenCalled();
+    for (const [sniff] of artifactRecord.mock.calls) {
+      expect(sniff).not.toHaveProperty('milestones');
+    }
   });
 });

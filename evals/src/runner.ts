@@ -74,6 +74,7 @@ import {
   noteHarnessInterventionDelivered,
 } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
+import { taskStepRouteFor } from './task-step-routing.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
   EvalContext,
@@ -2299,6 +2300,7 @@ export async function pollUntilDone(
     bytes: number;
     failReason?: string;
     repairFilePath?: string;
+    repairArtifactPath?: string;
     runtimePassed?: number;
     runtimeFailed?: number;
     milestones?: number;
@@ -2311,6 +2313,7 @@ export async function pollUntilDone(
     bytes: number;
     failReason?: string;
     repairFilePath?: string;
+    repairArtifactPath?: string;
     runtimePassed?: number;
     runtimeFailed?: number;
     milestones?: number;
@@ -2502,7 +2505,7 @@ export async function pollUntilDone(
   // See the re-engage pair below: attempted gates the budget, delivered gates
   // what the failure reason is allowed to assert.
   let retryLoopNudgeAttempted = false;
-  let retryLoopNudgeDelivered = false;
+  let retryLoopNudgeDelivery: RecoveryNudgeDelivery | null = null;
   let sniffPlateauKey: string | null = null;
   let sniffPlateauStartedAt = Date.now();
   // One plateau reset per delivered escalation rung (stage 0/1/2), cleared
@@ -2532,7 +2535,7 @@ export async function pollUntilDone(
   // them is how a trial came to report "nudge was sent and ignored" about a
   // message the service had rejected with a 400.
   let reEngageNudgeAttempted = false;
-  let reEngageNudgeDelivered = false;
+  let reEngageNudgeDelivery: RecoveryNudgeDelivery | null = null;
   let reEngageNudgeDeliveredAt: number | null = null;
   let reEngageTargetGezelId: string | null = null;
   const reEngageThresholdMs = Math.floor(args.softProgressTimeoutMs * 0.8);
@@ -2907,13 +2910,12 @@ export async function pollUntilDone(
             sniff,
             downstream: downstream !== null,
           });
-          await deliverRecoveryNudge(args.client, nudge, downstream, {
+          reEngageNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
             meesterId: args.meesterId,
             fallbackGezelId: targetId,
             ...(filePath ? { filePath } : {}),
             log: args.log,
           });
-          reEngageNudgeDelivered = true;
           reEngageNudgeDeliveredAt = Date.now();
           reEngageTargetGezelId = targetId;
           noteHarnessInterventionDelivered(ctx, reEngageNudgeDeliveredAt);
@@ -2934,11 +2936,10 @@ export async function pollUntilDone(
         // for the whole soft window; if we got here, the chat manager
         // simply stopped issuing turns — petshop case.
         const stallSeconds = Math.round(softStuckMs / 1000);
-        const nudgeNote = reEngageNudgeDelivered
-          ? ' (re-engage nudge was sent and ignored)'
-          : reEngageNudgeAttempted
-            ? ' (re-engage nudge could not be delivered — the model never saw it)'
-            : '';
+        const nudgeNote = recoveryNudgeNote('re-engage', {
+          attempted: reEngageNudgeAttempted,
+          delivery: reEngageNudgeDelivery,
+        });
         // An active render normally keeps the soft digest moving via
         // sd-server log lines; if we got here WITH a render open
         // (started, never completed) the image engine wedged mid-job.
@@ -3080,18 +3081,17 @@ export async function pollUntilDone(
           );
           try {
             const filePath = recoveryFilePathForSniff(latestSniff);
-            const filePathClause = filePath ? ` \`${filePath}\`` : '';
-            const writeCall = formatImmediateWriteFileCall(filePath);
-            const nudge = artifactExists
-              ? `Direct kick from the eval harness: your deliverable file${filePathClause} EXISTS but still fails the latest \`[scenario check]\`. Treat that check like a failing test: fix the specific error it names, preserve working behavior, and make the smallest targeted code/content edit that clears the gate. Do NOT recreate the file from scratch and do NOT reply that you already wrote it. If the check names a runtime/command failure, repair the file that caused it and verify with the available execution tool when practical. Your next tool call must be an edit (\`replace_in_file\`, \`append_to_file\`, \`apply_patch\`, or \`write_file\`); do not call more read-only tools until after that edit.`
-              : `Direct kick from the eval harness: you've been reading and exploring for a while but the deliverable file hasn't reached its expected path yet${filePath ? ` (\`${filePath}\`)` : ''}. Stop reading. Do not end your turn until \`write_file\` has created the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `review.md`, `index.html`)'} with whatever you can write now — a stub is better than nothing. You can refine it on the next turn. Do not use \`write_artifact\` for source or app files, and do not call any more read-only tools until the workspace file exists.`;
-            await deliverRecoveryNudge(args.client, nudge, downstream, {
+            const nudge = buildRetryLoopNudge({
+              filePath,
+              artifactPath: recoveryArtifactPathForSniff(latestSniff),
+              artifactExists,
+            });
+            retryLoopNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
               meesterId: args.meesterId,
               fallbackGezelId: targetId,
               ...(filePath ? { filePath } : {}),
               log: args.log,
             });
-            retryLoopNudgeDelivered = true;
             noteHarnessInterventionDelivered(ctx);
           } catch (err) {
             args.log(
@@ -3253,11 +3253,10 @@ export async function pollUntilDone(
                         ? ' (and wrote no files at all)'
                         : ' (write counter blind for this provider — re-write count unknown)'
                   }`;
-          const nudgeNote = retryLoopNudgeDelivered
-            ? ' (retry-loop nudge was sent and ignored)'
-            : retryLoopNudgeAttempted
-              ? ' (retry-loop nudge could not be delivered — the model never saw it)'
-              : '';
+          const nudgeNote = recoveryNudgeNote('retry-loop', {
+            attempted: retryLoopNudgeAttempted,
+            delivery: retryLoopNudgeDelivery,
+          });
           args.log(
             `[poll] retry-loop (${path}): sniff "${currentSniffKey}" stuck ${plateauMin}m — ${detail}${nudgeNote}; failing trial`,
           );
@@ -4141,6 +4140,44 @@ function formatImmediateWriteFileCall(filePath: string | null): string {
   return `write_file({ path: ${path}, content: <the full deliverable contents> })`;
 }
 
+/**
+ * The drawer path of a deliverable the scenario grades in the ARTIFACTS
+ * drawer, when it selected one for repair. Every kick below defaults to the
+ * workspace, and a craftbook step whose result is an artifact has no
+ * `write_file`: api-contract-review's `review` step was told "Your next tool
+ * call MUST be `write_file(...)`" for `review.md`, and its session reported
+ * that no writer was wired at all (2026-09-30).
+ */
+export function recoveryArtifactPathForSniff(
+  sniff: { repairArtifactPath?: string } | null | undefined,
+): string | null {
+  const path = sniff?.repairArtifactPath?.trim();
+  return path ? path : null;
+}
+
+function formatWriteArtifactCall(path: string, content = 'the full deliverable contents'): string {
+  return `write_artifact({ path: ${JSON.stringify(path)}, content: <${content}> })`;
+}
+
+/** The retry-loop kick: the deliverable plateaued while the team kept reading. */
+export function buildRetryLoopNudge(args: {
+  filePath: string | null;
+  artifactPath: string | null;
+  artifactExists: boolean;
+}): string {
+  const { filePath, artifactPath, artifactExists } = args;
+  if (artifactPath) {
+    return artifactExists
+      ? `Direct kick from the eval harness: your deliverable \`${artifactPath}\` EXISTS in the artifacts drawer but still fails the latest \`[scenario check]\`. Fix the specific error it names and keep what already passes. Do NOT reply that you already wrote it. Re-read it with \`read_artifact\`, then send the whole corrected file: \`${formatWriteArtifactCall(artifactPath, 'the full corrected contents')}\`.`
+      : `Direct kick from the eval harness: you've been reading for a while and \`${artifactPath}\` is still not in the artifacts drawer. Stop reading. Your next tool call MUST be \`${formatWriteArtifactCall(artifactPath)}\`, even if the content is incomplete — a stub is better than nothing, and you can rewrite it on the next turn. It is graded in the artifacts drawer, not the workspace.`;
+  }
+  const filePathClause = filePath ? ` \`${filePath}\`` : '';
+  const writeCall = formatImmediateWriteFileCall(filePath);
+  return artifactExists
+    ? `Direct kick from the eval harness: your deliverable file${filePathClause} EXISTS but still fails the latest \`[scenario check]\`. Treat that check like a failing test: fix the specific error it names, preserve working behavior, and make the smallest targeted code/content edit that clears the gate. Do NOT recreate the file from scratch and do NOT reply that you already wrote it. If the check names a runtime/command failure, repair the file that caused it and verify with the available execution tool when practical. Your next tool call must be an edit (\`replace_in_file\`, \`append_to_file\`, \`apply_patch\`, or \`write_file\`); do not call more read-only tools until after that edit.`
+    : `Direct kick from the eval harness: you've been reading and exploring for a while but the deliverable file hasn't reached its expected path yet${filePath ? ` (\`${filePath}\`)` : ''}. Stop reading. Do not end your turn until \`write_file\` has created the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `review.md`, `index.html`)'} with whatever you can write now — a stub is better than nothing. You can refine it on the next turn. Do not use \`write_artifact\` for source or app files, and do not call any more read-only tools until the workspace file exists.`;
+}
+
 export function buildReEngageNudge(args: {
   sniff: {
     key: string;
@@ -4148,6 +4185,7 @@ export function buildReEngageNudge(args: {
     bytes: number;
     failReason?: string;
     repairFilePath?: string;
+    repairArtifactPath?: string;
     deliverableMissing?: boolean;
   } | null;
   downstream: boolean;
@@ -4166,6 +4204,14 @@ export function buildReEngageNudge(args: {
   // cannot satisfy, delivered with full confidence.
   const artifactExists = sniff?.deliverableMissing === true ? false : (sniff?.bytes ?? 0) > 0;
   const failure = sniff?.failReason?.replace(/\s+/g, ' ').trim().slice(0, 700);
+
+  const artifactPath = recoveryArtifactPathForSniff(sniff);
+  if (artifactPath) {
+    return {
+      filePath,
+      text: artifactReEngageText(artifactPath, artifactExists, downstream, failure),
+    };
+  }
 
   if (artifactExists) {
     const path = filePath ? ` \`${filePath}\`` : '';
@@ -4195,6 +4241,24 @@ export function buildReEngageNudge(args: {
     filePath,
     text: `Direct kick from the eval harness: the deliverable hasn't landed in the project's workspace yet${filePathClause}. Do not write more planning documents, do not ask for confirmation. Do not end your turn until \`write_file\` has landed the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `index.html`)'} in the project's workspace. Use \`copy_artifact_to_workspace\` only for binary assets that already exist in artifacts. Do not use \`write_artifact\` for source or app files.`,
   };
+}
+
+/** {@link buildReEngageNudge} for a deliverable graded in the artifacts drawer. */
+function artifactReEngageText(
+  path: string,
+  exists: boolean,
+  downstream: boolean,
+  failure: string | undefined,
+): string {
+  const failureText = failure ? ` Latest checker failure: ${failure}` : '';
+  if (exists) {
+    return downstream
+      ? `Direct kick from the eval harness: \`${path}\` is in the artifacts drawer but has not passed yet.${failureText} Fix that failure and keep what already passes. Re-read it with \`read_artifact\`, then send the whole corrected file: \`${formatWriteArtifactCall(path, 'the full corrected contents')}\`. Do not answer only in prose.`
+      : `Quick check: \`${path}\` is in the artifacts drawer but has not reached success.${failureText} Continue the repair yourself or hand the exact checker failure to the step's assignee. Preserve what already passes.`;
+  }
+  return downstream
+    ? `Direct kick from the eval harness: \`${path}\` has not reached the artifacts drawer yet. Do not write more planning documents, do not ask for confirmation. Your next tool call MUST be \`${formatWriteArtifactCall(path)}\`. It is graded in the artifacts drawer, not the workspace.`
+    : `Quick check: your team has been active but \`${path}\` has not reached the artifacts drawer yet. Make sure the step that owns it writes it with \`write_artifact\`. If a specialist is blocked or waiting for input, surface that now.`;
 }
 
 const SNIFF_KEY_WORKSPACE_FILE_PATHS: Record<string, string> = {
@@ -4669,7 +4733,7 @@ async function finalize(args: {
  * an UNBOUND session into actually producing the file. A bound session needs
  * none of that — its craftbook step gate is stricter.
  */
-async function deliverRecoveryNudge(
+export async function deliverRecoveryNudge(
   client: GezelClient,
   nudge: string,
   target: {
@@ -4680,13 +4744,30 @@ async function deliverRecoveryNudge(
     taskRef: string | null;
   } | null,
   opts: { meesterId: string; fallbackGezelId: string; filePath?: string; log: (m: string) => void },
-): Promise<void> {
+): Promise<RecoveryNudgeDelivery> {
   if (target?.sessionId && target.taskRef) {
+    // A send into a session that is mid-turn is ENQUEUED, not seen: the model
+    // reads it only once the running turn ends. Reporting that as "delivered"
+    // and later as "sent and ignored" blamed the model for a message it had
+    // not yet been shown.
+    const busy = await (async () => {
+      try {
+        const { inflight } = await client.listInflightTurns({ projectId: target.projectId });
+        return (inflight ?? []).find((t) => t.sessionId === target.sessionId);
+      } catch {
+        return undefined;
+      }
+    })();
     await client.sendToChatSession(target.sessionId, { message: nudge, nudge: true });
-    opts.log(
-      `[poll] recovery nudge delivered into ${target.taskRef} session ${target.sessionId.slice(0, 8)} (step context preserved)`,
-    );
-    return;
+    const where = `${target.taskRef} session ${target.sessionId.slice(0, 8)}`;
+    if (busy) {
+      opts.log(
+        `[poll] recovery nudge queued behind an in-flight turn (${Math.round(busy.elapsedMs / 1000)}s) in ${where} — the model sees it only when that turn ends (step context preserved)`,
+      );
+      return { kind: 'queued', sessionId: target.sessionId, gezelId: target.gezelId };
+    }
+    opts.log(`[poll] recovery nudge delivered into ${where} (step context preserved)`);
+    return { kind: 'delivered' };
   }
   if (target) {
     await client.messageGezel(target.gezelId, {
@@ -4696,21 +4777,171 @@ async function deliverRecoveryNudge(
       projectId: target.projectId,
       ...attachableDeliverable(opts.filePath, target.role, opts.log),
     });
-    return;
+    return { kind: 'delivered' };
   }
   await client.sendChatMessage(opts.fallbackGezelId, { message: nudge, projectId: 'default' });
+  return { kind: 'delivered' };
+}
+
+export type RecoveryNudgeDelivery =
+  | { kind: 'delivered' }
+  | { kind: 'queued'; sessionId: string; gezelId: string };
+
+/**
+ * The failure-reason clause for a harness nudge. Only a nudge the model was
+ * actually shown may be called "ignored"; one that went into a busy session's
+ * queue is reported as queued.
+ */
+export function recoveryNudgeNote(
+  label: 're-engage' | 'retry-loop',
+  state: { attempted: boolean; delivery: RecoveryNudgeDelivery | null },
+): string {
+  if (state.delivery?.kind === 'queued') {
+    return ` (${label} nudge was queued behind an in-flight turn in ${state.delivery.gezelId}/${state.delivery.sessionId.slice(0, 8)}; no sniff movement followed)`;
+  }
+  if (state.delivery) return ` (${label} nudge was sent and ignored)`;
+  if (state.attempted) {
+    return ` (${label} nudge could not be delivered — the model never saw it)`;
+  }
+  return '';
 }
 
 /**
- * Pick the most-recently-active downstream gezel to receive a direct
- * re-engage nudge, bypassing the meester relay. Returns null when no
- * qualifying session exists (single-gezel trial, or only the meester is
- * registered) — caller falls back to nudging the meester.
+ * The step a harness nudge about a task may reach, per task ref. `null` means
+ * none may: the task is finished, so every session bound to it is history.
+ */
+export interface ReEngageActiveStep {
+  stepId: string;
+  /** The step's latest activation (`lastActivatedAt`), when known. */
+  activatedAt?: string;
+}
+
+export function reEngageActiveSteps(
+  tasks: ReadonlyArray<{
+    ref: string;
+    status?: string;
+    activeStepId?: string | null;
+    craftbook?: { steps?: ReadonlyArray<{ id: string; lastActivatedAt?: string }> };
+  }>,
+): Map<string, ReEngageActiveStep | null> {
+  const out = new Map<string, ReEngageActiveStep | null>();
+  for (const task of tasks) {
+    const route = taskStepRouteFor(task, '');
+    if (!route) {
+      out.set(task.ref, null);
+      continue;
+    }
+    const activatedAt = task.craftbook?.steps?.find(
+      (step) => step.id === route.stepId,
+    )?.lastActivatedAt;
+    out.set(task.ref, { stepId: route.stepId, ...(activatedAt ? { activatedAt } : {}) });
+  }
+  return out;
+}
+
+export interface ReEngageSessionCandidate {
+  id?: string;
+  gezelId: string;
+  projectId: string;
+  lastActivityAt?: string;
+  archived?: boolean;
+  taskRef?: string | null;
+  stepId?: string | null;
+}
+
+/**
+ * Choose the session a direct re-engage nudge goes into.
  *
- * "Qualifying" means: non-archived, non-meester session whose owner's
- * role is builder/developer/voorman (the gezels expected to write the
- * actual deliverable). Falls through to "any non-meester session" if no
- * role match — better to nudge the wrong specialist than no one.
+ * The active step's own session wins outright: it is the only place the
+ * nudge can be acted on. A session pinned to a step the task has LEFT is
+ * never chosen, and neither is one pinned to the active step but idle since
+ * before that step's latest activation — a loop-back re-activates `build`,
+ * and the previous pass's `build` session is history too. Wild-caught on
+ * craftbook-spreadsheet-model (2026-09-30): with `evaluate` active, the
+ * retry-loop nudge went into the builder's first `build` session, whose next
+ * edit the MCP server refused as `stale_task_step`, and the evaluator whose
+ * turn it was never heard it.
+ *
+ * With no reachable step session, the older order applies to what is left
+ * (unbound chats, and sessions of tasks the listing did not return): task-bound
+ * before unbound, then recency, with a builder — or, for a file nudge, a
+ * write-capable — role preferred. The meester is never chosen; it is the
+ * caller's fallback.
+ */
+export function chooseReEngageSession<S extends ReEngageSessionCandidate>(
+  sessions: readonly S[],
+  meesterId: string,
+  gezelRoles: ReadonlyMap<string, string | null>,
+  opts: {
+    preferWritableRole?: boolean;
+    activeSteps?: ReadonlyMap<string, ReEngageActiveStep | null>;
+  } = {},
+): S | null {
+  const tsOf = (s: { lastActivityAt?: string }): number => {
+    if (!s.lastActivityAt) return 0;
+    const t = Date.parse(s.lastActivityAt);
+    return Number.isFinite(t) ? t : 0;
+  };
+  const builderRoles = /^(builder|generalist|developer|voorman)$/i;
+  const matches = (s: { gezelId: string }, re: RegExp): boolean => {
+    const role = gezelRoles.get(s.gezelId) ?? null;
+    return role !== null && re.test(role);
+  };
+  // A nudge that names a deliverable file has to reach someone who can write
+  // one. `voorman` is coordination-only, so preferring it for a file nudge
+  // guarantees an HTTP 400 from the service's pure-delegation guard and the
+  // nudge silently never lands. Prefer a write-capable role when a file is in
+  // play; otherwise keep the recency-with-builder-preference order.
+  const pick = (ordered: readonly S[]): S | null => {
+    const writableHit = opts.preferWritableRole
+      ? ordered.find((s) => matches(s, WRITE_CAPABLE_ROLES))
+      : undefined;
+    return writableHit ?? ordered.find((s) => matches(s, builderRoles)) ?? ordered[0] ?? null;
+  };
+
+  const onActiveStep: S[] = [];
+  const onTaskUnpinned: S[] = [];
+  const rest: S[] = [];
+  for (const s of sessions) {
+    if (s.archived || !s.gezelId || s.gezelId === meesterId) continue;
+    const ref = s.taskRef ?? null;
+    if (!ref || !opts.activeSteps?.has(ref)) {
+      rest.push(s);
+      continue;
+    }
+    const active = opts.activeSteps.get(ref) ?? null;
+    if (!active) continue;
+    if (!s.stepId) {
+      // A continuing task session is re-pinned only when its next handoff
+      // dispatches; until then it is the task's, not a finished step's.
+      onTaskUnpinned.push(s);
+      continue;
+    }
+    if (s.stepId !== active.stepId) continue;
+    const activatedAt = active.activatedAt ? Date.parse(active.activatedAt) : Number.NaN;
+    if (Number.isFinite(activatedAt) && s.lastActivityAt && tsOf(s) < activatedAt) continue;
+    onActiveStep.push(s);
+  }
+  const recent = (a: S, b: S): number => tsOf(b) - tsOf(a);
+  const stepHit = pick([...onActiveStep].sort(recent)) ?? pick([...onTaskUnpinned].sort(recent));
+  if (stepHit) return stepHit;
+  // Task-bound before unbound, then recency. A gezel can hold both a step
+  // session and a plain chat, and recency alone picks the wrong one exactly
+  // when it matters most: a previous stray nudge is what made the unbound
+  // chat the most recent, so the harness would keep feeding the session that
+  // has none of the work.
+  return pick(
+    [...rest].sort(
+      (a, b) => Number(Boolean(b.taskRef)) - Number(Boolean(a.taskRef)) || tsOf(b) - tsOf(a),
+    ),
+  );
+}
+
+/**
+ * Pick the downstream session to receive a direct re-engage nudge, bypassing
+ * the meester relay (see `chooseReEngageSession` for the order). Returns null
+ * when no qualifying session exists (single-gezel trial, or only the meester
+ * is registered) — caller falls back to nudging the meester.
  *
  * Also returns the session id and its `taskRef` so the caller can deliver
  * INTO that session rather than opening a fresh unbound one.
@@ -4728,15 +4959,7 @@ async function pickReEngageTarget(
   /** Set when that session is bound to a craftbook step. */
   taskRef: string | null;
 } | null> {
-  let sessions: Array<{
-    id?: string;
-    gezelId: string;
-    projectId: string;
-    lastActivityAt?: string;
-    archived?: boolean;
-    taskRef?: string | null;
-    stepId?: string | null;
-  }> = [];
+  let sessions: ReEngageSessionCandidate[] = [];
   try {
     const r = await client.listChatSessions();
     sessions = r.sessions ?? [];
@@ -4752,40 +4975,19 @@ async function pickReEngageTarget(
   } catch {
     gezelRoles = new Map();
   }
+  // Advisory: with no task listing the older order applies unchanged.
+  let activeSteps: Map<string, ReEngageActiveStep | null> | undefined;
+  try {
+    const { tasks } = await client.listTasks();
+    activeSteps = reEngageActiveSteps(tasks ?? []);
+  } catch {
+    activeSteps = undefined;
+  }
 
-  const candidates = sessions.filter((s) => !s.archived && s.gezelId && s.gezelId !== meesterId);
-  if (candidates.length === 0) return null;
-
-  const tsOf = (s: { lastActivityAt?: string }): number => {
-    if (!s.lastActivityAt) return 0;
-    const t = Date.parse(s.lastActivityAt);
-    return Number.isFinite(t) ? t : 0;
-  };
-  // Task-bound before unbound, then recency. A gezel can hold both a step
-  // session and a plain chat, and recency alone picks the wrong one exactly
-  // when it matters most: a previous stray nudge is what made the unbound
-  // chat the most recent, so the harness would keep feeding the session that
-  // has none of the work.
-  const byRecency = [...candidates].sort(
-    (a, b) => Number(Boolean(b.taskRef)) - Number(Boolean(a.taskRef)) || tsOf(b) - tsOf(a),
-  );
-
-  const builderRoles = /^(builder|generalist|developer|voorman)$/i;
-  const roleOf = (s: { gezelId: string }): string | null => gezelRoles.get(s.gezelId) ?? null;
-  const matches = (s: { gezelId: string }, re: RegExp): boolean => {
-    const role = roleOf(s);
-    return role !== null && re.test(role);
-  };
-  // A nudge that names a deliverable file has to reach someone who can write
-  // one. `voorman` is coordination-only, so preferring it for a file nudge
-  // guarantees an HTTP 400 from the service's pure-delegation guard and the
-  // nudge silently never lands. Prefer a write-capable role when a file is in
-  // play; otherwise keep the original recency-with-builder-preference order.
-  const writableHit = args?.preferWritableRole
-    ? byRecency.find((s) => matches(s, WRITE_CAPABLE_ROLES))
-    : undefined;
-  const builderHit = byRecency.find((s) => matches(s, builderRoles));
-  const chosen = writableHit ?? builderHit ?? byRecency[0];
+  const chosen = chooseReEngageSession(sessions, meesterId, gezelRoles, {
+    ...(args?.preferWritableRole ? { preferWritableRole: true } : {}),
+    ...(activeSteps ? { activeSteps } : {}),
+  });
   if (!chosen) return null;
   return {
     gezelId: chosen.gezelId,

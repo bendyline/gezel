@@ -106,6 +106,10 @@ export interface DaemonActivityCounters {
    * read-only tool churn). A genuine rewrite changes the artifact's
    * bytes/score and resets the plateau key anyway, so a HELD key with
    * climbing write calls is the only true "stubborn rewriter" shape.
+   *
+   * From service telemetry this counts only writes the daemon ACCEPTED
+   * (refusals are subtracted via the history log). The daemon-log fallback
+   * cannot see outcomes and still counts attempts.
    */
   writeCalls: number;
   /**
@@ -334,7 +338,8 @@ async function readServiceTelemetryActivity(
   if (telemetryUnsupported.has(client)) return null;
   try {
     const resp = await client.listSessionTelemetry();
-    return telemetryToActivityCounters(resp.sessions);
+    const rejected = await readRejectedFileMutations(client, resp.sessions);
+    return telemetryToActivityCounters(resp.sessions, rejected);
   } catch (err) {
     const status = (err as { status?: unknown }).status;
     if (status === 404 || status === 405) telemetryUnsupported.add(client);
@@ -343,11 +348,145 @@ async function readServiceTelemetryActivity(
 }
 
 /**
+ * The daemon's file-mutation tool set, mirrored from `FILE_MUTATION_TOOLS`
+ * in packages/service/src/chat/session-telemetry.ts. Telemetry's
+ * `fileMutations` counts ATTEMPTS by these names; the rejected ones are
+ * recovered from the `tool.called` history log, which carries the same
+ * names from the same call site.
+ */
+export const FILE_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'write_file',
+  'write_artifact',
+  'replace_in_file',
+  'append_to_file',
+  'insert_at_marker',
+  'copy_artifact_to_workspace',
+]);
+
+/**
+ * Per-session count of file-mutation calls the daemon REJECTED, read from
+ * `tool.called` history events.
+ *
+ * Telemetry's `fileMutations` is bumped when the call is observed, before
+ * anyone asks whether it landed, so a refused write reads as a re-write.
+ * Wild-caught on craftbook-spreadsheet-model (qwen3.8-flash-next,
+ * 2026-09-30): after the task looped `evaluate → build`, the builder's
+ * stale session emitted three edits that the MCP server refused with
+ * `stale_task_step` — no byte reached the workspace — and the retry-loop
+ * FAST path killed the trial for "3 re-writes without sniff movement".
+ */
+export function rejectedFileMutationsBySession(entries: readonly object[]): Map<string, number> {
+  return countBySession(collectRejectedFileMutations(entries, new Map()));
+}
+
+/**
+ * Add every rejected file-mutation event in `entries` to `into`, keyed by
+ * event id so a re-read never counts one twice. Returns `into`.
+ */
+function collectRejectedFileMutations(
+  entries: readonly object[],
+  into: Map<string, string>,
+): Map<string, string> {
+  for (const entry of entries as ReadonlyArray<{
+    id?: unknown;
+    at?: unknown;
+    kind?: unknown;
+    details?: unknown;
+  }>) {
+    if (entry.kind !== 'tool.called') continue;
+    const details = entry.details as
+      | { name?: unknown; sessionId?: unknown; success?: unknown; errorMessage?: unknown }
+      | undefined;
+    if (!details || typeof details.sessionId !== 'string') continue;
+    if (typeof details.name !== 'string' || !FILE_MUTATION_TOOL_NAMES.has(details.name)) continue;
+    const failed =
+      details.success === false ||
+      (typeof details.errorMessage === 'string' && details.errorMessage.trim().length > 0);
+    if (!failed) continue;
+    const id =
+      typeof entry.id === 'string'
+        ? entry.id
+        : `${String(entry.at)}|${details.sessionId}|${details.name}`;
+    into.set(id, details.sessionId);
+  }
+  return into;
+}
+
+function countBySession(rejectedEvents: ReadonlyMap<string, string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const sessionId of rejectedEvents.values()) {
+    counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+interface RejectedMutationCache {
+  /** Per-session `fileMutations` signature of the latest read. */
+  key: string;
+  /** Every rejected mutation seen so far, event id → session id. */
+  events: Map<string, string>;
+  /** Reads taken at this key. See `readRejectedFileMutations`. */
+  reads: number;
+}
+
+const rejectedMutationCache = new WeakMap<GezelClient, RejectedMutationCache>();
+
+/**
+ * Newest `tool.called` events fetched per read. The history route answers
+ * only the newest N (200 by default), so rejections are accumulated across
+ * reads by event id: an old refusal that ages out of the window stays
+ * subtracted, and the write count never jumps up on its own.
+ */
+const REJECTED_MUTATION_READ_LIMIT = 2000;
+
+/**
+ * Rejected mutations for the sessions telemetry just reported, re-reading
+ * the history log only when a session's mutation count moved.
+ *
+ * The daemon notes the call in telemetry a moment BEFORE it appends the
+ * history event, so a poll can land between the two; each new key is
+ * therefore read twice (on consecutive polls) before it is trusted. A failed
+ * read keeps what was already seen — rejections only accumulate, so it errs
+ * toward the attempt count the harness used before.
+ */
+async function readRejectedFileMutations(
+  client: GezelClient,
+  sessions: readonly SessionTelemetry[],
+): Promise<Map<string, number> | undefined> {
+  if (!sessions.some((s) => s.fileMutations > 0)) return undefined;
+  const key = sessions
+    .filter((s) => s.fileMutations > 0)
+    .map((s) => `${s.sessionId}:${s.fileMutations}`)
+    .sort()
+    .join(',');
+  const cached = rejectedMutationCache.get(client);
+  if (cached && cached.key === key && cached.reads >= 2) return countBySession(cached.events);
+  const events = cached?.events ?? new Map<string, string>();
+  try {
+    const { entries } = await client.listHistory({
+      kind: 'tool.called',
+      limit: REJECTED_MUTATION_READ_LIMIT,
+    });
+    collectRejectedFileMutations(entries, events);
+    rejectedMutationCache.set(client, {
+      key,
+      events,
+      reads: cached && cached.key === key ? cached.reads + 1 : 1,
+    });
+  } catch {
+    // Keep what was already seen; the next poll retries.
+  }
+  return countBySession(events);
+}
+
+/**
  * Map per-session service telemetry onto the counter shape the digests
  * were tuned against. Sums across sessions; each mapping preserves the
  * granularity of the log line it replaces:
  *   toolCalls    ← Σ toolCalls          (was `[mcp-bridge] call_tool`)
- *   writeCalls   ← Σ fileMutations      (same six-tool set)
+ *   writeCalls   ← Σ fileMutations − rejected (same six-tool set; only
+ *                                        writes that LANDED — see
+ *                                        `rejectedFileMutationsBySession`)
  *   turnStarts   ← Σ turnsStarted       (true per-send turns; NOT
  *                                        generationSpurts, which is
  *                                        engine-asymmetric — llama ~1/turn
@@ -363,6 +502,7 @@ async function readServiceTelemetryActivity(
  */
 export function telemetryToActivityCounters(
   sessions: readonly SessionTelemetry[],
+  rejectedMutations?: ReadonlyMap<string, number>,
 ): DaemonActivityCounters {
   let turnStarts = 0;
   let toolCalls = 0;
@@ -374,7 +514,10 @@ export function telemetryToActivityCounters(
   for (const s of sessions) {
     turnStarts += s.turnsStarted;
     toolCalls += s.toolCalls;
-    writeCalls += s.fileMutations;
+    // Clamped per session: telemetry resets on a daemon restart while the
+    // history log does not, so a session's rejections can outnumber the
+    // attempts this daemon has counted.
+    writeCalls += Math.max(0, s.fileMutations - (rejectedMutations?.get(s.sessionId) ?? 0));
     slotUpdates += s.enginePhaseEvents;
     streamPulses += s.deltaChunks + s.wirePulses + s.heartbeats;
     imageLogLines += s.gpuEvents;

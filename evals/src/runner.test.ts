@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { craftbookStepMilestones } from './craftbooks/scenario.ts';
 import { repoRoot } from './native-bin.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import {
@@ -14,8 +15,10 @@ import {
   buildReEngageNudge,
   canDispatchPoisonedSessionRecovery,
   captureFinalState,
+  chooseReEngageSession,
   completedRepairActionSnapshot,
   defaultSoftProgressTimeoutMsForModel,
+  deliverRecoveryNudge,
   describeSendFailure,
   ds4EvalCapacityBudgetGb,
   ds4EvalLaunchOverridesForModel,
@@ -37,9 +40,11 @@ import {
   pickPoisonedSessionsForRecovery,
   poisonedRecoveryFailureFingerprint,
   pollUntilDone,
+  reEngageActiveSteps,
   readCapacityDenialFromLog,
   readContextOverflowFromLog,
   recoveryFilePathForSniff,
+  recoveryNudgeNote,
   repeatedPoisonedSessionFailure,
   retryLoopChatterTripped,
   retryLoopFastPathTripped,
@@ -1443,6 +1448,205 @@ describe('re-engage nudge state', () => {
   });
 });
 
+// INCIDENT (craftbook-spreadsheet-model x qwen3.8-flash-next, 2026-09-30):
+// with `evaluate` active, the retry-loop nudge chose the builder and went into
+// its FIRST `build` session. The edit it prompted was refused
+// `stale_task_step`, and the evaluator whose turn it was never heard it.
+describe('re-engage target selection', () => {
+  const roles = new Map<string, string | null>([
+    ['malai', 'Developer'],
+    ['maxime', 'Reviewer'],
+    ['thalia', 'Analyst'],
+  ]);
+  const spreadsheetSessions = [
+    {
+      id: 'thalia-scope',
+      gezelId: 'thalia',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'scope',
+      lastActivityAt: '2026-09-30T20:16:56Z',
+    },
+    {
+      id: 'malai-build-1',
+      gezelId: 'malai',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'build',
+      lastActivityAt: '2026-09-30T20:33:40Z',
+    },
+    {
+      id: 'maxime-evaluate',
+      gezelId: 'maxime',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'evaluate',
+      lastActivityAt: '2026-09-30T20:30:54Z',
+    },
+  ];
+  const evaluateActive = reEngageActiveSteps([
+    {
+      ref: 'p1/1',
+      status: 'active',
+      activeStepId: 'evaluate',
+      craftbook: {
+        steps: [
+          { id: 'scope', lastActivatedAt: '2026-09-30T20:13:57Z' },
+          { id: 'build', lastActivatedAt: '2026-09-30T20:16:57Z' },
+          { id: 'evaluate', lastActivatedAt: '2026-09-30T20:27:47Z' },
+        ],
+      },
+    },
+  ]);
+
+  it('prefers the active step session over a more recent developer on a finished step', () => {
+    const chosen = chooseReEngageSession(spreadsheetSessions, 'meester', roles, {
+      preferWritableRole: true,
+      activeSteps: evaluateActive,
+    });
+    expect(chosen?.id).toBe('maxime-evaluate');
+  });
+
+  it('never picks a session bound to a step the task has left', () => {
+    const withoutEvaluate = spreadsheetSessions.filter((s) => s.id !== 'maxime-evaluate');
+    const unbound = {
+      id: 'malai-chat',
+      gezelId: 'malai',
+      projectId: 'p1',
+      lastActivityAt: '2026-09-30T20:00:00Z',
+    };
+    expect(
+      chooseReEngageSession(withoutEvaluate, 'meester', roles, {
+        preferWritableRole: true,
+        activeSteps: evaluateActive,
+      }),
+    ).toBeNull();
+    // What remains is the older fallback order, never the stale step session.
+    expect(
+      chooseReEngageSession([...withoutEvaluate, unbound], 'meester', roles, {
+        activeSteps: evaluateActive,
+      })?.id,
+    ).toBe('malai-chat');
+  });
+
+  it('skips the previous pass of a re-activated step', () => {
+    const buildAgain = reEngageActiveSteps([
+      {
+        ref: 'p1/1',
+        status: 'active',
+        activeStepId: 'build',
+        craftbook: { steps: [{ id: 'build', lastActivatedAt: '2026-09-30T20:41:38Z' }] },
+      },
+    ]);
+    // The loop-back re-activated `build`; the first pass's session predates it.
+    expect(
+      chooseReEngageSession(spreadsheetSessions, 'meester', roles, { activeSteps: buildAgain }),
+    ).toBeNull();
+    const secondPass = {
+      id: 'malai-build-2',
+      gezelId: 'malai',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'build',
+      lastActivityAt: '2026-09-30T20:42:42Z',
+    };
+    expect(
+      chooseReEngageSession([...spreadsheetSessions, secondPass], 'meester', roles, {
+        activeSteps: buildAgain,
+      })?.id,
+    ).toBe('malai-build-2');
+  });
+
+  it('treats every session of a finished task as history', () => {
+    const done = reEngageActiveSteps([
+      { ref: 'p1/1', status: 'complete', activeStepId: 'evaluate', craftbook: { steps: [] } },
+    ]);
+    expect(done.get('p1/1')).toBeNull();
+    expect(
+      chooseReEngageSession(spreadsheetSessions, 'meester', roles, { activeSteps: done }),
+    ).toBeNull();
+  });
+
+  it('keeps the task-bound, builder-first order when no task listing is available', () => {
+    expect(
+      chooseReEngageSession(spreadsheetSessions, 'meester', roles, { preferWritableRole: true })
+        ?.id,
+    ).toBe('malai-build-1');
+  });
+});
+
+describe('recovery nudge wording', () => {
+  const stepTarget = {
+    gezelId: 'malai',
+    projectId: 'p1',
+    role: 'Developer',
+    sessionId: '7b9b1d8e-a6cb',
+    taskRef: 'p1/1',
+  };
+  const opts = (log: (m: string) => void) => ({
+    meesterId: 'meester',
+    fallbackGezelId: 'malai',
+    log,
+  });
+
+  it('says a send into a mid-turn session was queued, not delivered', async () => {
+    const log = vi.fn();
+    const client = {
+      listInflightTurns: vi.fn().mockResolvedValue({
+        inflight: [
+          { sessionId: '7b9b1d8e-a6cb', gezelId: 'malai', projectId: 'p1', elapsedMs: 42_000 },
+        ],
+      }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: '7b9b1d8e-a6cb' }),
+    };
+    const delivery = await deliverRecoveryNudge(
+      client as unknown as GezelClient,
+      'nudge',
+      stepTarget,
+      opts(log),
+    );
+    expect(delivery).toEqual({ kind: 'queued', sessionId: '7b9b1d8e-a6cb', gezelId: 'malai' });
+    expect(client.sendToChatSession).toHaveBeenCalledWith('7b9b1d8e-a6cb', {
+      message: 'nudge',
+      nudge: true,
+    });
+    const line = String(log.mock.calls[0]?.[0]);
+    expect(line).toContain('queued behind an in-flight turn (42s)');
+    expect(line).not.toContain('delivered');
+  });
+
+  it('says delivered when the session is idle', async () => {
+    const log = vi.fn();
+    const client = {
+      listInflightTurns: vi.fn().mockResolvedValue({ inflight: [] }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: '7b9b1d8e-a6cb' }),
+    };
+    await expect(
+      deliverRecoveryNudge(client as unknown as GezelClient, 'nudge', stepTarget, opts(log)),
+    ).resolves.toEqual({ kind: 'delivered' });
+    expect(String(log.mock.calls[0]?.[0])).toContain('recovery nudge delivered into p1/1');
+  });
+
+  it('reports a nudge queued behind an in-flight turn as queued, not ignored', () => {
+    const note = recoveryNudgeNote('retry-loop', {
+      attempted: true,
+      delivery: { kind: 'queued', sessionId: '7b9b1d8e-a6cb', gezelId: 'malai' },
+    });
+    expect(note).toContain('queued behind an in-flight turn in malai/7b9b1d8e');
+    expect(note).not.toContain('ignored');
+  });
+
+  it('keeps the delivered and undeliverable wording', () => {
+    expect(
+      recoveryNudgeNote('re-engage', { attempted: true, delivery: { kind: 'delivered' } }),
+    ).toBe(' (re-engage nudge was sent and ignored)');
+    expect(recoveryNudgeNote('retry-loop', { attempted: true, delivery: null })).toContain(
+      'could not be delivered',
+    );
+    expect(recoveryNudgeNote('retry-loop', { attempted: false, delivery: null })).toBe('');
+  });
+});
+
 describe('llamaCppEvalLaunchOverridesForModel', () => {
   it('does not override ordinary runnable local models', () => {
     expect(llamaCppEvalLaunchOverridesForModel('qwen3.6-35b-a3b-q4')).toBeUndefined();
@@ -2100,6 +2304,42 @@ describe('retryLoopSniffKey', () => {
       milestones: 2,
     });
     expect(churnA).toBe(churnB);
+  });
+
+  // A craftbook's step walk rides `milestones`: a real transition restarts the
+  // plateau, while an evaluate → build loop stops earning once it hits the cap.
+  it('advances on a craftbook step transition and holds once a loop is capped', () => {
+    const sniff = (steps: Array<{ id: string; attemptCount: number }>) =>
+      retryLoopSniffKey({
+        key: 'craftbook-spreadsheet-model',
+        score: 5,
+        bytes: 6931,
+        failReason: 'task sourced from craftbook spreadsheet-model has not reached a terminal step',
+        milestones: craftbookStepMilestones([{ status: 'active', craftbook: { steps } }]),
+      });
+    const evaluating = sniff([
+      { id: 'scope', attemptCount: 1 },
+      { id: 'build', attemptCount: 1 },
+      { id: 'evaluate', attemptCount: 1 },
+    ]);
+    const loopedBack = sniff([
+      { id: 'scope', attemptCount: 1 },
+      { id: 'build', attemptCount: 2 },
+      { id: 'evaluate', attemptCount: 1 },
+    ]);
+    expect(loopedBack).not.toBe(evaluating);
+
+    const capped = sniff([
+      { id: 'scope', attemptCount: 1 },
+      { id: 'build', attemptCount: 3 },
+      { id: 'evaluate', attemptCount: 3 },
+    ]);
+    const stillLooping = sniff([
+      { id: 'scope', attemptCount: 1 },
+      { id: 'build', attemptCount: 7 },
+      { id: 'evaluate', attemptCount: 6 },
+    ]);
+    expect(stillLooping).toBe(capped);
   });
 
   it('keys scenarios that report no milestone exactly as before', () => {

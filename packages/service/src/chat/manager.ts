@@ -410,6 +410,11 @@ import {
   shouldConstrainToImmediateFileWrite,
   shouldConstrainToScenarioFileRepair,
 } from './role-tool-filter.js';
+import {
+  bindStepActivation,
+  currentStepActivation,
+  servesEarlierActivation,
+} from './session-step-activation.js';
 import { SessionTelemetryTracker } from './session-telemetry.js';
 import {
   SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
@@ -2101,6 +2106,36 @@ export class ChatManager extends LocalEngineRuntime {
   private taskAdvancer?: TaskAdvancerFn;
 
   /**
+   * A completion gate re-activated a step while the turn that triggered it
+   * keeps the repair (TaskManager's current-turn reactivation hook — the chat
+   * twin of `TaskRunner.adoptActiveDispatchActivation`). Rebind that turn's
+   * session to the new pass, or the observable advance would read the
+   * repaired deliverable as an earlier pass's work and never move the step.
+   * Only a mid-turn session bound to the pass just replaced qualifies: a
+   * session from an older pass stays stale.
+   */
+  adoptStepActivation(args: {
+    taskRef: string;
+    stepId: string;
+    previousActivationAt: string | undefined;
+    activationAt: string;
+  }): void {
+    if (!args.previousActivationAt) return;
+    for (const [sessionId, state] of this.states) {
+      const record = state.record;
+      if (record.taskRef !== args.taskRef || record.stepId !== args.stepId) continue;
+      if (record.stepActivationId !== args.previousActivationAt) continue;
+      if (!this.inflight.has(sessionId)) continue;
+      bindStepActivation(record, args.activationAt);
+      void this.store.writeSession(record).catch((err) => {
+        log.warn(
+          `session ${sessionId.slice(0, 8)}: persisting adopted step activation failed: ${err instanceof Error ? err.message : err}`,
+        );
+      });
+    }
+  }
+
+  /**
    * Wire the diffpack draft overlay (set by service.ts once the
    * DiffpackManager exists — same cycle-avoidance as `setTaskAdvancer`).
    * The observable-progress watcher must judge a drafting task's
@@ -2282,6 +2317,19 @@ export class ChatManager extends LocalEngineRuntime {
       // an owner step advances only when the owner says so.
       const owner = stepOwnerGezelId(task, step);
       if (owner !== gezelId) continue;
+      // A loop re-enters a step under a NEW session; a turn ending in the
+      // session of an earlier pass is not this pass's work. Wild-caught on
+      // spreadsheet-model (qwen3.8-flash-next, 2026-09-30): a nudge into
+      // build's first-pass session ended after evaluate looped back to build,
+      // advanced the new pass on the unchanged index.html, and took the write
+      // lease from the session actually rebuilding it.
+      if (servesEarlierActivation(state.record, task.ref, step)) {
+        log.info(
+          `skip observable advance: session ${sessionId} belongs to an earlier activation of ` +
+            `${task.ref}/${step.id} (bound ${state.record.stepActivationId}, current ${step.lastActivatedAt})`,
+        );
+        continue;
+      }
 
       // A fixed-action evidence step intentionally hides
       // `advance_task_step`: the only useful model action is opening the
@@ -2450,7 +2498,7 @@ export class ChatManager extends LocalEngineRuntime {
     projectId: string,
     taskNum: number,
     stepId: string,
-    gezelId: string,
+    session: ChatSession,
     writtenThisTurn: boolean,
   ): Promise<boolean> {
     const task = await this.readEffectiveTask(projectId, taskNum);
@@ -2460,7 +2508,10 @@ export class ChatManager extends LocalEngineRuntime {
     const step = task.craftbook.steps.find((s) => s.id === stepId);
     const adv = step?.advanceWhen;
     if (!step || !adv || adv.artifact) return false;
-    if (stepOwnerGezelId(task, step) !== gezelId) return false;
+    if (stepOwnerGezelId(task, step) !== session.gezelId) return false;
+    // The live record: a gate self-loop adopts its new activation there.
+    const record = this.states.get(session.id)?.record ?? session;
+    if (servesEarlierActivation(record, task.ref, step)) return false;
     const content = await this.readStepDeliverable(projectId, task, adv.file, false);
     const writes = writtenThisTurn ? [{ name: 'write_file', path: adv.file, success: true }] : [];
     if (!evaluateDeliverableGate({ content, spec: adv, writes }).satisfied) return false;
@@ -3556,6 +3607,8 @@ export class ChatManager extends LocalEngineRuntime {
     projectId?: string;
     taskRef?: string;
     stepId?: string;
+    /** Activation of `stepId` this session serves — see session-step-activation.ts. */
+    stepActivationId?: string;
     /** Durable parent session for delegated/consulted/task-spawned work. */
     parentSession?: SessionParent;
     /** Immediate workflow step that handed work to this task session. */
@@ -3656,6 +3709,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.nightShift ? { nightShift: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(args.stepId && args.stepActivationId ? { stepActivationId: args.stepActivationId } : {}),
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(args.handoffFrom ? { handoffFrom: args.handoffFrom } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
@@ -3772,32 +3826,62 @@ export class ChatManager extends LocalEngineRuntime {
       gezelId: args.gezelId,
       projectId: args.projectId,
     });
-    const active = existing.find(
+    const candidates = existing.filter(
       (session) =>
         !session.archived &&
         session.taskRef === args.taskRef &&
         (args.stepId === undefined || session.stepId === args.stepId),
     );
-    if (active) {
-      const full = await this.store.getSession(args.gezelId, active.id);
-      if (full) {
-        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
-        if (args.parentSession && !full.parentSession) {
-          full.parentSession = args.parentSession;
-          await this.store.writeSession(full);
-        }
-        return full;
-      }
-    }
     const parsedTaskRef = parseTaskRef(args.taskRef);
     const task = parsedTaskRef
       ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
       : null;
+    // A runtime re-drive is for the step's CURRENT pass. Recency alone can
+    // pick an earlier pass's session — any nudge into it bumps its activity —
+    // and that session may no longer advance the step, so the re-drive would
+    // spend itself on a thread that cannot finish.
+    const activation =
+      args.stepId && task?.activeStepId === args.stepId
+        ? currentStepActivation(task, args.stepId)
+        : undefined;
+    let chosen = candidates[0];
+    if (activation && candidates.length > 1) {
+      for (const candidate of candidates) {
+        const record =
+          this.states.get(candidate.id)?.record ??
+          (await this.store.getSession(args.gezelId, candidate.id));
+        if (record?.stepActivationId === activation) {
+          chosen = candidate;
+          break;
+        }
+      }
+    }
+    if (chosen) {
+      const full = await this.store.getSession(args.gezelId, chosen.id);
+      if (full) {
+        let changed = false;
+        // Same first-parent-wins retro-stamp as ensureOrCreateSession.
+        if (args.parentSession && !full.parentSession) {
+          full.parentSession = args.parentSession;
+          changed = true;
+        }
+        // No session carries this pass (its dispatch failed, or predates the
+        // binding): the one being re-driven now serves it.
+        if (activation && bindStepActivation(full, activation)) {
+          const live = this.states.get(full.id);
+          if (live) bindStepActivation(live.record, activation);
+          changed = true;
+        }
+        if (changed) await this.store.writeSession(full);
+        return full;
+      }
+    }
     return this.createSession({
       gezelId: args.gezelId,
       projectId: args.projectId,
       taskRef: args.taskRef,
       ...(args.stepId ? { stepId: args.stepId } : {}),
+      ...(activation ? { stepActivationId: activation } : {}),
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(task?.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: task.roleBasedNameOnlyMode }
@@ -4112,6 +4196,12 @@ export class ChatManager extends LocalEngineRuntime {
     const taskRecord = parsedTaskRef
       ? await this.store.readTask(parsedTaskRef.projectId, parsedTaskRef.num).catch(() => null)
       : null;
+    // The pass this dispatch serves. Whatever session carries it — fresh,
+    // resumed, or continued across steps — is bound to it, so a session from
+    // an earlier pass of a looping step can be told apart from this one.
+    const dispatchActivationId = taskRecord
+      ? currentStepActivation(taskRecord, dispatchStepId)
+      : undefined;
     const candidates =
       args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
     const previous = candidates.find(
@@ -4297,6 +4387,10 @@ export class ChatManager extends LocalEngineRuntime {
         session.handoffFrom = handoffFrom;
         lineageChanged = true;
       }
+      // An adjacent-step transcript is rebound at its re-pin below instead.
+      if (session.stepId === dispatchStepId && bindStepActivation(session, dispatchActivationId)) {
+        lineageChanged = true;
+      }
       if (lineageChanged) await this.store.writeSession(session);
     }
     session ??= await this.createSession({
@@ -4304,6 +4398,7 @@ export class ChatManager extends LocalEngineRuntime {
       projectId: args.projectId,
       taskRef: args.taskRef,
       stepId: dispatchStepId,
+      ...(dispatchActivationId ? { stepActivationId: dispatchActivationId } : {}),
       roleBasedNameOnlyMode,
       ...(parentSession ? { parentSession } : {}),
       ...(handoffFrom ? { handoffFrom } : {}),
@@ -4437,6 +4532,7 @@ export class ChatManager extends LocalEngineRuntime {
           await this.reset(handoffSession.id);
           const previousStepId = record.stepId ?? '(unpinned)';
           record.stepId = dispatchStepId;
+          bindStepActivation(record, dispatchActivationId);
           record.lastActivityAt = nowIso();
           await this.store.writeSession(record);
           if (live) live.record = record;
@@ -13570,6 +13666,14 @@ export class ChatManager extends LocalEngineRuntime {
     const previous = record.stepId ?? '(unpinned)';
     record.stepId = stepId;
     if (!record.taskRef) record.taskRef = taskRef;
+    // Only reached after this session's own advance attempt judged the step,
+    // so it is serving that step's current pass — not the stale binding of
+    // the step it was pinned to before.
+    const parsedRef = parseTaskRef(taskRef);
+    const pinnedTask = parsedRef
+      ? await this.readEffectiveTask(parsedRef.projectId, parsedRef.num)
+      : null;
+    bindStepActivation(record, pinnedTask ? currentStepActivation(pinnedTask, stepId) : undefined);
     await this.store.writeSession(record).catch((err) => {
       log.warn(
         `session ${record.id.slice(0, 8)}: persisting re-pinned step failed: ${err instanceof Error ? err.message : err}`,
@@ -14818,7 +14922,7 @@ export class ChatManager extends LocalEngineRuntime {
                 readyTask.projectId,
                 readyTask.num,
                 step.id,
-                record.gezelId,
+                record,
                 writtenThisTurn,
               )
           : undefined;

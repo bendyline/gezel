@@ -1639,6 +1639,11 @@ export async function postMissingDeliverableFeedback(
   ) {
     return;
   }
+  // Both the file-turn intent and `expectedDeliverable` are WORKSPACE
+  // contracts: the MCP server redirects a `write_artifact` to that path into
+  // the workspace, so attaching either to a drawer deliverable makes it
+  // unwinnable (the craftbook-a11y-audit failure in craftbooks/scenario.ts).
+  const workspaceContract = opts.expectedSurface !== 'artifact';
   const text = formatMissingDeliverableNudge(filePath, opts.nearMiss, {
     coordinatorFallback:
       coordinatorFallback ||
@@ -1661,11 +1666,11 @@ export async function postMissingDeliverableFeedback(
         return;
       }
       await ctx.client.messageGezel(specialist.gezelId, {
-        fileTurnIntent: { kind: 'create-file', path: filePath },
+        ...(workspaceContract ? { fileTurnIntent: { kind: 'create-file', path: filePath } } : {}),
         fromGezelId: ctx.meesterId,
         text,
         suppressReply: true,
-        ...attachableDeliverable(filePath, specialist.role, ctx.log),
+        ...(workspaceContract ? attachableDeliverable(filePath, specialist.role, ctx.log) : {}),
         ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
       });
       ctx.log(
@@ -1690,7 +1695,9 @@ export async function postMissingDeliverableFeedback(
           fromGezelId: ctx.meesterId,
           text,
           suppressReply: true,
-          ...attachableDeliverable(filePath, ensured.role ?? 'Developer', ctx.log),
+          ...(workspaceContract
+            ? attachableDeliverable(filePath, ensured.role ?? 'Developer', ctx.log)
+            : {}),
           ...(opts.projectId ? { projectId: opts.projectId } : {}),
         });
         state.coordinatorFallbackSentAtPoll = state.absentPolls;
@@ -1848,6 +1855,14 @@ function formatMissingDeliverableNudge(
 ): string {
   const isHtml = /\.html?$/i.test(filePath);
   const isBinaryDocument = isBinaryDocumentDeliverablePath(filePath);
+  // A text deliverable graded in the ARTIFACTS drawer. Every message below
+  // was written for the workspace, and a craftbook step whose result is an
+  // artifact has no `write_file` at all: bug-fix-tdd's `reproduce` session
+  // was told "no `tasks/1/repro.md` in the workspace … `write_file({ path:
+  // "tasks/1/repro.md" })`" while its step could only `write_artifact`
+  // (2026-09-30). Name the drawer and its writer instead.
+  const artifactSurface = opts.expectedSurface === 'artifact' && !isBinaryDocument;
+  const writeArtifactCall = `\`write_artifact({ path: "${filePath}", content: <the full deliverable contents> })\``;
   const deliverableHint = isBinaryDocument
     ? 'Produce the real requested binary through the already-active craftbook production workflow; a text file with the right extension is invalid.'
     : isHtml
@@ -1855,20 +1870,26 @@ function formatMissingDeliverableNudge(
       : 'Write the actual deliverable file now with the requested content.';
   const handoffHint = isBinaryDocument
     ? 'Do not convert this into an ad-hoc Developer/file handoff. Continue the active document craftbook: author/review the source, convert and preview with DocBlocks, save the artifact, then copy its real bytes to the exact workspace path.'
-    : isHtml || isSourceFile(filePath)
-      ? `If your current role does not have \`write_file\`, do not translate this into another planning, design, review, or image request. Make a blocking file handoff instead: first call \`ensure_gezel\` for a Builder/Developer, then call \`message_gezel\` for that gezel with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and tell them to write \`${filePath}\` now. Do not call \`ask_specialist\` for this file deliverable.`
-      : '';
-  const artifactCopySource = artifactNearMissSource(filePath, nearMiss);
+    : artifactSurface
+      ? ''
+      : isHtml || isSourceFile(filePath)
+        ? `If your current role does not have \`write_file\`, do not translate this into another planning, design, review, or image request. Make a blocking file handoff instead: first call \`ensure_gezel\` for a Builder/Developer, then call \`message_gezel\` for that gezel with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and tell them to write \`${filePath}\` now. Do not call \`ask_specialist\` for this file deliverable.`
+        : '';
+  const artifactCopySource = artifactSurface ? null : artifactNearMissSource(filePath, nearMiss);
   const landingInstruction = isBinaryDocument
     ? `${deliverableHint} Use DocBlocks \`convert_document\` from the approved Markdown, \`preview_document\` for visual QA, and \`save_artifact\` with destination path \`${filePath}\`; then call \`copy_artifact_to_workspace({ source: "${filePath}", dest: "${filePath}" })\`. Do not call \`write_file\` for \`${filePath}\`.`
-    : artifactCopySource
-      ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
-      : `${deliverableHint} Stop reading/planning and write the file now: \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
+    : artifactSurface
+      ? `${deliverableHint} Stop reading/planning and write it to the artifacts drawer: ${writeArtifactCall}. Pass the path exactly as \`${filePath}\`.`
+      : artifactCopySource
+        ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
+        : `${deliverableHint} Stop reading/planning and write the file now: \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
   const landingToolPhrase = isBinaryDocument
     ? '`convert_document` → `preview_document` → `save_artifact` → `copy_artifact_to_workspace`'
-    : artifactCopySource
-      ? '`copy_artifact_to_workspace` or `write_file`'
-      : '`write_file`';
+    : artifactSurface
+      ? '`write_artifact`'
+      : artifactCopySource
+        ? '`copy_artifact_to_workspace` or `write_file`'
+        : '`write_file`';
   // Same path, wrong drawer. Saying "create the exact file X" here is advice
   // the model has already followed, so name the SURFACE and the one call that
   // moves it.
@@ -1893,29 +1914,38 @@ function formatMissingDeliverableNudge(
         ]
     : [];
   const coordinatorLines = opts.coordinatorFallback
-    ? isBinaryDocument
+    ? artifactSurface
       ? [
           '',
-          'No production specialist is active yet. Resume or invoke the matching document craftbook and execute its DocBlocks production step; do not recruit a generic Developer or attach an ad-hoc binary expected-deliverable contract.',
+          `No implementation specialist is active yet. If you are coordinating this project, write \`${filePath}\` to the artifacts drawer yourself with \`write_artifact\`, or resume the craftbook step that owns it.`,
         ]
-      : [
-          '',
-          'No implementation specialist is active yet. If you are coordinating this project, immediately create or ensure a Developer/Builder and send them this exact deliverable directive, or write the file yourself before ending the turn. For HTML/source files, do not delegate the shipping file to a Designer and do not ask anyone to paste file contents in chat. A Designer can supply visual direction or assets; the Developer/Builder writes the workspace file.',
-          `The handoff must include \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` so the assignee writes the workspace file instead of answering in chat.`,
-        ]
+      : isBinaryDocument
+        ? [
+            '',
+            'No production specialist is active yet. Resume or invoke the matching document craftbook and execute its DocBlocks production step; do not recruit a generic Developer or attach an ad-hoc binary expected-deliverable contract.',
+          ]
+        : [
+            '',
+            'No implementation specialist is active yet. If you are coordinating this project, immediately create or ensure a Developer/Builder and send them this exact deliverable directive, or write the file yourself before ending the turn. For HTML/source files, do not delegate the shipping file to a Designer and do not ask anyone to paste file contents in chat. A Designer can supply visual direction or assets; the Developer/Builder writes the workspace file.',
+            `The handoff must include \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` so the assignee writes the workspace file instead of answering in chat.`,
+          ]
     : [];
-  const completionLine = isBinaryDocument
-    ? `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Do not end your turn until ${landingToolPhrase} has landed the real binary workspace file. If you delegated this, the production work has not happened: resume the craftbook step and complete it.`
-    : `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replace_in_file\`/\`append_to_file\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`;
+  const completionLine = artifactSurface
+    ? 'Plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file beats nothing, and you can rewrite it with `write_artifact` later. Do not end your turn until `write_artifact` has landed the file in the artifacts drawer. If you delegated this, the work has not happened: assign it explicitly or write it yourself.'
+    : isBinaryDocument
+      ? `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Do not end your turn until ${landingToolPhrase} has landed the real binary workspace file. If you delegated this, the production work has not happened: resume the craftbook step and complete it.`
+      : `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replace_in_file\`/\`append_to_file\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`;
   return [
     ...nearMissLines,
-    `[scenario check] There is still **no \`${filePath}\`** in the workspace. The deliverable is the FILE — prose in chat does not count and will not be seen.`,
+    `[scenario check] There is still **no \`${filePath}\`** in the ${artifactSurface ? 'artifacts drawer' : 'workspace'}. The deliverable is the FILE — prose in chat does not count and will not be seen.`,
     '',
     ...(opts.repairDirective ? [opts.repairDirective, ''] : []),
     landingInstruction,
     handoffHint,
     '',
-    `If \`${filePath}\` already exists by the time you read this queued message, treat this message as stale: re-read \`${filePath}\` and patch the latest concrete scenario-check failure instead of rewriting from scratch or replying in prose.`,
+    artifactSurface
+      ? `If \`${filePath}\` already exists by the time you read this queued message, treat this message as stale: re-read it with \`read_artifact\` and fix the latest concrete scenario-check failure instead of replying in prose.`
+      : `If \`${filePath}\` already exists by the time you read this queued message, treat this message as stale: re-read \`${filePath}\` and patch the latest concrete scenario-check failure instead of rewriting from scratch or replying in prose.`,
     ...coordinatorLines,
     '',
     completionLine,
