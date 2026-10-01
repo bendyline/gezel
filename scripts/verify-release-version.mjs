@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { coreEntryPath, readCoreBuiltEntry } from './core-built-entry.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -47,13 +48,17 @@ const coreSource = await readFile(coreSourcePath, 'utf8');
 const sourceMatch = /export const GEZEL_VERSION = '([^']*)';/.exec(coreSource);
 assertVersion('packages/core/src/browser.ts GEZEL_VERSION', sourceMatch?.[1], expected);
 
-const builtCorePath = resolve(repoRoot, 'packages/core/dist/index.js');
+const builtCorePath = coreEntryPath(repoRoot);
 if (existsSync(builtCorePath)) {
-  const builtCore = await readFile(builtCorePath, 'utf8');
+  const builtCore = readCoreBuiltEntry(builtCorePath);
   const builtMatch =
     /(?:const|var)\s+GEZEL_VERSION\s*=\s*["']([^"']*)["']/.exec(builtCore) ??
     /GEZEL_VERSION\s*=\s*["']([^"']*)["']/.exec(builtCore);
-  assertVersion('packages/core/dist/index.js GEZEL_VERSION', builtMatch?.[1], expected);
+  assertVersion(
+    'packages/core/dist/index.js (with its chunks) GEZEL_VERSION',
+    builtMatch?.[1],
+    expected,
+  );
 }
 
 const serviceMetaArg = arg('--service-meta');

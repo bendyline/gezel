@@ -8,9 +8,11 @@ import {
 import {
   type ComposerDraftAddress,
   forgetDraft,
+  noteDraftSent,
   promptDraftSlotKey,
   readActiveDraftId,
   readDraftText,
+  wasDraftSent,
   writeActiveDraftId,
   writeDraftText,
 } from './composer-drafts.js';
@@ -309,6 +311,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   const markSent = useCallback(() => {
     const id = draftIdRef.current;
     if (!id) return;
+    noteDraftSent(id);
     controllerRef.current = null;
     controllerDraftRef.current = null;
     forgetDraft(id);
@@ -382,6 +385,16 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       try {
         const draft = await api.getPromptDraft(addressRef.current.projectId, id);
         if (generationRef.current !== generation) return;
+        if (draft.status !== 'draft' || wasDraftSent(id)) {
+          forgetDraft(id);
+          writeActiveDraftId(slotKeyRef.current, undefined);
+          setDraftId(null);
+          setMeta(null);
+          onDraftIdChangeRef.current?.(undefined);
+          if (getTextRef.current() === draft.content)
+            onLoadedRef.current('', { id: '' } as unknown as PromptDraftSummary);
+          return;
+        }
         hasFilesRef.current = draft.hasFiles;
         hasTaskLaunchRef.current = Boolean(draft.taskLaunch);
         freshThreadRef.current = draft.sessionId === null;
@@ -539,7 +552,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
           status: 'draft',
         });
         if (generationRef.current !== generation) return;
-        const newest = drafts[0];
+        const newest = drafts.find((d) => !wasDraftSent(d.id));
         if (!newest) return;
         writeActiveDraftId(slotKey, newest.id);
         setDraftId(newest.id);

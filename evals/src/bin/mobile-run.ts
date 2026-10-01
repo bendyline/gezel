@@ -52,6 +52,7 @@ const allowed = new Set([
   '--contracts-only',
   '--physical-device',
   '--cooldown-ms',
+  '--discard-backup',
 ]);
 for (const key of flags.keys()) if (!allowed.has(key)) throw new Error(`Unknown flag: ${key}`);
 const platform = flags.get('--platform');
@@ -63,6 +64,12 @@ if (platform === 'ios' && flags.has('--model-id'))
   );
 if (platform === 'ios' && flags.has('--trained-model') && !flags.has('--physical-device'))
   throw new Error('iOS model staging goes through devicectl, so it needs --physical-device.');
+if (
+  flags.has('--discard-backup') &&
+  (platform !== 'ios' ||
+    !/^product-eval-backup-[0-9A-F-]{36}$/.test(flags.get('--discard-backup')!))
+)
+  throw new Error('--discard-backup names one iOS eval backup folder, as the refusal printed it');
 if (flags.has('--cooldown-ms') && !/^\d+$/.test(flags.get('--cooldown-ms')!))
   throw new Error('--cooldown-ms must be a whole number of milliseconds');
 if (flags.has('--build-only') && flags.has('--contracts-only'))
@@ -206,7 +213,14 @@ if (flags.has('--report-only')) {
         flags.has('--contracts-only') ? '300' : String(8 * 3600 + 120),
         '-only-testing:AppTests/MobileProductEvalTests',
         ...(physical
-          ? ['-allowProvisioningUpdates', `DEVELOPMENT_TEAM=${team}`, 'CODE_SIGN_STYLE=Automatic']
+          ? [
+              '-allowProvisioningUpdates',
+              `DEVELOPMENT_TEAM=${team}`,
+              'CODE_SIGN_STYLE=Automatic',
+              // No iCloud entitlement, so an eval cannot reach the person's
+              // iCloud Gezel folder, whatever the trials do.
+              'CODE_SIGN_ENTITLEMENTS=',
+            ]
           : ['CODE_SIGNING_ALLOWED=NO']),
       ];
       const modelEnv: Record<string, string> = {};
@@ -279,6 +293,9 @@ if (flags.has('--report-only')) {
                 ...modelEnv,
                 ...(flags.has('--cooldown-ms')
                   ? { TEST_RUNNER_GEZEL_EVAL_COOLDOWN_MS: flags.get('--cooldown-ms')! }
+                  : {}),
+                ...(flags.has('--discard-backup')
+                  ? { TEST_RUNNER_GEZEL_EVAL_DISCARD_BACKUP: flags.get('--discard-backup')! }
                   : {}),
                 ...(flags.has('--contracts-only')
                   ? { TEST_RUNNER_GEZEL_EVAL_CONTRACTS_ONLY: '1' }

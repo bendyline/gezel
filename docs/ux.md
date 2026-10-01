@@ -508,7 +508,12 @@ edge, because Radix measures the room and leaves the clamping to CSS. The
 shared `.app-nav-menu` panel takes
 `max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem)` and
 scrolls; a menu that opts out of that class owes itself the same pair. Vertical
-scrollers keep the native bar, so nothing else is needed.
+scrollers keep the native bar, so nothing else is needed — except in a Select:
+Radix hides its viewport's scrollbar and opens scrolled to the selected row,
+so in a short panel (a phone with the keyboard up) the rows above the
+selection disappear without a trace. A Select that leads with actions passes
+`openAtTop` to `Select.Content`; the compact thread picker does, which is what
+keeps New thread on screen.
 
 **Resizable splits.** A two-pane split that a user might want to rebalance
 gets a grip, not a fixed track: a full-height `role="separator"` element with
@@ -1176,6 +1181,11 @@ intentions and collapsing them is what left empty threads behind. And the
 composer's save state is the toolbar's quiet autosave status — a dot while
 dirty, a word while saving — never a chip and never a banner: a person typing
 should not be told that typing is working.
+
+On a phone a thread row names only the model that answered ("Qwen 3.5 2B"),
+never "This Device": every conversation there runs on the device, so the
+label says nothing. Phone model ids are opaque store keys, so a row whose
+model has no known name shows no engine at all rather than the id.
 
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped

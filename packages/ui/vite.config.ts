@@ -32,6 +32,23 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    rolldownOptions: {
+      output: {
+        // Core's build splits its shared code into chunks. Left to itself,
+        // Rolldown then cannot merge the shell's small shared modules into the
+        // entry without a circular chunk import, and the startup graph grows
+        // from 42 to 53 requests at the same byte size. Keeping core in one
+        // chunk, as its unsplit browser entry was, restores the old shape.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'gezel-core',
+              test: /[\\/](?:packages[\\/]core|node_modules[\\/]@bendyline[\\/]gezel)[\\/]dist[\\/]/,
+            },
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

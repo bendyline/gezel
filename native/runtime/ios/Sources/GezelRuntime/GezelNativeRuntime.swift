@@ -636,7 +636,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
      */
     public func chat(_ call: NativeCall) {
         guard let requestId = call.getString("requestId"), !requestId.isEmpty, requestId.utf8.count <= 128,
-              let request = call.getObject("request") else {
+              let requestJson = call.getString("requestJson") else {
             call.reject("A request ID and chat request are required"); return
         }
         guard let modelId = call.getString("modelId"), !modelId.isEmpty else {
@@ -649,14 +649,17 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         guard (512...16384).contains(contextSize) else {
             call.reject("Context size is outside the supported range"); return
         }
-        func encode(_ value: [String: Any]) -> Data? {
-            guard JSONSerialization.isValidJSONObject(value) else { return nil }
-            return try? JSONSerialization.data(withJSONObject: value, options: [.withoutEscapingSlashes])
+        // The JSON text crosses unchanged. Re-encoding a dictionary reorders its
+        // keys from one request to the next, and with them the tool definitions
+        // at the top of the prompt, so no cached prefix ever matched.
+        func object(_ text: String) -> Data? {
+            let data = Data(text.utf8)
+            return (try? JSONSerialization.jsonObject(with: data)) is [String: Any] ? data : nil
         }
-        guard let body = encode(request), body.count <= 1024 * 1024 else {
-            call.reject("Chat request is too large"); return
+        guard requestJson.utf8.count <= 1024 * 1024, let body = object(requestJson) else {
+            call.reject("Chat request is too large or not a JSON object"); return
         }
-        guard let config = call.getObject("chatConfig").map(encode) ?? Data("{}".utf8) else {
+        guard let config = call.getString("chatConfigJson").map(object) ?? Data("{}".utf8) else {
             call.reject("Invalid chat settings"); return
         }
         guard engine != nil else { call.reject("The native inference engine could not initialize.", "UNAVAILABLE"); return }

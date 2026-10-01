@@ -1012,6 +1012,53 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(row.textContent).not.toContain('qwen3.6-27b-q8');
   });
 
+  it('names only the model on a phone, never the device or its store id', async () => {
+    const bridge = window.__GEZEL__;
+    window.__GEZEL__ = { token: 'test', platform: 'mobile' };
+    try {
+      vi.mocked(api.listProviderModels).mockResolvedValue({
+        models: [{ id: '9ed23295-4d37-432b-a492-cddbd101cd4c', name: 'Qwen 3.5 2B' }],
+      } as never);
+      mockSessions([
+        {
+          id: 's-known',
+          gezelId: 'g1',
+          title: 'Favorite music',
+          lastActivityAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+          providerName: 'llama-cpp',
+          model: '9ed23295-4d37-432b-a492-cddbd101cd4c',
+          archived: false,
+        },
+        {
+          id: 's-removed',
+          gezelId: 'g1',
+          title: 'Older chat',
+          lastActivityAt: new Date(Date.now() - 50 * 60_000).toISOString(),
+          providerName: 'llama-cpp',
+          model: '0b7c1d2e-0000-4000-8000-000000000000',
+          archived: false,
+        },
+      ]);
+      mockDrafts({ fresh: [], onThread: [] });
+      render(
+        <SessionSwitcher
+          gezelId="g1"
+          projectId="p1"
+          sessionId="s-known"
+          onSessionIdChange={vi.fn()}
+          onDraftSelect={vi.fn()}
+        />,
+      );
+      const known = await screen.findByRole('option', { name: /Favorite music/ });
+      await waitFor(() => expect(known.textContent).toContain('Qwen 3.5 2B'));
+      expect(known.textContent).not.toMatch(/This Device|9ed23295/);
+      const removed = screen.getByRole('option', { name: /Older chat/ });
+      expect(removed.textContent).not.toMatch(/This Device|0b7c1d2e/);
+    } finally {
+      window.__GEZEL__ = bridge;
+    }
+  });
+
   it('files "Draft" under the open thread, not as a new thread starter', async () => {
     mockSessions([
       {

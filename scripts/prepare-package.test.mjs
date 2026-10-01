@@ -33,6 +33,7 @@ async function fixture() {
   // prepare-package imports it to derive the content-compat calendar line.
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
   await copyFile(join(here, 'pnpm-cli.mjs'), join(root, 'scripts', 'pnpm-cli.mjs'));
+  await copyFile(join(here, 'core-built-entry.mjs'), join(root, 'scripts', 'core-built-entry.mjs'));
   await writeFile(join(root, 'packages', 'core', 'src', 'browser.ts'), DECLARATION);
   await writeFile(
     join(root, 'packages', 'core', 'package.json'),
@@ -242,6 +243,35 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
       await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'),
       /GEZEL_VERSION = '1\.2\.3'/,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('core preparation finds the stamp in a chunk the split build imports', async () => {
+  // Core's build splits shared modules into chunks, so the constants the
+  // entry exports live in a chunk — reached here through a second chunk.
+  const root = await fixture();
+  const pnpmCli = join(root, 'pnpm.mjs');
+  try {
+    await writeFile(
+      pnpmCli,
+      [
+        "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
+        "import { resolve } from 'node:path';",
+        "const source = readFileSync(resolve('packages/core/src/browser.ts'), 'utf8');",
+        "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
+        "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
+        "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
+        "writeFileSync(resolve('packages/core/dist/index.js'), 'import { a } from \"./chunk-A.js\";\\nexport { a };\\n');",
+        "writeFileSync(resolve('packages/core/dist/chunk-A.js'), 'import { GEZEL_VERSION as a } from \"./chunk-B.js\";\\nexport { a };\\n');",
+        'writeFileSync(resolve(\'packages/core/dist/chunk-B.js\'), `var GEZEL_VERSION = "${version}";\\nvar GEZEL_CONTENT_COMPAT = "${compat}";\\nexport { GEZEL_VERSION };\\n`);',
+      ].join('\n'),
+    );
+    const { stdout } = await run(root, 'packages/core', ['1.2.3'], {
+      GEZEL_PNPM_CLI: pnpmCli,
+    });
+    assert.match(stdout, /core dist carries 1\.2\.3/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

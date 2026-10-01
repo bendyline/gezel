@@ -1,5 +1,6 @@
 /** Browser-safe product runtime: same entities and API, injected host services. */
 export * from './files.js';
+export * from './tiered-files.js';
 export * from './entities.js';
 export * from './meester.js';
 export * from './store.js';

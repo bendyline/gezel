@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UnresolvedToolFailureLedger } from '../local-loop/unresolved-tool-failure-ledger.js';
-import { PortableToolExecutor, type PortableToolOutcome } from './local-loop-host.js';
+import {
+  PortableEngineHost,
+  PortableToolExecutor,
+  type PortableToolOutcome,
+} from './local-loop-host.js';
 
 const tool = (name: string, properties: Record<string, unknown>, required: string[] = []) => ({
   type: 'function' as const,
@@ -103,5 +107,42 @@ describe('the phone tool pipeline, as the desktop MCP bridge runs it', () => {
     );
     expect(capped.length).toBeLessThan(long.length);
     expect(capped).toContain('tool output truncated');
+  });
+});
+
+// The desktop provider keeps the same engine-scoped limits; see its provider.test.ts.
+describe('the phone engine host, as the desktop provider scopes tool limits', () => {
+  it('stops forcing tool choice engine-wide once the model rejects it', () => {
+    // Wild-caught on Nanbeige4.2-3B: `tool_choice: "required"` 400s for this
+    // model with one tool or forty, under its own template or a generic
+    // ChatML override, while qwen3.5-2b on the same binary accepts it. Since
+    // forcing the call IS the local-model rescue, an unguarded rejection
+    // makes the rescue fail and the turn burn its whole repair allowance.
+    const provider = new PortableEngineHost();
+    expect(provider.supportsForcedToolChoice).toBe(true);
+
+    provider.noteForcedToolChoiceUnsupported();
+    expect(provider.supportsForcedToolChoice).toBe(false);
+
+    // Monotonic — a later turn never re-enables it and re-pays the 400.
+    provider.noteForcedToolChoiceUnsupported();
+    expect(provider.supportsForcedToolChoice).toBe(false);
+  });
+
+  it('does not degrade a smaller tool roster because a larger one blew the grammar limit', () => {
+    const provider = new PortableEngineHost();
+    provider.noteToolGrammarFloor(48, 'simplified');
+    // The ceiling that failed is a grammar-SIZE limit, so it says nothing
+    // about a small roster; degrading that one would cost tool-argument
+    // fidelity for free.
+    expect(provider.toolGrammarFloorFor(5)).toBe('none');
+    expect(provider.toolGrammarFloorFor(48)).toBe('simplified');
+    expect(provider.toolGrammarFloorFor(75)).toBe('simplified');
+    // The floor only ever widens: a smaller failing count lowers the bar,
+    // and a more permissive tier sticks.
+    provider.noteToolGrammarFloor(12, 'strip-patterns');
+    expect(provider.toolGrammarFloorFor(12)).toBe('simplified');
+    provider.noteToolGrammarFloor(48, 'permissive');
+    expect(provider.toolGrammarFloorFor(12)).toBe('permissive');
   });
 });

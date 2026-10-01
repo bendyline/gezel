@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -15,6 +16,7 @@ import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ContextMeter, type ContextMeterStatus } from './ContextMeter.js';
+import { useProviderModels } from './ModelPicker.js';
 import { readDraftText, subscribeDraftText } from './composer-drafts.js';
 import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
@@ -197,6 +199,12 @@ export function SessionSwitcher({
   // Inside a narrow composer's toolbar: an icon-only picker plus the meter.
   // New thread and New draft stay reachable as rows in the picker.
   const inToolbar = useContext(ComposerToolbarContext);
+  const onPhone = window.__GEZEL__?.platform === 'mobile';
+  const phoneModels = useProviderModels('llama-cpp', onPhone);
+  const phoneModelNames = useMemo(
+    () => (onPhone ? new Map((phoneModels ?? []).map((m) => [m.id, m.name])) : undefined),
+    [onPhone, phoneModels],
+  );
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   // Unsent thread starters. They have no session to belong to, so they are
   // listed above the threads rather than inside one.
@@ -788,35 +796,38 @@ export function SessionSwitcher({
   );
 
   /** A thread row plus the drafts filed under it, minus the one naming it. */
-  const renderThread = ({ s, drafts, namer, unsent }: (typeof threadRows)[number]) => (
-    <Fragment key={s.id}>
-      <Select.Item
-        value={s.id}
-        textValue={rowTextValue(s, engineLabel, namer, unsent)}
-        // A row wearing a draft's name is showing an unsent message, and it
-        // reads exactly like the draft rows around it — so it throws that
-        // message away like they do. A thread with history keeps Archive:
-        // there the row stands for a conversation, not a message.
-        trailing={
-          namer
-            ? removeDraftButton(
-                namer.id,
-                namer.title || UNTITLED_DRAFT_LABEL,
-                drafts.length <= 1 ? s.id : undefined,
-              )
-            : archiveButton(s, namer)
-        }
-      >
-        {renderRow(s, engineLabel, namer, unsent)}
-      </Select.Item>
-      {/* The other messages started inside this thread, listed under it
+  const renderThread = ({ s, drafts, namer, unsent }: (typeof threadRows)[number]) => {
+    const engine = engineSuffix(s, engineLabel, phoneModelNames);
+    return (
+      <Fragment key={s.id}>
+        <Select.Item
+          value={s.id}
+          textValue={rowTextValue(s, engine, namer, unsent)}
+          // A row wearing a draft's name is showing an unsent message, and it
+          // reads exactly like the draft rows around it — so it throws that
+          // message away like they do. A thread with history keeps Archive:
+          // there the row stands for a conversation, not a message.
+          trailing={
+            namer
+              ? removeDraftButton(
+                  namer.id,
+                  namer.title || UNTITLED_DRAFT_LABEL,
+                  drafts.length <= 1 ? s.id : undefined,
+                )
+              : archiveButton(s, namer)
+          }
+        >
+          {renderRow(s, engine, namer, unsent)}
+        </Select.Item>
+        {/* The other messages started inside this thread, listed under it
           rather than in a drawer of their own, so one place answers "where
           does the next message go, and which one am I writing". */}
-      {drafts
-        .filter((d) => d.id !== namer?.id)
-        .map((d) => draftItem(d, { child: true, mark: !unsent }))}
-    </Fragment>
-  );
+        {drafts
+          .filter((d) => d.id !== namer?.id)
+          .map((d) => draftItem(d, { child: true, mark: !unsent }))}
+      </Fragment>
+    );
+  };
   // Between "the composer filed a draft" and its first autosave we know the
   // id and nothing else. That is still the fresh thread the user picked, so
   // it keeps that name until there are words to show; an empty title with
@@ -931,7 +942,7 @@ export function SessionSwitcher({
             <Select.Value placeholder={NEW_THREAD_LABEL} />
           )}
         </Select.Trigger>
-        <Select.Content className="gezel-chat-session-menu">
+        <Select.Content className="gezel-chat-session-menu" openAtTop={inToolbar}>
           {!isFreshThread && (
             <Select.Item value={NEW_THREAD_VALUE} textValue={NEW_THREAD_LABEL}>
               {newThreadLabel}
@@ -1058,11 +1069,23 @@ function renderTitleWithMentions(title: string): ReactNode {
 // (fixed-function generators) wins; otherwise it's the chat provider and the
 // model that actually answered, which differs from `model` when the pinned
 // one is not installed and a stand-in serves the thread.
-function engineSuffix(s: ChatSessionSummary, engineLabel?: string | null): string {
+//
+// A phone runs every conversation itself, so naming the device tells the
+// person nothing, and its model ids are opaque store keys. There the suffix is
+// the model's name, or nothing until the name is known.
+function engineSuffix(
+  s: ChatSessionSummary,
+  engineLabel?: string | null,
+  phoneModelNames?: ReadonlyMap<string, string>,
+): string {
   if (s.source?.kind === 'external') return `From ${s.source.appName} · read-only`;
   if (engineLabel) return engineLabel;
-  const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
   const model = s.servedModel ?? s.model;
+  if (phoneModelNames) {
+    if (s.providerName !== 'llama-cpp') return resolveProviderLabel(s.providerName, 'mobile');
+    return (model && phoneModelNames.get(model)) || '';
+  }
+  const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
   return `${provider}${model ? ` (${model})` : ''}`;
 }
 
@@ -1086,7 +1109,7 @@ function rowActivityAt(s: ChatSessionSummary, namer?: PromptDraftSummary): strin
 
 function renderRow(
   s: ChatSessionSummary,
-  engineLabel?: string | null,
+  engine: string,
   namer?: PromptDraftSummary,
   unsent?: boolean,
 ): ReactNode {
@@ -1094,9 +1117,8 @@ function renderRow(
   // A session record carries a provider and model from the moment it is
   // created, but a thread nothing was ever sent to has not run anything —
   // naming an engine there reports a prediction as a fact.
-  const meta = unsent
-    ? ` · ${formatRelativeTime(at)}`
-    : ` · ${formatRelativeTime(at)} · ${engineSuffix(s, engineLabel)}`;
+  const meta =
+    unsent || !engine ? ` · ${formatRelativeTime(at)}` : ` · ${formatRelativeTime(at)} · ${engine}`;
   return (
     <span className="session-row">
       <span className="session-row-title">{renderTitleWithMentions(rowTitle(s, namer))}</span>
@@ -1109,12 +1131,12 @@ function renderRow(
 
 function rowTextValue(
   s: ChatSessionSummary,
-  engineLabel?: string | null,
+  engine: string,
   namer?: PromptDraftSummary,
   unsent?: boolean,
 ): string {
   const head = `${plainTitle(rowTitle(s, namer))} · ${formatRelativeTime(rowActivityAt(s, namer))}`;
-  return unsent ? head : `${head} · ${engineSuffix(s, engineLabel)}`;
+  return unsent || !engine ? head : `${head} · ${engine}`;
 }
 
 /**

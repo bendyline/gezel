@@ -90,14 +90,20 @@ export interface NativeInferencePlugin {
     request: Parameters<PortableInference['generate']>[0],
   ): ReturnType<PortableInference['generate']>;
   cancel(options: { requestId: string }): Promise<void>;
-  /** Hosts whose llama.cpp provider advertises `structuredChat`. */
+  /**
+   * Hosts whose llama.cpp provider advertises `structuredChat`. The request
+   * and settings cross as JSON text, the bytes desktop sends llama-server, so
+   * native code never re-serializes them: a dictionary that reorders keys
+   * reorders the tool definitions at the top of the prompt, and no cached
+   * prefix survives the next request (iPhone, 2026-10-01).
+   */
   chat?(request: {
     requestId: string;
     providerId: 'llama-cpp';
     modelId: string;
     contextSize: number;
-    request: Record<string, unknown>;
-    chatConfig?: Record<string, unknown>;
+    requestJson: string;
+    chatConfigJson?: string;
   }): Promise<{ status: PortableChatStatus }>;
   /** Hosts with native tool calling only. Exactly one of `output`/`error` is set. */
   completeToolCall?(options: {
@@ -252,8 +258,12 @@ export function createNativeInference(plugin: NativeInferencePlugin): PortableIn
               if (run.cancelled) return { status: 'cancelled' as const };
               run.started = true;
               MobileModelSchema.shape.id.parse(request.modelId);
-              const { body, ...rest } = request;
-              return await plugin.chat!({ ...rest, request: body });
+              const { body, chatConfig, ...rest } = request;
+              return await plugin.chat!({
+                ...rest,
+                requestJson: JSON.stringify(body),
+                ...(chatConfig ? { chatConfigJson: JSON.stringify(chatConfig) } : {}),
+              });
             } finally {
               run.cancelled = true;
               try {

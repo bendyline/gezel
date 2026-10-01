@@ -22,14 +22,20 @@ public enum ProductFileError: LocalizedError {
     }
 }
 
-/// A separate private product tree; legacy state and models are outside its authority.
+/// A product tree: the app's private one, or the person's work in their iCloud
+/// Drive. Legacy state and models are outside its authority.
 public final class ProductFiles: @unchecked Sendable {
     public static let maximumFileBytes = 16 * 1024 * 1024
     private let root: URL
     private let fm = FileManager.default
     private let lock = NSRecursiveLock()
+    /// An iCloud Drive tree: iCloud syncs it underneath the app, so every access
+    /// is file-coordinated, and a file iCloud evicted shows only as a
+    /// `.name.icloud` placeholder until a coordinated read downloads it.
+    private let ubiquitous: Bool
 
-    public init(root: URL) throws {
+    public init(root: URL, ubiquitous: Bool = false) throws {
+        self.ubiquitous = ubiquitous
         self.root = root.deletingLastPathComponent().resolvingSymlinksInPath()
             .appendingPathComponent(root.lastPathComponent, isDirectory: true)
         if let attributes = try attributes(self.root), attributes[.type] as? FileAttributeType != .typeDirectory {
@@ -41,6 +47,43 @@ public final class ProductFiles: @unchecked Sendable {
     private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock(); defer { lock.unlock() }
         return try body()
+    }
+
+    private func coordinated<T>(reading url: URL, _ body: (URL) throws -> T) throws -> T {
+        guard ubiquitous else { return try body(url) }
+        var failure: NSError?
+        var result: Result<T, Error> = .failure(ProductFileError.missingDirectory)
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &failure) { actual in
+            result = Result { try body(actual) }
+        }
+        if let failure { throw failure }
+        return try result.get()
+    }
+
+    private func coordinated<T>(writing url: URL, _ options: NSFileCoordinator.WritingOptions, _ body: (URL) throws -> T) throws -> T {
+        guard ubiquitous else { return try body(url) }
+        var failure: NSError?
+        var result: Result<T, Error> = .failure(ProductFileError.missingDirectory)
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: options, error: &failure) { actual in
+            result = Result { try body(actual) }
+        }
+        if let failure { throw failure }
+        return try result.get()
+    }
+
+    private func placeholder(for url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
+    }
+
+    /// The name and size an iCloud placeholder stands for, when `name` is one.
+    private func evictedEntry(_ child: URL) -> (name: String, size: Int64)? {
+        let name = child.lastPathComponent
+        guard ubiquitous, name.hasPrefix("."), name.hasSuffix(".icloud"), name.count > 8 else { return nil }
+        let original = String(name.dropFirst().dropLast(7))
+        let plist = (try? Data(contentsOf: child)).flatMap {
+            try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+        }
+        return (original, (plist?["NSURLFileSizeKey"] as? NSNumber)?.int64Value ?? 0)
     }
 
     private func attributes(_ url: URL) throws -> [FileAttributeKey: Any]? {
@@ -76,15 +119,22 @@ public final class ProductFiles: @unchecked Sendable {
     public func read(_ path: String) throws -> Data? {
         try synchronized {
             let url = try resolve(path)
-            guard let attributes = try attributes(url) else { return nil }
-            guard attributes[.type] as? FileAttributeType == .typeRegular else { throw ProductFileError.notFile }
-            guard ((attributes[.size] as? NSNumber)?.intValue ?? 0) <= Self.maximumFileBytes else { throw ProductFileError.tooLarge }
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let bytes = try handle.read(upToCount: Self.maximumFileBytes + 1) ?? Data()
-            guard bytes.count <= Self.maximumFileBytes else { throw ProductFileError.tooLarge }
-            return bytes
+            if ubiquitous, try attributes(url) == nil, fm.fileExists(atPath: placeholder(for: url).path) {
+                try? fm.startDownloadingUbiquitousItem(at: url)
+            }
+            return try coordinated(reading: url) { url in try readResolved(url) }
         }
+    }
+
+    private func readResolved(_ url: URL) throws -> Data? {
+        guard let attributes = try attributes(url) else { return nil }
+        guard attributes[.type] as? FileAttributeType == .typeRegular else { throw ProductFileError.notFile }
+        guard ((attributes[.size] as? NSNumber)?.intValue ?? 0) <= Self.maximumFileBytes else { throw ProductFileError.tooLarge }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let bytes = try handle.read(upToCount: Self.maximumFileBytes + 1) ?? Data()
+        guard bytes.count <= Self.maximumFileBytes else { throw ProductFileError.tooLarge }
+        return bytes
     }
 
     public func write(_ path: String, data: Data) throws {
@@ -97,7 +147,11 @@ public final class ProductFiles: @unchecked Sendable {
             guard (try attributes(url.deletingLastPathComponent()))?[.type] as? FileAttributeType == .typeDirectory else {
                 throw ProductFileError.missingDirectory
             }
-            try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+            // iCloud must read a synced file to upload it, so that tree keeps
+            // the default protection class.
+            try coordinated(writing: url, .forReplacing) { url in
+                try data.write(to: url, options: ubiquitous ? [.atomic] : [.atomic, .completeFileProtectionUnlessOpen])
+            }
         }
     }
 
@@ -111,6 +165,10 @@ public final class ProductFiles: @unchecked Sendable {
                 let relative = path.isEmpty ? child.lastPathComponent : "\(path)/\(child.lastPathComponent)"
                 _ = try resolve(relative)
                 guard let attributes = try attributes(child) else { throw ProductFileError.unsafeFile }
+                if let evicted = evictedEntry(child) {
+                    return ProductFileEntry(name: evicted.name, isDirectory: false, size: evicted.size,
+                        mtime: ((attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0) * 1000)
+                }
                 let directory = attributes[.type] as? FileAttributeType == .typeDirectory
                 return ProductFileEntry(name: child.lastPathComponent, isDirectory: directory,
                     size: directory ? 0 : (attributes[.size] as? NSNumber)?.int64Value ?? 0,
@@ -146,7 +204,12 @@ public final class ProductFiles: @unchecked Sendable {
             let url = try resolve(path)
             var count = 0
             try checkTree(path, count: &count)
-            if try attributes(url) != nil { try fm.removeItem(at: url) }
+            try coordinated(writing: url, .forDeleting) { url in
+                if try attributes(url) != nil { try fm.removeItem(at: url) }
+            }
+            if ubiquitous, fm.fileExists(atPath: placeholder(for: url).path) {
+                try fm.removeItem(at: placeholder(for: url))
+            }
         }
     }
 
@@ -160,7 +223,9 @@ public final class ProductFiles: @unchecked Sendable {
             }
             var count = 0
             try checkTree(from, count: &count)
-            try fm.moveItem(at: source, to: destination)
+            try coordinated(writing: source, .forMoving) { source in
+                try fm.moveItem(at: source, to: destination)
+            }
         }
     }
 }

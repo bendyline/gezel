@@ -3,6 +3,7 @@ import {
   MAX_PRODUCT_FILE_BYTES,
   type ProductFilePlugin,
   createNativeProductFiles,
+  createRoutedProductFiles,
 } from './product-files.js';
 
 function fixture() {
@@ -73,5 +74,35 @@ describe('native product file boundary', () => {
       '16 MiB',
     );
     expect(plugin.writeProductFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('the person’s work on a device with a home for it', () => {
+  it('sends Work paths to the work root and settings to the app tree', async () => {
+    const { plugin } = fixture();
+    plugin.productStorage = vi.fn(async () => ({
+      work: { kind: 'icloud' as const, name: 'Gezel' },
+    }));
+    const files = createRoutedProductFiles(plugin);
+    await files.write('gezels/nadia/gezel.md', new Uint8Array([1]));
+    await files.write('config.json', new Uint8Array([2]));
+    expect(plugin.writeProductFile).toHaveBeenCalledWith({
+      path: 'gezels/nadia/gezel.md',
+      data: 'AQ==',
+      root: 'work',
+    });
+    expect(plugin.writeProductFile).toHaveBeenCalledWith({ path: 'config.json', data: 'Ag==' });
+    await files.read('projects/p/project.json');
+    expect(plugin.productStorage).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps one app-owned tree when the device has no such home', async () => {
+    const { plugin } = fixture();
+    plugin.productStorage = vi.fn(async () => ({ work: null }));
+    await createRoutedProductFiles(plugin).write('gezels/nadia/gezel.md', new Uint8Array([1]));
+    expect(plugin.writeProductFile).toHaveBeenCalledWith({
+      path: 'gezels/nadia/gezel.md',
+      data: 'AQ==',
+    });
   });
 });

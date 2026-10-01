@@ -93,6 +93,7 @@ Cloud providers need none of this.
 | `GEZEL_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` \| `silent` |
 | `GEZEL_MOCK_PROVIDER=1` | Deterministic provider, no credentials needed |
 | `GEZEL_SKIP_SYSTEM_BOOTSTRAP=1` | Skip first-boot background downloads |
+| `GEZEL_EMBEDDED_INFERENCE_ONLY=1` | Start `gezeld` in the embedded inference profile an app hosts for its own model calls: inference and model management only, no secret store, no device identity, no remote pairing or LAN serving. The app SDK sets it for an `inferenceOnly` child-hosted daemon |
 | `GEZEL_DAEMON_LOG_FILE=1` | Also write the daemon's output to `<home>/logs/service-YYYY-MM-DD.log` (10 MB rolls, 7 days kept). The CLI and app SDK set it when they start `gezeld` in the background |
 | `GEZEL_NATIVE_ENGINE_VERSION` | Override the pinned native release |
 

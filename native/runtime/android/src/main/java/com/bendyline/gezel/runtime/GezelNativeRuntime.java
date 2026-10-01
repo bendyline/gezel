@@ -635,19 +635,22 @@ public final class GezelNativeRuntime {
     public void chat(NativeCall call) {
         String requestId = call.getString("requestId");
         String modelId = call.getString("modelId");
-        JSONObject request = call.getObject("request");
-        JSONObject chatConfig = call.getObject("chatConfig");
+        // JSON text, passed through as sent: re-encoding could reorder keys, and
+        // with them the tool definitions at the top of the prompt.
+        String body = call.getString("requestJson");
+        String chatConfig = call.getString("chatConfigJson");
         if (call.contains("contextSize") && call.getInt("contextSize") == null) { call.reject("Token budgets must be integers", "INVALID_REQUEST"); return; }
         int contextSize = call.getInt("contextSize", 4096);
         try {
             if (engine == 0) throw new IllegalStateException(initializationError == null ? "Native engine unavailable" : initializationError);
             if (modelId == null || modelId.isEmpty()) throw new IllegalArgumentException("Choose a model for this conversation");
-            if (requestId == null || requestId.isEmpty() || requestId.getBytes(StandardCharsets.UTF_8).length > 128 || request == null)
+            if (requestId == null || requestId.isEmpty() || requestId.getBytes(StandardCharsets.UTF_8).length > 128 || body == null)
                 throw new IllegalArgumentException("A request ID and chat request are required");
             if (contextSize < 512 || contextSize > 16384) throw new IllegalArgumentException("Context size is outside the supported range");
-            String body = request.toString();
             if (body.getBytes(StandardCharsets.UTF_8).length > 1024 * 1024) throw new IllegalArgumentException("Chat request is too large");
-            String config = chatConfig == null ? "{}" : chatConfig.toString();
+            new JSONObject(body);
+            String config = chatConfig == null ? "{}" : chatConfig;
+            new JSONObject(config);
             synchronized (this) {
                 if (destroyed || backgrounded) { call.reject("Reopen the app to start a conversation", "BACKGROUND"); return; }
                 if (activeId != null || modelMutation || releaseRequested) { call.reject("Another conversation or memory cleanup is running", "BUSY"); return; }

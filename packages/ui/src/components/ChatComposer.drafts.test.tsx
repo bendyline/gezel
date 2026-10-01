@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -538,6 +539,61 @@ describe('sending a draft', () => {
       .mocked(api.writePromptDraftContent)
       .mock.calls.filter(([, , content]) => content === '');
     expect(writesAfterSend).toHaveLength(0);
+  });
+
+  // The phone accepts a message for a busy thread before it marks the draft
+  // sent, so the thread's open-draft list still names it for a moment.
+  it('never reopens the draft it just sent', async () => {
+    let created = 0;
+    vi.mocked(api.createPromptDraft).mockImplementation(async (_projectId, body) => {
+      created += 1;
+      return draftFixture({
+        id: `2026-09-03-000${created}`,
+        sessionId: 'session-1',
+        content: body.content ?? '',
+      }) as never;
+    });
+    vi.mocked(api.sendToChatSession).mockImplementation(async () => {
+      vi.mocked(api.listPromptDrafts).mockResolvedValue({
+        drafts: [draftFixture({ id: '2026-09-03-0001', sessionId: 'session-1' })],
+      } as never);
+      return { accepted: true, sessionId: 'session-1', queued: true } as never;
+    });
+    function Controlled() {
+      const [draftId, setDraftId] = useState<string | undefined>();
+      return (
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+          draftScope="meester"
+          draftId={draftId}
+          onDraftIdChange={setDraftId}
+        />
+      );
+    }
+    render(<Controlled />);
+    type('first');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    });
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    type('second');
+    await waitFor(() => expect(api.createPromptDraft).toHaveBeenCalledTimes(2));
+    expect(api.getPromptDraft).not.toHaveBeenCalledWith('default', '2026-09-03-0001');
+    expect(
+      vi
+        .mocked(api.writePromptDraftContent)
+        .mock.calls.filter(([, id, content]) => id === '2026-09-03-0001' && content === 'second'),
+    ).toHaveLength(0);
   });
 
   it('keeps the draft when the daemon refuses the message', async () => {

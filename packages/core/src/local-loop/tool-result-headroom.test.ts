@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type ToolOutputBudgetOptions,
-  capToolOutput,
-  computeToolBudgetChars,
-} from '../mcp-bridge.js';
-import { LlamaCppProvider } from './provider.js';
+import type { LocalToolOutputBudget } from './engine-host.js';
+import { ExternalLlamaServer } from './test-utils/external-llama-server.js';
+import { capToolOutput, computeToolBudgetChars } from './tool-budget.js';
 
 /**
  * Build an SSE Response body out of an array of events. Pass `'[DONE]'`
@@ -31,7 +28,7 @@ function sseResponse(events: Array<unknown>): Response {
 describe('LlamaCppSession tool-result headroom', () => {
   it('recovers tool read headroom before the engine-overflow threshold', async () => {
     const numCtx = 32_768;
-    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx });
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test', numCtx });
     const session = await provider.createSession({ systemMessage: 'sys' });
     const internal = session as unknown as {
       currentTurnStartIdx: number;
@@ -77,7 +74,7 @@ describe('LlamaCppSession tool-result headroom', () => {
   });
 
   it('leaves healthy tool transcripts and protected newest results intact', async () => {
-    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 32_768 });
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test', numCtx: 32_768 });
     const session = await provider.createSession({ systemMessage: 'sys' });
     const internal = session as unknown as {
       currentTurnStartIdx: number;
@@ -101,7 +98,7 @@ describe('LlamaCppSession tool-result headroom', () => {
       messages: Array<{ role: string; content: string; tool_call_id?: string }>;
     }> = [];
     const output = (id: number) => `SOURCE-${id}:${'x'.repeat(16_000)}`;
-    const provider = new LlamaCppProvider({
+    const provider = new ExternalLlamaServer({
       baseUrl: 'http://llama.test',
       numCtx: 32_768,
       fetchImpl: (async (_input, init) => {
@@ -150,7 +147,7 @@ describe('LlamaCppSession tool-result headroom', () => {
           callTool: (
             name: string,
             args: Record<string, unknown>,
-            opts?: ToolOutputBudgetOptions,
+            opts?: LocalToolOutputBudget,
           ) => Promise<string>;
         };
       };
@@ -189,7 +186,7 @@ describe('LlamaCppSession tool-result headroom', () => {
   });
 
   it('does not condense unread results even when their batch exceeds the context budget', async () => {
-    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 32_768 });
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test', numCtx: 32_768 });
     const session = await provider.createSession({ systemMessage: 'sys' });
     const internal = session as unknown as {
       messages: Array<{ role: string; content: string }>;
@@ -208,7 +205,7 @@ describe('LlamaCppSession tool-result headroom', () => {
     // engine's cached prefix from there on. Reclaiming only what the next read
     // needed condensed on nearly every read of a long loop.
     const numCtx = 65_536;
-    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx });
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test', numCtx });
     const session = await provider.createSession({ systemMessage: 'sys' });
     const internal = session as unknown as {
       currentTurnStartIdx: number;

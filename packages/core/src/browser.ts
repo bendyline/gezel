@@ -161,6 +161,7 @@ export * from './tasks/step-routing.js';
 export * from './tools/access.js';
 export * from './tools/assignee-arg.js';
 export * from './tools/envelope.js';
+export * from './storage-tiers.js';
 export { parseXmlFunctionCall, parseXmlFunctionParams } from './tools/xml-function-call.js';
 export * from './tools/native-tools.js';
 export * from './tools/project-ref.js';

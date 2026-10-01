@@ -68,6 +68,16 @@ final class MobileProductEvalTests: XCTestCase {
         let fm = FileManager.default
         let support = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let root = support.appendingPathComponent("Gezel", isDirectory: true)
+        // An operator who has looked inside a stale backup names it to discard
+        // it. Nothing is discarded on its own: the backup exists so a killed
+        // run cannot lose the person's product. devicectl cannot delete files.
+        if let named = env["GEZEL_EVAL_DISCARD_BACKUP"] {
+            guard named.range(of: "^product-eval-backup-[0-9A-F-]{36}$", options: .regularExpression) != nil,
+                  fm.fileExists(atPath: root.appendingPathComponent(named).appendingPathComponent("snapshot.json").path) else {
+                throw NSError(domain: "MobileEval", code: 10, userInfo: [NSLocalizedDescriptionKey: "\(named) is not an eval backup on this device"])
+            }
+            try fm.removeItem(at: root.appendingPathComponent(named, isDirectory: true))
+        }
         let unresolved = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .first { $0.lastPathComponent.hasPrefix("product-eval-backup-") || $0.lastPathComponent.hasPrefix("product-smoke-backup-") }
         guard unresolved == nil else {
@@ -122,6 +132,13 @@ final class MobileProductEvalTests: XCTestCase {
         }
         stage("isolating-product")
         try await unloadProduct()
+        // Preservation covers the app-owned tree only. With iCloud attached,
+        // trials would write test projects into the person's real Gezel folder,
+        // so the eval runs without it and the reloaded product sees one tree.
+        let mobileStore = Mirror(reflecting: plugin).children.first(where: { $0.label == "store" })?.value as? MobileStore
+        let iCloudWork = mobileStore?.workFiles
+        mobileStore?.workFiles = nil
+        addTeardownBlock { mobileStore?.workFiles = iCloudWork }
         let preservation = try EvalDataPreservation.begin(root: root)
         // Preservation restores inventory bytes, not model files, so a model
         // this run published is deleted here once the product has released it.

@@ -62,6 +62,8 @@ struct gezel_llama_engine {
     // Tokens held in the context's memory, in position order. Only a request
     // that finished cleanly leaves this set; everything else starts empty.
     std::vector<llama_token> cached;
+    // How the previous request ended, for the per-request reuse line.
+    int32_t last_status = 0;
     // Plain attention memory can drop a suffix and keep the rest exactly.
     // Recurrent and hybrid states (Qwen 3.5, LFM2, Granite 4) cannot: their
     // rollback snapshots serve speculative decoding, and reusing them changed

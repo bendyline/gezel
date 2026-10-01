@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -398,6 +399,23 @@ int32_t generate_impl(gezel_llama_engine & engine, const gezel_llama_message * m
 }
 }
 
+namespace {
+/** Bridge diagnostics: logcat on Android, the process's stderr elsewhere (the
+ *  iOS device console and the host tests). */
+void bridge_log(const char * format, ...) {
+    va_list args;
+    va_start(args, format);
+#ifdef __ANDROID__
+    __android_log_vprint(ANDROID_LOG_INFO, "GezelLlama", format, args);
+#else
+    std::fputs("GezelLlama ", stderr);
+    std::vfprintf(stderr, format, args);
+    std::fputc('\n', stderr);
+#endif
+    va_end(args);
+}
+}
+
 namespace gezel_mobile {
 int32_t decode_prompt(gezel_llama_engine & engine, const std::vector<llama_token> & tokens, size_t & reused,
                       gezel_llama_error * error, const std::vector<size_t> & checkpoints) {
@@ -412,6 +430,8 @@ int32_t decode_prompt(gezel_llama_engine & engine, const std::vector<llama_token
     auto memory = llama_get_memory(engine.context);
     size_t reuse = 0;
     while (reuse < engine.cached.size() && reuse < tokens.size() && engine.cached[reuse] == tokens[reuse]) ++reuse;
+    const size_t matched = reuse, held = engine.cached.size(), saved = engine.checkpoints.size();
+    const size_t longest = saved ? engine.checkpoints.back().tokens.size() : 0;
     if (!engine.reusable_memory) {
         // Attention memory still holds a checkpoint's positions only if the
         // cached tokens agree that far; the checkpoint restores the rest. The
@@ -446,6 +466,11 @@ int32_t decode_prompt(gezel_llama_engine & engine, const std::vector<llama_token
         llama_memory_clear(memory, true);
         reuse = 0;
     }
+    // One line per request: why a prompt was or was not reused is otherwise
+    // invisible on a device (iPhone 14 Pro Max re-read ~7,500 tokens on every
+    // tool step while the same model reused 99% on a Mac, 2026-10-01).
+    bridge_log("prompt reuse %zu/%zu: held %zu, matched %zu, checkpoints %zu (latest %zu), previous request %d",
+               reuse, tokens.size(), held, matched, saved, longest, static_cast<int>(engine.last_status));
     engine.cached.assign(tokens.begin(), tokens.begin() + static_cast<std::ptrdiff_t>(reuse));
     engine.progress_prompt.store(static_cast<uint32_t>(tokens.size()), std::memory_order_relaxed);
     engine.progress_reused.store(static_cast<uint32_t>(reuse), std::memory_order_relaxed);
@@ -504,6 +529,7 @@ void finish_request(gezel_llama_engine & engine, int32_t status) {
     // that finished cleanly keeps its memory for the next one to reuse. A reply
     // stopped after its first token still finished cleanly: every decoded token
     // is in `cached`, and nothing else is in memory.
+    engine.last_status = status;
     if (status != GEZEL_LLAMA_OK) {
         llama_memory_clear(llama_get_memory(engine.context), true);
         engine.cached.clear();

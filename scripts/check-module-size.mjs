@@ -18,7 +18,9 @@ export const HEADROOM_MULTIPLIER = 1.05;
 export const GRANDFATHERED = new Map([
   ['packages/service/src/chat/manager.ts', 16_898],
   ['packages/mcp/src/server.ts', 12_293],
-  ['packages/service/src/providers/llama-cpp/provider.test.ts', 10_290],
+  // Moved from service/providers/llama-cpp/provider.test.ts (10_290) with the
+  // session it tests; re-measured at the move.
+  ['packages/core/src/local-loop/llama-cpp-session.test.ts', 9_783],
   ['packages/client/src/client.ts', 8_172],
   ['packages/service/src/fs/store.ts', 7_204],
   ['packages/core/src/schemas/api.ts', 7_046],

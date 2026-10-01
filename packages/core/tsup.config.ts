@@ -49,6 +49,11 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2022',
-  splitting: false,
+  // Entries share most of their code: the schemas, and the local loop that
+  // both `./local-loop` and `./runtime` run. Unsplit, every entry carried its
+  // own copy, which put the published tarball at 3.36 MB (budget 2.6 MB) and
+  // gave a consumer of two entries two copies of each class. Shared modules
+  // now live in chunks every entry imports.
+  splitting: true,
   onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

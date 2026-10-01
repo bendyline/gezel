@@ -76,6 +76,9 @@ async function main() {
     port: explicitPort,
     preferCanonicalPort: explicitPort === undefined,
     uiDir,
+    // Set by an app SDK host that asked for inference only: the narrow
+    // embedded profile, with no secrets, device identity, or remote surface.
+    ...(process.env.GEZEL_EMBEDDED_INFERENCE_ONLY === '1' ? { embeddedInferenceOnly: true } : {}),
   });
   stopRunningService = () => running.stop();
 

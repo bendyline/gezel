@@ -15,6 +15,7 @@ import {
 const log = createLogger('secrets');
 
 export { FileSecretStore } from './file-store.js';
+export { MemorySecretStore } from './memory-store.js';
 export { KeyringSecretStore } from './keyring-store.js';
 export type {
   SecretStore,

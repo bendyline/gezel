@@ -1,5 +1,5 @@
 import * as RadixSelect from '@radix-ui/react-select';
-import type { CSSProperties, ReactNode } from 'react';
+import { type CSSProperties, type FocusEvent, type ReactNode, useCallback, useRef } from 'react';
 import { DropdownChevron } from './DropdownChevron.js';
 import { appCollisionBoundary } from './appCollisionBoundary.js';
 
@@ -43,8 +43,43 @@ export function Trigger(props: RadixSelect.SelectTriggerProps) {
   );
 }
 
-export function Content(props: RadixSelect.SelectContentProps) {
-  const { className, children, position = 'popper', sideOffset = 4, ...rest } = props;
+export function Content(
+  props: RadixSelect.SelectContentProps & {
+    /**
+     * Open on the first row rather than the selected one. Radix scrolls the
+     * selection into view and hides the viewport's scrollbar, so in a short
+     * panel (a phone with the keyboard up) the rows above it vanish without a
+     * trace. For menus that lead with actions, like the thread picker's
+     * New thread.
+     */
+    openAtTop?: boolean;
+  },
+) {
+  const {
+    className,
+    children,
+    position = 'popper',
+    sideOffset = 4,
+    openAtTop = false,
+    ...rest
+  } = props;
+  // Only the focus Radix gives the selected row on open may move the list.
+  // Anything the person focuses first ends it, so a row never jumps away
+  // from a finger that is already on it.
+  const settledRef = useRef(false);
+  const viewportRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) settledRef.current = false;
+  }, []);
+  const onViewportFocus = useCallback((event: FocusEvent<HTMLDivElement>) => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    if (!(event.target as HTMLElement).matches('[data-state="checked"]')) return;
+    const viewport = event.currentTarget;
+    // After the browser's own scroll-into-view for that focus.
+    requestAnimationFrame(() => {
+      viewport.scrollTop = 0;
+    });
+  }, []);
   return (
     <RadixSelect.Portal>
       <RadixSelect.Content
@@ -54,7 +89,12 @@ export function Content(props: RadixSelect.SelectContentProps) {
         sideOffset={sideOffset}
         className={className ? `gz-select-content ${className}` : 'gz-select-content'}
       >
-        <RadixSelect.Viewport className="gz-select-viewport">{children}</RadixSelect.Viewport>
+        <RadixSelect.Viewport
+          className="gz-select-viewport"
+          {...(openAtTop ? { ref: viewportRef, onFocus: onViewportFocus } : {})}
+        >
+          {children}
+        </RadixSelect.Viewport>
       </RadixSelect.Content>
     </RadixSelect.Portal>
   );

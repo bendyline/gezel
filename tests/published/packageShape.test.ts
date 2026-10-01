@@ -51,8 +51,10 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // than a 130 KB expansion per method); what remains is the shared schema
   // chunk (~3.2 MB), where every schema that embeds TaskSchema repeats its
   // whole type. Fix that, not the budget, when this trips again. Keep this
-  // close to the measurement so the next growth reopens it.
-  '@bendyline/gezel': 2_600_000, //                    2.42 MB
+  // close to the measurement so the next growth reopens it. (It tripped at
+  // 3.36 MB when `./local-loop` became an entry: unsplit, every entry bundled
+  // its own copy of the shared code. tsup now splits it into chunks.)
+  '@bendyline/gezel': 2_000_000, //                    1.75 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

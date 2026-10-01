@@ -134,6 +134,11 @@ export async function pairRemote(
   input: PairRemoteInput,
 ): Promise<PairedRemote> {
   const baseUrl = normalizeRemoteBaseUrl(input.baseUrl);
+  // B pins the identity we present; a service without one cannot pair.
+  const ownIdentity = ctx.deviceIdentity;
+  if (!ownIdentity) {
+    throw new Error('pairing: this service has no device identity to pair with');
+  }
 
   // 1. TOFU bootstrap — fetch B's identity over an unpinned HTTPS connection.
   const identity = await inspectRemoteIdentity(baseUrl);
@@ -164,9 +169,9 @@ export async function pairRemote(
     token = await registerAndPoll({
       baseUrl,
       fetch: pinned,
-      appId: ctx.deviceIdentity.deviceId,
+      appId: ownIdentity.deviceId,
       appName: input.displayName ?? hostname(),
-      deviceIdentityPubKey: ctx.deviceIdentity.publicKeyPem,
+      deviceIdentityPubKey: ownIdentity.publicKeyPem,
       timeoutMs: (input.approvalTimeoutSec ?? 120) * 1000,
     });
   } finally {

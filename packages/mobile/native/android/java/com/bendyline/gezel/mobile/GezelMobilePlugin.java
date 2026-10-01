@@ -61,6 +61,9 @@ public final class GezelMobilePlugin extends Plugin {
         }); } catch (RejectedExecutionException error) { completion.run(); call.reject("The app is closing"); }
     }
 
+    /** Where the person's work lives outside the app. None yet: Android keeps one app-owned
+     *  tree until its folder picker lands (docs/mobile-durable-storage-plan.md). */
+    @PluginMethod public void productStorage(PluginCall call) { call.resolve(new JSObject().put("work", JSONObject.NULL)); }
     @PluginMethod public void readProductFile(PluginCall call) { storage(call, () -> {
         byte[] data = store.productFiles.read(call.getString("path"));
         return new JSObject().put("data", data == null ? JSONObject.NULL : android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
