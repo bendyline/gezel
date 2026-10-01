@@ -1,3 +1,11 @@
+## @bendyline/gezel-catalog [1.2.1](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-catalog%401.2.0...%40bendyline%2Fgezel-catalog%401.2.1) (2026-10-01)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.1
+* **@bendyline/gezel-knowledge:** upgraded to 1.2.1
+
 ## @bendyline/gezel-catalog [1.2.0](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-catalog%401.1.2...%40bendyline%2Fgezel-catalog%401.2.0) (2026-09-30)
 
 
