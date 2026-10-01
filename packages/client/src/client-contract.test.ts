@@ -46,6 +46,20 @@ const cases: ContractCase[] = [
     invoke: (c) => c.getSystemDiagnostics(),
   },
   {
+    name: 'perf snapshot',
+    method: 'GET',
+    path: '/api/system/perf',
+    invoke: (c) => c.getPerfSnapshot(),
+  },
+  {
+    name: 'client perf report',
+    method: 'POST',
+    path: '/api/system/perf/client',
+    body: { kind: 'long-task', view: 'area:settings', durationMs: 640 },
+    invoke: (c) =>
+      c.reportClientPerf({ kind: 'long-task', view: 'area:settings', durationMs: 640 }),
+  },
+  {
     name: 'code review start',
     method: 'POST',
     path: '/api/projects/p1/git/reviews',

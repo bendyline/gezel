@@ -971,6 +971,18 @@ export const ChatMessageSchema = z.object({
    * the model replaying a bare `![](attachments/9f3.png)`.
    */
   recognizedImages: z.array(MessageImageDigestSchema).optional(),
+  /**
+   * Everything the provider saw in front of the person's words on this turn:
+   * the `[Current date and time: …]` line (see `prompt-clock.ts`) and any
+   * per-turn preludes (retrieval context, live-preview errors, a budget
+   * nudge, a turn-intent plan). Never shown; `content` stays the person's
+   * words. A rebuilt session replays it so history is byte-identical to what
+   * was sent: without it, an earlier user turn replays shorter than the
+   * engine's saved KV (llama-server's per-session slot file) or Anthropic's
+   * cached prefix, and everything after it is prefilled again. Can run to a
+   * few KB when retrieval fired; that disk is the price of the cache hit.
+   */
+  sentPreamble: z.string().optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 

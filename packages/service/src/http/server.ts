@@ -23,6 +23,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
 import { embeddingsHealth } from '../memory/embeddings.js';
+import { beginPerfRequest } from '../perf/responsiveness.js';
 import {
   bearerAuth,
   denyRemoteInferenceScope,
@@ -179,6 +180,24 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   const app = new Hono();
   const previewCapabilities = options.previewCapabilities ?? new PreviewCapabilityStore();
   const httpLog = createLogger('http');
+
+  // Outermost, so the time covers every other middleware. `Server-Timing`
+  // lets the renderer tell daemon time from time spent waiting to be served.
+  app.use('*', async (c, next) => {
+    const started = performance.now();
+    const done = beginPerfRequest(c.req.method, c.req.path);
+    try {
+      await next();
+    } finally {
+      const ms = performance.now() - started;
+      try {
+        c.res.headers.set('server-timing', `app;dur=${ms.toFixed(1)}`);
+      } catch {
+        /* immutable or absent response on a thrown request */
+      }
+      done(c.res?.status ?? 500);
+    }
+  });
 
   app.use('*', async (c, next) => {
     await next();

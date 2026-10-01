@@ -7865,6 +7865,18 @@ export class ChatManager extends LocalEngineRuntime {
       // (`isValidationRepairPrompt`, no-op confirmations) that a leading
       // bracket line would blind. Continuations already have it in history.
       const clockLine = renderCurrentDateTimeLine();
+      // Everything this send puts in front of the person's words (the date
+      // line and every prelude above), persisted with the turn's terminal
+      // write so a rebuilt session replays the turn exactly as sent and the
+      // engine's saved prefix still matches. Preludes all prepend, so the
+      // words are always the suffix.
+      const firstSend = withCurrentDateTimeLine(promptForTurn, clockLine);
+      const words = spliceIntoText(userText, pendingDigests);
+      if (firstSend.endsWith(words)) {
+        userMessage.sentPreamble = firstSend.slice(0, firstSend.length - words.length);
+      }
+      // Lazy on purpose: a Keurmeester recovery swaps `promptForTurn` without
+      // counting a continuation, and must send the corrective prompt.
       const providerPrompt = () =>
         continuations === 0 ? withCurrentDateTimeLine(promptForTurn, clockLine) : promptForTurn;
       let falseCapabilityDenialCorrected = false;
@@ -15206,11 +15218,12 @@ export class ChatManager extends LocalEngineRuntime {
           // replays as a bare `![](attachments/9f3.png)` after a daemon
           // restart or a context rebuild — the model loses the image it was
           // answering about. Byte-identical to the live send's splice, so the
-          // cached prefix still matches.
+          // cached prefix still matches — which is also why the turn's date
+          // line and preludes go back on in front, exactly as the send had them.
           content:
             m.role === 'assistant'
               ? stripReasoningTags(m.content)
-              : spliceIntoText(m.content, m.recognizedImages),
+              : `${m.sentPreamble ?? ''}${spliceIntoText(m.content, m.recognizedImages)}`,
         }));
       // Scale what we volunteer to the window the model actually has;
       // a fixed cap starves long-context sessions into re-read loops.

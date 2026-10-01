@@ -93,6 +93,7 @@ import type {
   ChatSession,
   ChatSessionSummary,
   CleanupRequest,
+  ClientPerfReport,
   CodeReviewResponse,
   CodexSetupStatusResponse,
   CompleteStepRequest,
@@ -296,6 +297,7 @@ import type {
   PageReadResponse,
   PatchPromptDraftRequest,
   PendingImports,
+  PerfSnapshot,
   PiSetupStatusResponse,
   Poppetje,
   PreviewLogEntry,
@@ -3350,6 +3352,16 @@ export class GezelClient {
    */
   getSystemDiagnostics(signal?: AbortSignal): Promise<SystemDiagnostics> {
     return this.request('GET', '/api/system/diagnostics', undefined, undefined, signal);
+  }
+
+  /** Main-thread stalls, slow requests, and renderer timings since the daemon started. */
+  getPerfSnapshot(): Promise<PerfSnapshot> {
+    return this.request('GET', '/api/system/perf');
+  }
+
+  /** Hand a renderer-side timing to the daemon, which logs it beside its own. */
+  reportClientPerf(report: ClientPerfReport): Promise<{ ok: true }> {
+    return this.request('POST', '/api/system/perf/client', report);
   }
 
   /**

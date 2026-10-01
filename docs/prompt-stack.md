@@ -198,7 +198,16 @@ while they stream.
   adds it at the provider seam only (`providerPrompt()`), so the stored user message, the
   prefix-anchored turn classifiers, and continuation nudges never see it. It sits outside
   the system prompt because a clock there would change every minute and invalidate the
-  cached prefix. Without it, models dated plans from their training data: a Meester
+  cached prefix. For the same reason everything a send put in front of the person's
+  words, this line and every prelude below, is kept beside the stored user message
+  (`ChatMessage.sentPreamble`), and a rebuilt session puts it back on each replayed turn:
+  after an engine eviction or a daemon restart, history must be byte-identical to what
+  was sent, or the engine's saved slot KV (and Anthropic's cached prefix) stops matching
+  at that turn and everything after it is prefilled again. Session files grow by the
+  preludes' size (a few KB on a turn that retrieved); that is the price of the cache hit.
+  Tool-using turns still replay through `buildToolEvidenceReplay`, which deduplicates and
+  budgets tool results by design, so a rebuilt work session matches only up to its first
+  tool turn. Without it, models dated plans from their training data: a Meester
   planned "the week of May 20th" in September 2026, and that date ended up in craftbook
   params, filenames and a customer quote. Guarded by the `date-grounding` eval.
 - **Turn intent plan** (`chat/turn-intent-plan.ts`): a deterministic first pass shared by

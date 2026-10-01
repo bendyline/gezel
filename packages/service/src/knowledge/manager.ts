@@ -63,6 +63,7 @@ import {
 } from '../machine-engine/knowledge-assets.js';
 import { embedKnowledgeQuery, sharesDaemonEmbedder } from '../memory/embeddings.js';
 import { ChatModelInstallRegistry } from '../models/install-registry.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import { scoreResult } from '../search/search-service.js';
 import type {
   GlobalSearchHit,
@@ -335,7 +336,10 @@ export class KnowledgeManager {
     }
   }
 
-  private async mountEntry(entry: KnowledgeRegistryEntry): Promise<void> {
+  private async mountEntry(
+    entry: KnowledgeRegistryEntry,
+    opts: { justVerified?: boolean } = {},
+  ): Promise<void> {
     const ref = entry.ref;
     const key = this.keyFor(ref);
     if (this.mountedByKey.has(key)) return;
@@ -343,8 +347,11 @@ export class KnowledgeManager {
 
     // Full verify before mount, including SQLite quick_check, vector-table
     // alignment, self-KNN, and publisher smoke queries. This runs in the
-    // dedicated knowledge worker in production.
-    const report = await this.opts.host.validate(rootDir, true);
+    // dedicated knowledge worker in production. An install that deep-validated
+    // these bytes moments ago re-checks hashes and counts only: repeating the
+    // deep pass doubled the tail of every update, during which the worker
+    // answered no other knowledge query.
+    const report = await this.opts.host.validate(rootDir, opts.justVerified !== true);
     if (!report.ok || !report.manifest) {
       const failed = report.checks.filter((c) => !c.ok);
       throw new Error(
@@ -693,6 +700,7 @@ export class KnowledgeManager {
       this.registry.read().catalogs.map((c) => [this.keyFor(c.ref), c.ref.version]),
     );
     const catalogId = request.kind === 'catalog' ? request.id : undefined;
+    const endPerfWork = beginPerfWork(`knowledge install ${catalogId ?? request.kind}`);
     try {
       const plan = await this.planInstall(request);
       if ('error' in plan) {
@@ -754,6 +762,7 @@ export class KnowledgeManager {
         yield event;
       }
     } finally {
+      endPerfWork();
       abort.abort();
       this.jobDownloadKeys.delete(jobId);
       this.jobRequests.delete(jobId);
@@ -778,7 +787,7 @@ export class KnowledgeManager {
     const entry = this.registry.find(event.ref.publisherId, event.ref.catalogId);
     if (entry) {
       try {
-        await this.mountEntry(entry);
+        await this.mountEntry(entry, { justVerified: true });
       } catch (err) {
         const reason = errorMessage(err);
         this.registry.quarantine(event.ref.publisherId, event.ref.catalogId, reason);

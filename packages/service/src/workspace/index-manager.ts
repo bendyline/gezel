@@ -24,6 +24,7 @@ import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { embeddingsHealth } from '../memory/embeddings.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,
@@ -439,11 +440,13 @@ export class WorkspaceIndexManager {
         return;
       }
       state.indexing = true;
+      const endPerfWork = beginPerfWork(`index scan ${projectId}`);
       const promise = this.runScan(projectId)
         .catch((err) => {
           log.warn(`[index] scan crashed for ${projectId}: ${describe(err)}`);
         })
         .finally(() => {
+          endPerfWork();
           state.indexing = false;
           state.inflight = undefined;
         });

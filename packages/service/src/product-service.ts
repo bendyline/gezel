@@ -72,6 +72,7 @@ import { planNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
+import { startResponsivenessMonitor } from './perf/responsiveness.js';
 
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
@@ -257,6 +258,13 @@ export async function startProductService(
     powerLog.warn(
       `host resumed after ${formatSuspension(event.suspendedMs)} suspended — in-flight deadlines were credited that time rather than charged for it`,
     );
+  });
+  // Started as early as the suspend clock so a block during boot is caught
+  // too. The CPU profile that explains a block follows debug mode, read live.
+  let perfDebug: DebugFlag | null = null;
+  const stopResponsivenessMonitor = startResponsivenessMonitor({
+    logsDir: gezelPaths(home).logs,
+    profileWhen: () => process.env.GEZEL_PERF_PROFILE === '1' || perfDebug?.isEnabled() === true,
   });
   discoverManagedScriptRuntimes(home);
   // Publish the accelerator probe as early as possible. `computeCapacityBudget()`
@@ -546,6 +554,7 @@ export async function startProductService(
   // Live flips (via `PUT /api/config`) mutate this object in place.
   const bootConfig = await store.readConfig().catch(() => ({}) as GezelConfig);
   const debug = new DebugFlag(bootConfig.debugMode === true);
+  perfDebug = debug;
   if (debug.isEnabled()) {
     log.info('[debug] verbose diagnostics ON (GezelConfig.debugMode=true)');
   }
@@ -2992,6 +3001,7 @@ export async function startProductService(
       log.info('[service] shutdown started');
       suspendLogOff();
       stopSuspendMonitor();
+      void stopResponsivenessMonitor();
       scheduler.stop();
       nightShift.stop();
       // Issued first: an owning supervisor force-stops this process a few

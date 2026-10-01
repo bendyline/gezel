@@ -10,6 +10,7 @@ import type {
 import { GezelClient } from '@bendyline/gezel-client';
 import type { ReactNode } from 'react';
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from './html-preview-host.js';
+import { instrumentFetch, setPerfReportSink } from './nav-timing.js';
 
 /**
  * Where an app update has got to. Mirrors the union the Electron main process
@@ -434,8 +435,16 @@ function resolveBaseUrl(): string {
   return window.__GEZEL__?.baseUrl ?? window.location.origin;
 }
 
+const injectedFetch = window.__GEZEL__?.fetch;
+
 export const api = new GezelClient({
   baseUrl: resolveBaseUrl(),
   token: resolveToken(),
-  fetch: window.__GEZEL__?.fetch,
+  fetch: instrumentFetch(injectedFetch ?? ((input, init) => globalThis.fetch(input, init))),
+});
+
+setPerfReportSink((report) => {
+  api.reportClientPerf(report).catch(() => {
+    /* an older daemon without the endpoint — timing is best-effort */
+  });
 });

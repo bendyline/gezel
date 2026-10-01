@@ -43,6 +43,7 @@ import { loadHomeViewModule, preloadTabContent } from './components/tab-content-
 import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
+import { beginNavigation } from './nav-timing.js';
 import { DropdownMenu } from './primitives/index.js';
 import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
@@ -270,6 +271,7 @@ function FullApp() {
     // reads as "not set up" — without this, saving in Settings would throw the
     // user back to Home and clear their stored selection.
     setupOpened.current = true;
+    beginNavigation(next ? tabKey(next) : 'home');
     setSelection(next);
     setNavigationOpen(false);
     try {
@@ -518,9 +520,13 @@ function FullApp() {
 
   const refreshUsage = useCallback(() => {
     if (!runtimeCapabilities().daemonSettings) return;
+    // A fresh object every 10 s re-renders the whole tree, active view
+    // included, even when nothing moved.
     api
       .getUsage()
-      .then(setUsage)
+      .then((next) =>
+        setUsage((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next)),
+      )
       .catch(() => {});
   }, []);
 
@@ -569,7 +575,9 @@ function FullApp() {
         const m = new Map<string, { sessionId: string; gezelId: string; error: string }>();
         for (const p of poisoned)
           m.set(p.projectId, { sessionId: p.sessionId, gezelId: p.gezelId, error: p.error });
-        setPoisonedProjects(m);
+        setPoisonedProjects((prev) =>
+          JSON.stringify([...prev]) === JSON.stringify([...m]) ? prev : m,
+        );
       })
       .catch(() => {});
   }, []);

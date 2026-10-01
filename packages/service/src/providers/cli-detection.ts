@@ -38,19 +38,46 @@ export function getCliPresence(
     codexCli?: { binaryPath?: string };
   },
   env: NodeJS.ProcessEnv = process.env,
+  now: number = Date.now(),
 ): CliDetections {
+  const anthropicOverride = config.anthropicCli?.binaryPath;
+  const codexOverride = config.codexCli?.binaryPath;
   return {
     anthropicCli: presence(
       'Claude CLI',
-      config.anthropicCli?.binaryPath,
-      whichClaude('claude', env.PATH ?? '', env.PATHEXT),
+      anthropicOverride,
+      anthropicOverride ? null : cachedWhich(whichClaude, 'claude', env, now),
     ),
     codexCli: presence(
       'Codex CLI',
-      config.codexCli?.binaryPath,
-      whichCodex('codex', env.PATH ?? '', env.PATHEXT),
+      codexOverride,
+      codexOverride ? null : cachedWhich(whichCodex, 'codex', env, now),
     ),
   };
+}
+
+/**
+ * `/api/config` and `/api/usage` are polled every 10 s and fetched by most
+ * views on mount, and each uncached lookup is PATH × PATHEXT synchronous stats
+ * per CLI on the daemon's main thread — 576 on a stock Windows dev box. A CLI
+ * installed meanwhile shows up once the entry expires.
+ */
+const PATH_LOOKUP_TTL_MS = 30_000;
+const pathLookups = new Map<string, { at: number; path: string | null }>();
+
+function cachedWhich(
+  which: (name: string, path: string, pathExt?: string) => string | null,
+  name: string,
+  env: NodeJS.ProcessEnv,
+  now: number,
+): string | null {
+  const key = `${name}\0${env.PATH ?? ''}\0${env.PATHEXT ?? ''}`;
+  const hit = pathLookups.get(key);
+  if (hit && now - hit.at < PATH_LOOKUP_TTL_MS) return hit.path;
+  const path = which(name, env.PATH ?? '', env.PATHEXT);
+  if (pathLookups.size >= 16) pathLookups.clear();
+  pathLookups.set(key, { at: now, path });
+  return path;
 }
 
 function presence(
