@@ -5,7 +5,6 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BundledSource, gildeDataDir } from '@bendyline/gezel-catalog';
 import { portableCatalogModels } from '@bendyline/gezel/runtime';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import {
@@ -578,6 +577,8 @@ if (flags.has('--report-only')) {
 
 /** The phone catalog's download for this GGUF, matched by content hash. */
 async function catalogDownloadFor(sha256: string, sizeBytes: number) {
+  // Loaded only when staging a model: CI's --contracts-only runner never builds the catalog package.
+  const { BundledSource, gildeDataDir } = await import('@bendyline/gezel-catalog');
   const catalog = new BundledSource({ dataDir: gildeDataDir() });
   const model = portableCatalogModels(await catalog.list('chat-model')).find(
     (entry) => entry.source.sha256 === sha256,
