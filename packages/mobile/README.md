@@ -221,6 +221,8 @@ GEZEL_IOS_DEVELOPMENT_TEAM=<team-id> pnpm mobile:eval --platform ios --device <u
   --provider llama-cpp --trained-model /absolute/path/catalog-model.gguf --cooldown-ms 600000
 ```
 
+The run moves the app's own product aside before the first trial and restores it, verified, at the end. A locked phone refuses those files, so the test waits for an unlocked phone before it moves anything and again before it restores. A run stopped part way leaves the original in `Library/Application Support/Gezel/product-eval-backup-<uuid>/`, and the next run refuses to start. Pass `--recover-backup product-eval-backup-<uuid>` to restore it, verified against its `snapshot.json`, before that run begins. `--discard-backup` deletes one instead; use it only after checking the backup holds nothing worth keeping.
+
 ## Unsigned release artifacts
 
 ```sh

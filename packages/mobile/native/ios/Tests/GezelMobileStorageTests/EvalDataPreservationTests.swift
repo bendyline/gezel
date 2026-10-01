@@ -53,6 +53,22 @@ final class EvalDataPreservationTests: XCTestCase {
         XCTAssertThrowsError(try EvalDataPreservation.begin(root: root))
         XCTAssertTrue(fm.fileExists(atPath: preservation.backup.path))
     }
+    // A run stopped by a locked phone left its backup and a partial restore copy;
+    // a later run recovers it from snapshot.json alone.
+    func testRecoversABackupAStoppedRunLeftBehind() throws {
+        let original = try EvalDataPreservation.tree(root.appendingPathComponent("product"))
+        let stopped = try EvalDataPreservation.begin(root: root)
+        try put("product/eval-only.txt", Data("eval output".utf8))
+        try put("models.json", Data("eval selection".utf8))
+        try put("\(stopped.backup.lastPathComponent)/restoring-product/config.json", Data("partial".utf8))
+        let recovered = try EvalDataPreservation.recover(root: root, named: stopped.backup.lastPathComponent)
+        XCTAssertEqual(recovered.original, stopped.original)
+        XCTAssertTrue(try recovered.restoreAndVerify().passed)
+        XCTAssertEqual(try EvalDataPreservation.tree(recovered.product), original)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("models.json")), Data("original selected model".utf8))
+        XCTAssertFalse(fm.fileExists(atPath: stopped.backup.path))
+        XCTAssertThrowsError(try EvalDataPreservation.recover(root: root, named: "../product"))
+    }
     func testDamagedBackupIsRetainedAndNeverReplacesTheCurrentProduct() throws {
         let preservation = try EvalDataPreservation.begin(root: root)
         try put("product/eval-only.txt", Data("current output".utf8))

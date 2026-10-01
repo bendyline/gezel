@@ -12,6 +12,7 @@ import {
   evaluateDeclarativeCheck,
   formatGateVerdict,
   isSharedGateCheck,
+  locateMissingGateFiles,
 } from '../tasks/gate-checks.js';
 import { evaluateGateScripts } from '../tasks/gate-scripts.js';
 import type { PortableStore } from './store.js';
@@ -94,7 +95,11 @@ export async function evaluatePortableTaskGate(
       const result = await evaluateDeclarativeCheck(item, ws);
       if (!result.ok) failures.push(result.detail);
     }
-    if (failures.length) return { approved: false, message: formatGateVerdict(failures) };
+    if (failures.length)
+      return {
+        approved: false,
+        message: formatGateVerdict([...(await locateMissingGateFiles(checks, ws)), ...failures]),
+      };
     const scripts = await evaluateGateScripts(
       gate?.scripts ?? [],
       (ref) => {

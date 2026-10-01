@@ -73,6 +73,12 @@ export const meta = defineScript({
       itemType: 'object',
     },
     total: { type: 'number', description: 'Record count (list).', nullable: true },
+    file: {
+      type: 'string',
+      description:
+        "Workspace file the action read or wrote: <root>.json in single-file mode; with one folder per record, that record's record.json (null for delete and list).",
+      nullable: true,
+    },
   },
   requires: ['workspace.read', 'workspace.write'],
 } as const);
@@ -95,6 +101,11 @@ if (!root) fail('root must be a non-empty workspace-relative path.');
 const mode = input.mode;
 const storeFile = `${root}.json`;
 const indexFile = `${root}/index.json`;
+
+/** Where one record lives, so a caller never has to guess the layout. */
+function fileFor(id: string): string {
+  return mode === 'single-file' ? storeFile : recordFile(id);
+}
 
 function recordFile(id: string): string {
   return `${root}/${id}/record.json`;
@@ -288,7 +299,7 @@ async function create(): Promise<Fields> {
     records[id] = fields;
     await saveSingleFile(records);
   }
-  return { ok: true, action: 'create', id, record: { id, ...fields } };
+  return { ok: true, action: 'create', id, record: { id, ...fields }, file: fileFor(id) };
 }
 
 async function get(): Promise<Fields> {
@@ -296,11 +307,11 @@ async function get(): Promise<Fields> {
   if (mode === 'folder-per-record') {
     const file = await readJsonIfPresent(recordFile(id));
     if (file === null) noRecord(id, await folderIds());
-    return { ok: true, action: 'get', id, record: recordFromFile(id, file) };
+    return { ok: true, action: 'get', id, record: recordFromFile(id, file), file: fileFor(id) };
   }
   const records = await loadSingleFile();
   if (!Object.hasOwn(records, id)) noRecord(id, Object.keys(records).sort());
-  return { ok: true, action: 'get', id, record: { id, ...bodyOf(records, id) } };
+  return { ok: true, action: 'get', id, record: { id, ...bodyOf(records, id) }, file: storeFile };
 }
 
 async function update(): Promise<Fields> {
@@ -312,14 +323,14 @@ async function update(): Promise<Fields> {
     const merged = { ...recordFromFile(id, file), ...patch, id };
     await writeJson(recordFile(id), { version: 1, ...merged });
     await regenerateFolderIndex();
-    return { ok: true, action: 'update', id, record: merged };
+    return { ok: true, action: 'update', id, record: merged, file: fileFor(id) };
   }
   const records = await loadSingleFile();
   if (!Object.hasOwn(records, id)) noRecord(id, Object.keys(records).sort());
   const merged = { ...bodyOf(records, id), ...patch };
   records[id] = merged;
   await saveSingleFile(records);
-  return { ok: true, action: 'update', id, record: { id, ...merged } };
+  return { ok: true, action: 'update', id, record: { id, ...merged }, file: storeFile };
 }
 
 async function remove(): Promise<Fields> {
@@ -351,7 +362,7 @@ async function remove(): Promise<Fields> {
   if (!Object.hasOwn(records, id)) noRecord(id, Object.keys(records).sort());
   delete records[id];
   await saveSingleFile(records);
-  return { ok: true, action: 'delete', id };
+  return { ok: true, action: 'delete', id, file: storeFile };
 }
 
 async function list(): Promise<Fields> {
@@ -363,7 +374,7 @@ async function list(): Promise<Fields> {
   const out = Object.keys(records)
     .sort()
     .map((id) => ({ id, ...bodyOf(records, id) }));
-  return { ok: true, action: 'list', records: out, total: out.length };
+  return { ok: true, action: 'list', records: out, total: out.length, file: storeFile };
 }
 
 async function run(): Promise<Fields> {
@@ -385,4 +396,4 @@ async function run(): Promise<Fields> {
 
 // Every declared output is stamped on every action, including inapplicable fields.
 // The shared runner validates the complete contract before accepting a run.
-gezel.output({ id: null, record: null, records: [], total: null, ...(await run()) });
+gezel.output({ id: null, record: null, records: [], total: null, file: null, ...(await run()) });

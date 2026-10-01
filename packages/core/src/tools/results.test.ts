@@ -9,6 +9,8 @@ import {
   artifactCompletionHint,
   countLineChanges,
   formatWorkspaceRead,
+  listDirMissingText,
+  nearbyPathMatches,
   readArtifactText,
   reanchorText,
   sliceWorkspaceText,
@@ -268,6 +270,25 @@ describe('artifact completion hints', () => {
     expect(artifactCompletionHint('manual')).toContain('call advance_task_step');
     expect(artifactCompletionHint('unknown')).toContain(
       'Follow the active craftbook completion rule',
+    );
+  });
+});
+
+describe('list_dir on a path that is not a folder', () => {
+  it('suggests the same name with an extension or in another case, under the same parent', () => {
+    expect(
+      nearbyPathMatches('data/repairs', [{ name: 'Repairs.JSON' }, { name: 'repair-log.md' }]),
+    ).toEqual(['data/Repairs.JSON']);
+    expect(nearbyPathMatches('notes', [{ name: 'notes.md' }, { name: 'notes.txt' }])).toEqual([
+      'notes.md',
+      'notes.txt',
+    ]);
+  });
+
+  it('reads plainly with and without a suggestion', () => {
+    expect(listDirMissingText('drafts', 'missing')).toBe('No folder or file exists at `drafts`.');
+    expect(listDirMissingText('notes', 'missing', ['notes.md', 'notes.txt'])).toBe(
+      'No folder or file exists at `notes`. Did you mean `notes.md` or `notes.txt`?',
     );
   });
 });

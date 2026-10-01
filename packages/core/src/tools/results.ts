@@ -333,6 +333,47 @@ export function listDirText(files: readonly ListedEntry[]): string {
   return listing ? `${summary}\n${listing}` : summary;
 }
 
+/**
+ * A `list_dir` path that is not a folder. Answering "Empty directory." for a
+ * folder that does not exist sent a 2B model on the iPhone looking for
+ * `repairs/` five times, when the store it had just written was
+ * `repairs.json`, until the loop guard ended the turn.
+ */
+export function listDirMissingText(
+  path: string,
+  found: 'missing' | 'file',
+  nearby: readonly string[] = [],
+): string {
+  if (found === 'file') return `\`${path}\` is a file, not a folder. Read the file instead.`;
+  const near = nearby.length ? ` Did you mean ${nearby.map((p) => `\`${p}\``).join(' or ')}?` : '';
+  return `No folder or file exists at \`${path}\`.${near}`;
+}
+
+/**
+ * Entries beside a missing path that the caller probably meant: the same
+ * name in another case, or the name with an extension (`repairs` →
+ * `repairs.json`). Paths are returned relative to the same root as `path`.
+ */
+export function nearbyPathMatches(
+  path: string,
+  siblings: readonly { name: string }[],
+  limit = 3,
+): string[] {
+  const slash = path.lastIndexOf('/');
+  const parent = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const base = path.slice(slash + 1).toLowerCase();
+  if (!base) return [];
+  const stem = (name: string) => name.replace(/\.[^.]+$/, '');
+  return siblings
+    .map((entry) => entry.name)
+    .filter((name) => {
+      const lower = name.toLowerCase();
+      return lower === base || lower.startsWith(`${base}.`) || stem(lower) === stem(base);
+    })
+    .slice(0, limit)
+    .map((name) => `${parent}${name}`);
+}
+
 export function listArtifactsText(
   files: readonly ListedEntry[],
   subpath: string,

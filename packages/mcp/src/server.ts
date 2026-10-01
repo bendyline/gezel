@@ -115,6 +115,7 @@ import {
   isSafeEntityId,
   isTrustedConstrainedToolset,
   listArtifactsText,
+  listDirMissingText,
   listDirText,
   listDocumentsText,
   listGezelsText,
@@ -124,6 +125,7 @@ import {
   listScriptsText,
   listTasksText,
   messageGezelText,
+  nearbyPathMatches,
   parseKnowledgeUri,
   pickRandomNameWithGender,
   prioritizePullsForCurrentBranch,
@@ -1630,6 +1632,33 @@ server.tool(
             ).files.map((entry) =>
               target.kind === 'linked' ? prefixLinkedEntry(target.projectId, entry) : entry,
             );
+      if (!files.length && target.kind !== 'links-root' && target.path) {
+        const client = workspaceClient(target);
+        const found = await client
+          .statProjectWorkspacePath(target.projectId, target.path)
+          .catch(() => null);
+        if (found && found.kind !== 'dir') {
+          const slash = target.path.lastIndexOf('/');
+          const siblings =
+            found.kind === 'missing'
+              ? await client
+                  .listProjectWorkspace(
+                    target.projectId,
+                    slash >= 0 ? target.path.slice(0, slash) : '',
+                    false,
+                  )
+                  .then((listing) => listing.files)
+                  .catch(() => [])
+              : [];
+          const shown = path ?? target.path;
+          const summary = listDirMissingText(shown, found.kind, nearbyPathMatches(shown, siblings));
+          return okResult(
+            ListToolOutputSchema,
+            { summary, items: [], count: 0 },
+            { text: summary },
+          );
+        }
+      }
       const summary = files.length
         ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
         : 'Empty directory.';

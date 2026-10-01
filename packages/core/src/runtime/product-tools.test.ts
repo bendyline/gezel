@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { portableToolResultText } from './portable-tool-results.js';
 import {
   type PortableToolActions,
   executePortableTool,
@@ -280,6 +281,35 @@ describe('portable tool authority and durable effects', () => {
       actions,
     );
     expect(await store.readFile('workspace', session.projectId, 'notes/a.md')).toBe('a');
+  });
+
+  it('says a listed folder does not exist, and names the file the model probably meant', async () => {
+    const { store, session } = await fixture();
+    await executePortableTool(
+      store,
+      session,
+      'write_file',
+      { path: 'repairs.json', content: '{}' },
+      actions,
+    );
+    const list = async (path: string) => {
+      const raw = await executePortableTool(store, session, 'list_dir', { path }, actions);
+      return (await portableToolResultText(store, session, 'list_dir', { path }, raw))?.text;
+    };
+    expect(await list('repairs')).toBe(
+      'No folder or file exists at `repairs`. Did you mean `repairs.json`?',
+    );
+    expect(await list('repairs.json')).toBe(
+      '`repairs.json` is a file, not a folder. Read the file instead.',
+    );
+    await executePortableTool(
+      store,
+      session,
+      'write_file',
+      { path: 'empty/.keep', content: '' },
+      actions,
+    );
+    expect(await list('empty')).toBe('Empty directory.');
   });
 
   it('lets a team gezel name a project by id or display name, as on the desktop', async () => {

@@ -64,8 +64,14 @@ export function gildeIdentity(repoRoot = REPO_ROOT, env = process.env) {
     const require = createRequire(join(repoRoot, 'packages', 'catalog', 'package.json'));
     const manifest = require.resolve('@bendyline/gilde/package.json');
     const { version } = JSON.parse(readFileSync(manifest, 'utf8'));
-    // The real path distinguishes a `pnpm link:gilde` checkout from the pin.
-    return `${version}@${realpathSync(dirname(manifest))}`;
+    // The real path distinguishes a `pnpm link:gilde` checkout from the pin. It is
+    // relative to the repo: an absolute path made every lock written on a
+    // developer's machine stale on CI, which then rebuilt and warned on every run.
+    const real = relative(realpathSync(repoRoot), realpathSync(dirname(manifest))).replaceAll(
+      '\\',
+      '/',
+    );
+    return `${version}@${real}`;
   } catch {
     return 'unresolved';
   }

@@ -52,7 +52,15 @@ describe('record-scale script workloads', () => {
         records.push({ id: entry.name, ...(JSON.parse(raw as string) as object) });
       }
       options.onNotification('script.output', {
-        value: { ok: true, action: 'list', id: null, record: null, records, total: records.length },
+        value: {
+          ok: true,
+          action: 'list',
+          id: null,
+          record: null,
+          records,
+          total: records.length,
+          file: null,
+        },
       });
       return success;
     });

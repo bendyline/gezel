@@ -53,7 +53,12 @@ import {
   WriteTaskNoteInputSchema,
 } from '../tools/inputs.js';
 import { findProjectByReference, projectNotFoundMessage } from '../tools/project-ref.js';
-import { countLineChanges, sliceWorkspaceText, workspaceReadRangeError } from '../tools/results.js';
+import {
+  countLineChanges,
+  nearbyPathMatches,
+  sliceWorkspaceText,
+  workspaceReadRangeError,
+} from '../tools/results.js';
 import { unionStepKit } from '../tools/step-kit.js';
 import { applyStepToolPolicy } from '../tools/step-policy.js';
 import { WorkspaceEditError } from '../workspace-edit-error.js';
@@ -554,6 +559,26 @@ export async function executePortableTool(
         ? 'artifacts'
         : 'workspace';
   const projectId = area === 'documents' ? undefined : session.projectId;
+  if (name === 'list_dir' && args.path && args.path !== '.') {
+    const path = String(args.path);
+    const stat = await store.statFile(area, projectId, path);
+    if (!stat || !stat.isDirectory) {
+      const slash = path.lastIndexOf('/');
+      const parent = slash >= 0 ? path.slice(0, slash) : '';
+      const siblings = stat
+        ? []
+        : await store
+            .listFiles(area, projectId, parent, false)
+            .then((listing) => listing.entries)
+            .catch(() => []);
+      return {
+        entries: [],
+        truncated: false,
+        notFolder: stat ? 'file' : 'missing',
+        nearby: nearbyPathMatches(path, siblings),
+      };
+    }
+  }
   if (name.startsWith('list_'))
     return store.listFiles(
       area,

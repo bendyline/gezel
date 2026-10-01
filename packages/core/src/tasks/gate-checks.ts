@@ -311,6 +311,51 @@ export const MAX_GATE_VERDICT_BULLETS = 6;
  * A rejected gate's message: each failing check as a bullet, capped so a
  * small local model reading it verbatim is not buried under a wall of them.
  */
+/**
+ * Where a rejected gate looked for each file it could not find, and any file
+ * of the same name saved somewhere else. "handover.md not found" alone sent a
+ * 2B model on the iPhone back to `artifacts/1/handover.md` until its loop
+ * guard fired: nothing told it the check reads `handover.md` at the root of
+ * the artifacts drawer. Call only for a gate that already failed; it lists
+ * the tree it searches.
+ */
+export async function locateMissingGateFiles(
+  checks: readonly GateCheck[],
+  ws: GateWorkspaceReader,
+): Promise<string[]> {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  const listings = new Map<boolean, Promise<string[]>>();
+  for (const check of checks) {
+    const file = (check as { file?: unknown }).file;
+    if (typeof file !== 'string' || !file || file.includes('*')) continue;
+    const artifact = (check as { artifact?: boolean }).artifact === true;
+    const key = `${artifact}:${file}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const reader = readerForCheck(ws, { artifact });
+    if ((await reader.read(file).catch(() => null)) !== null) continue;
+    if (!listings.has(artifact))
+      listings.set(
+        artifact,
+        reader.list().catch(() => []),
+      );
+    const base = file.slice(file.lastIndexOf('/') + 1).toLowerCase();
+    const elsewhere = (await listings.get(artifact)!)
+      .filter(
+        (path) => path !== file && path.slice(path.lastIndexOf('/') + 1).toLowerCase() === base,
+      )
+      .slice(0, 3);
+    const where = artifact ? 'the artifacts drawer' : 'the project workspace';
+    lines.push(
+      elsewhere.length
+        ? `The checks read \`${file}\` at exactly that path in ${where}; it was saved as ${elsewhere.map((path) => `\`${path}\``).join(' and ')} instead. Save it at \`${file}\`.`
+        : `The checks read \`${file}\` at exactly that path in ${where}, and nothing is saved there yet.`,
+    );
+  }
+  return lines;
+}
+
 export function formatGateVerdict(failures: readonly string[]): string {
   const bullets = failures
     .slice(0, MAX_GATE_VERDICT_BULLETS)

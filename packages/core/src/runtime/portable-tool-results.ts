@@ -18,6 +18,7 @@ import {
   getScriptRunText,
   getTaskText,
   listArtifactsText,
+  listDirMissingText,
   listDirText,
   listDocumentsText,
   listGezelsText,
@@ -108,6 +109,8 @@ export async function portableToolResultText(
     case 'list_artifacts':
     case 'list_documents': {
       const entries = (value.entries ?? []) as { path: string; isDirectory: boolean }[];
+      if (name === 'list_dir' && (value.notFolder === 'missing' || value.notFolder === 'file'))
+        return ok(listDirMissingText(path, value.notFolder, (value.nearby ?? []) as string[]));
       if (name === 'list_dir') return ok(listDirText(entries));
       if (name === 'list_documents') return ok(listDocumentsText(entries));
       return ok(listArtifactsText(entries, path, value.truncated === true));

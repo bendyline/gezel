@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -52,6 +52,21 @@ describe('handboekInputsHash', () => {
     const pinned = handboekInputsHash(root, env);
     const linked = handboekInputsHash(root, { GEZEL_GILDE_DATA_DIR: '/checkout/gilde/data' });
     expect(linked).not.toBe(pinned);
+  });
+
+  it('agrees across checkouts at different paths, so a committed lock holds on CI', async () => {
+    const gilde = 'node_modules/@bendyline/gilde/package.json';
+    await put(gilde, '{"name":"@bendyline/gilde","version":"0.1.78"}\n');
+    const first = handboekInputsHash(root, env);
+    const other = await mkdtemp(join(tmpdir(), 'gezel-handboek-lock-other-'));
+    try {
+      await cp(root, other, { recursive: true });
+      expect(handboekInputsHash(other, env)).toBe(first);
+      await put(gilde, '{"name":"@bendyline/gilde","version":"0.1.79"}\n');
+      expect(handboekInputsHash(root, env)).not.toBe(first);
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
   });
 });
 

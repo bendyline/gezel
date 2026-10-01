@@ -6,6 +6,7 @@ import {
   createLogger,
   evaluateGateScripts,
   formatGateVerdict,
+  locateMissingGateFiles,
   tailGateLogs,
   unresolvedGatePlaceholders,
   withSdkImportHint,
@@ -116,7 +117,10 @@ export async function evaluateStepGate(opts: {
       // full set stays on checkResults for telemetry/diagnostics.
       return {
         decision: 'reject',
-        message: formatGateVerdict(result.failures),
+        message: formatGateVerdict([
+          ...(await locateMissingGateFiles(gate.checks, ws)),
+          ...result.failures,
+        ]),
         skipped,
         runs,
         checkResults,

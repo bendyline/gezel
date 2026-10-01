@@ -84,7 +84,15 @@ describe('desktop and portable script policy contract', () => {
       await lockDown();
       await options.onRequest('fs.write', { path: 'standard.md', content: 'Saved' });
       options.onNotification('script.output', {
-        value: { ok: true, action: 'list', id: null, record: null, records: [], total: 0 },
+        value: {
+          ok: true,
+          action: 'list',
+          id: null,
+          record: null,
+          records: [],
+          total: 0,
+          file: 'records.json',
+        },
       });
       return success;
     });
