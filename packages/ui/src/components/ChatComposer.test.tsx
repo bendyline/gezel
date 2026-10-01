@@ -799,6 +799,45 @@ describe('ChatComposer /open command', () => {
   });
 });
 
+describe('ChatComposer new thread', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [{ id: 'old-thread', gezelId: 'tomas', projectId: 'default' } as never],
+    });
+    vi.mocked(api.createChatSession).mockResolvedValue({ id: 'new-thread' } as never);
+    vi.mocked(api.sendToChatSession).mockImplementation(async (sessionId) => ({
+      accepted: true,
+      sessionId,
+    }));
+    vi.mocked(streamChatEvents).mockImplementation(() =>
+      (async function* completedTurn() {
+        yield { type: 'done' as const };
+      })(),
+    );
+  });
+
+  it('sends a quick first message into the new thread the person chose', async () => {
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        freshThread
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    await waitFor(() =>
+      expect(api.sendToChatSession).toHaveBeenCalledWith('new-thread', expect.anything()),
+    );
+    expect(api.createChatSession).toHaveBeenCalledTimes(1);
+    expect(api.listChatSessions).not.toHaveBeenCalled();
+  });
+});
+
 describe('ChatComposer lossless draft submission', () => {
   beforeEach(() => {
     vi.clearAllMocks();

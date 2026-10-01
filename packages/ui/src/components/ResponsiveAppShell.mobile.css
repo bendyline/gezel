@@ -625,6 +625,17 @@ html[data-layout="mobile"] {
   font-size: 87.5%;
 }
 
+/* That density was sized on Android. On an iPhone the same 14px root read
+   clearly too small, and so did 16px and 17px (iPhone 14 Pro Max,
+   2026-09-30), so iOS uses a 19px root. A fixed size, not Dynamic Type: every
+   rem here also sizes spacing, and the accessibility text sizes would push the
+   root past 50px. The query matches iOS WebKit only. */
+@supports (-webkit-touch-callout: none) {
+  html[data-layout="mobile"] {
+    font-size: 118.75%;
+  }
+}
+
 /* iOS zooms the page into any focused field whose text is under 16px, and the
    denser root put the chat composer at 14px. A zoomed visual viewport also
    stops the mobile host's keyboard tracking, so the header stayed up and the

@@ -17,6 +17,7 @@ import {
 import { requireMobileBuildIdentity } from '../mobile/build-identity.ts';
 import { writeMobileEvalClock, writeMobileTestResource } from '../mobile/clock.ts';
 import { canonicalMobileFixtures } from '../mobile/fixtures.ts';
+import { iosDeviceCopyFrom, iosDeviceCopyTo, requireReadyIosDevice } from '../mobile/ios-device.ts';
 import { withNativeFeedback } from '../mobile/native-feedback.ts';
 import { type MobileReport, writeMobileEvaluationReport } from '../mobile/report.ts';
 
@@ -56,12 +57,12 @@ for (const key of flags.keys()) if (!allowed.has(key)) throw new Error(`Unknown 
 const platform = flags.get('--platform');
 if (!['ios', 'android'].includes(platform ?? ''))
   throw new Error('--platform must be ios or android');
-if (platform === 'ios' && (flags.has('--trained-model') || flags.has('--model-id')))
+if (platform === 'ios' && flags.has('--model-id'))
   throw new Error(
-    'Model import/selection flags currently target Android; iOS evaluates its selected native provider.',
+    '--model-id selects an installed Android model; iOS stages one with --trained-model.',
   );
-if (platform === 'ios' && flags.has('--cooldown-ms'))
-  throw new Error('--cooldown-ms reads Android thermal status; iOS has no equivalent here.');
+if (platform === 'ios' && flags.has('--trained-model') && !flags.has('--physical-device'))
+  throw new Error('iOS model staging goes through devicectl, so it needs --physical-device.');
 if (flags.has('--cooldown-ms') && !/^\d+$/.test(flags.get('--cooldown-ms')!))
   throw new Error('--cooldown-ms must be a whole number of milliseconds');
 if (flags.has('--build-only') && flags.has('--contracts-only'))
@@ -174,6 +175,13 @@ if (flags.has('--report-only')) {
     let nativeCode = 0;
     if (platform === 'ios') {
       const buildDir = resolve(flags.get('--native-build-dir') ?? '/tmp/gezel-mobile-ios-build');
+      const physical = flags.has('--physical-device');
+      // A physical device runs only development-signed code, and its team is
+      // the operator's; nothing in the repository can choose it.
+      const team = process.env.GEZEL_IOS_DEVELOPMENT_TEAM;
+      if (physical && !team)
+        throw new Error('A physical iPhone/iPad needs GEZEL_IOS_DEVELOPMENT_TEAM for signing.');
+      if (physical && !flags.has('--build-only')) await requireReadyIosDevice(device);
       const common = [
         '-project',
         'packages/mobile/ios/App/App.xcodeproj',
@@ -182,7 +190,7 @@ if (flags.has('--report-only')) {
         '-configuration',
         'Debug',
         '-destination',
-        `platform=iOS Simulator,id=${device}`,
+        physical ? `id=${device}` : `platform=iOS Simulator,id=${device}`,
         '-derivedDataPath',
         buildDir,
         '-clonedSourcePackagesDirPath',
@@ -197,16 +205,69 @@ if (flags.has('--report-only')) {
         '-default-test-execution-time-allowance',
         flags.has('--contracts-only') ? '300' : String(8 * 3600 + 120),
         '-only-testing:AppTests/MobileProductEvalTests',
-        'CODE_SIGNING_ALLOWED=NO',
+        ...(physical
+          ? ['-allowProvisioningUpdates', `DEVELOPMENT_TEAM=${team}`, 'CODE_SIGN_STYLE=Automatic']
+          : ['CODE_SIGNING_ALLOWED=NO']),
       ];
+      const modelEnv: Record<string, string> = {};
+      const modelPath = flags.get('--trained-model');
+      let built = false;
+      if (modelPath && !flags.has('--build-only') && !flags.has('--contracts-only')) {
+        const absolute = resolve(modelPath);
+        const file = await stat(absolute);
+        if (file.size <= 1024 * 1024 || file.size > 4 * 1024 ** 3)
+          throw new Error('Expected a trained GGUF within the mobile 4 GiB model cap');
+        const hash = createHash('sha256');
+        for await (const bytes of createReadStream(absolute)) hash.update(bytes);
+        const sha = hash.digest('hex');
+        // iOS publishes only as a catalog download, so the phone runs the
+        // model with the catalog tuning a person who downloaded it gets.
+        const download = await catalogDownloadFor(sha, file.size);
+        if (!download)
+          throw new Error(
+            'iOS stages catalog GGUFs only; this file matches no catalog chat model.',
+          );
+        // Build and install first: the data container must exist, and the
+        // test's own install then keeps the staged file in place.
+        if ((await command('xcodebuild', [...common, 'build-for-testing'])).code !== 0)
+          throw new Error('iOS eval compilation failed; see native.log');
+        built = true;
+        await required('xcrun', [
+          'devicectl',
+          'device',
+          'install',
+          'app',
+          '--device',
+          device,
+          join(buildDir, 'Build/Products/Debug-iphoneos/App.app'),
+        ]);
+        const staged = `mobile-eval-${runId}.gguf`;
+        await iosDeviceCopyTo(device, absolute, `Library/Caches/${staged}`);
+        Object.assign(modelEnv, {
+          TEST_RUNNER_GEZEL_EVAL_MODEL_FILE: staged,
+          TEST_RUNNER_GEZEL_EVAL_MODEL_SHA256: sha,
+          TEST_RUNNER_GEZEL_EVAL_MODEL_NAME: Buffer.from(download.name).toString('base64'),
+          TEST_RUNNER_GEZEL_EVAL_MODEL_SOURCE: Buffer.from(
+            JSON.stringify(download.source),
+          ).toString('base64'),
+        });
+        await writeFile(
+          join(output, 'model-source.json'),
+          `${JSON.stringify({ path: absolute, bytes: file.size, sha256: sha, catalogId: download.source.catalogId }, null, 2)}\n`,
+        );
+      }
       const result = await withNativeFeedback(
-        { platform: 'ios', device, runId, output, log: (line) => log.write(`${line}\n`) },
+        { platform: 'ios', device, runId, output, physical, log: (line) => log.write(`${line}\n`) },
         () =>
           command(
             'xcodebuild',
             [
               ...common,
-              flags.has('--build-only') ? 'build-for-testing' : 'test',
+              flags.has('--build-only')
+                ? 'build-for-testing'
+                : built
+                  ? 'test-without-building'
+                  : 'test',
               '-resultBundlePath',
               join(output, 'native.xcresult'),
             ],
@@ -215,6 +276,10 @@ if (flags.has('--report-only')) {
                 TEST_RUNNER_GEZEL_MOBILE_EVAL: '1',
                 TEST_RUNNER_GEZEL_EVAL_RUN_ID: runId,
                 TEST_RUNNER_GEZEL_EVAL_PROVIDER: provider,
+                ...modelEnv,
+                ...(flags.has('--cooldown-ms')
+                  ? { TEST_RUNNER_GEZEL_EVAL_COOLDOWN_MS: flags.get('--cooldown-ms')! }
+                  : {}),
                 ...(flags.has('--contracts-only')
                   ? { TEST_RUNNER_GEZEL_EVAL_CONTRACTS_ONLY: '1' }
                   : {}),
@@ -235,7 +300,10 @@ if (flags.has('--report-only')) {
           ),
       );
       nativeCode = result.code;
-      if (!flags.has('--build-only')) {
+      if (physical && !flags.has('--build-only')) {
+        reportPath = join(output, 'device-report.json');
+        await iosDeviceCopyFrom(device, `Documents/mobile-evals/${runId}.json`, reportPath);
+      } else if (!flags.has('--build-only')) {
         // XCTest may shut its dedicated simulator down after a failure. Preserve
         // the completed report without depending on another successful simctl call.
         const emitted = result.stdout

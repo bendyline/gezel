@@ -194,6 +194,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     /// llama.cpp cannot load the file at that window. Imported files never
     /// change in place, so an entry cannot go stale.
     private var allocations: [String: Int64] = [:]
+    private var fittedWindows: [String: Int] = [:]
     /// The bridge's own buffers beside llama.cpp's: the hybrid/windowed state
     /// checkpoint, token vectors and the reply text.
     private static let bridgeBufferBytes: Int64 = 128 * 1024 * 1024
@@ -229,8 +230,12 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             self.operationLock.unlock()
             self.requestRelease(nil)
         }
+        // Only .critical stops a reply mid-generation. At .serious iOS asks apps
+        // to scale back and already throttles the clocks itself; aborting there
+        // ended every reply of a charging iPhone 14 Pro Max about 20 s in, so
+        // no task could finish (2026-09-30).
         thermalObserver = NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self, ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical else { return }
+            guard let self, ProcessInfo.processInfo.thermalState == .critical else { return }
             self.operationLock.lock()
             self.activeFailure = MobileInferenceError(code: "RESOURCE_LIMIT", message: "The device is too warm for local inference. Let it cool down before trying again.")
             self.operationLock.unlock()
@@ -276,14 +281,17 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         withStore(call) { store in
             let library = try store.listModels()
             var models = library.models.map(self.modelJSON)
-            // The window the phone can hold for the model it would run next,
-            // which the product runtime uses unless the person chose one. Only
-            // the selected model is sized, so a long library costs no dry runs.
-            if let selected = library.selectedModelId,
-               let index = library.models.firstIndex(where: { $0.id == selected }),
-               let located = try? store.modelURL(id: selected),
-               let context = self.fitContext(id: selected, path: located.1.path) {
-                models[index]["contextTokens"] = context
+            // The window the phone can hold for each model, which the product
+            // runtime uses unless the person chose one. Every model is sized,
+            // not only the selected one: a conversation keeps the model it
+            // started with, and a Gemma 4 E2B thread sized as if it were the
+            // selected Qwen 3.5 2B asked for a 16K window it could not hold
+            // (2026-09-30). Dry runs are cached per file and window.
+            for (index, model) in library.models.enumerated() {
+                if let located = try? store.modelURL(id: model.id),
+                   let context = self.fitContext(id: model.id, path: located.1.path) {
+                    models[index]["contextTokens"] = context
+                }
             }
             var result: [String: Any] = ["models": models]
             if let selected = library.selectedModelId { result["selectedModelId"] = selected }
@@ -335,6 +343,15 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     /// keeps its window, so a listing never makes the next turn reload it;
     /// memory another loaded model holds counts as free, since loading this one
     /// releases it.
+    /// Logs a model's window only when it changes; the listing is polled.
+    private func noteFittedWindow(id: String, context: Int, bytes: Int64, available: Int64) {
+        sizingLock.lock()
+        let changed = fittedWindows[id] != context
+        fittedWindows[id] = context
+        sizingLock.unlock()
+        if changed { NSLog("GezelRuntime window %ld for %@: needs %lld bytes, %lld available", context, id, bytes, available) }
+    }
+
     private func fitContext(id: String, path: String) -> Int? {
         guard engine != nil else { return nil }
         sizingLock.lock()
@@ -349,8 +366,12 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         if let heldPath { available += max(0, allocation(path: heldPath, contextSize: heldContext)) }
         for context in Self.contextLadder {
             let bytes = allocation(path: path, contextSize: context)
-            if bytes >= 0, bytes + Self.ladderSpareBytes <= available { return context }
+            if bytes >= 0, bytes + Self.ladderSpareBytes <= available {
+                noteFittedWindow(id: id, context: context, bytes: bytes, available: available)
+                return context
+            }
         }
+        noteFittedWindow(id: id, context: Self.floorContext, bytes: allocation(path: path, contextSize: Self.floorContext), available: available)
         return Self.floorContext
         #endif
     }
@@ -742,29 +763,39 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         operationLock.unlock()
         if hidden { return "Reopen the app to use on-device AI." }
         if recentlyWarned { return "The device is low on memory. Wait before loading a model again." }
-        let thermal = ProcessInfo.processInfo.thermalState
-        if thermal == .serious || thermal == .critical { return "The device is too warm for local inference. Let it cool down first." }
+        if ProcessInfo.processInfo.thermalState == .critical { return "The device is too warm for local inference. Let it cool down first." }
         return nil
     }
 
-    /// How long a request waits for a hot device to cool before it is refused.
-    private static let coolingWaitSeconds: TimeInterval = 600
+    private static func gigabytes(_ bytes: UInt64) -> String {
+        String(format: "%.1f GB", Double(bytes) / 1_073_741_824)
+    }
 
-    /// A hot device refuses new work rather than heating further, but the next
-    /// request of a tool loop already underway waits the heat out instead of
-    /// failing the turn: the same work, delayed, is what the person asked for.
-    /// Bounded, so a device that never cools still gets the refusal from
-    /// `checkResources`. False when the request was cancelled meanwhile.
+    /// How long a request waits for a critically hot device to cool before it is refused.
+    private static let coolingWaitSeconds: TimeInterval = 600
+    /// How long a request pauses at .serious before it proceeds anyway.
+    private static let seriousPauseSeconds: TimeInterval = 15
+
+    /// A critically hot device waits the heat out instead of failing the turn:
+    /// the same work, delayed, is what the person asked for. Bounded, so a
+    /// device that never cools still gets the refusal from `checkResources`.
+    /// At .serious, where iOS asks apps to scale back, each request only pauses
+    /// briefly so the device sheds some heat between steps, then proceeds.
+    /// False when the request was cancelled meanwhile.
     private func awaitCooling(_ requestId: String) -> Bool {
-        let deadline = ProcessInfo.processInfo.systemUptime + Self.coolingWaitSeconds
+        let started = ProcessInfo.processInfo.systemUptime
         var announced = false
-        while [.serious, .critical].contains(ProcessInfo.processInfo.thermalState) {
+        while true {
+            let waited = ProcessInfo.processInfo.systemUptime - started
+            switch ProcessInfo.processInfo.thermalState {
+            case .critical: if waited >= Self.coolingWaitSeconds { return !isCancelled(requestId) }
+            case .serious: if waited >= Self.seriousPauseSeconds { return !isCancelled(requestId) }
+            default: return !isCancelled(requestId)
+            }
             if isCancelled(requestId) { return false }
-            if ProcessInfo.processInfo.systemUptime >= deadline { return true }
             if !announced { notifyPhase(requestId, "cooling"); announced = true }
             Thread.sleep(forTimeInterval: 2)
         }
-        return !isCancelled(requestId)
     }
 
     private func checkResources(additionalBytes: UInt64) throws {
@@ -777,8 +808,10 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "The simulator supports only small test models. Use a physical device to assess model memory requirements.")
         }
         #else
-        if UInt64(os_proc_available_memory()) < additionalBytes {
-            throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "There is not enough available memory for this model. Choose a smaller model or close other apps.")
+        let available = UInt64(os_proc_available_memory())
+        if available < additionalBytes {
+            NSLog("GezelRuntime admission refused: needs %llu bytes, %llu available", additionalBytes, available)
+            throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "There is not enough available memory for this model: it needs about \(Self.gigabytes(additionalBytes)), and \(Self.gigabytes(available)) is free. Choose a smaller model or close other apps.")
         }
         #endif
     }

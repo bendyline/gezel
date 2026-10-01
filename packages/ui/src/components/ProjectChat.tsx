@@ -255,6 +255,10 @@ function ProjectChatBody({
   // it for the (selectedGezel, project) pair; the timeline highlights it
   // as the active session; the composer posts into it.
   const [sessionId, setSessionId] = useState<string>('');
+  // The person chose New thread. Until a send creates it, or they pick a
+  // thread, neither the picker's auto-pick nor the composer's reuse probe may
+  // put them back on an older thread.
+  const [freshThreadChosen, setFreshThreadChosen] = useState(false);
   // The prompt draft the composer has open. Tracked here because both the
   // composer and the thread picker act on it, and a draft with no thread
   // yet has nothing else to hang off.
@@ -387,6 +391,7 @@ function ProjectChatBody({
       } else {
         setActiveTask(task);
       }
+      setFreshThreadChosen(false);
       setSessionId(nextSessionId);
     },
     [selectedGezel.id, onSelectGezel],
@@ -463,6 +468,7 @@ function ProjectChatBody({
     // Nothing was explicitly focused, so this is either a fresh mount or a
     // recipient switch. Resume the thread this session last had open with
     // that gezel here rather than falling back on the newest one.
+    setFreshThreadChosen(false);
     setSessionId(
       focused ??
         readChatThreadSelection(projectThreadKey(project.id, selectedGezel.id))?.sessionId ??
@@ -663,7 +669,9 @@ function ProjectChatBody({
                   sessionId={sessionId || undefined}
                   {...(activeTask ? { taskRef: activeTask.ref } : {})}
                   {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
+                  freshThread={freshThreadChosen || (startFreshThread && !activeTask)}
                   onSessionCreated={(sid) => {
+                    setFreshThreadChosen(false);
                     setSessionId(sid);
                     setSessionRefreshKey((k) => k + 1);
                   }}
@@ -730,15 +738,23 @@ function ProjectChatBody({
                       sessionId={sessionId || undefined}
                       {...(activeTask ? { taskRef: activeTask.ref } : {})}
                       {...(activeTask?.stepId ? { stepId: activeTask.stepId } : {})}
-                      onSessionIdChange={(next) => setSessionId(next ?? '')}
-                      onFreshThread={() => setChatFocusRequestKey((key) => key + 1)}
+                      onSessionIdChange={(next) => {
+                        if (next) setFreshThreadChosen(false);
+                        setSessionId(next ?? '');
+                      }}
+                      onFreshThread={() => {
+                        setFreshThreadChosen(true);
+                        setChatFocusRequestKey((key) => key + 1);
+                      }}
                       refreshKey={sessionRefreshKey}
                       activeDraftId={draftId || undefined}
                       onDraftSelect={(next) => setDraftId(next ?? '')}
                       draftScope={DRAFT_SCOPE}
                       // A task scope is always an explicit navigation, so it
                       // keeps the ordinary newest-thread pick.
-                      autoPickNewest={!startFreshThread || Boolean(activeTask)}
+                      autoPickNewest={
+                        !freshThreadChosen && (!startFreshThread || Boolean(activeTask))
+                      }
                     />
                   }
                 />

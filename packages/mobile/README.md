@@ -214,6 +214,13 @@ pnpm mobile:eval --platform android --device emulator-5554 --provider llama-cpp 
 
 The contracts run real TypeScript compilation, QuickJS artifact writing, durable questions, and reopen checks without inference. Quality runs require an available real provider; synthetic GGUF fixtures do not qualify. Reports retain native logs, configuration, tool/session traces, artifacts, and deterministic grading. Ten canonical core adapters preserve their setup, prompts, frozen evidence, and host-side graders. A test-only mailbox sends exact canonical repair feedback through the ordinary native product client and keeps per-trial grading receipts. The host runs TypeScript/Vitest/acceptance checks on copies of device-authored files; it never writes candidate fixes. `petshop` remains explicitly unsupported because the mobile runtime has no real image-generation engine. A portable subset passing does not establish that all 11 core scenarios passed. Model-quality execution takes the same device lease as desktop evals.
 
+A physical iPhone or iPad runs the same suite through `devicectl`. It needs Developer Mode, the phone unlocked when the run starts, and your development team for signing. `--trained-model` must be a catalog GGUF: it is staged into the app container and published as that catalog download, so the phone uses the catalog tuning. `--cooldown-ms` waits before each trial, up to that long, for the thermal state to return to nominal. The runtime refuses inference at `.serious`, and a charging phone reaches it quickly:
+
+```sh
+GEZEL_IOS_DEVELOPMENT_TEAM=<team-id> pnpm mobile:eval --platform ios --device <udid> --physical-device \
+  --provider llama-cpp --trained-model /absolute/path/catalog-model.gguf --cooldown-ms 600000
+```
+
 ## Unsigned release artifacts
 
 ```sh

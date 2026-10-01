@@ -218,17 +218,18 @@ public final class GezelNativeRuntime {
 
     public void listModels(NativeCall call) { storage(call, () -> withFittedContext(store.listModels())); }
 
-    /** The window the phone can hold for the model it would run next, which the
-     * product runtime uses unless the person chose one. Only the selected model
-     * is sized, so a long library costs no dry runs. */
+    /** The window the phone can hold for each model, which the product runtime
+     * uses unless the person chose one. Every model is sized, not only the
+     * selected one: a conversation keeps the model it started with, and a
+     * Gemma 4 E2B thread sized as if it were the selected Qwen 3.5 2B asked for
+     * a 16K window it could not hold (iPhone, 2026-09-30). Dry runs are cached
+     * per file and window. */
     private NativeObject withFittedContext(NativeObject library) throws Exception {
-        String selected = library.optString("selectedModelId", null);
-        if (selected == null) return library;
         org.json.JSONArray models = library.getJSONArray("models");
         for (int index = 0; index < models.length(); index++) {
             org.json.JSONObject model = models.getJSONObject(index);
-            if (!selected.equals(model.getString("id"))) continue;
-            Integer context = fitContext(selected, store.model(selected)[1]);
+            String id = model.getString("id");
+            Integer context = fitContext(id, store.model(id)[1]);
             if (context != null) model.put("contextTokens", context.intValue());
         }
         return library;
@@ -284,9 +285,8 @@ public final class GezelNativeRuntime {
         }
         // Field evidence for the fit, once per change: the listing is read at
         // every turn start, several times a second while a turn is set up.
-        String decision = id + ':' + chosen;
-        if (!decision.equals(lastFit)) {
-            lastFit = decision;
+        Integer previous = lastFit.put(id, chosen);
+        if (previous == null || previous != chosen) {
             android.util.Log.i("GezelRuntime", "Context window " + chosen + " for " + id + ": needs " +
                 mib(allocation(path, 16384)) + " MiB at 16K, " + mib(allocation(path, 8192)) + " at 8K, " +
                 mib(allocation(path, FLOOR_CONTEXT)) + " at 4K; " + mib(available) + " MiB available");
@@ -294,7 +294,8 @@ public final class GezelNativeRuntime {
         return chosen;
     }
 
-    private volatile String lastFit;
+    /** Last window per model; every model is sized on each listing. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> lastFit = new java.util.concurrent.ConcurrentHashMap<>();
 
     private static long mib(long bytes) { return bytes < 0 ? -1 : bytes / (1024 * 1024); }
 

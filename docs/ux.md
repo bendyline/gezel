@@ -340,8 +340,10 @@ operations that require the desktop daemon. Do not build a second mobile
 project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
 
-The compact layout runs one notch denser than desktop: `html[data-layout="mobile"]`
-sets the root to 87.5%, so the whole `--text-*` rem scale shrinks together.
+The compact layout runs one notch denser than desktop on Android and in a narrow
+desktop window: `html[data-layout="mobile"]` sets the root to 87.5%, so the whole
+`--text-*` rem scale shrinks together. iOS uses a 19px root instead (118.75%),
+because iPhone text read too small at 87.5%, at the desktop 16px, and at 17px.
 Never shrink a single view to compensate. Editable fields are the one floor:
 on iOS they stay at 16px or more, because iOS zooms the page into a focused
 field with smaller text. It also narrows the main gutter
