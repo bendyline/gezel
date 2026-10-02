@@ -43,6 +43,41 @@ export function chatCompletionToolName(tool: ChatCompletionTool): string | undef
 }
 
 /**
+ * Names of the advertised `tools` the session may call this turn. Differs
+ * from the advertised set only under a callable restriction — see
+ * `McpBridgePool.isRestrictedFromCalling`. Caller-executed external tools
+ * never resolve to a bridge, so they always stay callable.
+ */
+export function callableRequestToolNames(
+  tools: readonly ChatCompletionTool[] | undefined,
+  bridges: McpBridgePool,
+): string[] {
+  return (tools ?? [])
+    .map((tool) => chatCompletionToolName(tool))
+    .filter((name): name is string => !!name && !bridges.isRestrictedFromCalling(name));
+}
+
+/**
+ * Narrow the engine's tool grammar to what the session may call while the
+ * request keeps advertising every tool: `body.tools` is rendered into the
+ * prompt, so narrowing it instead would rewrite the prompt and cost a full
+ * re-prefill on an untrimmable cache. No-op without a restriction or a
+ * grammar hint.
+ */
+export function applyCallableToolGrammar(
+  body: Record<string, unknown>,
+  bridges: McpBridgePool,
+): void {
+  const hint = body.tool_grammar;
+  if (!bridges.hasCallableRestriction() || !hint || typeof hint !== 'object') return;
+  if (!Array.isArray(body.tools)) return;
+  body.tool_grammar = {
+    ...(hint as Record<string, unknown>),
+    allowed_names: callableRequestToolNames(body.tools as ChatCompletionTool[], bridges),
+  };
+}
+
+/**
  * Required top-level properties absent from one parsed tool call.
  *
  * This deliberately checks presence only. A present-but-wrongly-typed value

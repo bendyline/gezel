@@ -65,6 +65,19 @@ doesn't invalidate the whole KV prefix. Cloud providers would silently drop the 
 band, so the split is gated to local providers. Details:
 [kv-prompt-caching-strategy.md](kv-prompt-caching-strategy.md).
 
+The coordinator routing clamps (project orchestration, exact craftbook) are the one
+message-driven change that used to rewrite this prefix: they narrowed the tool roster,
+and the tool block plus the prose describing it changed with it. On MLX models whose
+decode-time tool grammar is active they now narrow what is **callable** instead
+(`routingClamps: 'callable'` in
+[session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts)): the
+prompt renders the full roster, the grammar's `allowed_names` confines native calls,
+and the bridge pool refuses a salvaged call outside the set. Measured before the change
+on gemma4-e4b, whose sliding-window cache cannot trim: one build request mid-thread
+re-prefilled the whole 6,420-token prompt, and the next ordinary message would flip it
+back. The price is that a thread whose *first* message is a build request prefills
+the full roster rather than the router surface.
+
 ### Model-profile behaviors: capability-inverse coddling
 
 Prompt text that exists *because of model limitations* does not live in `buildInstructions`

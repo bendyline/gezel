@@ -1503,6 +1503,36 @@ _BAND_MARKER_CHARS = 256
 _BAND_MARKER_MIN_CHARS = 64
 
 
+def _prefix_seed_state(sub, session_state, trimmable: bool):
+    """The state to publish as this request's prefix entry, or None.
+
+    A band-keyed entry (ADR 0010) must be the band itself. A longer
+    untrimmable entry is not a partial hit for a sibling but a full
+    re-prefill, so when the band snapshot is missing — never planted,
+    or dropped by the boundary proof — nothing is published. A trimmable
+    stack keeps publishing its post-turn state: siblings trim it back.
+    """
+    if sub.band_snapshot is not None:
+        layers, count = sub.band_snapshot
+        state = PromptCacheState()
+        state.cache = layers
+        state.token_ids = list(sub.prompt_tokens[:count])
+        return state
+    if getattr(sub.request, "stable_prefix_chars", None) and not trimmable:
+        return None
+    return session_state
+
+
+def _store_snapshot(sub, snapshot) -> None:
+    """File a verified boundary snapshot under the slot(s) its boundary is:
+    the session's own save, the shared band, or both when they coincide."""
+    at_tokens = snapshot[1]
+    if at_tokens == sub.snapshot_target:
+        sub.prompt_snapshot = snapshot
+    if at_tokens == sub.band_target:
+        sub.band_snapshot = snapshot
+
+
 class _Sub:
     """One in-flight batched request: its decode queue, accumulated tokens,
     and the bits needed to build its sequence + persist its KV on finish."""
@@ -1512,7 +1542,8 @@ class _Sub:
         "http_request", "uid", "queue", "cancelled", "token_ids", "emitted",
         "pinned_cache_ids", "prefill_total", "first_token_seen",
         "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
-        "saved_cache_state", "prefill_started_at", "generation_started_at",
+        "band_target", "band_snapshot", "saved_cache_state",
+        "prefill_started_at", "generation_started_at",
         "prompt_tps", "generation_tps", "roster_fp",
     )
 
@@ -1560,6 +1591,11 @@ class _Sub:
         # len(prompt)-margin at admission; prefix warming supplies the stable
         # boundary found by comparing two different synthetic user turns.
         self.snapshot_target = snapshot_target
+        # Shared-band boundary (ADR 0010) and its snapshot, captured beside
+        # the session's own so a fresh turn can publish the short band as the
+        # sibling prefix entry without shrinking its own saved cache to it.
+        self.band_target = None
+        self.band_snapshot = None
         # The exact state committed at finish. Cache warming uses this direct
         # reference for immediate persistence even if the memory-budget pass
         # evicts the just-built entry from the global LRU.
@@ -1728,14 +1764,14 @@ class BatchEngine:
         sub.reused_tokens = plan.reused
         sub.seed_mode = plan.mode
         # Publish the shared band ONLY from a session that reused nothing —
-        # the "pioneer" of this prefix. Its own saved entry is then the band
-        # rather than end-minus-margin, so its next turn re-prefills the
-        # tail; every sibling after it inherits the band and skips it. One
-        # session pays so N-1 do not. A session that already extended from
-        # the band keeps the normal boundary, which is what preserves the
-        # intra-session reuse that works today (`extension reused=91413`).
+        # the "pioneer" of this prefix; every sibling after it inherits the
+        # band and skips it. The band is a SECOND cut beside the session's
+        # own end-minus-margin boundary, not a replacement for it: saving the
+        # pioneer at the band made its next turn re-prefill everything after
+        # it, which on Gemma (tool block rendered after the system text) was
+        # 7,313 of 8,604 tokens on the second message of every chat.
         if sub.snapshot_target is None and str(plan.mode).startswith("fresh"):
-            sub.snapshot_target = _band_snapshot_target(sub)
+            sub.band_target = _band_snapshot_target(sub)
         if sub.request.cache_id:
             print(
                 f"[batch] seed cache_id={sub.request.cache_id} mode={plan.mode} "
@@ -1788,17 +1824,19 @@ class BatchEngine:
         return plan.segment, plan.caches, plan.all_tokens
 
     def _snapshot_segments(self, sub, segment):
-        """Plant exactly one per-sequence segment edge for KV extraction.
+        """Plant the per-sequence segment edges for KV extraction: the
+        session's own boundary, plus the shared band's on a pioneer turn.
 
         BatchGenerator reports every prefill chunk as a prompt response. The
         old handler copied the growing cache at *every* chunk and kept only the
         last copy. Long prompts therefore paid dozens of large, discarded KV
-        copies. A dedicated target makes capture one-shot and also works for
-        unequal-length multi-sequence waves: mlx_lm finalizes each chunk's
-        right-padding before returning, then extract_cache(uid) removes that
-        sequence's left-padding.
+        copies. Dedicated targets make capture one-shot per boundary and also
+        work for unequal-length multi-sequence waves: mlx_lm finalizes each
+        chunk's right-padding before returning, then extract_cache(uid)
+        removes that sequence's left-padding.
         """
         if not self._needs_snapshot or not sub.request.cache_id:
+            sub.band_target = None
             return [segment]
         plan = cache_seed.plan_snapshot_segments(
             segment,
@@ -1806,8 +1844,10 @@ class BatchEngine:
             len(sub.prompt_tokens),
             sub.snapshot_target,
             _SNAPSHOT_BOUNDARY_MARGIN,
+            sub.band_target,
         )
         sub.snapshot_target = plan.target
+        sub.band_target = plan.band
         return plan.segments
 
     def _emit_prefill_liveness(self) -> None:
@@ -2036,7 +2076,7 @@ class BatchEngine:
                     # finalizes this step, so every sub in a multi-request
                     # wave can safely take its own snapshot.
                     boundary = psub.reused_tokens + int(progress[0])
-                    if boundary == psub.snapshot_target:
+                    if boundary in (psub.snapshot_target, psub.band_target):
                         self._capture_prompt_snapshot(psub, boundary)
             if responses:
                 # A token came back → prefill for this wave is done; stop
@@ -2117,7 +2157,7 @@ class BatchEngine:
                 int(sub.request.max_tokens) if sub.request.max_tokens else 2048
             )
 
-            cut = None
+            cuts: List[int] = []
             if self._needs_snapshot and sub.request.cache_id:
                 plan = cache_seed.plan_snapshot_segments(
                     seg,
@@ -2125,12 +2165,16 @@ class BatchEngine:
                     len(sub.prompt_tokens),
                     sub.snapshot_target,
                     _SNAPSHOT_BOUNDARY_MARGIN,
+                    sub.band_target,
                 )
                 sub.snapshot_target = plan.target
-                if plan.target:
-                    rel = int(plan.target) - int(sub.reused_tokens)
-                    if 0 < rel < len(seg):
-                        cut = rel
+                sub.band_target = plan.band
+                edge = 0
+                for part in plan.segments[:-1]:
+                    edge += len(part)
+                    cuts.append(edge)
+            else:
+                sub.band_target = None
 
             self._prefill_total = max(0, int(sub.prefill_total or 0))
             self._prefill_done = {}
@@ -2144,7 +2188,7 @@ class BatchEngine:
 
             final_out = None
             for kind, done, _total, maybe_out in spec_decode.chunked_prefill_steps(
-                tower, cache_layers, list(seg), ARGS.prefill_step_size, cut=cut
+                tower, cache_layers, list(seg), ARGS.prefill_step_size, cuts=cuts
             ):
                 if sub.cancelled:
                     print(
@@ -2156,7 +2200,9 @@ class BatchEngine:
                 self._prefill_done[0] = int(done)
                 self._emit_prefill_liveness()
                 if kind == "cut":
-                    self._capture_spec_snapshot(sub, cache_layers, full_prompt)
+                    self._capture_spec_snapshot(
+                        sub, cache_layers, full_prompt, int(sub.reused_tokens) + int(done)
+                    )
                 elif kind == "final":
                     final_out = maybe_out
                 await asyncio.sleep(0)
@@ -2315,19 +2361,19 @@ class BatchEngine:
             log_contained_exception("spec")
             sub.queue.put_nowait(("err", str(exc)))
 
-    def _capture_spec_snapshot(self, sub, cache_layers, full_prompt):
+    def _capture_spec_snapshot(self, sub, cache_layers, full_prompt, boundary):
         """Boundary snapshot for the spec wave's direct prefill. The cache
         is quiescent at the planted chunk edge; clone_layers reconstructs
         standalone layers (MLX arrays are immutable, so sharing buffers is
         safe), and the same token-prefix proof as _capture_prompt_snapshot
         guards the boundary invariant."""
         try:
-            boundary = int(sub.snapshot_target)
+            boundary = int(boundary)
             layers = spec_decode.clone_layers(cache_layers)
             if cache_seed.snapshot_matches_prompt(
                 layers, full_prompt[:boundary], sub.prompt_tokens, boundary
             ):
-                sub.prompt_snapshot = (layers, boundary)
+                _store_snapshot(sub, (layers, boundary))
             elif not self._snapshot_warned:
                 self._snapshot_warned = True
                 print(
@@ -2361,6 +2407,8 @@ class BatchEngine:
         right-padding. Exact token-prefix + layer-offset checks are the runtime
         proof of the boundary invariant — on any mismatch the snapshot is
         dropped (logged once) and _finish falls back to the post-gen save.
+        The same edge may be the session boundary, the band boundary, or both;
+        `_store_snapshot` files it under whichever it is.
         """
         try:
             got = self._gen.extract_cache([sub.uid]).get(sub.uid)
@@ -2369,7 +2417,7 @@ class BatchEngine:
             if cache_seed.snapshot_matches_prompt(
                 layers, extracted_tokens, sub.prompt_tokens, at_tokens
             ):
-                sub.prompt_snapshot = (list(layers), at_tokens)
+                _store_snapshot(sub, (list(layers), at_tokens))
             elif not self._snapshot_warned:
                 self._snapshot_warned = True
                 offsets = [getattr(c, "offset", None) for c in (layers or [])]
@@ -2470,7 +2518,9 @@ class BatchEngine:
                             _save_cache(sub.request.cache_id, state)
                             sub.saved_cache_state = state
                             _LAST_SAVE_ROSTER[sub.request.cache_id] = sub.roster_fp
-                            _seed_prefix_from_session(sub.request, state)
+                            prefix_state = _prefix_seed_state(sub, state, trimmable)
+                            if prefix_state is not None:
+                                _seed_prefix_from_session(sub.request, prefix_state)
                             print(
                                 f"[batch] saved cache_id={sub.request.cache_id} "
                                 f"tokens={len(state.token_ids)}"

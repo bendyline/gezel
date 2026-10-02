@@ -110,6 +110,8 @@ describe('MlxProvider cache request wiring', () => {
         },
       ],
       hasTool: () => true,
+      hasCallableRestriction: () => false,
+      isRestrictedFromCalling: () => false,
       callTool: async () => {
         invoked = true;
         return 'Image read';
@@ -150,6 +152,8 @@ describe('MlxProvider cache request wiring', () => {
         },
       ],
       hasTool: () => true,
+      hasCallableRestriction: () => false,
+      isRestrictedFromCalling: () => false,
       callTool: async (
         _name: string,
         _args: unknown,
@@ -437,6 +441,8 @@ describe('MLX required-argument grammar fallback', () => {
             parameters: Record<string, unknown>;
           }>;
           hasTool: (name: string) => boolean;
+          hasCallableRestriction: () => boolean;
+          isRestrictedFromCalling: (name: string) => boolean;
           callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
           stop: () => Promise<void>;
         };
@@ -461,6 +467,8 @@ describe('MLX required-argument grammar fallback', () => {
         },
       ],
       hasTool: (name) => name === 'wikipedia_read',
+      hasCallableRestriction: () => false,
+      isRestrictedFromCalling: () => false,
       callTool: async (name, args) => {
         calls.push({ name, args });
         return 'ERROR: Input rejected by validator: missing required field: title';

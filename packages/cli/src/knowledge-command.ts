@@ -9,9 +9,9 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { CatalogDocument, KnowledgeCatalogManifest } from '@bendyline/gezel';
 import { KnowledgeIdSchema, formatKnowledgeUri } from '@bendyline/gezel';
 import type { ProfileEmbedder, TableOfContentsFormat } from '@bendyline/gezel-knowledge';
@@ -104,6 +104,21 @@ export function embeddingRuntimeMissingMessage(): string {
 
 // ── init ────────────────────────────────────────────────────────────────────
 
+/**
+ * Whether the folder already holds Markdown: a documentation tree to catalog
+ * in place. Scaffolding `content/` there would shadow the whole tree, since
+ * build prefers `content/` when it exists.
+ */
+async function holdsMarkdown(dir: string): Promise<boolean> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const visible = entries.filter((e) => !e.name.startsWith('.') && e.name !== 'node_modules');
+  if (visible.some((e) => e.isFile() && /\.(md|markdown)$/i.test(e.name))) return true;
+  for (const entry of visible) {
+    if (entry.isDirectory() && (await holdsMarkdown(join(dir, entry.name)))) return true;
+  }
+  return false;
+}
+
 export async function runKnowledgeInit(dir: string): Promise<void> {
   const root = resolve(dir);
   const configPath = join(root, CATALOG_JSON);
@@ -112,7 +127,8 @@ export async function runKnowledgeInit(dir: string): Promise<void> {
     () => false,
   );
   if (exists) throw new CliError(`${configPath} already exists`);
-  await mkdir(join(root, CONTENT_DIR, 'Getting Started'), { recursive: true });
+  const inPlace = await holdsMarkdown(root);
+  await mkdir(inPlace ? root : join(root, CONTENT_DIR, 'Getting Started'), { recursive: true });
   const id = sanitizeCatalogId(basename(root));
   const config: CatalogConfig = {
     id,
@@ -125,16 +141,25 @@ export async function runKnowledgeInit(dir: string): Promise<void> {
     profile: 'bge-small-en-v1.5@1',
   };
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-  await writeFile(
-    join(root, CONTENT_DIR, 'Getting Started', 'welcome.md'),
-    '# Welcome\n\nPut Markdown files under content/ — folders become the table of contents.\n',
-    'utf8',
-  );
+  if (!inPlace) {
+    await writeFile(
+      join(root, CONTENT_DIR, 'Getting Started', 'welcome.md'),
+      '# Welcome\n\nPut Markdown files under content/ — folders become the table of contents.\n',
+      'utf8',
+    );
+  }
   console.log(`Initialized knowledge catalog at ${root}`);
   console.log(`  ${CATALOG_JSON} — identity, license, embedding profile`);
-  console.log(`  ${CONTENT_DIR}/ — Markdown content (folders become topics)`);
+  if (inPlace) {
+    const toc = await detectTableOfContents(root);
+    console.log(
+      `  The Markdown already in this folder is the content (table of contents: ${describeToc(toc, root)})`,
+    );
+  } else {
+    console.log(`  ${CONTENT_DIR}/ — Markdown content (folders become topics)`);
+  }
   console.log(
-    '  An outline the tree already has is honored: SUMMARY.md, an mkdocs.yml nav, _toc.yml, or Hugo _index.md pages',
+    '  An outline the tree already has is honored: SUMMARY.md, an mkdocs.yml nav, _toc.yml, docfx toc.yml files, or Hugo _index.md pages',
   );
   console.log(`Build with: gezel knowledge build ${dir}`);
 }
@@ -188,6 +213,13 @@ async function resolveContentRoot(root: string, config: CatalogConfig): Promise<
   return root;
 }
 
+/** A path relative to the catalog folder when it lies inside, else absolute. */
+function displayPath(root: string, path: string): string {
+  const rel = relative(root, path);
+  if (rel === '') return '.';
+  return rel.startsWith('..') || isAbsolute(rel) ? path : rel;
+}
+
 function describeToc(toc: { format: TableOfContentsFormat; path?: string }, root: string): string {
   const source =
     toc.format === 'folders'
@@ -195,7 +227,7 @@ function describeToc(toc: { format: TableOfContentsFormat; path?: string }, root
       : toc.format === 'hugo'
         ? 'Hugo conventions (_index.md, weight)'
         : toc.format;
-  return toc.path ? `${source} (${relative(root, toc.path) || toc.path})` : source;
+  return toc.path ? `${source} (${displayPath(root, toc.path)})` : source;
 }
 
 export async function runKnowledgeBuild(
@@ -214,6 +246,7 @@ export async function runKnowledgeBuild(
     toc,
     onWarning: (message) => console.warn(`warning: ${message}`),
   });
+  console.log(`Content: ${displayPath(root, contentRoot)}`);
   console.log(`Table of contents: ${describeToc(source.toc, root)}`);
   const profileId = config.profile ?? 'bge-small-en-v1.5@1';
   const profile = knowledgeEmbeddingProfile(profileId);

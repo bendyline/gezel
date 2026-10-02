@@ -47,6 +47,8 @@ function withImageTool(session: LLMSession, name: string, calls: string[]): void
     isEmpty: () => false,
     getOpenAITools: () => [tool(name)],
     hasTool: () => true,
+    hasCallableRestriction: () => false,
+    isRestrictedFromCalling: () => false,
     callTool: async (
       toolName: string,
       _args: unknown,

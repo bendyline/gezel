@@ -154,6 +154,20 @@ export interface ResolveSessionToolSurfaceOptions {
    */
   exactCraftbookRouting?: boolean;
   /**
+   * How the coordinator routing clamps (project orchestration, exact
+   * craftbook) apply. `narrow` (default) removes every other tool from the
+   * surface. `callable` leaves the surface whole and reports the clamped
+   * set as `callableAllowlist`, for providers that confine calls at decode
+   * time: the rendered prompt then stays identical whether or not the clamp
+   * fires, so a local engine's prompt cache survives it flipping. A routing
+   * clamp rewrites the tool block AND the prose that describes it, which an
+   * untrimmable cache (Gemma's sliding window) can only answer with a full
+   * re-prefill — twice, since the next ordinary message flips it back.
+   */
+  routingClamps?: 'narrow' | 'callable';
+  /** Internal: compute the surface with neither routing clamp applied. */
+  skipRoutingClamps?: boolean;
+  /**
    * The persisted active craftbook step for a step-scoped session
    * (taskRef + stepId). Drives the deliverable-kind tool KIT (the
    * surface narrows to what this step's class + gate checks need) and
@@ -211,6 +225,12 @@ type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep
 
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
+  /**
+   * Set only under `routingClamps: 'callable'` when a routing clamp fired:
+   * exactly what `narrow` mode would have returned as `allowlist`, while
+   * `allowlist` keeps the unclamped surface the prompt renders.
+   */
+  callableAllowlist?: Set<string>;
   projectOrchestrationConstrained: boolean;
   exactCraftbookConstrained: boolean;
 }
@@ -303,6 +323,25 @@ export const LEAN_PROFILE_BUILTIN_TOOLS: readonly string[] = ['ask_user_question
 export async function resolveSessionToolSurface(
   opts: ResolveSessionToolSurfaceOptions,
 ): Promise<ResolvedSessionToolSurface> {
+  if (opts.routingClamps === 'callable') {
+    const routed = await resolveSessionToolSurface({ ...opts, routingClamps: 'narrow' });
+    const routedAllowlist = routed.allowlist;
+    if (
+      !routedAllowlist ||
+      (!routed.projectOrchestrationConstrained && !routed.exactCraftbookConstrained)
+    ) {
+      return routed;
+    }
+    // Same inputs with the routing clamps off is the surface the prompt
+    // would render without them. Quiet: telemetry already fired above.
+    const { onClamp: _onClamp, onCapTrim: _onCapTrim, ...quiet } = opts;
+    const unrouted = await resolveSessionToolSurface({
+      ...quiet,
+      routingClamps: 'narrow',
+      skipRoutingClamps: true,
+    });
+    return { ...routed, allowlist: unrouted.allowlist, callableAllowlist: routedAllowlist };
+  }
   const hasToolsetOverride = opts.toolsetsGroupOverride.length > 0;
   // The steps whose procedures shape this surface: just the active step,
   // or every step of a generalist run.
@@ -566,6 +605,7 @@ export async function resolveSessionToolSurface(
       deliverableKindForStep(opts.activeStep),
   );
   const projectOrchestrationConstrained =
+    !opts.skipRoutingClamps &&
     !executingStepWithDeliverable &&
     projectOrchestrationConstraintActive({
       record: opts.session,
@@ -591,6 +631,7 @@ export async function resolveSessionToolSurface(
   // small context). This is subtractive only: never grant invoke_craftbook if
   // the role/security ceiling did not already admit it.
   const exactCraftbookConstrained =
+    !opts.skipRoutingClamps &&
     opts.exactCraftbookRouting !== false &&
     shouldConstrainToExactCraftbookInvocation({
       role: opts.role,

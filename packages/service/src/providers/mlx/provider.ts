@@ -169,6 +169,8 @@ import {
   APPEND_TO_FILE_CONTINUATION_TOOL,
   type ChatCompletionTool,
   MlxToolCallAccumulator,
+  applyCallableToolGrammar,
+  callableRequestToolNames,
   chatCompletionToolName,
   hermesRequiredArgGrammarRequested,
   missingTopLevelRequiredToolArgs,
@@ -1591,6 +1593,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
+        applyCallableToolGrammar(body, this.deps.bridges);
         // Cache reuse extras from the engine's adapter (Phase 2). Adds
         // `cache_id: <sessionId>` so our wrapped `gezel_mlx_server.py`
         // preserves and reuses the prompt cache across turns. Falls
@@ -3548,6 +3551,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 closingText: deriveProjectMacroClosing(startedProjectOrJobThisTurn.firstResult),
               };
             }
+          } else if (
+            advertisedBridgeToolNames.has(call.function.name) &&
+            this.deps.bridges.isRestrictedFromCalling(call.function.name)
+          ) {
+            // The grammar keeps a native call inside the callable set; this
+            // catches calls salvaged from text, which the grammar never sees.
+            output = `ERROR: \`${call.function.name}\` is not available for this request. Call one of: ${formatToolMenu(new Set(callableRequestToolNames(tools, this.deps.bridges)))}.`;
           } else if (
             advertisedBridgeToolNames.has(call.function.name) &&
             this.deps.bridges.hasTool(call.function.name)

@@ -1981,3 +1981,78 @@ describe('resolveSessionToolSurface — generalist union surface', () => {
     expect([...generalist.allowlist!].sort()).toEqual([...stepwise.allowlist!].sort());
   });
 });
+
+describe('resolveSessionToolSurface routingClamps: callable', () => {
+  function meesterInputs(prompt: string) {
+    return {
+      surface: 'bridge' as const,
+      session: {
+        id: 'routing-callable',
+        gezelId: 'mira',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-10-01T00:00:00.000Z' }],
+        createdAt: '2026-10-01T00:00:00.000Z',
+        lastActivityAt: '2026-10-01T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always' as const,
+      provider: 'mlx' as const,
+      modelId: 'gemma4-e4b-q4',
+      parameterSize: '8B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'small' as const,
+      latestUserMessage: prompt,
+    };
+  }
+
+  // A routing clamp narrowed the roster from 60 tools to 30 mid-thread and
+  // rewrote the "Where work belongs" prose with it; gemma4-e4b's sliding-window
+  // cache cannot trim, so the turn re-prefilled all 6,420 prompt tokens.
+  it('renders the unclamped surface and reports the clamp as what is callable', async () => {
+    const prompt = 'Can we build a tank combat game?';
+    const narrow = await resolveSessionToolSurface(meesterInputs(prompt));
+    const callable = await resolveSessionToolSurface({
+      ...meesterInputs(prompt),
+      routingClamps: 'callable',
+    });
+    const unclamped = await resolveSessionToolSurface({
+      ...meesterInputs('What should we tackle first today?'),
+      routingClamps: 'callable',
+    });
+
+    expect(narrow.projectOrchestrationConstrained).toBe(true);
+    expect(callable.projectOrchestrationConstrained).toBe(true);
+    expect(callable.callableAllowlist).toEqual(narrow.allowlist);
+    expect(callable.allowlist).toEqual(unclamped.allowlist);
+    expect(callable.allowlist!.size).toBeGreaterThan(narrow.allowlist!.size);
+    expect(callable.allowlist!.has('write_artifact')).toBe(true);
+    expect(callable.callableAllowlist!.has('write_artifact')).toBe(false);
+    expect(callable.callableAllowlist!.has('start_project')).toBe(true);
+  });
+
+  it('matches narrow mode exactly when no routing clamp fires', async () => {
+    const prompt = 'What should we tackle first today?';
+    const narrow = await resolveSessionToolSurface(meesterInputs(prompt));
+    const callable = await resolveSessionToolSurface({
+      ...meesterInputs(prompt),
+      routingClamps: 'callable',
+    });
+    expect(callable).toEqual(narrow);
+    expect(callable.callableAllowlist).toBeUndefined();
+  });
+
+  it('reports the exact-craftbook clamp as a single callable action', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const callable = await resolveSessionToolSurface({
+      ...meesterInputs(prompt),
+      routingClamps: 'callable',
+    });
+    expect(callable.exactCraftbookConstrained).toBe(true);
+    expect([...callable.callableAllowlist!]).toEqual(['invoke_craftbook']);
+    expect(callable.allowlist!.size).toBeGreaterThan(1);
+  });
+});

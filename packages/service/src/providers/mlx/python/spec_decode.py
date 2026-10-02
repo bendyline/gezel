@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Optional, Sequence, Tuple
 
 
 @dataclass
@@ -300,14 +300,14 @@ def chunked_prefill_steps(
     tokens: List[int],
     step: int,
     *,
-    cut: Optional[int] = None,
+    cuts: Sequence[int] = (),
 ) -> Iterator[Tuple[str, int, int, Any]]:
     """Prefill `tokens` into `cache` with direct tower calls, one chunk per
     yield so the async worker can breathe, emit liveness, and check
     cancellation between chunks.
 
-    `cut` (index into `tokens`) forces a chunk edge so the caller can
-    capture a boundary snapshot from a quiescent cache. Yields
+    Each of `cuts` (indexes into `tokens`) forces a chunk edge so the caller
+    can capture a boundary snapshot from a quiescent cache. Yields
     ("cut"|"chunk", done, total, None) per chunk and finally
     ("final", n, n, bundle) where bundle carries the last chunk's logits,
     the hidden states CONCATENATED across all chunks (the MTP drafter's
@@ -324,10 +324,10 @@ def chunked_prefill_steps(
     i = 0
     out = None
     hidden_parts: List[Any] = []
+    edges = {int(c) for c in cuts}
     while i < n:
         j = min(n, i + int(step or 2048))
-        if cut is not None and i < cut < j:
-            j = cut
+        j = min([c for c in edges if i < c < j] or [j])
         last = j >= n
         chunk = mx.array([tokens[i:j]])
         out = tower(
@@ -347,7 +347,7 @@ def chunked_prefill_steps(
             mx.eval([c.state for c in cache], part)
         i = j
         yield (
-            "cut" if (cut is not None and i == cut) else "chunk",
+            "cut" if i in edges else "chunk",
             i,
             n,
             None,

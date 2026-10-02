@@ -60,10 +60,27 @@ class SeedPlan(NamedTuple):
 
 
 class SnapshotSegmentPlan(NamedTuple):
-    """One sequence's segments plus its absolute snapshot token boundary."""
+    """One sequence's segments plus its absolute snapshot token boundaries.
+
+    `target` is the session's own save boundary. `band` is the shared-band
+    boundary published as the sibling prefix entry; None when no band was
+    requested or it cannot be captured this wave. The two may be equal, in
+    which case one capture serves both.
+    """
 
     segments: List[List[int]]
     target: Optional[int]
+    band: Optional[int] = None
+
+
+# When the band reaches this fraction of the session boundary, the band
+# snapshot doubles as the session's own save. Its tail re-prefill next turn
+# is small (ADR 0010 measured ~7% on Qwen, whose tool block renders ahead of
+# the system text), while a second capture would hold another near-full KV
+# copy for the whole turn. Below it — Gemma renders the tool block AFTER the
+# system text, so its band is ~16% of the prompt — the session keeps its own
+# end-of-prompt snapshot or its next turn re-prefills ~85% of the prompt.
+BAND_SOLE_SNAPSHOT_FRACTION = 0.9
 
 
 def longest_common_prefix(a: Sequence[int], b: Sequence[int]) -> int:
@@ -137,28 +154,52 @@ def plan_snapshot_segments(
     prompt_length: int,
     requested_target: Optional[int],
     margin: int,
+    band_target: Optional[int] = None,
 ) -> SnapshotSegmentPlan:
-    """Split one seed segment at the single boundary worth snapshotting.
+    """Split one seed segment at the boundaries worth snapshotting.
 
     ``requested_target is None`` selects the normal end-minus-margin boundary;
     an explicit zero disables capture (used when prefix warming cannot prove a
     stable synthetic-user boundary). Targets are absolute prompt positions, so
     cached-prefix reuse is subtracted before cutting the remaining segment.
+
+    ``band_target`` adds the shared-band cut (ADR 0010). A band at or past the
+    session boundary is pulled back to it — anything shorter than the band is
+    still a prefix every sibling shares — and a band within
+    BAND_SOLE_SNAPSHOT_FRACTION of it becomes the session boundary too.
     """
     remaining = [int(t) for t in segment]
-    target = (
-        int(prompt_length) - max(0, int(margin))
+    reused = max(0, int(reused))
+    length = int(prompt_length)
+    target: Optional[int] = (
+        length - max(0, int(margin))
         if requested_target is None
         else int(requested_target)
     )
-    if not 0 < target < int(prompt_length):
-        return SnapshotSegmentPlan([remaining], None)
-    relative = target - max(0, int(reused))
-    if 0 < relative < len(remaining):
-        return SnapshotSegmentPlan(
-            [remaining[:relative], remaining[relative:]], target
-        )
-    return SnapshotSegmentPlan([remaining], target)
+    if not 0 < target < length:
+        target = None
+    band = int(band_target) if band_target else None
+    if band is not None and not 0 < band < length:
+        band = None
+    if band is not None and target is not None:
+        if band >= target:
+            band = target
+        elif band >= target * BAND_SOLE_SNAPSHOT_FRACTION:
+            target = band
+    cuts = sorted(
+        c
+        for c in {b - reused for b in (target, band) if b is not None}
+        if 0 < c < len(remaining)
+    )
+    if band is not None and band - reused not in cuts:
+        band = None
+    segments: List[List[int]] = []
+    start = 0
+    for cut in cuts:
+        segments.append(remaining[start:cut])
+        start = cut
+    segments.append(remaining[start:])
+    return SnapshotSegmentPlan(segments, target, band)
 
 
 def _layer_trimmable(layer: Any) -> bool:

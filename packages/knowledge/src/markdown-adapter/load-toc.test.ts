@@ -302,3 +302,90 @@ describe('folder-derived names', () => {
     expect(source.topics.map((t) => t.name).sort()).toEqual(['API', 'Getting Started']);
   });
 });
+
+describe('docfx toc.yml', () => {
+  it('stitches the breadcrumb and folder TOCs, publishing what docfx.json publishes', async () => {
+    const tree = join(scratch, 'docfx');
+    await writeTree(tree, {
+      'docfx.json': JSON.stringify({
+        build: {
+          content: [
+            {
+              files: ['**/*.md', '**/*.yml'],
+              exclude: ['**/includes/**'],
+              src: 'articles',
+              dest: '.',
+            },
+            { files: ['**/*.yml'], src: 'bread', dest: 'bread' },
+          ],
+          globalMetadata: { breadcrumb_path: '/azure/bread/toc.json' },
+        },
+      }),
+      'bread/toc.yml': [
+        'items:',
+        '- name: Azure',
+        '  tocHref: /azure/',
+        '  items:',
+        '  - name: API Center',
+        '    tocHref: /azure/api-center/',
+        '',
+      ].join('\n'),
+      'articles/api-center/TOC.yml': [
+        '- name: Azure API Center documentation',
+        '  href: index.yml',
+        '- name: Get started',
+        '  items:',
+        '  - name: Overview',
+        '    href: overview.md',
+        '',
+      ].join('\n'),
+      'articles/api-center/overview.md': [
+        '---',
+        'title: Azure API Center - Overview',
+        'description: Inventory your APIs.',
+        'ms.topic: overview',
+        '---',
+        '',
+        '# What is Azure API Center?',
+        '',
+        'API Center inventories APIs.',
+        '',
+        '![Diagram](~/articles/media/diagram.png)',
+        '',
+        '[!INCLUDE [note](includes/note.md)]',
+        '',
+      ].join('\n'),
+      'articles/api-center/includes/note.md': 'A shared note.\n',
+      'articles/media/diagram.png': 'png',
+      'articles/loose/page.md': '# Loose page\n',
+      'README.md': '# Repo readme\n',
+    });
+    expect(await detectTableOfContents(tree)).toEqual({ format: 'docfx' });
+
+    const warnings: string[] = [];
+    const source = await loadMarkdownCatalog(tree, {
+      language: 'en',
+      toc: { format: 'docfx' },
+      onWarning: (m) => warnings.push(m),
+    });
+    expect(source.toc).toEqual({ format: 'docfx', path: join(tree, 'bread', 'toc.yml') });
+    expect(source.documents.map((d) => d.id).sort()).toEqual([
+      'articles/api-center/overview',
+      'articles/loose/page',
+    ]);
+    const names = new Map(source.topics.map((t) => [t.id, t.name]));
+    const overview = source.documents.find((d) => d.id === 'articles/api-center/overview');
+    expect(overview).toMatchObject({
+      title: 'What is Azure API Center?',
+      summary: 'Inventory your APIs.',
+      meta: { 'ms.topic': 'overview' },
+    });
+    expect(overview?.topicPath.map((id) => names.get(id))).toEqual(['API Center', 'Get started']);
+    expect(overview?.markdown).toContain('![Diagram](assets/articles/media/diagram.png)');
+    expect(source.assets.map((a) => a.path)).toEqual(['assets/articles/media/diagram.png']);
+    expect(warnings).toEqual([
+      expect.stringContaining('articles/loose/page.md: not in the docfx table of contents'),
+      expect.stringContaining("link 'includes/note.md' does not name a document"),
+    ]);
+  });
+});

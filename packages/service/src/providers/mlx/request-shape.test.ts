@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
-import { applyMlxRequestShape } from './request-shape.js';
+import { applyMlxRequestShape, mlxToolGrammarActive } from './request-shape.js';
 
 const qwen = (ids: string[], template?: string): ResolvedModelProfile =>
   ({
@@ -40,5 +40,18 @@ describe('applyMlxRequestShape', () => {
     const body: Record<string, unknown> = { model: 'm' };
     applyMlxRequestShape(body, { profile: qwen([]) }, { hasTools: true });
     expect(body).toEqual({ model: 'm' });
+  });
+});
+
+describe('mlxToolGrammarActive', () => {
+  it('needs both the grammar behavior and a family with a grammar template', () => {
+    expect(mlxToolGrammarActive(qwen(['tools.mlx-grammar']))).toBe(true);
+    expect(mlxToolGrammarActive(qwen([]))).toBe(false);
+    const unsupported = {
+      ...qwen(['tools.mlx-grammar']),
+      style: { family: 'llama', reasoningFormat: 'none', toolCallFormat: 'function-call' },
+    } as ResolvedModelProfile;
+    expect(mlxToolGrammarActive(unsupported)).toBe(false);
+    expect(mlxToolGrammarActive(undefined)).toBe(false);
   });
 });

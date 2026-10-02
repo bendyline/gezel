@@ -93,7 +93,7 @@ describe('MLX sidecar cache seeding', () => {
   it('captures one padding-aware snapshot for every sub in a wave', () => {
     const run = sliceBlock(SERVER_SRC, 'async def _run(');
     expect(run).toMatch(/getattr\(pr, "end_of_segment", False\)/);
-    expect(run).toMatch(/boundary == psub\.snapshot_target/);
+    expect(run).toMatch(/boundary in \(psub\.snapshot_target, psub\.band_target\)/);
     expect(run).not.toMatch(/len\(self\._subs\) == 1/);
   });
 
@@ -172,16 +172,32 @@ describe('shared-band prefix reuse (ADR 0010)', () => {
   const SIDECAR = SERVER_SRC;
 
   it('publishes the band only from a session that reused nothing', () => {
-    // The pioneer saves the band as its own entry and re-prefills its tail
-    // next turn; siblings inherit it. A session that already extended keeps
-    // the normal end-minus-margin boundary — otherwise this would shrink
-    // every session's own cache and destroy the intra-session reuse that
-    // works today (`extension reused=91413 prefill=290`).
+    // Only the pioneer plants a band cut; siblings inherit it. A session
+    // that already extended keeps its single end-minus-margin boundary,
+    // which preserves intra-session reuse (`extension reused=91413 prefill=290`).
     const seedArgs = SIDECAR.slice(SIDECAR.indexOf('def _seed_args'));
     expect(seedArgs).toMatch(
       /sub\.snapshot_target is None and str\(plan\.mode\)\.startswith\("fresh"\)/,
     );
-    expect(seedArgs).toContain('_band_snapshot_target(sub)');
+    expect(seedArgs).toContain('sub.band_target = _band_snapshot_target(sub)');
+  });
+
+  it('keeps the pioneer session on its own end-of-prompt snapshot beside the band', () => {
+    // The band is a SECOND cut. When it replaced the session boundary, the
+    // pioneer's next turn re-prefilled everything after the band — 7,313 of
+    // 8,604 tokens on gemma4-e4b, whose template renders the tool block after
+    // the system text, on the second message of every chat.
+    const seedArgs = sliceBlock(SIDECAR, 'def _seed_args(');
+    expect(seedArgs).not.toMatch(/sub\.snapshot_target = _band_snapshot_target/);
+    const segments = sliceBlock(SIDECAR, 'def _snapshot_segments(');
+    expect(segments).toMatch(/sub\.band_target,\s*\)/);
+    expect(segments).toMatch(/sub\.band_target = plan\.band/);
+    // The session saves prompt_snapshot; the prefix entry comes from the band.
+    const finish = sliceBlock(SIDECAR, 'def _finish(');
+    expect(finish).toMatch(/_prefix_seed_state\(sub, state, trimmable\)/);
+    const prefixState = sliceBlock(SIDECAR, 'def _prefix_seed_state(');
+    expect(prefixState).toMatch(/sub\.band_snapshot/);
+    expect(prefixState).toMatch(/stable_prefix_chars/);
   });
 
   it('never replaces a prefix entry with a longer one', () => {

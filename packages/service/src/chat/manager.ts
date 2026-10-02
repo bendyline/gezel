@@ -187,6 +187,7 @@ import {
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
 import { isPlaywrightMcp } from '../providers/mcp-wrappers/playwright-snapshot.js';
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+import { mlxToolGrammarActive } from '../providers/mlx/request-shape.js';
 
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
@@ -14250,6 +14251,12 @@ export class ChatManager extends LocalEngineRuntime {
     // the generic ask_specialist/ask_gezel dispatchers. Computed once;
     // threaded into both the prompt-block and session allowlists below.
     const rolesAsToolsActive = profileHasBehavior(modelProfile, 'tools.gezels-as-roles');
+    // Where the engine confines tool calls at decode time, the coordinator
+    // routing clamps narrow what is CALLABLE and leave the rendered roster
+    // alone, so the prompt cache survives a build request mid-thread. See
+    // ResolveSessionToolSurfaceOptions.routingClamps.
+    const routingClamps: 'narrow' | 'callable' =
+      record.providerName === 'mlx' && mlxToolGrammarActive(modelProfile) ? 'callable' : 'narrow';
     // When `prompt.executor-context-trim` is on (incl. via
     // GEZEL_FORCE_BEHAVIORS), buildInstructions trims standing context for
     // executor-class roles. The executor-vs-orchestrator role gate is
@@ -14639,6 +14646,7 @@ export class ChatManager extends LocalEngineRuntime {
       session: record,
       role: gezel?.role,
       exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
+      routingClamps,
       mode: globalConfig.toolFilterMode,
       provider: record.providerName,
       ...(modelForTier !== undefined ? { modelId: modelForTier } : {}),
@@ -14763,10 +14771,9 @@ export class ChatManager extends LocalEngineRuntime {
     // Shared-band prefix reuse (ADR 0010). MLX-only, default ON since the
     // matched cross-session A/B: two sibling sessions, 22,516 → 12,794 tokens
     // prefilled (43% less), the sibling's own turn −86%, no
-    // `fresh-untrimmable` in either arm. The pioneer pays ~1,327 extra tokens
-    // ONCE (turn 2 saves at end-minus-margin again), so only a session that
-    // never gets a sibling is net-negative, and only mildly.
-    // `enabled: false` or the env var turns it off.
+    // `fresh-untrimmable` in either arm. The pioneer captures the band as a
+    // second snapshot beside its own end-of-prompt one, so publishing costs
+    // its next turn nothing. `enabled: false` or the env var turns it off.
     const envBand = (process.env.GEZEL_MLX_SHARED_BAND_PREFIX ?? '').trim().toLowerCase();
     const sharedBandPrefixEnabled =
       record.providerName === 'mlx' &&
@@ -16162,6 +16169,7 @@ export class ChatManager extends LocalEngineRuntime {
     // The craftbook's own crew gets the toolsets when it dispatches them; the
     // router does not need a single one to make the call it was handed.
     const suppressExtrasForExactCraftbook =
+      routingClamps === 'narrow' &&
       gezel !== null &&
       this.exactCraftbookConstraintActive(record, gezel, pendingUserText) &&
       permittedExtras.length > 0;
@@ -16266,6 +16274,7 @@ export class ChatManager extends LocalEngineRuntime {
       session: record,
       role: gezel?.role,
       exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
+      routingClamps,
       mode: globalConfig.toolFilterMode,
       provider: providerNameForFilter,
       ...(modelForFilter !== undefined ? { modelId: modelForFilter } : {}),
@@ -16345,10 +16354,21 @@ export class ChatManager extends LocalEngineRuntime {
         .join(',');
     }
     if (constrainedAllowlist) opts.toolAllowlist = constrainedAllowlist;
+    const callableAllowlist = withheldWhileDrafting(bridgeSurface.callableAllowlist);
+    if (callableAllowlist) {
+      opts.callableToolRestriction = {
+        builtins: callableAllowlist,
+        // The exact-craftbook clamp withholds toolset servers outright in
+        // narrow mode; here they stay advertised and are refused instead.
+        // The orchestration clamp never withheld them.
+        thirdParty: !bridgeSurface.exactCraftbookConstrained,
+      };
+    }
+    const routedAllowlist = callableAllowlist ?? constrainedAllowlist;
     if (
       bridgeSurface.exactCraftbookConstrained &&
-      constrainedAllowlist?.size === 1 &&
-      constrainedAllowlist.has('invoke_craftbook')
+      routedAllowlist?.size === 1 &&
+      routedAllowlist.has('invoke_craftbook')
     ) {
       opts.singleToolCallTurn = true;
     }

@@ -11,7 +11,13 @@
 
 import { posix } from 'node:path';
 
-export type TableOfContentsFormat = 'folders' | 'hugo' | 'gitbook' | 'mkdocs' | 'jupyter-book';
+export type TableOfContentsFormat =
+  | 'folders'
+  | 'hugo'
+  | 'gitbook'
+  | 'mkdocs'
+  | 'jupyter-book'
+  | 'docfx';
 export type OutlineFormat = Exclude<TableOfContentsFormat, 'folders' | 'hugo'>;
 
 export interface OutlineEntry {

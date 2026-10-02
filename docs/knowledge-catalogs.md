@@ -654,7 +654,8 @@ archive for immutable local identity, validates the archive and extracted files,
 and keeps the catalog in the private, untrusted tier.
 
 `knowledge init` writes a `catalog.json` descriptor next to a `content/`
-folder. For Markdown input:
+folder — or, in a folder that already holds Markdown, catalogs that tree in
+place, since a scaffolded `content/` would shadow it. For Markdown input:
 
 - document id comes from front matter `id` or the normalized relative path;
 - title comes from front matter, the first H1, or the filename; `summary`,
@@ -669,10 +670,24 @@ folder. For Markdown input:
   `SUMMARY.md` (parts, nesting, a page with sub-pages leads its section),
   an `mkdocs.yml` `nav` (sections and titled pages, `docs_dir` honored),
   Jupyter Book's `_toc.yml` (`jb-book` parts, chapters and sections,
-  `jb-article`, globs; notebooks are skipped), and Hugo's conventions
+  `jb-article`, globs; notebooks are skipped), docfx projects (Microsoft
+  Learn trees such as azure-docs: see below), and Hugo's conventions
   (`_index.md` section pages name and describe their folder and list
   first, `weight` orders, `draft` and `headless` pages are left out). A
   page the outline omits stays in its folder, with a warning;
+- a docfx project — `docfx.json` or a `toc.yml` at the content root — keeps
+  docfx's own rules: `build.content` globs decide what is published (so
+  `includes/` fragments and repo READMEs stay out); the outline starts from
+  the breadcrumb TOC (`breadcrumb_path`, or `"toc": {"format": "docfx",
+  "path": "bread/toc.yml"}`), follows `tocHref` and TOC `href`s into each
+  folder's `toc.yml`, and grafts every TOC the breadcrumb missed under the
+  section covering its parent folder, or at the top, because breadcrumbs
+  drift from the tree. A page another folder's TOC links to stays with its
+  own folder's TOC; a page no TOC lists joins its folder's section. Titles
+  come from the H1 (front matter `title` is the HTML title), summaries from
+  `description`, `~/` paths resolve from the root, and a missing image only
+  warns, since docsets reference dependent repositories a checkout lacks.
+  `[!INCLUDE]` and `:::image` directives are not expanded;
 - `catalog.json` may also set `content` (the content root, otherwise
   `content/`, an MkDocs project's `docs_dir`, or the folder itself) and
   `ignore` (content-relative files to leave out);

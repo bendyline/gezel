@@ -98,6 +98,8 @@ async function run(opts: { singleToolCallTurn?: boolean }, call = CALL) {
     isEmpty: () => false,
     getOpenAITools: () => definitions,
     hasTool: (name: string) => name === 'invoke_craftbook',
+    hasCallableRestriction: () => false,
+    isRestrictedFromCalling: () => false,
     callTool: execute,
     stop: async () => {},
   };

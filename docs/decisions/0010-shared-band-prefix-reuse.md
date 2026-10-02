@@ -241,6 +241,29 @@ completion before issuing the sibling request, which is the one ordering that
 hides it. Any future change here needs a two-sessions-dispatched-together test,
 not a sequential one.
 
+## Addendum (2026-10-01): the band is a second snapshot, not the session's
+
+"The pioneer tax is small" held for the model it was measured on and nowhere
+else. Qwen renders the tool block *ahead* of the system message, so its band is
+`[tools][band]` — 36,576 of 39,446 tokens — and re-prefilling the tail is ~7%.
+Gemma 4 renders the system text first and every tool declaration after it, so
+its band is the system head alone. Live on gemma4-e4b (Meester, 60 tools): the
+band was 1,390 of 8,604 tokens, the pioneer saved *only* the band as its own
+entry, and its second message re-prefilled 7,313 tokens. Every fresh turn paid
+it again, including a `fresh-untrimmable` one, so a single divergence cost two
+near-full prefills. In an interactive chat there is usually no sibling to
+benefit.
+
+The pioneer now plants two cuts in one prefill, the band and its usual
+end-minus-margin boundary (`cache_seed.plan_snapshot_segments(...,
+band_target)`). It saves the end snapshot as its own entry and publishes the
+band snapshot as the prefix (`_prefix_seed_state`). When the band reaches
+`BAND_SOLE_SNAPSHOT_FRACTION` (0.9) of the session boundary, one cut serves both
+as before: the tail is small, and a second capture would hold another near-full
+KV copy for the whole turn. A band-keyed entry is published only from a band
+snapshot, so a dropped capture no longer writes the full session state under a
+band id (the clobber described above).
+
 ## Regression surface
 
 - `cache-adapter.test.ts` — siblings differing only in the task band share one
@@ -248,7 +271,10 @@ not a sequential one.
   omitting the band is byte-identical to today.
 - `cache_seed_test.py` — the boundary helper, and the property that matters: a
   state saved *at* the boundary extends, one saved a token past it reuses
-  nothing.
+  nothing. Also the two-cut planner: a short band cuts twice, a band near the
+  session boundary becomes the single cut.
+- `cache-seed-contract.test.ts` — the pioneer keeps its own end-of-prompt
+  snapshot, and the prefix entry is the band snapshot.
 - The live signal is the engine log, in `~/.gezel-dev/logs/mlx-server-*.log`
   (not `service-*.log`): `[batch] seed … mode=extension reused=<band>` on a
   sibling, and `[cache] prefix-keep …` when the never-lengthen guard fires.
