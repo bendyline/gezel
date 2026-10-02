@@ -148,18 +148,33 @@ test('narrow window keeps the conversation visible without a side rail', async (
     const win = BrowserWindow.getAllWindows()[0];
     if (win) win.setContentSize(700, 900);
   });
-  await page.waitForTimeout(800);
+  const navigation = page.getByRole('button', { name: 'Navigation' });
+  await expect(navigation).toBeVisible();
+  if ((await navigation.getAttribute('aria-pressed')) === 'true') {
+    await navigation.click();
+  }
+  await expect(page.locator('.home-workshop-conversation')).toBeVisible();
 
   const narrow = await page.evaluate(() => {
     const rect = (s: string) => {
       const el = document.querySelector(s);
       if (!el) return null;
       const r = el.getBoundingClientRect();
-      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+      return {
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        height: Math.round(r.height),
+        left: Math.round(r.left),
+        right: Math.round(r.right),
+        width: Math.round(r.width),
+      };
     };
     const body = document.querySelector('.home-workshop-body');
     const bodyStyle = body ? getComputedStyle(body) : null;
     return {
+      innerWidth: window.innerWidth,
+      body: rect('.home-workshop-body'),
+      main: rect('.home-workshop-main'),
       conversation: rect('.home-workshop-conversation'),
       rail: rect('.home-workshop-rail'),
       bodyColumns: bodyStyle?.gridTemplateColumns ?? null,
@@ -171,7 +186,10 @@ test('narrow window keeps the conversation visible without a side rail', async (
 
   expect(narrow.conversation).not.toBeNull();
   expect(narrow.rail).toBeNull();
-  expect(narrow.bodyColumns?.split(' ')).toHaveLength(1);
+  expect(narrow.conversation!.height).toBeGreaterThan(0);
+  expect(narrow.conversation!.left).toBeGreaterThanOrEqual(0);
+  expect(narrow.conversation!.right).toBeLessThanOrEqual(narrow.innerWidth);
+  expect(narrow.main!.width).toBe(narrow.body!.width);
 
   await captureScreenshot(page, { path: '/tmp/gezel-home-workshop-narrow.png', fullPage: false });
 });

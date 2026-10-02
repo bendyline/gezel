@@ -99,6 +99,8 @@ export function sessionRouteGuard(
     isUserDirectedTurn?: (sessionId: string) => boolean;
     /** The task's persisted status, or null when there is no such task. */
     taskStatus?: TaskStatusLookup;
+    /** Why this session's step binding can no longer move the task, or null. */
+    staleStepSession?: StaleStepSessionLookup;
   } = {},
 ): MiddlewareHandler {
   return async (c, next) => {
@@ -120,19 +122,50 @@ export function sessionRouteGuard(
       opts.isProjectLinked,
       opts.isUserDirectedTurn,
       opts.taskStatus,
+      opts.staleStepSession,
     );
-    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason);
+    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason, allowed.code);
     return next();
   };
 }
 
 export type TaskStatusLookup = (projectId: string, num: number) => Promise<string | null>;
 
-type SessionRouteDecision = { ok: true } | { ok: false; reason: string };
+/** The refusal for a session acting on a task its step binding no longer owns. */
+export type StaleStepSessionLookup = (
+  sessionId: string,
+  projectId: string,
+  num: number,
+) => Promise<string | null>;
+
+/** Error code the MCP task tools recognize as "this turn is stale; end it". */
+export const STALE_TASK_STEP_CODE = 'stale_task_step';
+
+type SessionRouteDecision = { ok: true } | { ok: false; reason: string; code?: string };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
 
-function sessionDeny(reason: string): SessionRouteDecision {
-  return { ok: false, reason };
+function sessionDeny(reason: string, code?: string): SessionRouteDecision {
+  return code ? { ok: false, reason, code } : { ok: false, reason };
+}
+
+/**
+ * Refuse a status change or step advance from a task-step session whose
+ * step activation is no longer current (tasks/stale-step-session.ts). A
+ * failed lookup allows the call: this steers a leftover turn, it does not
+ * secure anything a first-party client could not undo.
+ */
+async function staleStepDecision(
+  lookup: StaleStepSessionLookup | undefined,
+  auth: SessionAuth,
+  projectId: string,
+  rawNum: string,
+): Promise<SessionRouteDecision> {
+  const num = Number.parseInt(rawNum, 10);
+  if (!lookup || !Number.isFinite(num) || num <= 0 || String(num) !== rawNum) {
+    return SESSION_ALLOW;
+  }
+  const refusal = await lookup(sessionId(auth), projectId, num).catch(() => null);
+  return refusal ? sessionDeny(refusal, STALE_TASK_STEP_CODE) : SESSION_ALLOW;
 }
 
 function sessionId(auth: SessionAuth): string {
@@ -184,6 +217,7 @@ async function isSessionRouteAllowed(
   isProjectLinked?: LinkedProjectAccessCheck,
   isUserDirectedTurn?: (sessionId: string) => boolean,
   taskStatus?: TaskStatusLookup,
+  staleStepSession?: StaleStepSessionLookup,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -243,6 +277,21 @@ async function isSessionRouteAllowed(
           ? 'restarting a paused task needs the user to ask for it in this turn'
           : 'restarting a paused task requires a first-party client',
       );
+    }
+    // A step session whose pass is over may not pause, resume, close, or
+    // advance the task: it answers for work the task has already judged.
+    const taskMutation =
+      method === 'POST'
+        ? /^\/tasks\/([^/]+)\/(?:status|steps\/[^/]+\/complete)\/?$/.exec(rest)
+        : null;
+    if (taskMutation) {
+      const stale = await staleStepDecision(
+        staleStepSession,
+        auth,
+        targetProject,
+        taskMutation[1]!,
+      );
+      if (!stale.ok) return stale;
     }
     const statusRoute = /^\/tasks\/([^/]+)\/status\/?$/.exec(rest);
     if (method === 'POST' && statusRoute) {
@@ -307,6 +356,10 @@ async function isSessionRouteAllowed(
     }
     if (rest === '/tools' || rest === '/tools/') {
       return sessionDeny('the unfiltered human terminal tool list is not a session route');
+    }
+    // Any model on any provider, outside the session's tool kit and budget.
+    if (rest === '/completions' || rest === '/completions/') {
+      return sessionDeny('workflow completions require a first-party client');
     }
     if (rest === '/timeline' || rest === '/timeline/') {
       return sessionDeny('project timelines contain other sessions');
@@ -382,15 +435,21 @@ async function isSessionRouteAllowed(
       : sessionDeny('project collection requires a coordinator session');
   }
 
-  // Gezel roster reads and `ensure_gezel` support delegation. Identity state
-  // is otherwise own-gezel only; metadata mutations remain coordinator-only.
+  // Gezel roster reads support delegation. Identity state is otherwise
+  // own-gezel only; creating, ensuring, messaging, and asking another gezel
+  // are coordinator moves (teamRouteGuard refuses them too — this guard must
+  // not admit what that one refuses, or the two disagree about a worker).
   if (path === '/api/gezels' || path === '/api/gezels/') {
     if (method === 'GET') return SESSION_ALLOW;
     return auth.team
       ? SESSION_ALLOW
       : sessionDeny('creating gezels requires a coordinator session');
   }
-  if (path === '/api/gezels/ensure' && method === 'POST') return SESSION_ALLOW;
+  if (path === '/api/gezels/ensure' && method === 'POST') {
+    return auth.team
+      ? SESSION_ALLOW
+      : sessionDeny('ensuring a gezel requires a coordinator session');
+  }
   if (path === '/api/gezels/mention-candidates' && method === 'GET') {
     return sessionDeny('mention candidates are a first-party composer route');
   }
@@ -402,10 +461,9 @@ async function isSessionRouteAllowed(
     const targetGezel = gezelMatch[1]!;
     const rest = gezelMatch[2] ?? '';
     if (rest === '/message' && method === 'POST') {
+      if (!auth.team) return sessionDeny('messaging a gezel requires a coordinator session');
       const body = await readJsonSafe(c);
-      return (auth.team || body?.projectId === auth.projectId) &&
-        body?.fromGezelId === auth.gezelId &&
-        body?.fromSessionId === sessionId(auth)
+      return body?.fromGezelId === auth.gezelId && body?.fromSessionId === sessionId(auth)
         ? SESSION_ALLOW
         : sessionDeny('message origin does not match the session token');
     }
@@ -515,15 +573,25 @@ async function isSessionRouteAllowed(
     return sessionDeny('question administration requires a first-party client');
   }
 
-  // Cross-gezel consultation is allowed only when the request proves it
-  // originated from the bound session.
+  // Cross-gezel consultation is a coordinator move, and only when the request
+  // proves it originated from the bound session.
   if (path === '/api/asks/request-and-wait' && method === 'POST') {
+    if (!auth.team) return sessionDeny('asking another gezel requires a coordinator session');
     const body = await readJsonSafe(c);
-    return (auth.team || body?.projectId === auth.projectId) &&
-      body?.fromGezelId === auth.gezelId &&
-      body?.fromSessionId === sessionId(auth)
+    return body?.fromGezelId === auth.gezelId && body?.fromSessionId === sessionId(auth)
       ? SESSION_ALLOW
       : sessionDeny('ask origin does not match the session token');
+  }
+
+  // `how_do_i` is in every role's kit (the `handboek` group): shipped docs
+  // rendered in agent mode, whose only install facts are the gezel roster
+  // (already a session read), installed model names, and the hardware tier.
+  // Only the question route — article, narration, and TOC stay renderer-side.
+  if (
+    method === 'GET' &&
+    (path === '/api/handboek/how-do-i' || path === '/api/handboek/how-do-i/')
+  ) {
+    return SESSION_ALLOW;
   }
 
   if ((path === '/api/tasks' || path === '/api/tasks/') && method === 'GET') {
@@ -617,12 +685,17 @@ async function isSessionRouteAllowed(
   return sessionDeny('route is not part of the session MCP API');
 }
 
-function denySessionRoute(c: Context, opts: { log?: (msg: string) => void }, reason: string) {
+function denySessionRoute(
+  c: Context,
+  opts: { log?: (msg: string) => void },
+  reason: string,
+  code = 'forbidden',
+) {
   const auth = c.get('auth');
   opts.log?.(
     `[session-route] DENY session=${auth?.appId ?? 'unknown'} ${c.req.method} ${c.req.path}: ${reason}`,
   );
-  return c.json({ error: 'forbidden', hint: reason }, 403);
+  return c.json({ error: code, hint: reason }, 403);
 }
 
 /** Resolve the `GEZEL_TOKEN_SCOPE` env into a mode. Default: enforce. */

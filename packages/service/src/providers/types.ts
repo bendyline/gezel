@@ -318,6 +318,20 @@ export interface SessionOpts {
    */
   singleToolCallTurn?: boolean;
   /**
+   * A coordinator routing clamp (project orchestration, exact craftbook)
+   * enforced on what the model may CALL rather than on what it is shown.
+   * The advertised roster — and so the rendered prompt — stays the full
+   * surface, which keeps a local engine's prompt cache valid across the
+   * clamp flipping on and off. `builtins` uses the `toolAllowlist`
+   * vocabulary; `thirdParty: false` also refuses every non-built-in tool.
+   * Only set for providers that enforce it at decode time (the MLX tool
+   * grammar); the bridge pool refuses anything outside it at dispatch.
+   */
+  callableToolRestriction?: {
+    builtins: ReadonlySet<string>;
+    thirdParty: boolean;
+  };
+  /**
    * Local bridge-backed providers: a successful call to one of these
    * action tools is the terminal outcome for the turn. The provider
    * appends one short closing line (preferably from `closingArg`) and

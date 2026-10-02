@@ -102,6 +102,7 @@ import {
   composeCraftbookLaunch,
   craftbookDocFormatFromEnv,
   createTaskText,
+  crewMemberNamedIn,
   deliverableStep,
   deniedTaskScopedWrite,
   expandStepDeliverable,
@@ -110,11 +111,13 @@ import {
   getScriptRunText,
   getTaskText,
   inferDeliverableKind,
+  inferScriptScope,
   isOwnerStep,
   isReservedShadowArtifactPath,
   isSafeEntityId,
   isTrustedConstrainedToolset,
   listArtifactsText,
+  listDirMissingText,
   listDirText,
   listDocumentsText,
   listGezelsText,
@@ -124,6 +127,7 @@ import {
   listScriptsText,
   listTasksText,
   messageGezelText,
+  nearbyPathMatches,
   parseKnowledgeUri,
   pickRandomNameWithGender,
   prioritizePullsForCurrentBranch,
@@ -135,11 +139,13 @@ import {
   saveMemoryText,
   searchMemoryText,
   searchResultText,
+  stepCheckedArtifactPaths,
   stepInsertionIndex,
   stepOwnerGezelId,
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
+  workspaceDrawerPrefix,
   writeTaskNoteText,
 } from '@bendyline/gezel';
 import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
@@ -215,7 +221,7 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
-import { taskStepMutationRejection } from './task-step-authority.js';
+import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
 import {
   ActionToolOutputSchema,
   ExecutionToolOutputSchema,
@@ -329,10 +335,12 @@ let sessionStepCompleted = false;
 // Advisory only: refresh it through the existing mutation fence for each write.
 // A failed lookup must not reuse an earlier completion hint.
 let sessionStepCompletion: 'automatic' | 'manual' | 'unknown' = 'unknown';
+let sessionStepCheckedArtifacts: string[] = [];
 
 async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
   sessionStepCompletion = 'unknown';
+  sessionStepCheckedArtifacts = [];
 
   let activeStepId: string | undefined;
   let activeStepOwnedBySession = false;
@@ -344,6 +352,7 @@ async function staleStepMutationResult() {
       const activeStep = task.craftbook.steps.find((s) => s.id === activeStepId);
       if (activeStep && activeStepId === sessionStepId) {
         sessionStepCompletion = activeStep.advanceWhen ? 'automatic' : 'manual';
+        sessionStepCheckedArtifacts = stepCheckedArtifactPaths(activeStep);
       }
       const owner = activeStep ? stepOwnerGezelId(task, activeStep) : undefined;
       activeStepOwnedBySession = !!gezelId && owner === gezelId;
@@ -415,7 +424,18 @@ async function workspaceTarget(path: string): Promise<LinkedWorkspaceTarget> {
   // Ordinary workspace calls keep their existing zero-request path. Project
   // metadata is fetched only when the model addresses the virtual sibling
   // namespace.
-  if (!isLinkedWorkspacePath(path)) return resolveLinkedWorkspacePath(projectId, [], path);
+  if (!isLinkedWorkspacePath(path)) {
+    const target = resolveLinkedWorkspacePath(projectId, [], path);
+    if (target.kind !== 'current') return target;
+    const prefixed = workspaceDrawerPrefix(target.path);
+    if (!prefixed) return target;
+    const folder = await api
+      .statProjectWorkspacePath(projectId, prefixed.folder)
+      .catch(() => ({ kind: 'missing' as const }));
+    return folder.kind === 'missing'
+      ? { ...target, path: prefixed.rest, displayPath: prefixed.rest }
+      : target;
+  }
   return resolveLinkedWorkspacePath(projectId, await linkedProjectIds(), path);
 }
 
@@ -1630,6 +1650,33 @@ server.tool(
             ).files.map((entry) =>
               target.kind === 'linked' ? prefixLinkedEntry(target.projectId, entry) : entry,
             );
+      if (!files.length && target.kind !== 'links-root' && target.path) {
+        const client = workspaceClient(target);
+        const found = await client
+          .statProjectWorkspacePath(target.projectId, target.path)
+          .catch(() => null);
+        if (found && found.kind !== 'dir') {
+          const slash = target.path.lastIndexOf('/');
+          const siblings =
+            found.kind === 'missing'
+              ? await client
+                  .listProjectWorkspace(
+                    target.projectId,
+                    slash >= 0 ? target.path.slice(0, slash) : '',
+                    false,
+                  )
+                  .then((listing) => listing.files)
+                  .catch(() => [])
+              : [];
+          const shown = path ?? target.path;
+          const summary = listDirMissingText(shown, found.kind, nearbyPathMatches(shown, siblings));
+          return okResult(
+            ListToolOutputSchema,
+            { summary, items: [], count: 0 },
+            { text: summary },
+          );
+        }
+      }
       const summary = files.length
         ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
         : 'Empty directory.';
@@ -3346,6 +3393,18 @@ function joinErrorAndHint(details: unknown): string | null {
   return `${head}: ${hint}`;
 }
 
+// The daemon answers a network failure reaching the site with one of these
+// fixed codes (packages/service/src/http/upstream-fetch-error.ts). A bare code
+// reads to a small model like a gezel fault, so name the next move.
+const UPSTREAM_FETCH_FAILURES: Record<string, string> = {
+  upstream_timeout:
+    'the site did not answer before the timeout. It may be slow or down; use another source rather than repeating this URL.',
+  upstream_unreachable:
+    'the site could not be reached (no such host, or the connection was refused or dropped). Use a URL from a search result, or another source.',
+  upstream_tls_failed:
+    "the site's security certificate was rejected, so nothing was fetched. Use another source.",
+};
+
 function unwrapApiError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const joined = joinErrorAndHint((err as { details?: unknown }).details);
@@ -3691,6 +3750,37 @@ async function workspaceCollisionForArtifactPath(
     // artifact tool continue to its normal path-safety/error handling.
   }
   return null;
+}
+
+/** Where a script named without a scope lives; undefined keeps the route's default. */
+async function installedScriptScope(project: string, name: string) {
+  try {
+    const [own, user, standard] = await Promise.all([
+      api.listProjectScripts(project),
+      api.listUserScripts().catch(() => ({ scripts: [] })),
+      api.listStandardScripts().catch(() => ({ scripts: [] })),
+    ]);
+    return inferScriptScope(name, undefined, [
+      ...own.scripts.map((script) => ({ name: script.name, scope: 'project' })),
+      ...user.scripts.map((script) => ({ name: script.name, scope: 'user' })),
+      ...standard.scripts.map((script) => ({ name: script.name, scope: 'standard' })),
+    ]);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The crew member a question names, so its result can point at message_gezel. */
+async function questionColleague(question: string) {
+  try {
+    const [roster, all] = await Promise.all([api.listProjectGezels(projectId), api.listGezels()]);
+    const crew = all.gezels
+      .filter((gezel) => roster.gezelIds.includes(gezel.id))
+      .map((gezel) => ({ id: gezel.id, name: gezel.name }));
+    return crewMemberNamedIn(question, crew, gezelId);
+  } catch {
+    return undefined;
+  }
 }
 
 function toolIsAuthorizedForThisSession(name: string): boolean {
@@ -4231,7 +4321,11 @@ server.tool(
       ...(sessionId ? { sessionId } : {}),
     });
     const completionHint =
-      sessionTaskRef && sessionStepId ? artifactCompletionHint(sessionStepCompletion) : '';
+      sessionTaskRef && sessionStepId
+        ? artifactCompletionHint(sessionStepCompletion, {
+            checkedByStep: sessionStepCheckedArtifacts.includes(clean),
+          })
+        : '';
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
   },
 );
@@ -6901,26 +6995,19 @@ server.tool(
         ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
-      if (res.deduped) {
-        // The session already has an unanswered question card from an
-        // earlier turn, so the runtime did NOT post this one — re-asking
-        // a reworded version would just stack duplicate cards in the
-        // user's "Needs your input" panel. Tell the model plainly so a
-        // looping small model stops rephrasing-and-retrying.
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: askUserQuestionText(res.questionId, true),
-            },
-          ],
-        };
-      }
+      const colleague = toolIsAuthorizedForThisSession('message_gezel')
+        ? await questionColleague(body)
+        : undefined;
+      // A deduped question means the session already has an unanswered card
+      // from an earlier turn, so the runtime did NOT post this one; re-asking
+      // a reworded version would just stack duplicate cards in the user's
+      // "Needs your input" panel. The text says so plainly so a looping small
+      // model stops rephrasing-and-retrying.
       return {
         content: [
           {
             type: 'text' as const,
-            text: askUserQuestionText(res.questionId, false),
+            text: askUserQuestionText(res.questionId, res.deduped === true, colleague),
           },
         ],
       };
@@ -8266,31 +8353,51 @@ function setStepDeliverableCall(
   return `set_step_deliverable({ task: "${ref}", stepId: "${stepId}", path: "${deliverable.path}", kind: "${deliverable.kind}" })`;
 }
 
+/**
+ * Set once the daemon refuses this child the install-wide task listing. Only
+ * a coordinator token may read `GET /api/tasks`, and a token's scope is fixed
+ * for the child's life, so a worker pays for that refusal once.
+ */
+let installWideTaskListingRefused = false;
+
 server.tool(
   'list_tasks',
   GEZEL_TOOL_DESCRIPTIONS.list_tasks,
   ListTasksInputSchema.shape,
   async ({ project, status, assignee }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = projectId
-      ? await api.listProjectTasks(
-          projectId,
-          status || assignee
-            ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
-            : undefined,
-        )
-      : await api.listTasks(
-          status || assignee
-            ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
-            : undefined,
-        );
+    const explicitProjectId = project ? await resolveProjectId(project) : undefined;
+    const filter =
+      status || assignee
+        ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
+        : undefined;
+    // No project named: a coordinator sees every project's tasks, and a
+    // worker — refused that listing — sees its own project's, which it may.
+    let listedProjectId = explicitProjectId ?? (installWideTaskListingRefused ? projectId : null);
+    let res: Awaited<ReturnType<typeof api.listTasks>>;
+    if (listedProjectId) {
+      res = await api.listProjectTasks(listedProjectId, filter);
+    } else {
+      try {
+        res = await api.listTasks(filter);
+      } catch (err) {
+        if (!(err instanceof GezelApiError) || err.status !== 403) throw err;
+        installWideTaskListingRefused = true;
+        listedProjectId = projectId;
+        res = await api.listProjectTasks(projectId, filter);
+      }
+    }
+    const scope = !explicitProjectId && listedProjectId ? ' in this project' : '';
     const summary = res.tasks.length
-      ? `Listed ${res.tasks.length} matching ${res.tasks.length === 1 ? 'task' : 'tasks'}.`
-      : 'No tasks match.';
+      ? `Listed ${res.tasks.length} matching ${res.tasks.length === 1 ? 'task' : 'tasks'}${scope}.`
+      : `No tasks match${scope}.`;
     return okResult(
       TaskToolOutputSchema,
       { summary, operation: 'list', tasks: res.tasks, count: res.tasks.length },
-      { text: listTasksText(res.tasks) },
+      {
+        text: scope
+          ? `${listTasksText(res.tasks)}\n(Tasks in this project only.)`
+          : listTasksText(res.tasks),
+      },
     );
   },
 );
@@ -8942,7 +9049,14 @@ server.tool(
         );
       }
     }
-    const updated = await api.setTaskStatus(parsed.projectId, parsed.num, status);
+    let updated: Awaited<ReturnType<typeof api.setTaskStatus>>;
+    try {
+      updated = await api.setTaskStatus(parsed.projectId, parsed.num, status);
+    } catch (err) {
+      const stale = staleTaskStepRefusal(err);
+      if (stale) return errorResult(stale, { code: 'stale_task_step', retryable: false });
+      throw err;
+    }
     const summary = `${ref} → ${status}`;
     return okResult(
       TaskToolOutputSchema,
@@ -9142,6 +9256,8 @@ server.tool(
         next ? { next } : {},
       );
     } catch (err) {
+      const stale = staleTaskStepRefusal(err);
+      if (stale) return errorResult(stale, { code: 'stale_task_step', retryable: false });
       return errorResult(await explainAdvanceFailure(err, parsed, stepId, next), {
         retryable: true,
       });
@@ -10098,8 +10214,14 @@ server.tool(
       return { content: [{ type: 'text' as const, text: `${head}\n\n${body}` }] };
     } catch (err) {
       const msg = unwrapApiError(err);
+      const explained = UPSTREAM_FETCH_FAILURES[msg];
       return {
-        content: [{ type: 'text' as const, text: `fetch_url failed: ${msg}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `fetch_url failed: ${explained ? `${explained} (${msg})` : msg}`,
+          },
+        ],
         isError: true,
       };
     }
@@ -11707,9 +11829,10 @@ server.tool(
     }
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
+      const effectiveScope = scope ?? (await installedScriptScope(resolved, name));
       const res = await api.runProjectScript(resolved, {
         name,
-        ...(scope ? { scope } : {}),
+        ...(effectiveScope ? { scope: effectiveScope } : {}),
         ...(input ? { input } : {}),
       });
       return formatScriptRunResult(res);

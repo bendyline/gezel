@@ -100,7 +100,11 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
 import { SessionSendQueue } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
-import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
+import {
+  type AppToolBinding,
+  type AppToolRelayRegistry,
+  appToolBindingsFingerprint,
+} from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import {
   outputMediumForStep,
@@ -187,6 +191,7 @@ import {
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
 import { isPlaywrightMcp } from '../providers/mcp-wrappers/playwright-snapshot.js';
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+import { mlxToolGrammarActive } from '../providers/mlx/request-shape.js';
 
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
@@ -491,6 +496,12 @@ const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
  */
 const QUEUE_WAIT_FRESH_MS = 12_000;
 const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
+/**
+ * A live session quiet this long gives back its provider session and MCP
+ * subprocesses (see `releaseIdleSessions`). Long enough that a conversation
+ * the user is still having keeps its warm session.
+ */
+export const IDLE_SESSION_RELEASE_MS = 20 * 60 * 1000;
 
 export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number.parseInt(env.GEZEL_AUTO_RECALL_INTERACTIVE_DEADLINE_MS ?? '', 10);
@@ -605,6 +616,30 @@ function resolveTurnMessageOrigin(
   return 'direct-user';
 }
 
+function buildUserTurnMessage(
+  userText: string,
+  opts:
+    | (Parameters<typeof resolveTurnMessageOrigin>[0] & {
+        hidden?: boolean;
+        draftId?: string;
+      })
+    | undefined,
+): ChatMessage {
+  return {
+    role: 'user',
+    content: userText,
+    at: nowIso(),
+    ...(opts?.from ? { from: opts.from } : {}),
+    ...(opts?.hidden ? { hidden: true } : {}),
+    ...(opts?.nudge ? { nudge: true } : {}),
+    ...(opts?.draftId ? { draftId: opts.draftId } : {}),
+    // A dispatch seed or handoff is a user turn only because that is the
+    // role providers accept; mark it so the transcript never attributes
+    // the machinery's words to the person.
+    ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
+  };
+}
+
 /** Include provider-qualified and unqualified spellings in capability checks. */
 function liveTurnToolNames(session: LLMSession | null | undefined): string[] {
   const names = new Set<string>();
@@ -672,6 +707,11 @@ export type TaskAdvancerOutcome =
       scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
       escalationStage?: number;
+      /**
+       * The task's active step after the hold. Differs from the held step when
+       * the gate's `onReject` looped the task to another step.
+       */
+      activeStepId?: string;
     };
 
 export type TaskAdvancerFn = (
@@ -753,8 +793,8 @@ interface LiveSessionState {
    */
   catalogContentSnapshot: string | null;
   /**
-   * Identity of the app-registered tool surface for this session's project
-   * at build time. An app may register or withdraw tools at any moment, and
+   * Identity of the app-registered tools this session was offered at build
+   * time. An app may register or withdraw tools at any moment, and
    * the surface is baked into the live session's bridges and system prompt,
    * so a change here has to rebuild on the next turn — otherwise a tool the
    * app just registered stays invisible until the session is reset.
@@ -2433,6 +2473,24 @@ export class ChatManager extends LocalEngineRuntime {
       // it: the deliverable exists (advanceWhen fired) but isn't good
       // enough yet. Surface the prescriptive message so the continuation
       // loop can re-prompt this same session toward the named gaps.
+      // A rejection whose onReject looped the task to ANOTHER step leaves this
+      // session nothing to repair: its step is no longer active. Re-prompting
+      // it "toward the named gaps" started invoice-run's reviewer on a stale
+      // turn that paused the whole task (qwen3.8-27b, 2026-10-01). Yield like
+      // a handoff instead.
+      if (
+        outcome &&
+        outcome.status === 'held' &&
+        !outcome.paused &&
+        outcome.activeStepId !== undefined &&
+        outcome.activeStepId !== step.id
+      ) {
+        log.info(
+          `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected and looped the task ` +
+            `to "${outcome.activeStepId}" — yielding`,
+        );
+        return { autoAdvanced: true };
+      }
       if (outcome && outcome.status === 'held') {
         log.info(
           `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected ` +
@@ -6518,6 +6576,56 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Record a turn that failed before a provider session existed — a
+   * capacity refusal, an engine that would not start — the same way a
+   * mid-turn failure is recorded. Without this nothing was persisted: the
+   * user's message was dropped, no `lastTurnError` was set, and a new
+   * thread sat on its own optimistic bubble with no failure card and no
+   * Retry (Retry needs both), then emptied on reload. Wild-caught
+   * 2026-10-01: gemma4-e4b refused for memory on every send read as a
+   * stuck app.
+   */
+  private async recordPreTurnFailure(
+    sessionId: string,
+    userText: string,
+    opts: Parameters<typeof buildUserTurnMessage>[1],
+    err: unknown,
+    scope: PublishScope,
+  ): Promise<void> {
+    const message = redactCredentials(err instanceof Error ? err.message : String(err));
+    const userMessage = buildUserTurnMessage(userText, opts);
+    const apply = (record: ChatSession): void => {
+      record.messages.push(userMessage, {
+        role: 'assistant',
+        content: '',
+        at: nowIso(),
+        synthetic: 'turn-aborted',
+        warnings: [message],
+      });
+      record.lastTurnError = message.slice(0, 500);
+      record.lastTurnErrorDetail = describeTurnError(err);
+      record.turnStartedAt = undefined;
+    };
+    try {
+      const live = this.states.get(sessionId);
+      if (live) {
+        apply(live.record);
+        await this.store.writeSession(live.record);
+      } else {
+        const record = await this.store.findSessionById(sessionId);
+        if (!record) return;
+        await this.store.mutateSession(record.gezelId, record.id, apply);
+      }
+    } catch (writeErr) {
+      log.warn(
+        `failed to record pre-turn failure for ${sessionId}: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
+      );
+      return;
+    }
+    this.events.publish(scope, { type: 'user_message', message: userMessage });
+  }
+
+  /**
    * Durable record of a handoff that parked waiting for its sender to go
    * idle. Serialized through one lock because several gezels can park at the
    * same instant and this is a read-modify-write of a whole-file queue.
@@ -7316,6 +7424,9 @@ export class ChatManager extends LocalEngineRuntime {
     try {
       state = await this.ensureState(sessionId, userText);
     } catch (err) {
+      if (preflightScope && !inflightTurn.cancelled) {
+        await this.recordPreTurnFailure(sessionId, userText, opts, err, preflightScope);
+      }
       fail(err);
       throw err; // unreachable — fail throws — but keeps TS narrowing happy
     } finally {
@@ -7359,19 +7470,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
       state.toolCapWarnings = undefined;
     }
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: userText,
-      at: nowIso(),
-      ...(opts?.from ? { from: opts.from } : {}),
-      ...(opts?.hidden ? { hidden: true } : {}),
-      ...(opts?.nudge ? { nudge: true } : {}),
-      ...(opts?.draftId ? { draftId: opts.draftId } : {}),
-      // A dispatch seed or handoff is a user turn only because that is the
-      // role providers accept; mark it so the transcript never attributes
-      // the machinery's words to the person.
-      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
-    };
+    const userMessage = buildUserTurnMessage(userText, opts);
     state.record.messages.push(userMessage);
     // Stamped here rather than at cancel time: this write already happens,
     // and a process that dies without unwinding never reaches a cancel path
@@ -7865,6 +7964,18 @@ export class ChatManager extends LocalEngineRuntime {
       // (`isValidationRepairPrompt`, no-op confirmations) that a leading
       // bracket line would blind. Continuations already have it in history.
       const clockLine = renderCurrentDateTimeLine();
+      // Everything this send puts in front of the person's words (the date
+      // line and every prelude above), persisted with the turn's terminal
+      // write so a rebuilt session replays the turn exactly as sent and the
+      // engine's saved prefix still matches. Preludes all prepend, so the
+      // words are always the suffix.
+      const firstSend = withCurrentDateTimeLine(promptForTurn, clockLine);
+      const words = spliceIntoText(userText, pendingDigests);
+      if (firstSend.endsWith(words)) {
+        userMessage.sentPreamble = firstSend.slice(0, firstSend.length - words.length);
+      }
+      // Lazy on purpose: a Keurmeester recovery swaps `promptForTurn` without
+      // counting a continuation, and must send the corrective prompt.
       const providerPrompt = () =>
         continuations === 0 ? withCurrentDateTimeLine(promptForTurn, clockLine) : promptForTurn;
       let falseCapabilityDenialCorrected = false;
@@ -10564,6 +10675,29 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Release the provider session — and with it the session's MCP
+   * subprocesses — of every live session quiet for `idleMs`. The next send
+   * rebuilds it through the same path a client reset takes, so the only
+   * visible change is a cold first turn.
+   *
+   * Nothing else releases a session whose task has finished: a 27-task
+   * story round left 29 gezel-mcp children (~1.5 GB) alive until the daemon
+   * stopped, and a batch of hundreds of tasks would hold hundreds.
+   */
+  async releaseIdleSessions(idleMs = IDLE_SESSION_RELEASE_MS, now = Date.now()): Promise<string[]> {
+    const released: string[] = [];
+    for (const [sessionId, state] of Array.from(this.states)) {
+      if (!state.session || this.isSessionTurnPending(sessionId)) continue;
+      const lastActivity = Date.parse(state.record.lastActivityAt);
+      if (Number.isFinite(lastActivity) && now - lastActivity < idleMs) continue;
+      await this.reset(sessionId);
+      released.push(sessionId);
+    }
+    if (released.length > 0) log.info(`released ${released.length} idle live session(s)`);
+    return released;
+  }
+
+  /**
    * Rebuild only the sessions and terminal bridge belonging to one project.
    * Used by the workspace watcher when a canonical MCP config changes.
    */
@@ -11084,6 +11218,17 @@ export class ChatManager extends LocalEngineRuntime {
        */
       tuningProfileId?: string;
       /**
+       * Sparse tuning layered above every other source for this call only:
+       * sampling, `reasoning.enableThinking`, `output.jsonSchema`. Workflow
+       * completions use it to ask for structured output with thinking off.
+       */
+      tuning?: ResolveTuningInput['override'];
+      /**
+       * Verbatim system message. Replaces the persona/default one-shot system
+       * message; an explicit empty string sends none.
+       */
+      systemMessage?: string;
+      /**
        * Truly-deferrable housekeeping (memory extraction, icon/about
        * generation, index enrichment, digests). On local engine queues
        * with ambient admission control the one-shot dispatches only
@@ -11276,15 +11421,17 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    const systemMessage = oneShotSystemMessage(personaAbout);
-    const sessionDefaults = opts.tuningProfileId
-      ? await wait(
-          this.resolveModelSessionDefaults(effectiveProviderName, model, {
-            tuningProfileId: opts.tuningProfileId,
-            ...(reasoningEffort ? { reasoningEffort } : {}),
-          }),
-        )
-      : null;
+    const systemMessage = opts.systemMessage ?? oneShotSystemMessage(personaAbout);
+    const sessionDefaults =
+      opts.tuningProfileId || opts.tuning
+        ? await wait(
+            this.resolveModelSessionDefaults(effectiveProviderName, model, {
+              ...(opts.tuningProfileId ? { tuningProfileId: opts.tuningProfileId } : {}),
+              ...(opts.tuning ? { tuning: opts.tuning } : {}),
+              ...(reasoningEffort ? { reasoningEffort } : {}),
+            }),
+          )
+        : null;
     const sessionPromise = provider.createSession({
       systemMessage,
       model,
@@ -12963,9 +13110,9 @@ export class ChatManager extends LocalEngineRuntime {
     }
   }
 
-  /** Identity of the app-tool surface for a project; '' when no app offers any. */
-  private appToolsFingerprint(projectId: string): string {
-    return this.appToolRelays?.fingerprint(projectId) ?? '';
+  /** Identity of the app tools this session is offered; '' when it is offered none. */
+  private appToolsFingerprint(record: ChatSession): string {
+    return appToolBindingsFingerprint(this.appToolBindingsFor(record));
   }
 
   /**
@@ -12975,7 +13122,9 @@ export class ChatManager extends LocalEngineRuntime {
    * an untrusted guest of the project and never sees any extra toolset. A
    * provider that runs its own tool loop outside our bridge (Copilot, the CLI
    * providers) cannot reach an in-process server at all, so offering the tools
-   * in its prompt would advertise names it could never call.
+   * in its prompt would advertise names it could never call. Tools an app
+   * registered for its own chat surface (the Office pane's document tools)
+   * reach only the sessions that surface is driving.
    */
   private appToolBindingsFor(record: ChatSession): AppToolBinding[] {
     if (!this.appToolRelays) return [];
@@ -12984,6 +13133,7 @@ export class ChatManager extends LocalEngineRuntime {
     return this.appToolRelays.listForSession({
       projectId: record.projectId,
       gezelId: record.gezelId,
+      sessionId: record.id,
     });
   }
 
@@ -13075,7 +13225,7 @@ export class ChatManager extends LocalEngineRuntime {
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
-          this.appToolsFingerprint(existing.record.projectId) !== existing.appToolsSnapshot ||
+          this.appToolsFingerprint(existing.record) !== existing.appToolsSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
@@ -13362,7 +13512,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
       catalogContentSnapshot: this.catalog.contentRoot(),
-      appToolsSnapshot: this.appToolsFingerprint(record.projectId),
+      appToolsSnapshot: this.appToolsFingerprint(record),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
         ? {
             codexPermissionModeSnapshot: normalizeCodexPermissionMode(
@@ -14131,6 +14281,12 @@ export class ChatManager extends LocalEngineRuntime {
     // the generic ask_specialist/ask_gezel dispatchers. Computed once;
     // threaded into both the prompt-block and session allowlists below.
     const rolesAsToolsActive = profileHasBehavior(modelProfile, 'tools.gezels-as-roles');
+    // Where the engine confines tool calls at decode time, the coordinator
+    // routing clamps narrow what is CALLABLE and leave the rendered roster
+    // alone, so the prompt cache survives a build request mid-thread. See
+    // ResolveSessionToolSurfaceOptions.routingClamps.
+    const routingClamps: 'narrow' | 'callable' =
+      record.providerName === 'mlx' && mlxToolGrammarActive(modelProfile) ? 'callable' : 'narrow';
     // When `prompt.executor-context-trim` is on (incl. via
     // GEZEL_FORCE_BEHAVIORS), buildInstructions trims standing context for
     // executor-class roles. The executor-vs-orchestrator role gate is
@@ -14520,6 +14676,7 @@ export class ChatManager extends LocalEngineRuntime {
       session: record,
       role: gezel?.role,
       exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
+      routingClamps,
       mode: globalConfig.toolFilterMode,
       provider: record.providerName,
       ...(modelForTier !== undefined ? { modelId: modelForTier } : {}),
@@ -14644,10 +14801,9 @@ export class ChatManager extends LocalEngineRuntime {
     // Shared-band prefix reuse (ADR 0010). MLX-only, default ON since the
     // matched cross-session A/B: two sibling sessions, 22,516 → 12,794 tokens
     // prefilled (43% less), the sibling's own turn −86%, no
-    // `fresh-untrimmable` in either arm. The pioneer pays ~1,327 extra tokens
-    // ONCE (turn 2 saves at end-minus-margin again), so only a session that
-    // never gets a sibling is net-negative, and only mildly.
-    // `enabled: false` or the env var turns it off.
+    // `fresh-untrimmable` in either arm. The pioneer captures the band as a
+    // second snapshot beside its own end-of-prompt one, so publishing costs
+    // its next turn nothing. `enabled: false` or the env var turns it off.
     const envBand = (process.env.GEZEL_MLX_SHARED_BAND_PREFIX ?? '').trim().toLowerCase();
     const sharedBandPrefixEnabled =
       record.providerName === 'mlx' &&
@@ -15206,11 +15362,12 @@ export class ChatManager extends LocalEngineRuntime {
           // replays as a bare `![](attachments/9f3.png)` after a daemon
           // restart or a context rebuild — the model loses the image it was
           // answering about. Byte-identical to the live send's splice, so the
-          // cached prefix still matches.
+          // cached prefix still matches — which is also why the turn's date
+          // line and preludes go back on in front, exactly as the send had them.
           content:
             m.role === 'assistant'
               ? stripReasoningTags(m.content)
-              : spliceIntoText(m.content, m.recognizedImages),
+              : `${m.sentPreamble ?? ''}${spliceIntoText(m.content, m.recognizedImages)}`,
         }));
       // Scale what we volunteer to the window the model actually has;
       // a fixed cap starves long-context sessions into re-read loops.
@@ -16042,6 +16199,7 @@ export class ChatManager extends LocalEngineRuntime {
     // The craftbook's own crew gets the toolsets when it dispatches them; the
     // router does not need a single one to make the call it was handed.
     const suppressExtrasForExactCraftbook =
+      routingClamps === 'narrow' &&
       gezel !== null &&
       this.exactCraftbookConstraintActive(record, gezel, pendingUserText) &&
       permittedExtras.length > 0;
@@ -16146,6 +16304,7 @@ export class ChatManager extends LocalEngineRuntime {
       session: record,
       role: gezel?.role,
       exactCraftbookRouting: this.inflight.get(record.id)?.turnIntent !== 'off',
+      routingClamps,
       mode: globalConfig.toolFilterMode,
       provider: providerNameForFilter,
       ...(modelForFilter !== undefined ? { modelId: modelForFilter } : {}),
@@ -16225,10 +16384,21 @@ export class ChatManager extends LocalEngineRuntime {
         .join(',');
     }
     if (constrainedAllowlist) opts.toolAllowlist = constrainedAllowlist;
+    const callableAllowlist = withheldWhileDrafting(bridgeSurface.callableAllowlist);
+    if (callableAllowlist) {
+      opts.callableToolRestriction = {
+        builtins: callableAllowlist,
+        // The exact-craftbook clamp withholds toolset servers outright in
+        // narrow mode; here they stay advertised and are refused instead.
+        // The orchestration clamp never withheld them.
+        thirdParty: !bridgeSurface.exactCraftbookConstrained,
+      };
+    }
+    const routedAllowlist = callableAllowlist ?? constrainedAllowlist;
     if (
       bridgeSurface.exactCraftbookConstrained &&
-      constrainedAllowlist?.size === 1 &&
-      constrainedAllowlist.has('invoke_craftbook')
+      routedAllowlist?.size === 1 &&
+      routedAllowlist.has('invoke_craftbook')
     ) {
       opts.singleToolCallTurn = true;
     }

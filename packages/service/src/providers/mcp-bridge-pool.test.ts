@@ -168,3 +168,54 @@ describe('McpBridgePool.fromSessionOpts strict-ID seeding', () => {
     expect(seededText.some((text) => text.includes('squisq/5'))).toBe(true);
   });
 });
+
+describe('McpBridgePool callable restriction', () => {
+  function restricted(restriction: NonNullable<SessionOpts['callableToolRestriction']>) {
+    const pool = poolWithFakeBridge(new Set(['start_project', 'write_file', 'list_dir']), {});
+    (pool as unknown as { callableRestriction: typeof restriction }).callableRestriction =
+      restriction;
+    return pool;
+  }
+
+  it('keeps the advertised roster whole so the rendered prompt does not change', () => {
+    const open = poolWithFakeBridge(new Set(['start_project', 'write_file', 'list_dir']), {});
+    const pool = restricted({ builtins: new Set(['start_project']), thirdParty: true });
+    expect(pool.getOpenAITools()).toEqual(open.getOpenAITools());
+    expect(pool.getAnthropicTools()).toEqual(open.getAnthropicTools());
+    expect(pool.hasCallableRestriction()).toBe(true);
+    expect(open.hasCallableRestriction()).toBe(false);
+  });
+
+  it('refuses advertised built-ins outside the restriction at every call path', async () => {
+    const pool = restricted({ builtins: new Set(['start_project']), thirdParty: true });
+    await expect(pool.callTool('start_project', {})).resolves.toBe('called start_project');
+    expect(pool.isRestrictedFromCalling('start_project')).toBe(false);
+    for (const name of ['write_file', 'list_dir']) {
+      expect(pool.hasTool(name)).toBe(false);
+      expect(pool.isRestrictedFromCalling(name)).toBe(true);
+      await expect(pool.callTool(name, {})).rejects.toThrow('not available');
+      await expect(pool.callToolRich(name, {})).rejects.toThrow('not available');
+    }
+    // Hidden by the role filter, not by the restriction: never advertised.
+    expect(pool.isRestrictedFromCalling('ask_gezel')).toBe(false);
+  });
+
+  it('lets third-party tools through only when the restriction allows them', async () => {
+    const orchestration = restricted({ builtins: new Set(['start_project']), thirdParty: true });
+    await expect(orchestration.callTool('browser_click', {})).resolves.toBe('called browser_click');
+    const exactCraftbook = restricted({ builtins: new Set(['start_project']), thirdParty: false });
+    expect(exactCraftbook.isRestrictedFromCalling('browser_click')).toBe(true);
+    await expect(exactCraftbook.callTool('browser_click', {})).rejects.toThrow('not available');
+  });
+
+  it('is wired from session opts', async () => {
+    const pool = await McpBridgePool.fromSessionOpts(
+      {
+        systemMessage: '',
+        callableToolRestriction: { builtins: new Set(['start_project']), thirdParty: true },
+      },
+      '[test]',
+    );
+    expect(pool.hasCallableRestriction()).toBe(true);
+  });
+});

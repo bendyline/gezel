@@ -24,6 +24,8 @@
     "build:packaged": "pnpm run build && node ../../scripts/stage-third-party-licenses.mjs && pnpm run build:bundle",
     "generate:icon:win": "node scripts/generate-windows-icon.mjs",
     "check:icon:win": "node scripts/generate-windows-icon.mjs --check",
+    "generate:icon:mobile": "node scripts/generate-mobile-icons.mjs",
+    "check:icon:mobile": "node scripts/generate-mobile-icons.mjs --check",
     "dev": "tsup --watch",
     "start": "electron .",
     "typecheck": "tsc --noEmit",

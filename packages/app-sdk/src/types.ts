@@ -508,6 +508,13 @@ export interface RegisterAppToolsInput {
   projectId: string;
   /** Limit these tools to specific gezels. Omitted means the whole project. */
   gezelIds?: string[];
+  /**
+   * Limit these tools to the chat your app shows. Pick an id (8-128 letters,
+   * digits, `-` or `_`) and send that chat's messages with an
+   * `x-gezel-app-surface` header carrying it: a session is offered the tools
+   * only while its latest message from a person came through your chat.
+   */
+  surfaceId?: string;
   tools: AppToolDefinition[];
   /** Human-readable provenance shown in Gezel's connected-app views. */
   label?: string;

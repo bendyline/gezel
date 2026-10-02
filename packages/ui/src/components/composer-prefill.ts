@@ -29,3 +29,17 @@ export function takeComposerPrefill(projectId: string): string | undefined {
   pendingPrefills.delete(projectId);
   return queued;
 }
+
+/**
+ * The draft after a prefill lands: below what is already written, or the
+ * whole draft when it is empty. Null when the draft already holds that exact
+ * block. A second tap on one of the meester's openers sent the same sentence
+ * twice in one message (Galaxy S26+, 2026-10-02).
+ */
+export function mergeComposerPrefill(existing: string, queued: string): string | null {
+  const draft = existing.trim();
+  const block = queued.trim();
+  if (!draft) return queued;
+  if (`\n\n${draft}\n\n`.includes(`\n\n${block}\n\n`)) return null;
+  return `${draft}\n\n${queued}`;
+}

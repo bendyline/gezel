@@ -18,6 +18,8 @@ import { TOOL_REGISTRY, canonicalToolName } from '@bendyline/gezel-mcp';
 
 const log = createLogger('app-tools');
 
+const MAX_TRACKED_SESSION_SURFACES = 512;
+
 /**
  * One app's tools for one project, as a chat session sees them.
  *
@@ -32,6 +34,8 @@ export interface AppToolBinding {
   appName?: string;
   projectId: string;
   gezelIds?: ReadonlySet<string>;
+  /** Offered only to sessions whose latest message came through this surface. */
+  surfaceId?: string;
   tools: readonly AppToolDefinition[];
 }
 
@@ -104,6 +108,8 @@ export interface AppToolRelayRegistryOptions {
  */
 export class AppToolRelayRegistry {
   private readonly relays = new Map<string, Relay>();
+  /** sessionId → the app surface its latest message from a person came through. */
+  private readonly sessionSurfaces = new Map<string, string>();
   private readonly graceMs: number;
   private readonly heartbeatMs: number;
   private readonly maxRelaysPerApp: number;
@@ -231,6 +237,7 @@ export class AppToolRelayRegistry {
       ...(relay.appName ? { appName: relay.appName } : {}),
       projectId: request.projectId,
       ...(gezelIds ? { gezelIds } : {}),
+      ...(request.surfaceId ? { surfaceId: request.surfaceId } : {}),
       tools: request.tools,
     });
     this.onChange?.(request.projectId);
@@ -266,40 +273,47 @@ export class AppToolRelayRegistry {
   }
 
   /**
+   * Record where a person's message to a session came from: the app surface
+   * named on the send, or none. The latest message decides, so a thread the
+   * Office pane opened stops seeing the pane's tools once someone writes to it
+   * from the desktop app, and sees them again on the pane's next message.
+   */
+  noteUserMessage(sessionId: string, surfaceId: string | undefined): void {
+    // Re-inserting keeps the map in recency order for the cap below.
+    this.sessionSurfaces.delete(sessionId);
+    if (!surfaceId) return;
+    this.sessionSurfaces.set(sessionId, surfaceId);
+    // A pane mints a new surface id each time it opens, so entries for closed
+    // panes accumulate. They are inert (no registration names them) and are
+    // deliberately not pruned on close: a relay that outlives its grace window
+    // is reopened under the same surface, and its thread must still match.
+    while (this.sessionSurfaces.size > MAX_TRACKED_SESSION_SURFACES) {
+      const oldest = this.sessionSurfaces.keys().next().value;
+      if (oldest === undefined) break;
+      this.sessionSurfaces.delete(oldest);
+    }
+  }
+
+  /**
    * Bindings that apply to one session. A relay inside its grace window still
    * counts: the tools are about to come back, and dropping them would rebuild
    * the session's whole tool surface for a two-second socket blip.
    */
-  listForSession(query: { projectId: string; gezelId: string }): AppToolBinding[] {
+  listForSession(query: {
+    projectId: string;
+    gezelId: string;
+    sessionId?: string;
+  }): AppToolBinding[] {
+    const surface = query.sessionId ? this.sessionSurfaces.get(query.sessionId) : undefined;
     const bindings: AppToolBinding[] = [];
     for (const relay of this.relays.values()) {
       const binding = relay.bindings.get(query.projectId);
       if (!binding) continue;
       if (binding.gezelIds && !binding.gezelIds.has(query.gezelId)) continue;
+      if (binding.surfaceId && binding.surfaceId !== surface) continue;
       bindings.push(binding);
     }
     return bindings.sort((a, b) => a.appId.localeCompare(b.appId));
-  }
-
-  /**
-   * Stable identity of a project's app-tool surface. The chat manager stores
-   * it on the live session and rebuilds when it moves, so tools registered
-   * after a session opened appear on the next turn.
-   */
-  fingerprint(projectId: string): string {
-    const parts: string[] = [];
-    for (const relay of [...this.relays.values()].sort((a, b) =>
-      a.relayId.localeCompare(b.relayId),
-    )) {
-      const binding = relay.bindings.get(projectId);
-      if (!binding) continue;
-      const gezels = binding.gezelIds ? [...binding.gezelIds].sort().join(',') : '*';
-      const tools = binding.tools
-        .map((tool) => `${tool.name}:${JSON.stringify(tool.inputSchema)}:${tool.description}`)
-        .join('|');
-      parts.push(`${relay.relayId}/${binding.appId}/${gezels}/${tools}`);
-    }
-    return parts.join(';');
   }
 
   listRelays(filter?: { appId?: string }): AppToolRelaySummary[] {
@@ -455,4 +469,22 @@ export class AppToolRelayRegistry {
       throw err;
     }
   }
+}
+
+/**
+ * Stable identity of the app tools one session is offered. The chat manager
+ * stores it on the live session and rebuilds when it moves, so tools
+ * registered after a session opened appear on the next turn — and only the
+ * sessions whose own surface changed pay for a rebuild.
+ */
+export function appToolBindingsFingerprint(bindings: readonly AppToolBinding[]): string {
+  return [...bindings]
+    .sort((a, b) => a.relayId.localeCompare(b.relayId))
+    .map((binding) => {
+      const tools = binding.tools
+        .map((tool) => `${tool.name}:${JSON.stringify(tool.inputSchema)}:${tool.description}`)
+        .join('|');
+      return `${binding.relayId}/${binding.appId}/${tools}`;
+    })
+    .join(';');
 }

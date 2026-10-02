@@ -3,6 +3,7 @@ export { systemMemoryRoutes } from './system-memory.js';
 import { freemem, totalmem } from 'node:os';
 import { delimiter, dirname } from 'node:path';
 import {
+  ClientPerfReportSchema,
   GEZEL_VERSION,
   type GitHubIdentity,
   type GitHubIdentityResponse,
@@ -16,6 +17,7 @@ import {
   ModelDownloadPreflightRequestSchema,
   ModelDownloadPreflightResponseSchema,
   PNPM_HOISTED_NODE_LINKER,
+  PerfSnapshotSchema,
   SystemDiagnosticsSchema,
   type SystemHomeInfo,
   SystemHomeInfoSchema,
@@ -40,6 +42,7 @@ import {
 } from '../../github/repo-preview.js';
 import { modelStorageRoots } from '../../models/storage-roots.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
+import { perfSnapshot, recordClientPerfReport } from '../../perf/responsiveness.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
@@ -149,6 +152,17 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       chat: ctx.chat,
     });
     return c.json(SystemDiagnosticsSchema.parse(diagnostics));
+  });
+
+  // Responsiveness: main-thread stalls, slow requests, and what the renderer
+  // measured. Local-only; deliberately not part of `/diagnostics`.
+  app.get('/perf', (c) => c.json(PerfSnapshotSchema.parse(perfSnapshot())));
+
+  app.post('/perf/client', async (c) => {
+    const parsed = ClientPerfReportSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: 'invalid perf report' }, 400);
+    recordClientPerfReport(parsed.data);
+    return c.json({ ok: true });
   });
 
   /**

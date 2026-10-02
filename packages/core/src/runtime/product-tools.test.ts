@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { portableToolResultText } from './portable-tool-results.js';
 import {
   type PortableToolActions,
   executePortableTool,
@@ -76,6 +77,21 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('artifacts', 'default', 'note.md')).toBeNull();
   });
 
+  // Told every key after a bad optional value, Gemini Nano sent them all back.
+  it('answers a bad optional value with leaving it out, not the whole key list', async () => {
+    const { store, session } = await fixture();
+    const rejection = executePortableTool(
+      store,
+      session,
+      'ask_user_question',
+      { question: 'What is the project for?', taskRef: 'default' },
+      { ...actions, askQuestion: async () => ({ questionId: 'q1' }) },
+    );
+    await expect(rejection).rejects.toThrow(
+      'ask_user_question `taskRef`: task ref must use projectId/num form. Leave out `taskRef`: it is optional. Call it again with corrected arguments.',
+    );
+  });
+
   it('honors output-medium and group exclusions without elevating the role', async () => {
     const { store, gezel } = await fixture();
     const task = await store.createTask('default', {
@@ -121,6 +137,33 @@ describe('portable tool authority and durable effects', () => {
       ),
     ).rejects.toThrow('read-only');
     expect(await store.readFile('workspace', 'default', 'blocked.md')).toBeNull();
+  });
+
+  it('runs the only installed script of that name when the call names no scope', async () => {
+    const { store, session } = await fixture();
+    const installed = [{ name: 'storeRecords', scope: 'standard' }];
+    const scripts = {
+      list: vi.fn(async () => ({ items: installed, count: installed.length })),
+      run: vi.fn(async () => ({ status: 'ok' })),
+    };
+    const enabled = { ...actions, scripts };
+    await executePortableTool(
+      store,
+      session,
+      'run_installed_script',
+      { name: 'storeRecords' },
+      enabled,
+    );
+    expect(scripts.run).toHaveBeenLastCalledWith('storeRecords', {}, session, 'standard');
+    installed.push({ name: 'storeRecords', scope: 'project' });
+    await executePortableTool(
+      store,
+      session,
+      'run_installed_script',
+      { name: 'storeRecords' },
+      enabled,
+    );
+    expect(scripts.run).toHaveBeenLastCalledWith('storeRecords', {}, session, 'project');
   });
 
   it('uses installed-script desktop inputs and default scope without crossing project authority', async () => {
@@ -280,6 +323,87 @@ describe('portable tool authority and durable effects', () => {
       actions,
     );
     expect(await store.readFile('workspace', session.projectId, 'notes/a.md')).toBe('a');
+    // A bare `artifacts` is the drawer, not a folder inside it.
+    const listed = (await executePortableTool(
+      store,
+      session,
+      'list_artifacts',
+      { path: 'artifacts', recursive: true },
+      actions,
+    )) as { entries: { path: string }[] };
+    expect(listed.entries.map((entry) => entry.path)).toContain('cabinet-note.md');
+  });
+
+  it('says a listed folder does not exist, and names the file the model probably meant', async () => {
+    const { store, session } = await fixture();
+    await executePortableTool(
+      store,
+      session,
+      'write_file',
+      { path: 'repairs.json', content: '{}' },
+      actions,
+    );
+    const list = async (path: string) => {
+      const raw = await executePortableTool(store, session, 'list_dir', { path }, actions);
+      return (await portableToolResultText(store, session, 'list_dir', { path }, raw))?.text;
+    };
+    expect(await list('repairs')).toBe(
+      'No folder or file exists at `repairs`. Did you mean `repairs.json`?',
+    );
+    expect(await list('repairs.json')).toBe(
+      '`repairs.json` is a file, not a folder. Read the file instead.',
+    );
+    await executePortableTool(
+      store,
+      session,
+      'write_file',
+      { path: 'empty/.keep', content: '' },
+      actions,
+    );
+    expect(await list('empty')).toBe('Empty directory.');
+  });
+
+  it('reads a path that starts with the drawer name as a workspace path', async () => {
+    const { store, session } = await fixture();
+    const write = (path: string, content: string) =>
+      executePortableTool(store, session, 'write_file', { path, content }, actions);
+    await write('project/workspace/result.json', '{"total":28}');
+    expect(await store.readFile('workspace', session.projectId, 'result.json')).toBe(
+      '{"total":28}',
+    );
+    // A project with a real `workspace/` folder keeps it.
+    await write('workspace/keep.md', 'mine');
+    expect(await store.readFile('workspace', session.projectId, 'keep.md')).toBe('mine');
+    await store.writeFile('workspace', session.projectId, 'workspace/.keep', '');
+    await write('workspace/nested.md', 'nested');
+    expect(await store.readFile('workspace', session.projectId, 'workspace/nested.md')).toBe(
+      'nested',
+    );
+  });
+
+  it('reads a task ref that names the project by its display name, as on the desktop', async () => {
+    const { store, gezel } = await fixture();
+    const task = await store.createTask('default', {
+      title: 'Write a note',
+      description: 'Write the handover note for the next volunteer on the cabinet.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [{ id: 'write', name: 'Write', prompt: 'Write it.' }],
+    });
+    const session = await store.createSession({
+      gezelId: gezel.id,
+      providerName: 'llama-cpp',
+      taskRef: task.ref,
+      stepId: 'write',
+    });
+    await store.updateProject('default', { name: 'Repair Crew' });
+    const notes = await executePortableTool(
+      store,
+      session,
+      'read_task_notes',
+      { ref: `Repair Crew/${task.num}` },
+      actions,
+    );
+    expect(notes).toBeDefined();
   });
 
   it('lets a team gezel name a project by id or display name, as on the desktop', async () => {

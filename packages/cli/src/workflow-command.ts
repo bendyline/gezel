@@ -8,6 +8,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type Craftbook,
+  type ProjectCompletionRequest,
   type Task,
   craftbookFromDoc,
   formatCraftbookDocErrors,
@@ -60,6 +61,10 @@ export async function runWorkflow(
     ...(invocation ?? {}),
     log,
     validateCraftbook: validateWorkflowCraftbook,
+    // A bounded model call whose input the driver already holds. Cheaper and
+    // more reliable than a task that must read its input back through tools.
+    complete: (request: ProjectCompletionRequest, signal?: AbortSignal) =>
+      client.completeInProject(projectId, request, signal),
     runCraftbook: async (
       id: string,
       params: Record<string, string>,

@@ -19,7 +19,7 @@ import {
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
-import { assertNoTemplatePlaceholderPath, safeJoin } from './safe-paths.js';
+import { assertNoTemplatePlaceholderPath, resolveMutationPath, safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,
@@ -507,8 +507,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = safeJoin(base, cleaned);
-    if (!full) throw new Error('path traversal blocked');
+    const full = await resolveMutationPath(base, cleaned);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content);
     await this.touchProject(id);
@@ -533,8 +532,7 @@ export class ProjectArtifactsStore {
     if (options?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = safeJoin(base, cleaned);
-    if (!full) throw new Error('path traversal blocked');
+    const full = await resolveMutationPath(base, cleaned);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.touchProject(id);
@@ -557,8 +555,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && touchesTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = safeJoin(base, cleaned);
-    if (!full) throw new Error('path traversal blocked');
+    const full = await resolveMutationPath(base, cleaned);
     if (namesArtifactsRoot(base, cleaned, full)) throw new ArtifactRootDeniedError('deleted');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
@@ -582,8 +579,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = safeJoin(base, cleaned);
-    if (!full) throw new Error('path traversal blocked');
+    const full = await resolveMutationPath(base, cleaned);
     await mkdir(full, { recursive: true });
     await this.touchProject(id);
     return cleaned;
@@ -624,9 +620,8 @@ export class ProjectArtifactsStore {
     ) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const fromFull = safeJoin(base, from);
-    const toFull = safeJoin(base, to);
-    if (!fromFull || !toFull) throw new Error('path traversal blocked');
+    const fromFull = await resolveMutationPath(base, from);
+    const toFull = await resolveMutationPath(base, to);
     if (namesArtifactsRoot(base, from, fromFull)) throw new ArtifactRootDeniedError('renamed');
     if (namesArtifactsRoot(base, to, toFull)) throw new ArtifactRootDeniedError('replaced');
     if (fromFull === toFull) return { fromPath: from, toPath: to };
@@ -684,7 +679,7 @@ const RESERVED_ROOT_SKIP: ReadonlySet<string> = new Set([
  */
 export function normalizeArtifactPath(p: string): string {
   let out = p.replace(/^\.?\/+/, '').trim();
-  while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
+  while (/^artifacts(?:\/+|$)/i.test(out)) out = out.replace(/^artifacts(?:\/+|$)/i, '');
   return out;
 }
 

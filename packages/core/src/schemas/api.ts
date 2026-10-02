@@ -154,6 +154,7 @@ import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
 export * from './api/code-intel.js';
+export * from './api/completions.js';
 export * from './api/git.js';
 
 /**

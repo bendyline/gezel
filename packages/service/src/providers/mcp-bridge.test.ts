@@ -470,6 +470,28 @@ describe('McpBridge', () => {
     expect(readResult).toContain('Test content.');
   });
 
+  it('reads a workspace path that starts with the drawer name as the workspace', async () => {
+    expect(
+      await bridge.callTool('write_file', {
+        path: 'project/workspace/drawer-result.json',
+        content: '{"total":28}\n',
+      }),
+    ).toMatch(/drawer-result\.json/);
+    expect(await bridge.callTool('read_file', { path: 'drawer-result.json', raw: true })).toContain(
+      '{"total":28}',
+    );
+  });
+
+  it('says a listed folder does not exist instead of calling it empty', async () => {
+    await bridge.callTool('write_file', { path: 'store/repairs.json', content: '{}\n' });
+    expect(await bridge.callTool('list_dir', { path: 'store/repairs' })).toBe(
+      'No folder or file exists at `store/repairs`. Did you mean `store/repairs.json`?',
+    );
+    expect(await bridge.callTool('list_dir', { path: 'store/repairs.json' })).toBe(
+      '`store/repairs.json` is a file, not a folder. Read the file instead.',
+    );
+  });
+
   it('steers workspace paths away from artifact tools', async () => {
     await bridge.callTool('write_file', {
       path: 'surface/bug_report.md',

@@ -28,8 +28,11 @@ SDKs or dependencies. On Android, select an ARM64 emulator such as the existing
 `gezel-api36-tests` device.
 
 When no usable chat model is selected, Gezel opens the shared **First run setup**
-page, including in a narrow desktop window. Download a model from the expanded
-catalog picker, or import a GGUF file and select it. Choosing a ready model opens
+page, including in a narrow desktop window. One model list holds every choice:
+models already on the device and the phone's own AI first, then catalog downloads
+that fit the device's memory, so a 6 GB iPhone is not offered Gemma 4 E4B. Choosing
+a download starts it and selects the model when it finishes. **Add a model from
+Files** copies in a GGUF file and selects it. Choosing a ready model opens
 the Meester's workspace; model management also lives in **Settings → Artificial
 Intelligence**. Chat model weights are not bundled with the app; the bundled
 speech models do not generate chat
@@ -106,7 +109,7 @@ test log and screenshots; set `GEZEL_ANDROID_TEST_OUTPUT_DIR` to choose one.
 For a browser preview, run `pnpm mobile:dev`. Browser
 previews persist to a separate IndexedDB database and clearly show that native
 models are unavailable. No demo model response or network fallback is installed.
-The installed app's **Import a model** action opens the platform document picker;
+The installed app's **Add a model from Files** action opens the platform document picker;
 it copies a selected GGUF into the app's private model library. The web view sees
 opaque model IDs, never arbitrary native paths. Models with unsupported chat
 templates, context limits, or resource requirements fail with an explicit error.
@@ -221,6 +224,8 @@ GEZEL_IOS_DEVELOPMENT_TEAM=<team-id> pnpm mobile:eval --platform ios --device <u
   --provider llama-cpp --trained-model /absolute/path/catalog-model.gguf --cooldown-ms 600000
 ```
 
+The run moves the app's own product aside before the first trial and restores it, verified, at the end. A locked phone refuses those files, so the test waits for an unlocked phone before it moves anything and again before it restores. On-device AI runs only while Gezel is the app on screen, so before each trial the test also waits for Gezel to be in front; leave the phone on the running app until the run ends. A run stopped part way leaves the original in `Library/Application Support/Gezel/product-eval-backup-<uuid>/`, and the next run refuses to start. Pass `--recover-backup product-eval-backup-<uuid>` to restore it, verified against its `snapshot.json`, before that run begins. `--discard-backup` deletes one instead; use it only after checking the backup holds nothing worth keeping.
+
 ## Unsigned release artifacts
 
 ```sh
@@ -231,3 +236,15 @@ pnpm mobile:package ios 1
 These rebuild and sync the product before compiling release artifacts using already installed native engines and toolchains. Sync verifies the upstream pin, current bridge source, payload hashes, and exact native file inventory. Android produces an unsigned APK and AAB and checks every packaged ELF library's actual ARM64 architecture, 16 KiB alignment and dependencies, APK ZIP alignment, required production assets, and exclusion of eval fixtures. iOS produces an unsigned device archive and verifies its ARM64 executables, embedded dependencies, deployment target, privacy/license assets, and absence of eval fixtures. Both platform verifiers also require every compiled web file to be present and byte-identical in the packaged public assets, and record the matched file count and entry digest. Candidates are built and verified in staging; a failed verification preserves the last verified release. Publication replaces the artifacts before writing their success manifest, so an interrupted publication cannot leave a stale success record. The manifest records verification results and artifact hashes, including a digest of the entire iOS app payload. Outputs go to `.build/release/<platform>` inside this package. Increase the build number for distribution; the marketing version follows core.
 
 Use `JAVA_HOME` for JDK 21 and `ANDROID_HOME` for the installed SDK. `GEZEL_MOBILE_IOS_BUILD_DIR` and `GEZEL_MOBILE_SPM_DIR` can reuse existing Xcode and resolved Swift package caches. No signing key is generated or selected automatically. Signing, provisioning, store declarations, and physical-device release qualification remain separate release gates.
+
+## App icons
+
+The phone icons are generated, not hand-edited:
+`pnpm --filter @bendyline/gezel-app generate:icon:mobile` writes the iOS app
+icon and Android's adaptive-icon layers (`gezel_icon_background.png`,
+`gezel_icon.png`) from the desktop's `packages/app/assets/icon-mac.png`, and
+`check:icon:mobile` verifies them. The desktop art is a macOS icon, a rounded
+card on a transparent margin, so it cannot be copied over: iOS fills that
+margin into a border, and Android's mask cuts into the card. The generator
+draws the paper full-bleed and places the bench where each platform's mask
+leaves room for it.

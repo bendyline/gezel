@@ -35,6 +35,11 @@ export interface RuntimeCapabilities {
    * Managing the engine stays with `daemonSettings`.
    */
   engineStatus: boolean;
+  /**
+   * The host logs renderer timings beside its own (`POST /api/system/perf/client`).
+   * False where it keeps no such log; omitted means it does.
+   */
+  perfReports?: boolean;
   externalFolders: boolean;
   scripts: boolean;
   scriptAuthoring: boolean;
@@ -86,6 +91,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   htmlPreview: true,
   daemonSettings: true,
   engineStatus: true,
+  perfReports: true,
   externalFolders: true,
   scripts: true,
   scriptAuthoring: true,
@@ -127,6 +133,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   htmlPreview: false,
   daemonSettings: false,
   engineStatus: true,
+  perfReports: false,
   externalFolders: false,
   scripts: true,
   scriptAuthoring: true,

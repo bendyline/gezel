@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRambleAbortMessage } from './ramble-abort-message.js';
+import { buildRambleAbortMessage, isRambleAbortMessage } from './ramble-abort-message.js';
 
 const build = (
   knownToolNames: string[],
@@ -144,5 +144,17 @@ describe('buildRambleAbortMessage', () => {
         expect(msg, `roster=${roster.join(',')} leaked ${tool}`).not.toContain(`\`${tool}\``);
       }
     }
+  });
+});
+
+describe('isRambleAbortMessage', () => {
+  it('recognizes every provider abort it builds, and nothing else', () => {
+    const built = buildRambleAbortMessage({
+      providerLabel: '[Mac AI]',
+      charCount: 9000,
+      knownToolNames: new Set(),
+    });
+    expect(isRambleAbortMessage(built)).toBe(true);
+    expect(isRambleAbortMessage('one-shot timed out after 90s')).toBe(false);
   });
 });

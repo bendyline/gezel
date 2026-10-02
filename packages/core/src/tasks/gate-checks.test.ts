@@ -5,6 +5,7 @@ import {
   evaluateDeclarativeCheck,
   gateCheckLabel,
   isSharedGateCheck,
+  locateMissingGateFiles,
 } from './gate-checks.js';
 
 function reader(
@@ -138,5 +139,50 @@ describe('evaluateDeclarativeCheck', () => {
     expect(isSharedGateCheck({ kind: 'contains', file: 'a', pattern: 'x' } as GateCheck)).toBe(
       false,
     );
+  });
+});
+
+describe('locateMissingGateFiles', () => {
+  const handover: GateCheck[] = [
+    { kind: 'minBytes', file: 'handover.md', artifact: true, bytes: 40 },
+    { kind: 'sniff', file: 'handover.md', artifact: true, sniff: 'nonempty' },
+  ];
+
+  // The iPhone case: the model saved the deliverable one folder down and was
+  // told only "handover.md not found".
+  it('names where the check looked and the copy saved somewhere else', async () => {
+    const lines = await locateMissingGateFiles(
+      handover,
+      reader({}, { '1/handover.md': '# Repair Handover' }),
+    );
+    expect(lines).toEqual([
+      'The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md` in the artifacts drawer.',
+    ]);
+  });
+
+  it('names the other drawer when the file was saved there', async () => {
+    expect(
+      await locateMissingGateFiles(
+        handover,
+        reader({ 'handover.md': '# Repair Handover' }, { '2/handover.md': 'x' }),
+      ),
+    ).toEqual([
+      'The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `2/handover.md` and `handover.md` in the project workspace instead. Save it at `handover.md` in the artifacts drawer.',
+    ]);
+  });
+
+  it('says nothing is there yet when no copy exists, and names the tree it read', async () => {
+    expect(
+      await locateMissingGateFiles(
+        [{ kind: 'minBytes', file: 'out/result.json', bytes: 1 }],
+        reader({}),
+      ),
+    ).toEqual([
+      'The checks read `out/result.json` at exactly that path in the project workspace, and nothing is saved there yet.',
+    ]);
+  });
+
+  it('stays quiet about files that exist', async () => {
+    expect(await locateMissingGateFiles(handover, reader({}, { 'handover.md': 'x' }))).toEqual([]);
   });
 });

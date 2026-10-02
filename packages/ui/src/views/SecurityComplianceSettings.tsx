@@ -41,7 +41,7 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowAppNetwork',
     label: 'App network',
-    help: 'Allow desktop-owned network traffic, including update checks and external resources in project previews. Off blocks background traffic and automatic renderer egress.',
+    help: 'Allow desktop-owned network traffic, including update checks and external resources in project previews. Off blocks background traffic and automatic renderer egress; downloads you start yourself, such as a model or a knowledge catalog, still work.',
   },
 ];
 

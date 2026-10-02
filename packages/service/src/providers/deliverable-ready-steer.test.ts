@@ -32,6 +32,8 @@ function installBridges(session: LLMSession): void {
         parameters: { type: 'object', properties: { path: { type: 'string' } } },
       })),
     hasTool: (name: string) => TOOL_NAMES.includes(name),
+    hasCallableRestriction: () => false,
+    isRestrictedFromCalling: () => false,
     callTool: async (_name: string, args: Record<string, unknown>) => `Wrote ${String(args.path)}`,
     stop: async () => {},
   };
@@ -116,6 +118,8 @@ describe('llama.cpp deliverable-ready footer and backstop', () => {
             parameters: Record<string, unknown>;
           }>;
           hasTool: (name: string) => boolean;
+          hasCallableRestriction: () => boolean;
+          isRestrictedFromCalling: (name: string) => boolean;
           callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
         };
       };
@@ -125,6 +129,8 @@ describe('llama.cpp deliverable-ready footer and backstop', () => {
       getOpenAITools: () =>
         toolNames.map((name) => ({ name, description: name, parameters: { type: 'object' } })),
       hasTool: (name: string) => toolNames.includes(name),
+      hasCallableRestriction: () => false,
+      isRestrictedFromCalling: () => false,
       callTool: async (name: string, args: Record<string, unknown>) =>
         name === 'write_file'
           ? `Wrote ${String(args.path)}`

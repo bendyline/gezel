@@ -351,6 +351,28 @@ def test_gemma_name_only_well_formed():
     assert tg.build_grammar_string(TOOLS, {"format": "gemma", "mode": "name-and-params"}) == g
 
 
+def test_allowed_names_narrow_only_the_grammar():
+    # A coordinator routing clamp restricts what may be CALLED while the
+    # prompt keeps rendering the full roster — a narrowed `tools` array would
+    # rewrite the prompt and force a full re-prefill on untrimmable caches.
+    names = tg._tool_names_from_request(TOOLS)
+    keep, drop = names[0], names[1:]
+    for fmt in ("gemma", "hermes", "glm"):
+        g = tg.build_grammar_string(TOOLS, {"format": fmt, "allowed_names": [keep]})
+        assert g is not None, fmt
+        _assert_valid(g)
+        assert keep in g, fmt
+        for name in drop:
+            assert name not in g, (fmt, name)
+    full = tg.build_grammar_string(TOOLS, {"format": "gemma"})
+    assert tg.build_grammar_string(TOOLS, {"format": "gemma", "allowed_names": names}) == full
+
+
+def test_allowed_names_with_nothing_callable_degrades_to_none():
+    for allowed in ([], ["not_a_tool"]):
+        assert tg.build_grammar_string(TOOLS, {"format": "gemma", "allowed_names": allowed}) is None
+
+
 def test_glm_name_only_well_formed():
     # GLM is always name-only (tier 1), regardless of requested mode.
     g = tg.build_grammar_string(TOOLS, {"format": "glm"})

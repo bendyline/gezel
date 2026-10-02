@@ -8,6 +8,7 @@ import { ProviderQueue } from '../providers/queue.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
+import { retryPausedTask } from './retry.js';
 import { TaskRunner, type TaskRunnerDispatcher } from './runner.js';
 
 /** Build a fixture craftbook from inline step records — keeps tests terse. */
@@ -811,7 +812,7 @@ describe('TaskRunner — cancellation via task status', () => {
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(1);
 
-    await store.writeTask(parent);
+    await store.writeTask({ ...(await store.readTask('p1', 1))!, status: 'paused' });
     await runner.tick();
     expect(dispatcher.cancelledSessionIds).toEqual(['session-1']);
   });
@@ -1400,6 +1401,134 @@ describe('TaskRunner — startup rehydration', () => {
     const step = (await store.readTask('p1', 1))!.craftbook.steps[0]!;
     expect(step.restartResumeCount).toBeUndefined();
     expect((await store.readTask('p1', 1))!.status).toBe('active');
+  });
+
+  async function writeNightShiftTask(gezelId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 'Night-shift oversight: project review',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId },
+      craftbook: fixtureCraftbook([{ id: 'oversight', name: 'oversight', createdAt: now }]),
+      activeStepId: 'oversight',
+      nightShift: { enabled: true, onceADay: true },
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+  }
+
+  it.each([
+    ['the shift is off', { active: false, pending: true }],
+    ['tonight’s run already happened', { active: true, pending: false }],
+  ])('does not charge a night-shift step the gate will hold when %s', async (_label, gate) => {
+    // The Meester's oversight task stays active all day waiting for the
+    // shift. Charging every daytime launch paused it on the fourth one and
+    // asked the user for help with a task that had never run.
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    await writeNightShiftTask(bea.id);
+
+    const tasks = new TaskManager(store);
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => gate.active,
+      isNightShiftPending: () => gate.pending,
+      noteRestartResume: (projectId, num, stepId) =>
+        tasks.noteRestartResume(projectId, num, stepId),
+    });
+
+    for (let boot = 0; boot < MAX_RESTART_RESUMES + 3; boot++) {
+      const res = await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+      expect(res.taskRefs).toEqual(['p1/1']);
+      expect(res.nightShiftTaskRefs).toEqual(['p1/1']);
+      expect(res.heldTaskRefs).toEqual([]);
+    }
+    const task = (await store.readTask('p1', 1))!;
+    expect(task.status).toBe('active');
+    expect(task.craftbook.steps[0]!.restartResumeCount).toBeUndefined();
+  });
+
+  it('still charges a night-shift step the boot will actually run', async () => {
+    // A boot during the shift re-dispatches the step and re-reads its
+    // context, which is exactly the cost the budget bounds.
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    await writeNightShiftTask(bea.id);
+
+    const tasks = new TaskManager(store);
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      isNightShiftActive: () => true,
+      isNightShiftPending: () => true,
+      noteRestartResume: (projectId, num, stepId) =>
+        tasks.noteRestartResume(projectId, num, stepId),
+    });
+
+    for (let boot = 1; boot <= MAX_RESTART_RESUMES; boot++) {
+      await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+    }
+    const spent = await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+    expect(spent.heldTaskRefs).toEqual(['p1/1']);
+    expect((await store.readTask('p1', 1))!.status).toBe('paused');
+  });
+
+  it('gives a fresh restart budget after Try again', async () => {
+    // Try again used to clear the re-drive and gate counters but not this
+    // one, so the next boot found the count past its budget and paused the
+    // task again before it had run.
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 't',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: bea.id },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'review',
+          name: 'review',
+          assignee: { kind: 'gezel', gezelId: bea.id },
+          createdAt: now,
+        },
+      ]),
+      activeStepId: 'review',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const tasks = new TaskManager(store);
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({
+      store,
+      dispatcher,
+      noteRestartResume: (projectId, num, stepId) =>
+        tasks.noteRestartResume(projectId, num, stepId),
+    });
+    for (let boot = 0; boot <= MAX_RESTART_RESUMES; boot++) {
+      await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+    }
+    expect((await store.readTask('p1', 1))!.status).toBe('paused');
+
+    await retryPausedTask({ store, tasks, taskRunner: { enqueueHandoff: () => {} } }, 'p1', 1);
+
+    const next = await runner.rehydrateFromStore({ projectId: 'p1', afterRestart: true });
+    expect(next.heldTaskRefs).toEqual([]);
+    expect(next.taskRefs).toEqual(['p1/1']);
+    const task = (await store.readTask('p1', 1))!;
+    expect(task.status).toBe('active');
+    expect(task.craftbook.steps[0]!.restartResumeCount).toBe(1);
   });
 
   it('requeues active tasks even when a stale non-archived session exists', async () => {

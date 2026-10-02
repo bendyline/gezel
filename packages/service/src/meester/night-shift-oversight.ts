@@ -1,5 +1,5 @@
 import type { StepGate } from '@bendyline/gezel';
-import { REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
+import { MAX_RESTART_RESUMES, REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 
@@ -91,6 +91,12 @@ export async function ensureNightShiftOversightTask(
         err instanceof Error ? err.message : err,
       );
     });
+    await releaseRestartBudgetPause(store, tasks, installed.num).catch((err) => {
+      log.warn(
+        '[night-shift] failed to resume oversight task after a restart-budget pause:',
+        err instanceof Error ? err.message : err,
+      );
+    });
     return;
   }
 
@@ -169,4 +175,43 @@ async function migrateOversightTask(store: Store, num: number): Promise<void> {
     updatedAt: new Date().toISOString(),
   });
   log.info('[night-shift] oversight task prompt/deliverable updated in place');
+}
+
+/**
+ * Undo the restart-budget pause that earlier builds put on this task.
+ *
+ * Those builds charged the oversight step on every launch while it waited
+ * for the shift, so an install that restarts daily paused it within four
+ * launches and filed a "Needs your input" card about a task that had never
+ * run. A paused oversight task whose count is past the budget carries that
+ * pause: the count only crosses the budget in the call that pauses.
+ */
+async function releaseRestartBudgetPause(
+  store: Store,
+  tasks: TaskManager,
+  num: number,
+): Promise<void> {
+  const task = await store.readTask('default', num);
+  if (!task || task.status !== 'paused') return;
+  const step = task.craftbook.steps.find((s) => s.id === OVERSIGHT_STEP_ID);
+  if ((step?.restartResumeCount ?? 0) <= MAX_RESTART_RESUMES) return;
+
+  await tasks.resetStepRecoveryBudget('default', num, OVERSIGHT_STEP_ID, {
+    clearRestartResumes: true,
+  });
+  await tasks.setStatus('default', num, 'active');
+
+  const at = new Date().toISOString();
+  for (const question of await store.listProjectQuestions('default')) {
+    const intent = question.intent;
+    if (
+      intent?.kind === 'task-paused' &&
+      intent.taskRef === task.ref &&
+      intent.reason === 'step_stalled' &&
+      !question.answer
+    ) {
+      await store.writeQuestion({ ...question, answer: { silentSkip: true, at } });
+    }
+  }
+  log.info(`[night-shift] resumed ${task.ref} after an earlier build's restart-budget pause`);
 }

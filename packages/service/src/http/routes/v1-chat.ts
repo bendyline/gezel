@@ -421,6 +421,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         ...(priorMessages.length > 0 ? { priorMessages } : {}),
         ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
         ...(tuning ? { tuning } : {}),
+        ...(parsed.reasoning_effort ? { reasoningEffort: parsed.reasoning_effort } : {}),
         ...(defaults && supportingBehaviors
           ? { profile: profileForCallerOwnedInference(defaults.profile) }
           : {}),

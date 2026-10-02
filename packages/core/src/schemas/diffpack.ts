@@ -58,7 +58,11 @@ export const DiffpackStatusSchema = z.enum([
 export type DiffpackStatus = z.infer<typeof DiffpackStatusSchema>;
 
 /** Statuses that still hold a claim on their source issues and their files. */
-export const ACTIVE_DIFFPACK_STATUSES: readonly DiffpackStatus[] = ['drafting', 'ready'];
+export const ACTIVE_DIFFPACK_STATUSES: readonly DiffpackStatus[] = [
+  'drafting',
+  'ready',
+  'partially-applied',
+];
 
 export function isActiveDiffpackStatus(status: DiffpackStatus): boolean {
   return ACTIVE_DIFFPACK_STATUSES.includes(status);
@@ -122,7 +126,7 @@ export const DiffpackRecordSchema = z.object({
   appliedAt: z.string().optional(),
   /** Status `failed` only — why sealing produced nothing usable. */
   error: z.string().optional(),
-  /** Per-file outcome of the last apply. */
+  /** Latest outcome per file, retaining successes across partial applications. */
   results: z
     .array(z.object({ path: z.string(), ok: z.boolean(), error: z.string().optional() }))
     .optional(),

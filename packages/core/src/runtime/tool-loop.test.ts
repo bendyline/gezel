@@ -257,6 +257,61 @@ describe('reasoning blocks from local models', () => {
     expect(delta.mock.calls.map(([text]) => text).join('')).toBe('Saved n.md.');
   });
 
+  it('asks once more for a call that will not parse instead of showing it', async () => {
+    const { store, session, inventory } = await fixture();
+    const replies = [
+      '{"name":"write_artifact","arguments":{"path":"n.md","content":"Hi",}}',
+      JSON.stringify({ name: 'write_artifact', arguments: { path: 'n.md', content: 'Hi' } }),
+      'Saved n.md.',
+    ];
+    const prompts: string[] = [];
+    const delta = vi.fn();
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: {
+        providers: async () => [],
+        generate: async (request, onDelta) => {
+          prompts.push(request.messages.at(-1)?.content ?? '');
+          const text = replies.shift()!;
+          onDelta({ requestId: request.requestId, delta: text });
+          return { text, stopReason: 'stop' };
+        },
+        cancel: async () => {},
+      },
+      requestId: 'req',
+      providerId: 'llama-cpp',
+      modelId: 'fixture',
+      contextSize: 8192,
+      maxTokens: 256,
+      messages: [{ role: 'user', content: 'Write it.' }],
+      tools: { inventory },
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta,
+    });
+    expect(prompts[1]).toMatch(/not valid JSON, so it did not run/);
+    expect(await store.readFile('artifacts', 'default', 'n.md')).toBe('Hi');
+    expect(result.text).toBe('Saved n.md.');
+    expect(delta.mock.calls.map(([text]) => text).join('')).toBe('Saved n.md.');
+  });
+
+  it('asks only once, then lets the reply stand', async () => {
+    const broken = '{"name":"write_artifact","arguments":{"path":"n.md",,}}';
+    let calls = 0;
+    const result = await run(
+      async () => {
+        calls++;
+        return { text: broken, stopReason: 'stop' };
+      },
+      { inventory: (await fixture()).inventory },
+    );
+    expect(calls).toBe(2);
+    expect(result.text).toBe(broken);
+  });
+
   it('runs an LFM-style Python call and keeps it off the stream', async () => {
     const { store, session, inventory } = await fixture();
     const replies = [

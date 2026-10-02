@@ -25,15 +25,27 @@ import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
 import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 
+/**
+ * Whether tool-bearing requests for this profile carry a decode-time tool
+ * grammar — i.e. whether the engine can confine what a call may NAME. The
+ * chat manager reads it to enforce coordinator routing clamps on what is
+ * callable instead of narrowing the rendered roster.
+ */
+export function mlxToolGrammarActive(profile: ResolvedModelProfile | undefined): boolean {
+  return (
+    profileHasBehavior(profile, 'tools.mlx-grammar') &&
+    familyToToolGrammarHint(profile?.style) !== null
+  );
+}
+
 export function applyMlxRequestShape(
   body: Record<string, unknown>,
   deps: { tuning?: ResolvedTuning; profile?: ResolvedModelProfile },
   opts: { hasTools: boolean },
 ): void {
   if (deps.tuning) applyTuning(body, deps.tuning, MLX_TUNING_MAP);
-  if (opts.hasTools && profileHasBehavior(deps.profile, 'tools.mlx-grammar')) {
-    const grammarHint = familyToToolGrammarHint(deps.profile?.style);
-    if (grammarHint) body.tool_grammar = grammarHint;
+  if (opts.hasTools && mlxToolGrammarActive(deps.profile)) {
+    body.tool_grammar = familyToToolGrammarHint(deps.profile?.style);
   }
   const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
     deps.profile,

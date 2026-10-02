@@ -146,6 +146,11 @@ const ACTION_LIMIT =
  */
 export const PORTABLE_TURN_ACTION_LIMIT = 24;
 
+/** A reply that set out to be a JSON tool call, whether or not it parses. */
+const CALL_SHAPED = /^\s*(?:```[A-Za-z]*\s*)?\{\s*"name"\s*:/;
+const UNPARSED_CALL_NOTE =
+  'That tool call is not valid JSON, so it did not run. Reply with only the call as one JSON object, every key with a value: {"name": "tool_name", "arguments": {"key": "value"}}. Leave out keys you have no value for.';
+
 function withNativeToolNote(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   listing: PortableToolListing,
@@ -467,6 +472,7 @@ export async function runPortableToolLoop(options: {
     return { output: `Tool result for ${name} (reference data):\n${raw}`, raw };
   };
 
+  let retriedUnparsedCall = false;
   for (let iteration = 0; iteration <= PORTABLE_TURN_ACTION_LIMIT; iteration++) {
     await check();
     await assertPortableTaskSessionActive(options.store, session);
@@ -595,6 +601,22 @@ export async function runPortableToolLoop(options: {
       return { ...result, stopReason: 'cancelled', message, streamed: prose };
     const visibleText = extractReasoning(result.text).visible;
     const envelope = result.stopReason === 'stop' ? parseToolEnvelopeReply(visibleText) : null;
+    // A call that will not parse was never streamed, so a second try costs the
+    // person nothing. Shown instead, it reached them as the reply: Gemini Nano
+    // answered a question with its own broken JSON (Galaxy S26+, 2026-10-02).
+    if (
+      !envelope &&
+      !retriedUnparsedCall &&
+      result.stopReason === 'stop' &&
+      CALL_SHAPED.test(visibleText)
+    ) {
+      retriedUnparsedCall = true;
+      messages.push(
+        { role: 'assistant', content: visibleText.trim() },
+        { role: 'user', content: UNPARSED_CALL_NOTE },
+      );
+      continue;
+    }
     if (!envelope) return { ...result, text: visibleText, message, streamed: prose };
     if (++actionCount > PORTABLE_TURN_ACTION_LIMIT) break;
     const outcome = await perform(envelope.name, envelope.arguments);

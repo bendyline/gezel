@@ -65,6 +65,19 @@ doesn't invalidate the whole KV prefix. Cloud providers would silently drop the 
 band, so the split is gated to local providers. Details:
 [kv-prompt-caching-strategy.md](kv-prompt-caching-strategy.md).
 
+The coordinator routing clamps (project orchestration, exact craftbook) are the one
+message-driven change that used to rewrite this prefix: they narrowed the tool roster,
+and the tool block plus the prose describing it changed with it. On MLX models whose
+decode-time tool grammar is active they now narrow what is **callable** instead
+(`routingClamps: 'callable'` in
+[session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts)): the
+prompt renders the full roster, the grammar's `allowed_names` confines native calls,
+and the bridge pool refuses a salvaged call outside the set. Measured before the change
+on gemma4-e4b, whose sliding-window cache cannot trim: one build request mid-thread
+re-prefilled the whole 6,420-token prompt, and the next ordinary message would flip it
+back. The price is that a thread whose *first* message is a build request prefills
+the full roster rather than the router surface.
+
 ### Model-profile behaviors: capability-inverse coddling
 
 Prompt text that exists *because of model limitations* does not live in `buildInstructions`
@@ -198,7 +211,16 @@ while they stream.
   adds it at the provider seam only (`providerPrompt()`), so the stored user message, the
   prefix-anchored turn classifiers, and continuation nudges never see it. It sits outside
   the system prompt because a clock there would change every minute and invalidate the
-  cached prefix. Without it, models dated plans from their training data: a Meester
+  cached prefix. For the same reason everything a send put in front of the person's
+  words, this line and every prelude below, is kept beside the stored user message
+  (`ChatMessage.sentPreamble`), and a rebuilt session puts it back on each replayed turn:
+  after an engine eviction or a daemon restart, history must be byte-identical to what
+  was sent, or the engine's saved slot KV (and Anthropic's cached prefix) stops matching
+  at that turn and everything after it is prefilled again. Session files grow by the
+  preludes' size (a few KB on a turn that retrieved); that is the price of the cache hit.
+  Tool-using turns still replay through `buildToolEvidenceReplay`, which deduplicates and
+  budgets tool results by design, so a rebuilt work session matches only up to its first
+  tool turn. Without it, models dated plans from their training data: a Meester
   planned "the week of May 20th" in September 2026, and that date ended up in craftbook
   params, filenames and a customer quote. Guarded by the `date-grounding` eval.
 - **Turn intent plan** (`chat/turn-intent-plan.ts`): a deterministic first pass shared by

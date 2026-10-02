@@ -29,6 +29,21 @@ describe('getCliPresence', () => {
     });
   });
 
+  it('reuses a PATH lookup until it expires', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-cli-presence-path-'));
+    const env = { PATH: dir, PATHEXT: '.EXE' };
+    const t0 = 1_000_000;
+    expect(getCliPresence({}, env, t0).anthropicCli.installed).toBe(false);
+
+    const claude = join(dir, process.platform === 'win32' ? 'claude.EXE' : 'claude');
+    await writeFile(claude, 'not an executable');
+    expect(getCliPresence({}, env, t0 + 5_000).anthropicCli.installed).toBe(false);
+    expect(getCliPresence({}, env, t0 + 31_000).anthropicCli).toEqual({
+      installed: true,
+      path: claude,
+    });
+  });
+
   it('reports missing overrides without falling back to PATH', () => {
     const missing = join(tmpdir(), 'gezel-cli-presence-missing');
     const result = getCliPresence(

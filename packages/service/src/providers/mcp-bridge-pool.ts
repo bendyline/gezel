@@ -44,6 +44,13 @@ export class McpBridgePool {
    */
   private toolAllowlist: Set<string> | null = null;
   private toolNamePolicy: SessionOpts['toolNamePolicy'];
+  /**
+   * See {@link SessionOpts.callableToolRestriction}. Unlike `toolAllowlist`
+   * it never narrows `getOpenAITools()`: the tools stay advertised so the
+   * prompt is byte-identical whether or not the clamp is on, and only the
+   * call paths refuse what it excludes.
+   */
+  private callableRestriction: SessionOpts['callableToolRestriction'] = undefined;
 
   /**
    * One ledger per session, shared by every bridge. A gezel that cannot
@@ -52,7 +59,9 @@ export class McpBridgePool {
    * failing tool is typically on a different bridge from the task tools,
    * so the ledger has to be pool-scoped rather than per-bridge.
    */
-  private readonly failureLedger = new UnresolvedToolFailureLedger();
+  private readonly failureLedger = new UnresolvedToolFailureLedger({
+    hasTool: (name) => this.hasTool(name),
+  });
 
   /**
    * Start the primary + extras based on SessionOpts. Returns a pool that
@@ -63,6 +72,7 @@ export class McpBridgePool {
     const pool = new McpBridgePool();
     if (opts.toolAllowlist) pool.toolAllowlist = opts.toolAllowlist;
     pool.toolNamePolicy = opts.toolNamePolicy;
+    pool.callableRestriction = opts.callableToolRestriction;
 
     const secrets = opts.knownSecretValues ?? new Set<string>();
     const debugOn = opts.debug?.isEnabled() === true;
@@ -239,6 +249,22 @@ export class McpBridgePool {
     return resolved !== null && this.isCallableByModel(resolved.name);
   }
 
+  /** True while a callable restriction narrows calls below the advertised roster. */
+  hasCallableRestriction(): boolean {
+    return this.callableRestriction !== undefined;
+  }
+
+  /**
+   * An advertised tool the callable restriction refuses this turn. Lets a
+   * provider answer with what IS callable instead of a generic "not
+   * available", which a small model reads as a transient fault to retry.
+   */
+  isRestrictedFromCalling(name: string): boolean {
+    const resolved = this.resolveBridgeTool(name);
+    if (!resolved || !this.isAuthorizedForSession(resolved.name)) return false;
+    return !this.allowsCallableRestriction(resolved.name);
+  }
+
   /**
    * Forward a one-shot `seedWrappersFromText` to every bridge in the
    * pool. Used by ChatManager to feed the rendered system prompt into
@@ -298,6 +324,17 @@ export class McpBridgePool {
   }
 
   private isCallableByModel(name: string): boolean {
+    return this.isAuthorizedForSession(name) && this.allowsCallableRestriction(name);
+  }
+
+  private allowsCallableRestriction(name: string): boolean {
+    const restriction = this.callableRestriction;
+    if (!restriction) return true;
+    if (!(canonicalToolName(name) in TOOL_REGISTRY)) return restriction.thirdParty;
+    return this.allowsBuiltin(restriction.builtins, name);
+  }
+
+  private isAuthorizedForSession(name: string): boolean {
     if (!this.allowsAuthoredName(name)) return false;
     const canonical = canonicalToolName(name);
     // Immediate-write sessions intentionally advertise only `write_file` on

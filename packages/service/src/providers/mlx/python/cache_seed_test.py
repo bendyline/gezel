@@ -129,6 +129,48 @@ check(
     snapshot_plan.target is None and len(snapshot_plan.segments) == 1,
 )
 
+# Band cuts (ADR 0010). The session must keep its own end-of-prompt boundary
+# beside the band: Gemma renders the tool block after the system text, so a
+# 1,390-token band of an 8,604-token prompt saved as the session's only
+# entry re-prefilled 7,313 tokens on the next turn.
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, None, 16, 20)
+check(
+    "a short band cuts twice: band and end minus margin",
+    snapshot_plan.target == 84
+    and snapshot_plan.band == 20
+    and list(map(len, snapshot_plan.segments)) == [20, 64, 16],
+)
+check(
+    "segments still cover the whole prompt in order",
+    [t for s in snapshot_plan.segments for t in s] == list(range(100)),
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, None, 16, 80)
+check(
+    "a band near the session boundary becomes the single shared cut",
+    snapshot_plan.target == 80
+    and snapshot_plan.band == 80
+    and list(map(len, snapshot_plan.segments)) == [80, 20],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, None, 16, 95)
+check(
+    "a band past the session boundary is pulled back to it",
+    snapshot_plan.target == 84
+    and snapshot_plan.band == 84
+    and list(map(len, snapshot_plan.segments)) == [84, 16],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(60)), 40, 100, None, 16, 20)
+check(
+    "a band inside the reused prefix is not capturable",
+    snapshot_plan.target == 84
+    and snapshot_plan.band is None
+    and list(map(len, snapshot_plan.segments)) == [44, 16],
+)
+snapshot_plan = cs.plan_snapshot_segments(list(range(100)), 0, 100, None, 16, 0)
+check(
+    "no band requested keeps the single end cut",
+    snapshot_plan.band is None and list(map(len, snapshot_plan.segments)) == [84, 16],
+)
+
 # ---- snapshot_matches_prompt ----
 
 check(

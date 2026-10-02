@@ -6,6 +6,22 @@ html {
   --app-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   overflow: hidden;
 }
+/* An iPhone's top inset runs past its notch or Dynamic Island to clear the
+   status bar's frame: 59pt on an iPhone 14 Pro Max, whose island ends near
+   48. The header sat under that empty band of sage, so it rises 9px into it,
+   stopping just under the island. An inset of 24pt or less is a status bar
+   with no cutout (an iPad, a home-button iPhone) and is kept whole; landscape
+   has none. The query matches iOS WebKit only: Android's status icons fill
+   their bar. */
+@supports (-webkit-touch-callout: none) {
+  html {
+    --app-safe-top: max(
+      var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+      9px,
+      min(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)), 24px)
+    );
+  }
+}
 html #root {
   position: fixed;
   top: var(--app-viewport-top, 0px);
@@ -14,6 +30,73 @@ html #root {
   height: var(--app-viewport-height, 100dvh);
   box-sizing: border-box;
   padding: var(--app-safe-top) var(--app-safe-right) var(--app-safe-bottom) var(--app-safe-left);
+  /* The status bar sits on the title bar's sage, so the top of the phone is
+     one green band rather than black above green. The band is painted here,
+     not by the header, so it holds when the keyboard hides the header and on
+     screens before the shell loads. */
+  background: linear-gradient(
+    to bottom,
+    var(--titlebar, #667f62) 0 var(--app-safe-top),
+    transparent var(--app-safe-top)
+  );
+}
+/* Until the shell mounts, the band also covers the header's row. The
+   portable service starts before React renders anything, so the status bar's
+   sage stood alone for a few seconds and the header's arrived after it.
+   Landscape hides the header, and a boot failure shows only its message. */
+html #root:not(:has(.app-header)):not(:has(> [role="alert"])) {
+  background: linear-gradient(
+    to bottom,
+    var(--titlebar, #667f62) 0 calc(var(--app-safe-top) + var(--app-compact-header-height, 52px)),
+    transparent calc(var(--app-safe-top) + var(--app-compact-header-height, 52px))
+  );
+}
+@media (max-height: 500px) and (pointer: coarse) {
+  html #root:not(:has(.app-header)):not(:has(> [role="alert"])) {
+    background: linear-gradient(
+      to bottom,
+      var(--titlebar, #667f62) 0 var(--app-safe-top),
+      transparent var(--app-safe-top)
+    );
+  }
+}
+/* While the app starts, the empty ground shows the bench in outline, faint
+   and slowly breathing. It is CSS in the stylesheet the page loads first, so
+   it costs no request and no script. It fades in after a moment so a quick
+   start never flashes it, and leaves with the selector once the shell mounts.
+   The outline is a mask, so its ink follows the system colour scheme. */
+html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--app-safe-top) + var(--app-compact-header-height, 52px)) 0 var(--app-safe-bottom);
+  background-color: color-mix(in srgb, CanvasText 16%, transparent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='16 26 212 192' fill='none' stroke='%23000' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'%3E%3Crect x='20' y='66' width='37' height='38' rx='5'/%3E%3Cpath d='M38.5 48V66M38.5 104V122'/%3E%3Ccircle cx='38.5' cy='39' r='9'/%3E%3Ccircle cx='38.5' cy='131' r='9'/%3E%3Crect x='64' y='64' width='160' height='42' rx='5'/%3E%3Cpath d='M78 119H105L97 214H65Z'/%3E%3Cpath d='M210 119H183L191 214H223Z'/%3E%3Crect x='105' y='163' width='78' height='23' rx='4'/%3E%3Ccircle cx='91' cy='139' r='6.5'/%3E%3Ccircle cx='80' cy='187' r='6.5'/%3E%3Ccircle cx='197' cy='139' r='6.5'/%3E%3Ccircle cx='208' cy='187' r='6.5'/%3E%3C/svg%3E")
+    center / 120px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='16 26 212 192' fill='none' stroke='%23000' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'%3E%3Crect x='20' y='66' width='37' height='38' rx='5'/%3E%3Cpath d='M38.5 48V66M38.5 104V122'/%3E%3Ccircle cx='38.5' cy='39' r='9'/%3E%3Ccircle cx='38.5' cy='131' r='9'/%3E%3Crect x='64' y='64' width='160' height='42' rx='5'/%3E%3Cpath d='M78 119H105L97 214H65Z'/%3E%3Cpath d='M210 119H183L191 214H223Z'/%3E%3Crect x='105' y='163' width='78' height='23' rx='4'/%3E%3Ccircle cx='91' cy='139' r='6.5'/%3E%3Ccircle cx='80' cy='187' r='6.5'/%3E%3Ccircle cx='197' cy='139' r='6.5'/%3E%3Ccircle cx='208' cy='187' r='6.5'/%3E%3C/svg%3E")
+    center / 120px no-repeat;
+  pointer-events: none;
+  animation: gezel-boot-in 700ms ease-out 400ms both, gezel-boot-breathe 2.8s ease-in-out 1.1s
+    infinite;
+}
+@media (max-height: 500px) and (pointer: coarse) {
+  html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {
+    inset-block-start: var(--app-safe-top);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {
+    animation: gezel-boot-in 700ms ease-out 400ms both;
+  }
+}
+@keyframes gezel-boot-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes gezel-boot-breathe {
+  50% {
+    filter: opacity(0.45);
+  }
 }
 /* The compact shell must fill the safe rectangle, not add another full 100dvh
    inside it. Capacitor already removes the keyboard from Android's viewport. */
@@ -52,94 +135,73 @@ html:root[data-platform] .gz-dialog {
   );
 }
 html #root:has(.app-main:not([hidden]) .chat-composer) {
-  background: var(--chat-compose-header-bg);
-}
-.mobile-models {
-  margin: 1rem 0;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-/* The UA marker sits flush against the label and gives a one-line tap target;
-   a full-height row with its own open-V reads like the rest of the app. */
-.mobile-models > summary {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  min-height: 44px;
-  cursor: pointer;
-  font-weight: 600;
-  list-style: none;
-}
-.mobile-models > summary::-webkit-details-marker {
-  display: none;
-}
-.mobile-models > summary::before {
-  content: "";
-  flex: none;
-  width: .4rem;
-  height: .4rem;
-  margin-inline: .15rem;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(-45deg);
-}
-.mobile-models[open] > summary::before {
-  transform: translateY(-.15rem) rotate(45deg);
+  background: linear-gradient(
+    to bottom,
+    var(--titlebar, #667f62) 0 var(--app-safe-top),
+    var(--chat-compose-header-bg) var(--app-safe-top)
+  );
 }
 .mobile-model-label {
   display: grid;
   gap: .5rem;
   margin: .75rem 0;
 }
-.mobile-model-label select,
-.mobile-models > select {
-  max-width: 100%;
+/* The model setup is one column of evenly spaced parts. Its paragraphs carry
+   no margins of their own, so the gap is the only spacing in it. */
+.mobile-model-chooser {
+  display: grid;
+  gap: .75rem;
+  margin: .75rem 0;
+}
+.mobile-model-chooser :is(p, .mobile-model-label) {
+  margin: 0;
+}
+.mobile-model-trigger {
   width: 100%;
   min-height: 44px;
+  padding-inline: .75rem;
 }
-/* Android's web view paints a dark-scheme native select as a flat grey slab
-   that matches nothing on the dark canvas. Recast the closed control like the
-   desktop select trigger; a tap still opens the system picker. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) :is(.mobile-model-label select, .mobile-models > select) {
-    appearance: none;
-    -webkit-appearance: none;
-    background-color: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0 2rem 0 .75rem;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right .75rem center;
-    background-size: .75rem;
-  }
+/* A size beside the name, not after it, so a name keeps its line. */
+.mobile-model-menu .gz-select-item {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-height: 44px;
 }
-:root[data-theme="dark"] :is(.mobile-model-label select, .mobile-models > select) {
-  appearance: none;
-  -webkit-appearance: none;
-  background-color: var(--panel);
-  color: var(--text);
+.mobile-model-menu .gz-select-item > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.mobile-model-size {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.mobile-model-menu .gz-select-item[data-highlighted] .mobile-model-size {
+  color: inherit;
+}
+.mobile-model-download,
+.mobile-confirm {
+  display: grid;
+  gap: .5rem;
+  padding: .75rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 2rem 0 .75rem;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right .75rem center;
-  background-size: .75rem;
+  border-radius: var(--radius-lg);
 }
-:is(.mobile-model-label select, .mobile-models > select):disabled {
-  opacity: 0.5;
+.mobile-model-download p {
+  overflow-wrap: anywhere;
 }
 .mobile-model-download progress {
   width: 100%;
 }
-.mobile-models .gz-key {
-  min-height: 44px;
-  /* Trailing space only, so a lone key lines up with the field above it. */
-  margin: .25rem .5rem .25rem 0;
+/* Keys share each row equally and fall to one per row when two would not
+   fit, which is every phone; a tablet gets pairs. */
+.mobile-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: .5rem;
 }
-.mobile-models p {
-  overflow-wrap: anywhere;
+.mobile-actions .gz-key {
+  min-height: 44px;
+  margin: 0;
 }

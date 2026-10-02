@@ -16,3 +16,24 @@ export class ScriptNotFoundError extends Error {
     this.name = 'ScriptNotFoundError';
   }
 }
+
+/**
+ * The scope a `run_installed_script` call means when it names none. The tool
+ * defaults to the project, so `storeRecords` without `scope: "standard"`
+ * failed "not found in project scope" and small models retried that identical
+ * call until their turn ended (iPhone and Galaxy S26, 2026-10-01). A name that
+ * exists in only one place can only mean that one: project first, then the
+ * user's own scripts, then the standard library. With no match the project
+ * stays the answer, so the not-found error still names where it looked.
+ */
+export function inferScriptScope(
+  name: string,
+  scope: 'project' | 'user' | 'standard' | undefined,
+  installed: readonly { name: string; scope: string }[],
+): 'project' | 'user' | 'standard' {
+  if (scope) return scope;
+  for (const candidate of ['project', 'user', 'standard'] as const)
+    if (installed.some((script) => script.name === name && script.scope === candidate))
+      return candidate;
+  return 'project';
+}

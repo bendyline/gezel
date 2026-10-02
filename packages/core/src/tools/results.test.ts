@@ -7,11 +7,18 @@ import {
 import {
   REANCHOR_MAX_CHARS,
   artifactCompletionHint,
+  askUserQuestionText,
   countLineChanges,
+  createTaskText,
+  crewMemberNamedIn,
   formatWorkspaceRead,
+  listDirMissingText,
+  listScriptsText,
+  nearbyPathMatches,
   readArtifactText,
   reanchorText,
   sliceWorkspaceText,
+  stepCheckedArtifactPaths,
   stepCompletionMode,
   toolErrorText,
   withLineNumbers,
@@ -269,5 +276,140 @@ describe('artifact completion hints', () => {
     expect(artifactCompletionHint('unknown')).toContain(
       'Follow the active craftbook completion rule',
     );
+  });
+});
+
+describe('list_dir on a path that is not a folder', () => {
+  it('suggests the same name with an extension or in another case, under the same parent', () => {
+    expect(
+      nearbyPathMatches('data/repairs', [{ name: 'Repairs.JSON' }, { name: 'repair-log.md' }]),
+    ).toEqual(['data/Repairs.JSON']);
+    expect(nearbyPathMatches('notes', [{ name: 'notes.md' }, { name: 'notes.txt' }])).toEqual([
+      'notes.md',
+      'notes.txt',
+    ]);
+  });
+
+  it('reads plainly with and without a suggestion', () => {
+    expect(listDirMissingText('drafts', 'missing')).toBe('No folder or file exists at `drafts`.');
+    expect(listDirMissingText('notes', 'missing', ['notes.md', 'notes.txt'])).toBe(
+      'No folder or file exists at `notes`. Did you mean `notes.md` or `notes.txt`?',
+    );
+  });
+});
+
+describe('stepCheckedArtifactPaths', () => {
+  it('lists the artifact files a step gate and checkpoint read, normalized', () => {
+    expect(
+      stepCheckedArtifactPaths({
+        gate: {
+          at: 'completion',
+          checks: [
+            { kind: 'minBytes', file: 'artifacts/handover.md', artifact: true, bytes: 40 },
+            { kind: 'sniff', file: 'handover.md', artifact: true, sniff: 'nonempty' },
+            { kind: 'minBytes', file: 'src/app.ts', bytes: 1 },
+          ],
+        },
+        advanceWhen: { file: 'tasks/1/notes.md', artifact: true },
+      }),
+    ).toEqual(['handover.md', 'tasks/1/notes.md']);
+    expect(stepCheckedArtifactPaths(undefined)).toEqual([]);
+  });
+});
+
+describe('a question card that names a colleague', () => {
+  const crew = [
+    { id: 'eval-craftsperson', name: 'Eval craftsperson' },
+    { id: 'eval-colleague', name: 'Eval colleague' },
+    { id: 'ada', name: 'Ada' },
+  ];
+
+  it('finds a crew member by id or name, never the asker or a word inside another', () => {
+    expect(
+      crewMemberNamedIn(
+        'I need you to ask eval-colleague to read crew-brief.md',
+        crew,
+        'eval-craftsperson',
+      )?.id,
+    ).toBe('eval-colleague');
+    expect(crewMemberNamedIn('Should Ada review it?', crew, 'eval-craftsperson')?.id).toBe('ada');
+    expect(crewMemberNamedIn('Is the cadastre ready?', crew, 'eval-craftsperson')).toBeUndefined();
+    expect(crewMemberNamedIn('Eval craftsperson here', crew, 'eval-craftsperson')).toBeUndefined();
+  });
+
+  it('points at message_gezel after the card', () => {
+    expect(
+      askUserQuestionText('q1', false, { id: 'eval-colleague', name: 'Eval colleague' }),
+    ).toMatch(
+      /\n\nThis card goes to the person using the app, not to Eval colleague\. To give Eval colleague the work, use `message_gezel` with to: "eval-colleague" once the answer arrives\.$/,
+    );
+    expect(askUserQuestionText('q1', false)).not.toContain('message_gezel');
+  });
+});
+
+describe('list_scripts', () => {
+  const gate = (name: string) => ({
+    name,
+    meta: {
+      kind: 'gate',
+      description: `Gate: ${name} holds.`,
+      inputs: { file: { type: 'string', required: true } },
+      requires: ['workspace.read'],
+    },
+  });
+  const storeRecords = {
+    name: 'storeRecords',
+    meta: {
+      kind: 'action',
+      description: 'Action: CRUD over a workspace record store.',
+      inputs: {
+        action: {
+          type: 'choice',
+          required: true,
+          options: [{ value: 'create' }, { value: 'update' }],
+        },
+        root: { type: 'string', required: true },
+        mode: { type: 'choice', required: true, options: [{ value: 'single-file' }] },
+      },
+      requires: ['workspace.read', 'workspace.write'],
+    },
+  };
+
+  it('leads with actions, spells out choices, and lists gate checks one per line', () => {
+    const text = listScriptsText(
+      [],
+      [gate('checkFileExists'), storeRecords, gate('checkJsonValid')],
+    );
+    expect(text).toBe(
+      [
+        'Listed 3 installed scripts.',
+        'No project scripts yet.',
+        '',
+        '## Standard actions (read-only, scope: "standard")',
+        '• storeRecords — Action: CRUD over a workspace record store.',
+        '    inputs: action: create|update, root: string, mode: single-file',
+        '    requires: workspace.read, workspace.write',
+        '',
+        '## Standard gate checks (read-only, scope: "standard"), for craftbook completion gates',
+        '• checkFileExists(file: string) — checkFileExists holds.',
+        '• checkJsonValid(file: string) — checkJsonValid holds.',
+      ].join('\n'),
+    );
+  });
+});
+
+describe('create_task for a colleague', () => {
+  it('leads with the message that starts the colleague when it was not dispatched', () => {
+    const created = {
+      ref: 'crew/1',
+      title: 'Write the crew note',
+      assignee: { kind: 'gezel', gezelId: 'eval-colleague' },
+      craftbook: { steps: [{ id: 'write' }] },
+    } as unknown as Parameters<typeof createTaskText>[0];
+    const text = createTaskText(created, { dispatch: false, callerGezelId: 'eval-craftsperson' });
+    expect(text.split('\n\n')[1]).toMatch(
+      /^Next: call message_gezel\(\{ gezel: "eval-colleague", message: "new task crew\/1 — Write the crew note: <one-line ask>" \}\)\. eval-colleague has not been told about this task and will not start it until you do\./,
+    );
+    expect(createTaskText(created, { dispatch: true })).not.toContain('Next: call message_gezel');
   });
 });

@@ -52,6 +52,7 @@ const allowed = new Set([
   '--physical-device',
   '--cooldown-ms',
   '--discard-backup',
+  '--recover-backup',
 ]);
 for (const key of flags.keys()) if (!allowed.has(key)) throw new Error(`Unknown flag: ${key}`);
 const platform = flags.get('--platform');
@@ -69,6 +70,15 @@ if (
     !/^product-eval-backup-[0-9A-F-]{36}$/.test(flags.get('--discard-backup')!))
 )
   throw new Error('--discard-backup names one iOS eval backup folder, as the refusal printed it');
+if (
+  flags.has('--recover-backup') &&
+  (platform !== 'ios' ||
+    flags.has('--discard-backup') ||
+    !/^product-eval-backup-[0-9A-F-]{36}$/.test(flags.get('--recover-backup')!))
+)
+  throw new Error(
+    '--recover-backup names one iOS eval backup folder to restore, and cannot be combined with --discard-backup',
+  );
 if (flags.has('--cooldown-ms') && !/^\d+$/.test(flags.get('--cooldown-ms')!))
   throw new Error('--cooldown-ms must be a whole number of milliseconds');
 if (flags.has('--build-only') && flags.has('--contracts-only'))
@@ -295,6 +305,9 @@ if (flags.has('--report-only')) {
                   : {}),
                 ...(flags.has('--discard-backup')
                   ? { TEST_RUNNER_GEZEL_EVAL_DISCARD_BACKUP: flags.get('--discard-backup')! }
+                  : {}),
+                ...(flags.has('--recover-backup')
+                  ? { TEST_RUNNER_GEZEL_EVAL_RECOVER_BACKUP: flags.get('--recover-backup')! }
                   : {}),
                 ...(flags.has('--contracts-only')
                   ? { TEST_RUNNER_GEZEL_EVAL_CONTRACTS_ONLY: '1' }

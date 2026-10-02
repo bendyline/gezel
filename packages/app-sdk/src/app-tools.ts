@@ -66,6 +66,7 @@ export async function registerAppTools(
     const res = await api('PUT', `/api/app-tools/relays/${encodeURIComponent(id)}/tools`, {
       projectId: input.projectId,
       ...(input.gezelIds ? { gezelIds: input.gezelIds } : {}),
+      ...(input.surfaceId ? { surfaceId: input.surfaceId } : {}),
       tools: [...tools.values()].map(({ name, description, inputSchema, timeoutMs }) => ({
         name,
         description,

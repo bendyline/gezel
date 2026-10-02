@@ -46,7 +46,7 @@ let relays: AppToolRelayRegistry;
 /** A connected app that answers every call with `respond`. */
 function connectApp(
   respond: (relayId: string, call: Extract<AppToolRelayEvent, { type: 'tool_call' }>) => void,
-  opts: { appId?: string; gezelIds?: string[] } = {},
+  opts: { appId?: string; gezelIds?: string[]; surfaceId?: string } = {},
 ): { relayId: string; seen: Array<Record<string, unknown>> } {
   const seen: Array<Record<string, unknown>> = [];
   const { relayId } = relays.open({ appId: opts.appId ?? 'qualla', appName: 'Qualla' });
@@ -61,6 +61,7 @@ function connectApp(
   relays.register(relayId, {
     projectId: 'default',
     ...(opts.gezelIds ? { gezelIds: opts.gezelIds } : {}),
+    ...(opts.surfaceId ? { surfaceId: opts.surfaceId } : {}),
     tools: [TRAVEL_TOOL],
   });
   return { relayId, seen };
@@ -203,6 +204,33 @@ describe('ChatManager + app tools', () => {
     );
     expect(mock.toolCallOutputs.find(({ name }) => name === 'add_travel_points')).toBeUndefined();
   }, 30_000);
+
+  it("offers a chat surface's tools only in the threads that surface drives", async () => {
+    // The Office pane's case: its document tools must reach the thread the
+    // pane is writing in, and not the same gezel's other chats — the
+    // Meester's front-door chat in the desktop app above all.
+    const app = connectApp(
+      (relayId, call) => relays.resolveCall(relayId, call.callId, { ok: true, content: 'awarded' }),
+      { gezelIds: ['ada'], surfaceId: 'pane-surface-1' },
+    );
+    const paneThread = await manager.createSession({ gezelId: 'ada' });
+    const frontDoor = await manager.createSession({ gezelId: 'ada' });
+
+    relays.noteUserMessage(paneThread.id, 'pane-surface-1');
+    mock.scriptToolCalls([{ name: 'add_travel_points', arguments: { points: 1 } }]);
+    mock.script('Awarded.');
+    await manager.send(paneThread.id, 'Award a point.');
+    expect(app.seen).toHaveLength(1);
+    await manager.drainBackground();
+
+    relays.noteUserMessage(frontDoor.id, undefined);
+    mock.scriptToolCalls([{ name: 'add_travel_points', arguments: { points: 1 } }]);
+    mock.script('That tool is not available to me.');
+    await expect(manager.send(frontDoor.id, 'Award a point.')).rejects.toThrow(
+      /no bridge has tool "add_travel_points"/,
+    );
+    expect(app.seen).toHaveLength(1);
+  }, 40_000);
 
   it('withholds app tools from a provider that runs its own tool loop', async () => {
     // Copilot and the CLI providers never reach an in-process server, so

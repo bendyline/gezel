@@ -578,11 +578,17 @@
   gap: 0.5rem;
 }
 
-.provider-card > .settings-card-header:first-child {
+/* A heading with its status beside it. Only the card's own header used to be
+   a row, so a section header inside a card (Audio's speech engines) dropped
+   its Ready pill onto the next line. */
+.settings-card-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.provider-card > .settings-card-header:first-child {
   padding-bottom: 0.75rem;
   margin-bottom: 1rem;
   border-bottom: 1px solid var(--border);

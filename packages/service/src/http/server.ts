@@ -23,6 +23,8 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
 import { embeddingsHealth } from '../memory/embeddings.js';
+import { beginPerfRequest } from '../perf/responsiveness.js';
+import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
   bearerAuth,
   denyRemoteInferenceScope,
@@ -50,6 +52,7 @@ import { channelRoutes } from './routes/channels.js';
 import { chatEventsRoutes } from './routes/chat-events.js';
 import { chatRoutes } from './routes/chats.js';
 import { codexSetupRoutes } from './routes/codex-setup.js';
+import { completionRoutes } from './routes/completions.js';
 import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
@@ -179,6 +182,24 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   const app = new Hono();
   const previewCapabilities = options.previewCapabilities ?? new PreviewCapabilityStore();
   const httpLog = createLogger('http');
+
+  // Outermost, so the time covers every other middleware. `Server-Timing`
+  // lets the renderer tell daemon time from time spent waiting to be served.
+  app.use('*', async (c, next) => {
+    const started = performance.now();
+    const done = beginPerfRequest(c.req.method, c.req.path);
+    try {
+      await next();
+    } finally {
+      const ms = performance.now() - started;
+      try {
+        c.res.headers.set('server-timing', `app;dur=${ms.toFixed(1)}`);
+      } catch {
+        /* immutable or absent response on a thrown request */
+      }
+      done(c.res?.status ?? 500);
+    }
+  });
 
   app.use('*', async (c, next) => {
     await next();
@@ -310,6 +331,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
     taskStatus: async (projectId, num) =>
       (await ctx.store.readTask(projectId, num))?.status ?? null,
+    staleStepSession: async (sessionId, projectId, num) =>
+      staleStepSessionRefusal(
+        await ctx.chat.getSessionRecord(sessionId),
+        await ctx.store.readTask(projectId, num),
+      ),
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
@@ -526,6 +552,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // grep_files, find_files, diff_files, read_image_as_base64,
   // list/extract_archive, run_git). Live at /api/projects/:id/tools/*.
   app.route('/api/projects', toolRoutes(ctx));
+  // Bounded one-shot model calls for repository workflow drivers.
+  app.route('/api/projects', completionRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
   // People (face lane): /api/projects/:id/people[...] + the global

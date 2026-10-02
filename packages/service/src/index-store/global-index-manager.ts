@@ -7,6 +7,7 @@ import {
 } from '@bendyline/gezel';
 import type { DocumentChangeEvent, SessionChangeEvent, Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import { HISTORY_BACKFILL_META_KEY, openGlobalCollection } from './global-index.js';
 import type { ChunkInput, IndexStore } from './index-store.js';
 
@@ -128,6 +129,7 @@ export class GlobalIndexManager {
       return;
     }
     this.flushing = true;
+    const endPerfWork = beginPerfWork('global index flush');
     try {
       const gates = await this.gates();
       if (this.dirtySessions.size > 0) {
@@ -141,6 +143,7 @@ export class GlobalIndexManager {
         if (gates.history) await this.flushHistory(batch);
       }
     } finally {
+      endPerfWork();
       this.flushing = false;
       if (this.flushQueued) {
         this.flushQueued = false;

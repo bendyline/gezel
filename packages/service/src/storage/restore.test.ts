@@ -1,8 +1,9 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RestoreReview } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as yazl from 'yazl';
 import { Store } from '../fs/store.js';
 import { runBackup } from './backup.js';
@@ -101,6 +102,39 @@ describe('scanRestore', () => {
 });
 
 describe('runRestore', () => {
+  it.each(['after review', 'during publication'])(
+    'does not replace an addition created %s',
+    async (when) => {
+      const gezel = await store.createGezel({ name: 'Archivist' });
+      const file = await makeBackup();
+      await store.deleteGezel(gezel.id);
+      const review = await scanRestore(deps(), file);
+      expect(review.items.find((item) => item.id === gezel.id)?.conflict).toBe('none');
+      const target = join(home, 'gezels', gezel.id);
+      const createLive = () => {
+        mkdirSync(target);
+        writeFileSync(join(target, 'about.md'), 'new live work');
+      };
+      const original = jobs.setPhase.bind(jobs);
+      const spy = vi.spyOn(jobs, 'setPhase').mockImplementation((...args) => {
+        if (when === 'during publication' && args[1] === 'publish' && !args[2]) createLive();
+        return original(...args);
+      });
+      try {
+        if (when === 'after review') createLive();
+        await expect(
+          restore(review, { items: [{ kind: 'gezel', id: gezel.id, action: 'add' }] }),
+        ).rejects.toThrow('refusing to overwrite');
+        expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('new live work');
+        expect(
+          (await readdir(join(home, 'gezels'))).some((name) => name.includes('restore-parked')),
+        ).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
   it('brings a deleted gezel back, prose and all', async () => {
     const gezel = await store.createGezel({ name: 'Archivist' });
     await writeFile(join(home, 'gezels', gezel.id, 'about.md'), '# Who I am\n\nThe archivist.');

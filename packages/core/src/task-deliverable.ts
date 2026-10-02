@@ -234,7 +234,7 @@ function canonicalPath(raw: string, kind: ReferencedFileKind): string {
     .replace(/\\/g, '/')
     .replace(/^\.?\/+/, '');
   if (kind === 'artifact') {
-    while (/^artifacts\/+/i.test(path)) path = path.replace(/^artifacts\/+/i, '');
+    while (/^artifacts(?:\/+|$)/i.test(path)) path = path.replace(/^artifacts(?:\/+|$)/i, '');
   }
   return path;
 }

@@ -59,6 +59,24 @@ import type { ServiceContext } from '../context.js';
 export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'): Hono {
   const app = new Hono();
 
+  app.use(`/:id/${segment}/*`, async (c, next) => {
+    if (c.req.method === 'GET' || !c.get('auth')?.scopes.includes('session')) return next();
+    const operation = c.req.path.split(`/${segment}/`).at(-1)?.replace(/\/$/, '');
+    if (operation === 'discard' || operation === 'merge/abandon') {
+      return c.json({ error: 'discarding work requires a user client' }, 403);
+    }
+    if (
+      operation &&
+      /^(clone|pull|branch|fetch|commit|push|sync|merge\/resolve|merge\/complete)$/.test(operation)
+    ) {
+      const gate = await ctx.store.assertWorkspaceWritable(c.req.param('id')!, {
+        initiatedByGezel: true,
+      });
+      if (!gate.ok) return c.json({ error: 'workspace writes are disabled', ...gate }, 403);
+    }
+    return next();
+  });
+
   app.get(`/:id/${segment}/status`, async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);

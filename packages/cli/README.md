@@ -170,10 +170,33 @@ export async function run({ client, projectId, workspace, args, log, runCraftboo
 
 Run it with `gezel workflow storyify c23n --json`. The module receives the
 public `GezelClient`, the directory's project id, its absolute workspace,
-arguments, a stderr logger, and `runCraftbook(id, params, options)`. That helper
+arguments, a stderr logger, `complete(request)` (below), and
+`runCraftbook(id, params, options)`. That helper
 starts a **project** craftbook and waits; options include `timeoutMs`, a saved
 `taskRef` to follow, `parentTaskRef` to link the child to its batch, and
 `onCreated(task)` to checkpoint the new reference.
+When a step needs model judgment on input the driver already holds — extract
+the facts in this page, check this paragraph against these quotations — use
+`complete(request)` instead of a craftbook. It makes one bounded call on the
+project's engine queue and returns `{ content, json?, jsonError?, elapsedMs }`:
+
+```js
+const { json } = await complete({
+  gezelId: 'checker',          // or provider + model
+  system: 'You are a meticulous fact-checker.',
+  prompt: `FACTS:\n${facts}\n\nSENTENCES:\n${sentences}`,
+  jsonSchema: verdictSchema,   // grammar-constrained on local engines
+  thinking: false,             // skip a local model's reasoning phase
+  maxTokens: 4000,
+  timeoutMs: 300_000,
+  label: 'check · Taylorville ¶3',
+});
+```
+
+No tools, session or transcript are involved, so there is nothing to read
+back and nothing to save: the driver validates the answer and persists what it
+keeps. Use a craftbook when the work genuinely needs tools or a person.
+
 For drivers that generate craftbook documents, `validateCraftbook(document)`
 checks the same schema and step contracts as the daemon and returns the runtime
 craftbook. Call it before installing files or freezing a batch checkpoint;

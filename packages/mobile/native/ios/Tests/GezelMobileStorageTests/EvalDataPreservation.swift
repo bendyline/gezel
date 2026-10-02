@@ -108,6 +108,18 @@ struct EvalDataPreservation {
             throw error
         }
     }
+    /// Re-attaches a backup a stopped run left behind, so the same verified
+    /// restore can bring the person's product back. `snapshot.json` is the
+    /// record `begin` made of the original before anything moved.
+    static func recover(root: URL, named: String) throws -> EvalDataPreservation {
+        guard named.range(of: "^product-eval-backup-[0-9A-F-]{36}$", options: .regularExpression) != nil else {
+            throw fail("\(named) is not an eval backup name")
+        }
+        let backup = root.appendingPathComponent(named, isDirectory: true)
+        let original = try JSONDecoder().decode(
+            Snapshot.self, from: Data(contentsOf: backup.appendingPathComponent("snapshot.json")))
+        return EvalDataPreservation(root: root, backup: backup, original: original)
+    }
     func restoreAndVerify() throws -> Receipt {
         let savedProduct = backup.appendingPathComponent("product", isDirectory: true)
         guard try Data(contentsOf: backup.appendingPathComponent("snapshot.json")) == Self.encoded(original),
@@ -116,6 +128,8 @@ struct EvalDataPreservation {
         }
         // Retain the original until the restored copy and inventory are proven.
         let staged = backup.appendingPathComponent("restoring-product", isDirectory: true)
+        // An interrupted restore leaves its partial copy; the original beside it is intact.
+        if Self.fm.fileExists(atPath: staged.path) { try Self.fm.removeItem(at: staged) }
         try Self.fm.copyItem(at: savedProduct, to: staged)
         guard try Self.tree(staged) == original.product else { throw Self.fail("Staged product restore failed verification") }
         if Self.fm.fileExists(atPath: product.path) { try Self.fm.removeItem(at: product) }

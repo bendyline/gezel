@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AppToolRelayEvent } from '@bendyline/gezel';
+import { APP_TOOL_SURFACE_HEADER, type AppToolRelayEvent } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
@@ -57,13 +57,14 @@ afterAll(async () => {
 function api(
   method: string,
   path: string,
-  opts: { body?: unknown; token?: string } = {},
+  opts: { body?: unknown; token?: string; surface?: string } = {},
 ): Promise<Response> {
   return httpFetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
       ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      ...(opts.surface ? { [APP_TOOL_SURFACE_HEADER]: opts.surface } : {}),
     },
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
@@ -233,6 +234,49 @@ describe('/api/app-tools', () => {
       await api('DELETE', `/api/app-tools/relays/${relayId}`, { token: appToken });
     }
   }, 20_000);
+
+  it('offers surface-scoped tools to the thread whose latest message came through it', async () => {
+    const relayId = await openRelay();
+    const stream = await openStream(relayId);
+    try {
+      await stream.waitFor((event) => event.type === 'ready');
+      const registered = await api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
+        token: appToken,
+        body: { projectId: 'default', surfaceId: 'route-pane-surface', tools: [TOOL] },
+      });
+      expect(registered.status).toBe(200);
+      const [gezel] = await svc.context.store.listGezels();
+      if (!gezel) throw new Error('no gezel to chat with');
+      const session = await svc.context.chat.createSession({ gezelId: gezel.id });
+      const offered = () =>
+        svc.context.appToolRelays.listForSession({
+          projectId: 'default',
+          gezelId: gezel.id,
+          sessionId: session.id,
+        });
+      expect(offered()).toEqual([]);
+
+      const send = (surface?: string, route = 'send') =>
+        api('POST', `/api/sessions/${session.id}/${route}`, {
+          token: appToken,
+          body: { message: 'Hello.' },
+          ...(surface ? { surface } : {}),
+        });
+      expect((await send('route-pane-surface')).status).toBe(202);
+      expect(offered()).toHaveLength(1);
+      expect((await send()).status).toBe(202);
+      expect(offered()).toEqual([]);
+      expect((await send('route-pane-surface', 'interrupt')).status).toBe(202);
+      expect(offered()).toHaveLength(1);
+      // A malformed id is no surface at all.
+      expect((await send('no')).status).toBe(202);
+      expect(offered()).toEqual([]);
+    } finally {
+      await svc.context.chat.drainBackground();
+      stream.close();
+      await api('DELETE', `/api/app-tools/relays/${relayId}`, { token: appToken });
+    }
+  }, 30_000);
 
   it('refuses a session-scoped token outright', async () => {
     const record = svc.context.tokenStore.issueSession({

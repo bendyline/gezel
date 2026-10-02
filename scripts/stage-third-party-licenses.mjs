@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { verifyNoticeInventory } from './check-notice.mjs';
@@ -340,16 +341,33 @@ async function ensureElectronDistribution(electronRoot, version) {
   console.log(
     `[stage-third-party-licenses] Electron ${version} distribution is missing; downloading it for redistribution notices`,
   );
-  try {
-    await execFileP(process.execPath, [installer], {
-      cwd: electronRoot,
-      env: process.env,
-      maxBuffer: 16 * 1024 * 1024,
-      windowsHide: true,
-    });
-  } catch (error) {
-    const detail = error.stderr?.trim() || error.stdout?.trim() || error.message;
-    throw new Error(`failed to download Electron ${version}: ${detail}`);
+  // Every release build takes this path, and a single dropped connection to
+  // GitHub's release CDN ("TypeError: fetch failed") used to fail the whole
+  // platform job. Electron's installer is idempotent and only extracts after a
+  // checksum-verified download, so a retry never sees a half-written tree.
+  const backoffMs = [5_000, 15_000, 30_000];
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await execFileP(process.execPath, [installer], {
+        cwd: electronRoot,
+        env: process.env,
+        maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
+      });
+      break;
+    } catch (error) {
+      const detail = error.stderr?.trim() || error.stdout?.trim() || error.message;
+      if (attempt > backoffMs.length) {
+        throw new Error(
+          `failed to download Electron ${version} after ${attempt} attempts: ${detail}`,
+        );
+      }
+      const delay = backoffMs[attempt - 1];
+      console.warn(
+        `[stage-third-party-licenses] Electron ${version} download attempt ${attempt} failed (${detail.split('\n')[0]}); retrying in ${delay / 1000}s`,
+      );
+      await sleep(delay);
+    }
   }
   if (!existsSync(chromiumLicenses) || (await stat(chromiumLicenses)).size === 0) {
     throw new Error(

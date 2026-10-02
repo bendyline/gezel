@@ -295,8 +295,25 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             }
             var result: [String: Any] = ["models": models]
             if let selected = library.selectedModelId { result["selectedModelId"] = selected }
+            if let budget = self.memoryBudget() { result["memoryBudgetBytes"] = budget }
             return result
         }
+    }
+
+    /// What one model may use here: the process allowance plus what a loaded
+    /// model already holds. Settings hides catalog downloads that cannot fit
+    /// it, such as Gemma 4 E4B on a 6 GB iPhone. The simulator has no allowance.
+    private func memoryBudget() -> Int64? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
+        sizingLock.lock()
+        let heldPath = loadedPath, heldContext = loadedContextSize
+        sizingLock.unlock()
+        var available = Int64(os_proc_available_memory())
+        if let heldPath { available += max(0, allocation(path: heldPath, contextSize: heldContext)) }
+        return available > 0 ? available : nil
+        #endif
     }
 
     private func loadOptions(contextSize: Int) -> gezel_llama_load_options {

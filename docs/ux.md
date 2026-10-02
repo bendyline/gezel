@@ -339,6 +339,19 @@ foreground tasks through the shared views. Host capability flags identify
 operations that require the desktop daemon. Do not build a second mobile
 project/document UX to fill those gaps.
 Model setup belongs in Settings, with a compact link from an unconfigured chat.
+On a phone it is one model list. "On this device" holds downloaded models and the
+phone's own AI. "Download" holds the system model still to fetch and the catalog
+models that fit the device's memory, judged against the budget its runtime reports.
+Choosing a download starts it and selects the model when it lands. The list never
+says "import" or "GGUF": a model is named by its catalog name, or by its file name
+without the extension, and adding a file from Files is a separate key. The list
+is the app's own Select, not a native `<select>`: Android shows a web select as a
+system dialog at the system text size, radio column on the right, so model names
+wrapped and the list matched no other dropdown. A size sits beside its name in a
+row (`Select.Item`'s `trailing`), never in the closed control, and rows take the
+44px touch height. A download in progress and a removal confirmation are each a
+bordered card. Their keys, like the ones under the list, share a row equally and
+fall to one per row when two would not fit.
 
 The compact layout runs one notch denser than desktop on Android and in a narrow
 desktop window: `html[data-layout="mobile"]` sets the root to 87.5%, so the whole
@@ -352,7 +365,12 @@ Full-bleed views cancel that gutter with the same `--app-main-pad-block` /
 `--app-main-pad-inline` tokens, never with literal negative margins. A view
 that adds its own inset on top of the gutter drops it in compact, so every
 compact view's content edge lines up. Page-level panes, such as first-run
-setup, span that full width without a second indent. The compact title bar leads with the
+setup, span that full width without a second indent. Home's greeting band
+steps aside for the visit, without saving that, while the meester's
+introduction fills the empty conversation, just as it does once the person
+sends. Collapsed, it is one row at any width. The introduction reads from its
+top, because an empty timeline does not pin to the bottom. In compact, its
+figure sits beside the title only, so the openers get the full width. The compact title bar leads with the
 navigation button, left of the brand. The button stays while the navigation is
 open, pressed, and a second tap returns to the current view, so the brand never
 shifts. In the compact rail, the
@@ -361,10 +379,24 @@ with equal side margins. It has no tab bridge, because no content pane sits
 beside it to merge into. A choice with one option shows no tray. For example,
 Tasks hides its kind filter on a host without background work. In dark mode
 the native app paints its ground `--gezel-paper-night` (true black) to meet the
-phone's own system bars. Desktop windows, including narrow ones, keep the warm
-dark canvas. Native `<select>`s in the phone's model setup keep the system
-picker, but their closed control is recast like `.gz-select-trigger`, because
-Android's web view draws a dark-scheme select as a flat grey slab.
+phone's own system bars. The top safe-area inset is painted the title bar's
+sage on the app's root, not by the header, so the status bar and the title bar
+read as one green band even while the keyboard hides the header. The status
+bar's icons stay light in either theme (`SystemBars`, status bar only; the
+gesture bar sits on the page ground and keeps the system's choice). On iOS 26 and
+later the web view's scroll-edge effects are hidden (`MainViewController`):
+the system otherwise dims that band, and over a solid sage strip the dimming
+reads as a shadow hanging from the top of the screen. The band is no deeper
+than it needs to be: an iPhone's top inset runs about 11pt past its Dynamic
+Island, so iOS takes 9px off it and the header sits just under the island. An
+inset of 24pt or less (no cutout) is kept whole, and Android keeps its own. Until
+the shell mounts, the band also covers the header's row
+(`--app-compact-header-height`), so the title bar is whole from the first
+frame rather than gaining the header a few seconds into boot. The ground
+below it shows the bench in faint outline, a CSS mask in the first
+stylesheet: it fades in only after 400ms, so a quick start never flashes it,
+breathes slowly (not under reduced motion), and leaves when the shell mounts. Desktop
+windows, including narrow ones, keep the warm dark canvas.
 
 Interactive targets are at least 44px on touch input, which is
 `@media (any-pointer: coarse)` and never the window width alone. A narrow
@@ -378,9 +410,16 @@ tapped, and a secondary "Back to …" key above it. Side by side at phone width
 they left the editor about 70px wide. A chat whose only pane is Chat shows no
 pane tab row. A described tray stays one row on a phone, its keys sharing the
 width and wrapping their words, because the stem to its readout can only reach
-from the first row. The composer's keys, the Settings group chevrons, and the
-row action menus take the 44px hit area; the gezel header's Context and
-Sandbox chips do not yet.
+from the first row. In a compact layout Settings chooses its section from one dropdown beside
+its heading instead of a list, because a list in a short box above the form
+hid every section past the fourth. Sections under a group heading are
+indented in the dropdown's menu, a heading that only groups others is not an
+entry, and the sidebar-position choice is hidden, since the rail's side only
+shows in a wide window. The Settings dropdown and the row action menus take
+the 44px hit area. The composer's keys keep a 36px face and reach 44px through
+an invisible `::after` around it, since a 44px face turned the composer into a
+row of slabs; keys that do this stand at least 4px apart. The gezel header's
+Context and Sandbox chips do not take the hit area yet.
 The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search
@@ -1223,6 +1262,11 @@ added — and it is a near-miss of sage, so a resting chip painted with it
 reads as an off-token green sitting inches under the sage titlebar. If you
 find yourself writing `var(--sage, #somehex)`, pin the primitive
 (`--gezel-sage`) instead: a fallback is a token waiting to shift under you.
+
+**A status sits beside its heading.** A readiness pill or setup state goes in
+the same `.settings-card-header` row as the heading it reports on, at every
+level: a card's own header and a section header inside a card alike (Audio's
+speech engines). Under the heading, it read as the first line of the section.
 
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along

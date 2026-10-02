@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream, constants as fsConstants } from 'n
 import {
   access,
   copyFile,
+  cp,
   lstat,
   mkdir,
   readFile,
@@ -164,11 +165,10 @@ export async function cancelRestore(home: string, restoreId: string): Promise<vo
 }
 
 /**
- * Extract the chosen items into staging, then publish each one by renaming
- * it into place. An existing item is parked alongside first and only deleted
- * once its replacement has landed, so a failure mid-restore leaves the
- * original where it was rather than nothing at all. Shared documents are the
- * exception: they are merged in file by file, never swapped (see
+ * Extract the chosen items into staging, then publish each one. Additions
+ * reserve a new directory and refuse collisions. Explicit replacements park
+ * the existing item alongside until its replacement has landed, so a failed
+ * swap can put the original back. Shared documents merge file by file (see
  * {@link mergeDocuments}).
  */
 export async function runRestore(
@@ -186,7 +186,13 @@ export async function runRestore(
   // Refusing here rather than at the file layer keeps the rule in one place:
   // an existing item is replaced only when this request said so by name.
   for (const item of planned) {
-    if (item.conflict === 'exists' && chosen.get(`${item.kind}:${item.id}`) !== 'replace') {
+    const target = targetPathFor(deps, item.kind, item.id);
+    const liveConflict =
+      item.kind !== 'document-root' && target !== null && (await pathExists(target));
+    if (
+      (item.conflict === 'exists' || liveConflict) &&
+      chosen.get(`${item.kind}:${item.id}`) !== 'replace'
+    ) {
       jobs.finish(job.id, {
         error: `"${item.label}" already exists. Choose to replace it, or leave it out.`,
       });
@@ -223,7 +229,15 @@ export async function runRestore(
         const keepWorkspace =
           item.kind === 'project' &&
           (manifest.excludedWorkspaces === true || !(await pathExists(join(staged, 'workspace'))));
-        await publish(staged, target, keepWorkspace ? 'workspace' : undefined);
+        if (chosen.get(`${item.kind}:${item.id}`) === 'add') {
+          await publishAddition(
+            staged,
+            target,
+            item.kind === 'gezel' ? 'gezel.md' : 'project.json',
+          );
+        } else {
+          await publish(staged, target, keepWorkspace ? 'workspace' : undefined);
+        }
       }
       restored += 1;
       jobs.update(job.id, { itemsDone: restored, bytesDone: item.bytes });
@@ -263,6 +277,32 @@ function targetPathFor(
   return null; // settings files are merged, not swapped wholesale
 }
 
+/** Publish an addition without replacing an entity created since the review. */
+async function publishAddition(staged: string, target: string, metadata: string): Promise<void> {
+  await mkdir(dirname(target), { recursive: true });
+  try {
+    await mkdir(target);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`refusing to overwrite ${target}; it appeared after the restore review`);
+    }
+    throw err;
+  }
+  // Node has no portable create-only directory rename. Reserve the name, then
+  // publish files exclusively, with discoverable entity metadata last. Never
+  // remove the target on failure: another writer may have added work there.
+  const entries = await readdir(staged);
+  entries.sort((a, b) => Number(a === metadata) - Number(b === metadata));
+  for (const entry of entries) {
+    await cp(join(staged, entry), join(target, entry), {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      mode: fsConstants.COPYFILE_EXCL,
+    });
+  }
+}
+
 /**
  * Swap `staged` in for `target`. `keepLive` names a subtree of the item as it
  * stands here that survives the swap — a project's working files, when the
@@ -275,8 +315,8 @@ async function publish(staged: string, target: string, keepLive?: string): Promi
   try {
     await rename(target, parked);
     didPark = true;
-  } catch {
-    // Nothing there to park — a plain add.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   try {
     await rename(staged, target);

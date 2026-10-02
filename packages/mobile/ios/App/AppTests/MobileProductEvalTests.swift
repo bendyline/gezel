@@ -51,6 +51,36 @@ final class MobileProductEvalTests: XCTestCase {
             }
             throw NSError(domain: "MobileEval", code: 1, userInfo: [NSLocalizedDescriptionKey: "Packaged product did not initialize"])
         }
+        // A locked phone refuses every protected product file ("You don't
+        // have permission to save config.json"). A run that moved the product
+        // aside then could not restore it either, and left the person's data
+        // in a backup folder. Nothing moves until the phone is unlocked.
+        func awaitUnlocked(_ purpose: String, seconds: TimeInterval) async throws {
+            let deadline = Date().addingTimeInterval(seconds)
+            var announced = false
+            while !UIApplication.shared.isProtectedDataAvailable {
+                if !announced { stage("waiting-for-unlock \(purpose)"); announced = true }
+                if Date() >= deadline {
+                    throw NSError(domain: "MobileEval", code: 11, userInfo: [NSLocalizedDescriptionKey: "Unlock the phone to \(purpose); its files are unreadable while it is locked"])
+                }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        // The runtime refuses inference unless the app is the one on screen, so
+        // a trial started while the person is in another app is "blocked"
+        // before the model runs: r7 lost all seven trials that way in seconds.
+        func awaitForeground(_ purpose: String, seconds: TimeInterval) async throws {
+            let deadline = Date().addingTimeInterval(seconds)
+            var announced = false
+            while UIApplication.shared.applicationState != .active || !UIApplication.shared.isProtectedDataAvailable {
+                if !announced { stage("waiting-for-foreground \(purpose)"); announced = true }
+                if Date() >= deadline {
+                    throw NSError(domain: "MobileEval", code: 12, userInfo: [NSLocalizedDescriptionKey: "Bring Gezel back to the screen to \(purpose); on-device AI only runs in the foreground"])
+                }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        try await awaitUnlocked("start the eval", seconds: 600)
         stage("waiting-initial-app")
         try await waitForApp()
         stage("initial-app-ready")
@@ -71,6 +101,13 @@ final class MobileProductEvalTests: XCTestCase {
         // An operator who has looked inside a stale backup names it to discard
         // it. Nothing is discarded on its own: the backup exists so a killed
         // run cannot lose the person's product. devicectl cannot delete files.
+        // A stopped run's backup holds the person's own product; naming it
+        // restores it, verified against its snapshot, before this run begins.
+        let recovering = env["GEZEL_EVAL_RECOVER_BACKUP"]
+        if let named = recovering,
+           !fm.fileExists(atPath: root.appendingPathComponent(named).appendingPathComponent("snapshot.json").path) {
+            throw NSError(domain: "MobileEval", code: 10, userInfo: [NSLocalizedDescriptionKey: "\(named) is not an eval backup on this device"])
+        }
         if let named = env["GEZEL_EVAL_DISCARD_BACKUP"] {
             guard named.range(of: "^product-eval-backup-[0-9A-F-]{36}$", options: .regularExpression) != nil,
                   fm.fileExists(atPath: root.appendingPathComponent(named).appendingPathComponent("snapshot.json").path) else {
@@ -79,7 +116,7 @@ final class MobileProductEvalTests: XCTestCase {
             try fm.removeItem(at: root.appendingPathComponent(named, isDirectory: true))
         }
         let unresolved = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            .first { $0.lastPathComponent.hasPrefix("product-eval-backup-") || $0.lastPathComponent.hasPrefix("product-smoke-backup-") }
+            .first { ($0.lastPathComponent.hasPrefix("product-eval-backup-") || $0.lastPathComponent.hasPrefix("product-smoke-backup-")) && $0.lastPathComponent != recovering }
         guard unresolved == nil else {
             throw NSError(domain: "MobileEval", code: 8, userInfo: [NSLocalizedDescriptionKey: "Recover the preserved product backup before another eval: \(unresolved!.path)"])
         }
@@ -132,6 +169,10 @@ final class MobileProductEvalTests: XCTestCase {
         }
         stage("isolating-product")
         try await unloadProduct()
+        if let named = recovering {
+            let receipt = try EvalDataPreservation.recover(root: root, named: named).restoreAndVerify()
+            stage("recovered-backup \(named) files=\(receipt.productFiles) inventory=\(receipt.modelInventoryFiles)")
+        }
         // Preservation covers the app-owned tree only. With iCloud attached,
         // trials would write test projects into the person's real Gezel folder,
         // so the eval runs without it and the reloaded product sees one tree.
@@ -147,6 +188,7 @@ final class MobileProductEvalTests: XCTestCase {
             do {
                 // A failed native drain is not permission to replace live files.
                 try await unloadProduct()
+                try await awaitUnlocked("restore the original product", seconds: 1800)
                 if let importedModel { try? fm.removeItem(at: importedModel) }
                 view.stopLoading()
                 view.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -278,7 +320,8 @@ final class MobileProductEvalTests: XCTestCase {
             let cooldownMs = Int(env["GEZEL_EVAL_COOLDOWN_MS"] ?? "0") ?? 0
             for scenario in options["scenarios"] as? [String] ?? defaults {
                 try await Self.coolDown(maxMs: cooldownMs, stage: stage)
-                stage("isolated-trial \(scenario)")
+                try await awaitForeground("run \(scenario)", seconds: 1800)
+                stage("isolated-trial \(scenario) appState=\(UIApplication.shared.applicationState.rawValue)")
                 try await resetProduct()
                 var phaseOptions = options
                 phaseOptions["scenarios"] = [scenario]

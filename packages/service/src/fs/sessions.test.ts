@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatSession } from '@bendyline/gezel';
@@ -677,5 +677,51 @@ describe('Store session CRUD', () => {
     expect(summary?.lastMessagePreview).toBe('The latest reply is ready.');
     expect(summary?.involvedGezelIds).toEqual(['ada', 'reviewer']);
     expect((summary as Record<string, unknown>).messages).toBeUndefined();
+  });
+});
+
+describe('Store session listings reuse unchanged summaries', () => {
+  it('sees a rewrite through writeSession and an edit made outside gezel', async () => {
+    await store.writeSession(sessionFixture({ id: 'cached', title: 'First' }));
+    expect((await store.listSessions()).map((s) => s.title)).toEqual(['First']);
+
+    await store.writeSession(sessionFixture({ id: 'cached', title: 'Second', archived: true }));
+    const [rewritten] = await store.listSessions();
+    expect(rewritten?.title).toBe('Second');
+    expect(rewritten?.archived).toBe(true);
+
+    const file = join(home, 'gezels', 'ada', 'sessions', 'cached.json');
+    await writeFile(
+      file,
+      `${JSON.stringify(sessionFixture({ id: 'cached', title: 'Edited by hand, longer' }))}\n`,
+    );
+    expect((await store.listSessions()).map((s) => s.title)).toEqual(['Edited by hand, longer']);
+
+    await rm(file);
+    expect(await store.listSessions()).toEqual([]);
+  });
+
+  it('scopes a timeline without losing sessions that moved project', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'mover',
+        projectId: 'default',
+        messages: [{ role: 'user', content: 'in default', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    expect((await store.listTimeline({ projectId: 'default', limit: 50 })).messages).toHaveLength(
+      1,
+    );
+
+    await store.writeSession(
+      sessionFixture({
+        id: 'mover',
+        projectId: 'elsewhere',
+        messages: [{ role: 'user', content: 'moved', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    expect((await store.listTimeline({ projectId: 'default', limit: 50 })).messages).toEqual([]);
+    const moved = await store.listTimeline({ projectId: 'elsewhere', limit: 50 });
+    expect(moved.messages.map((m) => m.content)).toEqual(['moved']);
   });
 });

@@ -29,6 +29,7 @@ export function MeesterConversation({
   meesterIconOverride,
   emptyPlaceholder,
   onTurnStarted,
+  onIntroductionShown,
 }: {
   meesterGezelId: string;
   meesterName: string;
@@ -38,6 +39,8 @@ export function MeesterConversation({
   emptyPlaceholder?: string;
   /** The person sent a message from here. */
   onTurnStarted?: () => void;
+  /** The meester's introduction fills the empty conversation. */
+  onIntroductionShown?: () => void;
 }) {
   // Home is swapped out wholesale when the user opens any other area, so this
   // component's local state cannot be the whole record of where they were.
@@ -173,6 +176,7 @@ export function MeesterConversation({
                     meesterPoppetje={meesterPoppetje}
                     meesterIconOverride={meesterIconOverride}
                     projectId={projectId}
+                    onShown={onIntroductionShown}
                   />
                 ) : undefined
               }

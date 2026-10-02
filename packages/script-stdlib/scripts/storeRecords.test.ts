@@ -108,10 +108,11 @@ beforeEach(() => {
   h.reset();
 });
 
+// The file each action names, so a caller never has to guess the layout.
 describe.each([
-  ['folder-per-record', folder],
-  ['single-file', single],
-] as const)('storeRecords crud (%s)', (_mode, scoped) => {
+  ['folder-per-record', folder, 'crm/members/ada-lovelace/record.json', null],
+  ['single-file', single, 'crm/members.json', 'crm/members.json'],
+] as const)('storeRecords crud (%s)', (_mode, scoped, recordFile, deletedFrom) => {
   it('creates, gets, updates, deletes, and lists records', async () => {
     const created = await run(
       scoped({ action: 'create', fields: { slug: 'Ada Lovelace', role: 'engineer' } }),
@@ -123,6 +124,7 @@ describe.each([
       action: 'create',
       id: 'ada-lovelace',
       record: { id: 'ada-lovelace', slug: 'Ada Lovelace', role: 'engineer' },
+      file: recordFile,
     });
 
     expect(await run(scoped({ action: 'get', id: 'ada-lovelace' }))).toEqual({
@@ -132,6 +134,7 @@ describe.each([
       action: 'get',
       id: 'ada-lovelace',
       record: { id: 'ada-lovelace', slug: 'Ada Lovelace', role: 'engineer' },
+      file: recordFile,
     });
 
     const updated = await run(
@@ -144,6 +147,7 @@ describe.each([
       action: 'update',
       id: 'ada-lovelace',
       record: { id: 'ada-lovelace', slug: 'Ada Lovelace', role: 'chief', level: 3 },
+      file: recordFile,
     });
 
     await run(scoped({ action: 'create', fields: { title: 'Zeb' } }));
@@ -161,6 +165,7 @@ describe.each([
       ok: true,
       action: 'delete',
       id: 'zeb',
+      file: deletedFrom,
     });
     await expect(run(scoped({ action: 'get', id: 'zeb' }))).rejects.toThrow(/No record 'zeb'/);
     expect((await run(scoped({ action: 'list' }))).total).toBe(1);
@@ -270,11 +275,27 @@ describe('storeRecords folder-per-record layout', () => {
       action: 'list',
       records: [],
       total: 0,
+      file: null,
     });
   });
 });
 
 describe('storeRecords single-file layout', () => {
+  it('takes a root named by its file as the same store', async () => {
+    await run({
+      root: 'crm/members.json',
+      mode: 'single-file',
+      action: 'create',
+      id: 'ada',
+      fields: {},
+    });
+    expect(h.files.has('crm/members.json')).toBe(true);
+    expect(h.files.has('crm/members.json.json')).toBe(false);
+    await expect(
+      run({ root: 'crm/members', mode: 'single-file', action: 'create', id: 'ada', fields: {} }),
+    ).rejects.toThrow('already exists in crm/members.json. Use action "update" to change it.');
+  });
+
   it('keeps every record in <root>.json, pretty-printed with a trailing newline', async () => {
     await run(single({ action: 'create', id: 'ada', fields: { name: 'Ada' } }));
     const raw = h.files.get('crm/members.json');

@@ -124,7 +124,7 @@ import type {
 } from './provider-contract.js';
 import { runOnLiveProvider } from './provider-disposal.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
-import { RambleDetector } from './ramble-detector.js';
+import { RambleDetector, inertRambleDetector, outputIsConstrained } from './ramble-detector.js';
 import {
   applyLlamaCppReasoningBudgetOverride,
   buildThinkingBudgetCorrective,
@@ -3802,27 +3802,29 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           this.deps.profile,
           'turn.ramble-detection',
         );
-        const ramble = rambleConfig
-          ? new RambleDetector({
-              threshold: rambleConfig.coldThreshold,
-              postActionThreshold: rambleConfig.postActionThreshold,
-              enabled: true,
-              // Models that leak untagged reasoning narrate their plan
-              // in the open before acting; give the cold cap room to
-              // reach the tool call. Prefer the profile opt-in, but also
-              // honor the model-id family signal so a verbose family whose
-              // profile is missing `turn.preamble-folding` (config drift)
-              // still gets the leaky budget instead of the tight 6k cap.
-              leakyReasoning:
-                profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
-                leaksUntaggedReasoning(this.deps.model),
-            })
-          : // No length-cap opt-in for this model, but the repetition
-            // guard is safe to run on any local model (it fires only on
-            // degenerate low-novelty loops, never on legitimate prose) —
-            // it is the sole protection a non-verbose model like ds4 gets
-            // against a runaway repetition loop. See RambleDetector.
-            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
+        const ramble = outputIsConstrained(this.deps.tuning)
+          ? inertRambleDetector()
+          : rambleConfig
+            ? new RambleDetector({
+                threshold: rambleConfig.coldThreshold,
+                postActionThreshold: rambleConfig.postActionThreshold,
+                enabled: true,
+                // Models that leak untagged reasoning narrate their plan
+                // in the open before acting; give the cold cap room to
+                // reach the tool call. Prefer the profile opt-in, but also
+                // honor the model-id family signal so a verbose family whose
+                // profile is missing `turn.preamble-folding` (config drift)
+                // still gets the leaky budget instead of the tight 6k cap.
+                leakyReasoning:
+                  profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
+                  leaksUntaggedReasoning(this.deps.model),
+              })
+            : // No length-cap opt-in for this model, but the repetition
+              // guard is safe to run on any local model (it fires only on
+              // degenerate low-novelty loops, never on legitimate prose) —
+              // it is the sole protection a non-verbose model like ds4 gets
+              // against a runaway repetition loop. See RambleDetector.
+              new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.

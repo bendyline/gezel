@@ -62,11 +62,58 @@ describe('portableToolResultText', () => {
       store,
       session,
       'write_artifact',
-      { path: 'tasks/1/note.md' },
-      { path: 'tasks/1/note.md', written: true },
+      { path: 'tasks/1/draft.md' },
+      { path: 'tasks/1/draft.md', written: true },
     );
     expect(rendered?.text).toMatch(
-      /^Wrote tasks\/1\/note\.md\nThis step uses automatic completion checks\./,
+      /^Wrote tasks\/1\/draft\.md\nThis step uses automatic completion checks\./,
+    );
+    const checked = await portableToolResultText(
+      store,
+      session,
+      'write_artifact',
+      { path: 'artifacts/tasks/1/note.md' },
+      { path: 'tasks/1/note.md', written: true },
+    );
+    expect(checked?.text).toMatch(
+      /^Wrote artifacts\/tasks\/1\/note\.md\nThis step uses automatic completion checks\./,
+    );
+  });
+
+  // The iPhone gated-task: the model saved the checked file, then rewrote it
+  // until its loop guard fired instead of submitting the step.
+  it('tells a manually gated step to submit once the checked file is saved', async () => {
+    const { store } = await fixture();
+    const gezel = await store.createGezel({ name: 'Ines', role: 'Generalist' });
+    const task = await store.createTask('default', {
+      title: 'Prepare repair handover',
+      description: 'Create a repair handover artifact recording who owns the repair cabinet.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [
+        {
+          id: 'write',
+          name: 'Write handover',
+          prompt: 'Write handover.md in the artifacts. Then complete this task step.',
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'handover.md', artifact: true, bytes: 40 }],
+          },
+        },
+      ],
+    });
+    const session = await store.createSession({
+      gezelId: gezel.id,
+      providerName: 'llama-cpp',
+      taskRef: task.ref,
+      stepId: 'write',
+    });
+    const save = (path: string) =>
+      portableToolResultText(store, session, 'write_artifact', { path }, { path, written: true });
+    expect((await save('handover.md'))?.text).toBe(
+      "Wrote handover.md\nThis is the file the step's completion checks read. If it is complete, call advance_task_step now to submit the step; saving it again changes nothing.",
+    );
+    expect((await save('tasks/2/handover.md'))?.text).toMatch(
+      /^Wrote tasks\/2\/handover\.md\nSaving an artifact does not complete the task step\./,
     );
   });
 

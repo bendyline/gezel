@@ -1,3 +1,4 @@
+import { normalizeArtifactPath } from '../path-rules.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
 /**
  * The text a model reads back from a gezel tool, shared by the desktop MCP
@@ -12,7 +13,8 @@ import {
   type WorkspaceReadFileError,
   type WorkspaceReadFileSuccess,
 } from '../schemas/api.js';
-import type { Task, TaskNote } from '../schemas/task.js';
+import { normalizeStepGate } from '../schemas/gate.js';
+import type { Task, TaskCraftbookStep, TaskNote } from '../schemas/task.js';
 import { isOwnerStep } from '../task-execution.js';
 import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 
@@ -308,9 +310,44 @@ export function stepCompletionMode(
   return step.advanceWhen ? 'automatic' : 'manual';
 }
 
-/** What saving an artifact means for the active step, appended to `write_artifact`. */
-export function artifactCompletionHint(mode: StepCompletionMode | undefined): string {
+/**
+ * The artifact files an active step's completion checks read, artifact-relative.
+ * A save that lands on one of them is the step's deliverable.
+ */
+export function stepCheckedArtifactPaths(
+  step: Pick<TaskCraftbookStep, 'gate' | 'advanceWhen'> | undefined,
+): string[] {
+  if (!step) return [];
+  const paths = new Set<string>();
+  for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
+    const file = (check as { file?: unknown }).file;
+    if (
+      (check as { artifact?: boolean }).artifact === true &&
+      typeof file === 'string' &&
+      file &&
+      !file.includes('*')
+    )
+      paths.add(normalizeArtifactPath(file));
+  }
+  if (step.advanceWhen?.artifact === true && step.advanceWhen.file)
+    paths.add(normalizeArtifactPath(step.advanceWhen.file));
+  return [...paths];
+}
+
+/**
+ * What saving an artifact means for the active step, appended to `write_artifact`.
+ * `checkedByStep` marks a save onto a file a manual step's checks read: on
+ * the iPhone a 2B model saved exactly that file and then rewrote it until its
+ * loop guard fired, never submitting the step the generic line told it to. An
+ * automatic step needs no change: its line already says to stop.
+ */
+export function artifactCompletionHint(
+  mode: StepCompletionMode | undefined,
+  options: { checkedByStep?: boolean } = {},
+): string {
   if (mode === undefined) return '';
+  if (options.checkedByStep && mode === 'manual')
+    return "\nThis is the file the step's completion checks read. If it is complete, call advance_task_step now to submit the step; saving it again changes nothing.";
   if (mode === 'automatic')
     return '\nThis step uses automatic completion checks. Finish its required deliverable and stop; the runtime will run its completion gate. Saving does not approve the work. If the gate rejects it, repair the named problems and save the complete deliverable again.';
   if (mode === 'manual')
@@ -331,6 +368,47 @@ export function listDirText(files: readonly ListedEntry[]): string {
     ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
     : 'Empty directory.';
   return listing ? `${summary}\n${listing}` : summary;
+}
+
+/**
+ * A `list_dir` path that is not a folder. Answering "Empty directory." for a
+ * folder that does not exist sent a 2B model on the iPhone looking for
+ * `repairs/` five times, when the store it had just written was
+ * `repairs.json`, until the loop guard ended the turn.
+ */
+export function listDirMissingText(
+  path: string,
+  found: 'missing' | 'file',
+  nearby: readonly string[] = [],
+): string {
+  if (found === 'file') return `\`${path}\` is a file, not a folder. Read the file instead.`;
+  const near = nearby.length ? ` Did you mean ${nearby.map((p) => `\`${p}\``).join(' or ')}?` : '';
+  return `No folder or file exists at \`${path}\`.${near}`;
+}
+
+/**
+ * Entries beside a missing path that the caller probably meant: the same
+ * name in another case, or the name with an extension (`repairs` →
+ * `repairs.json`). Paths are returned relative to the same root as `path`.
+ */
+export function nearbyPathMatches(
+  path: string,
+  siblings: readonly { name: string }[],
+  limit = 3,
+): string[] {
+  const slash = path.lastIndexOf('/');
+  const parent = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const base = path.slice(slash + 1).toLowerCase();
+  if (!base) return [];
+  const stem = (name: string) => name.replace(/\.[^.]+$/, '');
+  return siblings
+    .map((entry) => entry.name)
+    .filter((name) => {
+      const lower = name.toLowerCase();
+      return lower === base || lower.startsWith(`${base}.`) || stem(lower) === stem(base);
+    })
+    .slice(0, limit)
+    .map((name) => `${parent}${name}`);
 }
 
 export function listArtifactsText(
@@ -498,7 +576,10 @@ export function createTaskText(
     : created.craftbook.steps.length > 0 &&
         assigneeGezelId &&
         assigneeGezelId !== options.callerGezelId
-      ? `\n\n${assigneeGezelId} has NOT been engaged. Prefer \`dispatch: true\` on create_task so the assignee starts in a task-scoped session with the step contract in-prompt. For this already-created task, call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }) to brief them.`
+      ? // The action leads: Gemma 4 E4B on a phone wrote a task note after the
+        // older "Prefer dispatch… For this task, call message_gezel" wording,
+        // and the assignee never ran (Galaxy S26, 2026-10-02).
+        `\n\nNext: call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }). ${assigneeGezelId} has not been told about this task and will not start it until you do. (\`dispatch: true\` on create_task starts the assignee directly next time.)`
       : '';
   return `Created ${created.ref} — "${created.title}" with ${created.craftbook.steps.length} step(s).${spawnNote}${fanoutNote}${kickoff}`;
 }
@@ -509,7 +590,40 @@ export function createTaskText(
 export const ASK_USER_QUESTION_EMPTY_TEXT =
   'ask_user_question needs a non-empty `question` string — that\'s the actual question to show the user. Retry this tool call with `question: "..."`.';
 
-export function askUserQuestionText(questionId: string, deduplicated: boolean): string {
+/**
+ * A crew member a question card names, other than the gezel asking. "Ask your
+ * colleague to read crew-brief.md" sent a 2B model to `ask_user_question` in
+ * every crew-handoff trial on two phones (2026-10-01): the card reached the
+ * person using the app, never the colleague.
+ */
+export function crewMemberNamedIn(
+  text: string,
+  crew: readonly { id: string; name: string }[],
+  selfId: string | undefined,
+): { id: string; name: string } | undefined {
+  const names = (value: string) => {
+    const word = value.trim();
+    if (word.length < 2) return false;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\p{L}\\p{N}_-])${escaped}($|[^\\p{L}\\p{N}_-])`, 'iu').test(text);
+  };
+  return crew.find((member) => member.id !== selfId && (names(member.id) || names(member.name)));
+}
+
+export function askUserQuestionText(
+  questionId: string,
+  deduplicated: boolean,
+  colleague?: { id: string; name: string },
+): string {
+  return askUserQuestionBody(questionId, deduplicated) + colleagueNote(colleague);
+}
+
+function colleagueNote(colleague: { id: string; name: string } | undefined): string {
+  if (!colleague) return '';
+  return `\n\nThis card goes to the person using the app, not to ${colleague.name}. To give ${colleague.name} the work, use \`message_gezel\` with to: ${JSON.stringify(colleague.id)} once the answer arrives.`;
+}
+
+function askUserQuestionBody(questionId: string, deduplicated: boolean): string {
   if (deduplicated)
     return `[STOP — a question is ALREADY waiting for the user]\n\nYou asked the user a question on an earlier turn (id ${questionId}) and they haven't answered it yet, so this new question was NOT posted — re-asking a reworded version would only stack duplicate cards. Do NOT rephrase and ask again. **END YOUR TURN now** and wait; their answer arrives as the next user message starting with "[Answer to: …]". If the work can proceed without that answer, take a concrete action (route, hand off, or build) instead of asking.`;
   return `[STOP — question card is now in front of the user]\n\nThe runtime posted the card (id ${questionId}). The user sees it in chat, on the Home panel, and as a badge. **END YOUR TURN HERE** — do NOT emit a follow-up assistant message, a "thanks for waiting" sentence, or another \`ask_user_question\` call. Any further text or tool calls this turn are runtime-suppressed and never reach the user; the card is the message. Their answer will arrive as the next user message starting with "[Answer to: …]" — your turn fires again then.`;
@@ -654,28 +768,53 @@ export function getScriptRunText(run: { id: string; status: string }): string {
 }
 
 /** `list_scripts`: project scripts, then the read-only standard library and its scope. */
+/**
+ * The scripts a gezel can run. Actions lead and spell out choice values; the
+ * gate checks, which serve craftbook completion gates, follow as one line each.
+ * Listed in catalogue order with full detail, the one action a chat turn
+ * needed (`storeRecords`) sat eleventh of twelve behind ten gates, a 2B model
+ * on the Galaxy S26 called it missing, and every run's first call guessed
+ * `mode` because a choice input showed only "choice" (2026-10-01).
+ */
 export function listScriptsText(
   project: readonly ListedScript[],
   standard: readonly ListedScript[],
 ): string {
-  const fmt = (s: ListedScript) => {
-    const inputs = s.meta.inputs
+  const inputList = (s: ListedScript) =>
+    s.meta.inputs
       ? Object.entries(s.meta.inputs)
-          .map(([k, f]) => `${k}: ${f.type}${f.required ? '' : '?'}`)
+          .map(([k, f]) => {
+            const type =
+              f.type === 'choice' && f.options?.length
+                ? f.options.map((option) => option.value).join('|')
+                : f.type;
+            return `${k}: ${type}${f.required ? '' : '?'}`;
+          })
           .join(', ')
       : '—';
+  const full = (s: ListedScript) => {
     const requires = s.meta.requires?.length ? s.meta.requires.join(', ') : '—';
-    return `• ${s.name} — ${s.meta.description}\n    inputs: ${inputs}\n    requires: ${requires}`;
+    return `• ${s.name} — ${s.meta.description}\n    inputs: ${inputList(s)}\n    requires: ${requires}`;
   };
+  const compact = (s: ListedScript) =>
+    `• ${s.name}(${inputList(s)}) — ${s.meta.description.replace(/^Gate:\s*/i, '')}`;
+  const isGate = (s: ListedScript) => s.meta.kind === 'gate';
+  const actions = standard.filter((s) => !isGate(s));
+  const gates = standard.filter(isGate);
   const sections: string[] = [];
   sections.push(
     project.length
-      ? `## Project scripts\n${project.map(fmt).join('\n')}`
+      ? `## Project scripts\n${project.map(full).join('\n')}`
       : 'No project scripts yet.',
   );
-  if (standard.length) {
+  if (actions.length) {
     sections.push(
-      `## Standard library (read-only, scope: "standard")\n${standard.map(fmt).join('\n')}`,
+      `## Standard actions (read-only, scope: "standard")\n${actions.map(full).join('\n')}`,
+    );
+  }
+  if (gates.length) {
+    sections.push(
+      `## Standard gate checks (read-only, scope: "standard"), for craftbook completion gates\n${gates.map(compact).join('\n')}`,
     );
   }
   const count = project.length + standard.length;
@@ -687,7 +826,11 @@ interface ListedScript {
   name: string;
   meta: {
     description: string;
-    inputs?: Record<string, { type: string; required?: boolean }>;
+    kind?: string;
+    inputs?: Record<
+      string,
+      { type: string; required?: boolean; options?: readonly { value: string }[] }
+    >;
     requires?: readonly string[];
   };
 }

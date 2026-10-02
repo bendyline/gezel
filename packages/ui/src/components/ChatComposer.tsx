@@ -42,7 +42,11 @@ import {
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
 import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
-import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
+import {
+  COMPOSER_PREFILL_EVENT,
+  mergeComposerPrefill,
+  takeComposerPrefill,
+} from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
 import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
@@ -495,8 +499,8 @@ export function ChatComposer({
     // behavior: when the composer already has text, append the payload
     // below it (blank-line separated); when it's empty, the payload
     // becomes the whole draft.
-    const existing = draftRef.current.trim();
-    const merged = existing ? `${existing}\n\n${queued}` : queued;
+    const merged = mergeComposerPrefill(draftRef.current, queued);
+    if (merged === null) return;
     draftRef.current = merged;
     draftUpdateRef.current(merged);
     draftEditVersionRef.current += 1;

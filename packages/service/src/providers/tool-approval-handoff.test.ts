@@ -133,6 +133,8 @@ describe('command approval handoff', () => {
       (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
         isEmpty: () => false,
         hasTool: () => true,
+        hasCallableRestriction: () => false,
+        isRestrictedFromCalling: () => false,
         getOpenAITools: () => [
           {
             type: 'function',

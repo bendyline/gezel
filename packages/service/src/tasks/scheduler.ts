@@ -20,6 +20,7 @@ import {
 import type { ChatManager } from '../chat/manager.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import {
   buildPlateauDiagnosisNote,
   buildStageOneNudge,
@@ -199,6 +200,7 @@ export class TaskScheduler {
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    const endPerfWork = beginPerfWork('scheduler tick');
     try {
       await this.tickCrons();
       // Re-drive (or auto-advance) silently-stalled task steps BEFORE the
@@ -209,6 +211,7 @@ export class TaskScheduler {
       await this.sweepStuckSteps();
       await this.sweepProjectNudges();
     } finally {
+      endPerfWork();
       this.running = false;
     }
   }

@@ -124,13 +124,30 @@ export function safeJoin(base: string, relPath: string): string | null {
  * Returns true if the real path is inside the real base, false
  * otherwise. The caller should treat false as "refuse the op."
  */
-export async function realpathContained(base: string, fullPath: string): Promise<boolean> {
-  const realBase = await realpathSafe(base);
+export async function realpathContained(
+  base: string,
+  fullPath: string,
+  opts?: { allowMissingBase?: boolean },
+): Promise<boolean> {
+  const realBase = opts?.allowMissingBase ? await realpathNearest(base) : await realpathSafe(base);
   if (!realBase) return false;
   const realTarget = await realpathNearest(fullPath);
   if (!realTarget) return false;
   if (pathEq(realTarget, realBase)) return true;
   return pathStartsWithDir(realTarget, realBase);
+}
+
+/** Mutation roots can be created lazily, but their existing ancestors must still contain the write. */
+export async function resolveMutationPath(base: string, relPath: string): Promise<string> {
+  const full = safeJoin(base, relPath);
+  if (!full) throw new PathSafetyError('path traversal blocked', 'path-traversal');
+  if (pathEq(full, normalize(base))) {
+    throw new PathSafetyError('the root folder cannot be mutated', 'empty-path');
+  }
+  if (!(await realpathContained(base, full, { allowMissingBase: true }))) {
+    throw new PathSafetyError(`symlink escape detected for ${relPath}`, 'symlink-escape');
+  }
+  return full;
 }
 
 /**

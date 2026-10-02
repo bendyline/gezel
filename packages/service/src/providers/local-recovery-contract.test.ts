@@ -69,6 +69,8 @@ describe.each([
       isEmpty: () => false,
       getOpenAITools: () => definitions,
       hasTool: (name: string) => names.includes(name),
+      hasCallableRestriction: () => false,
+      isRestrictedFromCalling: () => false,
       callTool: execute,
       stop: async () => {},
     };

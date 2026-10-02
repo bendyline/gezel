@@ -47,7 +47,29 @@ describe('UnresolvedToolFailureLedger', () => {
     expect(reason).toContain('EARLIER attempt does not satisfy this step');
     // Both legal exits are spelled out, so the model is not left stuck.
     expect(reason).toContain('Fix the failing call');
-    expect(reason).toContain('paused');
+    expect(reason).toContain('record the blocker with `write_task_note`');
+    expect(reason).toContain('end your turn');
+    // Never steer a step session to pause itself: it cannot resume its own
+    // paused task, and advance_task_step refuses a paused one.
+    expect(reason).not.toContain('set_task_status');
+    expect(reason).not.toMatch(/\bpause/i);
+  });
+
+  it('names the note tool only when the session can call it', () => {
+    const noNotes = new UnresolvedToolFailureLedger({
+      hasTool: (name) => name !== 'write_task_note',
+    });
+    noNotes.record('convert_document', CONVERT_REJECTION, true);
+    noNotes.record('convert_document', CONVERT_REJECTION, true);
+    const reason = noNotes.blockReason('advance_task_step');
+    expect(reason).not.toContain('write_task_note');
+    expect(reason).toContain('state the blocker in your reply');
+    expect(reason).toContain('end your turn');
+
+    const withNotes = new UnresolvedToolFailureLedger({ hasTool: () => true });
+    withNotes.record('convert_document', CONVERT_REJECTION, true);
+    withNotes.record('convert_document', CONVERT_REJECTION, true);
+    expect(withNotes.blockReason('advance_task_step')).toContain('`write_task_note`');
   });
 
   it('unblocks as soon as the tool actually succeeds', () => {
@@ -88,7 +110,7 @@ describe('UnresolvedToolFailureLedger', () => {
     ledger.record('convert_document', CONVERT_REJECTION, true);
     ledger.record('convert_document', CONVERT_REJECTION, true);
     // A gezel that cannot make a tool work must still be able to explain
-    // itself and pause. Blocking these would leave it no legal move.
+    // itself, and the user or a coordinator must still be able to pause.
     expect(ledger.blockReason('write_task_note')).toBeNull();
     expect(ledger.blockReason('set_task_status')).toBeNull();
     expect(ledger.blockReason('read_task_notes')).toBeNull();

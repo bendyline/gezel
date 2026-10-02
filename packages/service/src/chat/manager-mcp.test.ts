@@ -190,8 +190,10 @@ beforeEach(async () => {
   // These tests exercise bridge plumbing — that a scripted tool call
   // actually fires through the MCP bridge — not role-based tool gating.
   // Disable the role filter so a Developer gezel can drive tools from the
-  // documents / team-management / images groups (write_document,
-  // create_gezel, generate_image) that the Developer role trims by default.
+  // documents / images groups (write_document, generate_image) that the
+  // Developer role trims by default. Coordinator-only tools (create_gezel,
+  // message_gezel, invoke_craftbook) stay off a worker in every mode — its
+  // session token cannot reach their routes — so those tests use a Planner.
   // 'provider' pins the injected mock: without it, routing falls through to
   // the platform default (an on-device engine) and the mock is never reached.
   await store.writeConfig({ provider: 'copilot', toolFilterMode: 'never' });
@@ -521,7 +523,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
   }, 30_000);
 
   it('can script create_gezel (meester-style) and the new gezel appears on disk', async () => {
-    const session = await manager.createSession({ gezelId: 'ada' });
+    const lead = await store.createGezel({ name: 'Pia', role: 'Planner' });
+    const session = await manager.createSession({ gezelId: lead.id });
 
     mock.scriptToolCalls([
       {
@@ -681,7 +684,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
 
   it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
-    const session = await manager.createSession({ gezelId: 'ada' });
+    const lead = await store.createGezel({ name: 'Pia', role: 'Planner' });
+    const session = await manager.createSession({ gezelId: lead.id });
 
     mock.scriptToolCalls([
       {
@@ -880,7 +884,8 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         runtime: docblocks.manifest.runtime,
       },
     ]);
-    const session = await manager.createSession({ gezelId: 'ada' });
+    const lead = await store.createGezel({ name: 'Pia', role: 'Planner' });
+    const session = await manager.createSession({ gezelId: lead.id });
 
     mock.scriptToolCalls([
       {
@@ -928,7 +933,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('start_project');
     expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('message_gezel');
 
-    const disk = await store.getSession('ada', session.id);
+    const disk = await store.getSession(lead.id, session.id);
     const assistantText = disk?.messages
       .filter((message) => message.role === 'assistant')
       .map((message) => message.content)
@@ -955,7 +960,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(invokeEvent.card.steps.map((step) => step.id)).toEqual(
       launched?.craftbook.steps.map((step) => step.id),
     );
-    const persistedInvoke = (await store.getSession('ada', session.id))?.messages
+    const persistedInvoke = (await store.getSession(lead.id, session.id))?.messages
       .flatMap((message) => message.toolCalls ?? [])
       .find((call) => call.name === 'invoke_craftbook');
     expect(persistedInvoke?.card).toEqual(invokeEvent.card);

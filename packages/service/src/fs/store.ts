@@ -494,6 +494,18 @@ export class Store {
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new KeyedLock();
   private readonly boekwachterIssueLocks = new KeyedLock();
+  /**
+   * Summary of every session file the listings have read, trusted only while
+   * the file's mtime, size and inode are unchanged. `listSessions`, the
+   * poisoned-project poll and every project timeline walk ALL session files in
+   * the home, and each walk used to parse and schema-check every transcript:
+   * ~110 ms per call for 300 sessions (9 MB), four calls per project-chat
+   * mount. The identity check means an edit from outside gezel is still seen.
+   */
+  private readonly sessionScanCache = new Map<
+    string,
+    { mtimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
+  >();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -4861,7 +4873,7 @@ export class Store {
     filePath: string,
     content: string,
     ctx?: JournalContext,
-    opts?: { userInitiated?: boolean },
+    opts?: { userInitiated?: boolean; createOnly?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
@@ -4871,7 +4883,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
-    await writeFileAtomic(full, content);
+    await writeFileAtomic(full, content, { noReplace: opts?.createOnly });
     await appendJournalEntry(this.home, id, 'write', filePath, { content, ctx });
     await this.history?.log({
       kind: 'workspace.write',
@@ -5500,6 +5512,42 @@ export class Store {
     return result.data;
   }
 
+  /**
+   * A session file's summary, from {@link sessionScanCache} when the file is
+   * unchanged. `session` is set only when this call had to parse the file, so
+   * a caller that needs the transcript does not read it twice.
+   */
+  private async scanSessionFile(
+    path: string,
+    label: string,
+  ): Promise<{ summary: ChatSessionSummary; session: ChatSession | null } | null> {
+    let identity: { mtimeMs: number; size: number; ino: number };
+    try {
+      const st = await stat(path);
+      identity = { mtimeMs: st.mtimeMs, size: st.size, ino: st.ino };
+    } catch {
+      this.sessionScanCache.delete(path);
+      return null;
+    }
+    const hit = this.sessionScanCache.get(path);
+    if (
+      hit &&
+      hit.mtimeMs === identity.mtimeMs &&
+      hit.size === identity.size &&
+      hit.ino === identity.ino
+    ) {
+      return { summary: hit.summary, session: null };
+    }
+    const session = await this.readSessionFile(path, label);
+    if (!session) {
+      this.sessionScanCache.delete(path);
+      return null;
+    }
+    const summary = sessionSummary(session);
+    this.sessionScanCache.set(path, { ...identity, summary });
+    return { summary, session };
+  }
+
   async getSession(gezelId: string, sessionId: string): Promise<ChatSession | null> {
     const session = await this.readSessionFile(
       gezelSessionFile(this.home, gezelId, sessionId, this.external),
@@ -5561,10 +5609,10 @@ export class Store {
       const files = await safeReaddir(dir);
       for (const file of files) {
         if (!file.endsWith('.json')) continue;
-        const session = await this.readSessionFile(join(dir, file), `${gezelId}/${file}`);
-        if (!session) continue;
-        if (opts?.projectId && session.projectId !== opts.projectId) continue;
-        summaries.push(sessionSummary(session));
+        const scanned = await this.scanSessionFile(join(dir, file), `${gezelId}/${file}`);
+        if (!scanned) continue;
+        if (opts?.projectId && scanned.summary.projectId !== opts.projectId) continue;
+        summaries.push({ ...scanned.summary });
       }
     }
     summaries.sort((a, b) =>
@@ -5630,7 +5678,16 @@ export class Store {
       const files = await safeReaddir(dir);
       for (const file of files) {
         if (!file.endsWith('.json')) continue;
-        const session = await this.readSessionFile(join(dir, file), `${gezelId}/${file}`);
+        const path = join(dir, file);
+        const label = `${gezelId}/${file}`;
+        // Scope on the cached summary first so another project's transcripts
+        // are never parsed; re-checked below against the full session.
+        const scanned = await this.scanSessionFile(path, label);
+        if (!scanned) continue;
+        if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
+        if (opts.taskRef && scanned.summary.taskRef !== opts.taskRef) continue;
+        if (!includeArchived && scanned.summary.archived) continue;
+        const session = scanned.session ?? (await this.readSessionFile(path, label));
         if (!session) continue;
         if (opts.projectId && session.projectId !== opts.projectId) continue;
         // Task scoping is exact-match on the session's pinned `taskRef`,

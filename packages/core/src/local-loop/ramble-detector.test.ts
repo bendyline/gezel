@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RambleDetector } from './ramble-detector.js';
+import { RambleDetector, inertRambleDetector, outputIsConstrained } from './ramble-detector.js';
 
 const PROSE = 'a'.repeat(100);
 
@@ -799,5 +799,46 @@ describe('RambleDetector — opensInReasoning (template-emitted <think>)', () =>
     });
     expect(d.observeContent(circling)).toBe(false);
     expect(d.hasAborted).toBe(false);
+  });
+});
+
+describe('RambleDetector — structured output', () => {
+  // A ledger check answer: the same object shape once per claim, with the
+  // short claims and stock reasons a checker repeats across a story.
+  const claims = [
+    'The lake is a cooling pond',
+    'It is used for fishing',
+    'It is owned by NRG Energy',
+  ];
+  const checkAnswer = `{"sentences":[${Array.from(
+    { length: 40 },
+    (_, i) =>
+      `{"n":${i + 1},"claims":[{"claim":"${claims[i % 3]}","facts":["F${(i % 3) + 1}"],"kind":"fact","status":"supported","severity":"none","reason":"The fact states this directly."}],"verdict":"ok"}`,
+  ).join(',')}]}`;
+
+  it('the guard alone would read a schema-shaped answer as a loop', () => {
+    const guard = new RambleDetector({
+      threshold: 6000,
+      enabled: false,
+      repetitionGuardEnabled: true,
+    });
+    let fired = false;
+    for (let end = 200; end <= checkAnswer.length && !fired; end += 200) {
+      fired = guard.observeContent(checkAnswer.slice(0, end));
+    }
+    expect(fired).toBe(true);
+  });
+
+  it('a turn whose output shape is pinned gets a detector that never fires', () => {
+    expect(outputIsConstrained({ output: { jsonSchema: { type: 'object' } } })).toBe(true);
+    expect(outputIsConstrained({ output: { responseFormat: 'json_object' } })).toBe(true);
+    expect(outputIsConstrained({ output: { grammar: 'root ::= "a"' } })).toBe(true);
+    expect(outputIsConstrained({ output: { responseFormat: 'text' } })).toBe(false);
+    expect(outputIsConstrained({})).toBe(false);
+    expect(outputIsConstrained(undefined)).toBe(false);
+    const inert = inertRambleDetector();
+    for (let end = 200; end <= checkAnswer.length; end += 200) {
+      expect(inert.observeContent(checkAnswer.slice(0, end))).toBe(false);
+    }
   });
 });

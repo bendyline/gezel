@@ -6,10 +6,11 @@
  * gets the single root topic the compiler demands.
  *
  * A tree that already carries an outline keeps it: GitBook's `SUMMARY.md`,
- * an `mkdocs.yml` nav and Jupyter Book's `_toc.yml` are read into the same
- * topic tree (`outline.ts`), and Hugo's conventions — `_index.md` section
- * pages, `weight`, `draft` — are honored on top of the folders. A file an
- * outline omits stays in its folder, with a warning, so nothing is lost.
+ * an `mkdocs.yml` nav, Jupyter Book's `_toc.yml` and docfx's per-folder
+ * `toc.yml` files are read into the same topic tree (`outline.ts`,
+ * `docfx.ts`), and Hugo's conventions — `_index.md` section pages,
+ * `weight`, `draft` — are honored on top of the folders. A file an outline
+ * omits stays in its folder, with a warning, so nothing is lost.
  *
  * Front matter carries what a documentation tree knows about itself: the
  * title and summary, an explicit `id`, an `order` (the listing ordinal), a
@@ -27,12 +28,14 @@ import {
   CatalogDocumentSchema,
   KnowledgeDocumentIdSchema,
   KnowledgeOrdinalSchema,
+  MAX_KNOWLEDGE_TOPIC_DEPTH,
   assetExtension,
   formatKnowledgeUri,
   topicSortKeyForOrder,
 } from '@bendyline/gezk';
 import type { CompileAsset, CompileTopic } from '../compiler/compile.js';
 import { documentSlug } from '../format/ids.js';
+import { type DocfxProject, docfxPublishes, parseDocfxJson, parseDocfxToc } from './docfx.js';
 import { OUTLINE_MAX_BYTES, parseMarkdownFrontMatter, parseYaml } from './frontmatter.js';
 import {
   type Outline,
@@ -66,7 +69,10 @@ export interface TableOfContentsOptions {
   /**
    * The outline file for `gitbook` (`SUMMARY.md`), `mkdocs` (`mkdocs.yml`)
    * and `jupyter-book` (`_toc.yml`), absolute or relative to the root. By
-   * default the root is searched, and for mkdocs its parent as well.
+   * default the root is searched, and for mkdocs its parent as well. For
+   * `docfx` it is the entry TOC (a breadcrumb such as `bread/toc.yml`, or a
+   * root `toc.yml`); by default docfx.json's `breadcrumb_path`, else the
+   * root `toc.yml`.
    */
   path?: string;
 }
@@ -90,7 +96,7 @@ export interface LoadMarkdownCatalogOptions {
    * rewritten to `knowledge://` references so a viewer can follow them.
    */
   uri?: { publisherId: string; catalogId: string };
-  /** What to do with an image link whose file is missing (default `error`). */
+  /** What to do with an image link whose file is missing (default `error`; `warn` for docfx). */
   missingAssets?: 'error' | 'warn';
   onWarning?: (message: string) => void;
 }
@@ -99,6 +105,9 @@ const ROOT_TOPIC_ID = 'general';
 const SUMMARY_MAX_CHARS = 280;
 const TOPIC_SIDECAR = '_topic.yaml';
 const HUGO_SECTION_PAGE = '_index';
+const DOCFX_JSON = 'docfx.json';
+/** How many warnings of one kind are shown before the rest are counted. */
+const WARNING_EXAMPLES = 20;
 /**
  * A Hugo section page (`_index.md`) is the landing page of its folder and
  * lists before every sibling, whatever their weights: the smallest int32
@@ -121,7 +130,7 @@ interface FrontMatter {
   subcategory?: Subcategory;
   /** Hugo: `weight` above zero, the listing position. */
   weight?: number;
-  /** Hugo: `description`, the summary a section or page declares. */
+  /** Hugo and docfx: `description`, the summary a section or page declares. */
   description?: string;
   /** Hugo: `draft: true` or `headless: true` pages are never published. */
   unpublished?: 'draft' | 'headless';
@@ -131,7 +140,12 @@ interface FrontMatter {
 
 const RESERVED_KEYS = new Set(['title', 'summary', 'aliases', 'id', 'order', 'subcategory']);
 
-function readFrontMatter(raw: string, file: string, hugo: boolean): FrontMatter {
+function readFrontMatter(
+  raw: string,
+  file: string,
+  conventions: { hugo: boolean; description: boolean },
+): FrontMatter {
+  const { hugo } = conventions;
   let data: Record<string, unknown>;
   let body: string;
   try {
@@ -202,8 +216,8 @@ function readFrontMatter(raw: string, file: string, hugo: boolean): FrontMatter 
       // Hugo treats weight 0 as unweighted: such pages list after weighted ones.
       if (weight.data > 0) out.weight = weight.data;
     }
-    out.description = str('description');
   }
+  if (conventions.description) out.description = str('description');
   for (const [key, value] of Object.entries(data)) {
     if (RESERVED_KEYS.has(key) || value === undefined) continue;
     out.meta[key] = value;
@@ -237,7 +251,7 @@ function topicIdFor(name: string, taken: Set<string>): string {
   return id;
 }
 
-async function walkMarkdownFiles(root: string): Promise<string[]> {
+async function walkFiles(root: string, matches: (name: string) => boolean): Promise<string[]> {
   const out: string[] = [];
   const visit = async (dir: string): Promise<void> => {
     const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
@@ -247,11 +261,26 @@ async function walkMarkdownFiles(root: string): Promise<string[]> {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
       const abs = join(dir, entry.name);
       if (entry.isDirectory()) await visit(abs);
-      else if (entry.isFile() && /\.(md|markdown)$/i.test(entry.name)) out.push(abs);
+      else if (entry.isFile() && matches(entry.name)) out.push(abs);
     }
   };
   await visit(root);
   return out;
+}
+
+function walkMarkdownFiles(root: string): Promise<string[]> {
+  return walkFiles(root, (name) => /\.(md|markdown)$/i.test(name));
+}
+
+/** Warn for the first few, then count the rest: a large tree can raise thousands. */
+function warnCapped(
+  warn: (message: string) => void,
+  items: readonly string[],
+  each: (item: string) => string,
+  rest: (count: number) => string,
+): void {
+  for (const item of items.slice(0, WARNING_EXAMPLES)) warn(each(item));
+  if (items.length > WARNING_EXAMPLES) warn(rest(items.length - WARNING_EXAMPLES));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -314,8 +343,9 @@ export async function readMkdocsDocsDir(mkdocsPath: string): Promise<string> {
 /**
  * Which outline a tree carries: GitBook's `SUMMARY.md` or Jupyter Book's
  * `_toc.yml` at the root, an `mkdocs.yml` at the root, the project folder
- * or the root's parent, Hugo's `_index.md` section pages anywhere in the
- * tree — else the folders themselves.
+ * or the root's parent, a docfx project (`docfx.json` or a `toc.yml` at the
+ * root), Hugo's `_index.md` section pages anywhere in the tree — else the
+ * folders themselves.
  */
 export async function detectTableOfContents(
   rootDir: string,
@@ -332,6 +362,10 @@ export async function detectTableOfContents(
     ]),
   );
   if (mkdocs) return { format: 'mkdocs', path: mkdocs };
+  const docfx = firstExisting(
+    [DOCFX_JSON, 'toc.yml', 'TOC.yml', 'toc.yaml'].map((name) => join(rootDir, name)),
+  );
+  if (docfx) return { format: 'docfx' };
   const files = await walkMarkdownFiles(rootDir);
   if (files.some((file) => basename(file).replace(/\.(md|markdown)$/i, '') === HUGO_SECTION_PAGE)) {
     return { format: 'hugo' };
@@ -347,11 +381,18 @@ async function readOutlineText(path: string): Promise<string> {
   return text;
 }
 
+interface LoadedOutline {
+  outline: Outline | null;
+  path?: string;
+  /** Root-relative files the tree's own build publishes; the rest are left out. */
+  publishes?: (file: string) => boolean;
+}
+
 async function loadOutline(
   rootDir: string,
   toc: TableOfContentsOptions,
   files: readonly string[],
-): Promise<{ outline: Outline | null; path?: string }> {
+): Promise<LoadedOutline> {
   if (toc.format === 'folders' || toc.format === 'hugo') return { outline: null };
   const explicit = toc.path
     ? isAbsolute(toc.path)
@@ -361,6 +402,7 @@ async function loadOutline(
   if (explicit && !existsSync(explicit)) {
     throw new Error(`${toc.format} table of contents not found: ${explicit}`);
   }
+  if (toc.format === 'docfx') return loadDocfxOutline(rootDir, explicit, files);
   if (toc.format === 'gitbook') {
     const path = explicit ?? join(rootDir, 'SUMMARY.md');
     const rel = insideRoot(rootDir, path);
@@ -406,6 +448,69 @@ async function loadOutline(
   return { outline: parseJupyterBookToc(doc, tocDir, files, basename(path)), path };
 }
 
+/**
+ * A docfx project: docfx.json's content groups decide which Markdown is
+ * published (so `includes/` fragments and repo READMEs stay out), and every
+ * `toc.yml` in the tree is read for the parser to stitch together. A TOC
+ * that does not parse is skipped with a warning, unless it is the entry.
+ */
+async function loadDocfxOutline(
+  rootDir: string,
+  explicit: string | undefined,
+  files: readonly string[],
+): Promise<LoadedOutline> {
+  const configPath = join(rootDir, DOCFX_JSON);
+  let project: DocfxProject | undefined;
+  if (existsSync(configPath)) {
+    let config: unknown;
+    try {
+      config = JSON.parse(await readOutlineText(configPath));
+    } catch (error) {
+      throw new Error(`${DOCFX_JSON}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    project = parseDocfxJson(config, DOCFX_JSON);
+  }
+  const entry = explicit === undefined ? undefined : insideRoot(rootDir, explicit);
+  if (entry === null) {
+    throw new Error(`${basename(explicit as string)} must live inside the content root ${rootDir}`);
+  }
+  const readToc = async (abs: string, rel: string): Promise<unknown> =>
+    parseYaml(await readOutlineText(abs), {
+      what: rel,
+      maxBytes: OUTLINE_MAX_BYTES,
+      tolerateUnknownTags: true,
+      maxAliasCount: 100,
+    });
+  const tocs = new Map<string, unknown>();
+  const warnings: string[] = [];
+  for (const abs of await walkFiles(rootDir, (name) => /^toc\.ya?ml$/i.test(name))) {
+    const rel = insideRoot(rootDir, abs) as string;
+    try {
+      tocs.set(rel, await readToc(abs, rel));
+    } catch (error) {
+      if (rel === entry) throw error;
+      warnings.push(`${rel}: ${error instanceof Error ? error.message : String(error)}; skipped`);
+    }
+  }
+  if (entry !== undefined && explicit !== undefined && !tocs.has(entry)) {
+    tocs.set(entry, await readToc(explicit, entry));
+  }
+  const publishes = project ? (file: string): boolean => docfxPublishes(project, file) : undefined;
+  const outline = parseDocfxToc({
+    tocs,
+    files: publishes ? files.filter(publishes) : files,
+    ...(project ? { project } : {}),
+    ...(entry !== undefined ? { entry } : {}),
+  });
+  outline.warnings.unshift(...warnings);
+  const path = outline.entry ? join(rootDir, ...outline.entry.split('/')) : undefined;
+  return {
+    outline,
+    ...(path ? { path } : project ? { path: configPath } : {}),
+    ...(publishes ? { publishes } : {}),
+  };
+}
+
 // ── links ───────────────────────────────────────────────────────────────────
 
 const INLINE_LINK = /(!?)\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]+)((?:\s+"[^"]*")?)\s*\)/g;
@@ -419,12 +524,15 @@ interface LinkRewriteContext {
   uri: LoadMarkdownCatalogOptions['uri'];
   assets: Map<string, CompileAsset>;
   missingAssets: 'error' | 'warn';
+  /** docfx: a target starting `~/` is relative to the docset root, not the page. */
+  tildeIsRoot: boolean;
   warn: (message: string) => void;
 }
 
 /** Resolve a relative target against the document's directory, staying inside the tree. */
 function resolveInTree(ctx: LinkRewriteContext, target: string): string | null {
-  const resolved = posix.normalize(posix.join(ctx.docDir, target));
+  const fromRoot = ctx.tildeIsRoot && target.startsWith('~/');
+  const resolved = posix.normalize(fromRoot ? target.slice(2) : posix.join(ctx.docDir, target));
   if (resolved === '..' || resolved.startsWith('../') || posix.isAbsolute(resolved)) return null;
   return resolved === '.' ? '' : resolved;
 }
@@ -531,11 +639,18 @@ export async function loadMarkdownCatalog(
   const warn = opts.onWarning ?? (() => {});
   const toc: TableOfContentsOptions = opts.toc ?? { format: 'folders' };
   const hugo = toc.format === 'hugo';
+  const docfx = toc.format === 'docfx';
+  const conventions = { hugo, description: hugo || docfx };
   const ignore = new Set(opts.ignore ?? []);
   const relOf = (abs: string): string => relative(rootDir, abs).split(sep).join('/');
   let files = (await walkMarkdownFiles(rootDir)).filter((abs) => !ignore.has(relOf(abs)));
-  const { outline, path: outlinePath } = await loadOutline(rootDir, toc, files.map(relOf));
+  const {
+    outline,
+    path: outlinePath,
+    publishes,
+  } = await loadOutline(rootDir, toc, files.map(relOf));
   for (const message of outline?.warnings ?? []) warn(message);
+  if (publishes) files = files.filter((abs) => publishes(relOf(abs)));
   if (outline) {
     const consumed = new Set(outline.consumed.map((file) => file.normalize('NFC')));
     files = files.filter((abs) => !consumed.has(relOf(abs).normalize('NFC')));
@@ -593,29 +708,35 @@ export async function loadMarkdownCatalog(
   }
   const placements = new Map<string, Placement>();
   if (outline) {
+    const duplicates: string[] = [];
     const walk = (topic: OutlineTopic, chain: OutlineTopic[]): void => {
       for (const entry of topic.entries) {
         const key = entry.file.normalize('NFC');
-        if (placements.has(key)) {
-          warn(
-            `${entry.file}: listed more than once in the table of contents; the first place wins`,
-          );
-        } else {
-          placements.set(key, { chain, entry });
-        }
+        if (placements.has(key)) duplicates.push(entry.file);
+        else placements.set(key, { chain, entry });
       }
       for (const child of topic.children) walk(child, [...chain, child]);
     };
     walk(outline.root, []);
+    warnCapped(
+      warn,
+      duplicates,
+      (file) => `${file}: listed more than once in the table of contents; the first place wins`,
+      (more) => `${more} more files are listed more than once in the table of contents`,
+    );
   }
   const outlineTopicIds = new Map<OutlineTopic, string>();
+  let outlineTooDeep = false;
   const ensureOutlineChain = (chain: OutlineTopic[]): string[] => {
     if (chain.length === 0) {
       rootTopicUsed = true;
       return [rootTopicId];
     }
+    // Sections below the format's depth limit fold into their deepest allowed
+    // ancestor, keeping one level free for a subcategory shelf.
+    if (chain.length > MAX_KNOWLEDGE_TOPIC_DEPTH - 1) outlineTooDeep = true;
     const ids: string[] = [];
-    for (const node of chain) {
+    for (const node of chain.slice(0, MAX_KNOWLEDGE_TOPIC_DEPTH - 1)) {
       let id = outlineTopicIds.get(node);
       if (!id) {
         id = topicIdFor(node.name, takenTopicIds);
@@ -668,12 +789,13 @@ export async function loadMarkdownCatalog(
   const fileById = new Map<string, string>();
   const idByRel = new Map<string, string>();
   const seenRel = new Set<string>();
+  const unlisted: string[] = [];
   for (const abs of files) {
     const rel = relOf(abs);
     const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
     const relNoExt = rel.replace(/\.(md|markdown)$/i, '').normalize('NFC');
     const raw = (await readFile(abs, 'utf8')).replace(/^\uFEFF/, '');
-    const fm = readFrontMatter(raw, rel, hugo);
+    const fm = readFrontMatter(raw, rel, conventions);
     if (fm.unpublished) {
       warn(`${rel}: skipped, ${fm.unpublished} page`);
       continue;
@@ -688,7 +810,11 @@ export async function loadMarkdownCatalog(
     idByRel.set(relNoExt, id);
 
     const stem = rel.slice(rel.lastIndexOf('/') + 1).replace(/\.(md|markdown)$/i, '');
-    let title = fm.title ?? firstHeading(fm.body) ?? stem;
+    // docfx pages carry the HTML <title> in front matter ("Azure API Center -
+    // Overview"); the H1 is the title the page shows ("What is Azure API Center?").
+    let title = docfx
+      ? (firstHeading(fm.body) ?? fm.title ?? stem)
+      : (fm.title ?? firstHeading(fm.body) ?? stem);
     let ordinal = fm.order;
     let topicPath: string[];
     const placement = placements.get(rel.normalize('NFC'));
@@ -697,8 +823,7 @@ export async function loadMarkdownCatalog(
       if (placement.entry.title) title = placement.entry.title;
       if (placement.entry.order !== undefined) ordinal = placement.entry.order;
     } else {
-      if (outline)
-        warn(`${rel}: not in the ${outline.format} table of contents; filed under its folder`);
+      if (outline) unlisted.push(rel);
       topicPath = await ensureTopicChain(relDir);
       if (hugo && ordinal === undefined) ordinal = fm.weight;
     }
@@ -724,7 +849,7 @@ export async function loadMarkdownCatalog(
       const parentId = topicPath[topicPath.length - 1] as string;
       topicPath = [...topicPath, ensureShelf(parentId, fm.subcategory, rel)];
     }
-    const summary = fm.summary ?? (hugo ? fm.description : undefined) ?? firstParagraph(fm.body);
+    const summary = fm.summary ?? fm.description ?? firstParagraph(fm.body);
     loaded.push({
       rel,
       file: rel,
@@ -759,12 +884,24 @@ export async function loadMarkdownCatalog(
       }
     };
     nameFromPages(outline.root);
-    for (const [file, placement] of placements) {
-      if (!seenRel.has(file)) {
-        warn(
-          `${placement.entry.file}: named by the table of contents but not found among the Markdown files`,
-        );
-      }
+    warnCapped(
+      warn,
+      unlisted,
+      (file) => `${file}: not in the ${outline.format} table of contents; filed under its folder`,
+      (more) =>
+        `${more} more files are not in the ${outline.format} table of contents; filed under their folders`,
+    );
+    warnCapped(
+      warn,
+      [...placements].filter(([file]) => !seenRel.has(file)).map(([, p]) => p.entry.file),
+      (file) => `${file}: named by the table of contents but not found among the Markdown files`,
+      (more) =>
+        `${more} more files named by the table of contents are not among the Markdown files`,
+    );
+    if (outlineTooDeep) {
+      warn(
+        `the table of contents nests deeper than ${MAX_KNOWLEDGE_TOPIC_DEPTH - 1} levels; deeper sections are folded into their ancestors`,
+      );
     }
   }
 
@@ -786,6 +923,7 @@ export async function loadMarkdownCatalog(
   // ── pass 2: links and assets, now that every target is known ─────────────
   const assets = new Map<string, CompileAsset>();
   const documents: CatalogDocument[] = [];
+  const linkWarnings: string[] = [];
   for (const entry of loaded) {
     const ctx: LinkRewriteContext = {
       rootDir,
@@ -794,8 +932,11 @@ export async function loadMarkdownCatalog(
       idByRel,
       uri: opts.uri,
       assets,
-      missingAssets: opts.missingAssets ?? 'error',
-      warn,
+      // A docfx docset draws on dependent repositories (`~/reusable-content`)
+      // that a checkout never holds, so a missing image is expected there.
+      missingAssets: opts.missingAssets ?? (docfx ? 'warn' : 'error'),
+      tildeIsRoot: docfx,
+      warn: (message) => linkWarnings.push(message),
     };
     documents.push(
       CatalogDocumentSchema.parse({
@@ -804,6 +945,12 @@ export async function loadMarkdownCatalog(
       }),
     );
   }
+  warnCapped(
+    warn,
+    linkWarnings,
+    (message) => message,
+    (more) => `${more} more link and image warnings`,
+  );
 
   return {
     topics,

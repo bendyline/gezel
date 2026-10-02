@@ -138,6 +138,12 @@ export const MobileModelInventorySchema = z
   .object({
     models: z.array(MobileModelSchema).max(100),
     selectedModelId: MobileModelSchema.shape.id.optional(),
+    /**
+     * Bytes one model may use on this device, as the native runtime judges it,
+     * so Settings can leave out downloads that cannot fit. Absent where the
+     * host cannot tell (the simulator, the browser).
+     */
+    memoryBudgetBytes: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((inventory, ctx) => {

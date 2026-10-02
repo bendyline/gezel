@@ -129,6 +129,35 @@ describe('opaqueServerErrors', () => {
     await expect(response.json()).resolves.toMatchObject({ error: 'internal_error' });
   });
 
+  it.each([
+    ['upstream_unreachable', 502],
+    ['upstream_timeout', 504],
+    ['upstream_tls_failed', 502],
+  ] as const)('preserves the fixed upstream fetch code %s', async (error, status) => {
+    const messages: string[] = [];
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: (message) => messages.push(message) }));
+    app.get('/fetch', (c) => c.json({ error }, status));
+
+    const response = await app.request('/fetch');
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error });
+    expect(messages).toEqual([]);
+  });
+
+  it('still sanitizes an upstream code that carries extra fields', async () => {
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: () => {} }));
+    app.get('/fetch', (c) =>
+      c.json({ error: 'upstream_unreachable', detail: 'C:\\Users\\alice\\secret.txt' }, 502),
+    );
+
+    const response = await app.request('/fetch');
+
+    await expect(response.json()).resolves.toMatchObject({ error: 'internal_error' });
+  });
+
   it.each(['speech_to_text_not_ready', 'speech_to_text_failed'])(
     'preserves the fixed narration error code %s',
     async (error) => {

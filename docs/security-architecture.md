@@ -217,6 +217,11 @@ the crew); each mode is `enforce` | `audit` (log `WOULD-DENY`, allow) | `off`; e
 logs `[token-scope]` / `[team-scope]` / `[gezel-scope]`.
 
 The `audit` and `off` modes remain explicit operator escape hatches; shipped defaults enforce.
+They do not reopen a team route to a worker: `sessionRouteGuard` refuses every route
+`teamRouteGuard` lists on its own, so the two never disagree about a worker
+(`coordinator-only-tools-guard.test.ts` replays each route through `sessionRouteGuard` alone).
+Sessions may read `GET /api/handboek/how-do-i` (the `how_do_i` tool in every role kit); the
+rest of the Handboek API stays first-party.
 
 ---
 

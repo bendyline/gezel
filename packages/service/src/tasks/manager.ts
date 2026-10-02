@@ -67,6 +67,7 @@ import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
 import { installedToolsetIds } from '../craftbook/applicable.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
+import { TaskWriteConflictError } from '../fs/task-files-store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import {
@@ -84,6 +85,7 @@ import {
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
 import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
+import { carryFanoutLoopGateAttempts } from './fanout-revision.js';
 import { gateDampingHash } from './gate-damping.js';
 import {
   type DeliverableSurface,
@@ -1399,6 +1401,14 @@ export class TaskManager {
   }
 
   async update(projectId: string, num: number, patch: UpdateTaskRequest): Promise<Task> {
+    return this.retryTaskMutation(() => this.updateOnce(projectId, num, patch));
+  }
+
+  private async updateOnce(
+    projectId: string,
+    num: number,
+    patch: UpdateTaskRequest,
+  ): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     if (task.origin?.kind === 'system-job' && patch.assignee !== undefined) {
       throw new Error(
@@ -1537,6 +1547,10 @@ export class TaskManager {
   // ── Workflow ────────────────────────────────────────────────────
 
   async setStatus(projectId: string, num: number, status: TaskStatus): Promise<Task> {
+    return this.retryTaskMutation(() => this.setStatusOnce(projectId, num, status));
+  }
+
+  private async setStatusOnce(projectId: string, num: number, status: TaskStatus): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     if (task.origin?.kind === 'system-job' && status !== 'active' && status !== 'paused') {
       throw new Error(`task ${task.ref}: system jobs can only be active or paused`);
@@ -2214,14 +2228,16 @@ export class TaskManager {
    * of instantly re-tripping the exhaustion triggers. `redriveCount`
    * set explicitly (the scheduler passes maxRedrives-1 — one more
    * re-drive, then pause for real); `clearGateAttempts` wipes the
-   * completion-gate attempt count + last rejection. A no-op when the
-   * task or step moved on between the trigger's read and this write.
+   * completion-gate attempt count + last rejection; `clearRestartResumes`
+   * wipes the restart-resume count, without which a step paused by that
+   * budget re-pauses on the very next boot. A no-op when the task or step
+   * moved on between the trigger's read and this write.
    */
   async resetStepRecoveryBudget(
     projectId: string,
     num: number,
     stepId: string,
-    opts: { redriveCount?: number; clearGateAttempts?: boolean },
+    opts: { redriveCount?: number; clearGateAttempts?: boolean; clearRestartResumes?: boolean },
   ): Promise<void> {
     const task = await this.store.readTask(projectId, num).catch(() => null);
     if (!task) return;
@@ -2240,6 +2256,10 @@ export class TaskManager {
         // instantly re-pause, defeating the "real second chance" the
         // applied consult earned.
         delete next.gateAttemptHistory;
+      }
+      if (opts.clearRestartResumes) {
+        delete next.restartResumeCount;
+        delete next.lastRestartResumeAt;
       }
       return next;
     });
@@ -2494,7 +2514,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // in place to add `suggestedGezelId` — both survive.
     const finalSteps =
       newActive && !terminating
-        ? bumpStepActivation(updatedSteps, newActive, completedAt)
+        ? carryFanoutLoopGateAttempts(
+            task,
+            updatedSteps,
+            bumpStepActivation(updatedSteps, newActive, completedAt),
+            newActive,
+          )
         : updatedSteps;
 
     // Once-a-day night-shift task finishing a run: stamp the run day (the
@@ -4354,9 +4379,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   /**
    * Clone the parent's spawn craftbook into a fresh child task. Child
    * starts at `status: 'active'` with the spawn craftbook's entry step
-   * active, which fires the `onStepActivated` hook.
+   * active, which fires the `onStepActivated` hook. `opts.notes` land on the
+   * entry step before that dispatch, so the child's first prompt carries them.
    */
-  async spawnChild(parentRef: string, variation?: TaskVariation): Promise<Task> {
+  async spawnChild(
+    parentRef: string,
+    variation?: TaskVariation,
+    opts: { notes?: string[] } = {},
+  ): Promise<Task> {
     const parent = await this.getByRef(parentRef);
     if (!parent) throw new Error(`task ${parentRef} not found`);
     if (taskEffectiveStatus(parent) !== 'active') {
@@ -4407,16 +4437,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     await this.store.writeTask(child);
 
     const contextNote = instanceContextNoteText(variation);
-    if (contextNote) {
+    for (const text of [...(contextNote ? [contextNote] : []), ...(opts.notes ?? [])]) {
       try {
         await this.appendNote(child.projectId, child.num, {
-          text: contextNote,
+          text,
           author: { kind: 'user' },
           stepId: activeStepId,
         });
       } catch (err) {
         log.warn(
-          `[tasks] failed to write variation context notes for ${child.ref}:`,
+          `[tasks] failed to write spawn notes for ${child.ref}:`,
           err instanceof Error ? err.message : err,
         );
       }
@@ -4569,6 +4599,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const task = await this.store.readTask(projectId, num);
     if (!task) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
     return task;
+  }
+
+  private async retryTaskMutation<T>(mutate: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await mutate();
+      } catch (err) {
+        if (!(err instanceof TaskWriteConflictError) || attempt >= 2) throw err;
+      }
+    }
   }
 
   private async withEffectiveStatus(task: Task): Promise<Task> {

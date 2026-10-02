@@ -88,7 +88,8 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
    * reads normalized files. What a connector pull actually needs is
    * permission for the machine to talk to the network on the user's
    * behalf, which is `allowAppNetwork`: true at `lockdown`, false at
-   * `super-lockdown`, whose promise is that nothing leaves the machine.
+   * `super-lockdown`, whose promise is that the user's work stays on the
+   * machine.
    *
    * The three levels therefore read: super-lockdown, connectors move no
    * data; lockdown, they move data when the user asks; free, they also
@@ -104,10 +105,11 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
  * Preset → capability mapping. Keep in lockstep with the table in the
  * Security & Compliance plan / panel copy.
  *
- * - `super-lockdown`: nothing leaves the machine. Local models only, no
- *   services, no scripts, no updater/background/renderer egress, no model git, and no
- *   shared-document writes from scripts. Read/review/index and the builtin
- *   artifact/document tools still work.
+ * - `super-lockdown`: the user's work stays on the machine. Local models only,
+ *   no services, no scripts, no updater/background/renderer egress, no model git, and no
+ *   shared-document writes from scripts. The only traffic is a download the
+ *   user starts (a model, a knowledge catalog). Read/review/index and the
+ *   builtin artifact/document tools still work.
  *   Workspace file writes are NOT globally gated by this level — they are
  *   governed per project by {@link projectManagedWorkspaceWritable}: internal
  *   workspaces (our own folder, nothing precious) stay writable, external

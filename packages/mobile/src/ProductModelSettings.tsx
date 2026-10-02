@@ -2,8 +2,7 @@ import type { MobileProvider, MobileProviderId } from '@bendyline/gezel/mobile-p
 import type { PortableCatalogModel, PortableProductService } from '@bendyline/gezel/runtime';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ModelBudgetSettings } from './ModelBudgetSettings.js';
-import { ModelDownloads } from './ModelDownloads.js';
-import { ProviderPanel } from './ProviderPanel.js';
+import { ModelChooser } from './ModelChooser.js';
 import type { MobileHost, ModelInventory } from './native.js';
 
 /** Native model acquisition is a host control inside the ordinary Settings view. */
@@ -76,16 +75,6 @@ export function ProductModelSettings({
   }, [load, onError]);
   const selected = providers.find(({ id }) => id === provider);
   const modelId = provider === 'llama-cpp' ? inventory.selectedModelId : provider;
-  const downloads = (
-    <ModelDownloads
-      host={guardedHost}
-      service={service}
-      models={models}
-      disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
-      onInstalled={refresh}
-      setup={setup}
-    />
-  );
   return (
     <section aria-label="On-device models">
       <p>
@@ -93,25 +82,26 @@ export function ProductModelSettings({
         while the app is open.
       </p>
       {error && <p role="alert">{error}</p>}
-      {setup && downloads}
-      <ProviderPanel
+      <ModelChooser
         host={guardedHost}
+        service={service}
         providers={providers}
         selectedProviderId={provider}
         inventory={inventory}
+        catalog={models}
         busy={busy || saving || status.busy || status.pendingSave || status.changingModel}
         onProvider={async (id) => {
           await service.setProvider(id);
           setProvider(id);
         }}
         refresh={refresh}
+        reload={load}
         onError={onError}
         onBusyChange={(value) => {
           if (value) setError(null);
           setBusy(value);
         }}
       />
-      {!setup && downloads}
       {selected?.availability === 'available' && modelId && (
         <ModelBudgetSettings
           service={service}

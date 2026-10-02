@@ -196,6 +196,25 @@ describe('portable shared gate-script contract', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  it('tells a rejected step where the gate looked for a missing file', async () => {
+    const { store, task, step } = await fixture();
+    step.gate = {
+      at: 'completion',
+      checks: [{ kind: 'minBytes', file: 'handover.md', artifact: true, bytes: 40 }],
+    };
+    await store.writeFile(
+      'artifacts',
+      'default',
+      '1/handover.md',
+      '# Repair Handover\n\nNoor opens at 09:30.',
+    );
+    const verdict = await evaluatePortableTaskGate(store, task, step);
+    expect(verdict.approved).toBe(false);
+    expect(verdict.message?.split('\n')[0]).toBe(
+      '- The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md` in the artifacts drawer.',
+    );
+  });
+
   it('keeps the schema contract: next is not an alias for goto', async () => {
     const { store, task, step } = await fixture();
     const gate = await evaluatePortableTaskGate(store, task, step, async () => ({

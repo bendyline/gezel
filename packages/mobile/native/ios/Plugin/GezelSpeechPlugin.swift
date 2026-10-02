@@ -117,17 +117,26 @@ public final class GezelSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 DispatchQueue.main.async {
                     guard let self, self.active === call else { return }
+                    let language = self.locale(call).identifier.replacingOccurrences(of: "_", with: "-")
+                    let durationMs = Int((ProcessInfo.processInfo.systemUptime - start) * 1000)
                     if let result, result.isFinal {
                         let segments = result.bestTranscription.segments.map {
                             ["start": $0.timestamp, "end": $0.timestamp + $0.duration, "text": $0.substring] as [String: Any]
                         }
                         let value: [String: Any] = [
                             "text": result.bestTranscription.formattedString,
-                            "language": self.locale(call).identifier.replacingOccurrences(of: "_", with: "-"),
+                            "language": language,
                             "segments": segments,
-                            "durationMs": Int((ProcessInfo.processInfo.systemUptime - start) * 1000)
+                            "durationMs": durationMs
                         ]
                         self.finish(result: value)
+                    } else if let error, GezelSpeechPlugin.isNoSpeech(error) {
+                        // Silence is a valid answer, not a failure. Narration sends
+                        // every pause-bounded take, including a silent tail after
+                        // the last word, and counts an empty transcript toward its
+                        // long-pause stop. Rejecting here ended the whole take with
+                        // "No speech detected" after the earlier words had landed.
+                        self.finish(result: ["text": "", "language": language, "segments": [], "durationMs": durationMs])
                     } else if let error {
                         self.finish(error: error.localizedDescription, code: recognizer.isAvailable ? "failed" : "unavailable")
                     }
@@ -135,6 +144,11 @@ public final class GezelSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             request.append(buffer)
             request.endAudio()
+    }
+    /// Speech framework's "No speech detected": a take that held no words.
+    static func isNoSpeech(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == "kAFAssistantErrorDomain" && error.code == 1110
     }
     @objc public func synthesize(_ call: CAPPluginCall) {
         DispatchQueue.main.async { self.runNative(call, synthesis: true) }

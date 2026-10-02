@@ -449,6 +449,13 @@ describe('sessionRouteGuard', () => {
     expect((await ui.request('/api/projects/proj-a/input-staging', jsonPost({}))).status).toBe(200);
   });
 
+  it('keeps workflow completions first-party: they reach any model outside the tool kit', async () => {
+    const app = sessionPolicyApp(session('proj-a', true));
+    expect((await app.request('/api/projects/proj-a/completions', jsonPost({}))).status).toBe(403);
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/projects/proj-a/completions', jsonPost({}))).status).toBe(200);
+  });
+
   it('keeps retrieval previews first-party: they can read any gezel’s memory', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/projects/proj-a/retrieval/preview', jsonPost({}))).status).toBe(
@@ -805,22 +812,17 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/permissions/request-and-wait', jsonPost(own))).status).toBe(
       200,
     );
-    expect(
-      (
-        await app.request(
-          '/api/asks/request-and-wait',
-          jsonPost({ projectId: 'proj-a', fromGezelId: 'gz-1', fromSessionId: 'proj-a' }),
-        )
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await app.request(
-          '/api/gezels/gz-2/message',
-          jsonPost({ projectId: 'proj-a', fromGezelId: 'gz-1', fromSessionId: 'proj-a' }),
-        )
-      ).status,
-    ).toBe(200);
+    // Asking and messaging another gezel are coordinator moves (see
+    // scope-guard-worker-routes.test.ts); the origin binding applies there.
+    const coordinator = sessionPolicyApp(session('proj-a', true));
+    const origin = { projectId: 'proj-a', fromGezelId: 'gz-1', fromSessionId: 'proj-a' };
+    for (const route of ['/api/asks/request-and-wait', '/api/gezels/gz-2/message']) {
+      expect((await coordinator.request(route, jsonPost(origin))).status).toBe(200);
+      expect(
+        (await coordinator.request(route, jsonPost({ ...origin, fromGezelId: 'gz-9' }))).status,
+      ).toBe(403);
+      expect((await app.request(route, jsonPost(origin))).status).toBe(403);
+    }
     expect(
       (
         await app.request(

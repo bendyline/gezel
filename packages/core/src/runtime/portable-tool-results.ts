@@ -1,3 +1,4 @@
+import { normalizeArtifactPath } from '../path-rules.js';
 import type { WorkspaceReadFileSuccess } from '../schemas/api.js';
 import type { ChatSession } from '../schemas/session.js';
 import type { Task, TaskNote } from '../schemas/task.js';
@@ -18,6 +19,7 @@ import {
   getScriptRunText,
   getTaskText,
   listArtifactsText,
+  listDirMissingText,
   listDirText,
   listDocumentsText,
   listGezelsText,
@@ -34,6 +36,7 @@ import {
   scriptRunText,
   searchMemoryText,
   searchResultText,
+  stepCheckedArtifactPaths,
   stepCompletionMode,
   withLineNumbers,
   writeTaskNoteText,
@@ -81,9 +84,10 @@ export async function portableToolResultText(
       let hint = '';
       if (session.taskRef && session.stepId) {
         const task = await store.getTask(session.taskRef).catch(() => null);
-        hint = artifactCompletionHint(
-          stepCompletionMode(task?.craftbook.steps.find((step) => step.id === session.stepId)),
-        );
+        const step = task?.craftbook.steps.find((item) => item.id === session.stepId);
+        hint = artifactCompletionHint(stepCompletionMode(step), {
+          checkedByStep: stepCheckedArtifactPaths(step).includes(normalizeArtifactPath(path)),
+        });
       }
       return ok(`Wrote ${path}${hint}`);
     }
@@ -108,6 +112,8 @@ export async function portableToolResultText(
     case 'list_artifacts':
     case 'list_documents': {
       const entries = (value.entries ?? []) as { path: string; isDirectory: boolean }[];
+      if (name === 'list_dir' && (value.notFolder === 'missing' || value.notFolder === 'file'))
+        return ok(listDirMissingText(path, value.notFolder, (value.nearby ?? []) as string[]));
       if (name === 'list_dir') return ok(listDirText(entries));
       if (name === 'list_documents') return ok(listDocumentsText(entries));
       return ok(listArtifactsText(entries, path, value.truncated === true));
@@ -161,7 +167,13 @@ export async function portableToolResultText(
     case 'ask_user_question':
       if (value.emptyQuestion === true) return ok(ASK_USER_QUESTION_EMPTY_TEXT);
       if (typeof value.questionId !== 'string') return undefined;
-      return ok(askUserQuestionText(value.questionId, value.deduped === true));
+      return ok(
+        askUserQuestionText(
+          value.questionId,
+          value.deduped === true,
+          value.colleague as { id: string; name: string } | undefined,
+        ),
+      );
     case 'message_gezel':
       if (typeof value.toGezelName !== 'string') return undefined;
       // The phone parks a handoff until this turn releases the engine.

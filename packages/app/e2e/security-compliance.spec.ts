@@ -91,7 +91,7 @@ test.describe('Security & Compliance — first run', () => {
     // Pick Super Lockdown → it becomes active and the blurb updates.
     await page.getByRole('radio', { name: /^Super Lockdown/ }).click();
     await page.waitForTimeout(500);
-    await expect(page.getByText(/Nothing leaves your machine/i)).toBeVisible();
+    await expect(page.getByText(/Your work stays on your machine/i)).toBeVisible();
     await shot(page, 'sec-02-firstrun-super-lockdown.png');
   });
 });

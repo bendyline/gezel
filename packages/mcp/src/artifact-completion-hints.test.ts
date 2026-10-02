@@ -10,7 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 describe('artifact completion guidance', () => {
   let httpServer: HttpServer;
   let client: Client;
-  let mode: 'automatic' | 'manual' | 'unavailable' | 'stale' = 'automatic';
+  let mode: 'automatic' | 'manual' | 'manual-gated' | 'unavailable' | 'stale' = 'automatic';
   let writes: unknown[] = [];
   let taskReads = 0;
 
@@ -44,6 +44,21 @@ describe('artifact completion guidance', () => {
                           file: 'tasks/42/report.json',
                           artifact: true,
                           requireChange: true,
+                        },
+                      }
+                    : {}),
+                  ...(mode === 'manual-gated'
+                    ? {
+                        gate: {
+                          at: 'completion',
+                          checks: [
+                            {
+                              kind: 'minBytes',
+                              file: 'tasks/42/report.json',
+                              artifact: true,
+                              bytes: 10,
+                            },
+                          ],
                         },
                       }
                     : {}),
@@ -125,6 +140,15 @@ describe('artifact completion guidance', () => {
     expect(text).toContain('call advance_task_step');
     expect(text).not.toContain('automatic completion');
     expect(writes).toHaveLength(1);
+  });
+
+  it('tells a manual step to submit once the file its checks read is saved', async () => {
+    mode = 'manual-gated';
+    const { result, text } = await save();
+    expect(result.isError).not.toBe(true);
+    expect(text).toBe(
+      "Wrote tasks/42/report.json\nThis is the file the step's completion checks read. If it is complete, call advance_task_step now to submit the step; saving it again changes nothing.",
+    );
   });
 
   it('refreshes metadata and gives conditional guidance after a transient lookup failure', async () => {

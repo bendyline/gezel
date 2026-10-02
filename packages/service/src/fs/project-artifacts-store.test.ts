@@ -39,7 +39,16 @@ describe('ProjectArtifactsStore drawer root', () => {
       const artifacts = new ProjectArtifactsStore({ home, touchProject: async () => {} });
       await artifacts.writeProjectArtifact('p', 'notes/a.md', 'kept');
       await artifacts.writeProjectArtifact('p', 'tasks/1/inputs/brief/x.md', 'input');
-      for (const path of ['.', './', 'notes/..', './notes/../', '...', 'notes/./..']) {
+      for (const path of [
+        '.',
+        './',
+        'notes/..',
+        './notes/../',
+        '...',
+        'notes/./..',
+        'artifacts',
+        'Artifacts/',
+      ]) {
         for (const initiatedByGezel of [false, true]) {
           await expect(
             artifacts.deleteProjectArtifact('p', path, { initiatedByGezel }),
@@ -59,6 +68,26 @@ describe('ProjectArtifactsStore drawer root', () => {
       // Ordinary deletes are unaffected.
       await artifacts.deleteProjectArtifact('p', 'notes/a.md');
       expect(await artifacts.readProjectArtifact('p', 'notes/a.md')).toBeNull();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('ProjectArtifactsStore drawer-prefixed paths', () => {
+  // A 2B model on the iPhone listed `artifacts` and was told the drawer it had
+  // just saved into was empty.
+  it('reads a bare `artifacts` as the drawer itself', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-artifact-prefix-test-'));
+    try {
+      const artifacts = new ProjectArtifactsStore({ home, touchProject: async () => {} });
+      await artifacts.writeProjectArtifact('p', 'tasks/1/handover.md', 'Noor opens at 09:30.');
+      const paths = async (subpath: string) =>
+        (await artifacts.listProjectArtifactsRecursive('p', { subpath }))
+          .filter((entry) => !entry.isDirectory)
+          .map((entry) => entry.path);
+      expect(await paths('artifacts')).toEqual(['tasks/1/handover.md']);
+      expect(await paths('artifacts/tasks')).toEqual(['tasks/1/handover.md']);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

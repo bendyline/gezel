@@ -641,6 +641,20 @@ def _tool_names_from_request(tools: Optional[List[Dict[str, Any]]]) -> List[str]
     return names
 
 
+def _callable_tools(
+    tool_list: List[Dict[str, Any]], hint: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Narrow to `hint.allowed_names` when the caller restricts what may be
+    CALLED this turn. The prompt still renders every tool in `tools`, so a
+    session's prompt cache survives the restriction flipping on and off;
+    only the grammar, which decides what a call may name, narrows."""
+    allowed = (hint or {}).get("allowed_names")
+    if not isinstance(allowed, list):
+        return tool_list
+    keep = {n for n in allowed if isinstance(n, str)}
+    return [t for t in tool_list if set(_tool_names_from_request([t])) & keep]
+
+
 def build_grammar_string(
     tools: Optional[List[Dict[str, Any]]], hint: Dict[str, Any]
 ) -> Optional[str]:
@@ -655,7 +669,7 @@ def build_grammar_string(
     fmt = str((hint or {}).get("format") or "").strip()
     if fmt not in SUPPORTED_FORMATS:
         return None
-    tool_list = [t for t in (tools or []) if isinstance(t, dict)]
+    tool_list = _callable_tools([t for t in (tools or []) if isinstance(t, dict)], hint)
     if not tool_list:
         return None
     mode = str((hint or {}).get("mode") or "name-and-params").strip()
@@ -762,9 +776,16 @@ def build_tool_grammar_processor(
         count = len(_required_param_keys_from_tool(tool, keys))
         required_fields += count
         required_tools += int(count > 0)
+    allowed = (hint or {}).get("allowed_names")
+    callable_note = (
+        f"callable={len(_callable_tools([t for t in (tools or []) if isinstance(t, dict)], hint))} "
+        if isinstance(allowed, list)
+        else ""
+    )
     print(
         f"[tool-grammar] active format={fmt} mode={mode} "
         f"tools={len(_tool_names_from_request(tools))} "
+        f"{callable_note}"
         f"declared-required-tools={required_tools} "
         f"declared-required-fields={required_fields} "
         f"json-escape={'on' if json_escape else 'off'}",

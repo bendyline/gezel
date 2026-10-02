@@ -95,6 +95,17 @@ describe('gezel knowledge (offline)', () => {
     await expect(runKnowledgeInit(catalogDir)).rejects.toThrow(/already exists/);
   });
 
+  it('init catalogs a folder that already holds Markdown in place', async () => {
+    const docsDir = join(dir, 'existing-docs');
+    await mkdir(join(docsDir, 'articles', 'guide'), { recursive: true });
+    await writeFile(join(docsDir, 'articles', 'guide', 'intro.md'), '# Intro\n');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runKnowledgeInit(docsDir);
+    expect((await stat(join(docsDir, 'catalog.json'))).isFile()).toBe(true);
+    // A scaffolded content/ would shadow the tree: build prefers it.
+    await expect(stat(join(docsDir, 'content'))).rejects.toThrow();
+  });
+
   it('build produced a verifiable archive', async () => {
     expect((await stat(archivePath)).size).toBeGreaterThan(0);
     const manifest = await readGezkManifest(archivePath);

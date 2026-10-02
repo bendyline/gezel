@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import { LlamaCppProvider } from '../providers/llama-cpp/provider.js';
 import { MockProvider } from '../providers/mock.js';
@@ -29,6 +30,7 @@ let requests: Array<{ messages: Array<{ role: string; content: string }> }>;
 let sessionOpts: SessionOpts[];
 let beforeCreate: (() => Promise<void>) | undefined;
 let afterCreate: ((session: LLMSession) => Promise<void>) | undefined;
+let previewLog: PreviewLogBuffer;
 const key = 'llama-cpp:worker-8b:0';
 
 beforeEach(async () => {
@@ -74,6 +76,7 @@ beforeEach(async () => {
   const pool = new ProviderPool({ broker, builders });
   router = new EngineRouter({ broker, pool, builders, resolveResidentBytes: () => 1e9 });
   events = new ChatEventBus();
+  previewLog = new PreviewLogBuffer();
   manager = new ChatManager({
     store,
     events,
@@ -97,6 +100,7 @@ beforeEach(async () => {
       resolveModel: async () => ({ id: 'worker-8b', approxSizeBytes: 1e9 }),
     } as unknown as LlamaCppModelManager,
     engineRouter: router,
+    previewLog,
   });
 });
 
@@ -119,14 +123,48 @@ describe('chat recovery after local engine eviction', () => {
     expect(generations).toHaveLength(2);
     expect(requests).toHaveLength(2);
     const sent = requests[1]?.messages.filter((m) => m.role !== 'system') ?? [];
-    // Only the turn being sent carries the clock line; rebuilt history is
-    // the stored transcript.
     expect(sent.at(-1)?.content.startsWith(CURRENT_DATE_TIME_PREFIX)).toBe(true);
+    // The rebuilt history replays turn 1 exactly as it was sent, date line
+    // included; one byte shorter and the engine's saved prefix stops matching
+    // at the first user turn, so the whole transcript is prefilled again.
+    const firstSent = requests[0]?.messages.find((m) => m.role === 'user');
+    expect(firstSent?.content.startsWith(CURRENT_DATE_TIME_PREFIX)).toBe(true);
+    expect(sent[0]).toEqual(firstSent);
+    // On disk too, so a daemon restart replays it; the person's words stay clean.
+    const saved = await store.findSessionById(record.id);
+    expect(saved?.messages[0]?.content).toBe('First review');
+    expect(`${saved?.messages[0]?.sentPreamble}First review`).toBe(firstSent?.content);
     expect(sent.map((m) => ({ ...m, content: stripCurrentDateTimeLine(m.content) }))).toEqual([
       { role: 'user', content: 'First review' },
       { role: 'assistant', content: 'Review complete.' },
       { role: 'user', content: 'Second review' },
     ]);
+  });
+
+  it('replays a turn prelude exactly as sent after a rebuild', async () => {
+    const record = await manager.createSession({ gezelId: 'worker' });
+    previewLog.record(record.projectId, [
+      {
+        kind: 'error',
+        message: "Failed to execute 'addColorStop' on 'CanvasGradient': '#0ff33'",
+        path: 'index.html',
+        source: 'workspace',
+        at: '2026-07-19T00:00:00.000Z',
+      },
+    ]);
+    await manager.send(record.id, 'How is the game looking?');
+    await router.pool.evict(key);
+    await router.ensure('llama-cpp', 'worker-8b', 0);
+    await manager.send(record.id, 'And now?');
+
+    const firstSent = requests[0]?.messages.find((m) => m.role === 'user');
+    expect(firstSent?.content).toContain('[Live preview reported runtime errors');
+    // The rebuilt session carries turn 1's preview block as well as its date
+    // line; dropping either one voids the saved prefix from turn 1 onward.
+    const replayed = requests[1]?.messages.find((m) => m.role === 'user');
+    expect(replayed).toEqual(firstSent);
+    const saved = await store.findSessionById(record.id);
+    expect(saved?.messages[0]?.content).toBe('How is the game looking?');
   });
 
   it('re-resolves when eviction happens while session options are being prepared', async () => {

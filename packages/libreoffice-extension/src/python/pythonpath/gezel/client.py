@@ -53,8 +53,8 @@ class GezelHttp:
             )
         return http.client.HTTPConnection(endpoint.host, endpoint.port, timeout=timeout)
 
-    def _open(self, method, path, body, token, timeout, accept):
-        headers = {"Accept": accept}
+    def _open(self, method, path, body, token, timeout, accept, extra_headers=None):
+        headers = {"Accept": accept, **(extra_headers or {})}
         payload = None
         if body is not None:
             payload = json.dumps(body).encode("utf-8")
@@ -79,8 +79,8 @@ class GezelHttp:
             raise DaemonNotRunning("Could not verify Gezel's connection. Restart Gezel and try again.") from last
         raise DaemonNotRunning("Gezel is not running.") from last
 
-    def request_json(self, method, path, body=None, token=None, timeout=30.0):
-        conn, res = self._open(method, path, body, token, timeout, "application/json")
+    def request_json(self, method, path, body=None, token=None, timeout=30.0, headers=None):
+        conn, res = self._open(method, path, body, token, timeout, "application/json", headers)
         try:
             raw = res.read()
         finally:

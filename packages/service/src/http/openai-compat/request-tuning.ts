@@ -36,12 +36,24 @@ export function overlayOpenAiRequestTuning(
 
   const toolChoice = typeof req.tool_choice === 'string' ? req.tool_choice : tuning.toolChoice;
 
+  // Only the off direction is mapped: turning thinking ON for a model whose
+  // catalog leaves it off could select a mode the model does not have.
+  const reasoning = disablesThinking(req.reasoning_effort)
+    ? { ...tuning.reasoning, enableThinking: false }
+    : tuning.reasoning;
+
   return {
     ...tuning,
     sampling,
+    reasoning,
     output,
     ...(toolChoice !== undefined ? { toolChoice } : {}),
   };
+}
+
+/** OpenAI effort values that mean "answer without a reasoning phase". */
+export function disablesThinking(effort: string | undefined): boolean {
+  return effort === 'none' || effort === 'minimal';
 }
 
 /**

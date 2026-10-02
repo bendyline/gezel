@@ -192,13 +192,26 @@ export function KnowledgeCatalogManager() {
       try {
         const res = await api.listKnowledgeActiveInstalls();
         if (cancelled) return;
+        // Keep `prev` when nothing moved: a new Map every 2 s re-renders the
+        // manager and every catalog card for no visible change.
         setInstalls((prev) => {
           const next = new Map(prev);
           const seen = new Set<string>();
+          let changed = false;
           for (const remote of res.installs) {
             seen.add(remote.jobId);
             const existing = next.get(remote.jobId);
             if (existing?.origin === 'local') continue;
+            if (
+              existing &&
+              existing.catalogId === remote.catalogId &&
+              existing.phase === remote.phase &&
+              existing.bytesDone === remote.bytesDone &&
+              existing.bytesTotal === remote.bytesTotal
+            ) {
+              continue;
+            }
+            changed = true;
             next.set(remote.jobId, {
               jobId: remote.jobId,
               ...(remote.catalogId ? { catalogId: remote.catalogId } : {}),
@@ -209,9 +222,12 @@ export function KnowledgeCatalogManager() {
             });
           }
           for (const [id, entry] of next) {
-            if (entry.origin === 'remote' && !seen.has(id)) next.delete(id);
+            if (entry.origin === 'remote' && !seen.has(id)) {
+              next.delete(id);
+              changed = true;
+            }
           }
-          return next;
+          return changed ? next : prev;
         });
         const hadRemoteInstall = hadRemoteInstallRef.current;
         hadRemoteInstallRef.current = res.installs.length > 0;

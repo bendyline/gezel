@@ -93,9 +93,15 @@ describe('retryPausedTask', () => {
       assigneeName: 'Name-wren',
     });
     expect(result?.task.status).toBe('active');
-    // Every budget that can re-pause the task on the first turn back.
+    // Every budget that can re-pause the task on the first turn back — and
+    // on the next boot, which is where a restart-budget pause came back.
     expect(h.resets).toEqual([
-      { stepId: 'model-system', redriveCount: 0, clearGateAttempts: true },
+      {
+        stepId: 'model-system',
+        redriveCount: 0,
+        clearGateAttempts: true,
+        clearRestartResumes: true,
+      },
     ]);
     expect(h.budgetResets).toEqual(['p1/7']);
     expect(h.statuses).toEqual(['active']);
