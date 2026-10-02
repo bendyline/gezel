@@ -33,7 +33,7 @@ const BOUNDS: Array<[number, number]> = [
   [0, 23], // hour
   [1, 31], // day of month
   [1, 12], // month
-  [0, 6], // day of week (0 = Sun)
+  [0, 7], // day of week (0 and 7 = Sun)
 ];
 
 function parseField(raw: string, min: number, max: number): Field {
@@ -81,6 +81,7 @@ export function parseCron(expression: string): Schedule {
     parsed[4]!.allowed.delete(7);
     parsed[4]!.allowed.add(0);
   }
+  parsed[4]!.max = 6;
   return {
     minute: parsed[0]!,
     hour: parsed[1]!,

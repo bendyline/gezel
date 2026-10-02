@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,18 +51,6 @@ describe('atomic file publishing', () => {
     await expectNoStagingFiles();
   });
 
-  it('publishes create-only backups without replacing an existing original', async () => {
-    const target = join(dir, 'original.docx');
-    const original = Uint8Array.from([1, 2, 3]);
-    await writeFileAtomic(target, original, { noReplace: true });
-
-    await expect(
-      writeFileAtomic(target, Uint8Array.from([9, 9, 9]), { noReplace: true }),
-    ).rejects.toMatchObject({ code: 'EEXIST' });
-    expect(new Uint8Array(await readFile(target))).toEqual(original);
-    await expectNoStagingFiles();
-  });
-
   it('uses collision-free staging paths for concurrent writers', async () => {
     const target = join(dir, 'session.json');
     const payloads = Array.from({ length: 12 }, (_, index) => `payload-${index}`);
@@ -70,6 +58,22 @@ describe('atomic file publishing', () => {
     await Promise.all(payloads.map((payload) => writeFileAtomic(target, payload)));
 
     expect(payloads).toContain(await readFile(target, 'utf8'));
+    await expectNoStagingFiles();
+  });
+
+  it('publishes exactly one complete file when create-only writers race', async () => {
+    const target = join(dir, 'original.docx');
+    const payloads = Array.from({ length: 8 }, (_, index) => Buffer.alloc(4096, index));
+    const outcomes = await Promise.allSettled(
+      payloads.map((bytes) => writeFileAtomic(target, bytes, { noReplace: true })),
+    );
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    for (const outcome of outcomes) {
+      if (outcome.status === 'rejected') expect(outcome.reason).toMatchObject({ code: 'EEXIST' });
+    }
+    expect(await readFile(target)).toEqual(
+      payloads[outcomes.findIndex((outcome) => outcome.status === 'fulfilled')],
+    );
     await expectNoStagingFiles();
   });
 
@@ -110,4 +114,59 @@ describe('atomic file publishing', () => {
       await expectNoStagingFiles();
     },
   );
+
+  describe.skipIf(process.platform === 'win32')('POSIX permissions', () => {
+    it.each([0o755, 0o600, 0o751, 0o640])(
+      'preserves mode %i when replacing text and bytes',
+      async (mode) => {
+        const target = join(dir, 'user-file');
+        await writeFile(target, 'old');
+        await chmod(target, mode);
+        await writeFileAtomic(target, 'new text');
+        expect((await stat(target)).mode & 0o777).toBe(mode);
+        await writeFileAtomic(target, Uint8Array.from([0, 1, 2]));
+        expect((await stat(target)).mode & 0o777).toBe(mode);
+        await expectNoStagingFiles();
+      },
+    );
+
+    it('preserves permissions even when the current umask is more restrictive', async () => {
+      const target = join(dir, 'run.sh');
+      await writeFile(target, 'old');
+      await chmod(target, 0o755);
+      const previous = process.umask(0o077);
+      try {
+        await writeFileAtomic(target, 'new');
+      } finally {
+        process.umask(previous);
+      }
+      expect((await stat(target)).mode & 0o777).toBe(0o755);
+    });
+
+    it('honors an explicit mode over existing permissions', async () => {
+      const target = join(dir, 'private.json');
+      await writeFile(target, 'old');
+      await chmod(target, 0o755);
+      await writeFileAtomic(target, 'secret', { mode: 0o600 });
+      expect((await stat(target)).mode & 0o777).toBe(0o600);
+    });
+
+    it('uses the umask for new files and does not borrow a symlink target mode', async () => {
+      const source = join(dir, 'executable');
+      const target = join(dir, 'linked');
+      await writeFile(source, 'original');
+      await chmod(source, 0o755);
+      await symlink(source, target);
+      const previous = process.umask(0o027);
+      try {
+        await writeFileAtomic(target, 'replacement');
+        await writeFileAtomic(join(dir, 'new'), 'new');
+      } finally {
+        process.umask(previous);
+      }
+      expect((await stat(target)).mode & 0o777).toBe(0o640);
+      expect((await stat(join(dir, 'new'))).mode & 0o777).toBe(0o640);
+      expect(await readFile(source, 'utf8')).toBe('original');
+    });
+  });
 });

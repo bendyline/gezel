@@ -1270,7 +1270,7 @@ export class TaskManager {
       createdBy: input.createdBy ?? { kind: 'user' },
     };
 
-    await writeTaskWithInputs(inputsPlan, () => this.store.writeTask(task));
+    await writeTaskWithInputs(inputsPlan, () => this.store.createTask(task));
     // Pre-create the task's artifact folder so it shows in the artifacts
     // browser from minute one. Purely a UX affordance — `write_artifact`
     // mkdir -p's on its own — so a failure must never block the task.
@@ -4434,7 +4434,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       variation,
       now,
     });
-    await this.store.writeTask(child);
+    await this.store.createTask(child);
 
     const contextNote = instanceContextNoteText(variation);
     for (const text of [...(contextNote ? [contextNote] : []), ...(opts.notes ?? [])]) {

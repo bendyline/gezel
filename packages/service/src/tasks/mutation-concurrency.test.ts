@@ -88,6 +88,58 @@ it('rejects stale transitions across Store instances before changing metadata or
   });
 });
 
+it.each(['paused', 'canceled'] as const)(
+  'rejects late step completion after the task is %s',
+  async (status) => {
+    const task = await tasks.create('fixture', {
+      title: 'Before',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Work' }, { name: 'Review' }],
+    });
+    const arrived = deferred();
+    const release = deferred();
+    const activated = vi.fn();
+    tasks.setStepActivatedHook(activated);
+    const original = store.writeTask.bind(store);
+    let blocked = false;
+    const spy = vi.spyOn(store, 'writeTask').mockImplementation(async (next) => {
+      if (!blocked) {
+        blocked = true;
+        arrived.resolve();
+        await release.promise;
+      }
+      return original(next);
+    });
+    // Attach rejection handling before releasing the barrier to avoid an unhandled rejection.
+    const completion = tasks.completeStep('fixture', task.num, task.activeStepId!).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    try {
+      await arrived.promise;
+      const other = new TaskManager(new Store({ home }));
+      await other.update('fixture', task.num, {
+        title: 'User edit',
+        description: 'Keep this prose',
+      });
+      await other.setStatus('fixture', task.num, status);
+      release.resolve();
+      expect(await completion).toBeInstanceOf(TaskWriteConflictError);
+      expect(await store.readTask('fixture', task.num)).toMatchObject({
+        title: 'User edit',
+        description: 'Keep this prose',
+        status,
+        activeStepId: task.activeStepId,
+      });
+      expect(activated).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await completion;
+      spy.mockRestore();
+    }
+  },
+);
+
 it('starts legacy tasks at revision zero and protects their first overlapping writes', async () => {
   const task = await tasks.create('fixture', {
     title: 'Legacy',

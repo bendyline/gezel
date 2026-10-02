@@ -615,20 +615,20 @@ export class DiffpackManager {
   }
 
   private async readRecords(projectId: string): Promise<DiffpackRecord[]> {
-    let parsed: unknown;
+    const file = projectDiffpacksFile(this.deps.home, projectId);
     try {
-      parsed = JSON.parse(await readFile(projectDiffpacksFile(this.deps.home, projectId), 'utf8'));
-    } catch {
-      return [];
+      const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+      const raw = (parsed as { diffpacks?: unknown } | null)?.diffpacks;
+      if (!Array.isArray(raw)) throw new Error('invalid proposals list');
+      // Reads also feed read-modify-write operations. Treating damaged JSON
+      // or a rejected row as absent would erase it on the next mutation.
+      return raw.map((row) => DiffpackRecordSchema.parse(row));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Cannot read change proposals from ${file}; repair it before continuing.`, {
+        cause: err,
+      });
     }
-    const raw = (parsed as { diffpacks?: unknown } | null)?.diffpacks;
-    if (!Array.isArray(raw)) return [];
-    const out: DiffpackRecord[] = [];
-    for (const row of raw) {
-      const res = DiffpackRecordSchema.safeParse(row);
-      if (res.success) out.push(res.data);
-    }
-    return out;
   }
 
   private async writeRecords(projectId: string, packs: DiffpackRecord[]): Promise<void> {

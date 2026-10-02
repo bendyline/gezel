@@ -1,6 +1,6 @@
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, parse, relative, resolve, sep } from 'node:path';
 import { validatePortablePath } from '@bendyline/gezel/runtime';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -54,6 +54,38 @@ describe('safeJoin', () => {
     expect(safeJoin(base, 'folder./file.txt')).toBe(null);
     expect(safeJoin(base, 'file.txt ')).toBe(null);
   });
+});
+
+describe('filesystem roots', () => {
+  const root = parse(resolve(tmpdir())).root;
+  it('accepts children and rebases absolute children without losing the first character', () => {
+    const child = join(root, 'review-fixture', 'child.txt');
+    expect(safeJoin(root, 'review-fixture/child.txt')).toBe(child);
+    expect(intoWorkspaceRelative(root, child)).toBe(join('review-fixture', 'child.txt'));
+    expect(intoWorkspaceRelative(root, root)).toBe('');
+    expect(isPathInside(child, root)).toBe(true);
+    expect(safeJoin(root, child)).toBeNull();
+  });
+
+  it('resolves a real temporary directory beneath a filesystem root', async () => {
+    const child = resolve(tmpdir());
+    expect(await realpathContained(root, child)).toBe(true);
+    expect(await resolveInside(root, relative(root, child))).toBe(child);
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'handles drive and UNC share roots without accepting other shares or drives',
+    () => {
+      for (const base of ['C:\\', '\\\\server\\share\\']) {
+        const child = `${base}folder\\file.txt`;
+        expect(safeJoin(base, 'folder/file.txt')).toBe(child);
+        expect(intoWorkspaceRelative(base, child)).toBe('folder\\file.txt');
+        expect(isPathInside(child, base)).toBe(true);
+        expect(isPathInside('D:\\folder', base)).toBe(false);
+        expect(isPathInside('\\\\server\\share-other\\file.txt', base)).toBe(false);
+      }
+    },
+  );
 });
 
 describe('intoWorkspaceRelative', () => {

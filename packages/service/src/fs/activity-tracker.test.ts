@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { HistoryManager } from '../history/manager.js';
 import { ActivityTracker } from './activity-tracker.js';
@@ -30,6 +30,14 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 async function waitForPersistedActivity(projectId: string, expectedAt?: string) {
   const deadline = Date.now() + 1_000;
   do {
@@ -41,6 +49,74 @@ async function waitForPersistedActivity(projectId: string, expectedAt?: string) 
 }
 
 describe('ActivityTracker', () => {
+  it('persists a newer stamp received while an earlier write is finishing', async () => {
+    const project = await store.createProject({ name: 'Overlapping activity' });
+    const t0 = Date.parse('2026-07-18T10:00:00Z');
+    const arrived = deferred();
+    const release = deferred();
+    const original = store.writeProjectActivity.bind(store);
+    const spy = vi.spyOn(store, 'writeProjectActivity').mockImplementationOnce(async (...args) => {
+      await original(...args);
+      arrived.resolve();
+      await release.promise;
+    });
+    try {
+      tracker.stamp(project.id, t0);
+      await arrived.promise;
+      tracker.stamp(project.id, t0 + 6 * 60_000);
+      // Let the second stamp reach the already-running writer before release.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      release.resolve();
+      const latestAt = new Date(t0 + 6 * 60_000).toISOString();
+      expect((await waitForPersistedActivity(project.id, latestAt))?.lastActivityAt).toBe(latestAt);
+    } finally {
+      release.resolve();
+      await tracker.stop();
+      spy.mockRestore();
+    }
+  });
+
+  it('waits for an in-flight write before flushing the latest stamp on stop', async () => {
+    const project = await store.createProject({ name: 'Stopping activity' });
+    const t0 = Date.parse('2026-07-18T10:00:00Z');
+    const arrived = deferred();
+    const release = deferred();
+    const original = store.writeProjectActivity.bind(store);
+    let active = 0;
+    let maxActive = 0;
+    const spy = vi.spyOn(store, 'writeProjectActivity').mockImplementation(async (...args) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      arrived.resolve();
+      try {
+        await release.promise;
+        await original(...args);
+      } finally {
+        active -= 1;
+      }
+    });
+    let stopping: Promise<void> | undefined;
+    try {
+      tracker.stamp(project.id, t0);
+      await arrived.promise;
+      tracker.stamp(project.id, t0 + 60_000);
+      stopping = tracker.stop();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      release.resolve();
+      await stopping;
+      expect(maxActive).toBe(1);
+      expect(active).toBe(0);
+      expect((await store.readProjectActivity(project.id))?.lastActivityAt).toBe(
+        new Date(t0 + 60_000).toISOString(),
+      );
+    } finally {
+      release.resolve();
+      await stopping;
+      await tracker.stop();
+      spy.mockRestore();
+    }
+  });
+
   it('stamps activity from project-scoped history events', async () => {
     const project = await store.createProject({ name: 'Vogelhuis' });
     tracker.start();
