@@ -34,6 +34,34 @@
  * chain-of-thought counts in full against the ~6 KB cold cap and the
  * turn aborts mid-thought before the tool call lands.
  */
+
+/**
+ * True when the request pins the output's shape (a JSON schema, JSON mode, or
+ * a GBNF grammar). Such a turn has no tools to call and its answer is SUPPOSED
+ * to repeat: a fact-check result is the same `{"claim", "facts", "kind",
+ * "status", "severity", "reason"}` object once per claim. The repetition guard
+ * read that as a loop and aborted a healthy 6.8 KB answer mid-stream
+ * (Gemma 4 31B, Qualla ledger check, 2026-10-02), and a length cap would cut a
+ * long legitimate answer the same way. The grammar already rules out prose
+ * spirals; `max_tokens` and the awake-time deadline bound a runaway.
+ */
+export function outputIsConstrained(
+  tuning:
+    | { output?: { responseFormat?: string; jsonSchema?: unknown; grammar?: string } }
+    | undefined,
+): boolean {
+  const output = tuning?.output;
+  return Boolean(
+    output &&
+      (output.jsonSchema != null || output.responseFormat === 'json_object' || output.grammar),
+  );
+}
+
+/** A detector that never fires, for turns whose output shape is pinned. */
+export function inertRambleDetector(): RambleDetector {
+  return new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: false });
+}
+
 export interface RambleDetectorOpts {
   /**
    * "Cold ramble" cap — applies before any tool-call signal has been

@@ -214,4 +214,40 @@ describe('fetch_url route', () => {
       truncated: true,
     });
   });
+
+  // A dead link is the remote site's state, not a daemon fault: it must reach
+  // the caller as a fixed code instead of the redacted `internal_error`.
+  it('reports an unreachable site with a fixed code', async () => {
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND gone.example'), {
+      code: 'ENOTFOUND',
+    });
+    outboundFetch.mockRejectedValueOnce(new TypeError('fetch failed', { cause }));
+
+    const res = await fetchUrl({ url: 'https://gone.example/page' });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'upstream_unreachable' });
+  });
+
+  it('reports its own deadline as an upstream timeout', async () => {
+    outboundFetch.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+
+    const res = await fetchUrl({ url: 'https://slow.example/page', timeoutMs: 50 });
+    expect(res.status).toBe(504);
+    expect(await res.json()).toEqual({ error: 'upstream_timeout' });
+  });
+
+  it('still redacts a failure that is not a network error', async () => {
+    outboundFetch.mockRejectedValueOnce(new Error('C:\\Users\\alice\\secret.txt ENOENT'));
+
+    const res = await fetchUrl({ url: 'https://fixture.example/page' });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('internal_error');
+    expect(JSON.stringify(body)).not.toContain('alice');
+  });
 });

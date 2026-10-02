@@ -57,7 +57,7 @@ import { McpBridgePool } from './mcp-bridge-pool.js';
 import { computeToolBudgetChars } from './mcp-bridge.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
-import { RambleDetector } from './ramble-detector.js';
+import { RambleDetector, inertRambleDetector, outputIsConstrained } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import {
   DeliverableReadySteer,
@@ -990,25 +990,27 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
         this.deps.profile,
         'turn.ramble-detection',
       );
-      const ramble = rambleConfig
-        ? new RambleDetector({
-            threshold: rambleConfig.coldThreshold,
-            postActionThreshold: rambleConfig.postActionThreshold,
-            enabled: true,
-            // Models that leak untagged reasoning narrate their plan in
-            // the open before acting; give the cold cap room to reach
-            // the tool call. Prefer the profile opt-in, but also honor the
-            // model-id family signal so a verbose family whose profile is
-            // missing `turn.preamble-folding` (config drift) still gets
-            // the leaky budget instead of the tight 6k cap.
-            leakyReasoning:
-              profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
-              leaksUntaggedReasoning(this.deps.model),
-          })
-        : // Repetition guard is safe on any local model (fires only on
-          // degenerate low-novelty loops); arm it even without the
-          // length-cap opt-in. See RambleDetector.
-          new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
+      const ramble = outputIsConstrained(this.deps.tuning)
+        ? inertRambleDetector()
+        : rambleConfig
+          ? new RambleDetector({
+              threshold: rambleConfig.coldThreshold,
+              postActionThreshold: rambleConfig.postActionThreshold,
+              enabled: true,
+              // Models that leak untagged reasoning narrate their plan in
+              // the open before acting; give the cold cap room to reach
+              // the tool call. Prefer the profile opt-in, but also honor the
+              // model-id family signal so a verbose family whose profile is
+              // missing `turn.preamble-folding` (config drift) still gets
+              // the leaky budget instead of the tight 6k cap.
+              leakyReasoning:
+                profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
+                leaksUntaggedReasoning(this.deps.model),
+            })
+          : // Repetition guard is safe on any local model (fires only on
+            // degenerate low-novelty loops); arm it even without the
+            // length-cap opt-in. See RambleDetector.
+            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
       try {
         for await (const line of readNdjson(res.body)) {
           const chunk = line as OllamaChatChunk;

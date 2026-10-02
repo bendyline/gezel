@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
+import { isUpstreamFetchErrorCode } from './upstream-fetch-error.js';
 export interface UnexpectedHttpErrorEvent {
   kind: 'unhandled_exception' | 'unsanitized_response';
   requestId: string;
@@ -71,15 +72,17 @@ export function opaqueServerErrors(
         c.header('x-request-id', parsed.requestId);
         return;
       }
-      // Broker outages, capacity denials, and media-engine readiness failures
-      // are expected, actionable degraded states rather than route exceptions.
+      // Broker outages, capacity denials, media-engine readiness failures, and
+      // an unreachable third-party site are expected, actionable degraded
+      // states rather than route exceptions.
       // Preserve only their fixed codes; the route/provider logs the underlying
       // detail and never puts it in this body.
       if (
         (parsed.error === 'machine_engine_unavailable' ||
           parsed.error === 'capacity_denied' ||
           parsed.error === 'speech_to_text_not_ready' ||
-          parsed.error === 'speech_to_text_failed') &&
+          parsed.error === 'speech_to_text_failed' ||
+          isUpstreamFetchErrorCode(parsed.error)) &&
         Object.keys(parsed as Record<string, unknown>).length === 1
       ) {
         return;

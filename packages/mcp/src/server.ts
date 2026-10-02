@@ -3393,6 +3393,18 @@ function joinErrorAndHint(details: unknown): string | null {
   return `${head}: ${hint}`;
 }
 
+// The daemon answers a network failure reaching the site with one of these
+// fixed codes (packages/service/src/http/upstream-fetch-error.ts). A bare code
+// reads to a small model like a gezel fault, so name the next move.
+const UPSTREAM_FETCH_FAILURES: Record<string, string> = {
+  upstream_timeout:
+    'the site did not answer before the timeout. It may be slow or down; use another source rather than repeating this URL.',
+  upstream_unreachable:
+    'the site could not be reached (no such host, or the connection was refused or dropped). Use a URL from a search result, or another source.',
+  upstream_tls_failed:
+    "the site's security certificate was rejected, so nothing was fetched. Use another source.",
+};
+
 function unwrapApiError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const joined = joinErrorAndHint((err as { details?: unknown }).details);
@@ -10173,8 +10185,14 @@ server.tool(
       return { content: [{ type: 'text' as const, text: `${head}\n\n${body}` }] };
     } catch (err) {
       const msg = unwrapApiError(err);
+      const explained = UPSTREAM_FETCH_FAILURES[msg];
       return {
-        content: [{ type: 'text' as const, text: `fetch_url failed: ${msg}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `fetch_url failed: ${explained ? `${explained} (${msg})` : msg}`,
+          },
+        ],
         isError: true,
       };
     }

@@ -68,11 +68,12 @@ import {
   WikipediaReadRequestSchema,
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
+  createLogger,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import type { ReadEntry } from 'tar';
 import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/suggest.js';
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
@@ -104,6 +105,9 @@ import { SsrfError, assertPublicUrl } from '../../utils/ssrf.js';
 import { WorkspaceGrepError, grepWorkspace } from '../../workspace/grep-files.js';
 import { readWorkspaceFiles } from '../../workspace/read-files.js';
 import type { ServiceContext } from '../context.js';
+import { classifyUpstreamFetchError, describeError } from '../upstream-fetch-error.js';
+
+const log = createLogger('tools');
 
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_FETCH_MAX_BYTES = 10 * 1024 * 1024;
@@ -118,6 +122,32 @@ class ArchiveValidationError extends Error {
     super(message);
     this.name = 'ArchiveValidationError';
   }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+/**
+ * A network failure reaching the third-party site answers with a fixed code
+ * the opaque-error middleware lets through; anything else stays a raw 502 so
+ * a genuine route bug is still logged and redacted as one.
+ */
+function upstreamFailureResponse(
+  c: Context,
+  tool: string,
+  target: string,
+  err: unknown,
+  timedOut: boolean,
+): Response {
+  const failure = classifyUpstreamFetchError(err, timedOut);
+  if (!failure) return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+  log.warn(`[tools] ${tool} ${failure.code} target=${target}: ${describeError(err)}`);
+  return c.json({ error: failure.code }, failure.status);
 }
 
 export function toolRoutes(ctx: ServiceContext): Hono {
@@ -243,7 +273,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       if (err instanceof SsrfError) {
         return c.json({ error: `request denied: ${err.message}` }, 403);
       }
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+      return upstreamFailureResponse(
+        c,
+        'fetch_url',
+        hostOf(body.url),
+        err,
+        controller.signal.aborted,
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -301,8 +337,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       };
       return c.json(response);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: msg }, 502);
+      return upstreamFailureResponse(
+        c,
+        'web_search',
+        provider.name,
+        err,
+        controller.signal.aborted,
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -380,8 +421,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       };
       return c.json(response);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: msg }, 502);
+      return upstreamFailureResponse(
+        c,
+        'wikipedia_search',
+        provider.name,
+        err,
+        controller.signal.aborted,
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -414,7 +460,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       const results = mocked ? [] : await searchWikimediaImages(body, controller.signal);
       return c.json({ query: body.query, results });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+      return upstreamFailureResponse(
+        c,
+        'wikimedia_image_search',
+        'commons.wikimedia.org',
+        err,
+        controller.signal.aborted,
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -478,8 +530,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       };
       return c.json(response);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: msg }, 502);
+      return upstreamFailureResponse(
+        c,
+        'wikipedia_read',
+        'wikipedia',
+        err,
+        controller.signal.aborted,
+      );
     } finally {
       clearTimeout(timeout);
     }
