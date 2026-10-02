@@ -282,7 +282,7 @@ export function AudioEngineSettings() {
                 aria-label="Voice preview text"
                 value={previewText}
                 onChange={(e) => setPreviewText(e.target.value)}
-                style={{ minWidth: 280, flex: 1 }}
+                style={{ minWidth: 'min(280px, 100%)', flex: 1 }}
               />
               <button
                 type="button"

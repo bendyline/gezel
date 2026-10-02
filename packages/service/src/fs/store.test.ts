@@ -1518,7 +1518,7 @@ describe('project tasks storage', () => {
       createdBy: { kind: 'user' as const },
     };
     await store.writeTask({ ...base, description: 'first version' });
-    await store.writeTask({ ...base, description: '' });
+    await store.writeTask({ ...(await store.readTask('alpha', 1))!, description: '' });
 
     const got = await store.readTask('alpha', 1);
     expect(got?.description).toBeUndefined();
@@ -1526,7 +1526,9 @@ describe('project tasks storage', () => {
     // Only a missing file is ignorable. A real filesystem failure must reach
     // the caller instead of reporting a successful clear that later reappears.
     await mkdir(join(home, 'projects', 'alpha', 'tasks', '1', 'about.md'));
-    await expect(store.writeTask(base)).rejects.toBeDefined();
+    await expect(store.writeTask(got!)).rejects.toMatchObject({
+      code: expect.stringMatching(/^(ERR_FS_EISDIR|EISDIR|EPERM|EACCES)$/),
+    });
   });
 
   it('notes append/list/delete with phase filter', async () => {

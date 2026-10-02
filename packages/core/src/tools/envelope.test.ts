@@ -18,6 +18,34 @@ describe('whole-reply tool envelopes', () => {
     ).toEqual({ name: 'write_file', arguments: { path: 'a.md', content: '{{' } });
   });
 
+  it('drops keys a small model sent with no value', () => {
+    // Verbatim from Gemini Nano on a Galaxy S26+ (2026-10-02).
+    const reply =
+      '{"name":"ask_user_question","arguments":{"question":"Could you please tell me more about the project\'s goal?","prompt":"Please provide a brief description of the project\'s objective.","description":"Understanding the project\'s goal is crucial.","choices":[],"allowWriteIn","multiSelect","taskRef":"default","documentPath":""}}';
+    expect(parseToolEnvelopeReply(reply)).toEqual({
+      name: 'ask_user_question',
+      arguments: {
+        question: "Could you please tell me more about the project's goal?",
+        prompt: "Please provide a brief description of the project's objective.",
+        description: "Understanding the project's goal is crucial.",
+        choices: [],
+        taskRef: 'default',
+        documentPath: '',
+      },
+    });
+    expect(
+      parseToolEnvelopeReply(
+        '{"name":"ask_user_question","arguments":{"question":"Which?","choices":["a","b"],"multiSelect"}}',
+      ),
+    ).toEqual({
+      name: 'ask_user_question',
+      arguments: { question: 'Which?', choices: ['a', 'b'] },
+    });
+    expect(
+      parseToolEnvelopeReply('Try this: {"name":"read_file","arguments":{"path":"a.md","x"}}'),
+    ).toBeNull();
+  });
+
   it('repairs nothing that is not plainly one unclosed call', () => {
     for (const reply of [
       '{"name":"write_file","arguments":{"path":"a.md","content":{"x":{"y":1',

@@ -1,6 +1,8 @@
 import {
   APP_TOOL_MAX_RESULT_CHARS,
+  APP_TOOL_SURFACE_HEADER,
   AppToolCallResultRequestSchema,
+  AppToolSurfaceIdSchema,
   OpenAppToolRelayRequestSchema,
   RegisterAppToolsRequestSchema,
   createLogger,
@@ -12,6 +14,22 @@ import type { ServiceContext } from '../context.js';
 import { serializeSseWrites } from './chat-events.js';
 
 const log = createLogger('app-tools');
+
+/**
+ * Record which app surface a person's message to `sessionId` came through.
+ *
+ * Every route that carries a message a person wrote calls this before
+ * dispatching it, so tools an app registered for its own chat (the Office
+ * pane's document tools) follow the person: the thread they last wrote to
+ * from the pane has them, the same thread written to from the desktop app
+ * does not. A gezel's own session token is not a person writing from
+ * anywhere, so it never moves that.
+ */
+export function noteMessageSurface(ctx: ServiceContext, c: Context, sessionId: string): void {
+  if (c.get('auth')?.scopes.includes('session')) return;
+  const surface = AppToolSurfaceIdSchema.safeParse(c.req.header(APP_TOOL_SURFACE_HEADER));
+  ctx.appToolRelays.noteUserMessage(sessionId, surface.success ? surface.data : undefined);
+}
 
 /**
  * `/api/app-tools` — tools a connected app runs on the daemon's behalf.

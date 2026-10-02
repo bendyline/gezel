@@ -385,7 +385,7 @@ export function HomeView({
           <h1 className="home-firstrun-heading">First run setup</h1>
           <p className="home-firstrun-lede muted">
             {hostModels
-              ? 'Download or import a chat model to get started, or choose an available on-device model. Your conversations stay on this device.'
+              ? 'Choose a model to get started: one already on this device, or one to download. Your conversations stay on this device.'
               : 'Gezel chats through a local AI model that runs privately on this device — download the recommended one to get started.'}
           </p>
           <div className="home-firstrun-body">

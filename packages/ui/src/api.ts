@@ -9,6 +9,7 @@ import type {
 } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 import type { ReactNode } from 'react';
+import { readAppSurface, withAppSurface } from './embedded/app-surface.js';
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from './html-preview-host.js';
 import { instrumentFetch, setPerfReportSink } from './nav-timing.js';
 
@@ -436,11 +437,13 @@ function resolveBaseUrl(): string {
 }
 
 const injectedFetch = window.__GEZEL__?.fetch;
+const baseFetch: typeof fetch = injectedFetch ?? ((input, init) => globalThis.fetch(input, init));
+const appSurface = readAppSurface(window.location.search);
 
 export const api = new GezelClient({
   baseUrl: resolveBaseUrl(),
   token: resolveToken(),
-  fetch: instrumentFetch(injectedFetch ?? ((input, init) => globalThis.fetch(input, init))),
+  fetch: instrumentFetch(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch),
 });
 
 if (window.__GEZEL__?.capabilities?.perfReports !== false) {

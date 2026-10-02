@@ -57,6 +57,15 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
     () => diffpacks.find((p) => p.packId === selectedId) ?? diffpacks[0] ?? null,
     [diffpacks, selectedId],
   );
+  const appliedPaths = new Set(
+    selected?.results?.filter((result) => result.ok).map((result) => result.path),
+  );
+  const canApply =
+    selected !== null &&
+    (selected.status === 'ready' ||
+      selected.status === 'partially-applied' ||
+      (selected.status === 'failed' && Boolean(selected.sealedAt))) &&
+    selected.files.some((file) => !appliedPaths.has(file.path));
 
   useEffect(() => {
     if (!selected) return;
@@ -204,7 +213,8 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
                     <span className="muted small">
                       {changeLabel(file)} · +{file.additions} −{file.deletions}
                     </span>
-                    {selected.status === 'ready' && file.change !== 'delete' && (
+                    {appliedPaths.has(file.path) && <span className="muted small">Applied</span>}
+                    {canApply && !appliedPaths.has(file.path) && file.change !== 'delete' && (
                       <button
                         type="button"
                         className="small"
@@ -236,7 +246,7 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
               <button
                 type="button"
                 className="gz-key dp-key-apply"
-                disabled={selected.status !== 'ready' || busy === selected.packId}
+                disabled={!canApply || busy === selected.packId}
                 onClick={() => void runApply()}
               >
                 {busy === selected.packId ? 'Applying…' : 'Apply all'}

@@ -77,6 +77,21 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('artifacts', 'default', 'note.md')).toBeNull();
   });
 
+  // Told every key after a bad optional value, Gemini Nano sent them all back.
+  it('answers a bad optional value with leaving it out, not the whole key list', async () => {
+    const { store, session } = await fixture();
+    const rejection = executePortableTool(
+      store,
+      session,
+      'ask_user_question',
+      { question: 'What is the project for?', taskRef: 'default' },
+      { ...actions, askQuestion: async () => ({ questionId: 'q1' }) },
+    );
+    await expect(rejection).rejects.toThrow(
+      'ask_user_question `taskRef`: task ref must use projectId/num form. Leave out `taskRef`: it is optional. Call it again with corrected arguments.',
+    );
+  });
+
   it('honors output-medium and group exclusions without elevating the role', async () => {
     const { store, gezel } = await fixture();
     const task = await store.createTask('default', {

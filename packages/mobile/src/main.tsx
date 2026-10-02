@@ -1,5 +1,6 @@
 import content from 'virtual:gezel-portable-content';
 import { PortableProductService, PortableStore } from '@bendyline/gezel/runtime';
+import { SystemBarType, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { version } from '../../core/package.json';
 import { ProductModelSettings } from './ProductModelSettings.js';
 import { createBrowserHost } from './browser-host.js';
@@ -57,6 +58,13 @@ async function boot() {
     ),
   };
   await import('../../ui/src/main.js');
+  // The status bar sits on the title bar's sage band (product-host.css), so
+  // its icons stay light in either theme. Only the status bar: the gesture
+  // bar sits on the page ground and keeps the system's choice.
+  if (host.native)
+    void SystemBars.setStyle({ style: SystemBarsStyle.Dark, bar: SystemBarType.StatusBar }).catch(
+      () => {},
+    );
   const viewport = window.visualViewport;
   let viewportWidth = window.innerWidth;
   let expandedHeight = window.innerHeight;

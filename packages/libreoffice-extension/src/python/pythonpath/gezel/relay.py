@@ -1,9 +1,10 @@
 """Offer the extension's document tools, while the panel is open, to the one
-gezel it talks to in the project, through the daemon's app-tool relay
-(ADR 0013). Offering them project-wide put a live document writer in every
-other session there too, the Meester's chat and background work among them.
-Calls arrive on a background thread; `run_on_main` executes each handler
-where UNO document calls are safe."""
+gezel it talks to in the project and only in the panel's own chat thread,
+through the daemon's app-tool relay (ADR 0013). Offering them to the gezel's
+every session put a live document writer in its other chats too, the
+Meester's front-door chat and background work among them. Calls arrive on a
+background thread; `run_on_main` executes each handler where UNO document
+calls are safe."""
 
 from __future__ import annotations
 
@@ -17,13 +18,24 @@ from .client import HttpError
 
 class Relay:
     def __init__(
-        self, http, token, project_id, label, tools, run_on_main, on_status=None, sleep=time.sleep, gezel_id=None
+        self,
+        http,
+        token,
+        project_id,
+        label,
+        tools,
+        run_on_main,
+        on_status=None,
+        sleep=time.sleep,
+        gezel_id=None,
+        surface_id=None,
     ):
         """`tools` is a list of {name, description, inputSchema, timeoutMs?, handler}."""
         self.http = http
         self.token = token
         self.project_id = project_id
         self.gezel_id = gezel_id
+        self.surface_id = surface_id
         self.label = label
         self._tools = {t["name"]: t for t in tools}
         self._run_on_main = run_on_main
@@ -53,6 +65,7 @@ class Relay:
             {
                 "projectId": self.project_id,
                 **({"gezelIds": [self.gezel_id]} if self.gezel_id else {}),
+                **({"surfaceId": self.surface_id} if self.surface_id else {}),
                 "tools": definitions,
             },
             token=self.token,

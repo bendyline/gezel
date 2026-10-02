@@ -1,5 +1,6 @@
 import { APP_TOOL_NAME_RE } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
+import type { DiagramRenderer } from '../diagram.js';
 import type { ExcelWorkbook } from './excel.js';
 import { toolsForHost } from './index.js';
 import type { PowerPointDeck } from './powerpoint.js';
@@ -45,6 +46,15 @@ function fakeWord(overrides: Partial<WordDocument> = {}): WordDocument {
   };
 }
 
+function fakeRenderer(): DiagramRenderer {
+  return vi.fn(async () => ({
+    base64: 'UE5H',
+    widthPt: 300,
+    heightPt: 120,
+    diagramType: 'flowchart-v2',
+  }));
+}
+
 function tools(
   host: 'word' | 'excel' | 'powerpoint',
   opts: {
@@ -53,6 +63,7 @@ function tools(
     word?: WordDocument;
     excel?: ExcelWorkbook;
     powerpoint?: PowerPointDeck;
+    renderDiagram?: DiagramRenderer;
   } = {},
 ) {
   const list = toolsForHost({
@@ -65,6 +76,7 @@ function tools(
       ...(opts.excel ? { excel: opts.excel } : {}),
       ...(opts.powerpoint ? { powerpoint: opts.powerpoint } : {}),
       readSelection: async () => 'selected text',
+      renderDiagram: opts.renderDiagram ?? fakeRenderer(),
     },
   });
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -101,6 +113,13 @@ describe('tool catalogue', () => {
   it('never offers a tool this Office cannot run', () => {
     const names = tools('powerpoint', { supported: false }).list.map((t) => t.name);
     expect(names).toEqual(['office_describe_document', 'office_read_selection']);
+    // A Word without picture inserts has no way to place a diagram.
+    expect(tools('word', { supported: false }).list.map((t) => t.name)).not.toContain(
+      'doc_insert_diagram',
+    );
+    expect(tools('word', { edits: false }).list.map((t) => t.name)).not.toContain(
+      'doc_insert_diagram',
+    );
   });
 });
 
@@ -134,9 +153,76 @@ describe('Word tools', () => {
     const word = fakeWord();
     const { call } = tools('word', { word });
     await call('doc_insert_text', { text: '# Heading', format: 'markdown', where: 'end' });
-    expect(word.insert).toHaveBeenCalledWith('<h1>Heading</h1>', 'end', true);
+    expect(word.insert).toHaveBeenCalledWith('<h1>Heading</h1>', 'end', true, []);
     await call('doc_insert_text', { text: 'plain' });
-    expect(word.insert).toHaveBeenLastCalledWith('plain', 'cursor', false);
+    expect(word.insert).toHaveBeenLastCalledWith('plain', 'cursor', false, []);
+  });
+
+  it('draws a diagram and puts it where its placeholder paragraph lands', async () => {
+    const word = fakeWord();
+    const renderDiagram = fakeRenderer();
+    const { call } = tools('word', { word, renderDiagram });
+    const result = await call('doc_insert_diagram', {
+      source: '```mermaid\nflowchart TD\n  A --> B\n```',
+      where: 'end',
+      title: 'Family tree',
+    });
+    expect(renderDiagram).toHaveBeenCalledWith('flowchart TD\n  A --> B');
+    expect(result).toEqual({
+      inserted: true,
+      where: 'end',
+      diagramType: 'flowchart-v2',
+      widthPt: 300,
+      heightPt: 120,
+    });
+    const [html, where, isHtml, pictures] = vi.mocked(word.insert).mock.calls[0]!;
+    expect([where, isHtml]).toEqual(['end', true]);
+    expect(pictures).toEqual([
+      expect.objectContaining({ base64: 'UE5H', widthPt: 300, altText: 'Family tree' }),
+    ]);
+    expect(html).toBe(`<p style="text-align:center">${pictures![0]!.placeholder}</p>`);
+  });
+
+  it('draws a mermaid block written inside markdown, in place', async () => {
+    const word = fakeWord();
+    const { call } = tools('word', { word });
+    const result = await call('doc_insert_text', {
+      format: 'markdown',
+      text: '# Tree\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nAfter.',
+    });
+    expect(result).toMatchObject({ inserted: true, diagrams: 1 });
+    const [html, , , pictures] = vi.mocked(word.insert).mock.calls[0]!;
+    expect(html).toBe(
+      `<h1>Tree</h1><p style="text-align:center">${pictures![0]!.placeholder}</p><p>After.</p>`,
+    );
+  });
+
+  it('leaves the document untouched when a diagram will not draw', async () => {
+    const word = fakeWord();
+    const renderDiagram = vi.fn(async () => {
+      throw new Error('The diagram could not be drawn. Mermaid says:\nParse error on line 2');
+    });
+    const { list } = tools('word', { word, renderDiagram });
+    const insert = list.find((t) => t.name === 'doc_insert_text')!;
+    await expect(
+      insert.handler(
+        { format: 'markdown', text: 'Intro\n\n```mermaid\nflowchart TD\n  A -->\n```' },
+        CONTEXT,
+      ),
+    ).rejects.toThrow(/Parse error on line 2/);
+    expect(word.insert).not.toHaveBeenCalled();
+  });
+
+  it('keeps a mermaid block as code where Word cannot take pictures', async () => {
+    const word = fakeWord();
+    const { call } = tools('word', { word, supported: false });
+    await call('doc_insert_text', { format: 'markdown', text: '```mermaid\nA --> B\n```' });
+    expect(word.insert).toHaveBeenCalledWith(
+      '<pre><code>A --&gt; B</code></pre>',
+      'cursor',
+      true,
+      [],
+    );
   });
 
   it('rejects bad arguments with a message the model can act on', async () => {

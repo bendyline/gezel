@@ -8,16 +8,22 @@ import urllib.parse
 
 from .client import HttpError
 
+# Mirrors APP_TOOL_SURFACE_HEADER in core's schemas/app-tools.ts. The daemon
+# offers the panel's document tools only to a thread whose latest message
+# carried the panel's surface id.
+SURFACE_HEADER = "x-gezel-app-surface"
+
 
 class ChatThread:
     """Send a message and receive the reply as callbacks, from a worker
     thread. Callers marshal UI work to the main thread themselves."""
 
-    def __init__(self, http, token, project_id, gezel_id):
+    def __init__(self, http, token, project_id, gezel_id, surface_id=None):
         self.http = http
         self.token = token
         self.project_id = project_id
         self.gezel_id = gezel_id
+        self.surface_id = surface_id
         self.session_id = None
         self._stop = threading.Event()
 
@@ -72,7 +78,11 @@ class ChatThread:
                 if failure:
                     raise failure[0]
                 self.http.request_json(
-                    "POST", f"/api/sessions/{urllib.parse.quote(session_id)}/send", {"message": message}, token=self.token
+                    "POST",
+                    f"/api/sessions/{urllib.parse.quote(session_id)}/send",
+                    {"message": message},
+                    token=self.token,
+                    headers={SURFACE_HEADER: self.surface_id} if self.surface_id else None,
                 )
                 listener.join()
             except HttpError as err:

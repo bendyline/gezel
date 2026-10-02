@@ -46,6 +46,13 @@ export class DiffpackNotFoundError extends Error {
   }
 }
 
+export class DiffpackNotReviewableError extends Error {
+  constructor(status: DiffpackStatus) {
+    super(`A ${status} proposal cannot be applied.`);
+    this.name = 'DiffpackNotReviewableError';
+  }
+}
+
 /**
  * A pack targets files that moved since it was sealed. Carried as an error so
  * the route can answer 409 with the specific paths — a model-authored patch
@@ -75,6 +82,7 @@ export class DiffpackDriftedError extends Error {
  */
 export class DiffpackManager {
   private readonly locks = new KeyedLock();
+  private readonly applicationLocks = new KeyedLock();
   /** Packs this process has already confirmed a record for. */
   private readonly known = new Set<string>();
   readonly drafts: DiffpackDraftStore;
@@ -173,8 +181,15 @@ export class DiffpackManager {
    * entry the user has to dismiss.
    */
   async seal(projectId: string, packId: string): Promise<DiffpackRecord> {
+    return this.applicationLocks.run(`${projectId}/${packId}`, () =>
+      this.sealLocked(projectId, packId),
+    );
+  }
+
+  private async sealLocked(projectId: string, packId: string): Promise<DiffpackRecord> {
     const record = await this.getRecord(projectId, packId);
     if (!record) throw new DiffpackNotFoundError(packId);
+    if (record.status !== 'drafting') return record;
 
     const [drafted, deletions] = await Promise.all([
       this.drafts.listDraftedPaths(projectId, packId),
@@ -329,9 +344,9 @@ export class DiffpackManager {
    * would silently overwrite a file someone else created.
    */
   private async driftedPaths(projectId: string, record: DiffpackRecord): Promise<string[]> {
-    if (!isActiveDiffpackStatus(record.status)) return [];
+    if (record.status === 'applied' || record.status === 'dismissed') return [];
     const out: string[] = [];
-    for (const file of record.files) {
+    for (const file of pendingFiles(record)) {
       const current = await this.deps.store
         .readProjectWorkspaceFile(projectId, file.path)
         .catch(() => null);
@@ -359,11 +374,25 @@ export class DiffpackManager {
     packId: string,
     opts: { paths?: string[]; allowDrifted?: boolean } = {},
   ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
+    return this.applicationLocks.run(`${projectId}/${packId}`, () =>
+      this.applyLocked(projectId, packId, opts),
+    );
+  }
+
+  private async applyLocked(
+    projectId: string,
+    packId: string,
+    opts: { paths?: string[]; allowDrifted?: boolean },
+  ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
     const record = await this.getRecord(projectId, packId);
     if (!record) throw new DiffpackNotFoundError(packId);
+    if (record.status === 'applied') return { ok: true, results: [] };
+    if (record.status === 'drafting' || record.status === 'dismissed' || !record.sealedAt) {
+      throw new DiffpackNotReviewableError(record.status);
+    }
 
     const wanted = opts.paths ? new Set(opts.paths.map(normalizeDraftPath)) : null;
-    const selected = record.files.filter((f) => !wanted || wanted.has(f.path));
+    const selected = pendingFiles(record).filter((f) => !wanted || wanted.has(f.path));
     if (selected.length === 0) return { ok: true, results: [] };
 
     if (!opts.allowDrifted) {
@@ -427,7 +456,7 @@ export class DiffpackManager {
           ...deletions.map(skipped),
         ],
       };
-      await this.recordApplyOutcome(projectId, packId, failed, selected.length);
+      await this.recordApplyOutcome(projectId, packId, failed);
       return failed;
     }
 
@@ -457,6 +486,7 @@ export class DiffpackManager {
         await run(add.path, () =>
           this.deps.store.writeProjectWorkspaceFile(projectId, add.path, add.content, undefined, {
             userInitiated: true,
+            createOnly: !opts.allowDrifted,
           }),
         );
       }
@@ -471,7 +501,7 @@ export class DiffpackManager {
       }
     }
 
-    await this.recordApplyOutcome(projectId, packId, applied, selected.length);
+    await this.recordApplyOutcome(projectId, packId, applied);
     this.deps.history
       ?.log({
         kind: 'project.diffpack.applied',
@@ -492,23 +522,34 @@ export class DiffpackManager {
     projectId: string,
     packId: string,
     outcome: { ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> },
-    selectedCount: number,
   ): Promise<void> {
     await this.mutate(projectId, async (packs) => {
       const record = packs.find((p) => p.packId === packId);
       if (!record) return { record: null, changed: false };
-      record.results = outcome.results;
-      if (!outcome.ok) {
-        record.status = 'failed';
-      } else {
-        record.status = selectedCount === record.files.length ? 'applied' : 'partially-applied';
-        record.appliedAt = nowIso();
-      }
+      const results = new Map(record.results?.map((result) => [result.path, result]));
+      for (const result of outcome.results) results.set(result.path, result);
+      record.results = [...results.values()];
+      const appliedCount = record.files.length - pendingFiles(record).length;
+      record.status =
+        appliedCount === record.files.length
+          ? 'applied'
+          : appliedCount > 0
+            ? 'partially-applied'
+            : outcome.ok
+              ? 'ready'
+              : 'failed';
+      if (appliedCount > 0) record.appliedAt = nowIso();
       return { record: null, changed: true };
     });
   }
 
   async dismiss(projectId: string, packId: string): Promise<DiffpackRecord> {
+    return this.applicationLocks.run(`${projectId}/${packId}`, () =>
+      this.dismissLocked(projectId, packId),
+    );
+  }
+
+  private async dismissLocked(projectId: string, packId: string): Promise<DiffpackRecord> {
     const record = await this.mutate(projectId, async (packs) => {
       const row = packs.find((p) => p.packId === packId);
       if (!row) throw new DiffpackNotFoundError(packId);
@@ -612,6 +653,13 @@ export class DiffpackManager {
   }
 }
 
+function pendingFiles(record: DiffpackRecord): DiffpackFile[] {
+  const applied = new Set(
+    record.results?.filter((result) => result.ok).map((result) => result.path),
+  );
+  return record.files.filter((file) => !applied.has(file.path));
+}
+
 /**
  * Recover a new file's content from the creation patch the sealer wrote
  * (`createPatch(path, '', content)`). Reading it back from the sidecar rather
@@ -639,13 +687,13 @@ function contentFromCreationPatch(diff: string): string | null {
 export function overlapsFor(record: DiffpackRecord, siblings: DiffpackRecord[]): DiffpackOverlap[] {
   if (!isActiveDiffpackStatus(record.status)) return [];
   const out: DiffpackOverlap[] = [];
-  for (const file of record.files) {
+  for (const file of pendingFiles(record)) {
     const packIds = siblings
       .filter(
         (other) =>
           other.packId !== record.packId &&
           isActiveDiffpackStatus(other.status) &&
-          other.files.some((f) => f.path === file.path),
+          pendingFiles(other).some((f) => f.path === file.path),
       )
       .map((other) => other.packId);
     if (packIds.length > 0) out.push({ path: file.path, packIds });

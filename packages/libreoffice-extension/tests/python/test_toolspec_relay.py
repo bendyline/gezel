@@ -3,6 +3,7 @@ import threading
 import unittest
 
 import _path  # noqa: F401
+from gezel.chat import SURFACE_HEADER, ChatThread
 from gezel.client import HttpError
 from gezel.relay import Relay
 from gezel.toolspec import MAX_CELLS, ToolInputError, markdown_blocks, tools_for
@@ -128,13 +129,17 @@ class ToolspecTests(unittest.TestCase):
 class FakeHttp:
     def __init__(self):
         self.calls = []
+        self.headers = {}
         self.events_frames = []
         self.results = []
 
-    def request_json(self, method, path, body=None, token=None, timeout=30.0):
+    def request_json(self, method, path, body=None, token=None, timeout=30.0, headers=None):
         self.calls.append((method, path, body))
+        self.headers[path] = headers
         if path == "/api/app-tools/relays":
             return {"relayId": "r1"}
+        if path == "/api/sessions":
+            return {"id": "s1"}
         if path.endswith("/result"):
             self.results.append(body)
         return {}
@@ -189,7 +194,7 @@ class RelayTests(unittest.TestCase):
 
     def test_unauthorized_stops_the_relay(self):
         class Refusing(FakeHttp):
-            def request_json(self, method, path, body=None, token=None, timeout=30.0):
+            def request_json(self, method, path, body=None, token=None, timeout=30.0, headers=None):
                 raise HttpError(401, {"error": "unauthorized"})
 
         statuses = []
@@ -201,7 +206,9 @@ class RelayTests(unittest.TestCase):
     def test_offers_the_tools_to_the_chosen_gezel_only(self):
         http = FakeHttp()
         tool = {"name": "echo", "description": "d", "inputSchema": {"type": "object"}, "handler": lambda a: ""}
-        relay = Relay(http, "t", "p1", "x", [tool], lambda fn: fn(), sleep=lambda _s: None, gezel_id="lead")
+        relay = Relay(
+            http, "t", "p1", "x", [tool], lambda fn: fn(), sleep=lambda _s: None, gezel_id="lead", surface_id="panel1234"
+        )
         relay.start()
         for _ in range(100):
             if any(c[0] == "PUT" for c in http.calls):
@@ -212,6 +219,21 @@ class RelayTests(unittest.TestCase):
         published = [c[2] for c in http.calls if c[0] == "PUT"]
         self.assertEqual(published[0]["gezelIds"], ["lead"])
         self.assertEqual(published[-1]["gezelIds"], ["writer"])
+        # Only in the panel's own thread, across a change of gezel too.
+        self.assertTrue(all(p["surfaceId"] == "panel1234" for p in published))
+
+
+class ChatThreadTests(unittest.TestCase):
+    def test_sends_with_the_panel_surface(self):
+        http = FakeHttp()
+        http.events_frames = [json.dumps({"type": "done"})]
+        done = threading.Event()
+        chat = ChatThread(http, "t", "p1", "lead", "panel1234")
+        worker = chat.send("Hello", lambda _d: None, lambda _t: None, done.set, lambda _e: done.set())
+        worker.join(5)
+        chat.close()
+        self.assertTrue(done.is_set())
+        self.assertEqual(http.headers["/api/sessions/s1/send"], {SURFACE_HEADER: "panel1234"})
 
 
 if __name__ == "__main__":

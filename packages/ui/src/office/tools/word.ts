@@ -1,3 +1,4 @@
+import type { DiagramRenderer } from '../diagram.js';
 import { markdownToHtml } from '../markdown-to-html.js';
 import {
   MAX_INSERT_CHARS,
@@ -22,6 +23,19 @@ export interface WordParagraph {
   style: string;
 }
 
+/**
+ * A picture that replaces a placeholder paragraph in inserted HTML. Inserting
+ * the HTML first and swapping each placeholder after keeps text and pictures
+ * in the order they were written, wherever the insert lands.
+ */
+export interface WordPicture {
+  placeholder: string;
+  base64: string;
+  widthPt: number;
+  heightPt: number;
+  altText: string;
+}
+
 /** What the Word tools need from the document. Office.js below; a fake in tests. */
 export interface WordDocument {
   readSelection(): Promise<{ text: string; paragraphs: WordParagraph[] }>;
@@ -31,8 +45,39 @@ export interface WordDocument {
     matchCase: boolean,
     max: number,
   ): Promise<{ total: number; matches: Array<{ text: string; paragraph: string }> }>;
-  insert(content: string, where: InsertWhere, html: boolean): Promise<void>;
-  replaceSelection(content: string, html: boolean): Promise<void>;
+  insert(
+    content: string,
+    where: InsertWhere,
+    html: boolean,
+    pictures?: readonly WordPicture[],
+  ): Promise<void>;
+  replaceSelection(
+    content: string,
+    html: boolean,
+    pictures?: readonly WordPicture[],
+  ): Promise<void>;
+}
+
+async function placePictures(
+  ctx: Word.RequestContext,
+  pictures: readonly WordPicture[] = [],
+): Promise<void> {
+  if (pictures.length === 0) return;
+  const found = pictures.map((picture) => {
+    const results = ctx.document.body.search(picture.placeholder, { matchCase: true });
+    results.load('items');
+    return results;
+  });
+  await ctx.sync();
+  pictures.forEach((picture, i) => {
+    const range = found[i]!.items[0];
+    if (!range) throw new Error('The text went in, but Word lost the place for the diagram.');
+    const inline = range.insertInlinePictureFromBase64(picture.base64, Word.InsertLocation.replace);
+    inline.width = picture.widthPt;
+    inline.height = picture.heightPt;
+    inline.altTextDescription = picture.altText;
+  });
+  await ctx.sync();
 }
 
 export function officeWordDocument(): WordDocument {
@@ -82,7 +127,7 @@ export function officeWordDocument(): WordDocument {
           };
         }),
       ),
-    insert: (content, where, html) =>
+    insert: (content, where, html, pictures) =>
       runSerial(() =>
         Word.run(async (ctx) => {
           if (where === 'cursor') {
@@ -97,28 +142,90 @@ export function officeWordDocument(): WordDocument {
             else body.insertText(content, location);
           }
           await ctx.sync();
+          await placePictures(ctx, pictures);
         }),
       ),
-    replaceSelection: (content, html) =>
+    replaceSelection: (content, html, pictures) =>
       runSerial(() =>
         Word.run(async (ctx) => {
           const selection = ctx.document.getSelection();
           if (html) selection.insertHtml(content, Word.InsertLocation.replace);
           else selection.insertText(content, Word.InsertLocation.replace);
           await ctx.sync();
+          await placePictures(ctx, pictures);
         }),
       ),
   };
 }
 
-function prepare(text: string, format: TextFormat): { content: string; html: boolean } {
-  return format === 'markdown'
-    ? { content: markdownToHtml(text), html: true }
-    : { content: text, html: false };
+/** Longest Mermaid source one diagram may carry. */
+const MAX_DIAGRAM_SOURCE_CHARS = 20_000;
+
+function placeholder(): string {
+  return `GEZELDIAGRAM${crypto.randomUUID().replace(/-/g, '')}`;
 }
 
-export function wordTools(doc: WordDocument): PaneTool[] {
-  return [
+function pictureParagraph(token: string): string {
+  return `<p style="text-align:center">${token}</p>`;
+}
+
+async function drawPicture(
+  render: DiagramRenderer,
+  source: string,
+  altText: string,
+): Promise<{ picture: WordPicture; diagramType: string }> {
+  const drawn = await render(source);
+  return {
+    picture: {
+      placeholder: placeholder(),
+      base64: drawn.base64,
+      widthPt: drawn.widthPt,
+      heightPt: drawn.heightPt,
+      altText,
+    },
+    diagramType: drawn.diagramType,
+  };
+}
+
+/**
+ * Text ready for Word. In markdown, a ```mermaid fence becomes a drawn
+ * diagram when this Word can take pictures. Every diagram is drawn before
+ * anything is inserted, so one that will not draw leaves the document
+ * untouched and the model gets Mermaid's message to correct.
+ */
+async function prepare(
+  text: string,
+  format: TextFormat,
+  render: DiagramRenderer | undefined,
+): Promise<{ content: string; html: boolean; pictures: WordPicture[] }> {
+  if (format !== 'markdown') return { content: text, html: false, pictures: [] };
+  const sources: Array<{ token: string; source: string }> = [];
+  const content = markdownToHtml(
+    text,
+    render
+      ? {
+          diagram: (source) => {
+            const token = placeholder();
+            sources.push({ token, source });
+            return pictureParagraph(token);
+          },
+        }
+      : {},
+  );
+  const pictures: WordPicture[] = [];
+  for (const { token, source } of sources) {
+    const { picture } = await drawPicture(render!, source, 'Diagram');
+    pictures.push({ ...picture, placeholder: token });
+  }
+  return { content, html: true, pictures };
+}
+
+/**
+ * `render` draws Mermaid diagrams; without it (a Word too old for picture
+ * inserts) there is no diagram tool and a ```mermaid fence stays code.
+ */
+export function wordTools(doc: WordDocument, render?: DiagramRenderer): PaneTool[] {
+  const tools: PaneTool[] = [
     {
       name: 'doc_read_selection',
       description:
@@ -215,8 +322,9 @@ export function wordTools(doc: WordDocument): PaneTool[] {
     },
     {
       name: 'doc_insert_text',
-      description:
-        'Insert text into the open Word document at the cursor, the start, or the end. Use format "markdown" for headings, lists, and bold; "plain" inserts the text as is.',
+      description: render
+        ? 'Insert text into the open Word document at the cursor, the start, or the end. Use format "markdown" for headings, lists (indent to nest), and bold; a ```mermaid block is drawn as a diagram. "plain" inserts the text as is.'
+        : 'Insert text into the open Word document at the cursor, the start, or the end. Use format "markdown" for headings, lists (indent to nest), and bold; "plain" inserts the text as is.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -237,9 +345,14 @@ export function wordTools(doc: WordDocument): PaneTool[] {
         const text = readString(args, 'text', { required: true, max: MAX_INSERT_CHARS })!;
         const where = readEnum(args, 'where', ['cursor', 'start', 'end'] as const, 'cursor');
         const format = readEnum(args, 'format', ['plain', 'markdown'] as const, 'plain');
-        const { content, html } = prepare(text, format);
-        await doc.insert(content, where, html);
-        return toJson({ inserted: true, where, characters: text.length });
+        const { content, html, pictures } = await prepare(text, format, render);
+        await doc.insert(content, where, html, pictures);
+        return toJson({
+          inserted: true,
+          where,
+          characters: text.length,
+          ...(pictures.length ? { diagrams: pictures.length } : {}),
+        });
       },
     },
     {
@@ -260,10 +373,67 @@ export function wordTools(doc: WordDocument): PaneTool[] {
       async handler(args) {
         const text = readString(args, 'text', { max: MAX_INSERT_CHARS }) ?? '';
         const format = readEnum(args, 'format', ['plain', 'markdown'] as const, 'plain');
-        const { content, html } = prepare(text, format);
-        await doc.replaceSelection(content, html);
-        return toJson({ replaced: true, characters: text.length });
+        const { content, html, pictures } = await prepare(text, format, render);
+        await doc.replaceSelection(content, html, pictures);
+        return toJson({
+          replaced: true,
+          characters: text.length,
+          ...(pictures.length ? { diagrams: pictures.length } : {}),
+        });
       },
     },
   ];
+  if (render) {
+    tools.push({
+      name: 'doc_insert_diagram',
+      description:
+        'Draw a diagram and insert it into the open Word document as a picture, at the cursor, the start, or the end. Write it in Mermaid: flowchart (also family and org trees), sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, timeline, mindmap, gantt, pie. Use it whenever the user asks for a diagram, chart, tree, or flow. If Mermaid cannot read the source, the error says where; fix it and call again.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source: {
+            type: 'string',
+            minLength: 1,
+            maxLength: MAX_DIAGRAM_SOURCE_CHARS,
+            description: 'Mermaid source, without a ``` fence.',
+          },
+          where: {
+            type: 'string',
+            enum: ['cursor', 'start', 'end'],
+            description: 'Default cursor.',
+          },
+          title: {
+            type: 'string',
+            maxLength: 200,
+            description: 'What the diagram shows; read aloud by screen readers.',
+          },
+        },
+        required: ['source'],
+        additionalProperties: false,
+      },
+      timeoutMs: WRITE_TIMEOUT_MS,
+      write: true,
+      async handler(args) {
+        const source = readString(args, 'source', {
+          required: true,
+          max: MAX_DIAGRAM_SOURCE_CHARS,
+        })!
+          .trim()
+          .replace(/^```\s*mermaid\s*\n/i, '')
+          .replace(/\n```\s*$/, '');
+        const where = readEnum(args, 'where', ['cursor', 'start', 'end'] as const, 'cursor');
+        const title = readString(args, 'title', { max: 200 }) ?? 'Diagram';
+        const { picture, diagramType } = await drawPicture(render, source, title);
+        await doc.insert(pictureParagraph(picture.placeholder), where, true, [picture]);
+        return toJson({
+          inserted: true,
+          where,
+          diagramType,
+          widthPt: picture.widthPt,
+          heightPt: picture.heightPt,
+        });
+      },
+    });
+  }
+  return tools;
 }

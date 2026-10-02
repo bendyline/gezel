@@ -123,8 +123,12 @@ public final class MobileUiSmokeTest {
         run("""
             await until(()=>Array.from(document.querySelectorAll('h1')).some(item=>visible(item)&&item.textContent==='First run setup'),'first run visible on launch');
             check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Navigation must not hide model setup');
-            const downloads=Array.from(document.querySelectorAll('details')).find(item=>item.querySelector('summary')?.textContent==='Download a model');
-            check(downloads?.open&&visible(downloads.querySelector('select')),'First run must show the model download choices without expanding a panel');
+            const picker=document.querySelector('[aria-label="On-device models"] [role="combobox"]');
+            check(visible(picker),'First run must show the model list');
+            picker.click();
+            await until(()=>document.querySelector('.mobile-model-menu [data-model-choice^="catalog:"]'),'First run must show the model download choices in the model list');
+            document.querySelector('.mobile-model-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+            await until(()=>!document.querySelector('.mobile-model-menu'),'model list closed');
             check(!document.querySelector('[data-testid="chat-composer"]'),'First run must not offer chat before a model is ready');
             const inventory=await plugin.listModels();
             check(inventory.models.length===0,'This test must start without a chat model');
@@ -176,7 +180,7 @@ public final class MobileUiSmokeTest {
         } finally {down.recycle();up.recycle();}
         run("""
             await until(()=>visible(document.querySelector('[aria-label="On-device models"]')),'model settings from chat');
-            check(visible(button('Import a model')),'Model setup must offer local GGUF import');
+            check(visible(button('Add a model from Files')),'Model setup must offer adding a model file');
             await openNavigation();
             await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
             await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]')?.textContent.includes('Hello from an empty model library.'),'draft after returning from model settings');
@@ -186,14 +190,14 @@ public final class MobileUiSmokeTest {
             """);
         importChatFixture();
         run("""
-            await clickButton('Check availability');
-            const choice=await until(()=>Array.from(document.querySelectorAll('[aria-label="On-device models"] select')).find(select=>visible(select)&&Array.from(select.options).some(option=>option.value===%s)),'visible imported model in shared first-run controls');
+            document.querySelector('[aria-label="On-device models"] [role="combobox"]').click();
+            const choice=await until(()=>document.querySelector('.mobile-model-menu [data-model-choice='+JSON.stringify(%s)+']'),'visible added model in shared first-run controls');
             check(document.body.innerText.includes('First run setup'),'An unselected download must not complete setup');
-            choice.value=%s;choice.dispatchEvent(new Event('change',{bubbles:true}));
+            choice.closest('[role="option"]').click();
             await until(()=>visible(document.querySelector('[data-testid="home-workshop"]')),'model selection completes first run without reload');
             check((await plugin.listModels()).selectedModelId===%s,'The native model choice must persist');
             return true;
-            """.formatted(JSONObject.quote(fixtureId),JSONObject.quote(fixtureId),JSONObject.quote(fixtureId)));
+            """.formatted(JSONObject.quote("model:"+fixtureId),JSONObject.quote(fixtureId)));
         reload();
         run("""
             check(visible(document.querySelector('[data-testid="app-sidebar"]')),'Configured launches return to ordinary mobile navigation');
@@ -505,7 +509,7 @@ public final class MobileUiSmokeTest {
             check(visible(button('Documents', sidebar)), 'Shared Documents navigation must be available');
             await clickButton('Settings', sidebar);
             const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native provider controls inside shared Settings');
-            await until(() => models.querySelector('select')?.options.length > 0, 'native provider inventory');
+            await until(() => { const picker = models.querySelector('[role="combobox"]'); return picker && !picker.hasAttribute('data-placeholder'); }, 'native provider inventory');
             const navigation = button('Navigation', document.querySelector('[data-testid="app-header"]') ?? document);
             if (visible(navigation)) {
                 const rect = navigation.getBoundingClientRect();

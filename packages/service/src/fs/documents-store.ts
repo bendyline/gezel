@@ -9,7 +9,7 @@ import { writeFileAtomic } from './atomic.js';
 import { looksBinaryText } from './binary-text.js';
 import { DocumentAuditCoalescer } from './document-audit.js';
 import { mimeTypeForFilename } from './media-types.js';
-import { safeJoin } from './safe-paths.js';
+import { resolveMutationPath, safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,
@@ -183,7 +183,7 @@ export class DocumentsStore {
     content: string,
     actor?: DocumentWriteActor,
   ): Promise<void> {
-    const full = this.resolveWritePath(filePath);
+    const full = await this.resolveWritePath(filePath);
     const existed = await pathExists(full);
     // Read the prior content before overwriting so the audit trail can say
     // how much moved, not merely that something did.
@@ -212,7 +212,7 @@ export class DocumentsStore {
   }
 
   async writeDocumentBinary(filePath: string, data: Uint8Array): Promise<void> {
-    const full = this.resolveWritePath(filePath);
+    const full = await this.resolveWritePath(filePath);
     const existed = await pathExists(full);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data);
@@ -227,7 +227,7 @@ export class DocumentsStore {
   }
 
   async deleteDocument(filePath: string, actor?: DocumentWriteActor): Promise<void> {
-    const full = this.resolveWritePath(filePath);
+    const full = await this.resolveWritePath(filePath);
     // The edits belong to the document while it still exists.
     await this.audit.flushPath(filePath);
     await rm(full, { recursive: true, force: true });
@@ -243,7 +243,7 @@ export class DocumentsStore {
   }
 
   async createDocumentFolder(folderPath: string): Promise<void> {
-    const full = this.resolveWritePath(folderPath);
+    const full = await this.resolveWritePath(folderPath);
     await mkdir(full, { recursive: true });
     this.notifyChange('mkdir', folderPath);
     if (!isOutsideInInternalPath(folderPath)) {
@@ -258,8 +258,8 @@ export class DocumentsStore {
   async renameDocument(fromPath: string, toPath: string): Promise<void> {
     // Close the sitting against the name the edits were made under.
     await this.audit.flushPath(fromPath);
-    const fromFull = this.resolveWritePath(fromPath);
-    const toFull = this.resolveWritePath(toPath);
+    const fromFull = await this.resolveWritePath(fromPath);
+    const toFull = await this.resolveWritePath(toPath);
     if (fromFull === this.documentsDir() || toFull === this.documentsDir()) {
       throw new Error('the documents root cannot be renamed');
     }
@@ -306,10 +306,8 @@ export class DocumentsStore {
     }
   }
 
-  private resolveWritePath(filePath: string): string {
-    const full = safeJoin(this.documentsDir(), filePath);
-    if (!full) throw new Error('path traversal blocked');
-    return full;
+  private resolveWritePath(filePath: string): Promise<string> {
+    return resolveMutationPath(this.documentsDir(), filePath);
   }
 }
 

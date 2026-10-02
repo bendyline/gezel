@@ -249,6 +249,11 @@
   height: 16px;
   background: var(--home-hair);
 }
+/* The rule divides the headline from chips; with none it trails the
+   headline like a text cursor. */
+.home-workshop-vrule:has(+ :empty) {
+  display: none;
+}
 
 /* Tip of the day */
 .home-workshop-tip {

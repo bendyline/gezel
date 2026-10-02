@@ -5,6 +5,7 @@ every UI change goes through dispatch.MainThread."""
 from __future__ import annotations
 
 import threading
+import uuid
 
 import uno
 import unohelper
@@ -189,6 +190,9 @@ class PanelSession:
         self.gezel_id = None
         self.edits = True
         self.chat = None
+        # One per panel: the daemon offers this panel's document tools only to
+        # the thread its own chat writes to (see chat.SURFACE_HEADER).
+        self.surface_id = uuid.uuid4().hex
         self.relay = None
         self.relay_status = "closed"
         self.busy = False
@@ -253,7 +257,7 @@ class PanelSession:
 
                 def ready():
                     self.token, self.project, self.roster, self.gezel_id = token, project, roster, gezel_id
-                    self.chat = ChatThread(self.http, token, project["id"], gezel_id)
+                    self.chat = ChatThread(self.http, token, project["id"], gezel_id, self.surface_id)
                     self._show_ready()
                     self._start_relay()
 
@@ -335,7 +339,7 @@ class PanelSession:
         self.gezel_id = chosen
         if self.chat:
             self.chat.close()
-        self.chat = ChatThread(self.http, self.token, self.project["id"], chosen)
+        self.chat = ChatThread(self.http, self.token, self.project["id"], chosen, self.surface_id)
         if self.relay:
             relay = self.relay
             threading.Thread(target=lambda: relay.set_gezel(chosen), daemon=True).start()
@@ -380,6 +384,7 @@ class PanelSession:
             run_on_main=lambda fn: self.main.call(fn, timeout=55),
             on_status=on_status,
             gezel_id=self.gezel_id,
+            surface_id=self.surface_id,
         )
         self.relay.start()
 

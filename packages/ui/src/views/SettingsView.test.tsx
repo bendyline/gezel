@@ -147,6 +147,21 @@ describe('SettingsView', () => {
     });
   });
 
+  it('offers every openable section in the compact dropdown, but not a heading that only groups', async () => {
+    render(<SettingsView />);
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    const picker = screen
+      .getAllByTestId('mock-select')
+      .find((select) =>
+        [...(select as HTMLSelectElement).options].some((o) => o.value === 'about'),
+      ) as HTMLSelectElement;
+    const values = [...picker.options].map((option) => option.value);
+    expect(values).toEqual(expect.arrayContaining(['general', 'knowledge', 'toolsets', 'about']));
+    expect(values).not.toContain('workloads');
+    fireEvent.change(picker, { target: { value: 'about' } });
+    expect(await screen.findByTestId('settings-section-about')).toBeTruthy();
+  });
+
   it('hosts microphone settings under Device Integration', async () => {
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-deviceIntegration'));

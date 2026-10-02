@@ -2,6 +2,7 @@ import { providerUsesManagedMcpBridge } from '@bendyline/gezel';
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Root } from 'react-dom/client';
 import { providerLabel } from '../components/provider-label.js';
+import { APP_SURFACE_PARAM } from '../embedded/app-surface.js';
 import * as Select from '../primitives/Select.js';
 import {
   type PaneProject,
@@ -39,11 +40,14 @@ function relayLabel(status: RelayStatus, gezelName: string | undefined): string 
  * whether gezels may edit) over the chat. The chat is the main UI's
  * `?embedded=chat` page in a same-origin frame, reading the pane's token
  * from this origin's storage. The pane also offers the document tools to
- * the gezel it talks to for as long as it is open.
+ * the gezel it talks to for as long as it is open, in the threads its own
+ * chat drives: the frame stamps every message with `surfaceId`, the id the
+ * tools are registered under.
  */
-export function chatFrameUrl(projectId: string, gezelId: string): string {
+export function chatFrameUrl(projectId: string, gezelId: string, surfaceId: string): string {
   const params = new URLSearchParams({ embedded: 'chat', compact: '1', projectId });
   if (gezelId) params.set('gezelId', gezelId);
+  params.set(APP_SURFACE_PARAM, surfaceId);
   return `/?${params.toString()}`;
 }
 
@@ -55,6 +59,9 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
   const [roster, setRoster] = useState<RosterGezel[]>([]);
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('connecting');
   const [unauthorized, setUnauthorized] = useState(false);
+  // One per pane: a second document's pane, or this one reopened, is a
+  // different surface, so its tools never reach this pane's threads.
+  const [surfaceId] = useState(() => crypto.randomUUID());
   const relayRef = useRef<OfficeRelay | null>(null);
   const baseUrl = window.location.origin;
 
@@ -114,6 +121,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
       token: ready.token,
       projectId: project.id,
       gezelId,
+      surfaceId,
       label: `${OFFICE_HOST_LABELS[host]}: ${documentTitle(path)}`,
       tools: sent,
       onStatus: setRelayStatus,
@@ -256,7 +264,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
         key={`${project.id}:${gezelId}`}
         className="office-pane-chat"
         title="Gezel chat"
-        src={chatFrameUrl(project.id, gezelId)}
+        src={chatFrameUrl(project.id, gezelId, surfaceId)}
       />
     </div>
   );

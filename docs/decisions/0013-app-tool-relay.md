@@ -1,6 +1,6 @@
 # 0013 — Apps register tools the daemon relays back to them
 
-Status: Accepted (2026-09)
+Status: Accepted (2026-09). Surface scope added 2026-10 (below).
 
 ## Context
 
@@ -79,6 +79,28 @@ untrusted guest of the project, and a provider that runs its own tool loop
 outside our bridge (Copilot, the CLI providers) could never call them, so
 advertising them would promise a call it cannot make.
 
+### Surface scope (added 2026-10)
+
+`gezelIds` alone was too wide for an app that shows its own chat. The Office
+pane offered its document tools to the gezel it talks to, which for an unsaved
+document is the Meester in Default — so the Meester's front-door chat in the
+desktop app could insert into the open Word document too.
+
+A registration may now carry a `surfaceId`, and every route that carries a
+message a person wrote (`/send`, `/interrupt`, the legacy `/chat/send`) records
+the `x-gezel-app-surface` header it arrived with, or its absence, against the
+session (`noteMessageSurface`). A surface-scoped binding is offered only to a
+session whose latest such message came through that surface. The latest message
+decides rather than the first, because the pane often lands on a thread the
+desktop app also shows. The record lives in the registry, in memory, capped
+by recency. It is not pruned when a relay closes: the SDK reopens a relay that
+outlived its grace window under the same surface, and the thread must still
+match.
+
+The header rides on the chat's requests rather than on the registration
+because sessions are created lazily on the first send: a pane that learned its
+session id afterwards and re-registered would miss that first turn.
+
 ### Session tokens may not register
 
 A gezel's own MCP subprocess holds a `session` token. If it could register
@@ -104,7 +126,8 @@ outright.
   stdio" was corrected to narrow on `isStdioSpec`; a spec carrying a live
   function must never reach the Claude CLI worker, which is a structured clone
   away.
-- Tools registered after a session opened appear on the next turn: the project's
-  app-tool surface is fingerprinted onto `LiveSessionState`, and the existing
-  drift check rebuilds when it moves.
+- Tools registered after a session opened appear on the next turn: the app tools
+  each session is offered are fingerprinted onto `LiveSessionState`, and the
+  existing drift check rebuilds when they move. The fingerprint is per session,
+  so a registration rebuilds only the sessions it actually reaches.
 - App tool descriptions reach the system prompt, capped at 1000 characters each.

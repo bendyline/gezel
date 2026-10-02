@@ -918,6 +918,9 @@ importers:
       harper.js:
         specifier: 2.7.0
         version: 2.7.0
+      mermaid:
+        specifier: 11.16.1
+        version: 11.16.1
       monaco-editor:
         specifier: ~0.50.0
         version: 0.50.0

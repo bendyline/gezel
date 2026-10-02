@@ -9,6 +9,8 @@ import {
 } from '../settings-nav.js';
 import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsLegalSection } from './SettingsLegal.js';
+import { SettingsSectionPicker } from './SettingsSectionPicker.js';
 
 /** Model management is supplied by the host; navigation and preferences stay shared. */
 export function HostModelSettings() {
@@ -48,19 +50,20 @@ export function HostModelSettings() {
       setSaving(false);
     }
   };
+  const sections = [
+    { id: 'models', label: 'Artificial Intelligence' },
+    { id: 'general', label: 'General' },
+    ...(runtimeCapabilities().audio ? [{ id: 'audio', label: 'Audio' }] : []),
+    ...(runtimeCapabilities().backups ? [{ id: 'backups', label: 'Backup and restore' }] : []),
+    { id: 'about', label: 'About' },
+  ];
   return (
     <div className="settings-layout">
       <aside className="settings-nav">
         <h2>Settings</h2>
+        <SettingsSectionPicker sections={sections} value={section} onChange={setSection} />
         <ul>
-          {[
-            { id: 'models', label: 'Artificial Intelligence' },
-            { id: 'general', label: 'General' },
-            ...(runtimeCapabilities().audio ? [{ id: 'audio', label: 'Audio' }] : []),
-            ...(runtimeCapabilities().backups
-              ? [{ id: 'backups', label: 'Backup and restore' }]
-              : []),
-          ].map((item) => (
+          {sections.map((item) => (
             <li key={item.id} className="settings-nav-li">
               <button
                 type="button"
@@ -79,6 +82,8 @@ export function HostModelSettings() {
           window.__GEZEL__?.renderModelSettings?.()
         ) : section === 'audio' ? (
           <AudioEngineSettings />
+        ) : section === 'about' ? (
+          <HostAbout />
         ) : section === 'backups' ? (
           <section>
             <h3>Keep a copy of your work</h3>
@@ -99,7 +104,7 @@ export function HostModelSettings() {
               <h3>Appearance</h3>
               <ThemePicker />
             </section>
-            <section>
+            <section className="settings-sidebar-side">
               <h3>Sidebar position</h3>
               <SidebarSidePicker />
             </section>
@@ -124,8 +129,31 @@ export function HostModelSettings() {
   );
 }
 
+/** What this app is, and the terms it ships under. Engine and service management stays desktop-only. */
+function HostAbout() {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void api
+      .health()
+      .then((health) => setVersion(health.version))
+      .catch(() => setVersion(null));
+  }, []);
+  return (
+    <>
+      <section>
+        <h3>About</h3>
+        <dl className="settings-facts">
+          <dt>Version</dt>
+          <dd>{version === null ? '…' : version === '0.0.0' ? 'development build' : version}</dd>
+        </dl>
+      </section>
+      <SettingsLegalSection />
+    </>
+  );
+}
+
 function hostSection(section: string | null): string {
-  if (section === 'general') return section;
+  if (section === 'general' || section === 'about') return section;
   if (section === 'audio' && runtimeCapabilities().audio) return section;
   if (section === 'backups' && runtimeCapabilities().backups) return section;
   return 'models';

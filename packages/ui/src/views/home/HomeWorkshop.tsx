@@ -76,11 +76,13 @@ export function HomeWorkshop({
       return next;
     });
   }, []);
-  // Once the person is talking, the greeting steps aside for this visit: at
-  // full height it squeezed the conversation to a third of the window. Not
-  // persisted, and a manual toggle always wins. It latches the reconcile too:
-  // when the first message beats the reconcile effect, that effect would
-  // reopen the band as soon as it flushed.
+  // Once the person is talking, or the meester's introduction fills the empty
+  // conversation, the greeting steps aside for this visit: at full height it
+  // squeezed the conversation to a third of the window, and on a phone's
+  // first run it pushed the introduction below the fold. Not persisted, and a
+  // manual toggle always wins. It latches the reconcile too: when the first
+  // message beats the reconcile effect, that effect would reopen the band as
+  // soon as it flushed.
   const collapseForConversation = useCallback(() => {
     if (userToggledCollapse.current) return;
     reconciledCollapse.current = true;
@@ -297,6 +299,7 @@ export function HomeWorkshop({
               meesterPoppetje={meesterPoppetje}
               meesterIconOverride={meesterIconOverride}
               onTurnStarted={collapseForConversation}
+              onIntroductionShown={collapseForConversation}
             />
           ) : (
             <section className="home-workshop-conversation">

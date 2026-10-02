@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '@bendyline/gezel';
 import { DiffpackManifestSchema } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { DiffpackDriftedError, DiffpackManager, overlapsFor, slugify } from './manager.js';
@@ -58,6 +58,71 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(home, { recursive: true, force: true });
+});
+
+describe('partial proposal application', () => {
+  async function twoFiles() {
+    return draftAndSeal('9', async (drafts) => {
+      await drafts.write(projectId, '9', 'first.txt', 'first proposal\n');
+      await drafts.write(projectId, '9', 'second.txt', 'second proposal\n');
+    });
+  }
+
+  it('checks drift on pending files after a partial apply and across reloads', async () => {
+    await twoFiles();
+    await manager.apply(projectId, '9', { paths: ['first.txt'] });
+    await seedWorkspace('second.txt', 'new user work\n');
+    manager = new DiffpackManager({ home, store, tasks: fakeTasks });
+    expect((await manager.get(projectId, '9')).drifted).toEqual(['second.txt']);
+    await expect(manager.apply(projectId, '9')).rejects.toBeInstanceOf(DiffpackDriftedError);
+    expect(await readWorkspace('second.txt')).toBe('new user work\n');
+  });
+
+  it('accumulates successes and never reapplies a completed file', async () => {
+    await twoFiles();
+    await manager.apply(projectId, '9', { paths: ['first.txt'] });
+    await seedWorkspace('first.txt', 'later user edit\n');
+    await manager.apply(projectId, '9');
+    const applied = await manager.get(projectId, '9');
+    expect(applied.status).toBe('applied');
+    expect(applied.results).toEqual([
+      { path: 'first.txt', ok: true },
+      { path: 'second.txt', ok: true },
+    ]);
+    await manager.apply(projectId, '9', { allowDrifted: true });
+    expect(await readWorkspace('first.txt')).toBe('later user edit\n');
+  });
+
+  it('does not overwrite an addition that appears after the drift check', async () => {
+    await twoFiles();
+    const original = store.writeProjectWorkspaceFile.bind(store);
+    const spy = vi.spyOn(store, 'writeProjectWorkspaceFile').mockImplementation(async (...args) => {
+      if (args[1] === 'second.txt') await seedWorkspace('second.txt', 'racing user write\n');
+      return original(...args);
+    });
+    try {
+      const result = await manager.apply(projectId, '9');
+      expect(result.ok).toBe(false);
+      expect((await manager.get(projectId, '9')).status).toBe('partially-applied');
+      expect(await readWorkspace('second.txt')).toBe('racing user write\n');
+      await expect(manager.apply(projectId, '9')).rejects.toBeInstanceOf(DiffpackDriftedError);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('serializes concurrent applications and refuses dismissed proposals', async () => {
+    await twoFiles();
+    const results = await Promise.all([
+      manager.apply(projectId, '9'),
+      manager.apply(projectId, '9'),
+    ]);
+    expect(results.map((result) => result.results.length)).toEqual([2, 0]);
+    await manager.dismiss(projectId, '9');
+    await expect(manager.apply(projectId, '9', { allowDrifted: true })).rejects.toThrow(
+      'dismissed',
+    );
+  });
 });
 
 describe('DiffpackManager.ensure', () => {

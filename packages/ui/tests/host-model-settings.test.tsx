@@ -9,6 +9,10 @@ vi.mock(
   '@bendyline/gezel/mobile-providers',
   () => import('../../core/src/schemas/mobile-provider.js'),
 );
+vi.mock(
+  '../src/primitives/Select.js',
+  async () => (await import('../src/test-utils/primitivesMock.js')).primitivesMock.Select,
+);
 
 type Status = { busy: boolean; pendingSave: boolean; changingModel: boolean };
 function fixture() {
@@ -54,6 +58,7 @@ function fixture() {
       ]),
     },
     listModels: vi.fn(async () => ({ models: [] })),
+    listModelDownloads: vi.fn(async () => []),
     importModel: vi.fn(async () => ({ model: null })),
     selectModel: vi.fn(async () => ({ model: { id: 'one' } })),
     removeModel: vi.fn(async () => {}),
@@ -71,16 +76,14 @@ function fixture() {
 }
 
 describe('host model settings product boundary', () => {
-  it('keeps the installed-model picker open until a model is selected', async () => {
+  it('selects a model already on the device from the one list', async () => {
     const f = fixture();
     f.host.listModels.mockResolvedValue({
-      models: [{ id: 'one', name: 'Local chat', sizeBytes: 1024 }],
+      models: [{ id: 'one', name: 'Local chat.gguf', sizeBytes: 1024 }],
     } as never);
     f.mount();
-    const picker = await screen.findByLabelText('Imported model');
-    await screen.findByRole('option', { name: 'Local chat (1 MB)' });
-    expect(picker.closest('details')).toHaveAttribute('open');
-    fireEvent.change(picker, { target: { value: 'one' } });
+    await screen.findByRole('option', { name: 'Local chat' });
+    fireEvent.change(screen.getByTestId('mock-select'), { target: { value: 'model:one' } });
     await waitFor(() => expect(f.host.selectModel).toHaveBeenCalledWith('one'));
     expect(f.service.setProvider).toHaveBeenCalledWith('llama-cpp');
   });
@@ -89,12 +92,12 @@ describe('host model settings product boundary', () => {
     const f = fixture();
     f.mount();
     await screen.findByRole('option', { name: 'Apple Intelligence' });
-    const picker = screen.getByLabelText('Use a model');
+    const picker = screen.getByTestId('mock-select');
     expect(picker).not.toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Retry saving' })).toBeNull();
     act(() => f.update({ busy: true }));
     expect(picker).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Import a model' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add a model from Files' })).toBeDisabled();
     act(() => f.update({ busy: false, pendingSave: true }));
     expect(picker).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry saving' }));
@@ -102,24 +105,25 @@ describe('host model settings product boundary', () => {
     expect(f.service.retrySave).toHaveBeenCalledOnce();
     await waitFor(() => expect(picker).not.toBeDisabled());
   });
+
   it('changes the provider through service admission and guards native model mutations', async () => {
     const f = fixture();
     f.mount();
     await screen.findByRole('option', { name: 'Apple Intelligence' });
-    fireEvent.change(screen.getByLabelText('Use a model'), {
-      target: { value: 'apple-foundation-models' },
+    fireEvent.change(screen.getByTestId('mock-select'), {
+      target: { value: 'provider:apple-foundation-models' },
     });
     await waitFor(() =>
       expect(f.service.setProvider).toHaveBeenCalledWith('apple-foundation-models'),
     );
     expect(f.service.store.writeConfig).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Import a model' })).not.toBeDisabled(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Import a model' }));
+    const add = screen.getByRole('button', { name: 'Add a model from Files' });
+    await waitFor(() => expect(add).not.toBeDisabled());
+    fireEvent.click(add);
     await waitFor(() => expect(f.host.importModel).toHaveBeenCalledOnce());
     expect(f.service.withModelChange).toHaveBeenCalledOnce();
   });
+
   it('keeps download cancellation outside model admission and shows failures', async () => {
     const f = fixture();
     let finish!: () => void;
@@ -131,8 +135,10 @@ describe('host model settings product boundary', () => {
     );
     f.host.cancelProviderPreparation.mockRejectedValueOnce(new Error('Could not stop yet'));
     f.mount();
-    await screen.findByRole('button', { name: 'Download Android on-device AI' });
-    fireEvent.click(screen.getByRole('button', { name: 'Download Android on-device AI' }));
+    await screen.findByRole('option', { name: 'Android on-device AI' });
+    fireEvent.change(screen.getByTestId('mock-select'), {
+      target: { value: 'provider:android-mlkit' },
+    });
     const cancel = await screen.findByRole('button', { name: 'Cancel download' });
     fireEvent.click(cancel);
     await screen.findByRole('alert');

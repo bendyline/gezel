@@ -100,8 +100,13 @@ vi.mock('../components/GezelIcon.js', () => ({
     <span data-testid="gezel-icon" data-name={name} data-pulsing={pulsing ? 'true' : 'false'} />
   ),
 }));
+// Most tests want a conversation that is not empty, so the meester's
+// introduction stays out of them unless a test asks for it.
+const timeline = vi.hoisted(() => ({ empty: false }));
 vi.mock('../components/GlobalTimeline.js', () => ({
-  GlobalTimeline: () => <div data-testid="timeline" />,
+  GlobalTimeline: ({ emptyContent }: { emptyContent?: import('react').ReactNode }) => (
+    <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>
+  ),
 }));
 vi.mock('../components/HealthStrip.js', () => ({
   HealthStrip: () => null,
@@ -899,6 +904,25 @@ describe('HomeView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
     fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
     expect(screen.getByText('Tip of the day')).toBeInTheDocument();
+  });
+
+  // On a phone's first run the band pushed the introduction below the fold.
+  it('steps the greeting aside while the meester introduces themselves, without saving it', async () => {
+    timeline.empty = true;
+    try {
+      render(<HomeView />);
+      await screen.findByText(/your meester\./);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+      });
+      expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+
+      // Reopened by hand, it stays open.
+      fireEvent.click(screen.getByRole('button', { name: 'Expand the greeting' }));
+      expect(screen.getByText('Tip of the day')).toBeInTheDocument();
+    } finally {
+      timeline.empty = false;
+    }
   });
 
   // The saved preference is applied by an effect, and on a slow runner the

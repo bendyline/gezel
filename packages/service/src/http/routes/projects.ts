@@ -33,7 +33,7 @@ import {
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { previewFolder } from '../../about/folder-preview.js';
 import { generateProjectAboutFromRepo } from '../../about/project-generator.js';
 import {
@@ -55,6 +55,7 @@ import {
   PathSafetyError,
   intoWorkspaceRelative,
   realpathContained,
+  resolveMutationPath,
   safeJoin,
 } from '../../fs/safe-paths.js';
 import { ProjectDeleteError } from '../../fs/store.js';
@@ -95,6 +96,7 @@ import {
 import { runWorkspaceScript } from '../../workspace/runner.js';
 import { runNpx, runPackageScript } from '../../workspace/scripts.js';
 import type { ServiceContext } from '../context.js';
+import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
 
 const log = createLogger('http');
@@ -1165,15 +1167,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json(res);
   });
 
-  // Whether this mutation is a gezel acting through a tool rather than the
-  // person at the keyboard. The reserved-subtree guards that protect the
-  // user's own files — connector corpora, prompt drafts — key off it, and the
-  // UI's own writes carry no gezel or session id.
   const initiatedByGezel = (
-    c: { req: { query: (k: string) => string | undefined } },
+    c: Context,
     body?: { gezelId?: string; sessionId?: string },
-  ): boolean =>
-    Boolean(body?.gezelId || body?.sessionId || c.req.query('gezelId') || c.req.query('sessionId'));
+  ): boolean => {
+    const actor = mutationActor(c, body);
+    return Boolean(actor.gezelId || actor.sessionId);
+  };
 
   app.put('/:id/artifacts/write', async (c) => {
     const id = c.req.param('id');
@@ -1620,8 +1620,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
     try {
       const result = await ctx.store.copyProjectArtifactToWorkspace(id, body.source, body.dest, {
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
       });
       return c.json({ ok: true, ...result });
     } catch (err) {
@@ -1655,6 +1654,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       );
     }
 
+    const gate = await ctx.store.assertWorkspaceWritable(id, {
+      initiatedByGezel: initiatedByGezel(c, body),
+    });
+    if (!gate.ok) return c.json({ error: 'workspace writes are disabled', ...gate }, 403);
+
     // URL guard: HTTPS only, drop SSH / non-http schemes outright so the
     // service never depends on the host's SSH agent setup. Also reject
     // file:// because that would let a chat-driven tool exfiltrate
@@ -1685,9 +1689,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // package.json directly. A non-empty `dest` is still supported for
     // the rare case where the caller wants the repo nested.
     const destRel = (body.dest ?? '').replace(/^\/+|\/+$/g, '');
-    const destAbs = destRel === '' ? workspaceDir : safeJoin(workspaceDir, destRel);
-    if (!destAbs) {
-      return c.json({ error: `dest "${destRel}" escapes workspace` }, 400);
+    let destAbs: string;
+    try {
+      destAbs = destRel === '' ? workspaceDir : await resolveMutationPath(workspaceDir, destRel);
+    } catch (err) {
+      const mapped = mapWorkspaceError(err);
+      return c.json(mapped.body, mapped.status as 400 | 403 | 500);
     }
 
     const cloneToWorkspaceRoot = destAbs === workspaceDir;
@@ -1851,6 +1858,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       );
     }
 
+    const gate = await ctx.store.assertWorkspaceWritable(id, {
+      initiatedByGezel: initiatedByGezel(c, body),
+    });
+    if (!gate.ok) return c.json({ error: 'workspace writes are disabled', ...gate }, 403);
+
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(body.url);
@@ -1873,12 +1885,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // Phase 2: default `dest` is workspace root. The clone IS the
     // workspace; diff.patch lives alongside as a top-level file.
     const destRel = (body.dest ?? '').replace(/^\/+|\/+$/g, '');
-    const destAbs = destRel === '' ? workspaceDir : safeJoin(workspaceDir, destRel);
-    if (!destAbs) return c.json({ error: `dest "${destRel}" escapes workspace` }, 400);
-
     const diffRel = (body.diffPath ?? 'diff.patch').replace(/^\/+|\/+$/g, '');
-    const diffAbs = safeJoin(workspaceDir, diffRel);
-    if (!diffAbs) return c.json({ error: `diffPath "${diffRel}" escapes workspace` }, 400);
+    let destAbs: string;
+    try {
+      destAbs = destRel === '' ? workspaceDir : await resolveMutationPath(workspaceDir, destRel);
+      await resolveMutationPath(workspaceDir, diffRel);
+    } catch (err) {
+      const mapped = mapWorkspaceError(err);
+      return c.json(mapped.body, mapped.status as 400 | 403 | 500);
+    }
 
     const cloneToWorkspaceRoot = destAbs === workspaceDir;
     if (cloneToWorkspaceRoot) {
@@ -2025,25 +2040,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // Write the diff into the workspace. Use the same gezelId/sessionId
     // attribution path so audit/history shows the writer.
     try {
-      await ctx.store.writeProjectWorkspaceFile(id, diffRel, diffText, {
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
-      });
+      await ctx.store.writeProjectWorkspaceBinary(
+        id,
+        diffRel,
+        Buffer.from(diffText),
+        mutationActor(c, body),
+      );
     } catch (err) {
-      // Fallback to raw fs if Store rejects (e.g. binary detection
-      // false-positive on a patch with control chars). The diff is just
-      // bytes; we control the destination via safeJoin already.
-      try {
-        await mkdir(dirname(diffAbs), { recursive: true });
-        await writeFileAtomic(diffAbs, diffText);
-      } catch (err2) {
-        return c.json(
-          {
-            error: `failed to write diff to ${diffRel}: ${err2 instanceof Error ? err2.message : String(err2)}`,
-          },
-          500,
-        );
-      }
+      const mapped = mapWorkspaceError(err);
+      return c.json(mapped.body, mapped.status as 400 | 403 | 500);
     }
 
     // Check out headRef so the source tree under destRel is at the
@@ -2136,8 +2141,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (typeof body.content !== 'string') return c.json({ error: 'missing content string' }, 400);
     try {
       await ctx.store.writeProjectWorkspaceFile(id, body.path, body.content, {
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
       });
       return c.json({ ok: true, path: body.path });
     } catch (err) {
@@ -2157,7 +2161,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         id,
         filePath,
         Buffer.from(await c.req.arrayBuffer()),
-        undefined,
+        mutationActor(c),
         { createOnly: c.req.query('create') === '1' },
       );
       return c.json({ ok: true, path: filePath });
@@ -2190,8 +2194,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ...(body.occurrence !== undefined ? { occurrence: body.occurrence } : {}),
         },
         {
-          ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-          ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+          ...mutationActor(c, body),
         },
       );
       return c.json({ ok: true, ...result });
@@ -2214,8 +2217,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           content: body.content,
         },
         {
-          ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-          ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+          ...mutationActor(c, body),
         },
       );
       return c.json({ ok: true, ...result });
@@ -2233,8 +2235,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         id,
         { path: body.path, diff: body.diff },
         {
-          ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-          ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+          ...mutationActor(c, body),
         },
       );
       return c.json({ ok: true, ...result });
@@ -2257,8 +2258,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ...(body.where ? { where: body.where } : {}),
         },
         {
-          ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-          ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+          ...mutationActor(c, body),
         },
       );
       return c.json({ ok: true, ...result });
@@ -2272,19 +2272,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const filePath = c.req.query('path');
     const recursive = c.req.query('recursive') === '1';
-    const gezelId = c.req.query('gezelId') || undefined;
-    const sessionId = c.req.query('sessionId') || undefined;
+
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     try {
-      await ctx.store.rmProjectWorkspacePath(
-        id,
-        filePath,
-        { recursive },
-        {
-          ...(gezelId ? { gezelId } : {}),
-          ...(sessionId ? { sessionId } : {}),
-        },
-      );
+      await ctx.store.rmProjectWorkspacePath(id, filePath, { recursive }, mutationActor(c));
       return c.json({ ok: true });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
@@ -2302,8 +2293,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!body.path) return c.json({ error: 'missing path' }, 400);
     try {
       await ctx.store.mkdirProjectWorkspace(id, body.path, {
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
       });
       return c.json({ ok: true, path: body.path });
     } catch (err) {
@@ -2323,8 +2313,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
     try {
       await ctx.store.renameProjectWorkspacePath(id, body.fromPath, body.toPath, {
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
       });
       return c.json({ ok: true, fromPath: body.fromPath, toPath: body.toPath });
     } catch (err) {
@@ -2359,8 +2348,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         projectId: id,
         packages,
         chatEvents: ctx.chatEvents,
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
       });
       return c.json(outcome);
     } catch (err) {
@@ -2456,8 +2444,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         script: body.script,
         ...(body.args ? { args: body.args } : {}),
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
         ...(body.taskRef ? { taskRef: body.taskRef } : {}),
         ...(body.stepId ? { stepId: body.stepId } : {}),
       });
@@ -2491,8 +2478,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         bin: body.bin,
         ...(body.args ? { args: body.args } : {}),
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
-        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
-        ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...mutationActor(c, body),
         ...(body.taskRef ? { taskRef: body.taskRef } : {}),
         ...(body.stepId ? { stepId: body.stepId } : {}),
       });
