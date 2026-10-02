@@ -176,6 +176,8 @@ export interface TrialMetrics {
      * llama-cpp path; `null` when no engine log was parsed.
      */
     genTokensPerSec?: number | null;
+    /** Decode tokens behind `genTokensPerSec` — how much evidence the rate rests on. */
+    genTokens?: number | null;
     /** Engine prefill throughput (prompt tokens / prefill seconds); `null` when unavailable. */
     promptTokensPerSec?: number | null;
     /**
@@ -607,6 +609,7 @@ export class PerfCollector {
         durationMs,
         meanTokensPerSec,
         genTokensPerSec: engineTimings?.genTokensPerSec ?? null,
+        genTokens: engineTimings?.genTokens ?? null,
         promptTokensPerSec: engineTimings?.promptTokensPerSec ?? null,
         // `null` when local sampling was disabled — readers should
         // see "n/a", not "0 MB peak RSS" (which reads as a real

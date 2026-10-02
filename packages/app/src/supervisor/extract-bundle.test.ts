@@ -120,18 +120,21 @@ async function seedInstalledTree(
   extraFile?: { path: string; content: string },
   sha?: string,
 ): Promise<void> {
-  await mkdir(join(dir, 'dist', 'bin'), { recursive: true });
+  // Explicit modes: the adoption checks refuse group-writable entries, and a
+  // umask-002 shell (Ubuntu's default) would otherwise seed 664/775 fixtures.
+  await mkdir(join(dir, 'dist', 'bin'), { recursive: true, mode: 0o755 });
   await writeFile(
     join(dir, 'package.json'),
     JSON.stringify({ name: '@bendyline/gezel-service', version }, null, 2),
+    { mode: 0o644 },
   );
-  await writeFile(join(dir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
+  await writeFile(join(dir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n', { mode: 0o644 });
   if (extraFile) {
-    await mkdir(join(dir, extraFile.path, '..'), { recursive: true });
-    await writeFile(join(dir, extraFile.path), extraFile.content);
+    await mkdir(join(dir, extraFile.path, '..'), { recursive: true, mode: 0o755 });
+    await writeFile(join(dir, extraFile.path), extraFile.content, { mode: 0o644 });
   }
   if (sha) {
-    await writeFile(join(dir, '.gezel-bundle.sha256'), `${sha}\n`);
+    await writeFile(join(dir, '.gezel-bundle.sha256'), `${sha}\n`, { mode: 0o644 });
   }
 }
 

@@ -26,11 +26,15 @@ describe('resolveSharedServiceTree', () => {
   }
 
   async function seedTree(sha: string | null): Promise<void> {
-    await mkdir(join(treeDir, 'dist', 'bin'), { recursive: true });
-    await mkdir(join(treeDir, 'node_modules'), { recursive: true });
-    await writeFile(join(treeDir, 'package.json'), '{"version":"1.2.3"}\n');
-    await writeFile(join(treeDir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
-    if (sha) await writeFile(join(treeDir, '.gezel-bundle.sha256'), `${sha}\n`);
+    // Explicit modes: the adoption checks refuse group-writable entries, and a
+    // umask-002 shell (Ubuntu's default) would otherwise seed 664/775 fixtures.
+    await mkdir(join(treeDir, 'dist', 'bin'), { recursive: true, mode: 0o755 });
+    await mkdir(join(treeDir, 'node_modules'), { recursive: true, mode: 0o755 });
+    await writeFile(join(treeDir, 'package.json'), '{"version":"1.2.3"}\n', { mode: 0o644 });
+    await writeFile(join(treeDir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n', {
+      mode: 0o644,
+    });
+    if (sha) await writeFile(join(treeDir, '.gezel-bundle.sha256'), `${sha}\n`, { mode: 0o644 });
     // What the installer hooks leave behind: readable, not writable by anyone
     // but the installer that owns it.
     await chmod(serviceHome, 0o711);
@@ -217,9 +221,11 @@ describe('resolveSharedServiceTree', () => {
     }
 
     async function seedWindowsTree(sha: string = SHIPPED_SHA): Promise<void> {
-      await mkdir(join(treeDir, 'dist', 'bin'), { recursive: true });
-      await writeFile(join(treeDir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
-      await writeFile(join(treeDir, '.gezel-bundle.sha256'), `${sha}\n`);
+      await mkdir(join(treeDir, 'dist', 'bin'), { recursive: true, mode: 0o755 });
+      await writeFile(join(treeDir, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n', {
+        mode: 0o644,
+      });
+      await writeFile(join(treeDir, '.gezel-bundle.sha256'), `${sha}\n`, { mode: 0o644 });
     }
 
     function resolve(overrides: Partial<Parameters<typeof resolveSharedServiceTree>[0]> = {}) {

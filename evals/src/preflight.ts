@@ -92,6 +92,16 @@ export interface PreflightReport {
    * this field that distinction is unrecoverable after the fact.
    */
   promptTokensPerSec: number | null;
+  /** Decode tokens behind `genTokensPerSec`; `null` when the engine log was not parsed. */
+  genTokens?: number | null;
+  /**
+   * Why `genTokensPerSec` should not be read as the model's speed: a sample
+   * of a few dozen tokens, or a probe soon after boot. One ~55-token probe at
+   * ~1 h uptime read 21.9 t/s while the same binary and model decoded
+   * 25.5-27.6 in every later probe and ~26.8 in-trial (2026-09-29) — it was
+   * reported as a 12% regression. Informational: admission is unchanged.
+   */
+  throughputCaveats?: string[];
   /**
    * Machine state at probe time. Recorded because the probe's rate varied
    * 2-4x on an identical model+binary+host, tracking machine **uptime**
@@ -558,20 +568,27 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
   const daemonLog = readDaemonLogTailSync(join(result.runDir, 'daemon.log'));
   let genTokensPerSec: number | null = null;
   let promptTokensPerSec: number | null = null;
+  let genTokens: number | null = null;
   try {
     const metrics = JSON.parse(await readFile(join(result.runDir, 'metrics.json'), 'utf8')) as {
       derived?: {
         genTokensPerSec?: number;
         meanTokensPerSec?: number;
         promptTokensPerSec?: number | null;
+        genTokens?: number | null;
       };
     };
     genTokensPerSec = metrics.derived?.genTokensPerSec ?? metrics.derived?.meanTokensPerSec ?? null;
     promptTokensPerSec = metrics.derived?.promptTokensPerSec ?? null;
+    genTokens = metrics.derived?.genTokens ?? null;
   } catch {
     genTokensPerSec = null;
     promptTokensPerSec = null;
   }
+  const throughputCaveats = preflightThroughputCaveats({
+    genTokens,
+    uptimeSeconds: hostState.uptimeSeconds,
+  });
 
   const { checks, admitted } = buildPreflightChecks({
     result,
@@ -591,6 +608,8 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
     admitted,
     genTokensPerSec,
     promptTokensPerSec,
+    genTokens,
+    ...(throughputCaveats.length > 0 ? { throughputCaveats } : {}),
     ...(Object.keys(hostState).length > 0 ? { hostState } : {}),
     checks,
   };
@@ -636,8 +655,12 @@ export async function ensurePreflightAdmission(
   const failed = Object.entries(report.checks)
     .filter(([, c]) => !c.ok)
     .map(([name, c]) => `${name}: ${c.detail}`);
+  const caveat =
+    report.throughputCaveats && report.throughputCaveats.length > 0
+      ? ` (throughput low-confidence: ${report.throughputCaveats.join('; ')})`
+      : '';
   log(
-    `[preflight] ${opts.modelId} ${report.admitted ? 'ADMITTED' : 'EXCLUDED'}${failed.length > 0 ? ` — ${failed.join('; ')}` : ''}`,
+    `[preflight] ${opts.modelId} ${report.admitted ? 'ADMITTED' : 'EXCLUDED'}${failed.length > 0 ? ` — ${failed.join('; ')}` : ''}${caveat}`,
   );
   return report;
 }
@@ -667,4 +690,28 @@ export function formatPreflightFailure(report: PreflightReport): string {
     .filter(([, c]) => !c.ok)
     .map(([name, c]) => `  ${name}: ${c.detail}`);
   return `preflight EXCLUDED ${report.modelId} (${report.engine}):\n${failed.join('\n')}\n  probe trial: ${report.runDir}\n  Fix the manifest/config and re-run, or pass --skip-preflight to override.`;
+}
+
+/** Below this many decode tokens a probe's rate is too noisy to compare across runs. */
+export const PREFLIGHT_MIN_RELIABLE_GEN_TOKENS = 256;
+/** Probes this soon after boot ran alongside post-boot housekeeping on the Spark. */
+export const PREFLIGHT_MIN_RELIABLE_UPTIME_SECONDS = 2 * 60 * 60;
+
+export function preflightThroughputCaveats(input: {
+  genTokens: number | null;
+  uptimeSeconds?: number;
+}): string[] {
+  const caveats: string[] = [];
+  if (input.genTokens !== null && input.genTokens < PREFLIGHT_MIN_RELIABLE_GEN_TOKENS) {
+    caveats.push(
+      `${input.genTokens} decode tokens < ${PREFLIGHT_MIN_RELIABLE_GEN_TOKENS}; compare in-trial engine timings instead`,
+    );
+  }
+  if (
+    input.uptimeSeconds !== undefined &&
+    input.uptimeSeconds < PREFLIGHT_MIN_RELIABLE_UPTIME_SECONDS
+  ) {
+    caveats.push(`host up ${Math.round(input.uptimeSeconds / 60)} min`);
+  }
+  return caveats;
 }
