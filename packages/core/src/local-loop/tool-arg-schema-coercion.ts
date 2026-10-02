@@ -249,11 +249,52 @@ export function coerceArgsToSchema(
   args: Record<string, unknown>,
   schema: JsonSchema | undefined,
 ): ToolArgCoercionResult {
-  if (!schema || !isPlainObject(args)) return { args, repaired: [] };
+  if (!isPlainObject(args)) return { args, repaired: [] };
   const repaired: string[] = [];
-  const out = coerceValue(args, schema, schema, '', repaired, 0);
+  const unquoted = unquoteKeys(args, '', repaired, 0);
+  const out =
+    schema && isPlainObject(unquoted)
+      ? coerceValue(unquoted, schema, schema, '', repaired, 0)
+      : unquoted;
   if (repaired.length === 0) return { args, repaired: [] };
   return { args: isPlainObject(out) ? out : args, repaired };
+}
+
+/**
+ * Object keys that arrived wrapped in literal double quotes. Gemma 4 writes
+ * calls in its own syntax, `{item:<|"|>lamp<|"|>}`, but copies JSON quoting
+ * from a prompt that showed `{"item":"lamp"}`; llama.cpp's parser then keeps
+ * the quotes, so the key becomes `"item"` and a record store saved
+ * `"\"item\""` (Galaxy S26, 2026-10-02). A key that starts and ends with a
+ * quote is never meant, so it is unwrapped unless the bare key is also there.
+ */
+function unquoteKeys(value: unknown, path: string, repaired: string[], depth: number): unknown {
+  if (depth > MAX_DEPTH) return value;
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item, index) => {
+      const next = unquoteKeys(item, `${path}[${index}]`, repaired, depth + 1);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? items : value;
+  }
+  if (!isPlainObject(value)) return value;
+  let changed = false;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const bare = /^"(.+)"$/s.exec(key)?.[1];
+    const name = bare !== undefined && !Object.hasOwn(value, bare) ? bare : key;
+    const childPath = path ? `${path}.${name}` : name;
+    if (name !== key) {
+      changed = true;
+      repaired.push(childPath);
+    }
+    const next = unquoteKeys(child, childPath, repaired, depth + 1);
+    if (next !== child) changed = true;
+    out[name] = next;
+  }
+  return changed ? out : value;
 }
 
 /**
@@ -265,7 +306,6 @@ export function coerceArgumentsJson(
   argumentsJson: string,
   schema: JsonSchema | undefined,
 ): { argumentsJson: string; repaired: string[] } {
-  if (!schema) return { argumentsJson, repaired: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(argumentsJson);

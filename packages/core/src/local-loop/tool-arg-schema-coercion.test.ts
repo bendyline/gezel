@@ -35,6 +35,24 @@ const CONVERT_SCHEMA = {
 };
 
 describe('coerceArgsToSchema', () => {
+  // Gemma 4 copied JSON quoting into its native call syntax on the Galaxy S26.
+  it('unwraps keys that arrived inside literal quotes, at any depth and without a schema', () => {
+    const args = {
+      name: 'storeRecords',
+      input: {
+        action: 'create',
+        fields: { '"item"': 'lamp', '"count"': 3, '"id"': 'x', id: 'kept' },
+      },
+    };
+    const { args: fixed, repaired } = coerceArgsToSchema(args, undefined);
+    expect(fixed).toEqual({
+      name: 'storeRecords',
+      input: { action: 'create', fields: { item: 'lamp', count: 3, '"id"': 'x', id: 'kept' } },
+    });
+    expect(repaired).toEqual(['input.fields.item', 'input.fields.count']);
+    expect(coerceArgsToSchema({ path: 'a.md' }, undefined).args).toEqual({ path: 'a.md' });
+  });
+
   it('reinterprets object and array args the markup flattened into strings', () => {
     const { args, repaired } = coerceArgsToSchema(
       {

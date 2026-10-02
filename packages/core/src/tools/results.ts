@@ -576,7 +576,10 @@ export function createTaskText(
     : created.craftbook.steps.length > 0 &&
         assigneeGezelId &&
         assigneeGezelId !== options.callerGezelId
-      ? `\n\n${assigneeGezelId} has NOT been engaged. Prefer \`dispatch: true\` on create_task so the assignee starts in a task-scoped session with the step contract in-prompt. For this already-created task, call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }) to brief them.`
+      ? // The action leads: Gemma 4 E4B on a phone wrote a task note after the
+        // older "Prefer dispatch… For this task, call message_gezel" wording,
+        // and the assignee never ran (Galaxy S26, 2026-10-02).
+        `\n\nNext: call message_gezel({ gezel: "${assigneeGezelId}", message: "new task ${created.ref} — ${created.title}: <one-line ask>" }). ${assigneeGezelId} has not been told about this task and will not start it until you do. (\`dispatch: true\` on create_task starts the assignee directly next time.)`
       : '';
   return `Created ${created.ref} — "${created.title}" with ${created.craftbook.steps.length} step(s).${spawnNote}${fanoutNote}${kickoff}`;
 }
@@ -765,28 +768,53 @@ export function getScriptRunText(run: { id: string; status: string }): string {
 }
 
 /** `list_scripts`: project scripts, then the read-only standard library and its scope. */
+/**
+ * The scripts a gezel can run. Actions lead and spell out choice values; the
+ * gate checks, which serve craftbook completion gates, follow as one line each.
+ * Listed in catalogue order with full detail, the one action a chat turn
+ * needed (`storeRecords`) sat eleventh of twelve behind ten gates, a 2B model
+ * on the Galaxy S26 called it missing, and every run's first call guessed
+ * `mode` because a choice input showed only "choice" (2026-10-01).
+ */
 export function listScriptsText(
   project: readonly ListedScript[],
   standard: readonly ListedScript[],
 ): string {
-  const fmt = (s: ListedScript) => {
-    const inputs = s.meta.inputs
+  const inputList = (s: ListedScript) =>
+    s.meta.inputs
       ? Object.entries(s.meta.inputs)
-          .map(([k, f]) => `${k}: ${f.type}${f.required ? '' : '?'}`)
+          .map(([k, f]) => {
+            const type =
+              f.type === 'choice' && f.options?.length
+                ? f.options.map((option) => option.value).join('|')
+                : f.type;
+            return `${k}: ${type}${f.required ? '' : '?'}`;
+          })
           .join(', ')
       : '—';
+  const full = (s: ListedScript) => {
     const requires = s.meta.requires?.length ? s.meta.requires.join(', ') : '—';
-    return `• ${s.name} — ${s.meta.description}\n    inputs: ${inputs}\n    requires: ${requires}`;
+    return `• ${s.name} — ${s.meta.description}\n    inputs: ${inputList(s)}\n    requires: ${requires}`;
   };
+  const compact = (s: ListedScript) =>
+    `• ${s.name}(${inputList(s)}) — ${s.meta.description.replace(/^Gate:\s*/i, '')}`;
+  const isGate = (s: ListedScript) => s.meta.kind === 'gate';
+  const actions = standard.filter((s) => !isGate(s));
+  const gates = standard.filter(isGate);
   const sections: string[] = [];
   sections.push(
     project.length
-      ? `## Project scripts\n${project.map(fmt).join('\n')}`
+      ? `## Project scripts\n${project.map(full).join('\n')}`
       : 'No project scripts yet.',
   );
-  if (standard.length) {
+  if (actions.length) {
     sections.push(
-      `## Standard library (read-only, scope: "standard")\n${standard.map(fmt).join('\n')}`,
+      `## Standard actions (read-only, scope: "standard")\n${actions.map(full).join('\n')}`,
+    );
+  }
+  if (gates.length) {
+    sections.push(
+      `## Standard gate checks (read-only, scope: "standard"), for craftbook completion gates\n${gates.map(compact).join('\n')}`,
     );
   }
   const count = project.length + standard.length;
@@ -798,7 +826,11 @@ interface ListedScript {
   name: string;
   meta: {
     description: string;
-    inputs?: Record<string, { type: string; required?: boolean }>;
+    kind?: string;
+    inputs?: Record<
+      string,
+      { type: string; required?: boolean; options?: readonly { value: string }[] }
+    >;
     requires?: readonly string[];
   };
 }

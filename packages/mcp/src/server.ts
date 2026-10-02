@@ -111,6 +111,7 @@ import {
   getScriptRunText,
   getTaskText,
   inferDeliverableKind,
+  inferScriptScope,
   isOwnerStep,
   isReservedShadowArtifactPath,
   isSafeEntityId,
@@ -3737,6 +3738,24 @@ async function workspaceCollisionForArtifactPath(
     // artifact tool continue to its normal path-safety/error handling.
   }
   return null;
+}
+
+/** Where a script named without a scope lives; undefined keeps the route's default. */
+async function installedScriptScope(project: string, name: string) {
+  try {
+    const [own, user, standard] = await Promise.all([
+      api.listProjectScripts(project),
+      api.listUserScripts().catch(() => ({ scripts: [] })),
+      api.listStandardScripts().catch(() => ({ scripts: [] })),
+    ]);
+    return inferScriptScope(name, undefined, [
+      ...own.scripts.map((script) => ({ name: script.name, scope: 'project' })),
+      ...user.scripts.map((script) => ({ name: script.name, scope: 'user' })),
+      ...standard.scripts.map((script) => ({ name: script.name, scope: 'standard' })),
+    ]);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The crew member a question names, so its result can point at message_gezel. */
@@ -11763,9 +11782,10 @@ server.tool(
     }
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
+      const effectiveScope = scope ?? (await installedScriptScope(resolved, name));
       const res = await api.runProjectScript(resolved, {
         name,
-        ...(scope ? { scope } : {}),
+        ...(effectiveScope ? { scope: effectiveScope } : {}),
         ...(input ? { input } : {}),
       });
       return formatScriptRunResult(res);

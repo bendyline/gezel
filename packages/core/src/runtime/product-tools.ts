@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isEngagementAllowed } from '../engagement.js';
+import { isSafeEntityId } from '../entity-id.js';
 import {
   normalizeArtifactPath,
   normalizeRelativeToolPath,
@@ -12,7 +13,8 @@ import {
 } from '../schemas/api.js';
 import type { ScriptScope } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
-import { type CreateTaskRequest, CreateTaskRequestSchema } from '../schemas/task.js';
+import { type CreateTaskRequest, CreateTaskRequestSchema, parseTaskRef } from '../schemas/task.js';
+import { inferScriptScope } from '../scripts/errors.js';
 import { roleHasTeamScope, roleToolNames } from '../tools/access.js';
 import { describeToolArgumentError } from '../tools/argument-errors.js';
 import {
@@ -330,6 +332,15 @@ export async function executePortableTool(
     if (!match) throw new Error(projectNotFoundMessage(args.project, projects));
     target = match.id;
   }
+  // As on the desktop: models reach for the project's display name in a task
+  // ref (`Eval crew-project-handoff/1`), which no id check can accept.
+  if (typeof args.ref === 'string') {
+    const parsed = parseTaskRef(args.ref);
+    if (parsed && !isSafeEntityId(parsed.projectId)) {
+      const project = findProjectByReference(await store.listProjects(), parsed.projectId);
+      if (project) args.ref = `${project.id}/${parsed.num}`;
+    }
+  }
   if (
     typeof args.path === 'string' &&
     !ARTIFACT_PATH_TOOLS.has(name) &&
@@ -543,11 +554,20 @@ export async function executePortableTool(
     const destination = await store.getProject(target);
     if (!destination || destination.status === 'readonly' || destination.status === 'inactive')
       throw new Error('The destination project does not accept changes');
+    const explicit = args.scope as ScriptScope | undefined;
+    const scope = explicit
+      ? explicit
+      : inferScriptScope(
+          String(args.name),
+          undefined,
+          ((await actions.scripts!.list(target)) as { items?: { name: string; scope: string }[] })
+            .items ?? [],
+        );
     return actions.scripts!.run(
       String(args.name),
       (args.input ?? {}) as Record<string, unknown>,
       { ...session, projectId: target },
-      (args.scope as ScriptScope | undefined) ?? 'project',
+      scope,
     );
   }
   if (name === 'search')

@@ -124,6 +124,33 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('workspace', 'default', 'blocked.md')).toBeNull();
   });
 
+  it('runs the only installed script of that name when the call names no scope', async () => {
+    const { store, session } = await fixture();
+    const installed = [{ name: 'storeRecords', scope: 'standard' }];
+    const scripts = {
+      list: vi.fn(async () => ({ items: installed, count: installed.length })),
+      run: vi.fn(async () => ({ status: 'ok' })),
+    };
+    const enabled = { ...actions, scripts };
+    await executePortableTool(
+      store,
+      session,
+      'run_installed_script',
+      { name: 'storeRecords' },
+      enabled,
+    );
+    expect(scripts.run).toHaveBeenLastCalledWith('storeRecords', {}, session, 'standard');
+    installed.push({ name: 'storeRecords', scope: 'project' });
+    await executePortableTool(
+      store,
+      session,
+      'run_installed_script',
+      { name: 'storeRecords' },
+      enabled,
+    );
+    expect(scripts.run).toHaveBeenLastCalledWith('storeRecords', {}, session, 'project');
+  });
+
   it('uses installed-script desktop inputs and default scope without crossing project authority', async () => {
     const { store, session } = await fixture();
     const other = await store.createProject({ name: 'Private project' });
@@ -337,6 +364,31 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('workspace', session.projectId, 'workspace/nested.md')).toBe(
       'nested',
     );
+  });
+
+  it('reads a task ref that names the project by its display name, as on the desktop', async () => {
+    const { store, gezel } = await fixture();
+    const task = await store.createTask('default', {
+      title: 'Write a note',
+      description: 'Write the handover note for the next volunteer on the cabinet.',
+      assignee: { kind: 'gezel', gezelId: gezel.id },
+      steps: [{ id: 'write', name: 'Write', prompt: 'Write it.' }],
+    });
+    const session = await store.createSession({
+      gezelId: gezel.id,
+      providerName: 'llama-cpp',
+      taskRef: task.ref,
+      stepId: 'write',
+    });
+    await store.updateProject('default', { name: 'Repair Crew' });
+    const notes = await executePortableTool(
+      store,
+      session,
+      'read_task_notes',
+      { ref: `Repair Crew/${task.num}` },
+      actions,
+    );
+    expect(notes).toBeDefined();
   });
 
   it('lets a team gezel name a project by id or display name, as on the desktop', async () => {

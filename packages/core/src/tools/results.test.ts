@@ -9,9 +9,11 @@ import {
   artifactCompletionHint,
   askUserQuestionText,
   countLineChanges,
+  createTaskText,
   crewMemberNamedIn,
   formatWorkspaceRead,
   listDirMissingText,
+  listScriptsText,
   nearbyPathMatches,
   readArtifactText,
   reanchorText,
@@ -342,5 +344,72 @@ describe('a question card that names a colleague', () => {
       /\n\nThis card goes to the person using the app, not to Eval colleague\. To give Eval colleague the work, use `message_gezel` with to: "eval-colleague" once the answer arrives\.$/,
     );
     expect(askUserQuestionText('q1', false)).not.toContain('message_gezel');
+  });
+});
+
+describe('list_scripts', () => {
+  const gate = (name: string) => ({
+    name,
+    meta: {
+      kind: 'gate',
+      description: `Gate: ${name} holds.`,
+      inputs: { file: { type: 'string', required: true } },
+      requires: ['workspace.read'],
+    },
+  });
+  const storeRecords = {
+    name: 'storeRecords',
+    meta: {
+      kind: 'action',
+      description: 'Action: CRUD over a workspace record store.',
+      inputs: {
+        action: {
+          type: 'choice',
+          required: true,
+          options: [{ value: 'create' }, { value: 'update' }],
+        },
+        root: { type: 'string', required: true },
+        mode: { type: 'choice', required: true, options: [{ value: 'single-file' }] },
+      },
+      requires: ['workspace.read', 'workspace.write'],
+    },
+  };
+
+  it('leads with actions, spells out choices, and lists gate checks one per line', () => {
+    const text = listScriptsText(
+      [],
+      [gate('checkFileExists'), storeRecords, gate('checkJsonValid')],
+    );
+    expect(text).toBe(
+      [
+        'Listed 3 installed scripts.',
+        'No project scripts yet.',
+        '',
+        '## Standard actions (read-only, scope: "standard")',
+        '• storeRecords — Action: CRUD over a workspace record store.',
+        '    inputs: action: create|update, root: string, mode: single-file',
+        '    requires: workspace.read, workspace.write',
+        '',
+        '## Standard gate checks (read-only, scope: "standard"), for craftbook completion gates',
+        '• checkFileExists(file: string) — checkFileExists holds.',
+        '• checkJsonValid(file: string) — checkJsonValid holds.',
+      ].join('\n'),
+    );
+  });
+});
+
+describe('create_task for a colleague', () => {
+  it('leads with the message that starts the colleague when it was not dispatched', () => {
+    const created = {
+      ref: 'crew/1',
+      title: 'Write the crew note',
+      assignee: { kind: 'gezel', gezelId: 'eval-colleague' },
+      craftbook: { steps: [{ id: 'write' }] },
+    } as unknown as Parameters<typeof createTaskText>[0];
+    const text = createTaskText(created, { dispatch: false, callerGezelId: 'eval-craftsperson' });
+    expect(text.split('\n\n')[1]).toMatch(
+      /^Next: call message_gezel\(\{ gezel: "eval-colleague", message: "new task crew\/1 — Write the crew note: <one-line ask>" \}\)\. eval-colleague has not been told about this task and will not start it until you do\./,
+    );
+    expect(createTaskText(created, { dispatch: true })).not.toContain('Next: call message_gezel');
   });
 });
