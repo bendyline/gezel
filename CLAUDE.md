@@ -177,8 +177,9 @@ The content-change dance: edit or generate in the sibling `../gilde`
 checkout (run `pnpm link:gilde` so the daemon/tests/evals see it) → run
 Gilde's `npm run fix && npm run check` → gilde PR → CI
 validates → merge → the pipeline publishes → bump the pin in
-`packages/catalog/package.json` **and** the `minimumReleaseAgeExclude`
-entry in `pnpm-workspace.yaml` → `pnpm unlink:gilde`. Content regressions
+`packages/catalog/package.json` (every `@bendyline/*` package is exempt from
+the seven-day release-age hold in `pnpm-workspace.yaml`, so a fresh gilde needs
+no exclusion entry) → `pnpm unlink:gilde`. Content regressions
 gate in gezel CI against the *pinned* version via the catalog package's
 data-contract tests.
 

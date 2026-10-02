@@ -18,6 +18,8 @@ export interface StartRelayOptions {
   projectId: string;
   /** The gezel the pane talks to: the only one offered the tools. */
   gezelId: string;
+  /** The pane's chat surface: only threads it is driving are offered the tools. */
+  surfaceId: string;
   label: string;
   tools: AppToolDefinition[];
   onStatus: (status: RelayStatus) => void;
@@ -28,11 +30,12 @@ export interface StartRelayOptions {
 
 /**
  * The pane's document tools, offered while the pane is open to the one
- * gezel it talks to in this project. Offering them project-wide put a live
- * document writer in every other session there too, the Meester's chat and
- * background work among them. `keepalive` lets the closing DELETE leave
- * while the pane is being torn down; the daemon's short grace window covers
- * the rest.
+ * gezel it talks to, and only in the threads the pane's own chat is driving.
+ * Offering them to the gezel's every session put a live document writer in
+ * its other chats too — the Meester's front-door chat in the desktop app
+ * when the pane talks to the Meester, and its background work. `keepalive`
+ * lets the closing DELETE leave while the pane is being torn down; the
+ * daemon's short grace window covers the rest.
  */
 export async function startOfficeRelay(opts: StartRelayOptions): Promise<OfficeRelay> {
   const register = opts.register ?? registerAppTools;
@@ -46,6 +49,7 @@ export async function startOfficeRelay(opts: StartRelayOptions): Promise<OfficeR
       {
         projectId: opts.projectId,
         gezelIds: [opts.gezelId],
+        surfaceId: opts.surfaceId,
         tools: opts.tools,
         label: opts.label,
         onStatus: (status) => opts.onStatus(status),

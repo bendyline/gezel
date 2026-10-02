@@ -1,4 +1,5 @@
 import type { AppToolDefinition } from '@bendyline/gezel-app-sdk/browser';
+import { type DiagramRenderer, renderMermaidPng } from '../diagram.js';
 import type { OfficeHostApp } from '../host.js';
 import { type DocumentDescription, commonTools } from './common.js';
 import { type ExcelWorkbook, excelTools, officeExcelWorkbook } from './excel.js';
@@ -16,6 +17,7 @@ export interface ToolsForHostOptions {
     excel?: ExcelWorkbook;
     powerpoint?: PowerPointDeck;
     readSelection?: () => Promise<string>;
+    renderDiagram?: DiagramRenderer;
   };
 }
 
@@ -32,7 +34,13 @@ export function toolsForHost(opts: ToolsForHostOptions): AppToolDefinition[] {
       ...(opts.adapters?.readSelection ? { readSelection: opts.adapters.readSelection } : {}),
     }),
   ];
-  if (opts.host === 'word') all.push(...wordTools(opts.adapters?.word ?? officeWordDocument()));
+  if (opts.host === 'word') {
+    // Diagrams go in as pictures, which a Range takes from WordApi 1.2.
+    const render = opts.isSupported('WordApi', '1.2')
+      ? (opts.adapters?.renderDiagram ?? renderMermaidPng)
+      : undefined;
+    all.push(...wordTools(opts.adapters?.word ?? officeWordDocument(), render));
+  }
   if (opts.host === 'excel') all.push(...excelTools(opts.adapters?.excel ?? officeExcelWorkbook()));
   if (opts.host === 'powerpoint') {
     all.push(

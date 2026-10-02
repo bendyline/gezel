@@ -38,22 +38,20 @@ fetchTimeout: 300000
 fetchRetries: 5
 networkConcurrency: 8
 
-# pnpm 11 holds new releases for one day by default. Version-specific entries
-# were reviewed as part of the July 2026 dependency sweep. Gilde is our
-# first-party catalog and is exempt by package name; gilde:update still exact-
-# pins each selected release in package.json and the lockfile.
+# Hold third-party releases for seven days (pnpm counts minutes), the same
+# cooldown DocBlocks enforces. Gezel's published packages exact-pin what they
+# depend on, so a younger pin here would block every app that installs Gezel
+# under that rule until the version aged. Our own `@bendyline/*` packages are
+# never held. Gilde stays listed by name because gilde:update looks for it
+# there; it still exact-pins each selected release in package.json and the
+# lockfile. Version-specific entries admit a third-party release before it has
+# aged: the July 2026 sweep, plus the versions already locked when the hold
+# rose to seven days on 2026-10-02 — delete those once they are a week old.
+minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
+  - "@bendyline/*"
   - "@anthropic-ai/sdk@0.113.0"
   - "@bendyline/gilde"
-  - "@bendyline/squisq-cli@2.8.12"
-  - "@bendyline/squisq-calc@2.11.0"
-  - "@bendyline/squisq-editor-react@2.11.14"
-  - "@bendyline/squisq-formats@2.6.11"
-  - "@bendyline/squisq-grid-react@2.11.12"
-  - "@bendyline/squisq-react@2.11.13"
-  - "@bendyline/squisq-video-react@2.4.17"
-  - "@bendyline/squisq-video@2.3.15"
-  - "@bendyline/squisq@2.11.11"
   - "@csstools/css-calc@3.3.0"
   - "@csstools/css-color-parser@4.1.10"
   - "@csstools/css-syntax-patches-for-csstree@1.1.7"
@@ -62,6 +60,7 @@ minimumReleaseAgeExclude:
   - "electron@43.7.7"
   - "jose@6.2.4"
   - "mermaid@11.16.1"
+  - "nodemailer@10.0.12"
   - "postcss@8.5.22"
   - "tar@7.5.21"
 

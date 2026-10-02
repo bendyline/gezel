@@ -49,6 +49,21 @@
   min-height: 0;
 }
 
+/* The compact layout's section dropdown; the wide layout lists sections instead. */
+.settings-nav-picker {
+  display: none;
+}
+
+/* Sections under a group heading sit indented in the menu, as in the list,
+   but not in the closed control that names the open one. */
+.settings-nav-picker-child {
+  padding-left: 1rem;
+}
+
+.settings-nav-picker-trigger .settings-nav-picker-child {
+  padding-left: 0;
+}
+
 .settings-nav h2 {
   margin: 0 0 0.75rem;
   padding: 1rem 1.25rem 0;

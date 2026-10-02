@@ -4,6 +4,7 @@ import {
   AppToolRelayError,
   AppToolRelayRegistry,
   type AppToolRelayStreamSink,
+  appToolBindingsFingerprint,
 } from './relay-registry.js';
 
 function sink(): AppToolRelayStreamSink & { events: AppToolRelayEvent[] } {
@@ -220,15 +221,17 @@ describe('AppToolRelayRegistry', () => {
     await expect(first).resolves.toMatchObject({ ok: true });
   });
 
-  it('moves the project fingerprint whenever the surface changes', () => {
+  it('moves a session fingerprint whenever the tools it is offered change', () => {
     const changed: string[] = [];
     const registry = new AppToolRelayRegistry({ onChange: (id) => changed.push(id) });
-    expect(registry.fingerprint('trips')).toBe('');
+    const query = { projectId: 'trips', gezelId: 'gids', sessionId: 's1' };
+    const fingerprint = () => appToolBindingsFingerprint(registry.listForSession(query));
+    expect(fingerprint()).toBe('');
 
     const { relayId } = registry.open({ appId: 'qualla' });
     registry.attachStream(relayId, sink());
     registry.register(relayId, { projectId: 'trips', tools: [TOOL] });
-    const registered = registry.fingerprint('trips');
+    const registered = fingerprint();
     expect(registered).not.toBe('');
     expect(changed).toEqual(['trips']);
 
@@ -236,10 +239,68 @@ describe('AppToolRelayRegistry', () => {
       projectId: 'trips',
       tools: [{ ...TOOL, description: 'Award points, generously.' }],
     });
-    expect(registry.fingerprint('trips')).not.toBe(registered);
+    expect(fingerprint()).not.toBe(registered);
 
     registry.unregister(relayId, 'trips');
-    expect(registry.fingerprint('trips')).toBe('');
+    expect(fingerprint()).toBe('');
+  });
+
+  it('offers surface-scoped tools only to the session its surface last wrote to', () => {
+    const registry = new AppToolRelayRegistry();
+    const { relayId } = registry.open({ appId: 'office' });
+    registry.attachStream(relayId, sink());
+    registry.register(relayId, {
+      projectId: 'trips',
+      gezelIds: ['gids'],
+      surfaceId: 'pane-a-surface',
+      tools: [TOOL],
+    });
+    const pane = { projectId: 'trips', gezelId: 'gids', sessionId: 'pane-thread' };
+    const desktop = { projectId: 'trips', gezelId: 'gids', sessionId: 'front-door' };
+
+    // Registered, but no message has come through the pane yet.
+    expect(registry.listForSession(pane)).toEqual([]);
+
+    registry.noteUserMessage('pane-thread', 'pane-a-surface');
+    expect(registry.listForSession(pane)).toHaveLength(1);
+    // The same gezel's other thread, written to from the desktop app.
+    registry.noteUserMessage('front-door', undefined);
+    expect(registry.listForSession(desktop)).toEqual([]);
+    expect(registry.listForSession({ projectId: 'trips', gezelId: 'gids' })).toEqual([]);
+
+    // Someone writes to the pane's thread from elsewhere: the latest message
+    // decides, until the pane writes to it again.
+    registry.noteUserMessage('pane-thread', undefined);
+    expect(registry.listForSession(pane)).toEqual([]);
+    registry.noteUserMessage('pane-thread', 'pane-a-surface');
+    expect(registry.listForSession(pane)).toHaveLength(1);
+
+    // Another document's pane is another surface.
+    registry.noteUserMessage('pane-thread', 'pane-b-surface');
+    expect(registry.listForSession(pane)).toEqual([]);
+  });
+
+  it('keeps a thread on its surface when the relay is reopened under it', () => {
+    const registry = new AppToolRelayRegistry();
+    const scope = { projectId: 'trips', surfaceId: 'pane-a-surface', tools: [TOOL] };
+    const first = registry.open({ appId: 'office' });
+    registry.attachStream(first.relayId, sink());
+    registry.register(first.relayId, scope);
+    registry.noteUserMessage('pane-thread', 'pane-a-surface');
+
+    // A relay that outlived its grace window is closed, and the SDK opens a
+    // fresh one and re-publishes the same scope.
+    registry.close(first.relayId, 'grace_expired');
+    const second = registry.open({ appId: 'office' });
+    registry.attachStream(second.relayId, sink());
+    registry.register(second.relayId, scope);
+
+    const [binding] = registry.listForSession({
+      projectId: 'trips',
+      gezelId: 'gids',
+      sessionId: 'pane-thread',
+    });
+    expect(binding?.relayId).toBe(second.relayId);
   });
 
   it('closes every relay and settles pending calls on daemon shutdown', async () => {

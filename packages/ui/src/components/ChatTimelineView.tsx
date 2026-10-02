@@ -2494,6 +2494,10 @@ export function ChatTimelineView({
     lastRowCountRef.current = rows.length;
     lastScrollHeightRef.current = el.scrollHeight;
     if (!rowsGrew && !heightGrew) return;
+    // An empty conversation has nothing to follow, and its introduction reads
+    // from the top: pinned, a phone opened on the meester's openers with the
+    // greeting that explains them scrolled away.
+    if (rows.length === 0) return;
     if (!pinnedToBottom) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
   }, [rows, pinnedToBottom]);

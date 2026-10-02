@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { queueComposerPrefill } from '../../components/composer-prefill.js';
 
@@ -27,13 +28,19 @@ export function MeesterGreeting({
   meesterPoppetje,
   meesterIconOverride,
   projectId,
+  onShown,
 }: {
   meesterName: string;
   meesterIcon?: string | null;
   meesterPoppetje?: import('@bendyline/gezel').Poppetje | null;
   meesterIconOverride?: boolean;
   projectId: string;
+  /** The introduction is on screen. */
+  onShown?: () => void;
 }) {
+  useEffect(() => {
+    onShown?.();
+  }, [onShown]);
   return (
     <div className="meester-greeting">
       <div className="meester-greeting-figure">

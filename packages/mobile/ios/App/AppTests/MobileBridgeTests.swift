@@ -226,7 +226,7 @@ final class MobileBridgeTests: XCTestCase {
             check(document.documentElement.scrollWidth <= innerWidth + 1, 'Primary navigation overflows');
             await clickButton('Settings', document.querySelector('[data-testid="app-sidebar"]'));
             const models = await until(() => document.querySelector('[aria-label="On-device models"]'), 'native providers inside shared Settings');
-            await until(() => models.querySelector('select')?.options.length > 0, 'native provider inventory');
+            await until(() => { const picker = models.querySelector('[role="combobox"]'); return picker && !picker.hasAttribute('data-placeholder'); }, 'native provider inventory');
             const navigation = await until(() => {
                 const control = document.querySelector('.app-header-navigation[aria-label="Navigation"]');
                 return visible(control) && control;

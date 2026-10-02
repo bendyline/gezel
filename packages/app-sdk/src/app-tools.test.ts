@@ -187,6 +187,31 @@ describe('registerAppTools', () => {
     }
   });
 
+  it('keeps the gezel and surface scope when it re-publishes to a fresh relay', async () => {
+    // The daemon matches a chat's threads to the surface id, so a relay
+    // reopened after a long sleep must come back under the same one.
+    const daemon = stubDaemon({ relayStatus: [404, 200] });
+    const registration = await registerAppTools(
+      { ...CONNECTION, fetch: daemon.fetchImpl },
+      {
+        projectId: 'trips',
+        gezelIds: ['gids'],
+        surfaceId: 'pane-surface-1',
+        tools: [{ ...TOOL, handler: async () => 'ok' }],
+      },
+    );
+    await settle();
+    try {
+      const puts = daemon.recorded.filter((entry) => entry.method === 'PUT');
+      expect(puts).toHaveLength(2);
+      for (const put of puts) {
+        expect(put.body).toMatchObject({ gezelIds: ['gids'], surfaceId: 'pane-surface-1' });
+      }
+    } finally {
+      await registration.close();
+    }
+  });
+
   it('withdraws the tools on close', async () => {
     const daemon = stubDaemon();
     const registration = await registerAppTools(

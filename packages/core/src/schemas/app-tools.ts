@@ -44,6 +44,16 @@ export const APP_TOOL_RELAY_HEARTBEAT_MS = 5_000;
 export const APP_TOOL_MAX_RELAYS_PER_APP = 8;
 export const APP_TOOL_MAX_PENDING_CALLS = 32;
 
+/**
+ * An app that shows its own chat registers its tools under a **surface id**
+ * and sends that chat's messages with this header carrying the same id. The
+ * daemon then offers the tools only to a session whose latest message from a
+ * person arrived through that surface, so a thread opened anywhere else —
+ * the desktop app's own chat with the same gezel, say — never sees them.
+ */
+export const APP_TOOL_SURFACE_HEADER = 'x-gezel-app-surface';
+export const AppToolSurfaceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
+
 export const AppToolDefinitionSchema = z.object({
   name: z.string().regex(APP_TOOL_NAME_RE, 'app tool names are snake_case, 2-64 characters'),
   description: z.string().min(1).max(1_000),
@@ -81,6 +91,11 @@ export const RegisterAppToolsRequestSchema = z.object({
    * gezel chatting in that project sees them.
    */
   gezelIds: z.array(z.string().min(1)).max(32).optional(),
+  /**
+   * Limit these tools to the sessions this app's own chat is driving: see
+   * {@link APP_TOOL_SURFACE_HEADER}. Combines with `gezelIds`.
+   */
+  surfaceId: AppToolSurfaceIdSchema.optional(),
   tools: z.array(AppToolDefinitionSchema).min(1).max(64),
 });
 export type RegisterAppToolsRequest = z.infer<typeof RegisterAppToolsRequestSchema>;

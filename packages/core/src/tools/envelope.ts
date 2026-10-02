@@ -58,12 +58,61 @@ function closeUnbalanced(text: string): string | null {
   return text + open.reverse().join('');
 }
 
+/**
+ * Drops object members that are a key with no value. Retrying a call whose
+ * error listed every parameter, Gemini Nano sent two of them as bare keys,
+ * `"allowWriteIn","multiSelect",` (Galaxy S26+, 2026-10-02). A key with no
+ * value says nothing, so the call is the same without it.
+ */
+function dropBareKeys(text: string): string | null {
+  const open: string[] = [];
+  let expectingKey = false;
+  let changed = false;
+  let out = '';
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]!;
+    if (char !== '"') {
+      if (char === '{' || char === '[') open.push(char);
+      else if (char === '}' || char === ']') open.pop();
+      if (char === '{') expectingKey = true;
+      else if (char === ',') expectingKey = open.at(-1) === '{';
+      else if (char === '[' || char === '}' || char === ']' || char === ':') expectingKey = false;
+      out += char;
+      continue;
+    }
+    let end = index + 1;
+    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+    if (end >= text.length) return null;
+    if (expectingKey) {
+      let next = end + 1;
+      while (next < text.length && /\s/.test(text[next]!)) next++;
+      if (text[next] === ',') {
+        changed = true;
+        index = next;
+        continue;
+      }
+      if (text[next] === '}') {
+        changed = true;
+        out = out.replace(/,\s*$/, '');
+        index = next - 1;
+        continue;
+      }
+      expectingKey = false;
+    }
+    out += text.slice(index, end + 1);
+    index = end;
+  }
+  return changed ? out : null;
+}
+
 function parseWholeEnvelope(text: string): ToolEnvelope | null {
   const exact = parseExactToolEnvelope(text);
   if (exact) return exact;
   const closed = closeUnbalanced(text.trim());
+  const keyed = dropBareKeys(closed ?? text.trim());
   return (
     (closed ? parseExactToolEnvelope(closed) : null) ??
+    (keyed ? parseExactToolEnvelope(keyed) : null) ??
     parsePythonicToolCall(text) ??
     parseGemmaToolCall(text) ??
     parseXmlFunctionCall(text)

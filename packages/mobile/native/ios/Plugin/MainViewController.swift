@@ -28,6 +28,14 @@ final class MainViewController: CAPBridgeViewController {
     }
 
     override func capacitorDidLoad() {
+        // The page paints the status bar's strip and the home indicator's
+        // itself (the title bar's sage, the composer's surface). iOS 26 laid
+        // its scroll-edge dimming over both, which read as a shadow hanging
+        // from the top of the screen (iPhone 14 Pro Max, iOS 27.0.1).
+        if #available(iOS 26.0, *), let scrollView = webView?.scrollView {
+            scrollView.topEdgeEffect.isHidden = true
+            scrollView.bottomEdgeEffect.isHidden = true
+        }
         guard let implementation = bridge as? CapacitorBridge else { return }
         let controller = implementation.webViewDelegationHandler.contentController
         let boundary = PackagedMainFrameMessages(original: implementation.webViewDelegationHandler)

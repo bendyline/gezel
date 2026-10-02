@@ -48,6 +48,7 @@ import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
 import { SettingsLegalSection } from './SettingsLegal.js';
+import { SettingsSectionPicker } from './SettingsSectionPicker.js';
 import {
   AutostartToggle,
   BackgroundServiceStatus,
@@ -1623,6 +1624,17 @@ function DaemonSettingsView() {
     <div className="settings-layout">
       <aside className="settings-nav">
         <h2>Settings</h2>
+        <SettingsSectionPicker
+          // The Workloads heading only groups its sections; it opens no page.
+          sections={sections
+            .filter((s) => s.id !== 'workloads')
+            .map((s) => ({ id: s.id, label: s.label, child: Boolean(s.group) }))}
+          value={section}
+          onChange={(id) => {
+            preloadSettingsSection(id as SectionId);
+            setSection(id as SectionId);
+          }}
+        />
         <ul>
           {sections.map((s) => {
             // Hide children of a collapsed group.
@@ -1715,7 +1727,7 @@ function DaemonSettingsView() {
                 </p>
                 <ThemePicker />
               </section>
-              <section style={{ marginBottom: '2rem' }}>
+              <section className="settings-sidebar-side" style={{ marginBottom: '2rem' }}>
                 <h3>Sidebar position</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
                   Which side the navigation rail (projects, gezellen, documents…) sits on.
@@ -4198,7 +4210,6 @@ function DaemonSettingsView() {
                   />
                 </p>
               </section>
-              <SettingsLegalSection />
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Updates</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
@@ -4258,7 +4269,7 @@ function DaemonSettingsView() {
                   </button>
                 </section>
               )}
-              <section>
+              <section style={{ marginBottom: '2rem' }}>
                 <h3>Debug mode</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
                   Turns on verbose diagnostics — tool-call internals, bridge startup traces, chat
@@ -4287,6 +4298,7 @@ function DaemonSettingsView() {
                   </button>
                 </div>
               </section>
+              <SettingsLegalSection />
             </>
           )}
 

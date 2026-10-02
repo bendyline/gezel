@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   COMPOSER_PREFILL_EVENT,
+  mergeComposerPrefill,
   queueComposerPrefill,
   takeComposerPrefill,
 } from './composer-prefill.js';
@@ -19,5 +20,17 @@ describe('composer prefill handoff', () => {
     expect(takeComposerPrefill('project-prefill-test')).toBeUndefined();
 
     window.removeEventListener(COMPOSER_PREFILL_EVENT, listener);
+  });
+
+  it('adds a prefill below the draft, but never the same block twice', () => {
+    const opener = 'I want to start a project — can you help me work out what it needs?';
+    expect(mergeComposerPrefill('', opener)).toBe(opener);
+    expect(mergeComposerPrefill(opener, opener)).toBeNull();
+    expect(mergeComposerPrefill(`Hi.\n\n${opener}\n`, opener)).toBeNull();
+    expect(mergeComposerPrefill('Hi.', opener)).toBe(`Hi.\n\n${opener}`);
+    // Contained in a longer sentence is not the same block.
+    expect(mergeComposerPrefill(`${opener} Quickly.`, opener)).toBe(
+      `${opener} Quickly.\n\n${opener}`,
+    );
   });
 });

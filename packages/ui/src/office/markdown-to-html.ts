@@ -1,8 +1,9 @@
 /**
  * The small Markdown subset a gezel writes into a document — headings,
- * paragraphs, bullet and numbered lists, bold, italic, inline code, code
- * blocks, links — as HTML for Word's `insertHtml`. Everything is escaped
- * first; nothing the model writes becomes markup it did not ask for.
+ * paragraphs, bullet and numbered lists (nested by indentation), bold,
+ * italic, inline code, code blocks, links — as HTML for Word's `insertHtml`.
+ * Everything is escaped first; nothing the model writes becomes markup it
+ * did not ask for.
  */
 
 function escapeHtml(text: string): string {
@@ -24,62 +25,108 @@ function inline(text: string): string {
   return out;
 }
 
-export function markdownToHtml(markdown: string): string {
+const LIST_ITEM_RE = /^([ \t]*)(?:([-*+])|(\d+)[.)])\s+(.*)$/;
+
+function indentWidth(whitespace: string): number {
+  let width = 0;
+  for (const ch of whitespace) width += ch === '\t' ? 4 : 1;
+  return width;
+}
+
+export interface MarkdownToHtmlOptions {
+  /**
+   * HTML for a ```mermaid fence. Without it, the fence stays a code block
+   * like any other.
+   */
+  diagram?: (source: string) => string;
+}
+
+export function markdownToHtml(markdown: string, opts: MarkdownToHtmlOptions = {}): string {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   const out: string[] = [];
   let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  // Open lists, outermost first. Each level's last item stays open until a
+  // sibling, a shallower item, or the end of the list closes it, so a deeper
+  // list nests inside it the way Word's insertHtml builds a multi-level list.
+  const lists: Array<{ indent: number; tag: 'ul' | 'ol' }> = [];
 
   const flushParagraph = () => {
     if (paragraph.length) out.push(`<p>${inline(paragraph.join(' '))}</p>`);
     paragraph = [];
   };
-  const flushList = () => {
-    if (!list) return;
-    const tag = list.ordered ? 'ol' : 'ul';
-    out.push(`<${tag}>${list.items.map((item) => `<li>${inline(item)}</li>`).join('')}</${tag}>`);
-    list = null;
+  const closeList = () => {
+    const closed = lists.pop();
+    if (closed) out.push(`</li></${closed.tag}>`);
+  };
+  const flushLists = () => {
+    while (lists.length) closeList();
+  };
+  const openList = (indent: number, tag: 'ul' | 'ol', start: number) => {
+    out.push(tag === 'ol' && start !== 1 ? `<ol start="${start}">` : `<${tag}>`);
+    lists.push({ indent, tag });
+  };
+  const nextContentLine = (from: number): string | undefined => {
+    for (let j = from; j < lines.length; j++) if (lines[j]!.trim()) return lines[j];
+    return undefined;
   };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (/^\s*```/.test(line)) {
+    const fence = /^\s*```\s*([\w-]*)/.exec(line);
+    if (fence) {
       flushParagraph();
-      flushList();
+      flushLists();
       const code: string[] = [];
       for (i += 1; i < lines.length && !/^\s*```/.test(lines[i]!); i++) code.push(lines[i]!);
-      out.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+      out.push(
+        fence[1]?.toLowerCase() === 'mermaid' && opts.diagram
+          ? opts.diagram(code.join('\n'))
+          : `<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`,
+      );
       continue;
     }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       flushParagraph();
-      flushList();
+      flushLists();
       const level = heading[1]!.length;
       out.push(`<h${level}>${inline(heading[2]!.trim())}</h${level}>`);
       continue;
     }
-    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (bullet || numbered) {
+    const item = LIST_ITEM_RE.exec(line);
+    if (item) {
       flushParagraph();
-      const ordered = Boolean(numbered);
-      if (!list || list.ordered !== ordered) {
-        flushList();
-        list = { ordered, items: [] };
-      }
-      list.items.push((bullet ?? numbered)![1]!);
+      const indent = indentWidth(item[1]!);
+      const tag = item[3] === undefined ? 'ul' : 'ol';
+      while (lists.length && lists[lists.length - 1]!.indent > indent) closeList();
+      const top = lists[lists.length - 1];
+      if (top && top.indent === indent && top.tag !== tag) closeList();
+      const level = lists[lists.length - 1];
+      if (level && level.indent === indent) out.push('</li>');
+      else openList(indent, tag, item[3] === undefined ? 1 : Number(item[3]));
+      out.push(`<li>${inline(item[4]!)}`);
       continue;
     }
     if (!line.trim()) {
       flushParagraph();
-      flushList();
+      // A blank line between items keeps the list going (a "loose" list);
+      // only text that is not part of it ends it.
+      const next = nextContentLine(i + 1);
+      if (lists.length && next !== undefined && (LIST_ITEM_RE.test(next) || /^\s/.test(next))) {
+        continue;
+      }
+      flushLists();
       continue;
     }
-    flushList();
+    if (lists.length && /^\s/.test(line)) {
+      // An indented line under an item continues that item's text.
+      out.push(` ${inline(line.trim())}`);
+      continue;
+    }
+    flushLists();
     paragraph.push(line.trim());
   }
   flushParagraph();
-  flushList();
+  flushLists();
   return out.join('');
 }

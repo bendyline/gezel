@@ -40,16 +40,24 @@ the Handboek's Connected Apps article.
    `Office.context.document.url` (none for unsaved or cloud documents).
 4. Gezel: remembered for this document (localStorage, keyed by path, never in
    the document), else the project lead, a member, the Meester, anyone.
-5. The pane writes the token to `gezel:token` and frames
-   `/?embedded=chat&compact=1&projectId=…&gezelId=…`; the SPA seeds the
-   recipient from `gezelId`.
+5. The pane mints a surface id (one per pane), writes the token to
+   `gezel:token`, and frames
+   `/?embedded=chat&compact=1&projectId=…&gezelId=…&appSurface=…`; the SPA
+   seeds the recipient from `gezelId`, and its API client sends every request
+   with the surface id in `x-gezel-app-surface`
+   (`packages/ui/src/embedded/app-surface.ts`).
 6. The pane registers its tools through the app-tool relay (ADR 0013) for the
-   project and **the chosen gezel only** (`gezelIds`), so the project's other
-   sessions (the Meester's chat, background work) never get a live document
-   writer. Changing the gezel re-registers (the LibreOffice panel re-publishes
-   the scope). The pane re-publishes on the edits switch, including a switch
-   made while the relay was still connecting, and closes the relay on
-   `pagehide` (keepalive DELETE).
+   project, **the chosen gezel only** (`gezelIds`), and **its own chat only**
+   (`surfaceId`). A session is offered the tools while its latest message
+   from a person came through that surface, so the same gezel's other
+   threads — the Meester's front-door chat in the desktop app when the pane
+   talks to the Meester, background work, another document's pane — never
+   get a live document writer, and a thread the pane shares with the desktop
+   app loses them when someone writes to it from there. Changing the gezel
+   re-registers (the LibreOffice panel re-publishes the scope, and stamps its
+   own chat's sends the same way). The pane re-publishes on the edits switch,
+   including a switch made while the relay was still connecting, and closes
+   the relay on `pagehide` (keepalive DELETE).
 7. Copilot, Claude CLI and Codex CLI run their own tool loop and never receive
    app tools (`providerUsesManagedMcpBridge`). When the chosen gezel resolves
    to one of them (its own provider, else the install default from
@@ -63,6 +71,7 @@ the Handboek's Connected Apps article.
 | `office_describe_document`, `office_read_selection` | all | no |
 | `doc_read_selection`, `doc_read` (paragraph pagination), `doc_search` | Word, Writer | no |
 | `doc_insert_text`, `doc_replace_selection` (`plain` or `markdown`) | Word, Writer | yes |
+| `doc_insert_diagram` (Mermaid source, drawn as a picture) | Word (WordApi 1.2) | yes |
 | `sheet_list`, `sheet_read_selection`, `sheet_read_range`, `sheet_describe_table` | Excel, Calc | no |
 | `sheet_write_range` | Excel, Calc | yes |
 | `slides_list`, `slide_read` | PowerPoint, Impress | no |
@@ -74,6 +83,18 @@ range's size, before any values load); inserts carry at most 50,000
 characters. Write tools are withdrawn, not refused, while edits are off; a
 tool whose Office.js requirement set is missing is never offered. Names are
 host-prefixed because `read_document` and `describe_table` are built-ins.
+
+Word markdown nests lists by indentation (`markdown-to-html.ts`) and draws a
+```` ```mermaid ```` fence the same way `doc_insert_diagram` does
+(`packages/ui/src/office/diagram.ts`): Mermaid renders in the pane with SVG-text
+labels (WebKit will not export a canvas that drew `foreignObject`, and Word's
+SVG import drops it), the SVG is rasterized to a 2x PNG on white, and the PNG
+replaces a placeholder paragraph inserted with the HTML, so text and pictures
+keep their written order wherever the insert lands. Every diagram is drawn
+before anything is inserted: one Mermaid cannot parse fails the call with
+Mermaid's message and leaves the document untouched. Mermaid is a lazy chunk
+of the pane bundle, fetched the first time a diagram is drawn. Writer keeps
+mermaid fences as code.
 
 ## Manifests
 

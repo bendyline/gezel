@@ -232,6 +232,11 @@ public final class GezelNativeRuntime {
             Integer context = fitContext(id, store.model(id)[1]);
             if (context != null) model.put("contextTokens", context.intValue());
         }
+        // Settings hides catalog downloads that cannot fit. Admission here
+        // charges only allocated bytes, because mapped weights are reclaimable
+        // page cache, so availMem says little about whether a model can run;
+        // half the device's memory is the share one app can count on.
+        library.put("memoryBudgetBytes", memoryInfo().totalMem / 2);
         return library;
     }
 

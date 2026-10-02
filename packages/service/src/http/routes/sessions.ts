@@ -22,6 +22,7 @@ import { chatLaunchInvocationKey } from '../../tasks/chat-launch-key.js';
 import { launchErrorResponse } from '../../tasks/launcher.js';
 import { pauseTaskStoppedByUser } from '../../tasks/step-pause.js';
 import type { ServiceContext } from '../context.js';
+import { noteMessageSurface } from './app-tools.js';
 
 const log = createLogger('http');
 
@@ -235,6 +236,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       }
       text = rewritePromptDraftFileRefs(body.message, body.draftId);
     }
+    noteMessageSurface(ctx, c, id);
     // Accept immediately; the live reply streams over /events/chat.
     // Mentioned gezels (if any) get the same verbatim user text in their
     // own session via the fan-out helper — no `from` metadata, so their
@@ -576,6 +578,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
           log.warn(`[sessions] marking draft sent failed: ${String(err)}`);
         });
     }
+    noteMessageSurface(ctx, c, id);
     ctx.chat.trackBackground(
       ctx.chat
         .interruptWithMessage(id, interruptText, body.draftId ? { draftId: body.draftId } : {})

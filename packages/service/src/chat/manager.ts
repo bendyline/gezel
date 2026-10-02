@@ -100,7 +100,11 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
 import { SessionSendQueue } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
-import type { AppToolBinding, AppToolRelayRegistry } from '../app-tools/relay-registry.js';
+import {
+  type AppToolBinding,
+  type AppToolRelayRegistry,
+  appToolBindingsFingerprint,
+} from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import {
   outputMediumForStep,
@@ -789,8 +793,8 @@ interface LiveSessionState {
    */
   catalogContentSnapshot: string | null;
   /**
-   * Identity of the app-registered tool surface for this session's project
-   * at build time. An app may register or withdraw tools at any moment, and
+   * Identity of the app-registered tools this session was offered at build
+   * time. An app may register or withdraw tools at any moment, and
    * the surface is baked into the live session's bridges and system prompt,
    * so a change here has to rebuild on the next turn — otherwise a tool the
    * app just registered stays invisible until the session is reset.
@@ -13106,9 +13110,9 @@ export class ChatManager extends LocalEngineRuntime {
     }
   }
 
-  /** Identity of the app-tool surface for a project; '' when no app offers any. */
-  private appToolsFingerprint(projectId: string): string {
-    return this.appToolRelays?.fingerprint(projectId) ?? '';
+  /** Identity of the app tools this session is offered; '' when it is offered none. */
+  private appToolsFingerprint(record: ChatSession): string {
+    return appToolBindingsFingerprint(this.appToolBindingsFor(record));
   }
 
   /**
@@ -13118,7 +13122,9 @@ export class ChatManager extends LocalEngineRuntime {
    * an untrusted guest of the project and never sees any extra toolset. A
    * provider that runs its own tool loop outside our bridge (Copilot, the CLI
    * providers) cannot reach an in-process server at all, so offering the tools
-   * in its prompt would advertise names it could never call.
+   * in its prompt would advertise names it could never call. Tools an app
+   * registered for its own chat surface (the Office pane's document tools)
+   * reach only the sessions that surface is driving.
    */
   private appToolBindingsFor(record: ChatSession): AppToolBinding[] {
     if (!this.appToolRelays) return [];
@@ -13127,6 +13133,7 @@ export class ChatManager extends LocalEngineRuntime {
     return this.appToolRelays.listForSession({
       projectId: record.projectId,
       gezelId: record.gezelId,
+      sessionId: record.id,
     });
   }
 
@@ -13218,7 +13225,7 @@ export class ChatManager extends LocalEngineRuntime {
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
-          this.appToolsFingerprint(existing.record.projectId) !== existing.appToolsSnapshot ||
+          this.appToolsFingerprint(existing.record) !== existing.appToolsSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
           scenarioFileRepairConstrained !== existing.scenarioFileRepairConstrained ||
@@ -13505,7 +13512,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel),
       catalogContentSnapshot: this.catalog.contentRoot(),
-      appToolsSnapshot: this.appToolsFingerprint(record.projectId),
+      appToolsSnapshot: this.appToolsFingerprint(record),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
         ? {
             codexPermissionModeSnapshot: normalizeCodexPermissionMode(

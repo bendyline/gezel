@@ -1,4 +1,5 @@
 import { openHandboekArticleActions, runNavActions } from '../components/nav-actions.js';
+import { supportsArea } from '../runtime-capabilities.js';
 
 /** Handboek article that explains what stays on the machine and what leaves it. */
 export const PRIVACY_ARTICLE_ID = 'privacy-local-first';
@@ -27,16 +28,19 @@ export function SettingsLegalSection() {
         its own license.
       </p>
       <ul className="settings-legal-links">
-        <li>
-          <button
-            type="button"
-            className="gz-link-button"
-            onClick={() => runNavActions(openHandboekArticleActions(PRIVACY_ARTICLE_ID))}
-          >
-            How Gezel handles your data
-          </button>{' '}
-          <span className="muted small">in the Handboek</span>
-        </li>
+        {/* The phone carries no Handboek, so it shows only the texts. */}
+        {supportsArea('handboek') && (
+          <li>
+            <button
+              type="button"
+              className="gz-link-button"
+              onClick={() => runNavActions(openHandboekArticleActions(PRIVACY_ARTICLE_ID))}
+            >
+              How Gezel handles your data
+            </button>{' '}
+            <span className="muted small">in the Handboek</span>
+          </li>
+        )}
         {LEGAL_LINKS.map((link) => (
           <li key={link.href}>
             <a href={link.href} target="_blank" rel="noreferrer">

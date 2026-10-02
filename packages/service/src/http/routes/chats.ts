@@ -1,6 +1,7 @@
 import { SendChatRequestSchema, getEngagementMode, isEngagementAllowed } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
+import { noteMessageSurface } from './app-tools.js';
 
 const DEFAULT_PROJECT = 'default';
 
@@ -37,6 +38,7 @@ export function chatRoutes(ctx: ServiceContext): Hono {
       projectId,
       ...(body.expectedDeliverable ? { expectedDeliverable: body.expectedDeliverable } : {}),
     });
+    noteMessageSurface(ctx, c, session.id);
     ctx.chat.trackBackground(
       ctx.chat
         .send(session.id, body.message, { fileTurnIntent: body.fileTurnIntent })

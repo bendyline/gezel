@@ -75,6 +75,41 @@
   margin-top: 10px;
 }
 
+/* Collapsed, the band stays one row at phone width too. The desktop's 54px
+   insets and the compact headline size pushed the expand key onto a second
+   line, so the collapsed band still took a fifth of the screen. */
+.app.app-compact .home-workshop-greeting-collapsed {
+  flex-wrap: nowrap;
+  gap: 12px;
+  padding: 8px var(--app-main-pad-inline, 0.75rem);
+}
+
+.app.app-compact .home-workshop-greeting-collapsed .home-workshop-headline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 20px;
+}
+
+/* The meester's introduction gives its words the full width: beside the
+   figure they had 178px, and each opener wrapped to three lines. The figure
+   sits beside the title only. */
+.app.app-compact .meester-greeting {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem 12px;
+  align-items: center;
+  padding: 0.75rem 0.25rem 1rem;
+}
+
+.app.app-compact .meester-greeting-body {
+  display: contents;
+}
+
+.app.app-compact .meester-greeting-body > :not(.meester-greeting-title) {
+  grid-column: 1 / -1;
+}
+
 .app.app-compact .home-workshop-tip-body {
   font-size: 15px;
 }
@@ -146,10 +181,16 @@
   overflow: hidden;
 }
 
+/* The phone host paints this much sage before the shell mounts
+   (product-host.css), so the two must agree. */
+:root {
+  --app-compact-header-height: 52px;
+}
+
 /* One row at every width: a wrapped titlebar drops search onto a second
    band and doubles the header's height. */
 .app.app-compact .app-header {
-  min-height: 52px;
+  min-height: var(--app-compact-header-height);
   gap: 0.5rem;
   flex-wrap: nowrap;
   align-items: center;
@@ -425,26 +466,51 @@
   height: 19px;
 }
 
-/* Keep the same Settings navigation and sections when the app becomes narrow.
-   The navigation gets a bounded scroll area above the full-width form, so a
-   fixed desktop rail cannot squeeze model controls outside the viewport. */
+/* Keep the same Settings sections when the app becomes narrow. The list
+   becomes one dropdown above the full-width form: as a bounded scroll box it
+   showed four sections at phone width and hid the rest below its fold. */
 .app.app-compact .settings-layout {
   flex-direction: column;
 }
 
+/* One row: the heading, then the section dropdown beside it. The wide rail
+   is a column, and without the direction here the dropdown stacked under
+   the heading on phones. */
 .app.app-compact .settings-nav {
   width: auto;
-  max-height: min(35%, 14rem);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
 }
 
 .app.app-compact .settings-nav h2 {
-  margin-bottom: 0.5rem;
-  padding: 0.75rem 0.75rem 0;
+  flex: none;
+  margin: 0;
+  padding: 0;
 }
 
 .app.app-compact .settings-nav ul {
-  padding: 0 0.75rem 0.5rem;
+  display: none;
+}
+
+.app.app-compact .settings-nav-picker {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+.app.app-compact .settings-nav-picker-trigger {
+  width: 100%;
+  min-height: 44px;
+}
+
+/* The rail's side only shows in a wide window, so a compact one has nothing
+   for the choice to change. */
+.app.app-compact .settings-sidebar-side {
+  display: none;
 }
 
 .app.app-compact .settings-nav-item,
@@ -710,9 +776,19 @@ html[data-layout="mobile"]
 
 /* Finger-sized hit areas (docs/ux.md: 44px on touch) for the controls a phone
    user reaches for most — the composer's keys, the Settings group chevrons,
-   and the row action menus — which otherwise sit at 15–30px. Faces keep
-   their desktop recipe; only the box grows. */
+   and the row action menus — which otherwise sit at 15–30px. */
 @media (any-pointer: coarse) {
+  .app.app-compact
+    :is(.settings-nav-group-toggle, .gezel-actions-trigger, .project-actions-trigger) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* The composer's keys draw their face on the box, so growing the box to
+     44px made a row of slabs that crowded the draft (Galaxy S26+ at its 1.2x
+     display zoom, 2026-10-02). The face stays 36px and an invisible reach
+     carries the touch area to 44px. Neighbours stand at least 4px apart, so a
+     reach never covers the key beside it. */
   .app.app-compact
     :is(
       .chat-send-btn-icon,
@@ -721,13 +797,26 @@ html[data-layout="mobile"]
       .chat-narrate-btn,
       .chat-task-btn,
       .chat-stop-btn,
-      .chat-interrupt-btn,
-      .settings-nav-group-toggle,
-      .gezel-actions-trigger,
-      .project-actions-trigger
+      .chat-interrupt-btn
     ) {
-    min-width: 44px;
-    min-height: 44px;
+    position: relative;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .app.app-compact
+    :is(
+      .chat-send-btn-icon,
+      .chat-composer-recipient-trigger,
+      .chat-composer-expand-btn,
+      .chat-narrate-btn,
+      .chat-task-btn,
+      .chat-stop-btn,
+      .chat-interrupt-btn
+    )::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
   }
 
   .app.app-compact .chat-composer-recipient-trigger {
