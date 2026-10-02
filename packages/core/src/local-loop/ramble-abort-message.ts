@@ -103,3 +103,8 @@ function route(opts: RambleAbortMessageOpts): string {
 export function buildRambleAbortMessage(opts: RambleAbortMessageOpts): string {
   return `${head(opts.providerLabel, opts.charCount)} ${route(opts)}`;
 }
+
+/** True for an error message built by {@link buildRambleAbortMessage}, from any local provider. */
+export function isRambleAbortMessage(text: string): boolean {
+  return /emitted\s+\d+\s+characters of prose this turn|\bStop planning\b/i.test(text);
+}

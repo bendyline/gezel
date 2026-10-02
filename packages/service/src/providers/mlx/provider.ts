@@ -98,7 +98,7 @@ import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
 import { buildRambleAbortMessage } from '../ramble-abort-message.js';
-import { RambleDetector } from '../ramble-detector.js';
+import { RambleDetector, inertRambleDetector, outputIsConstrained } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
   type RequiredInput,
@@ -1958,38 +1958,40 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           this.deps.profile,
           'turn.ramble-detection',
         );
-        const ramble = rambleConfig
-          ? new RambleDetector({
-              threshold: rambleConfig.coldThreshold,
-              postActionThreshold: rambleConfig.postActionThreshold,
-              enabled: true,
-              // Models that leak untagged reasoning narrate their plan
-              // in the open before acting; give the cold cap room to
-              // reach the tool call. Prefer the profile opt-in, but also
-              // honor the model-id family signal so a verbose family whose
-              // profile is missing `turn.preamble-folding` (config drift)
-              // still gets the leaky budget instead of the tight 6k cap.
-              leakyReasoning:
-                profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
-                leaksUntaggedReasoning(this.deps.model),
-              // MLX inlines chain-of-thought in the content deltas, and
-              // a template that opens `<think>` itself never shows the
-              // detector an open marker — so without this the whole
-              // reasoning block is scored as cold prose. Same flag the
-              // StreamingReasoningSplit below is seeded with.
-              opensInReasoning,
-            })
-          : // Repetition guard is safe on any local model (fires only on
-            // degenerate low-novelty loops); arm it even without the
-            // length-cap opt-in. See RambleDetector. Still needs the
-            // reasoning-open seed: the guard exempts reasoning spans, and
-            // a template-opened `<think>` is one.
-            new RambleDetector({
-              threshold: 6000,
-              enabled: false,
-              repetitionGuardEnabled: true,
-              opensInReasoning,
-            });
+        const ramble = outputIsConstrained(this.deps.tuning)
+          ? inertRambleDetector()
+          : rambleConfig
+            ? new RambleDetector({
+                threshold: rambleConfig.coldThreshold,
+                postActionThreshold: rambleConfig.postActionThreshold,
+                enabled: true,
+                // Models that leak untagged reasoning narrate their plan
+                // in the open before acting; give the cold cap room to
+                // reach the tool call. Prefer the profile opt-in, but also
+                // honor the model-id family signal so a verbose family whose
+                // profile is missing `turn.preamble-folding` (config drift)
+                // still gets the leaky budget instead of the tight 6k cap.
+                leakyReasoning:
+                  profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
+                  leaksUntaggedReasoning(this.deps.model),
+                // MLX inlines chain-of-thought in the content deltas, and
+                // a template that opens `<think>` itself never shows the
+                // detector an open marker — so without this the whole
+                // reasoning block is scored as cold prose. Same flag the
+                // StreamingReasoningSplit below is seeded with.
+                opensInReasoning,
+              })
+            : // Repetition guard is safe on any local model (fires only on
+              // degenerate low-novelty loops); arm it even without the
+              // length-cap opt-in. See RambleDetector. Still needs the
+              // reasoning-open seed: the guard exempts reasoning spans, and
+              // a template-opened `<think>` is one.
+              new RambleDetector({
+                threshold: 6000,
+                enabled: false,
+                repetitionGuardEnabled: true,
+                opensInReasoning,
+              });
         let rambleAborted = false;
         // Single-call turn: stop the stream once the one usable call is
         // complete in the VISIBLE text. Reasoning is excluded so a call the

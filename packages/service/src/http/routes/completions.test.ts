@@ -1,5 +1,6 @@
 import type { ProjectCompletionResponse } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import { CapacityDeniedError, EngineBusyError } from '../../providers/native/capacity-broker.js';
 import { ModelNotInstalledError } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 import { completionRoutes, completionTuning, parseJsonAnswer } from './completions.js';
@@ -26,7 +27,7 @@ function app(answer: OneShot, gezels: string[] = ['writer']) {
       }) as OneShot,
     },
   } as unknown as ServiceContext;
-  return { routes: completionRoutes(ctx), calls };
+  return { routes: completionRoutes(ctx, { pollMs: 5, capacityMs: 40 }), calls };
 }
 
 const post = (body: unknown) => ({
@@ -136,7 +137,58 @@ describe('POST /:id/completions', () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ code: 'model_not_installed' });
 
+    // The loop guard's corrective is written for an agent; a workflow gets a code.
+    const loop = await failing(
+      new Error(
+        '[llama-cpp] aborting — the gezel emitted 6843 characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call.',
+      ),
+    );
+    expect(loop.status).toBe(422);
+    const loopBody = (await loop.json()) as { error: string; code: string };
+    expect(loopBody.code).toBe('output_aborted');
+    expect(loopBody.error).not.toMatch(/tool call/);
+
     await expect(failing(new Error('socket hang up'))).resolves.toHaveProperty('status', 500);
+  });
+});
+
+describe('POST /:id/completions while another model holds the engine', () => {
+  it('waits for a busy engine to drain instead of failing the step', async () => {
+    let attempts = 0;
+    const { routes, calls } = app(async () => {
+      attempts++;
+      if (attempts < 3)
+        throw new EngineBusyError('engine llama-cpp:muse:0 is busy serving requests');
+      return '{"ok":true}';
+    });
+    const res = await routes.request(
+      '/stories/completions',
+      post({ prompt: 'x', jsonSchema: {}, timeoutMs: 60_000 }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ json: { ok: true } });
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.timeoutMs).toBe(60_000);
+    expect(calls[2]?.timeoutMs).toBeLessThanOrEqual(60_000);
+  });
+
+  it('waits out a capacity refusal only briefly, then reports it as a readable 409', async () => {
+    const { routes, calls } = app(async () => {
+      throw new CapacityDeniedError('There is not enough memory to run this model.');
+    });
+    const res = await routes.request('/stories/completions', post({ prompt: 'x' }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'capacity_denied' });
+    expect(calls.length).toBeGreaterThan(1);
+  });
+
+  it('does not wait on a resident engine whose window is too small: that needs a restart', async () => {
+    const { routes, calls } = app(async () => {
+      throw new CapacityDeniedError('restart the engine', { reason: 'resident-below-minimum' });
+    });
+    const res = await routes.request('/stories/completions', post({ prompt: 'x' }));
+    expect(res.status).toBe(409);
+    expect(calls).toHaveLength(1);
   });
 });
 
