@@ -435,15 +435,21 @@ async function isSessionRouteAllowed(
       : sessionDeny('project collection requires a coordinator session');
   }
 
-  // Gezel roster reads and `ensure_gezel` support delegation. Identity state
-  // is otherwise own-gezel only; metadata mutations remain coordinator-only.
+  // Gezel roster reads support delegation. Identity state is otherwise
+  // own-gezel only; creating, ensuring, messaging, and asking another gezel
+  // are coordinator moves (teamRouteGuard refuses them too — this guard must
+  // not admit what that one refuses, or the two disagree about a worker).
   if (path === '/api/gezels' || path === '/api/gezels/') {
     if (method === 'GET') return SESSION_ALLOW;
     return auth.team
       ? SESSION_ALLOW
       : sessionDeny('creating gezels requires a coordinator session');
   }
-  if (path === '/api/gezels/ensure' && method === 'POST') return SESSION_ALLOW;
+  if (path === '/api/gezels/ensure' && method === 'POST') {
+    return auth.team
+      ? SESSION_ALLOW
+      : sessionDeny('ensuring a gezel requires a coordinator session');
+  }
   if (path === '/api/gezels/mention-candidates' && method === 'GET') {
     return sessionDeny('mention candidates are a first-party composer route');
   }
@@ -455,10 +461,9 @@ async function isSessionRouteAllowed(
     const targetGezel = gezelMatch[1]!;
     const rest = gezelMatch[2] ?? '';
     if (rest === '/message' && method === 'POST') {
+      if (!auth.team) return sessionDeny('messaging a gezel requires a coordinator session');
       const body = await readJsonSafe(c);
-      return (auth.team || body?.projectId === auth.projectId) &&
-        body?.fromGezelId === auth.gezelId &&
-        body?.fromSessionId === sessionId(auth)
+      return body?.fromGezelId === auth.gezelId && body?.fromSessionId === sessionId(auth)
         ? SESSION_ALLOW
         : sessionDeny('message origin does not match the session token');
     }
@@ -568,15 +573,25 @@ async function isSessionRouteAllowed(
     return sessionDeny('question administration requires a first-party client');
   }
 
-  // Cross-gezel consultation is allowed only when the request proves it
-  // originated from the bound session.
+  // Cross-gezel consultation is a coordinator move, and only when the request
+  // proves it originated from the bound session.
   if (path === '/api/asks/request-and-wait' && method === 'POST') {
+    if (!auth.team) return sessionDeny('asking another gezel requires a coordinator session');
     const body = await readJsonSafe(c);
-    return (auth.team || body?.projectId === auth.projectId) &&
-      body?.fromGezelId === auth.gezelId &&
-      body?.fromSessionId === sessionId(auth)
+    return body?.fromGezelId === auth.gezelId && body?.fromSessionId === sessionId(auth)
       ? SESSION_ALLOW
       : sessionDeny('ask origin does not match the session token');
+  }
+
+  // `how_do_i` is in every role's kit (the `handboek` group): shipped docs
+  // rendered in agent mode, whose only install facts are the gezel roster
+  // (already a session read), installed model names, and the hardware tier.
+  // Only the question route — article, narration, and TOC stay renderer-side.
+  if (
+    method === 'GET' &&
+    (path === '/api/handboek/how-do-i' || path === '/api/handboek/how-do-i/')
+  ) {
+    return SESSION_ALLOW;
   }
 
   if ((path === '/api/tasks' || path === '/api/tasks/') && method === 'GET') {

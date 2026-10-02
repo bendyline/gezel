@@ -17,7 +17,8 @@ import { roleHasTeamScope } from './role-tool-filter.js';
  *
  * Only tools whose PRIMARY route is coordinator-only belong here. A tool with
  * a worker-legal main path keeps its slot even if one branch is refused
- * (`list_tasks` without a project, `ask_user_question`'s roster lookup).
+ * (`list_tasks` without a project, which falls back to the session's own
+ * project; `ask_user_question`'s roster lookup).
  * `coordinator-only-tools-guard.test.ts` replays every route below through
  * the real guards and fails when the guard and this table disagree.
  */

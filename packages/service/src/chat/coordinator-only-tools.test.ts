@@ -182,3 +182,20 @@ describe('the roster reads the same predicate the session token is minted with',
     }
   }
 });
+
+describe('a specialist made the project voorman stays a worker', () => {
+  // `voormanGezelId` is informational and changes no access (CLAUDE.md,
+  // "Project"); the token's team bit comes from the role. The roster must
+  // agree, or the project's lead is offered tools that 403.
+  it('is offered no coordinator-only tool, matching its worker token', async () => {
+    expect(roleHasTeamScope('Developer', 'crew')).toBe(false);
+    const allow = (await surface({
+      role: 'Developer',
+      projectMode: 'crew',
+      isProjectVoorman: true,
+      rolesAsTools: true,
+    }))!;
+    expect(coordinatorOnlyIn(allow)).toEqual([]);
+    expect(allow.has('delegate_voorman')).toBe(false);
+  });
+});

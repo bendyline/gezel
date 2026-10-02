@@ -8353,31 +8353,51 @@ function setStepDeliverableCall(
   return `set_step_deliverable({ task: "${ref}", stepId: "${stepId}", path: "${deliverable.path}", kind: "${deliverable.kind}" })`;
 }
 
+/**
+ * Set once the daemon refuses this child the install-wide task listing. Only
+ * a coordinator token may read `GET /api/tasks`, and a token's scope is fixed
+ * for the child's life, so a worker pays for that refusal once.
+ */
+let installWideTaskListingRefused = false;
+
 server.tool(
   'list_tasks',
   GEZEL_TOOL_DESCRIPTIONS.list_tasks,
   ListTasksInputSchema.shape,
   async ({ project, status, assignee }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = projectId
-      ? await api.listProjectTasks(
-          projectId,
-          status || assignee
-            ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
-            : undefined,
-        )
-      : await api.listTasks(
-          status || assignee
-            ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
-            : undefined,
-        );
+    const explicitProjectId = project ? await resolveProjectId(project) : undefined;
+    const filter =
+      status || assignee
+        ? { ...(status ? { status } : {}), ...(assignee ? { assignee } : {}) }
+        : undefined;
+    // No project named: a coordinator sees every project's tasks, and a
+    // worker — refused that listing — sees its own project's, which it may.
+    let listedProjectId = explicitProjectId ?? (installWideTaskListingRefused ? projectId : null);
+    let res: Awaited<ReturnType<typeof api.listTasks>>;
+    if (listedProjectId) {
+      res = await api.listProjectTasks(listedProjectId, filter);
+    } else {
+      try {
+        res = await api.listTasks(filter);
+      } catch (err) {
+        if (!(err instanceof GezelApiError) || err.status !== 403) throw err;
+        installWideTaskListingRefused = true;
+        listedProjectId = projectId;
+        res = await api.listProjectTasks(projectId, filter);
+      }
+    }
+    const scope = !explicitProjectId && listedProjectId ? ' in this project' : '';
     const summary = res.tasks.length
-      ? `Listed ${res.tasks.length} matching ${res.tasks.length === 1 ? 'task' : 'tasks'}.`
-      : 'No tasks match.';
+      ? `Listed ${res.tasks.length} matching ${res.tasks.length === 1 ? 'task' : 'tasks'}${scope}.`
+      : `No tasks match${scope}.`;
     return okResult(
       TaskToolOutputSchema,
       { summary, operation: 'list', tasks: res.tasks, count: res.tasks.length },
-      { text: listTasksText(res.tasks) },
+      {
+        text: scope
+          ? `${listTasksText(res.tasks)}\n(Tasks in this project only.)`
+          : listTasksText(res.tasks),
+      },
     );
   },
 );

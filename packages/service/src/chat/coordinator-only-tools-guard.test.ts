@@ -45,7 +45,7 @@ const UNTOOLED_COORDINATOR_ROUTES: ReadonlyArray<{ probe: CoordinatorRouteProbe;
   { probe: { method: 'DELETE', path: '/api/gezels/:other' }, why: 'roster UI' },
   {
     probe: { method: 'GET', path: '/api/tasks' },
-    why: 'list_tasks without a project; with one it takes the project route a worker may use',
+    why: 'list_tasks without a project; a worker MCP child falls back to its own project route',
   },
 ];
 
@@ -64,7 +64,11 @@ function concretePath(probe: CoordinatorRouteProbe): string {
 }
 
 /** Both route guards, in server.ts order, over a session token. */
-function guardedApp(team: boolean, onSessionDeny?: (reason: string) => void) {
+function guardedApp(
+  team: boolean,
+  onSessionDeny?: (reason: string) => void,
+  opts: { teamGuard?: boolean } = {},
+) {
   const app = new Hono();
   app.use('*', async (c, next) => {
     c.set('auth', {
@@ -82,7 +86,7 @@ function guardedApp(team: boolean, onSessionDeny?: (reason: string) => void) {
       log: (line) => onSessionDeny?.(line.slice(line.lastIndexOf(': ') + 2)),
     }),
   );
-  app.use('/api/*', teamRouteGuard({ mode: 'enforce' }));
+  if (opts.teamGuard !== false) app.use('/api/*', teamRouteGuard({ mode: 'enforce' }));
   app.all('*', (c) => c.json({ ok: true }));
   return app;
 }
@@ -131,6 +135,16 @@ describe('coordinator-only tool table', () => {
       const label = `${owner}: ${probe.method} ${probe.path}`;
       expect(await replay(worker, probe), label).toBe(403);
       expect(await replay(coordinator, probe), label).toBe(200);
+    }
+  });
+
+  it('the session guard alone refuses each listed route, so it agrees with the team guard', async () => {
+    // GEZEL_TEAM_SCOPE can put teamRouteGuard in audit/off; a worker must
+    // still be refused, and the session guard must never admit what the
+    // team guard refuses (it once admitted same-project message/ask/ensure).
+    const sessionOnly = guardedApp(false, undefined, { teamGuard: false });
+    for (const { owner, probe } of ALL_PROBES) {
+      expect(await replay(sessionOnly, probe), `${owner}: ${probe.method} ${probe.path}`).toBe(403);
     }
   });
 });
