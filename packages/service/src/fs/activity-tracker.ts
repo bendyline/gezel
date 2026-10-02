@@ -1,4 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
+import { KeyedLock, createLogger } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { Store } from './store.js';
@@ -57,7 +57,7 @@ export class ActivityTracker {
   private readonly persisted = new Map<string, number>();
   /** Projects whose on-disk stamp has been loaded into `persisted`. */
   private readonly loads = new Map<string, Promise<void>>();
-  private readonly writing = new Set<string>();
+  private readonly writes = new KeyedLock();
   private unsubs: Array<() => void> = [];
 
   constructor(opts: ActivityTrackerOptions) {
@@ -112,28 +112,24 @@ export class ActivityTracker {
 
   /** Persist every stamp that is newer than its on-disk value. */
   async flush(): Promise<void> {
-    for (const [projectId, ms] of this.latest) {
-      await this.ensureLoaded(projectId);
-      if (ms > (this.persisted.get(projectId) ?? 0)) {
-        await this.write(projectId, ms).catch((err) =>
-          log.warn(`activity flush for ${projectId} failed: ${String(err)}`),
-        );
-      }
+    for (const projectId of this.latest.keys()) {
+      await this.maybePersist(projectId, true).catch((err) =>
+        log.warn(`activity flush for ${projectId} failed: ${String(err)}`),
+      );
     }
   }
 
-  private async maybePersist(projectId: string): Promise<void> {
-    await this.ensureLoaded(projectId);
-    if (this.writing.has(projectId)) return;
-    const latest = this.latest.get(projectId) ?? 0;
-    const persisted = this.persisted.get(projectId) ?? 0;
-    if (latest - persisted < this.persistThresholdMs) return;
-    this.writing.add(projectId);
-    try {
+  private async maybePersist(projectId: string, force = false): Promise<void> {
+    return this.writes.run(projectId, async () => {
+      await this.ensureLoaded(projectId);
+      // Re-read after waiting: a newer stamp may arrive during the prior
+      // write. Shutdown joins the same queue so an older write cannot land
+      // after the final flush and move the on-disk activity backward.
+      const latest = this.latest.get(projectId) ?? 0;
+      const persisted = this.persisted.get(projectId) ?? 0;
+      if (latest <= persisted || (!force && latest - persisted < this.persistThresholdMs)) return;
       await this.write(projectId, latest);
-    } finally {
-      this.writing.delete(projectId);
-    }
+    });
   }
 
   private async write(projectId: string, ms: number): Promise<void> {

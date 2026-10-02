@@ -68,7 +68,13 @@ export class TerminalEventBus {
 
     return () => {
       set!.delete(listener);
-      if (set!.size === 0) this.projectListeners.delete(projectId);
+      // Drop only the set this subscription joined. The SSE route unsubscribes
+      // on abort and again when its ping loop exits; a reload that resubscribed
+      // in between lives in a new set, and deleting by key orphaned it — its
+      // stream stayed open while every publish found no listeners.
+      if (set!.size === 0 && this.projectListeners.get(projectId) === set) {
+        this.projectListeners.delete(projectId);
+      }
     };
   }
 }

@@ -1,9 +1,12 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { KeyedLock, type Task, isSafeEntityId } from '@bendyline/gezel';
+import { dirname, join, resolve } from 'node:path';
+import { KeyedLock, type Task, TaskSchema, createLogger, isSafeEntityId } from '@bendyline/gezel';
 import {
   type ExternalFolders,
   gezelPaths,
+  projectArtifactsDir,
+  projectDiffpacksDir,
+  projectDiffpacksFile,
   projectTaskAboutFile,
   projectTaskFile,
   projectTaskNextIdFile,
@@ -19,6 +22,8 @@ export interface TaskFilesStoreOptions {
 }
 
 const taskWriteLocks = new KeyedLock();
+const taskNumLocks = new KeyedLock();
+const log = createLogger('task-store');
 
 export class TaskWriteConflictError extends HttpStatusError {
   constructor(ref: string) {
@@ -31,7 +36,7 @@ export class TaskWriteConflictError extends HttpStatusError {
 export class TaskFilesStore {
   private readonly home: string;
   private readonly external?: ExternalFolders;
-  private readonly taskNumLocks = new KeyedLock();
+  private readonly invalidTasks = new Map<string, string>();
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -43,17 +48,57 @@ export class TaskFilesStore {
     // failed allocation must stay one failed allocation — the previous
     // hand-rolled chain kept the rejected promise as the queue head and
     // refused every later allocation for the project until restart.
-    return this.taskNumLocks.run(projectId, async () => {
-      const file = projectTaskNextIdFile(this.home, projectId, this.external);
+    const file = projectTaskNextIdFile(this.home, projectId, this.external);
+    return taskNumLocks.run(resolve(file), async () => {
       let current = 0;
       try {
         const raw = await readFile(file, 'utf8');
-        current = Number.parseInt(raw.trim(), 10);
-        if (!Number.isFinite(current) || current < 0) current = 0;
-      } catch {
-        /* first allocation */
+        current = /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+        if (!Number.isSafeInteger(current) || current < 0) {
+          log.warn(`Recovering invalid task counter ${file} from the existing task identities.`);
+          current = 0;
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new Error(
+            `Cannot read task counter ${file}; check its permissions before creating a task.`,
+            { cause: err },
+          );
+        }
+      }
+      // A restored/stale counter can be valid yet lower than the surviving
+      // tasks or outputs. Include every directory that reserves task IDs,
+      // even when its task.json has been deleted or damaged.
+      for (const dir of [
+        projectTasksDir(this.home, projectId, this.external),
+        join(projectArtifactsDir(this.home, projectId, this.external), 'tasks'),
+        projectDiffpacksDir(this.home, projectId, this.external),
+      ]) {
+        for (const name of await readdirIfPresent(dir)) {
+          if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, dir));
+        }
+      }
+      const packsFile = projectDiffpacksFile(this.home, projectId);
+      try {
+        const packs = JSON.parse(await readFile(packsFile, 'utf8')) as { diffpacks?: unknown };
+        if (!packs || !Array.isArray(packs.diffpacks)) throw new Error('invalid diffpacks list');
+        for (const pack of packs.diffpacks) {
+          if (!isRecord(pack) || typeof pack.packId !== 'string')
+            throw new Error('invalid proposal identity');
+          if (/^\d+$/.test(pack.packId))
+            current = Math.max(current, reservedTaskNum(pack.packId, packsFile));
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new Error(
+            `Cannot recover task identities from ${packsFile}; repair it before creating a task.`,
+            { cause: err },
+          );
+        }
       }
       const num = current + 1;
+      if (!Number.isSafeInteger(num))
+        throw new Error(`Task numbers are exhausted for ${projectId}.`);
       await mkdir(dirname(file), { recursive: true });
       await writeFileAtomic(file, `${num}\n`);
       return num;
@@ -66,14 +111,23 @@ export class TaskFilesStore {
     return taskWriteLocks.run(resolve(file), () => this.writeTaskVersion(file, task));
   }
 
-  private async writeTaskVersion(file: string, task: Task): Promise<void> {
+  /** Creation never replaces an existing task, including legacy revision-zero records. */
+  async createTask(task: Task): Promise<void> {
+    const file = projectTaskFile(this.home, task.projectId, task.num, this.external);
+    return taskWriteLocks.run(resolve(file), () => this.writeTaskVersion(file, task, true));
+  }
+
+  private async writeTaskVersion(file: string, task: Task, createOnly = false): Promise<void> {
     let current: Task | undefined;
     try {
       current = JSON.parse(await readFile(file, 'utf8')) as Task;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
-    if ((current?.revision ?? 0) !== (task.revision ?? 0)) {
+    if (
+      (createOnly && current !== undefined) ||
+      (current?.revision ?? 0) !== (task.revision ?? 0)
+    ) {
       throw new TaskWriteConflictError(task.ref);
     }
     const revision = (current?.revision ?? 0) + 1;
@@ -83,7 +137,9 @@ export class TaskFilesStore {
     // status rather than a stale inherited snapshot.
     const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
     void _effectiveStatus;
-    await writeFileAtomic(file, `${JSON.stringify({ ...rest, revision }, null, 2)}\n`);
+    await writeFileAtomic(file, `${JSON.stringify({ ...rest, revision }, null, 2)}\n`, {
+      noReplace: createOnly,
+    });
     if (description !== undefined && description.trim().length > 0) {
       await this.writeTaskAbout(task.projectId, task.num, description);
     } else {
@@ -98,13 +154,49 @@ export class TaskFilesStore {
   }
 
   private async readTaskVersion(projectId: string, num: number): Promise<Task | null> {
+    const file = projectTaskFile(this.home, projectId, num, this.external);
     try {
-      const raw = await readFile(projectTaskFile(this.home, projectId, num, this.external), 'utf8');
-      const parsed = normalizeLegacyTaskShape(JSON.parse(raw));
+      const raw = await readFile(file, 'utf8');
+      const normalized = normalizeLegacyTaskShape(JSON.parse(raw));
+      const validated = TaskSchema.safeParse(normalized);
+      if (!validated.success) {
+        throw new Error(
+          validated.error.issues
+            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+            .join('; '),
+        );
+      }
+      // Validate known fields but keep additive fields (including nested
+      // ones) so an older daemon does not erase newer metadata on save.
+      const parsed = normalized as Task;
+      if (
+        parsed.projectId !== projectId ||
+        parsed.num !== num ||
+        parsed.ref !== `${projectId}/${num}`
+      ) {
+        throw new Error('task identity does not match its storage path');
+      }
+      if (
+        ![parsed.createdAt, parsed.updatedAt].every((stamp) => Number.isFinite(Date.parse(stamp)))
+      ) {
+        throw new Error('createdAt and updatedAt must be valid timestamps');
+      }
       const about = await this.readTaskAbout(projectId, num);
       if (about.length > 0) parsed.description = about;
+      this.invalidTasks.delete(file);
       return parsed;
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.invalidTasks.delete(file);
+        return null;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      if (this.invalidTasks.get(file) !== message) {
+        log.warn(
+          `Skipping unreadable task ${file}: ${message}. Repair this file or restore it from a backup.`,
+        );
+        this.invalidTasks.set(file, message);
+      }
       return null;
     }
   }
@@ -161,12 +253,30 @@ export class TaskFilesStore {
 }
 
 /** Map the pre-craftbook task shape onto the current aggregate. */
-function normalizeLegacyTaskShape(raw: unknown): Task {
-  const task = raw as Record<string, unknown>;
-  if (task.craftbook || !Array.isArray(task.phases)) return task as unknown as Task;
+function normalizeLegacyTaskShape(raw: unknown): unknown {
+  if (!isRecord(raw)) throw new Error('task must be an object');
+  const task = raw;
+  if (task.craftbook || !Array.isArray(task.phases)) return task;
 
   const { phases, activePhaseId, ...rest } = task;
-  const legacyPhases = phases as Array<Record<string, unknown>>;
+  const legacyPhases = phases as unknown[];
+  if (!legacyPhases.every(isRecord)) throw new Error('legacy phases must contain objects');
+  for (const phase of legacyPhases) {
+    for (const key of [
+      'id',
+      'name',
+      'description',
+      'createdAt',
+      'completedAt',
+      'suggestedGezelId',
+      'suggestedRole',
+    ]) {
+      if (phase[key] !== undefined && typeof phase[key] !== 'string')
+        throw new Error(`invalid legacy phase ${key}`);
+    }
+  }
+  if (activePhaseId !== undefined && typeof activePhaseId !== 'string')
+    throw new Error('invalid activePhaseId');
   const createdAt =
     typeof task.createdAt === 'string' ? task.createdAt : '1970-01-01T00:00:00.000Z';
   const updatedAt = typeof task.updatedAt === 'string' ? task.updatedAt : createdAt;
@@ -201,6 +311,8 @@ function normalizeLegacyTaskShape(raw: unknown): Task {
 
   return {
     ...rest,
+    createdAt,
+    updatedAt,
     craftbook: {
       id: 'legacy',
       name: typeof task.title === 'string' ? task.title : 'Task',
@@ -210,7 +322,30 @@ function normalizeLegacyTaskShape(raw: unknown): Task {
       updatedAt,
     },
     ...(typeof activePhaseId === 'string' ? { activeStepId: activePhaseId } : {}),
-  } as unknown as Task;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function reservedTaskNum(value: string, source: string): number {
+  const num = Number(value);
+  if (!Number.isSafeInteger(num))
+    throw new Error(`Invalid task number ${value} in ${source}; repair it before creating a task.`);
+  return num;
+}
+
+async function readdirIfPresent(path: string): Promise<string[]> {
+  try {
+    return await readdir(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(
+      `Cannot read task identities in ${path}; check its permissions before creating a task.`,
+      { cause: err },
+    );
+  }
 }
 
 async function safeReaddir(path: string): Promise<string[]> {

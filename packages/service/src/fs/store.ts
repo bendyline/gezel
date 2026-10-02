@@ -4881,7 +4881,7 @@ export class Store {
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, filePath);
+    const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content, { noReplace: opts?.createOnly });
     await appendJournalEntry(this.home, id, 'write', filePath, { content, ctx });
@@ -4920,7 +4920,7 @@ export class Store {
       path: args.path,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, args.path);
+    const full = await resolveInside(gate.workspaceDir, args.path, { allowRoot: false });
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
     const newContent = computeReplaceInFile(oldContent, args);
@@ -4957,7 +4957,7 @@ export class Store {
       path: args.path,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, args.path);
+    const full = await resolveInside(gate.workspaceDir, args.path, { allowRoot: false });
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
     const newContent = computeReplaceLines(oldContent, args);
@@ -4988,7 +4988,7 @@ export class Store {
       path: args.path,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, args.path);
+    const full = await resolveInside(gate.workspaceDir, args.path, { allowRoot: false });
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
     let parsed: ReturnType<typeof parsePatch>;
@@ -5078,7 +5078,7 @@ export class Store {
 
     for (const edit of edits) {
       try {
-        const full = await resolveInside(gate.workspaceDir, edit.path);
+        const full = await resolveInside(gate.workspaceDir, edit.path, { allowRoot: false });
         const oldContent = await readFileForEditOrThrow(full, edit.path);
         let parsed: ReturnType<typeof parsePatch>;
         try {
@@ -5162,7 +5162,7 @@ export class Store {
       path: args.path,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, args.path);
+    const full = await resolveInside(gate.workspaceDir, args.path, { allowRoot: false });
     const oldContent = await readFileForEditOrThrow(full, args.path);
     const newContent = computeInsertAtMarker(oldContent, { ...args, where });
     await writeFileAtomic(full, newContent);
@@ -5215,7 +5215,7 @@ export class Store {
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, filePath);
+    const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.history?.log({
@@ -5264,7 +5264,7 @@ export class Store {
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, filePath);
+    const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
     // `force: true` so removing a missing path is a no-op (matches the
     // model's mental model of "make sure this is gone"). `recursive` is
     // caller-opt-in — models can't accidentally wipe a directory tree.
@@ -5286,7 +5286,7 @@ export class Store {
       path: dirPath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const full = await resolveInside(gate.workspaceDir, dirPath);
+    const full = await resolveInside(gate.workspaceDir, dirPath, { allowRoot: false });
     await mkdir(full, { recursive: true });
     await appendJournalEntry(this.home, id, 'mkdir', dirPath, { ctx });
     await this.history?.log({
@@ -5310,8 +5310,8 @@ export class Store {
       path: [fromPath, toPath],
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const fromFull = await resolveInside(gate.workspaceDir, fromPath);
-    const toFull = await resolveInside(gate.workspaceDir, toPath);
+    const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
+    const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
     await mkdir(dirname(toFull), { recursive: true });
     await rename(fromFull, toFull);
     await appendJournalEntry(this.home, id, 'rename', toPath, { fromPath, ctx });
@@ -6418,6 +6418,10 @@ export class Store {
 
   async writeTask(task: Task): Promise<void> {
     await this.taskFiles.writeTask(task);
+  }
+
+  async createTask(task: Task): Promise<void> {
+    await this.taskFiles.createTask(task);
   }
 
   async readTask(projectId: string, num: number): Promise<Task | null> {

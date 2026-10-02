@@ -40,10 +40,15 @@ function pathEq(a: string, b: string): boolean {
 }
 
 function pathStartsWithDir(candidate: string, base: string): boolean {
+  const prefix = directoryPrefix(base);
   if (process.platform === 'win32' || process.platform === 'darwin') {
-    return candidate.toLowerCase().startsWith(base.toLowerCase() + sep.toLowerCase());
+    return candidate.toLowerCase().startsWith(prefix.toLowerCase());
   }
-  return candidate.startsWith(base + sep);
+  return candidate.startsWith(prefix);
+}
+
+function directoryPrefix(base: string): string {
+  return base.endsWith(sep) ? base : base + sep;
 }
 
 /**
@@ -82,7 +87,7 @@ export function intoWorkspaceRelative(base: string, p: string): string {
     // is case-SENSITIVE on posix, so a differently-cased-but-contained
     // path would wrongly yield a `../` escape. Slicing keeps the tail's
     // real casing.
-    return normalizedPath.slice(normalizedBase.length + sep.length);
+    return normalizedPath.slice(directoryPrefix(normalizedBase).length);
   }
   throw new PathSafetyError(
     `absolute path outside the workspace: ${p} — pass a path relative to the workspace root`,
@@ -248,7 +253,11 @@ export class PathSafetyError extends Error {
  * `PathSafetyError` on any violation so callers get a single catch
  * for the whole class of "this path isn't allowed" errors.
  */
-export async function resolveInside(base: string, relPath: string): Promise<string> {
+export async function resolveInside(
+  base: string,
+  relPath: string,
+  opts?: { allowRoot?: boolean },
+): Promise<string> {
   // Rebase an absolute-under-base path to workspace-relative (or throw on
   // absolute-outside) before the containment checks; a relative path is
   // returned unchanged, so existing callers are unaffected.
@@ -263,6 +272,11 @@ export async function resolveInside(base: string, relPath: string): Promise<stri
   const joined = safeJoin(base, rebasedPath);
   if (joined === null) {
     throw new PathSafetyError(`path escapes the base dir: ${rebasedPath}`, 'path-traversal');
+  }
+  // Read/list callers may name the root. Mutators must reject equivalent
+  // spellings such as '.' and 'notes/..' before reaching the filesystem.
+  if (opts?.allowRoot === false && pathEq(joined, normalize(base))) {
+    throw new PathSafetyError('the root folder cannot be mutated', 'empty-path');
   }
   if (isReservedWindowsName(basename(joined))) {
     throw new PathSafetyError(`reserved Windows name: ${basename(joined)}`, 'reserved-name');

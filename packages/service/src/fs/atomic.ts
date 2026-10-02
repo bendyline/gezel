@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { type FileHandle, copyFile, link, open, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  type FileHandle,
+  chmod,
+  copyFile,
+  link,
+  lstat,
+  open,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -54,13 +64,27 @@ export async function writeFileAtomic(
   // "write at umask, chmod 0600 afterwards" pattern left a TOCTOU window
   // in which a local watcher could open the still-0644 file. `rename`
   // preserves the tmp's mode, so the published target lands at `mode`.
-  const modeOpt = opts?.mode !== undefined ? { mode: opts.mode } : {};
+  let mode = opts?.mode;
+  if (mode === undefined && !opts?.noReplace && process.platform !== 'win32') {
+    try {
+      const existing = await lstat(absPath);
+      // Preserve ordinary permissions, including executable bits. A symlink
+      // is replaced as a link, so its target's permissions do not apply here.
+      if (existing.isFile()) mode = existing.mode & 0o777;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+  const modeOpt = mode !== undefined ? { mode } : {};
   try {
     if (typeof content === 'string') {
       await writeFile(tmp, content, { encoding: 'utf8', ...modeOpt });
     } else {
       await writeFile(tmp, content, modeOpt);
     }
+    // Creation applies the process umask. Restore the intended permissions
+    // before publication, even under a more restrictive current umask.
+    if (mode !== undefined && process.platform !== 'win32') await chmod(tmp, mode);
     if (opts?.durable) await fsyncPath(tmp);
     if (opts?.noReplace) {
       // A hard link publishes the fully written sibling inode only when the

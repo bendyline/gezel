@@ -22,7 +22,7 @@ import {
   type UnexpectedHttpErrorEvent,
   startService,
 } from '@bendyline/gezel-service';
-import { test as base, expect } from '@playwright/test';
+import { type CDPSession, type Page, test as base, expect } from '@playwright/test';
 import { FIXED_CLOCK_MS } from '../helpers/determinism.js';
 import { type SeedWorld, seed } from '../helpers/seed.js';
 
@@ -233,7 +233,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // would have named the cause). Auto so every spec gets it without
   // opting in.
   browserDiagnostics: [
-    async ({ page }, use, testInfo) => {
+    async ({ page, daemon }, use, testInfo) => {
       const lines: string[] = [];
       const push = (line: string) => {
         if (lines.length < MAX_DIAGNOSTIC_LINES) lines.push(line);
@@ -251,7 +251,21 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           `[requestfailed] ${req.method()} ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`,
         );
       });
+      // Enabled before the page runs: a renderer already spinning in JS never
+      // services Debugger.enable, but an enabled debugger's pause interrupts it.
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Debugger.enable');
       await use(undefined);
+      if (testInfo.status !== testInfo.expectedStatus) {
+        // A blank page whose goto never reaches `load` recorded nothing above
+        // (2026-10-02). Its trace showed every request after the bundle as
+        // pending, which fits two causes: a renderer stuck in JS (Chromium
+        // reports responses from the renderer) or daemon requests that never
+        // answer, holding Chrome's six connections per origin so the lazy
+        // chunks behind `load` never go out. Ask each side directly.
+        for (const line of await probeRenderer(page, cdp)) push(line);
+        for (const line of await probeDaemon(daemon)) push(line);
+      }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
         // Attach by path (not body) so the text survives in
         // test-results/<test>/ for post-hoc inspection — body-only
@@ -270,6 +284,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 });
 
 export { expect };
+export type { Page };
 
 async function waitForHealth(baseURL: string, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -284,6 +299,61 @@ async function waitForHealth(baseURL: string, timeoutMs = 30_000): Promise<void>
       throw new Error(`daemon /api/health not ready within ${timeoutMs}ms`);
     await new Promise((r) => setTimeout(r, 150));
   }
+}
+
+const PROBE_TIMEOUT_MS = 3_000;
+const STUCK_REQUEST_MS = 1_000;
+
+function withTimeout<T>(work: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    work.catch(() => null),
+    new Promise<null>((resolveTimeout) => setTimeout(() => resolveTimeout(null), PROBE_TIMEOUT_MS)),
+  ]);
+}
+
+async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
+  if (page.isClosed()) return ['[renderer] page already closed'];
+  const state = await withTimeout(
+    page.evaluate(() => ({
+      readyState: document.readyState,
+      resources: performance.getEntriesByType('resource').length,
+    })),
+  );
+  if (state) {
+    return [
+      `[renderer] responsive: readyState=${state.readyState}, ${state.resources} resource(s) finished`,
+    ];
+  }
+  // The paused stack names the loop; no pause means it is stuck outside JS.
+  const paused = new Promise<string[]>((resolvePaused) => {
+    cdp.once('Debugger.paused', (event) => {
+      resolvePaused(
+        event.callFrames
+          .slice(0, 15)
+          .map(
+            (f) =>
+              `[renderer]   at ${f.functionName || '<anonymous>'} (${f.url}:${f.location.lineNumber + 1}:${(f.location.columnNumber ?? 0) + 1})`,
+          ),
+      );
+    });
+  });
+  void cdp.send('Debugger.pause').catch(() => {});
+  const frames = await withTimeout(paused);
+  if (!frames) {
+    return [`[renderer] did not answer evaluate or a debugger pause within ${PROBE_TIMEOUT_MS}ms`];
+  }
+  return ['[renderer] unresponsive; main thread paused in:', ...frames];
+}
+
+async function probeDaemon(daemon: DaemonInfo): Promise<string[]> {
+  const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+  const perf = await withTimeout(client.getPerfSnapshot());
+  if (!perf) return [`[daemon] /api/system/perf did not answer within ${PROBE_TIMEOUT_MS}ms`];
+  const stuck = perf.inflight.filter((work) => work.durationMs >= STUCK_REQUEST_MS);
+  return [
+    `[daemon] responsive; ${stuck.length} item(s) in flight for ${STUCK_REQUEST_MS}ms or more`,
+    ...stuck.map((work) => `[daemon]   ${work.label} ${Math.round(work.durationMs)}ms`),
+  ];
 }
 
 function formatUnexpectedHttpErrors(phase: string, errors: UnexpectedHttpErrorEvent[]): string {

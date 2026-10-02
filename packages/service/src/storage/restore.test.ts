@@ -10,6 +10,24 @@ import { runBackup } from './backup.js';
 import { StorageJobManager } from './job-manager.js';
 import { cancelRestore, readReview, runRestore, scanRestore } from './restore.js';
 
+const faults = vi.hoisted(() => ({ copyTo: '', renameFrom: '' }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...fs,
+    cp: async (...args: Parameters<typeof fs.cp>) => {
+      if (String(args[1]) === faults.copyTo)
+        throw Object.assign(new Error('copy interrupted'), { code: 'EIO' });
+      return fs.cp(...args);
+    },
+    rename: async (...args: Parameters<typeof fs.rename>) => {
+      if (String(args[0]) === faults.renameFrom)
+        throw Object.assign(new Error('rename failed'), { code: 'EIO' });
+      return fs.rename(...args);
+    },
+  };
+});
+
 let home: string;
 let out: string;
 let store: Store;
@@ -24,6 +42,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  faults.copyTo = '';
+  faults.renameFrom = '';
   await rm(home, { recursive: true, force: true });
   await rm(out, { recursive: true, force: true });
 });
@@ -102,6 +122,75 @@ describe('scanRestore', () => {
 });
 
 describe('runRestore', () => {
+  it('keeps an interrupted addition undiscoverable and preserves recovery material', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const target = join(home, 'gezels', gezel.id);
+    await writeFile(join(target, 'about.md'), 'BACKED UP');
+    const file = await makeBackup();
+    await store.deleteGezel(gezel.id);
+    const review = await scanRestore(deps(), file);
+    const confirm = { items: [{ kind: 'gezel' as const, id: gezel.id, action: 'add' as const }] };
+    const stage = join(
+      home,
+      '.transactions',
+      'backup-restores',
+      review.restoreId,
+      'stage',
+      'gezels',
+      gezel.id,
+    );
+    faults.copyTo = join(target, 'gezel.md');
+    const job = jobs.create('restore');
+    await expect(runRestore(deps(), review, confirm, job)).rejects.toMatchObject({ code: 'EIO' });
+    expect(jobs.get(job.id)?.status).toBe('error');
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('BACKED UP');
+    expect(await exists(join(target, 'gezel.md'))).toBe(false);
+    expect((await new Store({ home }).listGezels()).map((item) => item.id)).not.toContain(gezel.id);
+    expect(await readFile(join(stage, 'about.md'), 'utf8')).toBe('BACKED UP');
+    expect(await readReview(home, review.restoreId)).not.toBeNull();
+
+    faults.copyTo = '';
+    await writeFile(join(target, 'about.md'), 'WORK ADDED AFTER INTERRUPTION');
+    await expect(restore(review, confirm)).rejects.toThrow('refusing to overwrite');
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('WORK ADDED AFTER INTERRUPTION');
+    // The user may explicitly choose replacement after inspecting the partial tree.
+    const retried = await restore(review, {
+      items: [{ kind: 'gezel', id: gezel.id, action: 'replace' }],
+    });
+    expect(retried.job.status).toBe('done');
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('BACKED UP');
+  });
+
+  it('rolls back a failed replacement and allows the same review to be retried', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const target = join(home, 'gezels', gezel.id);
+    await writeFile(join(target, 'about.md'), 'BACKED UP');
+    const file = await makeBackup();
+    await writeFile(join(target, 'about.md'), 'CURRENT WORK');
+    const review = await scanRestore(deps(), file);
+    const confirm = {
+      items: [{ kind: 'gezel' as const, id: gezel.id, action: 'replace' as const }],
+    };
+    faults.renameFrom = join(
+      home,
+      '.transactions',
+      'backup-restores',
+      review.restoreId,
+      'stage',
+      'gezels',
+      gezel.id,
+    );
+    await expect(restore(review, confirm)).rejects.toMatchObject({ code: 'EIO' });
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('CURRENT WORK');
+    expect(await readReview(home, review.restoreId)).not.toBeNull();
+    expect(
+      (await readdir(join(home, 'gezels'))).some((name) => name.includes('restore-parked')),
+    ).toBe(false);
+    faults.renameFrom = '';
+    expect((await restore(review, confirm)).job.status).toBe('done');
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('BACKED UP');
+  });
+
   it.each(['after review', 'during publication'])(
     'does not replace an addition created %s',
     async (when) => {

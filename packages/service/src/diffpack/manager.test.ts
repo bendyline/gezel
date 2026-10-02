@@ -68,6 +68,97 @@ describe('partial proposal application', () => {
     });
   }
 
+  it.each(['broken JSON', 'invalid envelope', 'invalid row'] as const)(
+    'preserves a registry containing %s when another proposal is created',
+    async (damage) => {
+      await twoFiles();
+      const file = join(home, 'projects', projectId, 'diffpacks.json');
+      const original = await readFile(file, 'utf8');
+      const parsed = JSON.parse(original);
+      const damaged =
+        damage === 'broken JSON'
+          ? '{"diffpacks":'
+          : damage === 'invalid envelope'
+            ? '{"diffpacks":null}'
+            : JSON.stringify({ ...parsed, diffpacks: [...parsed.diffpacks, { packId: '10' }] });
+      await writeFile(file, damaged);
+      manager = new DiffpackManager({ home, store, tasks: fakeTasks });
+      const create = () =>
+        manager.ensure(projectId, '11', {
+          title: 'New proposal',
+          origin: { kind: 'manual' },
+          taskRef: `${projectId}/11`,
+        });
+      await expect(create()).rejects.toThrow(/repair/i);
+      expect(await readFile(file, 'utf8')).toBe(damaged);
+      await expect(manager.apply(projectId, '9')).rejects.toThrow(/repair/i);
+      expect(await readWorkspace('first.txt')).toBeNull();
+      await writeFile(file, original);
+      await create();
+      expect((await manager.list(projectId)).map((pack) => pack.packId)).toEqual(['11', '9']);
+      expect((await manager.apply(projectId, '9')).ok).toBe(true);
+    },
+  );
+
+  it.each([false, true])(
+    'retries only failed files after an I/O error (partial: %s)',
+    async (partial) => {
+      await twoFiles();
+      const original = store.writeProjectWorkspaceFile.bind(store);
+      const spy = vi
+        .spyOn(store, 'writeProjectWorkspaceFile')
+        .mockImplementation(async (...args) => {
+          if (!partial || args[1] === 'second.txt') {
+            throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+          }
+          return original(...args);
+        });
+      try {
+        const result = await manager.apply(projectId, '9');
+        expect(result.ok).toBe(false);
+        expect((await manager.get(projectId, '9')).status).toBe(
+          partial ? 'partially-applied' : 'failed',
+        );
+        expect(await readWorkspace('second.txt')).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+      if (partial) await seedWorkspace('first.txt', 'later user edit\n');
+      manager = new DiffpackManager({ home, store: new Store({ home }), tasks: fakeTasks });
+      const retry = await manager.apply(projectId, '9');
+      expect(retry.ok).toBe(true);
+      expect(retry.results.map((result) => result.path)).toEqual(
+        partial ? ['second.txt'] : ['first.txt', 'second.txt'],
+      );
+      expect((await manager.get(projectId, '9')).status).toBe('applied');
+      expect(await readWorkspace('first.txt')).toBe(
+        partial ? 'later user edit\n' : 'first proposal\n',
+      );
+      expect(await readWorkspace('second.txt')).toBe('second proposal\n');
+      expect((await manager.apply(projectId, '9')).results).toEqual([]);
+    },
+  );
+
+  it('requires review when a write lands but its acknowledgement is interrupted', async () => {
+    await twoFiles();
+    const original = store.writeProjectWorkspaceFile.bind(store);
+    const spy = vi.spyOn(store, 'writeProjectWorkspaceFile').mockImplementation(async (...args) => {
+      await original(...args);
+      if (args[1] === 'first.txt') throw new Error('interrupted after publishing the file');
+    });
+    try {
+      expect((await manager.apply(projectId, '9')).ok).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    await seedWorkspace('first.txt', 'user work after interruption\n');
+    manager = new DiffpackManager({ home, store: new Store({ home }), tasks: fakeTasks });
+    expect((await manager.get(projectId, '9')).drifted).toEqual(['first.txt']);
+    await expect(manager.apply(projectId, '9')).rejects.toBeInstanceOf(DiffpackDriftedError);
+    expect(await readWorkspace('first.txt')).toBe('user work after interruption\n');
+    expect(await readWorkspace('second.txt')).toBe('second proposal\n');
+  });
+
   it('checks drift on pending files after a partial apply and across reloads', async () => {
     await twoFiles();
     await manager.apply(projectId, '9', { paths: ['first.txt'] });

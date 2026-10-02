@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { gezelPaths, projectTaskFile, projectTaskNextIdFile } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as atomic from './atomic.js';
 import { TaskFilesStore } from './task-files-store.js';
 
 describe('TaskFilesStore.nextProjectTaskNum', () => {
@@ -19,8 +20,7 @@ describe('TaskFilesStore.nextProjectTaskNum', () => {
   it('a failed allocation rejects its caller without poisoning later ones', async () => {
     const store = new TaskFilesStore({ home });
     const counter = projectTaskNextIdFile(home, 'alpha');
-    // A directory squatting on the counter path makes the atomic write's
-    // rename fail, standing in for ENOSPC/EPERM-class disk failures.
+    // An unreadable counter must fail closed, then recover after repair.
     await mkdir(counter, { recursive: true });
     await expect(store.nextProjectTaskNum('alpha')).rejects.toThrow();
 
@@ -34,6 +34,27 @@ describe('TaskFilesStore.nextProjectTaskNum', () => {
     await mkdir(projectTaskNextIdFile(home, 'alpha'), { recursive: true });
     await expect(store.nextProjectTaskNum('alpha')).rejects.toThrow();
     await expect(store.nextProjectTaskNum('beta')).resolves.toBe(1);
+  });
+
+  it('releases a failed counter publication without reusing an issued number', async () => {
+    const store = new TaskFilesStore({ home });
+    expect(await store.nextProjectTaskNum('alpha')).toBe(1);
+    const spy = vi
+      .spyOn(atomic, 'writeFileAtomic')
+      .mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
+    try {
+      const results = await Promise.allSettled([
+        store.nextProjectTaskNum('alpha'),
+        new TaskFilesStore({ home }).nextProjectTaskNum('alpha'),
+      ]);
+      expect(results).toMatchObject([
+        { status: 'rejected', reason: { code: 'ENOSPC' } },
+        { status: 'fulfilled', value: 2 },
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await new TaskFilesStore({ home }).nextProjectTaskNum('alpha')).toBe(3);
   });
 });
 
@@ -58,6 +79,18 @@ describe('TaskFilesStore.listAllTasks', () => {
           projectId,
           num,
           ref: `${projectId}/${num}`,
+          title: 'Scheduler fixture',
+          status: 'active',
+          assignee: { kind: 'user' },
+          createdBy: { kind: 'user' },
+          craftbook: {
+            id: 'fixture',
+            name: 'Fixture',
+            entryStepId: 'work',
+            steps: [{ id: 'work', name: 'Work', createdAt: '2026-08-25T00:00:00.000Z' }],
+            createdAt: '2026-08-25T00:00:00.000Z',
+            updatedAt: '2026-08-25T00:00:00.000Z',
+          },
           createdAt: '2026-08-25T00:00:00.000Z',
           updatedAt: '2026-08-25T00:00:00.000Z',
         })}\n`,

@@ -73,6 +73,23 @@ function waitFor(
 const terminal = (job: EvalJob) =>
   ['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status);
 
+/**
+ * The live record turns terminal before its final write lands, so a read
+ * straight after `waitFor` can see the previous write on a slow runner.
+ */
+async function waitForPersisted(
+  dir: string,
+  status: EvalJob['status'],
+  timeoutMs = 5_000,
+): Promise<EvalJob> {
+  const started = Date.now();
+  for (;;) {
+    const job = JSON.parse(readFileSync(join(dir, 'job.json'), 'utf8')) as EvalJob;
+    if (job.status === status || Date.now() - started > timeoutMs) return job;
+    await new Promise((resolveTick) => setTimeout(resolveTick, 25));
+  }
+}
+
 describe('EvalJobManager', () => {
   let root: string;
   let script: string;
@@ -140,7 +157,7 @@ describe('EvalJobManager', () => {
     );
     expect(argv).toEqual(expect.arrayContaining(['--source-home', '/home/u/.gezel']));
 
-    const persisted = JSON.parse(readFileSync(join(job.dir, 'job.json'), 'utf8')) as EvalJob;
+    const persisted = await waitForPersisted(job.dir, 'completed');
     expect(persisted.status).toBe('completed');
     expect(readFileSync(join(job.dir, 'harness.log'), 'utf8')).toContain('a human log line');
     expect(history.map((h) => h.kind)).toEqual([

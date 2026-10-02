@@ -37,6 +37,25 @@ describe('TerminalEventBus', () => {
     expect(replayed).toEqual([]);
   });
 
+  it('keeps a newer subscriber when an earlier unsubscribe runs again', () => {
+    const bus = new TerminalEventBus();
+    const closedPage = bus.subscribeProject('alpha', () => {});
+    closedPage();
+
+    const received: string[] = [];
+    bus.subscribeProject('alpha', (event) => received.push(event.kind));
+    closedPage();
+    bus.publish({
+      kind: 'openFile',
+      projectId: 'alpha',
+      threadId: '_root',
+      path: 'notes.md',
+      source: 'workspace',
+    });
+
+    expect(received).toEqual(['openFile']);
+  });
+
   it('replays recent persisted messages to a late project subscriber', () => {
     const bus = new TerminalEventBus();
     bus.publish(commandEvent('alpha', 'list_memories'));

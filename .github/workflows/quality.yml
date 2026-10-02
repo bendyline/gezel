@@ -177,6 +177,16 @@ jobs:
           src/providers/codex-cli/binary.test.ts
           src/fs/store.test.ts
           src/fs/machine-shared-store.test.ts
+          src/fs/atomic.test.ts
+          src/fs/atomic-failures.test.ts
+          src/fs/activity-tracker.test.ts
+          src/fs/safe-paths.test.ts
+          src/fs/mutation-containment.test.ts
+          src/fs/task-files-recovery.test.ts
+          src/tasks/mutation-concurrency.test.ts
+          src/storage/restore.test.ts
+          src/diffpack/manager.test.ts
+          src/http/mutation-authority.test.ts
           src/chat/manager-machine-shared-mcp.test.ts
           src/machine-engine/bridge.integration.test.ts
 
