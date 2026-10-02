@@ -201,6 +201,20 @@ export function normalizeRelativeToolPath(input: string): string {
 }
 
 /**
+ * A workspace path that starts with the drawer's own name. "Write result.json
+ * in this project workspace" became `project/workspace/result.json` in all
+ * four Qwen 3.5 2B runs on two phones (2026-10-01), the workspace twin of the
+ * `artifacts/` prefix below. Returns the path under that prefix and the
+ * top-level folder the caller must find ABSENT before using it, so a project
+ * that really has a `workspace/` or `project/` folder is never bypassed.
+ */
+export function workspaceDrawerPrefix(path: string): { rest: string; folder: string } | null {
+  const match = /^(project\/workspace|workspace)\/+(.+)$/i.exec(path);
+  if (!match) return null;
+  return { rest: match[2]!, folder: match[1]!.split('/')[0]! };
+}
+
+/**
  * Models sometimes pass `artifacts/foo.md` because they see that folder
  * name in workspace listings or the UI. The API already scopes the call
  * to the artifacts root, so a leading `artifacts/` (or `./`) is always
@@ -211,7 +225,9 @@ export function normalizeRelativeToolPath(input: string): string {
 export function normalizeArtifactPath(path: string): string {
   let p = path.replace(/^\.?\/+/, '');
   // Strip repeated leading "artifacts/" segments (handles both `artifacts/`
-  // and the pathological `artifacts/artifacts/` case).
-  while (/^artifacts\/+/i.test(p)) p = p.replace(/^artifacts\/+/i, '');
+  // and the pathological `artifacts/artifacts/` case). A bare `artifacts` is
+  // the drawer itself: left alone, `list_artifacts({path:"artifacts"})` listed
+  // a folder that does not exist and told a 2B model its saved file was gone.
+  while (/^artifacts(?:\/+|$)/i.test(p)) p = p.replace(/^artifacts(?:\/+|$)/i, '');
   return p;
 }

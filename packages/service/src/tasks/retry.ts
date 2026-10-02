@@ -82,6 +82,7 @@ export async function retryPausedTask(
     await deps.tasks.resetStepRecoveryBudget(projectId, num, stepId, {
       redriveCount: 0,
       clearGateAttempts: true,
+      clearRestartResumes: true,
     });
   }
   await deps.tasks

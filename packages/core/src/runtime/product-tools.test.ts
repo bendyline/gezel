@@ -281,6 +281,15 @@ describe('portable tool authority and durable effects', () => {
       actions,
     );
     expect(await store.readFile('workspace', session.projectId, 'notes/a.md')).toBe('a');
+    // A bare `artifacts` is the drawer, not a folder inside it.
+    const listed = (await executePortableTool(
+      store,
+      session,
+      'list_artifacts',
+      { path: 'artifacts', recursive: true },
+      actions,
+    )) as { entries: { path: string }[] };
+    expect(listed.entries.map((entry) => entry.path)).toContain('cabinet-note.md');
   });
 
   it('says a listed folder does not exist, and names the file the model probably meant', async () => {
@@ -310,6 +319,24 @@ describe('portable tool authority and durable effects', () => {
       actions,
     );
     expect(await list('empty')).toBe('Empty directory.');
+  });
+
+  it('reads a path that starts with the drawer name as a workspace path', async () => {
+    const { store, session } = await fixture();
+    const write = (path: string, content: string) =>
+      executePortableTool(store, session, 'write_file', { path, content }, actions);
+    await write('project/workspace/result.json', '{"total":28}');
+    expect(await store.readFile('workspace', session.projectId, 'result.json')).toBe(
+      '{"total":28}',
+    );
+    // A project with a real `workspace/` folder keeps it.
+    await write('workspace/keep.md', 'mine');
+    expect(await store.readFile('workspace', session.projectId, 'keep.md')).toBe('mine');
+    await store.writeFile('workspace', session.projectId, 'workspace/.keep', '');
+    await write('workspace/nested.md', 'nested');
+    expect(await store.readFile('workspace', session.projectId, 'workspace/nested.md')).toBe(
+      'nested',
+    );
   });
 
   it('lets a team gezel name a project by id or display name, as on the desktop', async () => {

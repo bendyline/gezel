@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { isEngagementAllowed } from '../engagement.js';
-import { normalizeArtifactPath, normalizeRelativeToolPath } from '../path-rules.js';
+import {
+  normalizeArtifactPath,
+  normalizeRelativeToolPath,
+  workspaceDrawerPrefix,
+} from '../path-rules.js';
 import {
   type AskQuestionRequest,
   AskQuestionRequestSchema,
@@ -55,6 +59,7 @@ import {
 import { findProjectByReference, projectNotFoundMessage } from '../tools/project-ref.js';
 import {
   countLineChanges,
+  crewMemberNamedIn,
   nearbyPathMatches,
   sliceWorkspaceText,
   workspaceReadRangeError,
@@ -325,6 +330,16 @@ export async function executePortableTool(
     if (!match) throw new Error(projectNotFoundMessage(args.project, projects));
     target = match.id;
   }
+  if (
+    typeof args.path === 'string' &&
+    !ARTIFACT_PATH_TOOLS.has(name) &&
+    !name.endsWith('document') &&
+    name !== 'list_documents'
+  ) {
+    const prefixed = workspaceDrawerPrefix(args.path);
+    if (prefixed && !(await store.statFile('workspace', target, prefixed.folder)))
+      args.path = prefixed.rest;
+  }
   const readOnly = context.project.status === 'readonly';
   if (
     readOnly &&
@@ -348,7 +363,11 @@ export async function executePortableTool(
     );
     // As on the desktop: a nudge to retry with the question, not a failure.
     if (!text) return { emptyQuestion: true };
-    return actions.askQuestion({ ...rest, prompt: text });
+    const asked = await actions.askQuestion({ ...rest, prompt: text });
+    const colleague = grants.has('message_gezel')
+      ? crewMemberNamedIn(text, context.crew, session.gezelId)
+      : undefined;
+    return colleague ? { ...asked, colleague } : asked;
   }
   assertPortableTextBudget(args);
   if (name === 'append_to_file' || name === 'replace_in_file' || name === 'replace_lines') {
@@ -407,7 +426,9 @@ export async function executePortableTool(
   if (name === 'create_task') {
     // No craftbook catalogue on this host: a task needs its steps spelled out.
     if (!Array.isArray(args.steps) || args.steps.length === 0)
-      throw new Error('This host needs the task steps spelled out');
+      throw new Error(
+        'create_task needs `steps`: a list with a `name` and a `prompt` for each step. This device has no craftbook catalog to fill them in.',
+      );
     if (args.steps.length > PORTABLE_MAX_TASK_STEPS)
       throw new Error(`This host runs tasks of at most ${PORTABLE_MAX_TASK_STEPS} steps`);
     const destination = await store.getProject(target);

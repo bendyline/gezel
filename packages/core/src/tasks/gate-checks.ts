@@ -347,9 +347,21 @@ export async function locateMissingGateFiles(
       )
       .slice(0, 3);
     const where = artifact ? 'the artifacts drawer' : 'the project workspace';
+    // The other drawer too: a 2B model on the Galaxy S26 rewrote `handover.md`
+    // with write_file into the workspace four times, hearing only that the
+    // artifact was misplaced one folder down.
+    const otherDrawer = artifact ? 'the project workspace' : 'the artifacts drawer';
+    const inOtherDrawer =
+      (await readerForCheck(ws, { artifact: !artifact })
+        .read(file)
+        .catch(() => null)) !== null;
+    const misplaced = [
+      ...elsewhere.map((path) => `\`${path}\``),
+      ...(inOtherDrawer ? [`\`${file}\` in ${otherDrawer}`] : []),
+    ];
     lines.push(
-      elsewhere.length
-        ? `The checks read \`${file}\` at exactly that path in ${where}; it was saved as ${elsewhere.map((path) => `\`${path}\``).join(' and ')} instead. Save it at \`${file}\`.`
+      misplaced.length
+        ? `The checks read \`${file}\` at exactly that path in ${where}; it was saved as ${misplaced.join(' and ')} instead. Save it at \`${file}\` in ${where}.`
         : `The checks read \`${file}\` at exactly that path in ${where}, and nothing is saved there yet.`,
     );
   }

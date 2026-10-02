@@ -102,6 +102,7 @@ import {
   composeCraftbookLaunch,
   craftbookDocFormatFromEnv,
   createTaskText,
+  crewMemberNamedIn,
   deliverableStep,
   deniedTaskScopedWrite,
   expandStepDeliverable,
@@ -137,11 +138,13 @@ import {
   saveMemoryText,
   searchMemoryText,
   searchResultText,
+  stepCheckedArtifactPaths,
   stepInsertionIndex,
   stepOwnerGezelId,
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
+  workspaceDrawerPrefix,
   writeTaskNoteText,
 } from '@bendyline/gezel';
 import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
@@ -331,10 +334,12 @@ let sessionStepCompleted = false;
 // Advisory only: refresh it through the existing mutation fence for each write.
 // A failed lookup must not reuse an earlier completion hint.
 let sessionStepCompletion: 'automatic' | 'manual' | 'unknown' = 'unknown';
+let sessionStepCheckedArtifacts: string[] = [];
 
 async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
   sessionStepCompletion = 'unknown';
+  sessionStepCheckedArtifacts = [];
 
   let activeStepId: string | undefined;
   let activeStepOwnedBySession = false;
@@ -346,6 +351,7 @@ async function staleStepMutationResult() {
       const activeStep = task.craftbook.steps.find((s) => s.id === activeStepId);
       if (activeStep && activeStepId === sessionStepId) {
         sessionStepCompletion = activeStep.advanceWhen ? 'automatic' : 'manual';
+        sessionStepCheckedArtifacts = stepCheckedArtifactPaths(activeStep);
       }
       const owner = activeStep ? stepOwnerGezelId(task, activeStep) : undefined;
       activeStepOwnedBySession = !!gezelId && owner === gezelId;
@@ -417,7 +423,18 @@ async function workspaceTarget(path: string): Promise<LinkedWorkspaceTarget> {
   // Ordinary workspace calls keep their existing zero-request path. Project
   // metadata is fetched only when the model addresses the virtual sibling
   // namespace.
-  if (!isLinkedWorkspacePath(path)) return resolveLinkedWorkspacePath(projectId, [], path);
+  if (!isLinkedWorkspacePath(path)) {
+    const target = resolveLinkedWorkspacePath(projectId, [], path);
+    if (target.kind !== 'current') return target;
+    const prefixed = workspaceDrawerPrefix(target.path);
+    if (!prefixed) return target;
+    const folder = await api
+      .statProjectWorkspacePath(projectId, prefixed.folder)
+      .catch(() => ({ kind: 'missing' as const }));
+    return folder.kind === 'missing'
+      ? { ...target, path: prefixed.rest, displayPath: prefixed.rest }
+      : target;
+  }
   return resolveLinkedWorkspacePath(projectId, await linkedProjectIds(), path);
 }
 
@@ -3722,6 +3739,19 @@ async function workspaceCollisionForArtifactPath(
   return null;
 }
 
+/** The crew member a question names, so its result can point at message_gezel. */
+async function questionColleague(question: string) {
+  try {
+    const [roster, all] = await Promise.all([api.listProjectGezels(projectId), api.listGezels()]);
+    const crew = all.gezels
+      .filter((gezel) => roster.gezelIds.includes(gezel.id))
+      .map((gezel) => ({ id: gezel.id, name: gezel.name }));
+    return crewMemberNamedIn(question, crew, gezelId);
+  } catch {
+    return undefined;
+  }
+}
+
 function toolIsAuthorizedForThisSession(name: string): boolean {
   const canonical = canonicalToolName(name);
   // Bridge-backed providers can register a broad child-server surface and
@@ -4260,7 +4290,11 @@ server.tool(
       ...(sessionId ? { sessionId } : {}),
     });
     const completionHint =
-      sessionTaskRef && sessionStepId ? artifactCompletionHint(sessionStepCompletion) : '';
+      sessionTaskRef && sessionStepId
+        ? artifactCompletionHint(sessionStepCompletion, {
+            checkedByStep: sessionStepCheckedArtifacts.includes(clean),
+          })
+        : '';
     return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
   },
 );
@@ -6930,26 +6964,19 @@ server.tool(
         ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
-      if (res.deduped) {
-        // The session already has an unanswered question card from an
-        // earlier turn, so the runtime did NOT post this one — re-asking
-        // a reworded version would just stack duplicate cards in the
-        // user's "Needs your input" panel. Tell the model plainly so a
-        // looping small model stops rephrasing-and-retrying.
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: askUserQuestionText(res.questionId, true),
-            },
-          ],
-        };
-      }
+      const colleague = toolIsAuthorizedForThisSession('message_gezel')
+        ? await questionColleague(body)
+        : undefined;
+      // A deduped question means the session already has an unanswered card
+      // from an earlier turn, so the runtime did NOT post this one; re-asking
+      // a reworded version would just stack duplicate cards in the user's
+      // "Needs your input" panel. The text says so plainly so a looping small
+      // model stops rephrasing-and-retrying.
       return {
         content: [
           {
             type: 'text' as const,
-            text: askUserQuestionText(res.questionId, false),
+            text: askUserQuestionText(res.questionId, res.deduped === true, colleague),
           },
         ],
       };

@@ -66,6 +66,20 @@ final class MobileProductEvalTests: XCTestCase {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+        // The runtime refuses inference unless the app is the one on screen, so
+        // a trial started while the person is in another app is "blocked"
+        // before the model runs: r7 lost all seven trials that way in seconds.
+        func awaitForeground(_ purpose: String, seconds: TimeInterval) async throws {
+            let deadline = Date().addingTimeInterval(seconds)
+            var announced = false
+            while UIApplication.shared.applicationState != .active || !UIApplication.shared.isProtectedDataAvailable {
+                if !announced { stage("waiting-for-foreground \(purpose)"); announced = true }
+                if Date() >= deadline {
+                    throw NSError(domain: "MobileEval", code: 12, userInfo: [NSLocalizedDescriptionKey: "Bring Gezel back to the screen to \(purpose); on-device AI only runs in the foreground"])
+                }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         try await awaitUnlocked("start the eval", seconds: 600)
         stage("waiting-initial-app")
         try await waitForApp()
@@ -306,7 +320,8 @@ final class MobileProductEvalTests: XCTestCase {
             let cooldownMs = Int(env["GEZEL_EVAL_COOLDOWN_MS"] ?? "0") ?? 0
             for scenario in options["scenarios"] as? [String] ?? defaults {
                 try await Self.coolDown(maxMs: cooldownMs, stage: stage)
-                stage("isolated-trial \(scenario)")
+                try await awaitForeground("run \(scenario)", seconds: 1800)
+                stage("isolated-trial \(scenario) appState=\(UIApplication.shared.applicationState.rawValue)")
                 try await resetProduct()
                 var phaseOptions = options
                 phaseOptions["scenarios"] = [scenario]

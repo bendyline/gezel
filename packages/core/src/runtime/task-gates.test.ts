@@ -211,7 +211,7 @@ describe('portable shared gate-script contract', () => {
     const verdict = await evaluatePortableTaskGate(store, task, step);
     expect(verdict.approved).toBe(false);
     expect(verdict.message?.split('\n')[0]).toBe(
-      '- The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md`.',
+      '- The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md` in the artifacts drawer.',
     );
   });
 

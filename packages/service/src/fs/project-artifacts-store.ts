@@ -684,7 +684,7 @@ const RESERVED_ROOT_SKIP: ReadonlySet<string> = new Set([
  */
 export function normalizeArtifactPath(p: string): string {
   let out = p.replace(/^\.?\/+/, '').trim();
-  while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
+  while (/^artifacts(?:\/+|$)/i.test(out)) out = out.replace(/^artifacts(?:\/+|$)/i, '');
   return out;
 }
 

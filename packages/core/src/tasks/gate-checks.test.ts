@@ -156,7 +156,18 @@ describe('locateMissingGateFiles', () => {
       reader({}, { '1/handover.md': '# Repair Handover' }),
     );
     expect(lines).toEqual([
-      'The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md`.',
+      'The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `1/handover.md` instead. Save it at `handover.md` in the artifacts drawer.',
+    ]);
+  });
+
+  it('names the other drawer when the file was saved there', async () => {
+    expect(
+      await locateMissingGateFiles(
+        handover,
+        reader({ 'handover.md': '# Repair Handover' }, { '2/handover.md': 'x' }),
+      ),
+    ).toEqual([
+      'The checks read `handover.md` at exactly that path in the artifacts drawer; it was saved as `2/handover.md` and `handover.md` in the project workspace instead. Save it at `handover.md` in the artifacts drawer.',
     ]);
   });
 

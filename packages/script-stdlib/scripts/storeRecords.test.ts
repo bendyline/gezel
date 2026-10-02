@@ -281,6 +281,21 @@ describe('storeRecords folder-per-record layout', () => {
 });
 
 describe('storeRecords single-file layout', () => {
+  it('takes a root named by its file as the same store', async () => {
+    await run({
+      root: 'crm/members.json',
+      mode: 'single-file',
+      action: 'create',
+      id: 'ada',
+      fields: {},
+    });
+    expect(h.files.has('crm/members.json')).toBe(true);
+    expect(h.files.has('crm/members.json.json')).toBe(false);
+    await expect(
+      run({ root: 'crm/members', mode: 'single-file', action: 'create', id: 'ada', fields: {} }),
+    ).rejects.toThrow('already exists in crm/members.json. Use action "update" to change it.');
+  });
+
   it('keeps every record in <root>.json, pretty-printed with a trailing newline', async () => {
     await run(single({ action: 'create', id: 'ada', fields: { name: 'Ada' } }));
     const raw = h.files.get('crm/members.json');

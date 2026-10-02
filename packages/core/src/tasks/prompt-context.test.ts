@@ -111,6 +111,37 @@ describe('renderTaskContextBlock', () => {
     expect(block).toContain('finish and pass them before the next step is revealed');
   });
 
+  it('names a checked file outside the task folder, and only then', () => {
+    const handover = {
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        steps: [
+          {
+            id: 'write',
+            name: 'Write handover',
+            prompt: 'Write handover.md in the artifacts.',
+            gate: {
+              at: 'completion',
+              checks: [{ kind: 'minBytes', file: 'handover.md', artifact: true, bytes: 40 }],
+            },
+          },
+        ],
+      },
+      activeStepId: 'write',
+    } as unknown as Task;
+    const block = renderTaskContextBlock({ task: handover, step: handover.craftbook.steps[0]! });
+    expect(block).toContain(
+      "This step's completion checks read `handover.md`; save that file at exactly that path, not in the task folder.",
+    );
+    const inFolder = structuredClone(handover);
+    (inFolder.craftbook.steps[0]!.gate as { checks: { file: string }[] }).checks[0]!.file =
+      'tasks/3/handover.md';
+    expect(
+      renderTaskContextBlock({ task: inFolder, step: inFolder.craftbook.steps[0]! }),
+    ).not.toContain("This step's completion checks read");
+  });
+
   it('describes an input by where it is and the tools that open it', () => {
     const withInput = {
       ...task,

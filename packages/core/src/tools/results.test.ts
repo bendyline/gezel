@@ -7,13 +7,16 @@ import {
 import {
   REANCHOR_MAX_CHARS,
   artifactCompletionHint,
+  askUserQuestionText,
   countLineChanges,
+  crewMemberNamedIn,
   formatWorkspaceRead,
   listDirMissingText,
   nearbyPathMatches,
   readArtifactText,
   reanchorText,
   sliceWorkspaceText,
+  stepCheckedArtifactPaths,
   stepCompletionMode,
   toolErrorText,
   withLineNumbers,
@@ -290,5 +293,54 @@ describe('list_dir on a path that is not a folder', () => {
     expect(listDirMissingText('notes', 'missing', ['notes.md', 'notes.txt'])).toBe(
       'No folder or file exists at `notes`. Did you mean `notes.md` or `notes.txt`?',
     );
+  });
+});
+
+describe('stepCheckedArtifactPaths', () => {
+  it('lists the artifact files a step gate and checkpoint read, normalized', () => {
+    expect(
+      stepCheckedArtifactPaths({
+        gate: {
+          at: 'completion',
+          checks: [
+            { kind: 'minBytes', file: 'artifacts/handover.md', artifact: true, bytes: 40 },
+            { kind: 'sniff', file: 'handover.md', artifact: true, sniff: 'nonempty' },
+            { kind: 'minBytes', file: 'src/app.ts', bytes: 1 },
+          ],
+        },
+        advanceWhen: { file: 'tasks/1/notes.md', artifact: true },
+      }),
+    ).toEqual(['handover.md', 'tasks/1/notes.md']);
+    expect(stepCheckedArtifactPaths(undefined)).toEqual([]);
+  });
+});
+
+describe('a question card that names a colleague', () => {
+  const crew = [
+    { id: 'eval-craftsperson', name: 'Eval craftsperson' },
+    { id: 'eval-colleague', name: 'Eval colleague' },
+    { id: 'ada', name: 'Ada' },
+  ];
+
+  it('finds a crew member by id or name, never the asker or a word inside another', () => {
+    expect(
+      crewMemberNamedIn(
+        'I need you to ask eval-colleague to read crew-brief.md',
+        crew,
+        'eval-craftsperson',
+      )?.id,
+    ).toBe('eval-colleague');
+    expect(crewMemberNamedIn('Should Ada review it?', crew, 'eval-craftsperson')?.id).toBe('ada');
+    expect(crewMemberNamedIn('Is the cadastre ready?', crew, 'eval-craftsperson')).toBeUndefined();
+    expect(crewMemberNamedIn('Eval craftsperson here', crew, 'eval-craftsperson')).toBeUndefined();
+  });
+
+  it('points at message_gezel after the card', () => {
+    expect(
+      askUserQuestionText('q1', false, { id: 'eval-colleague', name: 'Eval colleague' }),
+    ).toMatch(
+      /\n\nThis card goes to the person using the app, not to Eval colleague\. To give Eval colleague the work, use `message_gezel` with to: "eval-colleague" once the answer arrives\.$/,
+    );
+    expect(askUserQuestionText('q1', false)).not.toContain('message_gezel');
   });
 });

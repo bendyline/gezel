@@ -100,4 +100,65 @@ describe('night-shift oversight task', () => {
     expect(second.task.updatedAt).toBe(first.task.updatedAt);
     expect(await store.listProjectTasks('default')).toHaveLength(1);
   });
+
+  /**
+   * Earlier builds charged the waiting oversight step on every launch and
+   * paused it on the fourth, with a "Needs your input" card about a task that
+   * had never run. Found on a dev home paused for a month.
+   */
+  describe('restart-budget pause from earlier builds', () => {
+    const pauseLikeAnEarlierBuild = async (restartResumeCount: number) => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      await store.writeTask({
+        ...task,
+        status: 'paused',
+        craftbook: {
+          ...task.craftbook,
+          steps: task.craftbook.steps.map((s) =>
+            s.id === 'oversight' ? { ...s, restartResumeCount } : s,
+          ),
+        },
+      });
+      await store.writeQuestion({
+        id: 'q-paused',
+        projectId: 'default',
+        gezelId: task.assignee.kind === 'gezel' ? task.assignee.gezelId : '',
+        sessionId: '',
+        prompt: `Task ${task.ref} paused for help at step \`oversight\``,
+        choices: ['Dismiss'],
+        allowWriteIn: false,
+        multiSelect: false,
+        taskRef: task.ref,
+        intent: {
+          kind: 'task-paused',
+          taskRef: task.ref,
+          stepId: 'oversight',
+          reason: 'step_stalled',
+        },
+        createdAt: new Date().toISOString(),
+      });
+      return task;
+    };
+
+    it('resumes the task and clears its card', async () => {
+      await pauseLikeAnEarlierBuild(4);
+      await ensureNightShiftOversightTask(store, tasks);
+
+      const { task, step } = await oversightStep();
+      expect(task.status).toBe('active');
+      expect(step.restartResumeCount).toBeUndefined();
+      const card = await store.getQuestion('default', 'q-paused');
+      expect(card?.answer?.silentSkip).toBe(true);
+    });
+
+    it('leaves a pause the budget did not cause', async () => {
+      await pauseLikeAnEarlierBuild(2);
+      await ensureNightShiftOversightTask(store, tasks);
+
+      const { task } = await oversightStep();
+      expect(task.status).toBe('paused');
+      expect((await store.getQuestion('default', 'q-paused'))?.answer).toBeUndefined();
+    });
+  });
 });

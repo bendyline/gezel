@@ -93,9 +93,13 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-const root = String(input.root ?? '')
+// A single-file store named by its file (`repairs.json`) is the same store as
+// its root (`repairs`); appending the extension again made `repairs.json.json`
+// and sent a model hunting for the record it had just written.
+const givenRoot = String(input.root ?? '')
   .replace(/\\+/g, '/')
   .replace(/\/+$/, '');
+const root = input.mode === 'single-file' ? givenRoot.replace(/\.json$/i, '') : givenRoot;
 if (!root) fail('root must be a non-empty workspace-relative path.');
 
 const mode = input.mode;
@@ -289,13 +293,14 @@ async function create(): Promise<Fields> {
   const id = input.id !== undefined ? requireSuppliedId(input.id) : generatedId(fields);
   if (mode === 'folder-per-record') {
     if ((await readJsonIfPresent(recordFile(id))) !== null) {
-      fail(`Record '${id}' already exists in ${root}.`);
+      fail(`Record '${id}' already exists in ${root}. Use action "update" to change it.`);
     }
     await writeJson(recordFile(id), { version: 1, id, ...fields });
     await regenerateFolderIndex();
   } else {
     const records = await loadSingleFile();
-    if (Object.hasOwn(records, id)) fail(`Record '${id}' already exists in ${storeFile}.`);
+    if (Object.hasOwn(records, id))
+      fail(`Record '${id}' already exists in ${storeFile}. Use action "update" to change it.`);
     records[id] = fields;
     await saveSingleFile(records);
   }

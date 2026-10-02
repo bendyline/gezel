@@ -2214,14 +2214,16 @@ export class TaskManager {
    * of instantly re-tripping the exhaustion triggers. `redriveCount`
    * set explicitly (the scheduler passes maxRedrives-1 — one more
    * re-drive, then pause for real); `clearGateAttempts` wipes the
-   * completion-gate attempt count + last rejection. A no-op when the
-   * task or step moved on between the trigger's read and this write.
+   * completion-gate attempt count + last rejection; `clearRestartResumes`
+   * wipes the restart-resume count, without which a step paused by that
+   * budget re-pauses on the very next boot. A no-op when the task or step
+   * moved on between the trigger's read and this write.
    */
   async resetStepRecoveryBudget(
     projectId: string,
     num: number,
     stepId: string,
-    opts: { redriveCount?: number; clearGateAttempts?: boolean },
+    opts: { redriveCount?: number; clearGateAttempts?: boolean; clearRestartResumes?: boolean },
   ): Promise<void> {
     const task = await this.store.readTask(projectId, num).catch(() => null);
     if (!task) return;
@@ -2240,6 +2242,10 @@ export class TaskManager {
         // instantly re-pause, defeating the "real second chance" the
         // applied consult earned.
         delete next.gateAttemptHistory;
+      }
+      if (opts.clearRestartResumes) {
+        delete next.restartResumeCount;
+        delete next.lastRestartResumeAt;
       }
       return next;
     });

@@ -659,7 +659,16 @@ export class TaskRunner {
         // Only a real restart counts. The night-shift and per-project
         // callers rehydrate a running process's queue — charging those to
         // the budget would pause a healthy task for being looked at.
-        if (opts.afterRestart && this.noteRestartResume) {
+        //
+        // Nor does a boot that only re-queues a step the Night Shift gate
+        // will hold: nothing is resumed and no context is re-read. The
+        // Meester's oversight task waits active all day, so charging it
+        // paused it after the fourth daytime launch and asked the user for
+        // help with a task that had never run.
+        const heldForNightShift =
+          task.nightShift?.enabled === true &&
+          (!this.isNightShiftActive() || !this.isNightShiftPending(task));
+        if (opts.afterRestart && this.noteRestartResume && !heldForNightShift) {
           const { count, exhausted } = await this.noteRestartResume(
             proj.id,
             task.num,

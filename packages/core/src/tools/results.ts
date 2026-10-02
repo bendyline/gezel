@@ -1,3 +1,4 @@
+import { normalizeArtifactPath } from '../path-rules.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
 /**
  * The text a model reads back from a gezel tool, shared by the desktop MCP
@@ -12,7 +13,8 @@ import {
   type WorkspaceReadFileError,
   type WorkspaceReadFileSuccess,
 } from '../schemas/api.js';
-import type { Task, TaskNote } from '../schemas/task.js';
+import { normalizeStepGate } from '../schemas/gate.js';
+import type { Task, TaskCraftbookStep, TaskNote } from '../schemas/task.js';
 import { isOwnerStep } from '../task-execution.js';
 import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 
@@ -308,9 +310,44 @@ export function stepCompletionMode(
   return step.advanceWhen ? 'automatic' : 'manual';
 }
 
-/** What saving an artifact means for the active step, appended to `write_artifact`. */
-export function artifactCompletionHint(mode: StepCompletionMode | undefined): string {
+/**
+ * The artifact files an active step's completion checks read, artifact-relative.
+ * A save that lands on one of them is the step's deliverable.
+ */
+export function stepCheckedArtifactPaths(
+  step: Pick<TaskCraftbookStep, 'gate' | 'advanceWhen'> | undefined,
+): string[] {
+  if (!step) return [];
+  const paths = new Set<string>();
+  for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
+    const file = (check as { file?: unknown }).file;
+    if (
+      (check as { artifact?: boolean }).artifact === true &&
+      typeof file === 'string' &&
+      file &&
+      !file.includes('*')
+    )
+      paths.add(normalizeArtifactPath(file));
+  }
+  if (step.advanceWhen?.artifact === true && step.advanceWhen.file)
+    paths.add(normalizeArtifactPath(step.advanceWhen.file));
+  return [...paths];
+}
+
+/**
+ * What saving an artifact means for the active step, appended to `write_artifact`.
+ * `checkedByStep` marks a save onto a file a manual step's checks read: on
+ * the iPhone a 2B model saved exactly that file and then rewrote it until its
+ * loop guard fired, never submitting the step the generic line told it to. An
+ * automatic step needs no change: its line already says to stop.
+ */
+export function artifactCompletionHint(
+  mode: StepCompletionMode | undefined,
+  options: { checkedByStep?: boolean } = {},
+): string {
   if (mode === undefined) return '';
+  if (options.checkedByStep && mode === 'manual')
+    return "\nThis is the file the step's completion checks read. If it is complete, call advance_task_step now to submit the step; saving it again changes nothing.";
   if (mode === 'automatic')
     return '\nThis step uses automatic completion checks. Finish its required deliverable and stop; the runtime will run its completion gate. Saving does not approve the work. If the gate rejects it, repair the named problems and save the complete deliverable again.';
   if (mode === 'manual')
@@ -550,7 +587,40 @@ export function createTaskText(
 export const ASK_USER_QUESTION_EMPTY_TEXT =
   'ask_user_question needs a non-empty `question` string — that\'s the actual question to show the user. Retry this tool call with `question: "..."`.';
 
-export function askUserQuestionText(questionId: string, deduplicated: boolean): string {
+/**
+ * A crew member a question card names, other than the gezel asking. "Ask your
+ * colleague to read crew-brief.md" sent a 2B model to `ask_user_question` in
+ * every crew-handoff trial on two phones (2026-10-01): the card reached the
+ * person using the app, never the colleague.
+ */
+export function crewMemberNamedIn(
+  text: string,
+  crew: readonly { id: string; name: string }[],
+  selfId: string | undefined,
+): { id: string; name: string } | undefined {
+  const names = (value: string) => {
+    const word = value.trim();
+    if (word.length < 2) return false;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\p{L}\\p{N}_-])${escaped}($|[^\\p{L}\\p{N}_-])`, 'iu').test(text);
+  };
+  return crew.find((member) => member.id !== selfId && (names(member.id) || names(member.name)));
+}
+
+export function askUserQuestionText(
+  questionId: string,
+  deduplicated: boolean,
+  colleague?: { id: string; name: string },
+): string {
+  return askUserQuestionBody(questionId, deduplicated) + colleagueNote(colleague);
+}
+
+function colleagueNote(colleague: { id: string; name: string } | undefined): string {
+  if (!colleague) return '';
+  return `\n\nThis card goes to the person using the app, not to ${colleague.name}. To give ${colleague.name} the work, use \`message_gezel\` with to: ${JSON.stringify(colleague.id)} once the answer arrives.`;
+}
+
+function askUserQuestionBody(questionId: string, deduplicated: boolean): string {
   if (deduplicated)
     return `[STOP — a question is ALREADY waiting for the user]\n\nYou asked the user a question on an earlier turn (id ${questionId}) and they haven't answered it yet, so this new question was NOT posted — re-asking a reworded version would only stack duplicate cards. Do NOT rephrase and ask again. **END YOUR TURN now** and wait; their answer arrives as the next user message starting with "[Answer to: …]". If the work can proceed without that answer, take a concrete action (route, hand off, or build) instead of asking.`;
   return `[STOP — question card is now in front of the user]\n\nThe runtime posted the card (id ${questionId}). The user sees it in chat, on the Home panel, and as a badge. **END YOUR TURN HERE** — do NOT emit a follow-up assistant message, a "thanks for waiting" sentence, or another \`ask_user_question\` call. Any further text or tool calls this turn are runtime-suppressed and never reach the user; the card is the message. Their answer will arrive as the next user message starting with "[Answer to: …]" — your turn fires again then.`;

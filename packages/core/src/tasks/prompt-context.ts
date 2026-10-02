@@ -18,6 +18,7 @@ import { normalizeStepGate } from '../schemas/gate.js';
 import { normalizeScriptRefs } from '../schemas/script.js';
 import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
+import { stepCheckedArtifactPaths } from '../tools/results.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
 
 /**
@@ -224,8 +225,18 @@ export function renderTaskContextBlock(
   // failure class (ADR 0001).
   const taskArtifactFolder = t.artifactDir ?? `tasks/${t.num}`;
   if (wired('write_artifact')) {
+    // The folder example outweighs "unless the procedure names another path"
+    // for a small model: 2B and E4B models saved `tasks/1/handover.md` while
+    // the step's gate read `handover.md` (iPhone and Galaxy S26, 10-01). A
+    // step whose checks read a file outside the folder now names it.
+    const checkedElsewhere = stepCheckedArtifactPaths(step).filter(
+      (path) => !path.startsWith(`${taskArtifactFolder}/`),
+    );
+    const exception = checkedElsewhere.length
+      ? ` This step's completion checks read ${checkedElsewhere.map((path) => `\`${path}\``).join(' and ')}; save ${checkedElsewhere.length === 1 ? 'that file' : 'those files'} at exactly that path, not in the task folder.`
+      : '';
     lines.push(
-      `Task artifact folder: \`${taskArtifactFolder}/\` in the **artifacts drawer** — store this task's working files (notes, drafts, reports, analysis) there, e.g. \`write_artifact({ path: ${JSON.stringify(`${taskArtifactFolder}/notes.md`)}, ... })\`, unless the step procedure names another path.`,
+      `Task artifact folder: \`${taskArtifactFolder}/\` in the **artifacts drawer** — store this task's working files (notes, drafts, reports, analysis) there, e.g. \`write_artifact({ path: ${JSON.stringify(`${taskArtifactFolder}/notes.md`)}, ... })\`, unless the step procedure names another path.${exception}`,
     );
   }
   const taskInputs = t.inputs ?? {};
