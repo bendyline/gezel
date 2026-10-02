@@ -7,7 +7,11 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 import { type Context, Hono } from 'hono';
-import { DiffpackDriftedError, DiffpackNotFoundError } from '../../diffpack/manager.js';
+import {
+  DiffpackDriftedError,
+  DiffpackNotFoundError,
+  DiffpackNotReviewableError,
+} from '../../diffpack/manager.js';
 import { WorkspaceWriteDeniedError } from '../../workspace/errors.js';
 import type { ServiceContext } from '../context.js';
 import { buildDiffpackZip } from './diffpack-export.js';
@@ -71,6 +75,9 @@ export function diffpackRoutes(ctx: ServiceContext): Hono {
       if (err instanceof DiffpackNotFoundError) return c.json({ error: err.message }, 404);
       if (err instanceof DiffpackDriftedError) {
         return c.json({ error: err.message, code: 'drifted', paths: err.paths }, 409);
+      }
+      if (err instanceof DiffpackNotReviewableError) {
+        return c.json({ error: err.message, code: 'not-reviewable' }, 409);
       }
       if (err instanceof WorkspaceWriteDeniedError) {
         // `userInitiated` waives external consent, so reaching here means the

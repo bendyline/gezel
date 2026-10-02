@@ -110,6 +110,33 @@ describe('DiffpackReviewView', () => {
     expect(api.applyDiffpack).toHaveBeenCalledWith('p1', '1', { paths: ['src/a.ts'] });
   });
 
+  it('keeps remaining files actionable after applying one file', async () => {
+    const user = userEvent.setup();
+    const first = pack().files[0]!;
+    const files = [first, { ...first, path: 'src/b.ts' }];
+    let current = pack({ files });
+    vi.mocked(api.listDiffpacks).mockImplementation(async () => ({ diffpacks: [current] }));
+    vi.mocked(api.applyDiffpack).mockImplementation(async (_project, _id, opts) => {
+      const path = opts?.paths?.[0]!;
+      const results = [...(current.results ?? []), { path, ok: true }];
+      current = pack({
+        files,
+        results,
+        status: results.length === 2 ? 'applied' : 'partially-applied',
+      });
+      return { ok: true, diffpack: current, results: [{ path, ok: true }] };
+    });
+    render(<DiffpackReviewView projectId="p1" />);
+    await user.click((await screen.findAllByRole('button', { name: 'Apply this file' }))[0]!);
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Apply this file' })).toHaveLength(1),
+    );
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Apply this file' }));
+    expect(api.applyDiffpack).toHaveBeenLastCalledWith('p1', '1', { paths: ['src/b.ts'] });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled());
+  });
+
   it('names the files that moved before applying over drift', async () => {
     const user = userEvent.setup();
     vi.mocked(api.applyDiffpack).mockRejectedValueOnce(

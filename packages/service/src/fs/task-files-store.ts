@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { KeyedLock, type Task, isSafeEntityId } from '@bendyline/gezel';
 import {
   type ExternalFolders,
@@ -9,12 +9,22 @@ import {
   projectTaskNextIdFile,
   projectTasksDir,
 } from '@bendyline/gezel/paths';
+import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { writeFileAtomic } from './atomic.js';
 import { isSyncJunkName } from './sync-junk.js';
 
 export interface TaskFilesStoreOptions {
   home: string;
   external?: ExternalFolders;
+}
+
+const taskWriteLocks = new KeyedLock();
+
+export class TaskWriteConflictError extends HttpStatusError {
+  constructor(ref: string) {
+    super(`Task ${ref} changed while it was being edited. Reload it and retry.`, 409);
+    this.name = 'TaskWriteConflictError';
+  }
 }
 
 /** Owns the file layout and legacy hydration for project task aggregates. */
@@ -50,23 +60,44 @@ export class TaskFilesStore {
     });
   }
 
+  /** Reject stale aggregates and advance the caller's revision after a successful save. */
   async writeTask(task: Task): Promise<void> {
     const file = projectTaskFile(this.home, task.projectId, task.num, this.external);
+    return taskWriteLocks.run(resolve(file), () => this.writeTaskVersion(file, task));
+  }
+
+  private async writeTaskVersion(file: string, task: Task): Promise<void> {
+    let current: Task | undefined;
+    try {
+      current = JSON.parse(await readFile(file, 'utf8')) as Task;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    if ((current?.revision ?? 0) !== (task.revision ?? 0)) {
+      throw new TaskWriteConflictError(task.ref);
+    }
+    const revision = (current?.revision ?? 0) + 1;
     await mkdir(dirname(file), { recursive: true });
     // `effectiveStatus` is a runtime projection of the ancestry graph. Never
     // persist it: resuming a parent must reveal the child's unchanged own
     // status rather than a stale inherited snapshot.
     const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
     void _effectiveStatus;
-    await writeFileAtomic(file, `${JSON.stringify(rest, null, 2)}\n`);
+    await writeFileAtomic(file, `${JSON.stringify({ ...rest, revision }, null, 2)}\n`);
     if (description !== undefined && description.trim().length > 0) {
       await this.writeTaskAbout(task.projectId, task.num, description);
     } else {
       await this.deleteTaskAbout(task.projectId, task.num);
     }
+    task.revision = revision;
   }
 
   async readTask(projectId: string, num: number): Promise<Task | null> {
+    const file = projectTaskFile(this.home, projectId, num, this.external);
+    return taskWriteLocks.run(resolve(file), () => this.readTaskVersion(projectId, num));
+  }
+
+  private async readTaskVersion(projectId: string, num: number): Promise<Task | null> {
     try {
       const raw = await readFile(projectTaskFile(this.home, projectId, num, this.external), 'utf8');
       const parsed = normalizeLegacyTaskShape(JSON.parse(raw));

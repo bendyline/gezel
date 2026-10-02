@@ -812,7 +812,7 @@ describe('TaskRunner — cancellation via task status', () => {
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(1);
 
-    await store.writeTask(parent);
+    await store.writeTask({ ...(await store.readTask('p1', 1))!, status: 'paused' });
     await runner.tick();
     expect(dispatcher.cancelledSessionIds).toEqual(['session-1']);
   });

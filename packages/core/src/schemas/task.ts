@@ -447,6 +447,8 @@ export type TaskReferences = z.infer<typeof TaskReferencesSchema>;
  * A child instance has `parentTaskRef` set to its host's ref.
  */
 export const TaskSchema = z.object({
+  /** Optimistic concurrency token for the persisted task aggregate. Legacy records start at zero. */
+  revision: z.number().int().nonnegative().optional(),
   projectId: z.string(),
   num: z.number().int().positive(),
   ref: z.string(),

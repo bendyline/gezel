@@ -4873,7 +4873,7 @@ export class Store {
     filePath: string,
     content: string,
     ctx?: JournalContext,
-    opts?: { userInitiated?: boolean },
+    opts?: { userInitiated?: boolean; createOnly?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
@@ -4883,7 +4883,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath);
     await mkdir(dirname(full), { recursive: true });
-    await writeFileAtomic(full, content);
+    await writeFileAtomic(full, content, { noReplace: opts?.createOnly });
     await appendJournalEntry(this.home, id, 'write', filePath, { content, ctx });
     await this.history?.log({
       kind: 'workspace.write',

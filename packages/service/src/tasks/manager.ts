@@ -67,6 +67,7 @@ import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
 import { installedToolsetIds } from '../craftbook/applicable.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
+import { TaskWriteConflictError } from '../fs/task-files-store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import {
@@ -1400,6 +1401,14 @@ export class TaskManager {
   }
 
   async update(projectId: string, num: number, patch: UpdateTaskRequest): Promise<Task> {
+    return this.retryTaskMutation(() => this.updateOnce(projectId, num, patch));
+  }
+
+  private async updateOnce(
+    projectId: string,
+    num: number,
+    patch: UpdateTaskRequest,
+  ): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     if (task.origin?.kind === 'system-job' && patch.assignee !== undefined) {
       throw new Error(
@@ -1538,6 +1547,10 @@ export class TaskManager {
   // ── Workflow ────────────────────────────────────────────────────
 
   async setStatus(projectId: string, num: number, status: TaskStatus): Promise<Task> {
+    return this.retryTaskMutation(() => this.setStatusOnce(projectId, num, status));
+  }
+
+  private async setStatusOnce(projectId: string, num: number, status: TaskStatus): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     if (task.origin?.kind === 'system-job' && status !== 'active' && status !== 'paused') {
       throw new Error(`task ${task.ref}: system jobs can only be active or paused`);
@@ -4586,6 +4599,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const task = await this.store.readTask(projectId, num);
     if (!task) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
     return task;
+  }
+
+  private async retryTaskMutation<T>(mutate: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await mutate();
+      } catch (err) {
+        if (!(err instanceof TaskWriteConflictError) || attempt >= 2) throw err;
+      }
+    }
   }
 
   private async withEffectiveStatus(task: Task): Promise<Task> {
