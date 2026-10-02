@@ -550,6 +550,39 @@ function sessionReadPaths(
   return read;
 }
 
+/**
+ * Seeded paths a successful read reached, from `tool.called` history events.
+ *
+ * A session's messages persist only when its turn ends, so a read made inside
+ * a long in-flight turn was invisible to the session scan: deepseek-v4 read
+ * all three seeded code-review inputs at 09:40:21 inside a turn that was still
+ * running at 09:54, the check kept reporting them unread, and the plateau
+ * detector failed the trial (2026-10-01). History records each call as it
+ * finishes.
+ */
+export function historyReadPaths(
+  entries: ReadonlyArray<{ entryType?: string; kind?: string; details?: unknown }>,
+  seededPaths: readonly string[],
+): Set<string> {
+  const read = new Set<string>();
+  for (const entry of entries) {
+    if (entry.entryType !== 'event' || entry.kind !== 'tool.called') continue;
+    const details = (entry.details ?? {}) as Record<string, unknown>;
+    if (details.success === false) continue;
+    const name = typeof details.name === 'string' ? details.name : undefined;
+    if (!isSeededReadTool(name)) continue;
+    const touched = new Set<string>();
+    for (const key of ['path', 'requestedPath'] as const) {
+      if (typeof details[key] === 'string') touched.add(details[key] as string);
+    }
+    if (Array.isArray(details.paths)) {
+      for (const p of details.paths) if (typeof p === 'string') touched.add(p);
+    }
+    for (const path of seededPaths) if (touched.has(path)) read.add(path);
+  }
+  return read;
+}
+
 async function missingSeededReads(
   client: GezelClient,
   projectId: string,
@@ -575,6 +608,15 @@ async function missingSeededReads(
     for (const listed of sessions ?? []) {
       const session = listed.messages ? listed : await maybeClient.getChatSession(listed.id);
       for (const path of sessionReadPaths(session, seededPaths)) read.add(path);
+    }
+    if (seededPaths.some((path) => !read.has(path)) && typeof client.listHistory === 'function') {
+      // A history failure must not turn "unread" into "read": keep the
+      // session verdict when the fallback cannot answer.
+      const entries = await client
+        .listHistory({ projectId, kind: 'tool.called', limit: 1_000 })
+        .then((res) => res.entries)
+        .catch(() => []);
+      for (const path of historyReadPaths(entries, seededPaths)) read.add(path);
     }
     return seededPaths.filter((path) => !read.has(path));
   } catch {
