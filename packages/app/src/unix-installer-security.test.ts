@@ -635,15 +635,18 @@ describe('Linux machine-service filesystem security', () => {
       try {
         mkdirSync(probeBin, { recursive: true });
         mkdirSync(outputDir, { recursive: true });
-        const probe = '#!/bin/sh\n: > "$CACHE_PROBE_DIR/${0##*/}"\n';
+        // One probe behind three names: macOS assesses every freshly written
+        // executable on its first exec (~200 ms idle, seconds under a full
+        // parallel run), and three separate files tripled that past 5 s.
+        const probePath = join(probeBin, 'probe');
+        writeFileSync(probePath, '#!/bin/sh\n: > "$CACHE_PROBE_DIR/${0##*/}"\n');
+        chmodSync(probePath, 0o755);
         for (const command of [
           'update-mime-database',
           'update-desktop-database',
           'gtk-update-icon-cache',
         ]) {
-          const commandPath = join(probeBin, command);
-          writeFileSync(commandPath, probe);
-          chmodSync(commandPath, 0o755);
+          symlinkSync('probe', join(probeBin, command));
         }
 
         const script = `${shellFunction(linuxPostinstall, 'refresh_desktop_caches')}
@@ -675,6 +678,7 @@ refresh_desktop_caches
         rmSync(probeRoot, { recursive: true, force: true });
       }
     },
+    20_000,
   );
 
   it('does destructive removal only for final dpkg and RPM removals', () => {
