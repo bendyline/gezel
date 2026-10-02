@@ -138,7 +138,9 @@ final class MobileBridgeTests: XCTestCase {
         func assertSafeChatLayout() async throws {
             _ = try await run(#"""
                 const viewport=window.visualViewport;
-                await until(()=>{const header=document.querySelector('.app-header');return !visible(header)||header.getBoundingClientRect().top>=safeTop-1;},'header clears the iOS status bar and cutout');
+                // product-host.css lifts the header 9px into a cutout's inset, which runs past the island; an inset of 24pt or less has no cutout and is kept whole.
+                const headerTop=Math.max(safeTop-9,Math.min(safeTop,24));
+                await until(()=>{const header=document.querySelector('.app-header');return !visible(header)||header.getBoundingClientRect().top>=headerTop-1;},'header clears the iOS cutout');
                 const app=document.querySelector('.app').getBoundingClientRect();
                 const bottom=document.documentElement.dataset.keyboard==='open'?0:safeBottom;
                 check(app.bottom<=viewport.offsetTop+viewport.height-bottom+1,'App clears the home indicator and keyboard');

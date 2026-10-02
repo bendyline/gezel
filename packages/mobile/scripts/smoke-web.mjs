@@ -187,6 +187,17 @@ try {
     await input.waitFor();
     return input;
   }
+  async function settingsSection(name) {
+    // Compact layout names the open Settings section in a dropdown; the wide
+    // layout lists every section as a button beside the form.
+    const listed = page.getByRole('button', { name, exact: true });
+    const picker = page.getByRole('combobox', { name: 'Settings section', exact: true });
+    await listed.or(picker).first().waitFor();
+    if (!(await picker.isVisible())) return listed.click();
+    await picker.click();
+    await page.getByRole('option', { name, exact: true }).click();
+    await picker.filter({ hasText: name }).waitFor();
+  }
   async function createFile(name, text) {
     await page.getByRole('button', { name: 'New file', exact: true }).click();
     await page.getByRole('textbox', { name: 'Path', exact: true }).fill(name);
@@ -384,7 +395,9 @@ try {
   const navigationButton = await page
     .getByRole('button', { name: 'Navigation', exact: true })
     .boundingBox();
-  const modelPicker = await page.getByRole('combobox', { name: 'Use a model' }).boundingBox();
+  const modelPicker = await page
+    .getByRole('combobox', { name: 'Model', exact: true })
+    .boundingBox();
   assert(
     settingsPanel && settingsPanel.width >= 300,
     'Phone Settings needs a readable full-width panel',
@@ -401,14 +414,14 @@ try {
     'Phone model picker must remain inside the viewport',
   );
   await checkpoint('phone-model-settings');
-  await page.getByRole('button', { name: 'General', exact: true }).click();
+  await settingsSection('General');
   await page.getByRole('checkbox', { name: 'Show advanced features', exact: true }).click();
   await page.locator('input[type="checkbox"]:checked:not(:disabled)').waitFor();
   await (await navigation()).getByRole('button', { name: 'Scripts', exact: true }).click();
   await page.getByRole('heading', { name: 'Scripts', exact: true }).waitFor();
   await checkpoint('phone-scripts');
   await (await navigation()).getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Backup and restore', exact: true }).click();
+  await settingsSection('Backup and restore');
   await page.getByRole('button', { name: 'Back up content…', exact: true }).click();
   const backupDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Choose where to save…', exact: true }).click();
@@ -426,7 +439,7 @@ try {
   await page.locator('[contenteditable="true"]').fill('A newer draft after the backup.');
   await page.getByText('Saved', { exact: true }).waitFor();
   await (await navigation()).getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Backup and restore', exact: true }).click();
+  await settingsSection('Backup and restore');
   await page.getByRole('button', { name: 'Restore from a backup…', exact: true }).click();
   await page.getByLabel('Backup file', { exact: true }).setInputFiles({
     name: download.suggestedFilename(),
@@ -473,7 +486,7 @@ try {
   booted = false;
   await page.goto(previewUrl.href);
   await (await navigation()).getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Backup and restore', exact: true }).click();
+  await settingsSection('Backup and restore');
   await page.getByRole('button', { name: 'Back up content…', exact: true }).click();
   await page.locator('.gz-backup-dialog .storage-list li').first().waitFor();
   const frame = await page.locator('.app-mobile-preview').boundingBox();
