@@ -111,4 +111,39 @@ describe('repository-owned workflow modules', () => {
     expect(logs).toContain('Following project/9');
     expect(logs).toContain('project/1: complete (finished)');
   });
+
+  it('gives modules a bounded one-shot completion scoped to their project', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'gezel-cli-workflow-'));
+    homes.push(workspace);
+    await mkdir(join(workspace, '.gezel', 'workflows'), { recursive: true });
+    await writeFile(
+      join(workspace, '.gezel', 'workflows', 'check.mjs'),
+      [
+        'export async function run(context) {',
+        "  const r = await context.complete({ gezelId: 'checker', prompt: 'Check S1.', jsonSchema: { type: 'object' }, thinking: false });",
+        '  return r.json;',
+        '}',
+      ].join('\n'),
+    );
+    const client = {
+      completeInProject: vi
+        .fn()
+        .mockResolvedValue({ content: '{"verdict":"ok"}', json: { verdict: 'ok' }, elapsedMs: 5 }),
+    };
+
+    const result = await runWorkflow(
+      client as unknown as GezelClient,
+      'stories',
+      workspace,
+      'check',
+      [],
+    );
+
+    expect(result).toEqual({ verdict: 'ok' });
+    expect(client.completeInProject).toHaveBeenCalledWith(
+      'stories',
+      { gezelId: 'checker', prompt: 'Check S1.', jsonSchema: { type: 'object' }, thinking: false },
+      undefined,
+    );
+  });
 });

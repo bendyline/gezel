@@ -308,6 +308,10 @@ async function isSessionRouteAllowed(
     if (rest === '/tools' || rest === '/tools/') {
       return sessionDeny('the unfiltered human terminal tool list is not a session route');
     }
+    // Any model on any provider, outside the session's tool kit and budget.
+    if (rest === '/completions' || rest === '/completions/') {
+      return sessionDeny('workflow completions require a first-party client');
+    }
     if (rest === '/timeline' || rest === '/timeline/') {
       return sessionDeny('project timelines contain other sessions');
     }

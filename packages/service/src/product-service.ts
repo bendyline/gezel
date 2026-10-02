@@ -2959,6 +2959,17 @@ export async function startProductService(
         60 * 60 * 1000,
       );
   idleSummarizerTimer?.unref();
+  // Give back the provider sessions and MCP subprocesses of quiet sessions;
+  // finished task sessions otherwise hold theirs until the daemon stops.
+  const idleSessionTimer = setInterval(
+    () => {
+      chat.releaseIdleSessions().catch((err) => {
+        log.warn('[chat] idle session release failed:', err instanceof Error ? err.message : err);
+      });
+    },
+    5 * 60 * 1000,
+  );
+  idleSessionTimer.unref();
   if (!embeddedInferenceOnly) {
     setTimeout(() => {
       chat.runIdleSummarizationSweep().catch(() => {
@@ -3053,6 +3064,7 @@ export async function startProductService(
       await shutdownStep('speech recognition', () => stt.shutdown());
       await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
+      clearInterval(idleSessionTimer);
       await shutdownStep('channels', () => channels.stop());
       await shutdownStep('app serve', async () => appServe?.stopAll());
       await shutdownStep('remote serving', () => remoteServing.stop());

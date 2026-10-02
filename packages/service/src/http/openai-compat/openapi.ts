@@ -509,6 +509,11 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
               description:
                 'json_object and json_schema are honored via the tuning layer (llama.cpp json_schema, OpenAI strict mode). Copilot/CLI backends ignore tuning.',
             },
+            reasoning_effort: {
+              type: 'string',
+              description:
+                'none or minimal turns thinking off for local models via the tuning layer; every value is forwarded as the session reasoning effort for providers that take one.',
+            },
             temperature: {
               type: 'number',
               minimum: 0,

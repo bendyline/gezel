@@ -51,6 +51,7 @@ import { channelRoutes } from './routes/channels.js';
 import { chatEventsRoutes } from './routes/chat-events.js';
 import { chatRoutes } from './routes/chats.js';
 import { codexSetupRoutes } from './routes/codex-setup.js';
+import { completionRoutes } from './routes/completions.js';
 import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
@@ -545,6 +546,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // grep_files, find_files, diff_files, read_image_as_base64,
   // list/extract_archive, run_git). Live at /api/projects/:id/tools/*.
   app.route('/api/projects', toolRoutes(ctx));
+  // Bounded one-shot model calls for repository workflow drivers.
+  app.route('/api/projects', completionRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
   // People (face lane): /api/projects/:id/people[...] + the global

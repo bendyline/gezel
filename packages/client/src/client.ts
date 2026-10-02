@@ -304,6 +304,8 @@ import type {
   ProjectAboutPreviewRequest,
   ProjectAboutPreviewResponse,
   ProjectApprovalsResponse,
+  ProjectCompletionRequest,
+  ProjectCompletionResponse,
   ProjectFolderPreviewResponse,
   ProjectResponse,
   ProjectSearchRequest,
@@ -6321,6 +6323,26 @@ export class GezelClient {
 
   toolWebSearch(id: string, body: WebSearchRequest): Promise<WebSearchResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/web-search`, body);
+  }
+
+  /**
+   * One bounded model call for a repository workflow: the whole input goes
+   * in the prompt, the answer comes back in the response. Pass `jsonSchema`
+   * for grammar-constrained output (parsed into `json`) and `thinking: false`
+   * to skip a local model's reasoning phase. Owner/CLI tokens only.
+   */
+  completeInProject(
+    id: string,
+    body: ProjectCompletionRequest,
+    signal?: AbortSignal,
+  ): Promise<ProjectCompletionResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/completions`,
+      body,
+      undefined,
+      signal,
+    );
   }
 
   toolWikipediaSearch(id: string, body: WikipediaSearchRequest): Promise<WebSearchResponse> {

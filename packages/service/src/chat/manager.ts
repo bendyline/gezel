@@ -491,6 +491,12 @@ const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
  */
 const QUEUE_WAIT_FRESH_MS = 12_000;
 const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
+/**
+ * A live session quiet this long gives back its provider session and MCP
+ * subprocesses (see `releaseIdleSessions`). Long enough that a conversation
+ * the user is still having keeps its warm session.
+ */
+export const IDLE_SESSION_RELEASE_MS = 20 * 60 * 1000;
 
 export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number.parseInt(env.GEZEL_AUTO_RECALL_INTERACTIVE_DEADLINE_MS ?? '', 10);
@@ -10641,6 +10647,29 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Release the provider session — and with it the session's MCP
+   * subprocesses — of every live session quiet for `idleMs`. The next send
+   * rebuilds it through the same path a client reset takes, so the only
+   * visible change is a cold first turn.
+   *
+   * Nothing else releases a session whose task has finished: a 27-task
+   * story round left 29 gezel-mcp children (~1.5 GB) alive until the daemon
+   * stopped, and a batch of hundreds of tasks would hold hundreds.
+   */
+  async releaseIdleSessions(idleMs = IDLE_SESSION_RELEASE_MS, now = Date.now()): Promise<string[]> {
+    const released: string[] = [];
+    for (const [sessionId, state] of Array.from(this.states)) {
+      if (!state.session || this.isSessionTurnPending(sessionId)) continue;
+      const lastActivity = Date.parse(state.record.lastActivityAt);
+      if (Number.isFinite(lastActivity) && now - lastActivity < idleMs) continue;
+      await this.reset(sessionId);
+      released.push(sessionId);
+    }
+    if (released.length > 0) log.info(`released ${released.length} idle live session(s)`);
+    return released;
+  }
+
+  /**
    * Rebuild only the sessions and terminal bridge belonging to one project.
    * Used by the workspace watcher when a canonical MCP config changes.
    */
@@ -11161,6 +11190,17 @@ export class ChatManager extends LocalEngineRuntime {
        */
       tuningProfileId?: string;
       /**
+       * Sparse tuning layered above every other source for this call only:
+       * sampling, `reasoning.enableThinking`, `output.jsonSchema`. Workflow
+       * completions use it to ask for structured output with thinking off.
+       */
+      tuning?: ResolveTuningInput['override'];
+      /**
+       * Verbatim system message. Replaces the persona/default one-shot system
+       * message; an explicit empty string sends none.
+       */
+      systemMessage?: string;
+      /**
        * Truly-deferrable housekeeping (memory extraction, icon/about
        * generation, index enrichment, digests). On local engine queues
        * with ambient admission control the one-shot dispatches only
@@ -11353,15 +11393,17 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    const systemMessage = oneShotSystemMessage(personaAbout);
-    const sessionDefaults = opts.tuningProfileId
-      ? await wait(
-          this.resolveModelSessionDefaults(effectiveProviderName, model, {
-            tuningProfileId: opts.tuningProfileId,
-            ...(reasoningEffort ? { reasoningEffort } : {}),
-          }),
-        )
-      : null;
+    const systemMessage = opts.systemMessage ?? oneShotSystemMessage(personaAbout);
+    const sessionDefaults =
+      opts.tuningProfileId || opts.tuning
+        ? await wait(
+            this.resolveModelSessionDefaults(effectiveProviderName, model, {
+              ...(opts.tuningProfileId ? { tuningProfileId: opts.tuningProfileId } : {}),
+              ...(opts.tuning ? { tuning: opts.tuning } : {}),
+              ...(reasoningEffort ? { reasoningEffort } : {}),
+            }),
+          )
+        : null;
     const sessionPromise = provider.createSession({
       systemMessage,
       model,

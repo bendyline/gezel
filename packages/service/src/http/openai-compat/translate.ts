@@ -129,6 +129,14 @@ export const ChatCompletionRequestSchema = z.object({
   presence_penalty: z.number().min(-2).max(2).optional(),
   frequency_penalty: z.number().min(-2).max(2).optional(),
   seed: z.number().int().optional(),
+  /**
+   * OpenAI's reasoning control. `none` and `minimal` switch a local
+   * model's thinking off through the tuning layer; every value is also
+   * forwarded as the session's reasoning effort for providers that take
+   * one. Without it a thinking model can spend the whole `max_tokens`
+   * budget reasoning and return an empty answer.
+   */
+  reasoning_effort: z.string().min(1).max(32).optional(),
   /** Parsed so the route can reject n>1 loudly — gezel returns one choice. */
   n: z.number().int().positive().optional(),
   user: z.string().optional(),

@@ -1599,6 +1599,41 @@ describe('ChatManager — task context', () => {
   });
 });
 
+describe('ChatManager — idle session release', () => {
+  it('releases only quiet sessions, and a released session resumes on its next send', async () => {
+    const quiet = await manager.createSession({ gezelId: 'ada' });
+    const recent = await manager.createSession({ gezelId: 'ada' });
+    mock.script('one');
+    await manager.send(quiet.id, 'hi');
+    mock.script('two');
+    await manager.send(recent.id, 'hi');
+    const disconnectsBefore = mock.calls.filter((c) => c.kind === 'disconnect').length;
+
+    const quietAt = Date.parse((await store.getSession('ada', quiet.id))!.lastActivityAt);
+    const recentAt = Date.parse((await store.getSession('ada', recent.id))!.lastActivityAt);
+    const released = await manager.releaseIdleSessions(
+      60_000,
+      Math.max(quietAt, recentAt) + 30_000,
+    );
+    expect(released).toEqual([]);
+
+    const later = Math.max(quietAt, recentAt) + 61_000;
+    expect(await manager.releaseIdleSessions(60_000, later)).toEqual(
+      expect.arrayContaining([quiet.id, recent.id]),
+    );
+    // Background one-shots (titles) disconnect their own ephemeral sessions too.
+    expect(mock.calls.filter((c) => c.kind === 'disconnect').length).toBeGreaterThanOrEqual(
+      disconnectsBefore + 2,
+    );
+    expect(await manager.releaseIdleSessions(60_000, later)).toEqual([]);
+
+    mock.script('three');
+    const reply = await manager.send(quiet.id, 'still there?');
+    expect(reply.content).toBe('three');
+    expect(mock.calls.some((c) => c.kind === 'resume')).toBe(true);
+  });
+});
+
 describe('ChatManager — resume', () => {
   it('resumes a persisted session via resumeSession on next send', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
