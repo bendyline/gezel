@@ -703,6 +703,11 @@ export type TaskAdvancerOutcome =
       scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
       escalationStage?: number;
+      /**
+       * The task's active step after the hold. Differs from the held step when
+       * the gate's `onReject` looped the task to another step.
+       */
+      activeStepId?: string;
     };
 
 export type TaskAdvancerFn = (
@@ -2464,6 +2469,24 @@ export class ChatManager extends LocalEngineRuntime {
       // it: the deliverable exists (advanceWhen fired) but isn't good
       // enough yet. Surface the prescriptive message so the continuation
       // loop can re-prompt this same session toward the named gaps.
+      // A rejection whose onReject looped the task to ANOTHER step leaves this
+      // session nothing to repair: its step is no longer active. Re-prompting
+      // it "toward the named gaps" started invoice-run's reviewer on a stale
+      // turn that paused the whole task (qwen3.8-27b, 2026-10-01). Yield like
+      // a handoff instead.
+      if (
+        outcome &&
+        outcome.status === 'held' &&
+        !outcome.paused &&
+        outcome.activeStepId !== undefined &&
+        outcome.activeStepId !== step.id
+      ) {
+        log.info(
+          `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected and looped the task ` +
+            `to "${outcome.activeStepId}" — yielding`,
+        );
+        return { autoAdvanced: true };
+      }
       if (outcome && outcome.status === 'held') {
         log.info(
           `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected ` +

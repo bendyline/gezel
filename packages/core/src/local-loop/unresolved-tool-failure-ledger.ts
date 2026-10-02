@@ -53,9 +53,13 @@ const DEFAULT_REPEAT_THRESHOLD = 2;
  * Tools whose success would declare work complete. Blocked while an
  * unresolved validation failure stands.
  *
- * `set_task_status` is deliberately absent: pausing or cancelling a task
- * is exactly the honest move for a gezel that cannot make a tool work,
- * and blocking that call would leave it with no legal way to stop.
+ * `set_task_status` stays ungated: pausing remains the user's and a
+ * coordinator's move, and a gate here would only change who is refused.
+ * The refusal below never prescribes it, though. A step session cannot
+ * resume its own paused task and `advance_task_step` refuses a paused one,
+ * so a step that paused itself was locked out for good (the same lesson as
+ * the cap-blocker escalation in local-tool-call-salvage.ts). Its honest
+ * exit is a blocker note and the end of its turn.
  */
 const DEFAULT_GATED_TOOLS: readonly string[] = ['advance_task_step'];
 
@@ -96,16 +100,24 @@ interface Entry {
 export interface UnresolvedToolFailureLedgerOpts {
   repeatThreshold?: number;
   gatedTools?: readonly string[];
+  /**
+   * Whether the session can call a tool. The refusal names `write_task_note`
+   * only when it is callable; absent, it is assumed wired, as it is on every
+   * task session's gezel-mcp roster.
+   */
+  hasTool?: (name: string) => boolean;
 }
 
 export class UnresolvedToolFailureLedger {
   private readonly entries = new Map<string, Entry>();
   private readonly repeatThreshold: number;
   private readonly gatedTools: ReadonlySet<string>;
+  private readonly hasTool: ((name: string) => boolean) | undefined;
 
   constructor(opts: UnresolvedToolFailureLedgerOpts = {}) {
     this.repeatThreshold = opts.repeatThreshold ?? DEFAULT_REPEAT_THRESHOLD;
     this.gatedTools = new Set(opts.gatedTools ?? DEFAULT_GATED_TOOLS);
+    this.hasTool = opts.hasTool;
   }
 
   /**
@@ -160,7 +172,8 @@ export class UnresolvedToolFailureLedger {
   /**
    * Reason to refuse `toolName`, or null to allow it. The returned text
    * is what the model sees as the tool result, so it names the blocker
-   * and the two legal ways out — fix the call, or stop honestly.
+   * and the two legal ways out — fix the call, or record the blocker and
+   * end the turn.
    */
   blockReason(advertisedName: string): string | null {
     const toolName = canonicalToolName(advertisedName);
@@ -169,6 +182,10 @@ export class UnresolvedToolFailureLedger {
     if (blockers.length === 0) return null;
     const list = blockers.map((b) => `\`${b.toolName}\` (${b.count}× identical)`).join(', ');
     const detail = blockers[0]!.lastMessage.trim();
+    const stop =
+      (this.hasTool?.('write_task_note') ?? true)
+        ? 'record the blocker with `write_task_note` (the tool, its rejection, what you tried) and end your turn.'
+        : 'state the blocker in your reply (the tool, its rejection, what you tried) and end your turn.';
     return [
       `ERROR: \`${advertisedName}\` refused — you have an unresolved tool failure this session: ${list}.`,
       'A step cannot be completed while a tool you needed is still rejecting your calls.',
@@ -176,8 +193,8 @@ export class UnresolvedToolFailureLedger {
       '',
       `Last rejection: ${detail}`,
       '',
-      'Two legal moves. (1) Fix the failing call and make it succeed — then advancing is allowed again.',
-      '(2) If it genuinely cannot be made to work, stop: record what you tried with `write_task_note` and pause the task (`set_task_status` with `status: "paused"`) so a human can look. Do not claim the step is done.',
+      'Fix the failing call and make it succeed — then advancing is allowed again.',
+      `If it cannot be made to work, ${stop} Do not claim the step is done.`,
     ].join('\n');
   }
 }

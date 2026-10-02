@@ -1661,7 +1661,7 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
   it('does not offer a project voorman escalation tools that target themselves', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
-      role: 'Reviewer',
+      role: 'Planner',
       rolesAsTools: true,
       isProjectVoorman: true,
       session: baseSession({}),
@@ -1673,6 +1673,21 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist!.has('consult_voorman')).toBe(false);
     expect(allowlist!.has('delegate_meester')).toBe(true);
     expect(allowlist!.has('consult_meester')).toBe(true);
+  });
+
+  it('a specialist selected as voorman holds a worker token, so no escalation tool', async () => {
+    // The token's `team` bit is role-derived; every delegate_/consult_ tool
+    // starts with the coordinator-only `ensure_gezel` route.
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Reviewer',
+      rolesAsTools: true,
+      isProjectVoorman: true,
+      session: baseSession({}),
+      tier: 'medium',
+    });
+
+    expect([...allowlist!].filter((name) => /^(?:delegate|consult)_/.test(name))).toEqual([]);
   });
 
   it('a github mandate stays stripped when the project has no repo linked', async () => {

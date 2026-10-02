@@ -114,7 +114,9 @@ export async function runSharedLoopTurn(
     ...(options.profile ? { profile: options.profile } : {}),
     modelTier: options.profile?.tier ?? 'tiny',
     isMeester: options.isMeester,
-    ledger: new UnresolvedToolFailureLedger(),
+    ledger: new UnresolvedToolFailureLedger({
+      hasTool: (name) => options.tools.some((tool) => tool.name === name),
+    }),
     run: async (name, args) => {
       const { call, serialized, error } = await recordPortableToolCall(
         {

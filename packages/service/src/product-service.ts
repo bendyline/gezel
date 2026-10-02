@@ -940,6 +940,7 @@ export async function startProductService(
         ...(outcome.gate.escalationStage !== undefined
           ? { escalationStage: outcome.gate.escalationStage }
           : {}),
+        ...(outcome.task.activeStepId ? { activeStepId: outcome.task.activeStepId } : {}),
       };
     }
     return { status: 'advanced' };

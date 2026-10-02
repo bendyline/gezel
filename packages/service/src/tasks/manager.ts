@@ -84,6 +84,7 @@ import {
 } from './craftbook-instantiation.js';
 import { nextCronFire, parseCron } from './cron.js';
 import { type ExecutionModeResolver, applyExecutionMode } from './execution-mode.js';
+import { carryFanoutLoopGateAttempts } from './fanout-revision.js';
 import { gateDampingHash } from './gate-damping.js';
 import {
   type DeliverableSurface,
@@ -2500,7 +2501,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // in place to add `suggestedGezelId` — both survive.
     const finalSteps =
       newActive && !terminating
-        ? bumpStepActivation(updatedSteps, newActive, completedAt)
+        ? carryFanoutLoopGateAttempts(
+            task,
+            updatedSteps,
+            bumpStepActivation(updatedSteps, newActive, completedAt),
+            newActive,
+          )
         : updatedSteps;
 
     // Once-a-day night-shift task finishing a run: stamp the run day (the
@@ -4360,9 +4366,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   /**
    * Clone the parent's spawn craftbook into a fresh child task. Child
    * starts at `status: 'active'` with the spawn craftbook's entry step
-   * active, which fires the `onStepActivated` hook.
+   * active, which fires the `onStepActivated` hook. `opts.notes` land on the
+   * entry step before that dispatch, so the child's first prompt carries them.
    */
-  async spawnChild(parentRef: string, variation?: TaskVariation): Promise<Task> {
+  async spawnChild(
+    parentRef: string,
+    variation?: TaskVariation,
+    opts: { notes?: string[] } = {},
+  ): Promise<Task> {
     const parent = await this.getByRef(parentRef);
     if (!parent) throw new Error(`task ${parentRef} not found`);
     if (taskEffectiveStatus(parent) !== 'active') {
@@ -4413,16 +4424,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     await this.store.writeTask(child);
 
     const contextNote = instanceContextNoteText(variation);
-    if (contextNote) {
+    for (const text of [...(contextNote ? [contextNote] : []), ...(opts.notes ?? [])]) {
       try {
         await this.appendNote(child.projectId, child.num, {
-          text: contextNote,
+          text,
           author: { kind: 'user' },
           stepId: activeStepId,
         });
       } catch (err) {
         log.warn(
-          `[tasks] failed to write variation context notes for ${child.ref}:`,
+          `[tasks] failed to write spawn notes for ${child.ref}:`,
           err instanceof Error ? err.message : err,
         );
       }

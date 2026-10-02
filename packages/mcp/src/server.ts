@@ -221,7 +221,7 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
-import { taskStepMutationRejection } from './task-step-authority.js';
+import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
 import {
   ActionToolOutputSchema,
   ExecutionToolOutputSchema,
@@ -9017,7 +9017,14 @@ server.tool(
         );
       }
     }
-    const updated = await api.setTaskStatus(parsed.projectId, parsed.num, status);
+    let updated: Awaited<ReturnType<typeof api.setTaskStatus>>;
+    try {
+      updated = await api.setTaskStatus(parsed.projectId, parsed.num, status);
+    } catch (err) {
+      const stale = staleTaskStepRefusal(err);
+      if (stale) return errorResult(stale, { code: 'stale_task_step', retryable: false });
+      throw err;
+    }
     const summary = `${ref} → ${status}`;
     return okResult(
       TaskToolOutputSchema,
@@ -9217,6 +9224,8 @@ server.tool(
         next ? { next } : {},
       );
     } catch (err) {
+      const stale = staleTaskStepRefusal(err);
+      if (stale) return errorResult(stale, { code: 'stale_task_step', retryable: false });
       return errorResult(await explainAdvanceFailure(err, parsed, stepId, next), {
         retryable: true,
       });

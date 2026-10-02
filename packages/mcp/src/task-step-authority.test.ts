@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { taskStepMutationRejection } from './task-step-authority.js';
+import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
 
 describe('taskStepMutationRejection', () => {
   it('allows the session to write while its step is active', () => {
@@ -55,5 +55,23 @@ describe('taskStepMutationRejection', () => {
         transitionCompleted: true,
       }),
     ).toBeNull();
+  });
+});
+
+describe('staleTaskStepRefusal', () => {
+  const apiError = (details: unknown) =>
+    Object.assign(new Error('Gezel API error 403'), { details });
+
+  it('returns the daemon hint for a stale step pass', () => {
+    const hint =
+      "Your step `evaluate` is no longer the active step on p/1 — the task is now on `collect`. Don't change the task — end your turn.";
+    expect(staleTaskStepRefusal(apiError({ error: 'stale_task_step', hint }))).toBe(hint);
+  });
+
+  it('ignores every other refusal', () => {
+    expect(staleTaskStepRefusal(apiError({ error: 'forbidden', hint: 'nope' }))).toBeNull();
+    expect(staleTaskStepRefusal(apiError({ error: 'stale_task_step' }))).toBeNull();
+    expect(staleTaskStepRefusal(new Error('boom'))).toBeNull();
+    expect(staleTaskStepRefusal(undefined)).toBeNull();
   });
 });

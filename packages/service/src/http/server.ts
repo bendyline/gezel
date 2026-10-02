@@ -24,6 +24,7 @@ import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
 import { embeddingsHealth } from '../memory/embeddings.js';
 import { beginPerfRequest } from '../perf/responsiveness.js';
+import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
   bearerAuth,
   denyRemoteInferenceScope,
@@ -330,6 +331,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
     taskStatus: async (projectId, num) =>
       (await ctx.store.readTask(projectId, num))?.status ?? null,
+    staleStepSession: async (sessionId, projectId, num) =>
+      staleStepSessionRefusal(
+        await ctx.chat.getSessionRecord(sessionId),
+        await ctx.store.readTask(projectId, num),
+      ),
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);

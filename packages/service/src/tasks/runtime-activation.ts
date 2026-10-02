@@ -18,6 +18,11 @@ import {
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
+import {
+  buildRevisionNote,
+  classifyFanoutActivation,
+  currentRoundChildren,
+} from './fanout-revision.js';
 import { deriveFanoutChildTitle } from './fanout-title.js';
 import type { GateWorkspaceReader } from './gate-eval.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
@@ -194,9 +199,10 @@ export async function runActivationGate(
  * crew (children) ARE the work, so no redundant parent worker turn is
  * started. The collect step's fileCount gate is the barrier that waits on the
  * children's files. Fail-safe: every read/parse/spawn error is logged and
- * swallowed so a malformed run never throws into the lifecycle. Idempotent:
- * we skip spawning when the parent already has children (a loop-back
- * re-activation must not double-spawn).
+ * swallowed so a malformed run never throws into the lifecycle. Idempotent
+ * per activation: a re-fire of the same activation, or a re-activation while
+ * an earlier crew is still out, never double-spawns. A gate loop-back after
+ * the crew settled runs a revision pass instead (see fanout-revision.ts).
  */
 export async function runSpawnFanout(
   deps: RuntimeActivationDeps,
@@ -212,12 +218,22 @@ export async function runSpawnFanout(
   if (fanoutProject && !projectAllowsAmbientWork(fanoutProject)) return true;
   try {
     const existing = await tasks.listChildren(task.ref).catch(() => []);
-    if (existing.length === 0) {
+    const activation = classifyFanoutActivation(task, newStep, existing);
+    if (activation.kind !== 'skip') {
       const raw = await (spawn.overArtifact
         ? store.readProjectArtifact(projectId, spawn.overFile)
         : store.readProjectWorkspaceFile(projectId, spawn.overFile)
       ).catch(() => null);
       const items = raw ? extractSpawnItems(raw, spawn.itemsPath) : [];
+      const revision =
+        activation.kind === 'revise'
+          ? buildRevisionNote({
+              fanoutStep: newStep,
+              gatedStep: activation.gatedStep,
+              pass: activation.pass,
+              findings: await readStepDeliverable(store, projectId, activation.gatedStep),
+            })
+          : undefined;
       if (items.length === 0) {
         log.warn(
           `[fanout] ${task.ref} step "${newStep.id}": no items in ${spawn.overFile} — skipping fanout`,
@@ -240,15 +256,25 @@ export async function runSpawnFanout(
                     ? JSON.stringify(v)
                     : String(v);
           }
-          const title = deriveFanoutChildTitle(context);
+          const derived = deriveFanoutChildTitle(context);
+          const title =
+            derived && activation.kind === 'revise'
+              ? `${derived} (pass ${activation.pass})`
+              : derived;
           await tasks
-            .spawnChild(task.ref, { context, ...(title ? { title } : {}) })
+            .spawnChild(
+              task.ref,
+              { context, ...(title ? { title } : {}) },
+              revision ? { notes: [revision] } : undefined,
+            )
             .catch((err) =>
               log.error(`[fanout] ${task.ref}: spawnChild failed for one item:`, err),
             );
         }
         log.info(
-          `[fanout] ${task.ref} step "${newStep.id}": spawned ${items.length} child(ren) from ${spawn.overFile}`,
+          activation.kind === 'revise'
+            ? `[fanout] ${task.ref} step "${newStep.id}": revision pass ${activation.pass} after "${activation.gatedStep.id}" rejected — re-spawned ${items.length} child(ren) from ${spawn.overFile}`
+            : `[fanout] ${task.ref} step "${newStep.id}": spawned ${items.length} child(ren) from ${spawn.overFile}`,
         );
       }
     }
@@ -258,7 +284,9 @@ export async function runSpawnFanout(
     // collect step's fileCount gate waits on their files.
     const advanceFile = newStep.advanceWhen?.file;
     if (advanceFile) {
-      const kids = await tasks.listChildren(task.ref).catch(() => []);
+      const all = await tasks.listChildren(task.ref).catch(() => []);
+      const round = currentRoundChildren(all, newStep);
+      const kids = round.length > 0 ? round : all;
       const manifest = `# Fanned out ${kids.length} draft(s)\n\n${kids
         .map((k) => `- ${k.ref}: ${k.title}`)
         .join('\n')}\n`;
@@ -277,4 +305,19 @@ export async function runSpawnFanout(
     log.error(`[fanout] ${task.ref} step "${newStep.id}" fanout crashed (non-fatal):`, err);
   }
   return true;
+}
+
+/** The gated step's own deliverable — the review's findings — or null. */
+async function readStepDeliverable(
+  store: RuntimeActivationDeps['store'],
+  projectId: string,
+  step: TaskCraftbookStep,
+): Promise<string | null> {
+  const file = step.advanceWhen?.file;
+  if (!file) return null;
+  return (
+    step.advanceWhen?.artifact
+      ? store.readProjectArtifact(projectId, file)
+      : store.readProjectWorkspaceFile(projectId, file)
+  ).catch(() => null);
 }

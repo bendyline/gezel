@@ -59,7 +59,9 @@ export class McpBridgePool {
    * failing tool is typically on a different bridge from the task tools,
    * so the ledger has to be pool-scoped rather than per-bridge.
    */
-  private readonly failureLedger = new UnresolvedToolFailureLedger();
+  private readonly failureLedger = new UnresolvedToolFailureLedger({
+    hasTool: (name) => this.hasTool(name),
+  });
 
   /**
    * Start the primary + extras based on SessionOpts. Returns a pool that

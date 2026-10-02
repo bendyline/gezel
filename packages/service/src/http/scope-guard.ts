@@ -99,6 +99,8 @@ export function sessionRouteGuard(
     isUserDirectedTurn?: (sessionId: string) => boolean;
     /** The task's persisted status, or null when there is no such task. */
     taskStatus?: TaskStatusLookup;
+    /** Why this session's step binding can no longer move the task, or null. */
+    staleStepSession?: StaleStepSessionLookup;
   } = {},
 ): MiddlewareHandler {
   return async (c, next) => {
@@ -120,19 +122,50 @@ export function sessionRouteGuard(
       opts.isProjectLinked,
       opts.isUserDirectedTurn,
       opts.taskStatus,
+      opts.staleStepSession,
     );
-    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason);
+    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason, allowed.code);
     return next();
   };
 }
 
 export type TaskStatusLookup = (projectId: string, num: number) => Promise<string | null>;
 
-type SessionRouteDecision = { ok: true } | { ok: false; reason: string };
+/** The refusal for a session acting on a task its step binding no longer owns. */
+export type StaleStepSessionLookup = (
+  sessionId: string,
+  projectId: string,
+  num: number,
+) => Promise<string | null>;
+
+/** Error code the MCP task tools recognize as "this turn is stale; end it". */
+export const STALE_TASK_STEP_CODE = 'stale_task_step';
+
+type SessionRouteDecision = { ok: true } | { ok: false; reason: string; code?: string };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
 
-function sessionDeny(reason: string): SessionRouteDecision {
-  return { ok: false, reason };
+function sessionDeny(reason: string, code?: string): SessionRouteDecision {
+  return code ? { ok: false, reason, code } : { ok: false, reason };
+}
+
+/**
+ * Refuse a status change or step advance from a task-step session whose
+ * step activation is no longer current (tasks/stale-step-session.ts). A
+ * failed lookup allows the call: this steers a leftover turn, it does not
+ * secure anything a first-party client could not undo.
+ */
+async function staleStepDecision(
+  lookup: StaleStepSessionLookup | undefined,
+  auth: SessionAuth,
+  projectId: string,
+  rawNum: string,
+): Promise<SessionRouteDecision> {
+  const num = Number.parseInt(rawNum, 10);
+  if (!lookup || !Number.isFinite(num) || num <= 0 || String(num) !== rawNum) {
+    return SESSION_ALLOW;
+  }
+  const refusal = await lookup(sessionId(auth), projectId, num).catch(() => null);
+  return refusal ? sessionDeny(refusal, STALE_TASK_STEP_CODE) : SESSION_ALLOW;
 }
 
 function sessionId(auth: SessionAuth): string {
@@ -184,6 +217,7 @@ async function isSessionRouteAllowed(
   isProjectLinked?: LinkedProjectAccessCheck,
   isUserDirectedTurn?: (sessionId: string) => boolean,
   taskStatus?: TaskStatusLookup,
+  staleStepSession?: StaleStepSessionLookup,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -243,6 +277,21 @@ async function isSessionRouteAllowed(
           ? 'restarting a paused task needs the user to ask for it in this turn'
           : 'restarting a paused task requires a first-party client',
       );
+    }
+    // A step session whose pass is over may not pause, resume, close, or
+    // advance the task: it answers for work the task has already judged.
+    const taskMutation =
+      method === 'POST'
+        ? /^\/tasks\/([^/]+)\/(?:status|steps\/[^/]+\/complete)\/?$/.exec(rest)
+        : null;
+    if (taskMutation) {
+      const stale = await staleStepDecision(
+        staleStepSession,
+        auth,
+        targetProject,
+        taskMutation[1]!,
+      );
+      if (!stale.ok) return stale;
     }
     const statusRoute = /^\/tasks\/([^/]+)\/status\/?$/.exec(rest);
     if (method === 'POST' && statusRoute) {
@@ -621,12 +670,17 @@ async function isSessionRouteAllowed(
   return sessionDeny('route is not part of the session MCP API');
 }
 
-function denySessionRoute(c: Context, opts: { log?: (msg: string) => void }, reason: string) {
+function denySessionRoute(
+  c: Context,
+  opts: { log?: (msg: string) => void },
+  reason: string,
+  code = 'forbidden',
+) {
   const auth = c.get('auth');
   opts.log?.(
     `[session-route] DENY session=${auth?.appId ?? 'unknown'} ${c.req.method} ${c.req.path}: ${reason}`,
   );
-  return c.json({ error: 'forbidden', hint: reason }, 403);
+  return c.json({ error: code, hint: reason }, 403);
 }
 
 /** Resolve the `GEZEL_TOKEN_SCOPE` env into a mode. Default: enforce. */

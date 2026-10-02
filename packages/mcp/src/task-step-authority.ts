@@ -35,3 +35,16 @@ export function taskStepMutationRejection(scope: TaskStepMutationScope): string 
       : "Stop this turn and yield to the active step's gezel.";
   return `Step "${sessionStepId}" on ${taskRef} no longer owns project writes.${active} ${yieldTo} Do not rewrite, append to, move, or delete the completed step's deliverable.`;
 }
+
+/**
+ * The daemon's refusal of a status change or step advance from a session
+ * whose step pass is over (`stale_task_step`, service scope-guard), or null
+ * for any other failure. The hint is the whole instruction — end the turn —
+ * so callers return it verbatim instead of decorating it with retry advice.
+ */
+export function staleTaskStepRefusal(err: unknown): string | null {
+  const details = (err as { details?: unknown } | null | undefined)?.details;
+  if (!details || typeof details !== 'object') return null;
+  const { error, hint } = details as { error?: unknown; hint?: unknown };
+  return error === 'stale_task_step' && typeof hint === 'string' && hint.trim() ? hint : null;
+}
