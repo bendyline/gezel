@@ -19,6 +19,7 @@ vi.mock('../memory/embeddings.js', () => {
   return {
     EmbeddingsDisabledError,
     embeddingsDisabledReason: () => null,
+    warmEmbeddings: async () => true,
     embed: async (t: string) => vectorFor(t),
     embedQuery: async (t: string) => vectorFor(t),
     embedBatch: async (ts: string[]) => ts.map(vectorFor),

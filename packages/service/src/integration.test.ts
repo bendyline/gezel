@@ -1,10 +1,33 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GEZEL_VERSION, resolveShowWorkInProgressFeatures } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { InferProjectDeps } from './projects/infer-project.js';
 import { type RunningService, startService } from './service.js';
+
+const inferenceMachine = vi.hoisted(() => ({ homedir: '' }));
+
+// The HTTP routes still run the real inference logic, but probing a developer's
+// Documents or cloud mounts makes this test depend on their contents and speed.
+vi.mock('./projects/infer-project.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./projects/infer-project.js')>();
+  const isolatedDeps = (deps: InferProjectDeps): InferProjectDeps => ({
+    ...deps,
+    homedir: inferenceMachine.homedir,
+    env: { GEZEL_MACHINE_SHARED_HOME: process.env.GEZEL_MACHINE_SHARED_HOME },
+  });
+  return {
+    ...actual,
+    inferProjectForPath: (
+      deps: InferProjectDeps,
+      request: Parameters<typeof actual.inferProjectForPath>[1],
+    ) => actual.inferProjectForPath(isolatedDeps(deps), request),
+    listWellKnownFolders: (deps: InferProjectDeps) =>
+      actual.listWellKnownFolders(isolatedDeps(deps)),
+  };
+});
 
 vi.mock('./memory/embeddings.js', () => {
   const vectorFor = (text: string): number[] => {
@@ -25,6 +48,7 @@ vi.mock('./memory/embeddings.js', () => {
     embeddingsDisabledReason: () => null,
     embeddingPipelineStatus: () => 'ready' as const,
     embeddingsHealth: () => ({ status: 'ready' as const }),
+    warmEmbeddings: async () => true,
     embed: async (text: string) => vectorFor(text),
     embedQuery: async (text: string) => vectorFor(text),
     embedBatch: async (texts: string[]) => texts.map(vectorFor),
@@ -35,6 +59,7 @@ let svc: RunningService;
 let baseUrl: string;
 let token: string;
 let httpFetch: typeof fetch;
+let fixtureRoot: string;
 
 // Mock-provider mode disables both the real-LLM path AND the
 // fire-and-forget first-run install kicked off in `service.ts`.
@@ -44,7 +69,12 @@ let httpFetch: typeof fetch;
 // provider — they exercise CRUD/HTTP routes only.
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
-  const home = await mkdtemp(join(tmpdir(), 'lv-integ-'));
+  fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'lv-integ-')));
+  inferenceMachine.homedir = join(fixtureRoot, 'user-home');
+  const documents = join(inferenceMachine.homedir, 'Documents');
+  await mkdir(documents, { recursive: true });
+  await writeFile(join(documents, 'fixture.docx'), 'document fixture');
+  const home = join(fixtureRoot, 'gezel-home');
   svc = await startService({ home });
   // Daemon now defaults to HTTPS; switch the test client to a trusting
   // fetch built from the cert it generated. Falls back to plain `fetch`
@@ -56,8 +86,8 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await svc.stop();
-  await rm(svc.context.home, { recursive: true, force: true }).catch(() => {});
+  await svc?.stop();
+  await rm(fixtureRoot, { recursive: true, force: true }).catch(() => {});
   delete process.env.GEZEL_MOCK_PROVIDER;
 }, 30_000);
 
@@ -114,6 +144,21 @@ describe('operational API surface', () => {
   it('keeps control-plane routes behind bearer authentication', async () => {
     const res = await httpFetch(`${baseUrl}/api/config`);
     expect(res.status).toBe(401);
+  });
+
+  it('serves a retrieval preview after warming the embedding pipeline', async () => {
+    const res = await api('POST', '/api/projects/default/retrieval/preview', {
+      surface: 'turn',
+      query: 'document fixture',
+      mode: 'off',
+      warm: true,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      surface: 'turn',
+      embedder: { status: 'ready' },
+      kept: [],
+    });
   });
 
   it('round-trips durable document export preferences', async () => {
@@ -392,8 +437,14 @@ describe('projects API', () => {
 
     const known = await api('GET', '/api/projects/well-known-folders');
     expect(known.status).toBe(200);
-    const { folders } = (await known.json()) as { folders: Array<{ kind: string }> };
-    expect(folders.some((f) => f.kind === 'documents')).toBe(true);
+    const { folders } = (await known.json()) as {
+      folders: Array<{ kind: string; path: string; itemCount?: number; documentCount?: number }>;
+    };
+    expect(folders.find((f) => f.kind === 'documents')).toMatchObject({
+      path: join(inferenceMachine.homedir, 'Documents'),
+      itemCount: 1,
+      documentCount: 1,
+    });
   });
 
   it('default project exists from boot', async () => {
