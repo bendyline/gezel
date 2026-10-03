@@ -24,6 +24,7 @@ describe('buildCodexConfigToml', () => {
     expect(body).toContain('instructions = "You are Maya."');
     expect(body).toContain('model = "gpt-5.5"');
     expect(body).toContain('project_doc_max_bytes = 0');
+    expect(body).toContain('[features]\nplugins = false\nremote_plugin = false\napps = false');
     expect(body).toContain('[shell_environment_policy]');
     expect(body).toContain('inherit = "all"');
     expect(body).toContain('ignore_default_excludes = false');

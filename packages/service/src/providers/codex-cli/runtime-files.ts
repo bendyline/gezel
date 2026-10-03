@@ -1,3 +1,10 @@
+/**
+ * Builds isolated Codex homes for Gezel-managed sessions. Gezel supplies each
+ * session's instructions and approved MCP servers; Codex owns its resumable
+ * history. Plugin and account-app discovery stay off in these homes so
+ * short batch tasks do not each download another copy of the plugin catalogs.
+ * This does not change the user's personal Codex configuration.
+ */
 import { mkdir, readFile, stat, symlink, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -126,6 +133,17 @@ export function buildCodexConfigToml(config: CodexRuntimeConfig): string {
   if (config.mcpOauthCallbackUrl) {
     lines.push(`mcp_oauth_callback_url = ${tomlString(config.mcpOauthCallbackUrl)}`);
   }
+
+  // Gezel already supplies the session's explicitly configured MCP tools.
+  // Automatic account discovery adds unrelated tools and ~57 MB of downloaded
+  // catalogs/plugins per isolated home (hundreds of GB across a large batch).
+  // Keep hooks and the native vision/shell tools at their existing defaults.
+  lines.push('');
+  lines.push('[features]');
+  // Disabling only remote_plugin falls back to a larger Git catalog clone.
+  lines.push('plugins = false');
+  lines.push('remote_plugin = false');
+  lines.push('apps = false');
 
   // Preserve the normal PATH/toolchain while retaining Codex's built-in
   // secret-name exclusions for model-generated shell commands.
