@@ -1,5 +1,14 @@
 import { readFile, stat } from 'node:fs/promises';
-import { type PageApiBootstrap, type PreviewSource, resolveSecurityPolicy } from '@bendyline/gezel';
+import {
+  type PageApiBootstrap,
+  type PreviewSource,
+  isPreviewCompiledPath,
+  previewImportProblem,
+  previewImportSpecifier,
+  resolvePreviewImport,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
+import { compilePreviewModule } from '@bendyline/gezel-script-runtime/preview-module';
 import { Hono } from 'hono';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import { resolvePageTools } from '../../project-type/script-tools.js';
@@ -202,7 +211,7 @@ addEventListener('pagehide',function(){if(timer)clearTimeout(timer);},false);
  */
 const BROWSER_INTERNAL_LINK_RE =
   /<link\b(?=[^>]*\bhref\s*=\s*(?:"chrome:\/\/[^"\r\n]*"|'chrome:\/\/[^'\r\n]*'|chrome:\/\/[^\s>]+))[^>]*>/gi;
-const SCRIPT_ELEMENT_RE = /<script\b([^>]*)>[\s\S]*?<\/script\s*>/gi;
+const SCRIPT_OPEN_RE = /<script\b([^>]*)>/gi;
 
 function htmlAttribute(attrs: string, name: string): string | null {
   const match = attrs.match(
@@ -211,23 +220,70 @@ function htmlAttribute(attrs: string, name: string): string | null {
   return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
 }
 
-function unbuiltSourceModuleShim(sources: string[]): string {
-  if (sources.length === 0) return '';
-  const names = sources.join(', ');
-  const message = `Preview cannot run unbuilt TypeScript/JSX module${sources.length > 1 ? 's' : ''}: ${names}. Build the app and preview its generated dist/index.html, or run its development server.`;
+/**
+ * The page a source module shows when it cannot run: a missing import, an npm
+ * package, a syntax error. It replaces the module's code, so the reason is on
+ * the page rather than only in a console the person never opens.
+ */
+export function previewProblemModule(message: string): string {
   // The preview owns its color palette, so derive a quiet translucent alert
   // from its current text color instead of forcing a bright light-theme card.
-  return `<script>(function(){
+  return `(function(){
 var message=${JSON.stringify(message)};
 console.error(message);
-addEventListener('DOMContentLoaded',function(){
+function show(){
 var box=document.createElement('div');
 box.setAttribute('role','alert');
 box.style.cssText='box-sizing:border-box;width:calc(100% - clamp(48px,12vw,96px));max-width:720px;margin:clamp(40px,8vh,64px) auto;padding:clamp(28px,5vw,36px);border:1px solid color-mix(in srgb,currentColor 24%,transparent);border-radius:10px;background:color-mix(in srgb,currentColor 7%,transparent);color:inherit;font:16px/1.6 system-ui,sans-serif;white-space:pre-wrap';
 box.textContent=message;
 if(document.body)document.body.replaceChildren(box);
-},{once:true});
-})();</script>`;
+}
+if(document.readyState==='loading')addEventListener('DOMContentLoaded',show,{once:true});else show();
+})();
+`;
+}
+
+/** The first candidate under `baseDir` that is a file, as a path relative to it. */
+async function firstPreviewFile(
+  baseDir: string,
+  candidates: string[],
+): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    const full = safeJoin(baseDir, candidate);
+    if (!full) continue;
+    const info = await stat(full).catch(() => null);
+    if (info?.isFile() && (await realpathContained(baseDir, full))) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * A TypeScript or JSX file, compiled for the browser. Each import is rewritten
+ * to the exact file it names, so `./tank` and `./tank.js` load `./tank.ts` and
+ * every importer of a module asks for it by one URL: the browser keys modules
+ * by the URL requested, and two spellings would run the same module twice.
+ */
+async function previewModuleSource(baseDir: string, path: string, source: string): Promise<string> {
+  const compiled = compilePreviewModule(source, path, 'esm');
+  if (compiled.errors.length) return previewProblemModule(compiled.errors.slice(0, 3).join('\n'));
+  let code = compiled.code;
+  for (const found of [...compiled.imports].reverse()) {
+    const target = resolvePreviewImport(found.specifier, path);
+    // A URL loads or not under the page's network policy, as any page's would.
+    if (target.kind === 'url') continue;
+    const file =
+      target.kind === 'file' ? await firstPreviewFile(baseDir, target.candidates) : undefined;
+    if (!file) {
+      const problem = previewImportProblem(path, found.specifier, target);
+      return previewProblemModule(
+        target.kind === 'package'
+          ? `${problem} If the app builds with npm, build it and preview its generated dist/index.html.`
+          : problem,
+      );
+    }
+    code = code.slice(0, found.start) + previewImportSpecifier(path, file) + code.slice(found.end);
+  }
+  return code;
 }
 
 /**
@@ -245,19 +301,18 @@ export function preparePreviewHtml(
   opts: { pageApi?: PageApiBootstrap } = {},
 ): string {
   let out = html.replace(BROWSER_INTERNAL_LINK_RE, '');
-  const unbuiltSourceModules: string[] = [];
-  out = out.replace(SCRIPT_ELEMENT_RE, (match, rawAttrs: string) => {
-    const type = htmlAttribute(rawAttrs, 'type');
+  // Source modules are compiled as they are served. A `.ts` file can only be
+  // a module, whatever its tag says, and a root-absolute source (`/src/main.ts`,
+  // as Vite writes it) means the page's own folder, not the preview server's.
+  out = out.replace(SCRIPT_OPEN_RE, (match, rawAttrs: string) => {
     const src = htmlAttribute(rawAttrs, 'src');
-    if (
-      type?.toLowerCase() !== 'module' ||
-      !src ||
-      !/\.(?:[cm]?ts|tsx|jsx)(?:[?#].*)?$/i.test(src)
-    ) {
-      return match;
-    }
-    unbuiltSourceModules.push(src);
-    return `<!-- Gezel omitted unbuilt source module: ${src.replaceAll('--', '—')} -->`;
+    if (!src || !isPreviewCompiledPath(src.split(/[?#]/, 1)[0]!)) return match;
+    let attrs = rawAttrs;
+    if (src.startsWith('/') && !src.startsWith('//'))
+      attrs = attrs.replace(src, src.replace(/^\/+/, ''));
+    if (htmlAttribute(attrs, 'type')?.toLowerCase() !== 'module')
+      attrs = `${attrs.replace(/(?:^|\s)type\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i, '')} type="module"`;
+    return `<script${attrs}>`;
   });
   const headMatch = out.match(/<head[^>]*>/i);
   // Order matters: log shim first (so page-api shim errors are captured),
@@ -265,8 +320,7 @@ export function preparePreviewHtml(
   const shims =
     PREVIEW_LOG_SHIM +
     (opts.pageApi ? buildPageApiShim(opts.pageApi) : '') +
-    PREVIEW_SCROLLBAR_SHIM +
-    unbuiltSourceModuleShim(unbuiltSourceModules);
+    PREVIEW_SCROLLBAR_SHIM;
   if (headMatch) {
     const at = (headMatch.index ?? 0) + headMatch[0].length;
     out = out.slice(0, at) + shims + out.slice(at);
@@ -303,6 +357,8 @@ export function preparePreviewHtml(
  * query-param shape would route every relative asset back to
  * `artifacts` and 404.
  */
+const MODULE_FETCH_DESTINATIONS = new Set(['script', 'worker', 'sharedworker']);
+
 export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabilityStore): Hono {
   const app = new Hono();
 
@@ -390,12 +446,30 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       return c.json({ error: 'path traversal blocked' }, 400);
     }
 
+    // A script the browser asks for by an import's spelling (`./tank`,
+    // `./tank.js` for `tank.ts`, a folder for its index) goes to the file the
+    // import names. Pages are left to 404 as on any static host.
+    const notFile = await stat(full).then(
+      (info) => !info.isFile(),
+      () => true,
+    );
+    if (notFile && MODULE_FETCH_DESTINATIONS.has(c.req.header('sec-fetch-dest') ?? '')) {
+      const named = resolvePreviewImport(`/${filePath}`, '');
+      const file =
+        named.kind === 'file' ? await firstPreviewFile(baseDir, named.candidates) : undefined;
+      if (file && file !== filePath) return c.redirect(`${prefix}${encodeURI(file)}`, 307);
+    }
+
     try {
       const s = await stat(full);
       if (s.isDirectory()) {
         // Static-host semantics require a directory URL to end in `/`; without
         // it, `style.css` resolves beside the directory instead of inside it.
         return c.redirect(`${c.req.path}/`, 308);
+      }
+      if (isPreviewCompiledPath(filePath)) {
+        const code = await previewModuleSource(baseDir, filePath, await readFile(full, 'utf8'));
+        return c.body(code, 200, previewHeaders('text/javascript; charset=utf-8'));
       }
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {

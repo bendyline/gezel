@@ -41,6 +41,12 @@ gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
 ```
 
+## Which project a command uses
+
+`gezel`, `gezel run`, `gezel do`, and the other project commands work in the project for the folder you run them from, and create it the first time. Pass `--project <folder>` to use another folder without changing directory.
+
+Gezel never makes a project of your home folder, the temp folder, or the top of a drive. Run a command from one of those and it uses the Default project instead, with a note saying so. Naming one of those folders with `--project` stops the command, so it never quietly uses a different project than the one you asked for.
+
 ## Working with the crew
 
 ```

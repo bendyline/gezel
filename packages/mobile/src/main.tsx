@@ -6,6 +6,7 @@ import { ProductModelSettings } from './ProductModelSettings.js';
 import { createBrowserHost } from './browser-host.js';
 import { createOfflineHtmlPreview } from './html-preview.js';
 import { createNativeHost, isNativeHost } from './native.js';
+import { createPreviewModuleCompiler } from './script-compiler.js';
 import { createMobileScripts } from './scripts.js';
 // The native host is always compact, so its stylesheet belongs in the first
 // paint rather than arriving a moment later over the desktop layout.
@@ -46,7 +47,12 @@ async function boot() {
     saveExportedFile: host.saveExportedFile,
     createHtmlPreview:
       htmlPreview && host.publishHtmlPreview
-        ? createOfflineHtmlPreview(service.fetch, token, host.publishHtmlPreview)
+        ? createOfflineHtmlPreview(
+            service.fetch,
+            token,
+            host.publishHtmlPreview,
+            createPreviewModuleCompiler,
+          )
         : undefined,
     renderModelSettings: (options) => (
       <ProductModelSettings

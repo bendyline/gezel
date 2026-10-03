@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-script-runtime",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Portable, capability-mediated script execution for Gezel.",
   "keywords": ["gezel", "ai", "agents", "local-first", "scripts", "quickjs", "sandbox"],
   "license": "MIT",
@@ -56,6 +56,10 @@
     "./compile": {
       "types": "./dist/compile.d.ts",
       "import": "./dist/compile.js"
+    },
+    "./preview-module": {
+      "types": "./dist/preview-module.d.ts",
+      "import": "./dist/preview-module.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],

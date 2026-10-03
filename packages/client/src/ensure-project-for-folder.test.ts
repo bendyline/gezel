@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GezelApiError } from './api-error.js';
-import { ensureProjectForFolder } from './ensure-project-for-folder.js';
+import { ensureProjectForFolder, forbiddenProjectFolderName } from './ensure-project-for-folder.js';
 
 let dir: string;
 
@@ -97,5 +97,28 @@ describe('ensureProjectForFolder', () => {
     });
     const res = await ensureProjectForFolder(client as never, dir, { mode: 'solo', source: 'cli' });
     expect(res).toEqual({ projectId: 'match', created: false });
+  });
+});
+
+describe('forbiddenProjectFolderName', () => {
+  it('names the folder the daemon refused', () => {
+    const refusal = (reason?: string) =>
+      new GezelApiError('no', 403, { code: 'forbidden_root', ...(reason ? { reason } : {}) });
+    expect(forbiddenProjectFolderName(refusal('user-home'))).toBe('your home folder');
+    expect(forbiddenProjectFolderName(refusal('temp-dir'))).toBe('the temp folder');
+    expect(forbiddenProjectFolderName(refusal('a-reason-from-a-newer-daemon'))).toBe(
+      'a folder gezel keeps out of projects',
+    );
+    expect(forbiddenProjectFolderName(refusal())).toBe('a folder gezel keeps out of projects');
+  });
+
+  it('ignores every other failure', () => {
+    expect(forbiddenProjectFolderName(new GezelApiError('no', 403, { code: 'forbidden' }))).toBe(
+      null,
+    );
+    expect(
+      forbiddenProjectFolderName(new GezelApiError('no', 404, { code: 'forbidden_root' })),
+    ).toBe(null);
+    expect(forbiddenProjectFolderName(new Error('forbidden_root'))).toBe(null);
   });
 });

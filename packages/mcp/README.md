@@ -12,7 +12,8 @@ rendering, and history search.
 npm install @bendyline/gezel-mcp
 ```
 
-It speaks stdio, so any MCP client can run it:
+It speaks stdio, so any MCP client can run it. With Gezel running on the same
+computer:
 
 ```json
 {
@@ -21,9 +22,7 @@ It speaks stdio, so any MCP client can run it:
       "command": "npx",
       "args": ["-y", "@bendyline/gezel-mcp"],
       "env": {
-        "GEZEL_BASE_URL": "https://127.0.0.1:8080",
-        "GEZEL_TOKEN": "…",
-        "GEZEL_AGENT_ID": "…",
+        "GEZEL_AGENT_ID": "<a gezel id from `gezel agent list`>",
         "GEZEL_PROJECT_ID": "default"
       }
     }
@@ -31,10 +30,32 @@ It speaks stdio, so any MCP client can run it:
 }
 ```
 
-The server is a thin front end: it calls back into a running `gezeld` over
-HTTP using the environment variables above. It runs as a child process with a
-fresh Node environment, so those variables are its only connection to the
-service — nothing else is inherited implicitly.
+There is no address, password, or certificate to configure. The server is a
+thin front end that calls back into the running Gezel service, and finds it on
+its own: Gezel picks its port, its sign-in token, and its TLS certificate at
+each launch and writes them to `~/.gezel/runtime/` (`port`, `auth-token`,
+`cert.pem`), readable only by you. The server reads them when it starts and
+follows Gezel across a restart, so a long-lived MCP client keeps working after
+Gezel updates. If Gezel is not running when the client starts the server, it
+exits with a message saying to open the Gezel app or run `gezel start`; start
+it, then reconnect the server from your MCP client.
+
+| Variable | |
+|---|---|
+| `GEZEL_AGENT_ID` | The gezel the tools work as: whose memories they search and save, whose tasks they see. |
+| `GEZEL_PROJECT_ID` | The project tools use when a call names none. Default `default`. |
+| `GEZEL_HOME` | A Gezel home other than `~/.gezel`. |
+
+Run this way, the server acts with your own access, as the `gezel` command
+does; `GEZEL_PROJECT_ID` picks a default, not a boundary.
+
+When Gezel starts the server itself, for a gezel's chat, it passes the
+connection directly: `GEZEL_BASE_URL`, `GEZEL_TOKEN` (a token it mints for that
+one session, confined to its project unless the gezel coordinates across
+projects), and `GEZEL_CERT_PATH` (the
+`runtime/cert.pem` that token's service is using). Setting `GEZEL_BASE_URL`
+yourself turns the lookup off, and keeping all three current across restarts
+is then up to you.
 
 ## Tool categories
 

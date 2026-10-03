@@ -303,3 +303,40 @@ describe('extractMemories cursor windows', () => {
     expect(called).toBe(false);
   });
 });
+
+describe('extractMemories when the one-shot does not answer', () => {
+  it('rethrows a cancellation so the caller keeps its cursor', async () => {
+    const { memory, saves } = recordingMemory();
+    const cancelled = Object.assign(new Error('service shutting down'), { name: 'AbortError' });
+    await expect(
+      extractMemories({
+        messages,
+        extractedUpTo: 0,
+        oneShot: async () => {
+          throw cancelled;
+        },
+        memory,
+        gezelId: 'ada',
+        projectId: 'proj-1',
+      }),
+    ).rejects.toBe(cancelled);
+    expect(saves).toEqual([]);
+  });
+
+  it('swallows an ordinary failure', async () => {
+    const { memory, saves } = recordingMemory();
+    await expect(
+      extractMemories({
+        messages,
+        extractedUpTo: 0,
+        oneShot: async () => {
+          throw new Error('one-shot timed out after 30s');
+        },
+        memory,
+        gezelId: 'ada',
+        projectId: 'proj-1',
+      }),
+    ).resolves.toBeUndefined();
+    expect(saves).toEqual([]);
+  });
+});

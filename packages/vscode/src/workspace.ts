@@ -1,33 +1,51 @@
 import { realpathSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Project } from '@bendyline/gezel';
-import { type GezelClient, ensureProjectForFolder } from '@bendyline/gezel-client/node';
+import {
+  type GezelClient,
+  ensureProjectForFolder,
+  forbiddenProjectFolderName,
+} from '@bendyline/gezel-client/node';
 import type * as vscode from 'vscode';
 import type { Logger } from './log.js';
+
+const DEFAULT_PROJECT_ID = 'default';
 
 /**
  * Lookup-or-create a project for a workspace folder. Idempotent. Delegates to
  * the shared `ensureProjectForFolder` (the daemon's folder inference): reuse
  * the project bound to this folder, adopt a same-name project with no
- * folder, else create one. The daemon refuses folders gezel must not own
- * (the home folder, a drive root) with 403 `forbidden_root`.
+ * folder, else create one. A folder gezel will not own (the home folder, a
+ * drive root) gets the Default project instead, and `notify` says so: the
+ * daemon's 403 used to fail the whole connection.
  */
 export async function ensureProjectForWorkspace(
   folder: vscode.WorkspaceFolder,
   client: GezelClient,
   logger: Logger,
+  notify?: (message: string) => void,
 ): Promise<string> {
   const wd = canonicalizePath(folder.uri.fsPath);
   const name = basename(wd) || 'workspace';
-  const result = await ensureProjectForFolder(client, wd, {
-    mode: 'crew',
-    source: 'vscode',
-    description: `VSCode workspace at ${wd}`,
-    about: defaultAbout(name, wd),
-    missionObjectives: defaultMission(name),
-  });
-  logger.info(`${result.created ? 'created' : 'using'} project ${result.projectId} for ${wd}`);
-  return result.projectId;
+  try {
+    const result = await ensureProjectForFolder(client, wd, {
+      mode: 'crew',
+      source: 'vscode',
+      description: `VSCode workspace at ${wd}`,
+      about: defaultAbout(name, wd),
+      missionObjectives: defaultMission(name),
+    });
+    logger.info(`${result.created ? 'created' : 'using'} project ${result.projectId} for ${wd}`);
+    return result.projectId;
+  } catch (err) {
+    const refused = forbiddenProjectFolderName(err);
+    if (!refused) throw err;
+    logger.info(`using the Default project for ${wd}: it is ${refused}`);
+    notify?.(
+      `Gezel is using the Default project: it does not make a project of ${refused}. Open a project folder to give it a project of its own.`,
+    );
+    return DEFAULT_PROJECT_ID;
+  }
 }
 
 /**

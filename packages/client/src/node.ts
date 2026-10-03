@@ -8,3 +8,4 @@ export * from './processes.js';
 export * from './system-service.js';
 export * from './model-bundle-file.js';
 export * from './ensure-project-for-folder.js';
+export * from './local-gezel.js';

@@ -179,11 +179,112 @@ try {
   );
   assert.equal(result.denied, 4);
   assert.equal(network.length, 0, 'no external request authority');
+  // TypeScript and module scripts, compiled by script-runtime's own compiler
+  // and linked into one deferred classic script inside the same snapshot.
+  const { compilePreviewModule } = await import(
+    new URL('../../script-runtime/dist/preview-module.js', import.meta.url)
+  );
+  await page.exposeFunction('gezelCompilePreview', (modules) =>
+    modules.map(({ path, source }) => ({
+      path,
+      ...compilePreviewModule(source, path, 'commonjs'),
+    })),
+  );
+  const modular = await page.evaluate(async () => {
+    const { buildOfflineHtmlPreview } = await import('/src/html-preview.ts');
+    const encode = (text) => new TextEncoder().encode(text);
+    const files = {
+      'tanks/index.html': `<!doctype html><head><script type="module" src="src/main.ts"></script><script type="module">import { units } from './src/units'; window.inlineUnits = units.length;</script></head><body><canvas id="board"></canvas></body>`,
+      'tanks/src/main.ts': [
+        "import { Engine } from './engine';",
+        "import type { Missing } from './types';",
+        "import { units } from './units';",
+        "import level from './levels/one.json';",
+        "import sprite from './sprites/tank.svg';",
+        "import './style.css';",
+        "const board = document.getElementById('board') as HTMLCanvasElement;",
+        'const engine: Engine = new Engine(units);',
+        'const unused: Missing | undefined = undefined;',
+        '(window as any).previewModules = { board: board?.tagName, ticks: engine.tick(), units: units.length, level: level.name, sprite: sprite.slice(0, 18), unused };',
+      ].join('\n'),
+      'tanks/src/engine.ts':
+        "import { units } from './units/index.js';\n(window as any).engineRuns = ((window as any).engineRuns ?? 0) + 1;\nexport class Engine { constructor(private list: string[]) {} tick(): number { return this.list.length + units.length; } }",
+      'tanks/src/units/index.ts': "export const units: string[] = ['scout', 'heavy'];",
+      'tanks/src/levels/one.json': '{"name":"Ardennes"}',
+      'tanks/src/sprites/tank.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      'tanks/src/style.css': '#board{width:33px}',
+    };
+    const read = async (path) => {
+      if (!(path in files)) throw Error(`Could not read preview file ${path} (404)`);
+      return encode(files[path]);
+    };
+    const publish = async (html) => {
+      const reply = await fetch('/__publish', { method: 'POST', body: html });
+      const data = await reply.json();
+      return { url: new URL(data.url, location.href).href, dispose: () => {} };
+    };
+    const compileModules = () => ({
+      compile: (modules) => window.gezelCompilePreview(modules),
+      dispose() {},
+    });
+    const lease = await buildOfflineHtmlPreview('tanks/index.html', read, publish, compileModules);
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.src = lease.url;
+    document.body.append(frame);
+    await new Promise((resolve, reject) => {
+      frame.onload = resolve;
+      setTimeout(() => reject(Error('Module preview failed to load')), 5000);
+    });
+    const problems = [];
+    for (const source of [
+      "import { Game } from './game/Game';\nnew Game();",
+      "import Phaser from 'phaser';\nnew Phaser.Game();",
+    ]) {
+      try {
+        await buildOfflineHtmlPreview(
+          'tanks/index.html',
+          async (path) =>
+            path === 'tanks/index.html'
+              ? encode('<script type="module" src="src/main.ts"></script>')
+              : path === 'tanks/src/main.ts'
+                ? encode(source)
+                : read(path),
+          publish,
+          compileModules,
+        );
+      } catch (error) {
+        problems.push(error.message);
+      }
+    }
+    return { url: lease.url, problems };
+  });
+  const tanks = page.frames().find((frame) => frame.url() === modular.url);
+  assert.ok(tanks, 'module preview loaded');
+  await tanks.waitForFunction(() => window.previewModules !== undefined);
+  assert.deepEqual(await tanks.evaluate(() => window.previewModules), {
+    board: 'CANVAS',
+    ticks: 4,
+    units: 2,
+    level: 'Ardennes',
+    sprite: 'data:image/svg+xml',
+    unused: undefined,
+  });
+  assert.equal(await tanks.evaluate(() => window.inlineUnits), 2, 'inline module shares imports');
+  assert.equal(await tanks.evaluate(() => window.engineRuns), 1, 'each module runs once');
+  assert.equal(
+    await tanks.locator('#board').evaluate((element) => getComputedStyle(element).width),
+    '33px',
+  );
+  assert.deepEqual(modular.problems, [
+    "tanks/src/main.ts imports ./game/Game, which isn't in the project.",
+    'tanks/src/main.ts imports the npm package "phaser". A preview runs only files in the project, so add the library\'s file to the project and import it by path.',
+  ]);
   await page.evaluate(() => {
     window.previewLease.dispose();
     document.querySelector('iframe').remove();
   });
-  console.log(JSON.stringify({ ok: true, checks: 14, reads: result.reads }, null, 2));
+  console.log(JSON.stringify({ ok: true, checks: 20, reads: result.reads }, null, 2));
 } finally {
   await browser?.close();
   await server.close();

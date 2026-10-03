@@ -121,7 +121,7 @@ import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
-import { extractMemories } from '../memory/extractor.js';
+import { extractMemories, isCancelledExtraction } from '../memory/extractor.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { renderRecallBlock, runAutoRecall } from '../memory/recall.js';
 import {
@@ -9452,6 +9452,10 @@ export class ChatManager extends LocalEngineRuntime {
               memLog.debug(`extract#${tag} END ok afterMs=${Date.now() - memT0}`);
             })
             .catch((err) => {
+              if (isCancelledExtraction(err)) {
+                memLog.debug(`extract#${tag} END cancelled afterMs=${Date.now() - memT0}`);
+                return;
+              }
               memLog.warn(`extract#${tag} END err afterMs=${Date.now() - memT0}:`, err);
             })
             .finally(() => {
@@ -12033,6 +12037,10 @@ export class ChatManager extends LocalEngineRuntime {
                 return true;
               });
             } catch (err) {
+              if (isCancelledExtraction(err)) {
+                memLog.debug(`external extraction cancelled for ${sessionId}`);
+                return;
+              }
               memLog.warn(
                 `external extraction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
               );
