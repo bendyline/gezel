@@ -455,7 +455,7 @@ import type {
   WorkspaceSkillIndex,
   WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
-import { KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
+import { type ChatEvent, KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
 import type {
   EvalCatalog,
   EvalJob,
@@ -517,6 +517,7 @@ import {
   SseResponseError,
   SseStreamStaleError,
   consumeSseJson,
+  streamChatEvents,
 } from './sse.js';
 import { TaskInputsClient } from './task-inputs.js';
 
@@ -5094,6 +5095,23 @@ export class GezelClient {
 
   sessionEventsUrl(sessionId: string): string {
     return `${this.baseUrl}/events/chat?session=${encodeURIComponent(sessionId)}`;
+  }
+
+  /**
+   * One session's chat events over this client's own transport and token,
+   * ending after the turn's `done` event. Safe to open after sending: the
+   * service replays the turn so far to a late subscriber.
+   */
+  streamSessionEvents(
+    sessionId: string,
+    opts: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<ChatEvent> {
+    return streamChatEvents({
+      url: this.sessionEventsUrl(sessionId),
+      headers: this.authHeader(),
+      fetch: this.fetchImpl,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
   }
 
   // ── Timeline (interleaved cross-session view) ──

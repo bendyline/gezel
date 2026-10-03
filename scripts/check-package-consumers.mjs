@@ -636,6 +636,47 @@ try {
     rmSync(cliRunHome, { recursive: true, force: true });
   }
 
+  // Started from the home folder, which the daemon refuses to make a project
+  // of. 1.2.0 shipped exiting 1 here for `gezel`, `gezel run`, and `gezel do`;
+  // the command must fall back to the Default project and say so on stderr.
+  // A temp folder stands in for the home so the real one is never touched.
+  const cliHomeRunHome = mkdtempHomeWithoutRetrieval('gezel-packed-cli-from-home-');
+  const fakeUserHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-user-home-'));
+  const cliHomeRunPrompt = 'Reply exactly with: packed-cli-from-home';
+  try {
+    const result = run(
+      process.execPath,
+      [bin, '--home', cliHomeRunHome, '--standalone', 'run', cliHomeRunPrompt],
+      {
+        cwd: fakeUserHome,
+        env: {
+          ...process.env,
+          HOME: fakeUserHome,
+          USERPROFILE: fakeUserHome,
+          GEZEL_HOME: cliHomeRunHome,
+          GEZEL_MOCK_PROVIDER: '1',
+          GEZEL_DISABLE_MACHINE_ENGINE: '1',
+          GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+          GEZEL_SECRETS_BACKEND: 'file',
+        },
+        timeout: 60_000,
+      },
+    );
+    const expected = `Mock reply: ${cliHomeRunPrompt}\n`;
+    if (result.status !== 0 || result.stdout !== expected) {
+      fail(
+        `gezel run from the home folder did not answer from the Default project\nstatus: ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      );
+    } else if (!result.stderr.includes('Using the Default project')) {
+      fail(`gezel run from the home folder did not say it used Default\nstderr: ${result.stderr}`);
+    } else {
+      ok('gezel run from the home folder falls back to the Default project');
+    }
+  } finally {
+    rmSync(cliHomeRunHome, { recursive: true, force: true });
+    rmSync(fakeUserHome, { recursive: true, force: true });
+  }
+
   // The warm path, and the one an npm-only user actually hits. Any command
   // that starts a daemon — `gezel start`, or a read-only `gezel agent list` —
   // leaves one running, and `run` must then adopt it with the same-user
@@ -663,6 +704,45 @@ try {
     if (armed.status !== 0) {
       fail(`gezel agent list failed\nstdout: ${armed.stdout}\nstderr: ${armed.stderr}`);
     } else {
+      // The client README's quick start, against the per-launch TLS service
+      // this install started. The README's previous example hard-coded a port
+      // and used Node's own fetch, and failed on the first request with
+      // DEPTH_ZERO_SELF_SIGNED_CERT.
+      const quickStart = join(consumer, 'probe-client-quick-start.mjs');
+      writeFileSync(
+        quickStart,
+        [
+          "import { connectToLocalGezel } from '@bendyline/gezel-client/node';",
+          'const { client, close } = await connectToLocalGezel();',
+          'try {',
+          '  const { gezels } = await client.listGezels();',
+          "  const session = await client.createChatSession({ gezelId: gezels[0].id, projectId: 'default' });",
+          "  await client.sendToChatSession(session.id, 'hello');",
+          '  for await (const event of client.streamSessionEvents(session.id)) {',
+          "    if (event.type === 'delta') process.stdout.write(event.content);",
+          '  }',
+          '} finally {',
+          '  await close();',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      const served = existsSync(join(cliWarmHome, 'runtime', 'cert.pem'));
+      const quick = run(process.execPath, [quickStart], {
+        cwd: consumer,
+        env: cliWarmEnv,
+        timeout: 60_000,
+      });
+      if (!served) {
+        fail('the CLI-started service wrote no TLS certificate; the quick start proved nothing');
+      } else if (quick.status !== 0 || quick.stdout !== 'Mock reply: hello') {
+        fail(
+          `client README quick start failed against the TLS service\nstatus: ${quick.status}\nstdout: ${quick.stdout}\nstderr: ${quick.stderr}`,
+        );
+      } else {
+        ok('client README quick start reaches the per-launch TLS service');
+      }
+
       const result = run(
         process.execPath,
         [bin, '--home', cliWarmHome, '--standalone', 'run', cliWarmPrompt],

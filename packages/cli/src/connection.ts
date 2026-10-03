@@ -13,6 +13,7 @@ import {
   getLogLevel,
   getLogOutput,
   pickRandomNameWithGender,
+  projectLeadGezelId,
   setLogLevel,
   setLogOutput,
 } from '@bendyline/gezel';
@@ -31,6 +32,7 @@ import {
   discoverOrSpawn,
   electronNativeBinCandidates,
   ensureProjectForFolder as ensureClientProjectForFolder,
+  forbiddenProjectFolderName,
   isProcessAlive,
   readRuntime,
   readSystemServiceEndpoint,
@@ -899,6 +901,35 @@ export async function ensureProjectForFolder(
   return result.projectId;
 }
 
+const DEFAULT_PROJECT_ID = 'default';
+
+export function defaultProjectNotice(folder: string, name: string): string {
+  return `Using the Default project: gezel does not make a project of ${name} (${folder}). To work in a project, run gezel from its folder or pass --project <folder>.\n`;
+}
+
+/**
+ * The folder the command runs in: `--project <folder>`, else the cwd. Only an
+ * implicit cwd falls back to Default when gezel will not own that folder
+ * (home, temp, a drive root); a folder the person named is refused instead.
+ */
+async function resolveCommandProject(client: GezelClient, globals: CliGlobals): Promise<string> {
+  const p = globals.project;
+  const folder = resolve(typeof p === 'string' ? p : process.cwd());
+  try {
+    return await ensureProjectForFolder(client, folder);
+  } catch (err) {
+    const name = forbiddenProjectFolderName(err);
+    if (!name) throw err;
+    if (p === true || typeof p === 'string') {
+      throw new CliError(
+        `gezel does not make a project of ${name} (${folder}). Pass --project with a project folder, or leave out --project to use the Default project.`,
+      );
+    }
+    process.stderr.write(defaultProjectNotice(folder, name));
+    return DEFAULT_PROJECT_ID;
+  }
+}
+
 /**
  * Resolve (and, for an old/incomplete project record, repair) the lead the
  * CLI should open on. The terminal is a project workspace, so its front door
@@ -907,7 +938,8 @@ export async function ensureProjectForFolder(
  * New folder projects already get a Builder synchronously in the service. The
  * recovery path here covers older projects and interrupted first-time setup
  * without ever falling back to the Meester and silently regaining the
- * cross-project `start_project` surface.
+ * cross-project `start_project` surface. Default is the exception: it never
+ * gets a voorman, and its lead is the Meester.
  */
 export async function ensureCliProjectLead(
   client: GezelClient,
@@ -915,6 +947,12 @@ export async function ensureCliProjectLead(
 ): Promise<string> {
   const project = await client.getProject(projectId);
   if (project.voormanGezelId) return project.voormanGezelId;
+  if (project.id === DEFAULT_PROJECT_ID) {
+    const { meesterGezelId } = await client.getConfig();
+    const lead = projectLeadGezelId(project, meesterGezelId);
+    if (!lead) throw new CliError('the Default project has no Meester yet');
+    return lead;
+  }
 
   // Solo projects intentionally have no separate voorman: their one gezel is
   // the lead. This also keeps an explicit `/project` switch to a game/chat
@@ -959,20 +997,10 @@ export async function ensureCliProjectLead(
 
 /** Resolve the command project: the current directory unless explicitly overridden. */
 export async function resolveRunProject(client: GezelClient, globals: CliGlobals): Promise<string> {
-  const p = globals.project;
-  const folder = p === undefined || p === true || p === false ? process.cwd() : p;
-  return ensureProjectForFolder(client, folder);
+  return resolveCommandProject(client, globals);
 }
 
-/**
- * Resolve the project id for the interactive TUI. Unlike `run` (which falls
- * back to the shared `default` project), the TUI is folder-centric: when
- * `--project` is omitted entirely it ensures a project for the *current
- * working directory*. An explicit `--project <folder>` (or bare flag = cwd)
- * is honored as-is.
- */
+/** Resolve the project id for the interactive TUI; same rules as `run`. */
 export async function resolveTuiProject(client: GezelClient, globals: CliGlobals): Promise<string> {
-  const p = globals.project;
-  const folder = p === undefined || p === true || p === false ? process.cwd() : p;
-  return ensureProjectForFolder(client, folder);
+  return resolveCommandProject(client, globals);
 }

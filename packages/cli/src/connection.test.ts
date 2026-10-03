@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GezelSdkError } from '@bendyline/gezel-app-sdk';
-import { type GezelClient, LiveDaemonUnhealthyError } from '@bendyline/gezel-client/node';
+import {
+  GezelApiError,
+  type GezelClient,
+  LiveDaemonUnhealthyError,
+} from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PENDING_GRANT_MINUTES,
@@ -479,7 +483,67 @@ describe('command project semantics', () => {
   });
 });
 
+describe('folders gezel will not make a project of', () => {
+  const refuseHome = () =>
+    vi.fn(async () => {
+      throw new GezelApiError('gezel does not create a project for this folder', 403, {
+        code: 'forbidden_root',
+        reason: 'user-home',
+      });
+    });
+
+  it.each([
+    ['run', resolveRunProject],
+    ['the TUI', resolveTuiProject],
+  ] as const)(
+    'falls back to Default from the cwd for %s and says why',
+    async (_, resolveProject) => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const client = makeClient({ inferProjectForPath: refuseHome() });
+        await expect(resolveProject(client, {})).resolves.toBe('default');
+        expect(stderr).toHaveBeenCalledWith(
+          `Using the Default project: gezel does not make a project of your home folder (${process.cwd()}). To work in a project, run gezel from its folder or pass --project <folder>.\n`,
+        );
+      } finally {
+        stderr.mockRestore();
+      }
+    },
+  );
+
+  it.each([true, '/Users/someone'] as const)(
+    'refuses a folder named with --project %s instead of switching projects',
+    async (project) => {
+      const client = makeClient({ inferProjectForPath: refuseHome() });
+      await expect(resolveRunProject(client, { project })).rejects.toThrow(
+        /gezel does not make a project of your home folder .* leave out --project to use the Default project\./,
+      );
+    },
+  );
+
+  it('still reports other refusals', async () => {
+    const client = makeClient({
+      inferProjectForPath: vi.fn(async () => {
+        throw new GezelApiError('forbidden', 403, { code: 'missing_scope:projects' });
+      }),
+    });
+    await expect(resolveRunProject(client, {})).rejects.toMatchObject({ status: 403 });
+  });
+});
+
 describe('CLI project lead', () => {
+  it('opens Default on the Meester without giving it a voorman', async () => {
+    const updateProject = vi.fn();
+    const client = makeClient({
+      getProject: vi.fn().mockResolvedValue({ id: 'default', name: 'Default' }),
+      getConfig: vi.fn().mockResolvedValue({ meesterGezelId: 'mira' }),
+      updateProject,
+    });
+
+    await expect(ensureCliProjectLead(client, 'default')).resolves.toBe('mira');
+    expect(updateProject).not.toHaveBeenCalled();
+  });
+
   it('uses the project voorman instead of the install-wide Meester', async () => {
     const client = makeClient({
       getProject: vi.fn().mockResolvedValue({

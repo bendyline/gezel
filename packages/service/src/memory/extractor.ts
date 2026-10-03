@@ -186,6 +186,16 @@ function renderMessages(messages: ChatMessage[], budget: number): string {
   return lines.join('\n\n');
 }
 
+/** The one-shot was cancelled (service shutdown), not failed. */
+export function isCancelledExtraction(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
+/**
+ * Extract and save memories from the messages past the cursor. A failure is
+ * logged and swallowed; a cancellation rethrows, so the caller leaves the
+ * cursor where it was and a later turn extracts the same messages.
+ */
 export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> {
   const { messages, oneShot, memory, gezelId, projectId, debug } = args;
 
@@ -241,6 +251,9 @@ export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> 
     // silent — `getPipeline()` already printed the fix command on first
     // failure, and we don't want one stack-trace per chat turn.
     if (err instanceof EmbeddingsDisabledError) return;
+    // Every one-shot `gezel run` stops its in-process service right after the
+    // reply, mid-extraction; that printed this warning on each run.
+    if (isCancelledExtraction(err)) throw err;
     log.warn('[memory] extraction failed:', err instanceof Error ? err.message : err);
   }
 }

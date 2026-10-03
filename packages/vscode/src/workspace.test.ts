@@ -1,4 +1,4 @@
-import type { GezelClient } from '@bendyline/gezel-client/node';
+import { GezelApiError, type GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
 import { ensureProjectForWorkspace, pathsEqual } from './workspace.js';
 
@@ -118,5 +118,44 @@ describe('ensureProjectForWorkspace', () => {
     expect(arg.about.length).toBeGreaterThanOrEqual(60);
     expect(arg.missionObjectives.length).toBeGreaterThanOrEqual(40);
     expect(setProjectWorkingDir).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the Default project for a folder gezel will not own, and says so', async () => {
+    const createProject = vi.fn();
+    const notify = vi.fn();
+    const client = makeClient({
+      inferProjectForPath: vi.fn(async () => {
+        throw new GezelApiError('gezel does not create a project for this folder', 403, {
+          code: 'forbidden_root',
+          reason: 'user-home',
+        });
+      }),
+      createProject,
+    } as unknown as Partial<GezelClient>);
+
+    const id = await ensureProjectForWorkspace(
+      makeFolder(process.cwd()),
+      client,
+      noopLogger,
+      notify,
+    );
+
+    expect(id).toBe('default');
+    expect(createProject).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      'Gezel is using the Default project: it does not make a project of your home folder. Open a project folder to give it a project of its own.',
+    );
+  });
+
+  it('still fails on any other error', async () => {
+    const client = makeClient({
+      inferProjectForPath: vi.fn(async () => {
+        throw new GezelApiError('service unavailable', 503, { code: 'unavailable' });
+      }),
+    } as unknown as Partial<GezelClient>);
+
+    await expect(
+      ensureProjectForWorkspace(makeFolder(process.cwd()), client, noopLogger),
+    ).rejects.toMatchObject({ status: 503 });
   });
 });
