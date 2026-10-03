@@ -44,6 +44,8 @@ export interface PortableInstructionsInput {
   toolNames: readonly string[];
   /** The phone's footprint for this window; only `minimal` changes the desktop builder. */
   minimalContext: boolean;
+  /** The app previews the project's HTML pages itself. */
+  inAppWebPreview?: boolean;
 }
 
 /**
@@ -119,6 +121,7 @@ export async function buildPortableInstructions(
       ? { trimExecutorContext: true }
       : {}),
     ...(input.minimalContext ? { minimalContext: true } : {}),
+    ...(input.inAppWebPreview ? { inAppWebPreview: true } : {}),
     ...(step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
     ...(project.leanProfile ? { leanProfile: true } : {}),
     ...(profileHasBehavior(profile, 'prompt.retrieval-first') ? { retrievalFirstHint: true } : {}),

@@ -8,6 +8,7 @@ export default defineConfig({
     'src/meta.ts',
     'src/source.ts',
     'src/compile.ts',
+    'src/preview-module.ts',
     'src/web-worker.ts',
     'src/worker-protocol.ts',
   ],

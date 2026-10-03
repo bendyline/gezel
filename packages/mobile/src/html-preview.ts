@@ -1,4 +1,13 @@
+import {
+  type PreviewModule,
+  bundlePreviewModules,
+  isPreviewCompiledPath,
+  isPreviewModulePath,
+  previewImportProblem,
+  resolvePreviewImport,
+} from '@bendyline/gezel';
 import { previewAssetPath, previewEntryPath } from './html-preview-path.js';
+import type { PreviewModuleCompiler } from './script-compiler.js';
 
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from '../../ui/src/html-preview-host.js';
 type OfflineHtmlPreviewRequest = HostHtmlPreviewRequest;
@@ -35,6 +44,7 @@ export function createOfflineHtmlPreview(
   fetcher: typeof fetch,
   token: string,
   publish: PublishHtmlPreview,
+  compileModules?: () => PreviewModuleCompiler,
 ) {
   return async (request: OfflineHtmlPreviewRequest): Promise<OfflineHtmlPreview> => {
     if (request.source === 'type')
@@ -73,6 +83,7 @@ export function createOfflineHtmlPreview(
         return data;
       },
       publish,
+      compileModules,
     );
   };
 }
@@ -81,6 +92,8 @@ export async function buildOfflineHtmlPreview(
   entryPath: string,
   read: (path: string) => Promise<Uint8Array>,
   publish: PublishHtmlPreview,
+  /** Compiles TypeScript and module scripts; without it a page must use classic scripts. */
+  compileModules?: () => PreviewModuleCompiler,
 ): Promise<OfflineHtmlPreview> {
   const entry = previewEntryPath(entryPath);
   const bytes = new Map<string, Uint8Array>();
@@ -100,16 +113,18 @@ export async function buildOfflineHtmlPreview(
       binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
     return `data:${mime};base64,${btoa(binary)}`;
   };
-  const load = async (path: string) => {
-    const existing = bytes.get(path);
-    if (existing) return existing;
-    if (bytes.size >= MAX_FILES) throw new Error('This preview needs more than 64 files');
-    const data = await read(path);
+  const keep = (path: string, data: Uint8Array) => {
     if (data.byteLength > MAX_FILE) throw new Error('A preview file exceeds 2 MiB');
     total += data.byteLength;
     if (total > MAX_TOTAL) throw new Error('This preview exceeds 16 MiB');
     bytes.set(path, data);
     return data;
+  };
+  const load = async (path: string) => {
+    const existing = bytes.get(path);
+    if (existing) return existing;
+    if (bytes.size >= MAX_FILES) throw new Error('This preview needs more than 64 files');
+    return keep(path, await read(path));
   };
   const text = async (path: string) =>
     new TextDecoder('utf-8', { fatal: true }).decode(await load(path));
@@ -160,6 +175,95 @@ export async function buildOfflineHtmlPreview(
     }
     return result + input.slice(last);
   };
+  const scope = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/') + 1) : '';
+  /** The first candidate the project has, inside the previewed folder. */
+  const firstExisting = async (candidates: string[]) => {
+    for (const candidate of candidates) {
+      if (!candidate.startsWith(scope)) continue;
+      if (bytes.has(candidate)) return candidate;
+      try {
+        previewEntryPath(candidate);
+      } catch {
+        continue;
+      }
+      if (bytes.size >= MAX_FILES) throw new Error('This preview needs more than 64 files');
+      let data: Uint8Array;
+      try {
+        data = await read(candidate);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('exceeds')) throw error;
+        continue;
+      }
+      keep(candidate, data);
+      return candidate;
+    }
+    return undefined;
+  };
+  /** An imported file that is not code: JSON, a stylesheet, or an asset's URL. */
+  const dataModule = async (path: string): Promise<string> => {
+    if (/\.json$/i.test(path)) {
+      const source = await text(path);
+      try {
+        JSON.parse(source);
+      } catch {
+        throw new Error(`${path} is not valid JSON`);
+      }
+      return `module.exports=${source};`;
+    }
+    if (/\.css$/i.test(path))
+      return `var style=document.createElement('style');style.textContent=${JSON.stringify(await css(await text(path), path, [path]))};document.head.appendChild(style);`;
+    const mime = TYPES[path.split('.').at(-1)?.toLowerCase() ?? ''];
+    if (!mime) throw new Error(`${path} cannot be imported by a preview`);
+    let url = assets.get(path);
+    if (!url) {
+      url = dataUrl(await load(path), mime);
+      assets.set(path, url);
+    }
+    return `module.exports=${JSON.stringify(account(url))};`;
+  };
+  /**
+   * Compiles the module scripts' import graph a round at a time and links it
+   * into one classic script. A snapshot's scripts are data URLs, which have
+   * nothing to resolve a relative import against, so the files cannot be
+   * left to import each other.
+   */
+  const linkModules = async (entries: string[]) => {
+    const compiler = compileModules!();
+    try {
+      const modules = new Map<string, PreviewModule>();
+      const seen = new Set(entries);
+      let round = [...seen];
+      while (round.length) {
+        const sources: { path: string; source: string }[] = [];
+        for (const path of round) {
+          const inline = inlineModules.get(path);
+          if (inline !== undefined) sources.push({ path, source: inline });
+          else if (isPreviewModulePath(path)) sources.push({ path, source: await text(path) });
+          else modules.set(path, { path, code: await dataModule(path), requires: {} });
+        }
+        round = [];
+        for (const compiled of sources.length ? await compiler.compile(sources) : []) {
+          if (compiled.errors.length) throw new Error(compiled.errors.slice(0, 3).join('\n'));
+          const requires: Record<string, string> = {};
+          for (const { specifier } of compiled.imports) {
+            const found = resolvePreviewImport(specifier, compiled.path);
+            const target =
+              found.kind === 'file' ? await firstExisting(found.candidates) : undefined;
+            if (!target) throw new Error(previewImportProblem(compiled.path, specifier, found));
+            requires[specifier] = target;
+            if (!seen.has(target)) {
+              seen.add(target);
+              round.push(target);
+            }
+          }
+          modules.set(compiled.path, { path: compiled.path, code: compiled.code, requires });
+        }
+      }
+      return bundlePreviewModules([...modules.values()], entries);
+    } finally {
+      compiler.dispose();
+    }
+  };
   // Template contents stay inert while assets and CSP are prepared. Nothing
   // from the file is attached to the privileged app document.
   const template = document.createElement('template');
@@ -169,6 +273,8 @@ export async function buildOfflineHtmlPreview(
   ))
     node.remove();
   const handlers: string[] = [];
+  const moduleScripts: { element: Element; path: string }[] = [];
+  const inlineModules = new Map<string, string>();
   for (const element of template.content.querySelectorAll('*')) {
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLowerCase();
@@ -191,10 +297,19 @@ export async function buildOfflineHtmlPreview(
     const tag = element.tagName.toLowerCase();
     if (tag === 'script') {
       const type = element.getAttribute('type')?.toLowerCase() ?? '';
-      if (type === 'module')
-        throw new Error('This preview needs a built standalone page using classic JavaScript');
-      if (type && !['text/javascript', 'application/javascript'].includes(type)) continue;
       const src = element.getAttribute('src');
+      // A `.ts` file can only be a module, whatever its tag says.
+      if (type === 'module' || (src && isPreviewCompiledPath(src.split(/[?#]/, 1)[0]!))) {
+        if (!compileModules)
+          throw new Error('This preview needs a built standalone page using classic JavaScript');
+        const path = src
+          ? previewAssetPath(src, entry, entry)
+          : `${entry} (module ${moduleScripts.length + 1})`;
+        if (!src) inlineModules.set(path, element.textContent ?? '');
+        moduleScripts.push({ element, path });
+        continue;
+      }
+      if (type && !['text/javascript', 'application/javascript'].includes(type)) continue;
       const code = src
         ? await text(previewAssetPath(src, entry, entry))
         : (element.textContent ?? '');
@@ -226,6 +341,17 @@ export async function buildOfflineHtmlPreview(
       }
       element.setAttribute(name, await asset(value, entry));
     }
+  }
+  if (moduleScripts.length) {
+    const linked = await linkModules(moduleScripts.map(({ path }) => path));
+    const [first, ...rest] = moduleScripts;
+    for (const { name } of [...first!.element.attributes]) first!.element.removeAttribute(name);
+    first!.element.textContent = '';
+    // Module scripts run once the document is parsed; a deferred classic
+    // script runs then too, so a game that looks up its canvas still finds it.
+    first!.element.setAttribute('src', account(dataUrl(linked, 'text/javascript')));
+    first!.element.setAttribute('defer', '');
+    for (const { element } of rest) element.remove();
   }
   const log = dataUrl(
     `(()=>{

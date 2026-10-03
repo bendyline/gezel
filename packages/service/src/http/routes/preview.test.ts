@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PREVIEW_LOG_SHIM, PREVIEW_SCROLLBAR_SHIM, preparePreviewHtml } from './preview.js';
+import {
+  PREVIEW_LOG_SHIM,
+  PREVIEW_SCROLLBAR_SHIM,
+  preparePreviewHtml,
+  previewProblemModule,
+} from './preview.js';
 
 /**
  * The preview log shim is browser JS injected as a string into every
@@ -270,25 +275,40 @@ describe('preparePreviewHtml', () => {
     expect(prepared).toContain(PREVIEW_SCROLLBAR_SHIM);
   });
 
-  it('replaces unbuilt Vite source modules with an actionable preview error', () => {
-    const prepared = preparePreviewHtml(`<!doctype html><html><head>
-      <meta http-equiv="Content-Security-Policy" content="script-src 'self'">
-    </head><body><div id="root"></div>
+  // Source modules are compiled as they are served, so a page keeps them. A
+  // root-absolute source is the page's own folder, as Vite reads it.
+  it('keeps source modules for the server to compile, as modules from the page folder', () => {
+    const prepared = preparePreviewHtml(`<!doctype html><html><head></head><body>
       <script type="module" src="/src/main.tsx"></script>
+      <script src="game.ts"></script>
+      <script type="text/javascript" src="./levels.ts"></script>
     </body></html>`);
 
-    expect(prepared).not.toContain('<script type="module" src="/src/main.tsx"');
-    expect(prepared).toContain('Gezel omitted unbuilt source module: /src/main.tsx');
-    expect(prepared).toContain('Build the app and preview its generated dist/index.html');
-    expect(prepared).toContain('width:calc(100% - clamp(48px,12vw,96px))');
-    expect(prepared).toContain('padding:clamp(28px,5vw,36px)');
-    expect(prepared).toContain('background:color-mix(in srgb,currentColor 7%,transparent)');
-    expect(prepared).not.toContain('background:#f7f1e7');
-    // The warning is injected before the page's meta CSP, so a source app that
-    // disallows inline scripts still receives the clear failure state.
-    expect(prepared.indexOf('Preview cannot run unbuilt')).toBeLessThan(
-      prepared.indexOf('http-equiv="Content-Security-Policy"'),
+    expect(prepared).toContain('<script type="module" src="src/main.tsx" crossorigin="anonymous">');
+    expect(prepared).toContain('<script src="game.ts" type="module" crossorigin="anonymous">');
+    expect(prepared).toContain('src="./levels.ts" type="module"');
+    expect(prepared).not.toContain('text/javascript');
+  });
+
+  it('shows why a source module cannot run, on the page', () => {
+    const shown: string[] = [];
+    const body = { replaceChildren: (box: { textContent: string }) => shown.push(box.textContent) };
+    const run = new Function(
+      'document',
+      'console',
+      'addEventListener',
+      previewProblemModule("main.ts imports ./game, which isn't in the project."),
     );
+    run(
+      {
+        readyState: 'complete',
+        body,
+        createElement: () => ({ setAttribute() {}, style: {}, textContent: '' }),
+      },
+      { error() {} },
+      () => {},
+    );
+    expect(shown).toEqual(["main.ts imports ./game, which isn't in the project."]);
   });
 
   it('leaves built JavaScript modules untouched', () => {

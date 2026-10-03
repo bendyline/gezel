@@ -140,6 +140,7 @@ export * from './scripts/redact.js';
 export * from './scripts/runs.js';
 export * from './scripts/policy.js';
 
+export * from './preview/modules.js';
 export * from './tools/builtin-groups.js';
 export * from './tools/coerce.js';
 export * from './tools/descriptions.js';
