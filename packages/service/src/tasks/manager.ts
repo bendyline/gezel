@@ -269,6 +269,41 @@ function stepOwnAssignee(
  */
 const STEP_CASCADE_CAP = 10;
 
+/**
+ * Attempts {@link TaskManager.mutateTask} makes before surfacing a revision
+ * conflict. Each conflict means another write committed, so the bound only
+ * trips under sustained contention on one task.
+ */
+const TASK_MUTATION_ATTEMPTS = 5;
+
+/**
+ * The pass a gate verdict was computed against: the step's activation and
+ * the gate bookkeeping the verdict extends. When either moved while the gate
+ * ran (a re-entry, a Keurmeester or Try-again budget reset, another
+ * evaluation), the verdict's attempt count and trail describe a pass that no
+ * longer exists.
+ */
+function gatePassKey(step: TaskCraftbookStep): string {
+  const trail = step.gateAttemptHistory;
+  return JSON.stringify([
+    step.lastActivatedAt ?? null,
+    step.gateAttempts ?? 0,
+    step.gateProgressAttempts ?? 0,
+    step.lastGateReject?.at ?? null,
+    trail?.length ?? 0,
+    trail?.at(-1)?.at ?? null,
+  ]);
+}
+
+/** Fields {@link TaskManager.updateCraftbookMeta} patches; `null` clears. */
+interface CraftbookMetaPatch {
+  name?: string;
+  description?: string | null;
+  plan?: string | null;
+  defaultAssignee?: TaskAssignee | null;
+  entryStepId?: string;
+}
+
 export interface CompleteStepOpts {
   /** Bypass the step's completion gate (user-only affordance). */
   force?: boolean;
@@ -718,6 +753,61 @@ export class TaskManager {
         `[tasks] role resolution failed for step "${step.id}" role="${step.suggestedRole}":`,
         err instanceof Error ? err.message : err,
       );
+    }
+  }
+
+  /**
+   * Resolve a just-activated step's role and persist the pick. This runs
+   * after the transition committed, so it must never strand the step.
+   *
+   * A pick that no longer applies (someone pinned the step meanwhile, or the
+   * task left it) returns the stored task so the caller sees the newer state.
+   * Only when the write itself fails is the pick returned as `unsaved`: the
+   * task carries it in memory, and the caller re-applies it to the dispatch
+   * after any later re-read, so this handoff still reaches the resolved gezel.
+   */
+  private async resolveActivatedStepRole(
+    projectId: string,
+    task: Task,
+    stepId: string,
+  ): Promise<{ task: Task; unsavedGezelId?: string }> {
+    // Resolve on a copy: `maybeResolveStepRole` writes into the step it is
+    // handed, and the persisted mutation below must see the step unresolved.
+    const scratch = {
+      steps: task.craftbook.steps.map((s) => (s.id === stepId ? { ...s } : s)),
+    };
+    await this.maybeResolveStepRole(scratch, stepId, projectId);
+    const resolved = scratch.steps.find((s) => s.id === stepId)?.suggestedGezelId;
+    const before = task.craftbook.steps.find((s) => s.id === stepId)?.suggestedGezelId;
+    if (!resolved || resolved === before) return { task };
+    const withRole = (current: Task): Task => ({
+      ...current,
+      craftbook: {
+        ...current.craftbook,
+        steps: current.craftbook.steps.map((s) =>
+          s.id === stepId ? { ...s, suggestedGezelId: resolved } : s,
+        ),
+      },
+    });
+    try {
+      const result = await this.mutateTask(
+        projectId,
+        task.num,
+        (current) => {
+          const step = current.craftbook.steps.find((s) => s.id === stepId);
+          if (current.activeStepId !== stepId || !step) return null;
+          if (step.assignee || step.suggestedGezelId) return null;
+          return withRole(current);
+        },
+        { initial: task },
+      );
+      return { task: result?.task ?? task };
+    } catch (err) {
+      log.warn(
+        `[tasks] ${task.ref}: could not persist the gezel resolved for step "${stepId}":`,
+        err instanceof Error ? err.message : err,
+      );
+      return { task: withRole(task), unsavedGezelId: resolved };
     }
   }
 
@@ -1625,7 +1715,20 @@ export class TaskManager {
     return this.update(projectId, num, { assignee });
   }
 
+  // The craftbook edits below share update()'s concurrency contract: each
+  // reads, computes, and writes before any side effect, so a revision
+  // conflict re-runs the whole edit against the fresh task.
+
   async addStep(
+    projectId: string,
+    num: number,
+    input: NewCraftbookStep,
+    pos?: StepPosition,
+  ): Promise<Task> {
+    return this.retryTaskMutation(() => this.addStepOnce(projectId, num, input, pos));
+  }
+
+  private async addStepOnce(
     projectId: string,
     num: number,
     input: NewCraftbookStep,
@@ -1676,6 +1779,15 @@ export class TaskManager {
    * the updated task. Returns `null` when the step id doesn't exist.
    */
   async updateStep(
+    projectId: string,
+    num: number,
+    stepId: string,
+    patch: UpdateTaskStepRequest,
+  ): Promise<Task | null> {
+    return this.retryTaskMutation(() => this.updateStepOnce(projectId, num, stepId, patch));
+  }
+
+  private async updateStepOnce(
     projectId: string,
     num: number,
     stepId: string,
@@ -1737,6 +1849,14 @@ export class TaskManager {
    * doesn't exist; throws when it's the last remaining step.
    */
   async removeStep(projectId: string, num: number, stepId: string): Promise<Task | null> {
+    return this.retryTaskMutation(() => this.removeStepOnce(projectId, num, stepId));
+  }
+
+  private async removeStepOnce(
+    projectId: string,
+    num: number,
+    stepId: string,
+  ): Promise<Task | null> {
     const task = await this.requireTask(projectId, num);
     if (!task.craftbook.steps.some((s) => s.id === stepId)) return null;
     const removedName = task.craftbook.steps.find((s) => s.id === stepId)?.name ?? stepId;
@@ -1769,6 +1889,10 @@ export class TaskManager {
    * fields and edges are preserved — only the array order changes.
    */
   async reorderSteps(projectId: string, num: number, order: string[]): Promise<Task> {
+    return this.retryTaskMutation(() => this.reorderStepsOnce(projectId, num, order));
+  }
+
+  private async reorderStepsOnce(projectId: string, num: number, order: string[]): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     const steps = reorderStepsArray(task.craftbook.steps, order);
     assertCraftbookGraph({ steps, entryStepId: task.craftbook.entryStepId });
@@ -1797,13 +1921,15 @@ export class TaskManager {
   async updateCraftbookMeta(
     projectId: string,
     num: number,
-    patch: {
-      name?: string;
-      description?: string | null;
-      plan?: string | null;
-      defaultAssignee?: TaskAssignee | null;
-      entryStepId?: string;
-    },
+    patch: CraftbookMetaPatch,
+  ): Promise<Task> {
+    return this.retryTaskMutation(() => this.updateCraftbookMetaOnce(projectId, num, patch));
+  }
+
+  private async updateCraftbookMetaOnce(
+    projectId: string,
+    num: number,
+    patch: CraftbookMetaPatch,
   ): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     const cb: TaskCraftbook = { ...task.craftbook };
@@ -1847,6 +1973,14 @@ export class TaskManager {
    * step vanished. The incoming book must already be graph-valid.
    */
   async replaceCraftbook(projectId: string, num: number, book: Craftbook): Promise<Task> {
+    return this.retryTaskMutation(() => this.replaceCraftbookOnce(projectId, num, book));
+  }
+
+  private async replaceCraftbookOnce(
+    projectId: string,
+    num: number,
+    book: Craftbook,
+  ): Promise<Task> {
     const task = await this.requireTask(projectId, num);
     assertCraftbookGraph(book);
     const now = nowIso();
@@ -1924,40 +2058,51 @@ export class TaskManager {
     },
   ): Promise<{ stepId: string } | null> {
     if (process.env.GEZEL_DISABLE_TIER_COLLAPSE === '1') return null;
-    const task = await this.requireTask(projectId, num);
-    if (task.craftbook.renderedForTier) return null;
-    // Single-assignee guard: a tiny model relaying a multi-owner crew
-    // book is out of scope for v1 — every step must resolve to the
-    // dispatched gezel.
-    for (const step of task.craftbook.steps) {
-      if (stepOwnerGezelId(task, step) !== opts.dispatchGezelId) {
-        log.info(
-          `[tasks] tier-collapse skipped for ${task.ref}: step "${step.id}" is not owned by the dispatched gezel`,
-        );
+    const now = nowIso();
+    const pass: {
+      skipped?: string;
+      fromSteps: number;
+      result?: { steps: TaskCraftbookStep[]; entryStepId: string; stepIdMap: Map<string, string> };
+    } = { fromSteps: 0 };
+    const collapse = await this.mutateExistingTask(projectId, num, (task) => {
+      pass.skipped = undefined;
+      if (task.craftbook.renderedForTier) return null;
+      // Single-assignee guard: a tiny model relaying a multi-owner crew
+      // book is out of scope for v1 — every step must resolve to the
+      // dispatched gezel.
+      const foreign = task.craftbook.steps.find(
+        (step) => stepOwnerGezelId(task, step) !== opts.dispatchGezelId,
+      );
+      if (foreign) {
+        pass.skipped = `step "${foreign.id}" is not owned by the dispatched gezel`;
         return null;
       }
-    }
-    const result = collapseCraftbookPass(task.craftbook, { tier: opts.tier });
-    if (!result.changed) {
-      if (result.skippedReason) {
-        log.info(`[tasks] tier-collapse skipped for ${task.ref}: ${result.skippedReason}`);
+      const result = collapseCraftbookPass(task.craftbook, { tier: opts.tier });
+      if (!result.changed) {
+        pass.skipped = result.skippedReason;
+        return null;
       }
+      pass.result = result;
+      pass.fromSteps = task.craftbook.steps.length;
+      const craftbook: TaskCraftbook = {
+        ...task.craftbook,
+        steps: result.steps,
+        entryStepId: result.entryStepId,
+        renderedForTier: opts.tier,
+        updatedAt: now,
+      };
+      const activeStepId = task.activeStepId
+        ? (result.stepIdMap.get(task.activeStepId) ?? result.entryStepId)
+        : task.activeStepId;
+      return { ...task, craftbook, activeStepId, updatedAt: now };
+    });
+    const task = collapse.task;
+    if (!collapse.written || !pass.result) {
+      if (pass.skipped) log.info(`[tasks] tier-collapse skipped for ${task.ref}: ${pass.skipped}`);
       return null;
     }
-    const now = nowIso();
-    const fromSteps = task.craftbook.steps.length;
-    const craftbook: TaskCraftbook = {
-      ...task.craftbook,
-      steps: result.steps,
-      entryStepId: result.entryStepId,
-      renderedForTier: opts.tier,
-      updatedAt: now,
-    };
-    const activeStepId = task.activeStepId
-      ? (result.stepIdMap.get(task.activeStepId) ?? result.entryStepId)
-      : task.activeStepId;
-    const next: Task = { ...task, craftbook, activeStepId, updatedAt: now };
-    await this.store.writeTask(next);
+    const result = pass.result;
+    const fromSteps = pass.fromSteps;
     log.info(
       `[tasks] tier-collapse rendered ${task.ref} for ${opts.tier}: ${fromSteps} → ${result.steps.length} steps`,
     );
@@ -1979,32 +2124,34 @@ export class TaskManager {
   }
 
   async activateStep(projectId: string, num: number, stepId: string): Promise<Task> {
-    const task = await this.requireTask(projectId, num);
-    const step = task.craftbook.steps.find((s) => s.id === stepId);
-    if (!step) throw new Error(`task ${task.ref}: no step "${stepId}"`);
-    if (task.activeStepId === stepId) return task;
     const now = nowIso();
-    const next: Task = {
-      ...task,
-      craftbook: {
-        ...task.craftbook,
-        steps: bumpStepActivation(task.craftbook.steps, stepId, now),
+    const activation = await this.mutateExistingTask(projectId, num, (task) => {
+      if (!task.craftbook.steps.some((s) => s.id === stepId)) {
+        throw new Error(`task ${task.ref}: no step "${stepId}"`);
+      }
+      if (task.activeStepId === stepId) return null;
+      return {
+        ...task,
+        craftbook: {
+          ...task.craftbook,
+          steps: bumpStepActivation(task.craftbook.steps, stepId, now),
+          updatedAt: now,
+        },
+        activeStepId: stepId,
         updatedAt: now,
-      },
-      activeStepId: stepId,
-      updatedAt: now,
-    };
-    await this.store.writeTask(next);
+      };
+    });
+    if (!activation.written) return activation.task;
+    const next = activation.task;
+    const activatedStep = next.craftbook.steps.find((candidate) => candidate.id === stepId)!;
     // Re-activating a step is live work — wake a stable project.
     await this.reactivateProject(projectId);
     await this.history?.log({
       kind: 'task.step.activated',
       projectId,
-      summary: `Activated step "${step.name}" on ${next.ref}`,
+      summary: `Activated step "${activatedStep.name}" on ${next.ref}`,
       details: { ref: next.ref, stepId },
     });
-    const activatedStep = next.craftbook.steps.find((candidate) => candidate.id === stepId);
-    if (!activatedStep) return next;
     return (await this.runActivatedStepOnEnter(projectId, next, activatedStep, 0)).task;
   }
 
@@ -2141,35 +2288,33 @@ export class TaskManager {
     stepId: string,
     opts: { redriveCount?: number; clearGateAttempts?: boolean; clearRestartResumes?: boolean },
   ): Promise<void> {
-    const task = await this.store.readTask(projectId, num).catch(() => null);
-    if (!task) return;
     const at = nowIso();
-    let touched = false;
-    const steps = task.craftbook.steps.map((s) => {
-      if (s.id !== stepId) return s;
-      touched = true;
-      const next = { ...s };
-      if (opts.redriveCount !== undefined) next.redriveCount = opts.redriveCount;
-      if (opts.clearGateAttempts) {
-        delete next.gateAttempts;
-        delete next.lastGateReject;
-        // Also drop the plateau trail: a fresh gate budget with a stale
-        // trail would recompute stage 3 on the very next rejection and
-        // instantly re-pause, defeating the "real second chance" the
-        // applied consult earned.
-        delete next.gateAttemptHistory;
-      }
-      if (opts.clearRestartResumes) {
-        delete next.restartResumeCount;
-        delete next.lastRestartResumeAt;
-      }
-      return next;
-    });
-    if (!touched) return;
-    await this.store.writeTask({
-      ...task,
-      craftbook: { ...task.craftbook, steps, updatedAt: at },
-      updatedAt: at,
+    await this.mutateTask(projectId, num, (task) => {
+      if (!task.craftbook.steps.some((s) => s.id === stepId)) return null;
+      const steps = task.craftbook.steps.map((s) => {
+        if (s.id !== stepId) return s;
+        const next = { ...s };
+        if (opts.redriveCount !== undefined) next.redriveCount = opts.redriveCount;
+        if (opts.clearGateAttempts) {
+          delete next.gateAttempts;
+          delete next.lastGateReject;
+          // Also drop the plateau trail: a fresh gate budget with a stale
+          // trail would recompute stage 3 on the very next rejection and
+          // instantly re-pause, defeating the "real second chance" the
+          // applied consult earned.
+          delete next.gateAttemptHistory;
+        }
+        if (opts.clearRestartResumes) {
+          delete next.restartResumeCount;
+          delete next.lastRestartResumeAt;
+        }
+        return next;
+      });
+      return {
+        ...task,
+        craftbook: { ...task.craftbook, steps, updatedAt: at },
+        updatedAt: at,
+      };
     });
   }
 
@@ -2192,23 +2337,30 @@ export class TaskManager {
     num: number,
     stepId: string,
   ): Promise<{ count: number; exhausted: boolean }> {
-    const task = await this.store.readTask(projectId, num).catch(() => null);
-    if (!task || task.activeStepId !== stepId) return { count: 0, exhausted: false };
-    const step = task.craftbook.steps.find((s) => s.id === stepId);
-    if (!step) return { count: 0, exhausted: false };
-    const count = (step.restartResumeCount ?? 0) + 1;
     const at = nowIso();
-    await this.store.writeTask({
-      ...task,
-      craftbook: {
-        ...task.craftbook,
-        steps: task.craftbook.steps.map((s) =>
-          s.id === stepId ? { ...s, restartResumeCount: count, lastRestartResumeAt: at } : s,
-        ),
+    const resume = { count: 0 };
+    const result = await this.mutateTask(projectId, num, (current) => {
+      const live = current.craftbook.steps.find((s) => s.id === stepId);
+      if (current.activeStepId !== stepId || !live) return null;
+      resume.count = (live.restartResumeCount ?? 0) + 1;
+      return {
+        ...current,
+        craftbook: {
+          ...current.craftbook,
+          steps: current.craftbook.steps.map((s) =>
+            s.id === stepId
+              ? { ...s, restartResumeCount: resume.count, lastRestartResumeAt: at }
+              : s,
+          ),
+          updatedAt: at,
+        },
         updatedAt: at,
-      },
-      updatedAt: at,
+      };
     });
+    if (!result?.written) return { count: 0, exhausted: false };
+    const task = result.task;
+    const step = task.craftbook.steps.find((s) => s.id === stepId)!;
+    const count = resume.count;
     if (count <= MAX_RESTART_RESUMES) return { count, exhausted: false };
 
     const assignee = stepOwnerGezelId(task, step) ?? 'the assignee';
@@ -2242,21 +2394,23 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   }
 
   async recordStepRedrive(projectId: string, num: number, stepId: string): Promise<number> {
-    const task = await this.store.readTask(projectId, num).catch(() => null);
-    if (!task || task.activeStepId !== stepId) return 0;
     const at = nowIso();
-    let count = 0;
-    const steps = task.craftbook.steps.map((s) => {
-      if (s.id !== stepId) return s;
-      count = (s.redriveCount ?? 0) + 1;
-      return { ...s, redriveCount: count, lastRedriveAt: at };
+    const redrive = { count: 0 };
+    const result = await this.mutateTask(projectId, num, (task) => {
+      if (task.activeStepId !== stepId) return null;
+      redrive.count = 0;
+      const steps = task.craftbook.steps.map((s) => {
+        if (s.id !== stepId) return s;
+        redrive.count = (s.redriveCount ?? 0) + 1;
+        return { ...s, redriveCount: redrive.count, lastRedriveAt: at };
+      });
+      return {
+        ...task,
+        craftbook: { ...task.craftbook, steps, updatedAt: at },
+        updatedAt: at,
+      };
     });
-    await this.store.writeTask({
-      ...task,
-      craftbook: { ...task.craftbook, steps, updatedAt: at },
-      updatedAt: at,
-    });
-    return count;
+    return result?.written ? redrive.count : 0;
   }
 
   /**
@@ -2377,25 +2531,118 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // this below the hook loop makes it structurally impossible for a
     // failed hook to stamp completion or activate an explicit jump target.
     const completedAt = nowIso();
-    const updatedSteps = task.craftbook.steps.map((s, i) =>
-      i === idx ? { ...s, completedAt } : s,
-    );
 
-    // Decide next active step: the shared precedence both hosts follow.
-    const stepExists = (id: string | undefined): id is string =>
-      id !== undefined && task.craftbook.steps.some((s) => s.id === id);
-    const route = resolveNextStep({
-      steps: task.craftbook.steps,
-      currentId: stepId,
-      ...(nextArg !== undefined ? { override: nextArg } : {}),
-      ...(gateOutcome?.goto !== undefined ? { gateGoto: gateOutcome.goto } : {}),
-      ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
-      branchOutput: exitRun?.output,
+    // Once-a-day night-shift task finishing a run: stamp the run day (the
+    // window-start local date, so a single overnight window counts as one
+    // run) so dispatch won't pick it up again until the next day. Stamped
+    // on ANY step completion — the bundled oversight task is a single step
+    // that loops back to itself, re-arming each day via this guard rather
+    // than ever going terminal. Only read config in the rare path needed.
+    let nightShiftDay: string | undefined;
+    if (task.nightShift?.onceADay) {
+      const cfg = await this.store.readConfig().catch(() => ({}) as GezelConfig);
+      const window = cfg.nightShift?.window ?? DEFAULT_NIGHT_SHIFT_WINDOW;
+      nightShiftDay = nightShiftDayKey(new Date(), window);
+    }
+
+    // Handoff payload from an approving gate script: persisted on the
+    // task (the handoff seed prompt injects it) and noted on the next
+    // step below (durable, readable via read_task_notes).
+    const handoff = gateOutcome?.handoff;
+
+    // Commit the state-machine transition BEFORE recruitment. Role resolution
+    // may consult a catalog, touch the roster, or (under custom wiring) block;
+    // none of that may leave the completed step looking active to an MCP retry.
+    // If the process stops after this write, the durable task is still on the
+    // correct next step and the runner's recovery sweep can pick it up.
+    //
+    // The transition is applied to the task as it stands NOW, not to the copy
+    // read before the gate and exit scripts ran: a script holding `tasks.write`
+    // may update this very task, and building from the stale read turned every
+    // such completion into a revision conflict, so the step could never
+    // advance. Concurrent edits are kept. Only a task that has left this
+    // activation (paused, canceled, moved on, or re-entered) refuses it.
+    const transition = {
+      duplicate: false,
+      terminating: false,
+      newActive: undefined as string | undefined,
+      finalSteps: [] as TaskCraftbookStep[],
+    };
+    const committed = await this.mutateExistingTask(projectId, num, (current) => {
+      const live = current.craftbook.steps.find((s) => s.id === stepId);
+      // Only a completion stamped on this same pass since this call read the
+      // task counts as a concurrent duplicate. removeStep, replaceCraftbook
+      // and tier collapse can re-point the task at a step without bumping it,
+      // so an older pass's `completedAt` proves nothing about this one.
+      transition.duplicate =
+        current.activeStepId !== stepId &&
+        live !== undefined &&
+        live.completedAt !== undefined &&
+        live.completedAt !== completedStep.completedAt &&
+        live.lastActivatedAt === completedStep.lastActivatedAt;
+      if (transition.duplicate) return null;
+      if (
+        !live ||
+        current.activeStepId !== stepId ||
+        current.status !== 'active' ||
+        live.lastActivatedAt !== completedStep.lastActivatedAt
+      ) {
+        throw new TaskWriteConflictError(current.ref);
+      }
+      const steps = current.craftbook.steps;
+      // Decide next active step: the shared precedence both hosts follow.
+      const route = resolveNextStep({
+        steps,
+        currentId: stepId,
+        ...(nextArg !== undefined ? { override: nextArg } : {}),
+        ...(gateOutcome?.goto !== undefined ? { gateGoto: gateOutcome.goto } : {}),
+        ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
+        branchOutput: exitRun?.output,
+      });
+      if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
+        throw new Error(`task ${current.ref}: no step "${nextArg}" to activate`);
+      const terminating = route.kind === 'terminate';
+      const newActive = route.kind === 'terminate' ? undefined : route.to;
+      const updatedSteps = steps.map((s) => (s.id === stepId ? { ...s, completedAt } : s));
+      // Stamp the activation onto the newly-active step so loops expose
+      // their re-entry count (build-loop's `evaluate → build`, etc.).
+      const finalSteps =
+        newActive && !terminating
+          ? carryFanoutLoopGateAttempts(
+              current,
+              updatedSteps,
+              bumpStepActivation(updatedSteps, newActive, completedAt),
+              newActive,
+            )
+          : updatedSteps;
+      Object.assign(transition, { terminating, newActive, finalSteps });
+      const next: Task = {
+        ...current,
+        craftbook: { ...current.craftbook, steps: finalSteps, updatedAt: nowIso() },
+        ...(newActive ? { activeStepId: newActive } : {}),
+        ...(terminating ? { status: 'complete' as TaskStatus } : {}),
+        ...(nightShiftDay && current.nightShift?.onceADay
+          ? { nightShift: { ...current.nightShift, lastRunDay: nightShiftDay } }
+          : {}),
+        ...(handoff
+          ? { lastGateHandoff: stampGateHandoff(stepId, newActive, handoff, nowIso()) }
+          : {}),
+        updatedAt: nowIso(),
+      };
+      if (terminating || !newActive) {
+        delete (next as { activeStepId?: string }).activeStepId;
+      }
+      return next;
     });
-    if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
-      throw new Error(`task ${task.ref}: no step "${nextArg}" to activate`);
-    const terminating = route.kind === 'terminate';
-    const newActive: string | undefined = route.kind === 'terminate' ? undefined : route.to;
+    if (transition.duplicate) {
+      log.info(
+        `[tasks] duplicate completion ignored for ${task.ref} step "${stepId}" ` +
+          `(active step: "${committed.task.activeStepId ?? '(none)'}")`,
+      );
+      return { status: 'advanced', task: committed.task };
+    }
+    const { terminating, newActive, finalSteps } = transition;
+    let updated = committed.task;
 
     // A route that names no step used to be silently accepted here: the task
     // was written with an `activeStepId` matching nothing, so no handoff
@@ -2404,73 +2651,21 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // rejects the shape (including inside `spawn.steps`, which was never
     // graph-checked at all); this makes any survivor from an older snapshot
     // loud instead of leaving a task that merely looks active forever.
-    if (newActive && !terminating && !stepExists(newActive)) {
+    if (newActive && !terminating && !finalSteps.some((s) => s.id === newActive)) {
       log.error(
-        `[tasks] ${task.ref}: step "${stepId}" routes to "${newActive}", which is not a step on this task (steps: ${task.craftbook.steps.map((s) => s.id).join(', ')}). The task will sit active on a step that does not exist — fix the craftbook's routing.`,
+        `[tasks] ${task.ref}: step "${stepId}" routes to "${newActive}", which is not a step on this task (steps: ${finalSteps.map((s) => s.id).join(', ')}). The task will sit active on a step that does not exist — fix the craftbook's routing.`,
       );
     }
-
-    // Stamp the activation onto the newly-active step so loops expose
-    // their re-entry count (build-loop's `evaluate → build`, etc.). Done
-    // before `maybeResolveStepRole`, which mutates the same step object
-    // in place to add `suggestedGezelId` — both survive.
-    const finalSteps =
-      newActive && !terminating
-        ? carryFanoutLoopGateAttempts(
-            task,
-            updatedSteps,
-            bumpStepActivation(updatedSteps, newActive, completedAt),
-            newActive,
-          )
-        : updatedSteps;
-
-    // Once-a-day night-shift task finishing a run: stamp the run day (the
-    // window-start local date, so a single overnight window counts as one
-    // run) so dispatch won't pick it up again until the next day. Stamped
-    // on ANY step completion — the bundled oversight task is a single step
-    // that loops back to itself, re-arming each day via this guard rather
-    // than ever going terminal. Only read config in the rare path needed.
-    let nightShiftPatch: Pick<Task, 'nightShift'> | undefined;
-    if (task.nightShift?.onceADay) {
-      const cfg = await this.store.readConfig().catch(() => ({}) as GezelConfig);
-      const window = cfg.nightShift?.window ?? DEFAULT_NIGHT_SHIFT_WINDOW;
-      nightShiftPatch = {
-        nightShift: { ...task.nightShift, lastRunDay: nightShiftDayKey(new Date(), window) },
-      };
-    }
-
-    // Handoff payload from an approving gate script: persisted on the
-    // task (the handoff seed prompt injects it) and noted on the next
-    // step below (durable, readable via read_task_notes).
-    const handoff = gateOutcome?.handoff;
-    const updated: Task = {
-      ...task,
-      craftbook: { ...task.craftbook, steps: finalSteps, updatedAt: nowIso() },
-      ...(newActive ? { activeStepId: newActive } : {}),
-      ...(terminating ? { status: 'complete' as TaskStatus } : {}),
-      ...(nightShiftPatch ?? {}),
-      ...(handoff
-        ? { lastGateHandoff: stampGateHandoff(stepId, newActive, handoff, nowIso()) }
-        : {}),
-      updatedAt: nowIso(),
-    };
-    if (terminating || !newActive) {
-      delete (updated as { activeStepId?: string }).activeStepId;
-    }
-    // Commit the state-machine transition BEFORE recruitment. Role resolution
-    // may consult a catalog, touch the roster, or (under custom wiring) block;
-    // none of that may leave the completed step looking active to an MCP retry.
-    // If the process stops after this write, the durable task is still on the
-    // correct next step and the runner's recovery sweep can pick it up.
-    await this.store.writeTask(updated);
 
     // Resolve the newly-activated step's `suggestedRole` for the handoff, then
     // persist that enrichment separately. Production task routing uses a
     // deterministic template/static resolver, but the split also protects the
     // transition from slow or third-party resolver implementations.
+    let unsavedGezelId: string | undefined;
     if (newActive && !terminating) {
-      await this.maybeResolveStepRole(updated.craftbook, newActive, projectId);
-      await this.store.writeTask(updated);
+      const role = await this.resolveActivatedStepRole(projectId, updated, newActive);
+      updated = role.task;
+      unsavedGezelId = role.unsavedGezelId;
     }
     // Terminal step closed the task → the project may have come to rest;
     // advancing to a new step is live work → keep/make it active.
@@ -2515,13 +2710,23 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     }
 
     if (newActive && newActive !== task.activeStepId) {
-      const newStep = finalSteps.find((s) => s.id === newActive);
+      const newStep = updated.craftbook.steps.find((s) => s.id === newActive);
       await this.history?.log({
         kind: 'task.step.activated',
         projectId,
         summary: `Activated step "${newStep?.name ?? newActive}" on ${updated.ref}`,
         details: { ref: updated.ref, stepId: newActive },
       });
+
+      // The role lookup may have read newer state. A task that already left
+      // the step it just entered (a jump, a pause) must not run that step's
+      // setup or hand it to anyone.
+      if (updated.activeStepId !== newActive || updated.status !== 'active') {
+        log.info(
+          `[tasks] ${updated.ref} left step "${newActive}" before its handoff — not dispatching it`,
+        );
+        return { status: 'advanced', task: updated };
+      }
 
       // A step that runs only when the owner asked for it is decided from
       // their recorded answer, before any hook or model turn. "Queue to
@@ -2560,7 +2765,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           return { status: 'advanced', task: entrance.task };
         }
         const preparedTask = entrance.task;
-        const preparedStep = preparedTask.craftbook.steps.find((s) => s.id === newStep.id)!;
+        const storedStep = preparedTask.craftbook.steps.find((s) => s.id === newStep.id)!;
+        // A role pick that could not be saved lives only in memory, and the
+        // onEnter stamp may have re-read the task without it.
+        const preparedStep =
+          unsavedGezelId && !storedStep.assignee && !storedStep.suggestedGezelId
+            ? { ...storedStep, suggestedGezelId: unsavedGezelId }
+            : storedStep;
         if (opts.suppressHandoff) {
           return { status: 'advanced', task: preparedTask };
         }
@@ -2590,7 +2801,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           task: (await this.get(projectId, preparedTask.num)) ?? preparedTask,
         };
       }
-    } else if (newActive && (opts.cause === 'model' || opts.cause === 'auto')) {
+    } else if (
+      newActive &&
+      updated.activeStepId === newActive &&
+      (opts.cause === 'model' || opts.cause === 'auto')
+    ) {
       // A step that routes to itself (`next` names its own id, as the
       // night-shift oversight re-arm does) was re-activated by the turn that
       // completed it. Hand that dispatch the fresh activation now, exactly as
@@ -2598,7 +2813,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       // `lastActivatedAt` as a superseding dispatch, cancels the turn while
       // it is still streaming its close, and re-runs the whole step (Opus
       // oversight, 2026-09-19).
-      const newStep = finalSteps.find((s) => s.id === newActive);
+      const newStep = updated.craftbook.steps.find((s) => s.id === newActive);
       if (newStep) {
         this.onCurrentTurnStepReactivated?.({
           projectId,
@@ -2721,6 +2936,51 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   }
 
   /**
+   * Record a rejection's bookkeeping on the step the gate judged, applied to
+   * the task as it stands now so a gate script's own task edit survives.
+   * Refuses with {@link TaskWriteConflictError} when the task left that pass
+   * while the gate ran (paused, moved, re-entered, or its gate budget reset):
+   * the verdict's attempt count and trail would overwrite the newer state,
+   * and the pause it might trigger would undo a resume. Nothing is stamped,
+   * the same 409 the transition gives a completion that lost its pass.
+   */
+  private async stampGatePass(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    at: string,
+    patch: (live: TaskCraftbookStep) => TaskCraftbookStep,
+  ): Promise<Task> {
+    const pass = gatePassKey(step);
+    const result = await this.mutateExistingTask(
+      projectId,
+      task.num,
+      (current) => {
+        const live = current.craftbook.steps.find((s) => s.id === step.id);
+        if (current.activeStepId !== step.id || current.status !== 'active') return null;
+        if (!live || gatePassKey(live) !== pass) return null;
+        return {
+          ...current,
+          craftbook: {
+            ...current.craftbook,
+            steps: current.craftbook.steps.map((s) => (s.id === step.id ? patch(s) : s)),
+            updatedAt: at,
+          },
+          updatedAt: at,
+        };
+      },
+      { initial: task },
+    );
+    if (!result.written) {
+      log.info(
+        `[gate] ${task.ref} step "${step.id}" changed while its gate ran — discarding the stale verdict`,
+      );
+      throw new TaskWriteConflictError(task.ref);
+    }
+    return result.task;
+  }
+
+  /**
    * Evaluate a step's COMPLETION gate. Approve → return the outcome so
    * routing/handoff use it. Reject → persist `gateAttempts` +
    * `lastGateReject` on the step, append the prescriptive note, pause at
@@ -2825,18 +3085,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         frozen: true,
       };
       const newTrail = appendGateAttempt(trail, frozenEntry);
-      const persistTrail = async (extraStep: Partial<TaskCraftbookStep> = {}) => {
-        const steps = task.craftbook.steps.map((s) =>
-          s.id === step.id ? { ...s, gateAttemptHistory: newTrail, ...extraStep } : s,
-        );
-        const updated: Task = {
-          ...task,
-          craftbook: { ...task.craftbook, steps, updatedAt: nowIso() },
-          updatedAt: nowIso(),
-        };
-        await this.store.writeTask(updated);
-        return updated;
-      };
+      const persistTrail = (extraStep: Partial<TaskCraftbookStep> = {}) =>
+        this.stampGatePass(projectId, task, step, nowIso(), (s) => ({
+          ...s,
+          gateAttemptHistory: newTrail,
+          ...extraStep,
+        }));
 
       if (stage === 3) {
         const updated = await persistTrail();
@@ -3404,28 +3658,20 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           : {}),
     };
     const newTrail = appendGateAttempt(step.gateAttemptHistory, trailEntry);
-    const steps = task.craftbook.steps.map((s) =>
-      s.id === step.id
-        ? {
-            ...s,
-            gateAttempts: attempt,
-            ...(progressAttempts > 0 ? { gateProgressAttempts: progressAttempts } : {}),
-            gateAttemptHistory: newTrail,
-            lastGateReject: {
-              ...(contentHash !== undefined ? { contentHash } : {}),
-              messageFingerprint: fingerprint,
-              message,
-              at: now,
-            },
-          }
-        : s,
-    );
-    let updated: Task = {
-      ...task,
-      craftbook: { ...task.craftbook, steps, updatedAt: now },
-      updatedAt: now,
-    };
-    await this.store.writeTask(updated);
+    // Throws when the task left this pass while the gate ran, so a stale
+    // verdict neither pauses, loops back, nor raises needs-help below.
+    let updated = await this.stampGatePass(projectId, task, step, now, (s) => ({
+      ...s,
+      gateAttempts: attempt,
+      ...(progressAttempts > 0 ? { gateProgressAttempts: progressAttempts } : {}),
+      gateAttemptHistory: newTrail,
+      lastGateReject: {
+        ...(contentHash !== undefined ? { contentHash } : {}),
+        messageFingerprint: fingerprint,
+        message,
+        at: now,
+      },
+    }));
     // A converging pass is the loop working, not a failure — heading the
     // note "not yet met (attempt 2/6)" reads as a warning and pushed
     // reviewers toward clearing the check rather than doing the next
@@ -3818,19 +4064,40 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       return task;
     }
     const now = nowIso();
-    const next: Task = {
-      ...task,
-      craftbook: {
-        ...task.craftbook,
-        steps: bumpStepActivation(task.craftbook.steps, targetId, now, {
-          preserveGateBudget: targetId === gatedStep.id,
-        }),
-        updatedAt: now,
+    const prior = { activationAt: target.lastActivatedAt };
+    const loopBack = await this.mutateExistingTask(
+      projectId,
+      task.num,
+      (current) => {
+        // The loop-back answers a rejection of the gated step's current pass.
+        // A task that has since moved on, paused, or closed carries a newer
+        // decision, and routing it back would overwrite that decision.
+        if (current.activeStepId !== gatedStep.id || current.status !== 'active') return null;
+        const liveTarget = current.craftbook.steps.find((s) => s.id === targetId);
+        if (!liveTarget) return null;
+        prior.activationAt = liveTarget.lastActivatedAt;
+        return {
+          ...current,
+          craftbook: {
+            ...current.craftbook,
+            steps: bumpStepActivation(current.craftbook.steps, targetId, now, {
+              preserveGateBudget: targetId === gatedStep.id,
+            }),
+            updatedAt: now,
+          },
+          activeStepId: targetId,
+          updatedAt: now,
+        };
       },
-      activeStepId: targetId,
-      updatedAt: now,
-    };
-    await this.store.writeTask(next);
+      { initial: task },
+    );
+    if (!loopBack.written) {
+      log.info(
+        `[gate] ${task.ref}: task left step "${gatedStep.id}" during the gate — not looping back to "${targetId}"`,
+      );
+      return loopBack.task;
+    }
+    const next = loopBack.task;
     const newStep = next.craftbook.steps.find((s) => s.id === targetId);
     // Model/tool and observable-progress attempts already have a live chat
     // turn that receives the gate verdict and continues the repair loop.
@@ -3846,7 +4113,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           task: next,
           newStep,
           gatedStep,
-          previousActivationAt: target.lastActivatedAt,
+          previousActivationAt: prior.activationAt,
         });
       } catch (err) {
         log.error('[tasks] current-turn step reactivation hook failed:', err);
@@ -4077,18 +4344,24 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     }
 
     const now = nowIso();
-    const prepared: Task = {
-      ...task,
-      craftbook: {
-        ...task.craftbook,
-        steps: task.craftbook.steps.map((candidate) =>
-          candidate.id === step.id ? { ...candidate, onEnterCompletedAt: activationAt } : candidate,
-        ),
+    const { task: prepared } = await this.mutateExistingTask(
+      projectId,
+      task.num,
+      (current) => ({
+        ...current,
+        craftbook: {
+          ...current.craftbook,
+          steps: current.craftbook.steps.map((candidate) =>
+            candidate.id === step.id
+              ? { ...candidate, onEnterCompletedAt: activationAt }
+              : candidate,
+          ),
+          updatedAt: now,
+        },
         updatedAt: now,
-      },
-      updatedAt: now,
-    };
-    await this.store.writeTask(prepared);
+      }),
+      { initial: task },
+    );
 
     if (!autoAdvance) return { status: 'ready', task: prepared };
     if (cascadeDepth + 1 > STEP_CASCADE_CAP) {
@@ -4409,16 +4682,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       const variation = variations?.[i];
       children.push(await this.spawnChild(parent.ref, variation));
     }
-    const updatedParent = await this.requireTask(projectId, num);
-    const withStamp: Task = {
-      ...updatedParent,
-      fanout: {
-        ...parent.fanout,
-        materializedAt: nowIso(),
-      },
+    const fanout = parent.fanout;
+    const { task: withStamp } = await this.mutateExistingTask(projectId, num, (current) => ({
+      ...current,
+      fanout: { ...fanout, materializedAt: nowIso() },
       updatedAt: nowIso(),
-    };
-    await this.store.writeTask(withStamp);
+    }));
     await this.history?.log({
       kind: 'task.fanout.materialized',
       projectId,
@@ -4453,29 +4722,39 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
   async recordCronTick(task: Task): Promise<Task> {
     if (!task.cron) return task;
-    const schedule = parseCron(task.cron.expression);
     const now = new Date();
-    const updated: Task = {
-      ...task,
-      cron: {
-        expression: task.cron.expression,
-        lastTickAt: now.toISOString(),
-        nextTickAt: nextCronFire(schedule, now).toISOString(),
-        ...(task.cron.overlap ? { overlap: task.cron.overlap } : {}),
+    // The scheduler hands in the task from its sweep, which may predate a
+    // user edit; the tick is re-applied to the stored task on conflict.
+    const result = await this.mutateTask(
+      task.projectId,
+      task.num,
+      (current) => {
+        if (!current.cron) return null;
+        return {
+          ...current,
+          cron: {
+            expression: current.cron.expression,
+            lastTickAt: now.toISOString(),
+            nextTickAt: nextCronFire(parseCron(current.cron.expression), now).toISOString(),
+            ...(current.cron.overlap ? { overlap: current.cron.overlap } : {}),
+          },
+          updatedAt: now.toISOString(),
+        };
       },
-      updatedAt: now.toISOString(),
-    };
-    await this.store.writeTask(updated);
-    const activeStep = task.craftbook.steps.find((s) => s.id === task.activeStepId);
+      { initial: task },
+    );
+    const updated = result?.written ? result.task : undefined;
+    if (!updated?.cron) return result?.task ?? task;
+    const activeStep = updated.craftbook.steps.find((s) => s.id === updated.activeStepId);
     await this.history?.log({
       kind: 'task.tick',
-      projectId: task.projectId,
-      ...(task.assignee.kind === 'gezel' ? { gezelId: task.assignee.gezelId } : {}),
-      summary: `Tick on ${task.ref} — "${task.title}" (step: ${activeStep?.name ?? task.activeStepId})`,
+      projectId: updated.projectId,
+      ...(updated.assignee.kind === 'gezel' ? { gezelId: updated.assignee.gezelId } : {}),
+      summary: `Tick on ${updated.ref} — "${updated.title}" (step: ${activeStep?.name ?? updated.activeStepId})`,
       details: {
-        ref: task.ref,
-        activeStepId: task.activeStepId,
-        expression: task.cron.expression,
+        ref: updated.ref,
+        activeStepId: updated.activeStepId,
+        expression: updated.cron.expression,
       },
     });
     return updated;
@@ -4489,13 +4768,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
    * this gives `onceADay` hosts "at most one spawn per night window".
    */
   async recordNightShiftSpawn(ref: string, dayKey: string): Promise<void> {
-    const task = await this.getByRef(ref);
-    if (!task?.nightShift) return;
-    await this.store.writeTask({
-      ...task,
-      nightShift: { ...task.nightShift, lastRunDay: dayKey },
-      updatedAt: new Date().toISOString(),
-    });
+    const parsed = parseTaskRef(ref);
+    if (!parsed) return;
+    const at = new Date().toISOString();
+    await this.mutateTask(parsed.projectId, parsed.num, (task) =>
+      task.nightShift
+        ? { ...task, nightShift: { ...task.nightShift, lastRunDay: dayKey }, updatedAt: at }
+        : null,
+    );
   }
 
   describeAssignee = describeAssignee;
@@ -4514,6 +4794,57 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         if (!(err instanceof TaskWriteConflictError) || attempt >= 2) throw err;
       }
     }
+  }
+
+  /**
+   * Read-modify-write one task under its optimistic revision. `mutate` maps
+   * the task it is handed to the next version, or returns null when that
+   * task no longer qualifies (nothing is written). On a revision conflict the
+   * task is re-read and `mutate` re-applied, so the concurrent writer's change
+   * survives alongside ours: a user edit, or a gate/onExit script calling
+   * `task.update` on its own task, would otherwise fail every runtime write
+   * that read the task before it.
+   *
+   * `mutate` may run more than once, so it must be a pure function of its
+   * argument. History, notes, hooks and scripts belong after this returns,
+   * driven by the task actually written; retrying them would duplicate
+   * events and re-run work. Throwing from `mutate` aborts without retry.
+   * `initial` seeds the first attempt with a task the caller already read.
+   * Returns null when the task does not exist.
+   */
+  private async mutateTask(
+    projectId: string,
+    num: number,
+    mutate: (current: Task) => Task | null,
+    opts: { initial?: Task } = {},
+  ): Promise<{ task: Task; written: boolean } | null> {
+    let current = opts.initial ?? (await this.store.readTask(projectId, num));
+    for (let attempt = 1; current; attempt++) {
+      const next = mutate(current);
+      if (!next) return { task: current, written: false };
+      try {
+        await this.store.writeTask(next);
+        return { task: next, written: true };
+      } catch (err) {
+        if (!(err instanceof TaskWriteConflictError) || attempt >= TASK_MUTATION_ATTEMPTS) {
+          throw err;
+        }
+      }
+      current = await this.store.readTask(projectId, num);
+    }
+    return null;
+  }
+
+  /** {@link mutateTask} for callers that require the task to exist. */
+  private async mutateExistingTask(
+    projectId: string,
+    num: number,
+    mutate: (current: Task) => Task | null,
+    opts: { initial?: Task } = {},
+  ): Promise<{ task: Task; written: boolean }> {
+    const result = await this.mutateTask(projectId, num, mutate, opts);
+    if (!result) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
+    return result;
   }
 
   private async withEffectiveStatus(task: Task): Promise<Task> {

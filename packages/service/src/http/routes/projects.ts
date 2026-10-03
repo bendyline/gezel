@@ -41,6 +41,7 @@ import {
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
+import { MutationPathRefusedError } from '../../fs/mutation-path-refusal.js';
 import {
   ArtifactPathExistsError,
   ArtifactPathNotFoundError,
@@ -1271,6 +1272,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
+      if (err instanceof MutationPathRefusedError) throw err;
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
@@ -1296,6 +1298,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       ) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
+      if (err instanceof MutationPathRefusedError) throw err;
       const status =
         err instanceof ArtifactPathNotFoundError
           ? 404

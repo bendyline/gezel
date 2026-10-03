@@ -58,26 +58,77 @@ export interface WordDocument {
   ): Promise<void>;
 }
 
-async function placePictures(
-  ctx: Word.RequestContext,
-  pictures: readonly WordPicture[] = [],
-): Promise<void> {
-  if (pictures.length === 0) return;
-  const found = pictures.map((picture) => {
+function findPlaceholders(ctx: Word.RequestContext, pictures: readonly WordPicture[]) {
+  return pictures.map((picture) => {
     const results = ctx.document.body.search(picture.placeholder, { matchCase: true });
     results.load('items');
     return results;
   });
-  await ctx.sync();
-  pictures.forEach((picture, i) => {
-    const range = found[i]!.items[0];
-    if (!range) throw new Error('The text went in, but Word lost the place for the diagram.');
-    const inline = range.insertInlinePictureFromBase64(picture.base64, Word.InsertLocation.replace);
-    inline.width = picture.widthPt;
-    inline.height = picture.heightPt;
-    inline.altTextDescription = picture.altText;
-  });
-  await ctx.sync();
+}
+
+/**
+ * Swaps each picture in for its placeholder paragraph. The HTML is already
+ * committed by then, so a picture that cannot be placed must not leave its
+ * GEZELDIAGRAM token behind for the person to find, or a retry stacks a
+ * second one: `undo` takes the insert back out, and any token still in the
+ * body is deleted.
+ */
+async function placePictures(
+  ctx: Word.RequestContext,
+  pictures: readonly WordPicture[],
+  undo: () => void,
+): Promise<void> {
+  if (pictures.length === 0) return;
+  try {
+    const found = findPlaceholders(ctx, pictures);
+    await ctx.sync();
+    const ranges = found.map((results) => results.items[0]);
+    if (ranges.some((range) => !range)) throw new Error('its placeholder was not found');
+    pictures.forEach((picture, i) => {
+      const inline = ranges[i]!.insertInlinePictureFromBase64(
+        picture.base64,
+        Word.InsertLocation.replace,
+      );
+      inline.width = picture.widthPt;
+      inline.height = picture.heightPt;
+      inline.altTextDescription = picture.altText;
+    });
+    await ctx.sync();
+  } catch (error) {
+    throw await takeBack(ctx, pictures, undo, error);
+  }
+}
+
+/** Undoes a failed placement and says truthfully what the document now holds. */
+async function takeBack(
+  ctx: Word.RequestContext,
+  pictures: readonly WordPicture[],
+  undo: () => void,
+  cause: unknown,
+): Promise<Error> {
+  const reason = (cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, '');
+  let undone = true;
+  try {
+    undo();
+    await ctx.sync();
+  } catch {
+    undone = false;
+  }
+  let swept = true;
+  try {
+    const left = findPlaceholders(ctx, pictures);
+    await ctx.sync();
+    for (const results of left) for (const range of results.items) range.delete();
+    await ctx.sync();
+  } catch {
+    swept = false;
+  }
+  const failed = `Word could not place the diagram (${reason})`;
+  if (undone) return new Error(`${failed}, so the document was left as it was.`);
+  if (swept) return new Error(`${failed}. The text went in without it.`);
+  return new Error(
+    `${failed}. The text went in, and its GEZELDIAGRAM placeholder may still be in the document.`,
+  );
 }
 
 export function officeWordDocument(): WordDocument {
@@ -127,32 +178,49 @@ export function officeWordDocument(): WordDocument {
           };
         }),
       ),
-    insert: (content, where, html, pictures) =>
+    insert: (content, where, html, pictures = []) =>
       runSerial(() =>
         Word.run(async (ctx) => {
+          let inserted: Word.Range;
           if (where === 'cursor') {
             const selection = ctx.document.getSelection();
-            if (html) selection.insertHtml(content, Word.InsertLocation.end);
-            else selection.insertText(content, Word.InsertLocation.end);
+            if (html) inserted = selection.insertHtml(content, Word.InsertLocation.end);
+            else inserted = selection.insertText(content, Word.InsertLocation.end);
           } else {
             const location =
               where === 'start' ? Word.InsertLocation.start : Word.InsertLocation.end;
             const body = ctx.document.body;
-            if (html) body.insertHtml(content, location);
-            else body.insertText(content, location);
+            if (html) inserted = body.insertHtml(content, location);
+            else inserted = body.insertText(content, location);
           }
           await ctx.sync();
-          await placePictures(ctx, pictures);
+          await placePictures(ctx, pictures, () => inserted.delete());
         }),
       ),
-    replaceSelection: (content, html, pictures) =>
+    replaceSelection: (content, html, pictures = []) =>
       runSerial(() =>
         Word.run(async (ctx) => {
           const selection = ctx.document.getSelection();
-          if (html) selection.insertHtml(content, Word.InsertLocation.replace);
-          else selection.insertText(content, Word.InsertLocation.replace);
+          if (!html || pictures.length === 0) {
+            if (html) selection.insertHtml(content, Word.InsertLocation.replace);
+            else selection.insertText(content, Word.InsertLocation.replace);
+            await ctx.sync();
+            return;
+          }
+          // A diagram can still fail after the replace lands, so keep what it
+          // replaces to put back. An empty selection has nothing to restore.
+          const before = selection.getOoxml();
+          selection.load('text');
+          const selectedPictures = selection.inlinePictures;
+          selectedPictures.load('items/width');
           await ctx.sync();
-          await placePictures(ctx, pictures);
+          const hadContent = selection.text.length > 0 || selectedPictures.items.length > 0;
+          const inserted = selection.insertHtml(content, Word.InsertLocation.replace);
+          await ctx.sync();
+          await placePictures(ctx, pictures, () => {
+            if (hadContent) inserted.insertOoxml(before.value, Word.InsertLocation.replace);
+            else inserted.delete();
+          });
         }),
       ),
   };

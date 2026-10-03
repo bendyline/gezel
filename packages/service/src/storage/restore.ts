@@ -10,10 +10,12 @@ import {
   readdir,
   rename,
   rm,
+  rmdir,
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   BACKUP_RESTORABLE_CONFIG_KEYS,
   BACKUP_ROLE_CONFIG_KEYS,
@@ -166,7 +168,8 @@ export async function cancelRestore(home: string, restoreId: string): Promise<vo
 
 /**
  * Extract the chosen items into staging, then publish each one. Additions
- * reserve a new directory and refuse collisions. Explicit replacements park
+ * move into place only where nothing exists (see {@link publishAddition}).
+ * Explicit replacements park
  * the existing item alongside until its replacement has landed, so a failed
  * swap can put the original back. Shared documents merge file by file (see
  * {@link mergeDocuments}).
@@ -230,11 +233,7 @@ export async function runRestore(
           item.kind === 'project' &&
           (manifest.excludedWorkspaces === true || !(await pathExists(join(staged, 'workspace'))));
         if (chosen.get(`${item.kind}:${item.id}`) === 'add') {
-          await publishAddition(
-            staged,
-            target,
-            item.kind === 'gezel' ? 'gezel.md' : 'project.json',
-          );
+          await publishAddition(staged, target);
         } else {
           await publish(staged, target, keepWorkspace ? 'workspace' : undefined);
         }
@@ -277,30 +276,106 @@ function targetPathFor(
   return null; // settings files are merged, not swapped wholesale
 }
 
-/** Publish an addition without replacing an entity created since the review. */
-async function publishAddition(staged: string, target: string, metadata: string): Promise<void> {
+/**
+ * Publish an addition without replacing anything created since the review.
+ *
+ * Additions once went through {@link publish}, which parks and then deletes
+ * whatever sits at the target, so a gezel or project created after the review
+ * was lost. The exclusive file-by-file copy that replaced it kept that promise
+ * but took minutes and twice the disk for a multi-GB workspace, and a copy that
+ * died midway left a half-populated target that blocked every retry. Now the
+ * staged tree moves into place in one create-only rename. Only a move across
+ * volumes (a relocated gezels folder, a machine-shared project) copies, and it
+ * copies into a hidden sibling that moves into place once complete, so the
+ * target is either absent or whole.
+ */
+async function publishAddition(staged: string, target: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true });
   try {
-    await mkdir(target);
+    await renameIntoPlace(staged, target);
+    return;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error(`refusing to overwrite ${target}; it appeared after the restore review`);
-    }
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+  }
+  // A leading dot is never an entity id, so nothing lists a half-copied item.
+  const landing = join(
+    dirname(target),
+    `.restore-incoming-${basename(target)}-${randomUUID().slice(0, 8)}`,
+  );
+  try {
+    await cp(staged, landing, { recursive: true, force: false, errorOnExist: true });
+    await renameIntoPlace(landing, target);
+  } catch (err) {
+    await rm(landing, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
-  // Node has no portable create-only directory rename. Reserve the name, then
-  // publish files exclusively, with discoverable entity metadata last. Never
-  // remove the target on failure: another writer may have added work there.
-  const entries = await readdir(staged);
-  entries.sort((a, b) => Number(a === metadata) - Number(b === metadata));
-  for (const entry of entries) {
-    await cp(join(staged, entry), join(target, entry), {
-      recursive: true,
-      force: false,
-      errorOnExist: true,
-      mode: fsConstants.COPYFILE_EXCL,
-    });
+}
+
+/**
+ * Rename a directory onto a name nothing holds, never replacing what does.
+ *
+ * Node has no create-only rename, and each platform's plain rename replaces
+ * something: POSIX swaps out an empty directory, and Windows overwrites a file
+ * (it refuses any directory, empty or not). So POSIX reserves the name with an
+ * exclusive mkdir and renames over its own empty reservation; anything written
+ * into the reservation meanwhile makes the rename fail instead of vanish.
+ * Windows checks first and relies on that refusal for the case that matters,
+ * since anything Gezel creates at an entity's path is a directory.
+ */
+async function renameIntoPlace(from: string, to: string): Promise<void> {
+  if (process.platform === 'win32') {
+    if (await lexists(to)) throw appearedAfterReview(to);
+    await renameRetryingWindowsLocks(from, to);
+    return;
   }
+  try {
+    await mkdir(to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw appearedAfterReview(to);
+    throw err;
+  }
+  try {
+    await rename(from, to);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOTEMPTY' || code === 'EEXIST') throw appearedAfterReview(to);
+    // rmdir refuses a directory someone has since written into, so this
+    // only ever removes the empty reservation.
+    await rmdir(to).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * A freshly extracted tree is what Defender and the Search indexer open, and
+ * a handle inside it fails a directory rename with EPERM for a few
+ * milliseconds. EPERM is also how Windows refuses a destination that exists,
+ * so every failure checks the destination before deciding to wait.
+ */
+async function renameRetryingWindowsLocks(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      if (await lexists(to)) throw appearedAfterReview(to);
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+      if (!transient || attempt === 6) throw err;
+      await sleep(10 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+function appearedAfterReview(target: string): Error {
+  return new Error(`refusing to overwrite ${target}; it appeared after the restore review`);
+}
+
+function lexists(path: string): Promise<boolean> {
+  return lstat(path).then(
+    () => true,
+    () => false,
+  );
 }
 
 /**

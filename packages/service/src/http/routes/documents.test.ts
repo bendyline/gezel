@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
@@ -287,6 +287,57 @@ describe('DELETE /api/documents/delete', () => {
   it('returns 400 when /delete is called without ?path=', async () => {
     const res = await api('DELETE', '/api/documents/delete');
     expect(res.status).toBe(400);
+  });
+});
+
+// A library subfolder that is a junction or symlink to another drive is
+// refused on purpose. The refusal used to surface as an unhandled 500, which
+// the app shows as "Something went wrong inside Gezel".
+describe('a library folder that is a shortcut to somewhere else', () => {
+  it('refuses every change through it with a 403 that says why', async ({ skip }) => {
+    const outside = await mkdtemp(join(tmpdir(), 'gezel-documents-outside-'));
+    const link = join(home, 'documents', 'elsewhere');
+    try {
+      await writeFile(join(outside, 'keep.md'), 'outside work');
+      try {
+        await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch {
+        skip();
+      }
+      await api('PUT', '/api/documents/write', { path: 'here.md', content: 'here' });
+      const attempts: Array<[string, string, unknown?]> = [
+        ['PUT', '/api/documents/write', { path: 'elsewhere/keep.md', content: 'changed' }],
+        ['PUT', '/api/documents/write', { path: 'elsewhere/new/notes.md', content: 'new' }],
+        ['DELETE', '/api/documents/delete?path=elsewhere/keep.md'],
+        ['POST', '/api/documents/mkdir', { path: 'elsewhere/folder' }],
+        ['POST', '/api/documents/rename', { fromPath: 'elsewhere/keep.md', toPath: 'moved.md' }],
+        ['POST', '/api/documents/rename', { fromPath: 'here.md', toPath: 'elsewhere/here.md' }],
+      ];
+      for (const [method, path, body] of attempts) {
+        const res = await api(method, path, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        const reply = (await res.json()) as { error: string; code?: string };
+        expect(reply.code).toBe('symlink-escape');
+        expect(reply.error).toContain('elsewhere/');
+        expect(reply.error).toMatch(
+          /goes through a shortcut to a location outside your library, so Gezel won't change files through it/,
+        );
+      }
+      const raw = await httpFetch(
+        `${baseUrl}/api/documents/raw?path=${encodeURIComponent('elsewhere/image.png')}`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}` },
+          body: new Uint8Array([1, 2, 3]),
+        },
+      );
+      expect(raw.status).toBe(403);
+      expect(await readFile(join(outside, 'keep.md'), 'utf8')).toBe('outside work');
+      expect(await readFile(join(home, 'documents', 'here.md'), 'utf8')).toBe('here');
+    } finally {
+      await rm(link, { force: true }).catch(() => {});
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
