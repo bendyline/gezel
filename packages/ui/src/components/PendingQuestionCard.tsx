@@ -12,6 +12,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useS
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
+import { useQuestionDraft } from './question-drafts.js';
 import { questionChatTarget } from './question-nav.js';
 import { toolDisplayName } from './tool-display.js';
 
@@ -70,6 +71,8 @@ export function PendingQuestionCard(props: {
    * doesn't pass this (we're already in chat); the Home pane does.
    */
   onOpenInChat?: (question: Question) => void;
+  /** Keep documents in the context strip in a narrow Activity panel. */
+  compact?: boolean;
 }) {
   const { question } = props;
   const body = <QuestionBody {...props} />;
@@ -77,7 +80,12 @@ export function PendingQuestionCard(props: {
   // coverage JSON, a manifest) is context, not reading — it stays in the
   // card's context strip as a code block rather than filling half the
   // width with a literal.
-  if (question.answer || !question.documentPath || !isProseDocument(question.documentPath)) {
+  if (
+    props.compact ||
+    question.answer ||
+    !question.documentPath ||
+    !isProseDocument(question.documentPath)
+  ) {
     return body;
   }
   return (
@@ -327,8 +335,8 @@ function NightShiftReviewCard({
     tasksCompleted: number;
     reports: Array<{ projectId: string; path: string; title?: string; actionCount: number }>;
   };
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
 
   useEffect(() => {
@@ -357,7 +365,7 @@ function NightShiftReviewCard({
       setError((err as Error).message ?? 'Failed to dismiss.');
       setSubmitting(false);
     }
-  }, [question.id, submitting, onAnswered]);
+  }, [question.id, submitting, onAnswered, setSubmitting, setError]);
 
   const tasks = review?.tasksCompleted ?? [];
   const proposals = review?.diffpacks ?? [];
@@ -508,8 +516,12 @@ function TaskPausedCard({
   question: Question;
   onAnswered?: (q: Question) => void;
 }) {
-  const [submitting, setSubmitting] = useState<'retry' | 'dismiss' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft<'retry' | 'dismiss' | null>(
+    question.id,
+    'submitting',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
   const [held, setHeld] = useState<string | null>(null);
 
   const dismiss = useCallback(async () => {
@@ -523,7 +535,7 @@ function TaskPausedCard({
       setError((err as Error).message ?? 'Failed to dismiss.');
       setSubmitting(null);
     }
-  }, [question.id, submitting, onAnswered]);
+  }, [question.id, submitting, onAnswered, setSubmitting, setError]);
 
   const retry = useCallback(async () => {
     if (submitting) return;
@@ -557,7 +569,7 @@ function TaskPausedCard({
       setError((err as Error).message ?? 'Failed to restart the task.');
       setSubmitting(null);
     }
-  }, [question.id, question.taskRef, submitting, onAnswered]);
+  }, [question.id, question.taskRef, submitting, onAnswered, setSubmitting, setError]);
 
   return (
     <div className="pending-question pending-question-pending">
@@ -604,8 +616,8 @@ function TaskFinishedCard({
   onAnswered?: (q: Question) => void;
   onOpenInChat?: (question: Question) => void;
 }) {
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const dismiss = useCallback(async () => {
     if (submitting) return;
@@ -618,7 +630,7 @@ function TaskFinishedCard({
       setError((err as Error).message ?? 'Failed to dismiss.');
       setSubmitting(false);
     }
-  }, [question.id, submitting, onAnswered]);
+  }, [question.id, submitting, onAnswered, setSubmitting, setError]);
 
   return (
     <div className="pending-question pending-question-pending">
@@ -679,8 +691,12 @@ function ImageGenerationApprovalForm({
     promptPreview: string;
     estimatedSize?: string;
   };
-  const [submitting, setSubmitting] = useState<'allow' | 'always' | 'decline' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft<'allow' | 'always' | 'decline' | null>(
+    question.id,
+    'submitting',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const submit = useCallback(
     async (decision: 'allow' | 'always' | 'decline') => {
@@ -703,7 +719,7 @@ function ImageGenerationApprovalForm({
         setSubmitting(null);
       }
     },
-    [question.id, submitting, onAnswered],
+    [question.id, submitting, onAnswered, setSubmitting, setError],
   );
 
   const providerLabel =
@@ -783,8 +799,12 @@ function ScheduleApprovalForm({
     overlap?: string;
   };
   const nightShift = intent.runMode === 'night-shift';
-  const [submitting, setSubmitting] = useState<'enable' | 'keep' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft<'enable' | 'keep' | null>(
+    question.id,
+    'submitting',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const submit = useCallback(
     async (decision: 'enable' | 'keep') => {
@@ -802,7 +822,7 @@ function ScheduleApprovalForm({
         setSubmitting(null);
       }
     },
-    [question.id, submitting, onAnswered],
+    [question.id, submitting, onAnswered, setSubmitting, setError],
   );
 
   return (
@@ -871,8 +891,12 @@ function ToolPermissionForm({
     toolName: string;
     toolInput: Record<string, unknown>;
   };
-  const [submitting, setSubmitting] = useState<'allow' | 'deny' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft<'allow' | 'deny' | null>(
+    question.id,
+    'submitting',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const submit = useCallback(
     async (decision: 'allow' | 'deny') => {
@@ -889,7 +913,7 @@ function ToolPermissionForm({
         setSubmitting(null);
       }
     },
-    [question.id, submitting, onAnswered],
+    [question.id, submitting, onAnswered, setSubmitting, setError],
   );
 
   const argsPretty = useMemo(() => {
@@ -975,8 +999,12 @@ function ToolsetInstallApprovalForm({
     targetProjectId: string;
     craftbookId: string;
   };
-  const [submitting, setSubmitting] = useState<'allow' | 'deny' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft<'allow' | 'deny' | null>(
+    question.id,
+    'submitting',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const submit = useCallback(
     async (decision: 'allow' | 'deny') => {
@@ -993,7 +1021,7 @@ function ToolsetInstallApprovalForm({
         setSubmitting(null);
       }
     },
-    [question.id, submitting, onAnswered],
+    [question.id, submitting, onAnswered, setSubmitting, setError],
   );
 
   return (
@@ -1165,13 +1193,21 @@ function PendingForm({
   // Multi-select still needs explicit confirmation, and write-in mode
   // needs the row so the user can type without committing.
   const autoSubmit = !multi && !allowWriteIn && choices.length > 0;
-  const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [writeIn, setWriteIn] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [selected, setSelected] = useQuestionDraft<Set<number>>(
+    question.id,
+    'selected',
+    () => new Set(),
+  );
+  const [writeIn, setWriteIn] = useQuestionDraft(question.id, 'writeIn', () => '');
+  const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
   // Auto-submit mode tracks which choice is mid-flight so we can label
   // it ("Approving…") while disabling the rest.
-  const [autoSubmittingIdx, setAutoSubmittingIdx] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [autoSubmittingIdx, setAutoSubmittingIdx] = useQuestionDraft<number | null>(
+    question.id,
+    'autoSubmittingIdx',
+    () => null,
+  );
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
   const toggleChoice = useCallback(
     (idx: number) => {
@@ -1187,7 +1223,7 @@ function PendingForm({
         return next;
       });
     },
-    [multi],
+    [multi, setSelected],
   );
 
   const submit = useCallback(
@@ -1213,7 +1249,7 @@ function PendingForm({
         setSubmitting(false);
       }
     },
-    [question.id, selected, writeIn, submitting, onAnswered],
+    [question.id, selected, writeIn, submitting, onAnswered, setSubmitting, setError],
   );
 
   // Auto-submit handler: submits with a single explicit choice index,
@@ -1234,7 +1270,7 @@ function PendingForm({
         setAutoSubmittingIdx(null);
       }
     },
-    [question.id, autoSubmittingIdx, onAnswered],
+    [question.id, autoSubmittingIdx, onAnswered, setAutoSubmittingIdx, setError],
   );
 
   return (
@@ -1353,25 +1389,28 @@ function NpmInstallApprovalForm({
   onOpenInChat?: (question: Question) => void;
 }) {
   const packages = useMemo(() => npmIntentPackages(question), [question]);
-  const [decisions, setDecisions] = useState<NpmDecision[]>(() =>
+  const [decisions, setDecisions] = useQuestionDraft<NpmDecision[]>(question.id, 'decisions', () =>
     packages.map(() => 'install' as const),
   );
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
+  const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
 
-  const setOne = useCallback((idx: number, decision: NpmDecision) => {
-    setDecisions((prev) => {
-      const next = prev.slice();
-      next[idx] = decision;
-      return next;
-    });
-  }, []);
+  const setOne = useCallback(
+    (idx: number, decision: NpmDecision) => {
+      setDecisions((prev) => {
+        const next = prev.slice();
+        next[idx] = decision;
+        return next;
+      });
+    },
+    [setDecisions],
+  );
 
   const setAll = useCallback(
     (decision: NpmDecision) => {
       setDecisions(packages.map(() => decision));
     },
-    [packages],
+    [packages, setDecisions],
   );
 
   const submit = useCallback(
@@ -1396,7 +1435,7 @@ function NpmInstallApprovalForm({
         setSubmitting(false);
       }
     },
-    [packages, decisions, question.id, submitting, onAnswered],
+    [packages, decisions, question.id, submitting, onAnswered, setSubmitting, setError],
   );
 
   if (packages.length === 0) {

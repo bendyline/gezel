@@ -3063,6 +3063,8 @@ export const UpdateGezelSettingsRequestSchema = z.object({
   provider: ProviderNameSchema.nullable().optional(),
   model: z.string().nullable().optional(),
   reasoningEffort: z.string().nullable().optional(),
+  /** `null` goes back to following the role. */
+  factualWriting: z.boolean().nullable().optional(),
   /** `null` clears the per-gezel num_ctx override. */
   numCtx: z.number().int().positive().nullable().optional(),
   /** `null` inherits the global autoRecall default. */

@@ -309,6 +309,8 @@ export interface GateEvalDeps {
    * citation. Build with {@link taskSuppliedCitationPaths}.
    */
   knownCitationPaths?: readonly string[];
+  /** Resolves `knowledge://` citations against installed catalogs (see `citationsResolve`). */
+  resolveKnowledge?: (uri: string) => Promise<boolean>;
 }
 
 /**
@@ -714,6 +716,7 @@ async function evalCheckInner(
         ...(c.minCitations !== undefined ? { minCitations: c.minCitations } : {}),
         ...(c.corpus ? { corpus: c.corpus } : {}),
         ...(deps?.knownCitationPaths ? { knownPaths: deps.knownCitationPaths } : {}),
+        ...(deps?.resolveKnowledge ? { resolveKnowledge: deps.resolveKnowledge } : {}),
       });
       return {
         ok: r.ok,

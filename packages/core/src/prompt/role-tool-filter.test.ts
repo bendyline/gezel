@@ -359,6 +359,19 @@ describe('computeToolAllowlist', () => {
     expect(allow!.has('list_gezels')).toBe(true);
   });
 
+  it('keeps Wikipedia lookups for a cloud model writing in factual mode', () => {
+    const factual = computeToolAllowlist({
+      role: 'researcher',
+      mode: 'always',
+      provider: 'openai',
+      factualWriting: true,
+    });
+    expect(factual?.has('wikipedia_search')).toBe(true);
+    expect(factual?.has('wikipedia_read')).toBe(true);
+    const plain = computeToolAllowlist({ role: 'researcher', mode: 'always', provider: 'openai' });
+    expect(plain?.has('wikipedia_search')).toBe(false);
+  });
+
   it('exposes replace_lines wherever replace_in_file is available (positional edit for small models)', () => {
     // Invariant: a role that can content-edit (`replace_in_file`) can also
     // line-edit (`replace_lines`) — the surgical tool small models can drive

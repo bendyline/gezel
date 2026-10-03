@@ -4418,6 +4418,24 @@ server.tool(
   ReadDocumentInputSchema.shape,
   async ({ path }) => {
     const knowledgeUri = parseKnowledgeUri(path);
+    if (knowledgeUri?.fragment && 'chunk' in knowledgeUri.fragment) {
+      // A passage citation opens the passage it cites; the article without
+      // the fragment is one more read away.
+      const passage = await api.readKnowledgePassage(
+        knowledgeUri.catalogId,
+        knowledgeUri.documentId,
+        knowledgeUri.fragment.chunk,
+      );
+      const articleUri = path.split('#')[0];
+      const provenance = [
+        `Source: ${passage.title} — ${path}`,
+        ...(passage.headingPath.length ? [`Section: ${passage.headingPath.join(' › ')}`] : []),
+        `Lines ${passage.lineStart}-${passage.lineEnd} of the article (whole article: read_document ${articleUri})`,
+        ...(passage.sourceUrl ? [`Origin: ${passage.sourceUrl}`] : []),
+        ...(passage.sourceUpdatedAt ? [`Snapshot: ${passage.sourceUpdatedAt}`] : []),
+      ].join('\n');
+      return { content: [{ type: 'text' as const, text: `${provenance}\n\n${passage.text}` }] };
+    }
     if (knowledgeUri) {
       const doc = await api.readKnowledgeDocument(knowledgeUri.catalogId, knowledgeUri.documentId);
       let body = doc.markdown;

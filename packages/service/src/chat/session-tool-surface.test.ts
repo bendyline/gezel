@@ -910,6 +910,27 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('run_installed_script')).toBe(true);
     expect(allowlist!.has('read_file')).toBe(false);
   });
+
+  it('keeps a factual writer able to research through an immediate write_file clamp', async () => {
+    const request = {
+      ...baseOpts,
+      role: 'Writer',
+      provider: 'llama-cpp' as const,
+      session: baseSession({ gezelId: 'ida', providerName: 'llama-cpp' }),
+      tier: 'medium' as const,
+      latestUserMessage:
+        "Write a paragraph about Martha Washington's children from her first marriage.",
+    };
+    const clamps: string[] = [];
+    const plain = await resolveSessionToolSurface({ ...request, onClamp: (k) => clamps.push(k) });
+    expect(clamps).toContain('immediate-file-write');
+    expect(plain.allowlist!.has('wikipedia_search')).toBe(false);
+
+    const factual = await resolveSessionToolSurface({ ...request, factualWriting: true });
+    expect(factual.allowlist!.has('write_file')).toBe(true);
+    expect(factual.allowlist!.has('wikipedia_search')).toBe(true);
+    expect(factual.allowlist!.has('wikipedia_read')).toBe(true);
+  });
 });
 
 describe('resolveSessionToolSurface — Meester routing precedence', () => {

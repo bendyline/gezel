@@ -1813,6 +1813,7 @@ export async function startProductService(
     search.setKnowledgeSearch({
       search: (query, opts) => knowledge.searchUnified(query, opts),
     });
+    tasks.setKnowledgeCitationResolver(async (uri) => (await knowledge.resolveCitation(uri)).ok);
     knowledge.startAutoUpdateTimer();
   }
   // Drop the cached name catalog when a project/gezel/document is

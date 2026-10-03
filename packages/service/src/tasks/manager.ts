@@ -582,6 +582,16 @@ export class TaskManager {
   private keurmeester?: import('../keurmeester/manager.js').KeurmeesterManager;
 
   /**
+   * Resolves `knowledge://` citations for the `citationsResolve` gate. Set by
+   * product-service once knowledge catalogs are mounted; without it those
+   * citations are counted as unchecked URLs.
+   */
+  setKnowledgeCitationResolver(resolve: (uri: string) => Promise<boolean>): void {
+    this.knowledgeCitationResolver = resolve;
+  }
+  private knowledgeCitationResolver?: (uri: string) => Promise<boolean>;
+
+  /**
    * Wire the diffpack draft overlay. Set by service.ts after the
    * DiffpackManager exists (same cycle-avoidance as setKeurmeester). When a
    * task drafts a change proposal (`task.diffpackId`), its gates and
@@ -3075,6 +3085,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           artifactDir: task.artifactDir ?? `tasks/${task.num}`,
           steps: task.craftbook.steps,
         }),
+        ...(this.knowledgeCitationResolver
+          ? { resolveKnowledge: this.knowledgeCitationResolver }
+          : {}),
         // The nodeRuns executor — same security fence as user scripts:
         // when the policy disables script execution, the check rejects
         // with the policy message (fail-closed) instead of running.

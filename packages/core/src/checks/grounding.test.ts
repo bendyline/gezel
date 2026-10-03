@@ -318,3 +318,30 @@ describe('citationsResolve — task refs are not citations', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe('citationsResolve — knowledge citations', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+  const real = 'knowledge://bendyline/handboek/welcome#chunk=0123456789abcdef0123456789abcdef';
+  const invented = 'knowledge://bendyline/handboek/made-up-page';
+  const report = `Gezel keeps your work on disk (source: ${real}). It also predicts the weather (source: ${invented}).`;
+
+  it('resolves knowledge citations against installed catalogs when a resolver is wired', async () => {
+    const r = await citationsResolve(ws({ 'notes.md': report }), 'notes.md', {
+      minCitations: 1,
+      resolveKnowledge: async (uri) => uri === real,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.resolved).toEqual([real]);
+    expect(r.unresolved).toEqual([invented]);
+    expect(r.detail).toMatch(/knowledge:\/\/ citation to a passage in an installed catalog/);
+  });
+
+  it('counts them as unchecked URLs without a resolver, as before', async () => {
+    const r = await citationsResolve(ws({ 'notes.md': report }), 'notes.md', { minCitations: 1 });
+    expect(r.ok).toBe(true);
+    expect(r.urls.sort()).toEqual([invented, real].sort());
+  });
+});

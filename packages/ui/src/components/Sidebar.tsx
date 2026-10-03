@@ -44,7 +44,6 @@ import {
 } from './PrimaryNavigation.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectIcon } from './ProjectIcon.js';
-import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
 import {
   isMarkdownDocumentPath,
   markdownCompanionDirectory,
@@ -56,6 +55,7 @@ import { documentLabel } from './document-label.js';
 import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { fileManagerLabel } from './file-manager-label.js';
 import { useFirstRun } from './first-run-context.js';
+import { openUpdates } from './nav-actions.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
@@ -233,7 +233,6 @@ export function Sidebar({
 }: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   // The project whose pending-question resolution dialog is open, if any.
-  const [resolveProjectId, setResolveProjectId] = useState<string | null>(null);
   const selectedProjectId = selection?.kind === 'project' ? selection.id : null;
   const visibleProjects = useMemo(
     () =>
@@ -994,10 +993,10 @@ export function Sidebar({
                         className="project-row-intervene"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setResolveProjectId(p.id);
+                          openUpdates(p.id);
                         }}
-                        title={`${pendingCount} pending question${pendingCount === 1 ? '' : 's'} — resolve now`}
-                        aria-label={`Resolve ${pendingCount} pending question${pendingCount === 1 ? '' : 's'} in ${p.name}`}
+                        title={`${pendingCount} item${pendingCount === 1 ? ' needs' : 's need'} your attention — open Activity`}
+                        aria-label={`Open Activity: ${pendingCount} item${pendingCount === 1 ? ' needs' : 's need'} you in ${p.name}`}
                       >
                         <span className="project-row-intervene-glyph" aria-hidden="true">
                           ?
@@ -1364,13 +1363,6 @@ export function Sidebar({
         }}
         onConfirm={confirmDeleteDocument}
       />
-
-      {resolveProjectId && (
-        <ProjectQuestionsDialog
-          projectId={resolveProjectId}
-          onClose={() => setResolveProjectId(null)}
-        />
-      )}
     </aside>
   );
 }

@@ -33,6 +33,7 @@ import type {
   KnowledgeDocumentSummary as KnowledgeDocumentSummaryWire,
   KnowledgeInstallEvent,
   KnowledgeInstallRequest,
+  KnowledgePassageRead as KnowledgePassageReadWire,
   KnowledgeSearchRequest,
   KnowledgeTopicNode as KnowledgeTopicNodeWire,
   KnowledgeUpdatesResponse,
@@ -1873,6 +1874,7 @@ export interface KnowledgeInstallJobSnapshot {
 export type KnowledgeTopicNode = KnowledgeTopicNodeWire;
 export type KnowledgeDocumentSummary = KnowledgeDocumentSummaryWire;
 export type KnowledgeDocumentRead = KnowledgeDocumentReadWire;
+export type KnowledgePassageRead = KnowledgePassageReadWire;
 export type KnowledgeAssetInfo = KnowledgeAssetInfoWire;
 /**
  * @deprecated The listing row is `KnowledgeDocumentSummary`; the format's
@@ -2006,6 +2008,11 @@ export class GezelClient {
 
   getQueueStatus(): Promise<QueueStatusResponse> {
     return this.request('GET', '/api/queues');
+  }
+
+  /** One product-level view of work and questions across every project. */
+  getActivityStatus(): Promise<import('@bendyline/gezel').ActivityStatusResponse> {
+    return this.request('GET', '/api/activity');
   }
 
   /**
@@ -2576,6 +2583,18 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/document?id=${encodeURIComponent(documentId)}`,
+    );
+  }
+
+  /** The passage a `knowledge://…#chunk=<uid>` citation names. */
+  readKnowledgePassage(
+    catalogId: string,
+    documentId: string,
+    chunkUid: string,
+  ): Promise<KnowledgePassageRead> {
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/passage?id=${encodeURIComponent(documentId)}&chunk=${encodeURIComponent(chunkUid)}`,
     );
   }
 
@@ -4841,6 +4860,7 @@ export class GezelClient {
       sessionId: string;
       gezelId: string;
       projectId: string;
+      taskRef?: string;
       providerName: ProviderName;
       model?: string;
       userText: string;

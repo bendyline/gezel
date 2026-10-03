@@ -8,6 +8,7 @@ import {
   inferTargetProject,
   isOwnerStep,
   renderCurrentDateTimeLine,
+  resolveFactualWriting,
   resolvePromptFootprint,
   stepOwnerGezelId,
   taskTranscriptCompatible,
@@ -343,6 +344,7 @@ import {
   isExpectedImageDeliverablePath,
 } from './deliverable-paths.js';
 import type { ChatEventBus, PublishScope } from './events.js';
+import { EvidenceLedger } from './evidence-ledger.js';
 import {
   deriveRepairClampNudge,
   formatExpectedDeliverableAnnotation,
@@ -1576,6 +1578,8 @@ export class ChatManager extends LocalEngineRuntime {
   readonly telemetry = new SessionTelemetryTracker();
   private telemetryGpuUnsub: (() => void) | null = null;
   private readonly appToolRelays: AppToolRelayRegistry | undefined;
+  /** Numbered evidence of each session writing in factual mode (chat/evidence-ledger.ts). */
+  private readonly evidenceLedgers = new Map<string, EvidenceLedger>();
 
   constructor(opts: ChatManagerOptions) {
     super(opts);
@@ -2869,6 +2873,7 @@ export class ChatManager extends LocalEngineRuntime {
     sessionId: string;
     gezelId: string;
     projectId: string;
+    taskRef?: string;
     providerName: ProviderName;
     model?: string;
     userText: string;
@@ -2881,6 +2886,7 @@ export class ChatManager extends LocalEngineRuntime {
       sessionId: string;
       gezelId: string;
       projectId: string;
+      taskRef?: string;
       providerName: ProviderName;
       model?: string;
       userText: string;
@@ -2900,6 +2906,7 @@ export class ChatManager extends LocalEngineRuntime {
         sessionId,
         gezelId: state.record.gezelId,
         projectId: state.record.projectId,
+        ...(state.record.taskRef ? { taskRef: state.record.taskRef } : {}),
         providerName: state.record.providerName,
         ...(state.effectiveModel ? { model: state.effectiveModel } : {}),
         userText: entry.userText,
@@ -7878,6 +7885,18 @@ export class ChatManager extends LocalEngineRuntime {
           );
         }
       }
+      // A factual-mode turn starts here: what the person has said counts as
+      // evidence, and refusal counts reset. Nudges continue the turn they
+      // belong to rather than starting one.
+      const evidenceLedger = this.evidenceLedgers.get(sessionId);
+      if (evidenceLedger && messageOrigin !== 'background-nudge' && messageOrigin !== 'system') {
+        evidenceLedger.beginTurn(
+          [
+            ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
+            userText,
+          ].join('\n'),
+        );
+      }
       const projectRetrieval = await this.resolveTurnProjectRetrieval(
         state,
         userText,
@@ -8442,6 +8461,22 @@ export class ChatManager extends LocalEngineRuntime {
           assistantMessage.warnings = [...(assistantMessage.warnings ?? []), ...drainedWarnings];
         }
         this.currentTurnWarnings.set(sessionId, []);
+        // Factual writing: what the reply cites, and what no evidence shows.
+        // Text that went into the person's document unverified, after the
+        // write check gave up refusing it, is said out loud.
+        const turnLedger = this.evidenceLedgers.get(sessionId);
+        if (turnLedger) {
+          const unverifiedWrites = turnLedger.takeUnverifiedWrites();
+          const grounding = turnLedger.grounding(finalContent, unverifiedWrites.sentences);
+          if (grounding) assistantMessage.grounding = grounding;
+          const unverified = unverifiedWrites.sentences.length;
+          if (unverified > 0) {
+            assistantMessage.warnings = [
+              ...(assistantMessage.warnings ?? []),
+              `${unverified === 1 ? 'One statement' : `${unverified} statements`} written into ${unverifiedWrites.places.join(' and ')} could not be matched to any source. Check ${unverified === 1 ? 'it' : 'them'} before relying on the text.`,
+            ];
+          }
+        }
         state.record.messages.push(assistantMessage);
         // Mid-turn approval questions (npm-install, command,
         // tool-permission, image-generation) are synthesized
@@ -12989,6 +13024,7 @@ export class ChatManager extends LocalEngineRuntime {
         state.session?.numCtx ??
         this.providers.get(state.record.providerName)?.getContextWindow?.();
       const linkedProjectIds = await this.store.linkedProjectIds(state.record.projectId);
+      const evidenceLedger = this.evidenceLedgers.get(state.record.id);
       // Captured by the probe callback so telemetry exists even when the
       // floor/hydration turn the whole retrieval into null — the exact blind
       // spot where "arms all scored low" used to leave no audit trace at all.
@@ -13011,6 +13047,15 @@ export class ChatManager extends LocalEngineRuntime {
         projectIds: [state.record.projectId, ...linkedProjectIds],
         ...(contextWindow ? { contextWindow } : {}),
         availableToolNames: liveTurnToolNames(state.session),
+        ...(evidenceLedger
+          ? {
+              citeHit: (hit: { excerpt: string; title?: string; uri?: string; path?: string }) =>
+                evidenceLedger.add('retrieval', hit.excerpt, {
+                  ...(hit.title || hit.path ? { title: hit.title ?? hit.path } : {}),
+                  ...(hit.uri || hit.path ? { ref: hit.uri ?? hit.path } : {}),
+                }),
+            }
+          : {}),
         onSearchProbe: (p) => {
           probe = p;
         },
@@ -13113,6 +13158,24 @@ export class ChatManager extends LocalEngineRuntime {
   /** Identity of the app tools this session is offered; '' when it is offered none. */
   private appToolsFingerprint(record: ChatSession): string {
     return appToolBindingsFingerprint(this.appToolBindingsFor(record));
+  }
+
+  /**
+   * The session's evidence ledger while it writes in factual mode, picked
+   * up from the transcript after a restart so numbering continues. Dropped
+   * when the mode goes off, so a stale ledger never stamps a reply.
+   */
+  private evidenceLedgerFor(record: ChatSession, on: boolean): EvidenceLedger | null {
+    if (!on) {
+      this.evidenceLedgers.delete(record.id);
+      return null;
+    }
+    let ledger = this.evidenceLedgers.get(record.id);
+    if (!ledger) {
+      ledger = EvidenceLedger.fromMessages(record.messages);
+      this.evidenceLedgers.set(record.id, ledger);
+    }
+    return ledger;
   }
 
   /**
@@ -14671,6 +14734,28 @@ export class ChatManager extends LocalEngineRuntime {
         : []),
       ...(project?.connectors?.length ? ['draft_connector_action'] : []),
     ];
+    // Factual writing follows the gezel's role, or its explicit setting, and
+    // is on for any session that can write into a person's open document.
+    // Resolved before either tool surface: it keeps the lookups on the roster.
+    const appToolNames = appToolBindings.flatMap((binding) =>
+      binding.tools.map((tool) => tool.name),
+    );
+    const factualWriting = record.visitorAccess
+      ? { on: false, reason: 'off' as const }
+      : resolveFactualWriting({
+          ...(gezel?.parsed.frontmatter.factualWriting !== undefined
+            ? { override: gezel.parsed.frontmatter.factualWriting }
+            : {}),
+          ...(gezel?.role ? { role: gezel.role } : {}),
+          ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
+          toolNames: appToolNames,
+        });
+    // Evidence is numbered only where the bridge sees the tool traffic;
+    // elsewhere the prompt asks for named sources and nothing is checked.
+    const evidenceLedger = this.evidenceLedgerFor(
+      record,
+      factualWriting.on && providerUsesManagedMcpBridge(record.providerName),
+    );
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,
@@ -14689,6 +14774,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),
+      ...(factualWriting.on ? { factualWriting: true } : {}),
       githubLinked,
       isGitRepo,
       securityPolicy,
@@ -14770,6 +14856,7 @@ export class ChatManager extends LocalEngineRuntime {
       );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
+    evidenceLedger?.setLookupTools(availableBuiltinTools.map((tool) => tool.name));
     const workspaceGestalt = workspaceGestaltActive
       ? await this.buildWorkspaceGestalt(
           record.projectId,
@@ -14873,6 +14960,13 @@ export class ChatManager extends LocalEngineRuntime {
       // issues) into the corpus — turn on the provenance-framing block so the
       // model treats it as data, not commands.
       ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
+      ...(factualWriting.on
+        ? {
+            factualWriting: {
+              toolNames: [...availableBuiltinTools.map((tool) => tool.name), ...appToolNames],
+            },
+          }
+        : {}),
     });
 
     // Debug-mode contract check against the ACTUAL rendered prompt and the
@@ -15002,6 +15096,9 @@ export class ChatManager extends LocalEngineRuntime {
         ? { directFileWorkTargetPath }
         : {}),
       ...(record.numCtx ? { numCtx: record.numCtx } : {}),
+      // Factual writing: number evidence results and check document writes
+      // on every bridge in the session.
+      ...(evidenceLedger ? { grounding: evidenceLedger.hooks() } : {}),
       // Always pass the resolved boolean. The provider also fails closed when
       // called directly with an absent option, so omitting an explicit false
       // here would accidentally turn a user's opt-out back on.
@@ -16318,6 +16415,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
         : {}),
+      ...(factualWriting.on ? { factualWriting: true } : {}),
       githubLinked,
       isGitRepo,
       securityPolicy,

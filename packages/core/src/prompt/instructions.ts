@@ -1,5 +1,6 @@
 import type { GeneralistMode } from '../generalist-mode.js';
 import { displayName } from '../gezel-display.js';
+import { factualWritingGuidance } from '../grounding/factual-writing.js';
 import { createLogger } from '../log.js';
 import { pronounFormsForGender, pronounsForGender } from '../names.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
@@ -396,6 +397,14 @@ export interface BuildInstructionsOptions {
    */
   untrustedContentPresent?: boolean;
   /**
+   * Factual writing (grounding/factual-writing.ts): the session states facts
+   * only from evidence and cites it. `toolNames` is every tool the session
+   * can call, app tools included, so the block names only lookups it has and
+   * mentions document inserts only where they exist. Resolved by role, by a
+   * gezel override, or by the session writing into a person's document.
+   */
+  factualWriting?: { toolNames: Iterable<string> };
+  /**
    * Lean-agent profile (a game / chat-room project type). Drops the
    * developer-agent browsing/"Web work" scaffolding. The tool-cookbook and
    * file-editing behaviors self-trim because the lean tool surface strips
@@ -587,12 +596,19 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     workspaceWritable,
     layeredPrefixCache,
     untrustedContentPresent,
+    factualWriting,
     browserAutomationRoleExcluded,
     browserLocalPreviewOnly,
   } = opts;
   // Provenance-framing block — present only when the session can surface
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
   const untrustedContentBlock = untrustedContentPresent ? UNTRUSTED_CONTENT_GUIDANCE : '';
+  const factualWritingBlock = factualWriting
+    ? `\n\n${factualWritingGuidance({
+        numbered: providerName ? providerUsesManagedMcpBridge(providerName) : false,
+        toolNames: factualWriting.toolNames,
+      })}`
+    : '';
   // A non-writable project strips workspace-write tools from every role.
   // Inject a posture note + suppress write_file-shaped deliverable guidance
   // below.
@@ -1635,7 +1651,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     .filter(Boolean)
     .join('\n\n');
   const operationalGuidanceSection = operationalGuidance ? `\n\n---\n\n${operationalGuidance}` : '';
-  const responseGuidanceSection = `\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+  const responseGuidanceSection = `\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}`;
 
   const aboutIntro =
     '\n\nThe section below is your "about" document — it describes your role, what you know, and how you should behave.\n\n---\n\n';
@@ -1662,6 +1678,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       ['browsingForRole', browsingForRole, 'stable'],
       ['markdownGuidance', markdownGuidance, 'stable'],
       ['untrustedContent', untrustedContentBlock, 'stable'],
+      ['factualWriting', factualWritingBlock, 'stable'],
       ['localHints', localHints, 'stable'],
       ['verboseModelHints', verboseModelHints, 'stable'],
       ['availableTools (text block)', availableToolsBlock, 'stable'],
@@ -1729,7 +1746,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // model-specific tool syntax, and the late recency anchor.
   if (focusedTaskContext && task?.step?.prompt) {
     const actionGuidance = actDontNarrate ? `\n\n${actDontNarrate}` : '';
-    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
     const volatile = `${taskContext}${consultationAddendum}${activeTaskAnchor}`
       .replace(/^\n+(?:---\n+)?/, '')
       .trim();

@@ -112,6 +112,7 @@ import {
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
   projectManagedWorkspaceWritePolicy,
+  resolveFactualWriting,
   resolveSharedProjectId,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
@@ -1646,6 +1647,8 @@ export class Store {
       model: d.model,
       provider: d.provider,
       reasoningEffort: d.reasoningEffort,
+      ...(d.factualWriting !== undefined ? { factualWriting: d.factualWriting } : {}),
+      writesFactually: d.writesFactually ?? false,
       font: d.font,
       voice: d.parsed.frontmatter.voice,
       templateId: d.templateId,
@@ -2045,6 +2048,7 @@ export class Store {
       provider?: ProviderName | null;
       model?: string | null;
       reasoningEffort?: string | null;
+      factualWriting?: boolean | null;
       numCtx?: number | null;
       autoRecall?: boolean | null;
       retrieval?: RetrievalPolicy | null;
@@ -2099,6 +2103,8 @@ export class Store {
     if (patch.reasoningEffort === null) delete frontmatter.reasoningEffort;
     else if (patch.reasoningEffort !== undefined)
       frontmatter.reasoningEffort = patch.reasoningEffort;
+    if (patch.factualWriting === null) delete frontmatter.factualWriting;
+    else if (patch.factualWriting !== undefined) frontmatter.factualWriting = patch.factualWriting;
     if (patch.numCtx === null) delete frontmatter.numCtx;
     else if (patch.numCtx !== undefined) frontmatter.numCtx = patch.numCtx;
     if (patch.autoRecall === null) delete frontmatter.autoRecall;
@@ -2132,6 +2138,7 @@ export class Store {
     if (patch.provider !== undefined) changed.push('provider');
     if (patch.model !== undefined) changed.push('model');
     if (patch.reasoningEffort !== undefined) changed.push('reasoningEffort');
+    if (patch.factualWriting !== undefined) changed.push('factualWriting');
     if (patch.numCtx !== undefined) changed.push('numCtx');
     if (patch.autoRecall !== undefined) changed.push('autoRecall');
     if (patch.retrieval !== undefined) changed.push('retrieval');
@@ -2353,6 +2360,16 @@ export class Store {
         model: parsed.frontmatter.model,
         provider: parsed.frontmatter.provider,
         reasoningEffort: parsed.frontmatter.reasoningEffort,
+        factualWriting: parsed.frontmatter.factualWriting,
+        writesFactually: resolveFactualWriting({
+          ...(parsed.frontmatter.factualWriting !== undefined
+            ? { override: parsed.frontmatter.factualWriting }
+            : {}),
+          ...(parsed.frontmatter.role ? { role: parsed.frontmatter.role } : {}),
+          ...(parsed.frontmatter.roleBasedName
+            ? { roleBasedName: parsed.frontmatter.roleBasedName }
+            : {}),
+        }).on,
         numCtx: parsed.frontmatter.numCtx,
         autoRecall: parsed.frontmatter.autoRecall,
         retrieval: parsed.frontmatter.retrieval,
@@ -5947,6 +5964,7 @@ export class Store {
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
           ...(m.deliverable ? { deliverable: m.deliverable } : {}),
           ...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {}),
+          ...(m.grounding ? { grounding: m.grounding } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),
@@ -7357,6 +7375,7 @@ function defaultAgentMarkdown(params: {
   const suggestedTuningProfile = params.extraFrontmatter?.suggestedTuningProfile;
   const tuning = params.extraFrontmatter?.tuning;
   const reasoningEffort = params.extraFrontmatter?.reasoningEffort;
+  const factualWriting = params.extraFrontmatter?.factualWriting;
   const provider = params.extraFrontmatter?.provider;
   const frontmatter = [
     '---',
@@ -7378,6 +7397,7 @@ function defaultAgentMarkdown(params: {
       ? [`suggestedTuningProfile: ${JSON.stringify(suggestedTuningProfile)}`]
       : []),
     ...(reasoningEffort ? [`reasoningEffort: ${JSON.stringify(reasoningEffort)}`] : []),
+    ...(factualWriting !== undefined ? [`factualWriting: ${factualWriting}`] : []),
     ...(tuning ? [`tuning: ${JSON.stringify(tuning)}`] : []),
     ...(ff
       ? [

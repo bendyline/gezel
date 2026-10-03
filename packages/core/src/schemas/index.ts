@@ -78,3 +78,4 @@ export * from './turn-intent-plan.js';
 export * from './native-capacity.js';
 export * from './offline-speech.js';
 export * from './perf.js';
+export * from './activity.js';

@@ -39,6 +39,7 @@ import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
+import { activityRoutes } from './routes/activity.js';
 import { aiAppRoutes } from './routes/ai-apps.js';
 import { aiRoutes } from './routes/ai.js';
 import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
@@ -564,6 +565,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/craftbooks', craftbookRoutes(ctx));
   app.route('/api/usage', usageRoutes(ctx));
   app.route('/api/queues', queueRoutes(ctx));
+  app.route('/api/activity', activityRoutes(ctx));
   app.route('/api/cache', cacheRoutes(ctx));
   app.route('/api/ai', aiRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));

@@ -50,6 +50,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
+| 14b | `## Facts and sources` — state facts only from evidence, cite it as `[n]`, look up or leave out what is missing ([factual-writing.md](factual-writing.md)) | factual mode: the gezel's `factualWriting` setting, else a fact-stating role (writer, researcher, reviewer, …), else any session with document-write tools | ~700 ch |
 | 15 | **Behavior `promptAppend` walk** (the old "local hints") | per resolved model profile — see next section | 0 to ~9.4K ch |
 | 16 | `## Tools available this turn` ([chat/tools-block.ts](../packages/service/src/chat/tools-block.ts)) | tiers tiny/small/medium only; skipped for providers without an MCP bridge (copilot, the CLI providers); per-gezel `tools.md` overrides; bridge-failure notice overrides all | tiny: full descriptions; small/medium: names-only |
 | 17 | File-edits-off notice / consultation-mode addendum / fresh-project addendum | lockdown / spawned consultation / ≤5 workspace files | ~1–2K ch each |
@@ -250,6 +251,9 @@ while they stream.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, and shared
   library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.
+  In a factual-mode session each row carries its session-wide evidence
+  number (`[7] [knowledge] …`), and evidence tool results get the same
+  `[n]` header in the bridge ([factual-writing.md](factual-writing.md)).
   This changes with the turn without rebuilding the system prompt; see
   [Project retrieval and indexed context](project-retrieval.md).
 - **Preludes** (`resolveUserPromptPrelude` — first non-null wins, prepended to the user's

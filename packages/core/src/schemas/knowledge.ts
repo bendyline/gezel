@@ -456,6 +456,22 @@ export const KnowledgeDocumentReadSchema = KnowledgeDocumentSummarySchema.extend
 });
 export type KnowledgeDocumentRead = z.infer<typeof KnowledgeDocumentReadSchema>;
 
+/** The passage a `knowledge://…#chunk=<uid>` citation names. */
+export const KnowledgePassageReadSchema = z.object({
+  catalogId: z.string(),
+  catalogVersion: z.string(),
+  documentId: z.string(),
+  chunkUid: z.string(),
+  title: z.string(),
+  headingPath: z.array(z.string()),
+  lineStart: z.number().int(),
+  lineEnd: z.number().int(),
+  text: z.string(),
+  sourceUrl: z.string().optional(),
+  sourceUpdatedAt: z.string().optional(),
+});
+export type KnowledgePassageRead = z.infer<typeof KnowledgePassageReadSchema>;
+
 /** One declared image asset of a mounted catalog. */
 export const KnowledgeAssetInfoSchema = z.object({
   path: z.string(),

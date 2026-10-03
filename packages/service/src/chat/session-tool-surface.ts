@@ -8,6 +8,7 @@ import {
   applyStepToolPolicy,
   createLogger,
   deliverableKindForStep,
+  factualLookupTools,
   isLocalProvider,
   normalizeScriptRefs,
   resolveRoleId,
@@ -124,6 +125,8 @@ export interface ResolveSessionToolSurfaceOptions {
   /** Current gezel owns this project (`project.voormanGezelId === gezelId`). */
   isProjectVoorman?: boolean;
   webSearchProvider?: WebSearchBackendName;
+  /** Factual writing keeps the Wikipedia lookups on cloud models too. */
+  factualWriting?: boolean;
   githubLinked: boolean;
   isGitRepo: boolean;
   securityPolicy?: ResolvedSecurityPolicy;
@@ -383,6 +386,7 @@ export async function resolveSessionToolSurface(
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.isProjectVoorman ? { isProjectVoorman: true } : {}),
     ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+    ...(opts.factualWriting ? { factualWriting: true } : {}),
     githubLinked: opts.githubLinked,
     isGitRepo: opts.isGitRepo,
     ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
@@ -448,6 +452,7 @@ export async function resolveSessionToolSurface(
           ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
           ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
           ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+          ...(opts.factualWriting ? { factualWriting: true } : {}),
           githubLinked: opts.githubLinked,
           isGitRepo: opts.isGitRepo,
           ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
@@ -514,6 +519,7 @@ export async function resolveSessionToolSurface(
       ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
       ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
       ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+      ...(opts.factualWriting ? { factualWriting: true } : {}),
       githubLinked: opts.githubLinked,
       isGitRepo: opts.isGitRepo,
       ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
@@ -566,7 +572,11 @@ export async function resolveSessionToolSurface(
     mode: opts.mode,
     ...(kit ? { deliverableKind: kit.kind } : {}),
     ...(researchIntent ? { researchIntent: true } : {}),
-    stepMandatedTools: new Set([...mandatedStepTools, ...conditionallyReferencedStepTools]),
+    stepMandatedTools: new Set([
+      ...mandatedStepTools,
+      ...conditionallyReferencedStepTools,
+      ...(opts.factualWriting && rawAllowlist ? factualLookupTools(rawAllowlist) : []),
+    ]),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
@@ -712,6 +722,17 @@ export async function resolveSessionToolSurface(
     hasToolsetOverride,
   });
   if (allowlist !== allowlistBeforeSourceEdit) opts.onClamp?.('existing-source-edit');
+
+  // A factual session's lookups survive every message-shaped clamp. "Write a
+  // paragraph about Martha Washington's children" reads as an immediate file
+  // write, and the clamp left a Writer holding `write_file` alone: it saved
+  // four wrong dates from memory and, with nothing to research with, told the
+  // person it had no sources (gemma4-31b, 2026-10-02).
+  if (opts.factualWriting && allowlist && cappedAllowlist && allowlist !== cappedAllowlist) {
+    const withLookups = new Set(allowlist);
+    for (const name of factualLookupTools(cappedAllowlist)) withLookups.add(name);
+    allowlist = withLookups;
+  }
 
   // A message-shaped clamp is subordinate to the persisted craftbook
   // procedure. File handoffs commonly contain `write_file` wording even when

@@ -372,6 +372,25 @@ the resolved security policy. Copilot's SDK-native built-ins (`bash`,
 bypass those layers. An explicit install-level or per-gezel
 `sandboxCopilot: false` is the deliberate compatibility escape hatch.
 
+### Factual writing
+
+A gezel that states facts for people cites its evidence and does not fill
+gaps from memory. Factual mode is resolved per session by
+`resolveFactualWriting` ([core grounding/factual-writing.ts](packages/core/src/grounding/factual-writing.ts)):
+the gezel's `factualWriting` setting, else a fact-stating role (writer,
+researcher, reviewer, journalist, historian, …; fiction excluded), else any
+session that can write into a person's document (the Office and LibreOffice
+`doc_insert_text` / `doc_replace_selection` / `slide_insert`). The session's
+[EvidenceLedger](packages/service/src/chat/evidence-ledger.ts) numbers every
+retrieval row and evidence-tool result as `[n]` (session-wide, through the
+bridge's `grounding` hooks). It refuses a document write that states a name,
+date, number or quote no evidence shows (twice per tool per turn, then it
+writes and warns). It also stamps `ChatMessage.grounding` on each reply.
+The check is literal and model-free ([core grounding/citations.ts](packages/core/src/grounding/citations.ts)):
+it catches invention, not a wrong source copied faithfully. Never put this
+guidance in about.md. It is runtime text, gated by role like the other
+layers. Contract in [docs/factual-writing.md](docs/factual-writing.md).
+
 ### Launching a craftbook from chat
 
 Two surfaces turn a person's words into a craftbook task, and they share one

@@ -3,6 +3,7 @@ import type {
   ChatMessageToolCall,
   ChatTurnErrorDetail,
   ContextCompaction,
+  MessageGrounding,
   Question,
   ReferencedFile,
   SessionGpuTask,
@@ -65,10 +66,17 @@ import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
+import { citationFromHref, evidenceTitle, linkifyCitations } from './citation-linkify.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { shouldDisplayIntent } from './intent-display.js';
-import { openProjectFileActions, openTabAction, runNavActions } from './nav-actions.js';
+import { knowledgeRefFromHref, linkifyKnowledgeRefs } from './knowledge-linkify.js';
+import {
+  openKnowledgeDocumentActions,
+  openProjectFileActions,
+  openTabAction,
+  runNavActions,
+} from './nav-actions.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -479,6 +487,12 @@ export interface MessageBubbleProps {
    * session-debug bundle.
    */
   warnings?: WarningValue[];
+  /**
+   * A factual-mode reply's numbered evidence and citation check. The body's
+   * `[n]` markers link to it, and a collapsed "Sources" row lists it with
+   * any statements no source showed.
+   */
+  grounding?: MessageGrounding;
 }
 
 type RetrievalDisplayHit = NonNullable<MessageBubbleProps['retrieval']>['hits'][number];
@@ -650,6 +664,7 @@ export function MessageBubble({
   synthetic,
   contextCompaction,
   warnings,
+  grounding,
 }: MessageBubbleProps) {
   // When the assistant reply referenced real files, pre-process the
   // markdown so code spans matching those filenames become clickable
@@ -667,10 +682,15 @@ export function MessageBubble({
   // render time. Idempotent — text that's already been promoted is a
   // no-op.
   const displayContent = useMemo(() => {
-    const scrubbed = promoteBareChannelNames(stripVisibleToolCallMarkup(content));
+    const scrubbed = linkifyCitations(
+      linkifyKnowledgeRefs(promoteBareChannelNames(stripVisibleToolCallMarkup(content))),
+      grounding?.evidence,
+    );
     if (!referencedFiles || referencedFiles.length === 0) return scrubbed;
     return linkifyFileRefs(scrubbed, referencedFiles);
-  }, [content, referencedFiles]);
+  }, [content, referencedFiles, grounding]);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [focusedCitation, setFocusedCitation] = useState<number | null>(null);
 
   // Walk `displayContent` and splice intent dividers at their offsets.
   // Produces an ordered list of `text` slices + `intent` markers. A
@@ -709,16 +729,50 @@ export function MessageBubble({
   // navigating.
   const handleBodyClick = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
-      if (!onFileReference) return;
       const target = e.target as HTMLElement | null;
       const anchor = target?.closest('a');
       if (!anchor) return;
+      // A `[n]` citation opens what it cites when that is a document or a
+      // page, and otherwise shows the source in the Sources row.
+      const citation = citationFromHref(anchor.getAttribute('href') ?? '');
+      if (citation !== null) {
+        e.preventDefault();
+        const item = grounding?.evidence.find((ev) => ev.n === citation);
+        const knowledge = item?.ref ? knowledgeRefFromHref(item.ref) : null;
+        if (knowledge) {
+          runNavActions(
+            openKnowledgeDocumentActions({
+              catalogId: knowledge.catalogId,
+              documentId: knowledge.documentId,
+            }),
+          );
+        } else if (item?.ref && /^https?:\/\//.test(item.ref)) {
+          window.open(item.ref, '_blank', 'noopener,noreferrer');
+        } else {
+          setSourcesOpen(true);
+          setFocusedCitation(citation);
+        }
+        return;
+      }
+      // A knowledge citation opens its document in the Knowledge area.
+      const cited = knowledgeRefFromHref(anchor.getAttribute('href') ?? '');
+      if (cited) {
+        e.preventDefault();
+        runNavActions(
+          openKnowledgeDocumentActions({
+            catalogId: cited.catalogId,
+            documentId: cited.documentId,
+          }),
+        );
+        return;
+      }
+      if (!onFileReference) return;
       const file = fileRefFromHref(anchor.getAttribute('href') ?? '');
       if (!file) return;
       e.preventDefault();
       onFileReference(file);
     },
-    [onFileReference],
+    [onFileReference, grounding],
   );
 
   const hasFiles = referencedFiles && referencedFiles.length > 0;
@@ -847,6 +901,61 @@ export function MessageBubble({
               </li>
             );
           })}
+        </ul>
+      </details>
+    ) : null;
+
+  // A factual-mode reply's sources: the evidence its [n] markers name, and
+  // any statement no source showed. Collapsed until a citation is clicked.
+  const groundingEvidence = grounding?.evidence ?? [];
+  const groundingIssues = grounding?.problems ?? [];
+  const groundingSources =
+    role !== 'user' && (groundingEvidence.length > 0 || groundingIssues.length > 0) ? (
+      <details
+        className="msg-retrieval msg-grounding"
+        open={sourcesOpen}
+        onToggle={(e) => setSourcesOpen(e.currentTarget.open)}
+      >
+        <summary className="msg-retrieval-summary">
+          {groundingEvidence.length} source{groundingEvidence.length === 1 ? '' : 's'}
+          {groundingIssues.length > 0 &&
+            ` · ${groundingIssues.length} statement${groundingIssues.length === 1 ? '' : 's'} not found in any source`}
+        </summary>
+        {groundingIssues.length > 0 && (
+          <ul className="msg-grounding-issues">
+            {groundingIssues.map((issue) => (
+              <li key={issue.text} className="msg-grounding-issue">
+                {issue.text}
+                <span className="msg-grounding-missing">
+                  {issue.status === 'bad-citation'
+                    ? ` — cites ${issue.missing.join(', ')}, which is not one of the sources`
+                    : issue.missing.length > 0
+                      ? ` — not in any source: ${issue.missing.join(', ')}`
+                      : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ul className="msg-retrieval-list">
+          {groundingEvidence.map((item) => (
+            <li key={item.n} className="msg-retrieval-item">
+              <details className="msg-retrieval-source" open={focusedCitation === item.n}>
+                <summary className="msg-retrieval-source-summary">
+                  <span className="msg-retrieval-source-label">
+                    [{item.n}] {evidenceTitle(item)}
+                  </span>
+                </summary>
+                <div className="msg-retrieval-source-body">
+                  {item.excerpt ? (
+                    <pre className="msg-retrieval-excerpt">{item.excerpt}</pre>
+                  ) : (
+                    <p className="msg-retrieval-empty">No excerpt was kept for this source.</p>
+                  )}
+                </div>
+              </details>
+            </li>
+          ))}
         </ul>
       </details>
     ) : null;
@@ -1112,6 +1221,7 @@ export function MessageBubble({
       )}
       {chips}
       {isUser && consultedSources}
+      {groundingSources}
       {planCards}
       <MessageActions
         markdown={content}

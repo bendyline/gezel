@@ -2398,6 +2398,7 @@ export class PortableProductService {
               sessionId: session.id,
               gezelId: session.gezelId,
               projectId: session.projectId,
+              ...(session.taskRef ? { taskRef: session.taskRef } : {}),
               providerName: session.providerName,
               ...(session.model ? { model: session.model } : {}),
               userText: lastUserText(session),

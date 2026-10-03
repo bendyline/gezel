@@ -296,6 +296,13 @@ export async function citationsResolve(
     minCitations?: number;
     corpus?: string[];
     knownPaths?: readonly string[];
+    /**
+     * Resolves a `knowledge://` citation against the installed catalogs.
+     * Without it those citations are counted as unchecked URLs; with it, one
+     * that names a catalog, document or passage that is not installed fails
+     * like a missing file.
+     */
+    resolveKnowledge?: (uri: string) => Promise<boolean>;
   } = {},
 ): Promise<CitationsResult> {
   const content = await ws.read(file);
@@ -348,6 +355,11 @@ export async function citationsResolve(
   const forgiven: string[] = [];
 
   for (const c of cites) {
+    if (opts.resolveKnowledge && /^knowledge:\/\//i.test(c)) {
+      if (await opts.resolveKnowledge(c)) resolved.push(c);
+      else unresolved.push(c);
+      continue;
+    }
     if (/^[a-z][\w+.-]*:\/\//i.test(c) || c.startsWith('mailto:')) {
       urls.push(c);
       if (corpus && !corpus.has(c.toLowerCase())) unresolved.push(c);
@@ -380,7 +392,7 @@ export async function citationsResolve(
       .join(', ');
     return {
       ok: false,
-      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${listed}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
+      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${listed}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''}${unresolved.some((u) => /^knowledge:\/\//i.test(u)) ? ', and every knowledge:// citation to a passage in an installed catalog (copy the URI from a search result; do not compose one)' : ''} (no fabricated citations).`,
       resolved,
       unresolved,
       urls,

@@ -184,6 +184,8 @@ describe('Windows machine-service installer security', () => {
       '"${GEZEL_DATA_DIR}" /grant:r "NT SERVICE',
       '"${GEZEL_DATA_DIR}\\runtime" /grant:r "NT SERVICE',
       '"${GEZEL_DATA_DIR}\\assets" /grant:r "NT SERVICE',
+      '"${GEZEL_SERVICE_TREE}" /inheritance:r',
+      '"${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE',
     ]) {
       expect(commandLine(gate), `${gate} must not recurse`).not.toContain('/T');
     }
@@ -557,6 +559,91 @@ describe('Windows machine-service installer security', () => {
     );
     expect(position('RejectReparsePoint "${GEZEL_SERVICE_TREE}"')).toBeLessThan(
       position('--dest="${GEZEL_SERVICE_TREE}" --force'),
+    );
+  });
+
+  // Audit of 1.26275.85, F01: the published service tree inherited the data
+  // root's (OI)(CI)(M) grant to the service SID. The broker, which parses
+  // untrusted model files, could therefore rewrite code that every account's
+  // daemon runs with that person's credentials, and a repair install
+  // re-attested the edited tree because its sentinel still matched.
+  it('keeps the shared service tree writable by SYSTEM and Administrators only', () => {
+    const treeAcl = commandLine('"${GEZEL_SERVICE_TREE}" /inheritance:r');
+    expect(treeAcl).toContain('*S-1-5-18:(OI)(CI)(F)');
+    expect(treeAcl).toContain('*S-1-5-32-544:(OI)(CI)(F)');
+    expect(treeAcl).toContain('*S-1-5-32-545:(OI)(CI)(RX)');
+    expect(treeAcl).not.toMatch(/S-1-5-32-545:[^"]*[WMF]/);
+    expect(treeAcl).not.toContain('NT SERVICE');
+    expect(treeAcl).toContain('/L');
+
+    // The broker runs its code but never writes it.
+    const brokerGrants = hook
+      .split(/\r?\n/)
+      .filter((line) => line.includes('"${GEZEL_SERVICE_TREE}"') && line.includes('NT SERVICE'));
+    expect(brokerGrants).toHaveLength(1);
+    expect(brokerGrants[0]).toContain('/grant:r "NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(RX)"');
+
+    // Publishing: the protected DACL comes before the attestation, and a
+    // failure skips the attestation rather than recording an open tree.
+    const publishStart = position('!macro PublishServiceTree');
+    const publish = hook.slice(publishStart, hook.indexOf('!macroend', publishStart));
+    const protect = publish.indexOf('"${GEZEL_SERVICE_TREE}" /inheritance:r');
+    const attest = publish.indexOf('WriteRegStr SHELL_CONTEXT');
+    expect(protect).toBeGreaterThanOrEqual(0);
+    expect(protect).toBeLessThan(attest);
+    expect(publish.slice(protect, attest)).toContain('Goto GezelTreeUnpublished');
+
+    // In customInstall: extract, protect, register, then grant the data root
+    // and the broker's read access, failing closed like the other SID grants.
+    const customInstallStart = position('!macro customInstall');
+    const customInstall = hook.slice(
+      customInstallStart,
+      hook.indexOf('!macroend', customInstallStart),
+    );
+    const at = (needle: string) => {
+      const index = customInstall.indexOf(needle);
+      expect(index, `customInstall is missing: ${needle}`).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const extract = at('--dest="${GEZEL_SERVICE_TREE}" --force');
+    const published = at('!insertmacro PublishServiceTree');
+    const sidType = at('sidtype ${GEZEL_SERVICE_NAME} unrestricted');
+    const rootGrant = at('"${GEZEL_DATA_DIR}" /grant:r "NT SERVICE');
+    const brokerRead = at('"${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE');
+    const autostart = at('config ${GEZEL_SERVICE_NAME} start= auto');
+    expect(extract).toBeLessThan(published);
+    expect(published).toBeLessThan(sidType);
+    expect(published).toBeLessThan(rootGrant);
+    expect(sidType).toBeLessThan(brokerRead);
+    expect(brokerRead).toBeLessThan(autostart);
+    const brokerReadBlock = customInstall.slice(
+      brokerRead,
+      customInstall.indexOf('${EndIf}', brokerRead),
+    );
+    expect(brokerReadBlock).toContain('!insertmacro RemoveGezelService');
+    expect(brokerReadBlock).toContain('Goto SkipNssm');
+  });
+
+  it('never lets the extractor keep an existing service tree on its sentinel', () => {
+    const sentinelStart = position('!macro InvalidateTreeSentinel');
+    const sentinel = hook.slice(sentinelStart, hook.indexOf('!macroend', sentinelStart));
+    expect(sentinel).toContain('Delete "${TREE}\\.gezel-bundle.sha256"');
+    expect(sentinel).toContain('Goto ${FAILURE_LABEL}');
+
+    const extract = position('--dest="${GEZEL_SERVICE_TREE}" --force');
+    for (const tree of ['"${GEZEL_SERVICE_TREE}"', '"${GEZEL_SERVICE_TREE}.previous"']) {
+      const invalidate = position(`!insertmacro InvalidateTreeSentinel ${tree} SkipNssm`);
+      expect(invalidate).toBeLessThan(extract);
+    }
+    // The backup is a directory the broker could create, so it gets the same
+    // no-follow check as the tree before anything is deleted through it.
+    expect(
+      position('!insertmacro RejectReparsePoint "${GEZEL_SERVICE_TREE}.previous"'),
+    ).toBeLessThan(
+      position('!insertmacro InvalidateTreeSentinel "${GEZEL_SERVICE_TREE}.previous"'),
+    );
+    expect(position('RejectReparseDescendants "${GEZEL_SERVICE_TREE}"')).toBeLessThan(
+      position('!insertmacro InvalidateTreeSentinel "${GEZEL_SERVICE_TREE}"'),
     );
   });
 
