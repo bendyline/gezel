@@ -409,7 +409,9 @@ async function rewireProject(
     state.activeProjectId = cached;
     return;
   }
-  const projectId = await ensureProjectForWorkspace(folder, client, logger);
+  const projectId = await ensureProjectForWorkspace(folder, client, logger, (message) => {
+    void vscode.window.showInformationMessage(message);
+  });
   state.projectCache.set(cacheKey, projectId);
   state.activeProjectId = projectId;
 }

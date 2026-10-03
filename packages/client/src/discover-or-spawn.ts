@@ -36,7 +36,7 @@ export class LiveDaemonUnhealthyError extends Error {
 
 export class DaemonNotRunningError extends Error {
   constructor() {
-    super('no running gezel daemon was found for this user');
+    super('Gezel is not running for this user. Start it from the Gezel app, or run `gezel start`.');
     this.name = 'DaemonNotRunningError';
   }
 }

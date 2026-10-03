@@ -33,6 +33,7 @@ function diagnosticsFor(file: string): readonly ts.Diagnostic[] {
       '@bendyline/gezel-app-sdk/host': ['packages/app-sdk/dist/host.d.ts'],
       '@bendyline/gezel-catalog': ['packages/catalog/dist/index.d.ts'],
       '@bendyline/gezel-client': ['packages/client/dist/index.d.ts'],
+      '@bendyline/gezel-client/node': ['packages/client/dist/node.d.ts'],
       '@bendyline/gezel': ['packages/core/dist/index.d.ts'],
       '@bendyline/gezel/paths': ['packages/core/dist/paths.d.ts'],
       '@bendyline/gezel/schemas': ['packages/core/dist/schemas/index.d.ts'],
