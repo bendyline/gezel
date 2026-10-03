@@ -39,6 +39,7 @@ import { isPureDelegationRole } from './role-tool-filter.js';
 import { scopeProjectAboutForTier } from './scope-instructions.js';
 import { SQUISQ_DIALECT_BRIEF } from './squisq-dialect.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
+import { IN_APP_WEB_PREVIEW_GUIDANCE } from './web-preview.js';
 import {
   WORKSPACE_PROMPT_ENTRY_CAP,
   filterWorkspaceFilesForPrompt,
@@ -389,6 +390,12 @@ export interface BuildInstructionsOptions {
    */
   layeredPrefixCache?: boolean;
   /**
+   * The host shows a project's HTML pages in the app and has no server,
+   * terminal or package manager (the phones). Replaces the desktop's browser
+   * guidance with how a web page is written and run there.
+   */
+  inAppWebPreview?: boolean;
+  /**
    * True when this session can surface untrusted, externally-sourced content
    * (mail-enabled projects). Drives the {@link UNTRUSTED_CONTENT_GUIDANCE}
    * provenance-framing block. Off by default so non-mail sessions stay
@@ -589,6 +596,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     untrustedContentPresent,
     browserAutomationRoleExcluded,
     browserLocalPreviewOnly,
+    inAppWebPreview,
   } = opts;
   // Provenance-framing block — present only when the session can surface
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
@@ -1218,15 +1226,17 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const workspaceHtmlBrowserGuidance = browserUsesManagedBridge
     ? 'For interactive testing of workspace HTML, call `browser_navigate({ url: "file:///workspace/index.html" })` with the real workspace-relative path. Gezel automatically rewrites it to the active project\'s capability-scoped preview server; never install a separate static server. Call `validate({ path: "index.html" })` for the HTML/JavaScript lint plus headless-load gate.'
     : 'For workspace HTML, call `validate({ path: "index.html" })`; it runs the HTML/JavaScript lint plus a headless load through Gezel\'s scoped preview server. This provider\'s native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` and do not install a separate static server.';
-  const browsingGuidance = browserLocalPreviewOnly
-    ? `**Local preview browser.** ${workspaceHtmlBrowserGuidance} External URLs and arbitrary localhost services are blocked in this security mode. Use the available \`browser_*\` tools only to inspect and interact with that hosted workspace page; JavaScript evaluation, file upload, storage mutation, and unsafe browser code are intentionally absent.`
-    : scriptedBrowsing
-      ? `**Web work.** ${workspaceHtmlBrowserGuidance} For anything else re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot web reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
-      : hasPlaywright
-        ? `**Web work.** ${workspaceHtmlBrowserGuidance} Use the \`browser_*\` tools on your function schema for one-shot web reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake \`<browser_*>\` markup.`
-        : browserAutomationRoleExcluded
-          ? '**Browser tools are not part of this role\'s kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don\'t emit fake `<browser_*>` markup.'
-          : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+  const browsingGuidance = inAppWebPreview
+    ? IN_APP_WEB_PREVIEW_GUIDANCE
+    : browserLocalPreviewOnly
+      ? `**Local preview browser.** ${workspaceHtmlBrowserGuidance} External URLs and arbitrary localhost services are blocked in this security mode. Use the available \`browser_*\` tools only to inspect and interact with that hosted workspace page; JavaScript evaluation, file upload, storage mutation, and unsafe browser code are intentionally absent.`
+      : scriptedBrowsing
+        ? `**Web work.** ${workspaceHtmlBrowserGuidance} For anything else re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot web reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
+        : hasPlaywright
+          ? `**Web work.** ${workspaceHtmlBrowserGuidance} Use the \`browser_*\` tools on your function schema for one-shot web reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake \`<browser_*>\` markup.`
+          : browserAutomationRoleExcluded
+            ? '**Browser tools are not part of this role\'s kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don\'t emit fake `<browser_*>` markup.'
+            : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?

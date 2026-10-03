@@ -113,4 +113,36 @@ describe('buildPortableInstructions', () => {
     expect(built.full).toContain('The voorman of this project is **Noor**.');
     expect(built.full).toContain('### About this project');
   });
+
+  // Told nothing, a phone model wrote a desktop project and told the person
+  // to open localhost.
+  it('tells a phone model how a web page runs here, in place of desktop browser setup', async () => {
+    const { store, wren, project, profile } = await fixture();
+    const session = await store.createSession({
+      gezelId: wren.id,
+      projectId: project.id,
+      providerName: 'llama-cpp',
+    });
+    const tools = await portableToolSurface(store, session);
+    const build = (inAppWebPreview: boolean) =>
+      store.getProjectContext(project.id, wren.id).then(async (context) =>
+        buildPortableInstructions({
+          store,
+          config: await store.readConfig(),
+          session,
+          context,
+          modelId: 'gemma4-e4b-q4',
+          tier: 'small',
+          profile,
+          toolNames: tools.map((tool) => tool.name),
+          minimalContext: false,
+          inAppWebPreview,
+        }),
+      );
+    const phone = (await build(true)).full;
+    expect(phone).toContain('**Web pages.** The person runs a web page by opening its HTML file');
+    expect(phone).toContain('Never tell the person to open localhost');
+    expect(phone).not.toContain('Browser automation is not installed');
+    expect((await build(false)).full).not.toContain('**Web pages.**');
+  });
 });

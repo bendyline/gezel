@@ -46,7 +46,9 @@ import {
  * memory system, workspace files, artifacts, and project tools. Spawned by
  * the ChatManager as a local MCP server for each chat session.
  *
- * Configuration is passed via environment variables:
+ * Configuration is passed via environment variables. The service sets the
+ * first three when it spawns this server; without GEZEL_BASE_URL the server
+ * finds the running service through its runtime files instead.
  *   GEZEL_BASE_URL   — daemon base URL (http(s)://127.0.0.1:<port>)
  *   GEZEL_TOKEN      — bearer token for the daemon API
  *   GEZEL_CERT_PATH  — path to the daemon's runtime/cert.pem (under its GEZEL_HOME; default ~/.gezel/runtime) when it serves HTTPS
@@ -149,7 +151,12 @@ import {
   writeTaskNoteText,
 } from '@bendyline/gezel';
 import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
-import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client/node';
+import {
+  type LocalGezel,
+  connectToLocalGezel,
+  createPatientFetch,
+  createTrustingFetch,
+} from '@bendyline/gezel-client/node';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -267,8 +274,25 @@ import {
 } from './workspace-write-quality.js';
 import { coerceJsonArray, coerceJsonObject, coerceStringArray } from './zod-coerce.js';
 
-const baseUrl = process.env.GEZEL_BASE_URL ?? 'http://127.0.0.1:0';
-const token = process.env.GEZEL_TOKEN ?? '';
+/**
+ * The service hands a server it spawns its connection: GEZEL_BASE_URL,
+ * GEZEL_TOKEN, GEZEL_CERT_PATH. Started from an MCP client's config instead,
+ * find the service this user is running. Its port, token, and certificate
+ * change on every launch, so values copied into that config go stale.
+ */
+async function localGezelUnlessSpawned(): Promise<LocalGezel | null> {
+  if (process.env.GEZEL_BASE_URL || process.env.GEZEL_MCP_NO_MAIN === '1') return null;
+  try {
+    return await connectToLocalGezel();
+  } catch (err) {
+    process.stderr.write(`gezel-mcp: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
+}
+
+const local = await localGezelUnlessSpawned();
+const baseUrl = local?.baseUrl ?? process.env.GEZEL_BASE_URL ?? 'http://127.0.0.1:0';
+const token = local?.token ?? process.env.GEZEL_TOKEN ?? '';
 const gezelId = process.env.GEZEL_AGENT_ID ?? '';
 const projectId = process.env.GEZEL_PROJECT_ID ?? 'default';
 const sessionId = process.env.GEZEL_SESSION_ID ?? '';
@@ -317,9 +341,9 @@ const sessionContextWindow =
 // generic `fetch failed` at exactly the 5-min mark even though the
 // daemon is still doing useful work.
 const certPath = process.env.GEZEL_CERT_PATH;
-const fetchImpl: typeof fetch = certPath
-  ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') })
-  : createPatientFetch();
+const fetchImpl: typeof fetch =
+  local?.fetch ??
+  (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
 const linkedFetchImpl: typeof fetch = (input, init) => {

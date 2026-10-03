@@ -56,6 +56,10 @@
     "./compile": {
       "types": "./dist/compile.d.ts",
       "import": "./dist/compile.js"
+    },
+    "./preview-module": {
+      "types": "./dist/preview-module.d.ts",
+      "import": "./dist/preview-module.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],

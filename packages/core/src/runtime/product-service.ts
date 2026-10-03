@@ -18,6 +18,7 @@ import {
   resolvePromptFootprint,
 } from '../prompt-footprint.js';
 import type { BuiltInstructions } from '../prompt/instructions.js';
+import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { resolveRoleId } from '../roles/index.js';
 import {
@@ -1014,6 +1015,7 @@ export class PortableProductService {
           profile: structuredChat.profile,
           toolNames: inventoryTools.map((tool) => tool.name),
           minimalContext: footprintName === 'minimal',
+          inAppWebPreview: this.capabilities.htmlPreview,
         });
       const instructions = structuredChat?.prompt
         ? [structuredChat.prompt.full, structuredChat.prompt.volatileContext]
@@ -1033,6 +1035,9 @@ export class PortableProductService {
               context.crew.some((member) => member.id === context.project.voormanGezelId) &&
               `The voorman of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
             renderProjectBrief(context.project, footprint.projectBriefMaxChars),
+            this.capabilities.htmlPreview &&
+              inventoryTools.some((tool) => tool.name === 'write_file') &&
+              IN_APP_WEB_PREVIEW_GUIDANCE,
           ]
             .filter(Boolean)
             .join('\n\n');

@@ -1,5 +1,6 @@
 import { type ScriptTemplateId, acquireSuspendMonitor, createAwakeTimeout } from '@bendyline/gezel';
 import type { PortableScriptCompilation } from '@bendyline/gezel-script-runtime/compile';
+import type { CompiledPreviewModule } from '@bendyline/gezel-script-runtime/preview-module';
 
 function request<T>(body: {
   name: string;
@@ -70,3 +71,84 @@ export const scaffoldMobileScript = (
   description?: string,
   template?: ScriptTemplateId,
 ) => request<string>({ name, description, template });
+
+export type CompiledPreviewFile = CompiledPreviewModule & { path: string };
+export interface PreviewModuleCompiler {
+  compile(modules: { path: string; source: string }[]): Promise<CompiledPreviewFile[]>;
+  dispose(): void;
+}
+
+/**
+ * The script compiler's worker, held open for one preview: the preview
+ * compiles its import graph a round at a time, and the worker loads
+ * TypeScript only once for all of them. Running it here, rather than in a
+ * worker of its own, keeps one copy of the compiler in the app.
+ */
+export function createPreviewModuleCompiler(): PreviewModuleCompiler {
+  const worker = new Worker(new URL('./script-compiler-worker.ts', import.meta.url), {
+    type: 'module',
+    name: 'gezel-preview-compiler',
+  });
+  const releaseMonitor = acquireSuspendMonitor();
+  const pending = new Map<
+    number,
+    { resolve(value: CompiledPreviewFile[]): void; reject(error: Error): void }
+  >();
+  let next = 0;
+  let closed: Error | undefined;
+  const close = (error: Error) => {
+    if (closed) return;
+    closed = error;
+    worker.terminate();
+    releaseMonitor();
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+  };
+  worker.onmessage = (event) => {
+    const message = event.data as { id: number; value?: CompiledPreviewFile[]; error?: string };
+    const request = pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id);
+    if (message.error) request.reject(new Error(message.error));
+    else request.resolve(message.value ?? []);
+  };
+  worker.onerror = (event) => {
+    event.preventDefault();
+    close(new Error(event.message || 'The preview compiler failed'));
+  };
+  worker.onmessageerror = () => close(new Error('Invalid preview compiler result'));
+  return {
+    compile(modules) {
+      if (closed) return Promise.reject(closed);
+      const id = next++;
+      const timeout = createAwakeTimeout(30_000);
+      return new Promise<CompiledPreviewFile[]>((resolve, reject) => {
+        const settle = () => {
+          timeout.dispose();
+          timeout.signal.removeEventListener('abort', onTimeout);
+        };
+        const onTimeout = () => {
+          pending.delete(id);
+          reject(
+            new Error(`Compiling the preview timed out${timeout.budget.describeSuspension()}`),
+          );
+        };
+        timeout.signal.addEventListener('abort', onTimeout, { once: true });
+        pending.set(id, {
+          resolve: (value) => {
+            settle();
+            resolve(value);
+          },
+          reject: (error) => {
+            settle();
+            reject(error);
+          },
+        });
+        worker.postMessage({ kind: 'preview-modules', id, modules });
+      });
+    },
+    dispose() {
+      close(new Error('The preview compiler was closed'));
+    },
+  };
+}
