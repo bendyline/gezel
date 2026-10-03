@@ -1,7 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { gezelPaths, projectTaskFile, projectTaskNextIdFile } from '@bendyline/gezel/paths';
+import {
+  gezelPaths,
+  projectArtifactsDir,
+  projectTaskFile,
+  projectTaskNextIdFile,
+} from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as atomic from './atomic.js';
 import { TaskFilesStore } from './task-files-store.js';
@@ -55,6 +60,27 @@ describe('TaskFilesStore.nextProjectTaskNum', () => {
       spy.mockRestore();
     }
     expect(await new TaskFilesStore({ home }).nextProjectTaskNum('alpha')).toBe(3);
+  });
+
+  // Gezels can create folders in the artifacts drawer. A stray numeric folder
+  // there used to throw "repair it before creating a task" for every new task
+  // in the project, or jump numbering to the end of the safe-integer range.
+  it('ignores drawer folders no task could own', async () => {
+    const drawer = projectArtifactsDir(home, 'alpha');
+    await mkdir(join(drawer, 'tasks', '99999999999999999999'), { recursive: true });
+    await mkdir(join(drawer, 'tasks', '9007199254740990'), { recursive: true });
+    await mkdir(join(drawer, 'diffpacks', '123456789012345'), { recursive: true });
+    await mkdir(join(drawer, 'tasks', '7'), { recursive: true });
+    expect(await new TaskFilesStore({ home }).nextProjectTaskNum('alpha')).toBe(8);
+  });
+
+  it('still refuses an out-of-range number in the store-owned tasks folder', async () => {
+    await mkdir(join(dirname(projectTaskFile(home, 'alpha', 1)), '..', '99999999999999999999'), {
+      recursive: true,
+    });
+    await expect(new TaskFilesStore({ home }).nextProjectTaskNum('alpha')).rejects.toThrow(
+      /repair it before creating a task/,
+    );
   });
 });
 

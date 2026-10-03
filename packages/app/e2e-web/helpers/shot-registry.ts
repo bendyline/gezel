@@ -23,9 +23,11 @@ export type ShotArea =
   | 'settings'
   | 'dialogs'
   | 'handboek'
-  | 'updates';
+  | 'updates'
+  | 'activity';
 
 export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
+  activity: ['inline-questions', 'answer-saved', 'held-work', 'connection-lost'],
   shell: [
     'app-shell',
     'header',

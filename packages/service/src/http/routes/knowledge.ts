@@ -19,6 +19,7 @@
  *   GET    /api/knowledge/catalogs/:catalogId/topics   the shipped TOC
  *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=&descendants=0
  *   GET    /api/knowledge/catalogs/:catalogId/document?id=<docId>   body + metadata
+ *   GET    /api/knowledge/catalogs/:catalogId/passage?id=<docId>&chunk=<uid>   one cited passage
  *   GET    /api/knowledge/catalogs/:catalogId/assets                the declared image assets
  *   GET    /api/knowledge/catalogs/:catalogId/assets/<path>?v=      one asset's bytes
  *
@@ -241,6 +242,18 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     const doc = await manager().getDocument(c.req.param('catalogId'), documentId);
     if (!doc) return c.json({ error: 'document not found' }, 404);
     return c.json(doc);
+  });
+
+  // The passage a `knowledge://…#chunk=<uid>` citation names, so a citation
+  // opens what it cites rather than the whole article.
+  app.get('/catalogs/:catalogId/passage', async (c) => {
+    const documentId = c.req.query('id');
+    const chunk = c.req.query('chunk');
+    if (!documentId || !chunk)
+      return c.json({ error: 'id and chunk query parameters required' }, 400);
+    const passage = await manager().getPassage(c.req.param('catalogId'), documentId, chunk);
+    if (!passage) return c.json({ error: 'passage not found' }, 404);
+    return c.json(passage);
   });
 
   return app;

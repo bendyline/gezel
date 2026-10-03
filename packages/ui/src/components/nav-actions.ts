@@ -27,7 +27,14 @@ export function openTabAction(detail: RecentTabInput): NavAction {
  * built-in `handboek` catalog, so the article is a knowledge document there.
  */
 export function openHandboekArticleActions(articleId: string): NavAction[] {
-  const intent: OpenKnowledgeIntent = { catalogId: 'handboek', documentId: articleId };
+  return openKnowledgeDocumentActions({ catalogId: 'handboek', documentId: articleId });
+}
+
+/**
+ * Open one document of an installed knowledge catalog in the Knowledge area
+ * — where a `knowledge://` citation in a chat reply leads.
+ */
+export function openKnowledgeDocumentActions(intent: OpenKnowledgeIntent): NavAction[] {
   return [
     { kind: 'open-knowledge', intent },
     openTabAction({ kind: 'area', area: 'knowledge' }),
@@ -61,11 +68,11 @@ export function navigateToTab(detail: RecentTabInput): void {
   runNavActions([openTabAction(detail)]);
 }
 
-/** Opens the titlebar's Updates drawer (the owner's pending questions). */
+/** Opens Activity. The event name remains compatible with existing entry points. */
 export const OPEN_UPDATES_EVENT = 'gezel:open-updates';
 
-export function openUpdates(): void {
-  window.dispatchEvent(new CustomEvent(OPEN_UPDATES_EVENT));
+export function openUpdates(projectId?: string): void {
+  window.dispatchEvent(new CustomEvent(OPEN_UPDATES_EVENT, { detail: { projectId } }));
 }
 
 /**

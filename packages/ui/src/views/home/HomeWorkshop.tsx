@@ -7,9 +7,11 @@ import type {
   Question,
   Task,
 } from '@bendyline/gezel';
+import { isReadyQuestion } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { useActivity } from '../../components/activity-context.js';
 import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
@@ -92,7 +94,10 @@ export function HomeWorkshop({
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
   const [statusRunning, setStatusRunning] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const activity = useActivity();
+  const hasSharedActivity = activity !== null;
+  const [localQuestions, setQuestions] = useState<Question[]>([]);
+  const questions = activity?.snapshot?.questions ?? localQuestions;
 
   const activeProjectId = useMemo(
     () => deriveActiveProjectId(config, projects),
@@ -100,12 +105,12 @@ export function HomeWorkshop({
   );
 
   const refreshQuestions = useCallback(() => {
-    if (!runtimeCapabilities().structuredQuestions) return;
+    if (hasSharedActivity || !runtimeCapabilities().structuredQuestions) return;
     api
       .listQuestions({ pending: true })
       .then((r) => setQuestions(r.questions ?? []))
       .catch(() => {});
-  }, []);
+  }, [hasSharedActivity]);
 
   // Pending questions contribute to the greeting's "waiting on you" chip.
   // Loaded once, then kept live off the SSE stream below: answering or
@@ -233,18 +238,22 @@ export function HomeWorkshop({
   // "Ready" cards (finished work) ask nothing, so they get their own chip
   // rather than inflating "waiting on you".
   const pendingQuestions = useMemo(
-    () => questions.filter((q) => !q.answer && q.intent?.kind !== 'task-finished'),
+    () => questions.filter((q) => !q.answer && !isReadyQuestion(q)),
     [questions],
   );
   const readyForYou = useMemo(
-    () => questions.filter((q) => !q.answer && q.intent?.kind === 'task-finished').length,
+    () => questions.filter((q) => !q.answer && isReadyQuestion(q)).length,
     [questions],
   );
 
   const ownerTasks = visibleTasks.filter(
     (t) => t.assignee.kind === 'user' && t.status !== 'complete',
   );
-  const waitingOnYou = pendingQuestions.length + ownerTasks.length;
+  const waitingOnYou = activity?.snapshot
+    ? activity.snapshot.items
+        .filter((item) => item.section === 'needs-you')
+        .reduce((sum, item) => sum + Math.max(1, item.questionIds.length), 0)
+    : pendingQuestions.length + ownerTasks.length;
 
   const chips: HomeChip[] = [];
   if (waitingOnYou > 0) {
@@ -254,9 +263,9 @@ export function HomeWorkshop({
     chips.push({
       dot: 'var(--ochre)',
       label: `${waitingOnYou} waiting on you`,
-      actionLabel: pendingQuestions.length > 0 ? 'Open your updates' : 'Open the task',
+      actionLabel: activity || pendingQuestions.length > 0 ? 'Open Activity' : 'Open the task',
       onClick: () => {
-        if (pendingQuestions.length > 0) openUpdates();
+        if (activity || pendingQuestions.length > 0) openUpdates();
         else if (firstTask) navigateToTab({ kind: 'task', ref: firstTask.ref });
       },
     });
@@ -265,8 +274,8 @@ export function HomeWorkshop({
     chips.push({
       dot: 'var(--sage)',
       label: `${readyForYou} ready for you`,
-      actionLabel: 'Open your updates',
-      onClick: openUpdates,
+      actionLabel: 'Open Activity',
+      onClick: () => openUpdates(),
     });
   }
 

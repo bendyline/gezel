@@ -36,6 +36,7 @@ function fixture() {
     resolveModelSource: vi.fn(async () => exact),
     cancelModelSourceResolution: vi.fn(async () => {}),
     startModelDownload: vi.fn(async () => started),
+    resumeModelDownload: vi.fn(async () => started),
     removeModelDownload: vi.fn(async () => {}),
     selectModel: vi.fn(async () => ({})),
   };
@@ -151,5 +152,36 @@ describe('downloading from the model list', () => {
       ),
     );
     expect(host.startModelDownload).not.toHaveBeenCalled();
+  });
+});
+
+describe('resuming a paused download', () => {
+  const paused = { ...started, state: 'paused', downloadedBytes: 400 } as MobileModelDownload;
+
+  it('holds to the network setting with the same message as starting one', async () => {
+    const { host, readConfig, onError, mount, choose } = fixture();
+    host.listModelDownloads.mockResolvedValue([paused]);
+    readConfig.mockResolvedValue(denied);
+    mount();
+    choose();
+    await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    const refused = onError.mock.calls[0]![0] as Error;
+    expect(refused.message).toContain('Network access is off');
+
+    const resume = await screen.findByRole('button', { name: 'Resume' });
+    await waitFor(() => expect(resume).not.toBeDisabled());
+    fireEvent.click(resume);
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(2));
+    expect(onError.mock.calls[1]![0]).toEqual(new Error(refused.message));
+    expect(host.resumeModelDownload).not.toHaveBeenCalled();
+  });
+
+  it('resumes when the network is allowed', async () => {
+    const { host, onError, mount } = fixture();
+    host.listModelDownloads.mockResolvedValue([paused]);
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(host.resumeModelDownload).toHaveBeenCalledWith('download-1'));
+    expect(onError).not.toHaveBeenCalled();
   });
 });

@@ -306,7 +306,7 @@ function formatMs(ms: number): string {
  * search. Looking up the session at click time gives us its authoritative
  * project, which the provider queue does not carry.
  */
-async function openQueuedChat(sessionId: string, onClose: () => void): Promise<void> {
+export async function openQueuedChat(sessionId: string, onClose: () => void): Promise<boolean> {
   try {
     const session = await api.getChatSession(sessionId);
     const intent = {
@@ -322,9 +322,11 @@ async function openQueuedChat(sessionId: string, onClose: () => void): Promise<v
       }),
     );
     window.dispatchEvent(new CustomEvent('gezel:open-session', { detail: intent }));
+    return true;
   } catch {
     // Queue snapshots are inherently racy: a session can disappear between
     // the poll and the click. Leave the panel open when there is nowhere to go.
+    return false;
   }
 }
 
@@ -827,7 +829,8 @@ function QueueKeyIcon() {
   );
 }
 
-function QueueMeterPanel({
+export function QueueMeterPanel({
+  embedded = false,
   style,
   status,
   gezels,
@@ -839,6 +842,7 @@ function QueueMeterPanel({
   onClose,
   onItemChanged,
 }: {
+  embedded?: boolean;
   style?: CSSProperties;
   status: QueueStatusResponse;
   gezels: Map<string, GezelSummary>;
@@ -900,18 +904,24 @@ function QueueMeterPanel({
   );
 
   return (
-    <div className="queue-meter-panel" style={style} aria-label="AI chat queue">
-      <div className="queue-meter-panel-header">
-        <strong>AI chat queue</strong>
-        <button
-          type="button"
-          className="queue-meter-panel-close"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
+    <div
+      className={`queue-meter-panel${embedded ? ' activity-queue-details' : ''}`}
+      style={style}
+      aria-label="AI chat queue"
+    >
+      {!embedded && (
+        <div className="queue-meter-panel-header">
+          <strong>AI chat queue</strong>
+          <button
+            type="button"
+            className="queue-meter-panel-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {providers.length === 0 && !showPreparing && (
         <p className="muted small">No providers initialized yet.</p>

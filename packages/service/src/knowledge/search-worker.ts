@@ -29,6 +29,7 @@ export interface KnowledgeWorkerRequest {
     | 'topics'
     | 'documentsPage'
     | 'getDocument'
+    | 'getChunk'
     | 'assets'
     | 'readAsset'
     | 'search'

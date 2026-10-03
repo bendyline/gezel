@@ -404,6 +404,12 @@ export interface SessionOpts {
     hooks: import('@bendyline/gezel').HookSpec[];
   }>;
   /**
+   * Factual writing: the session's evidence ledger, as bridge hooks. Every
+   * bridge in the session numbers evidence and checks document writes
+   * through it. Unset outside factual mode.
+   */
+  grounding?: import('./mcp-bridge.js').ToolGroundingHooks;
+  /**
    * Runs a hook script when the bridge needs a decision. Receives the
    * active hook plus the tool-call context (name + args; result for
    * PostToolUse) and returns `{ decision: 'allow'|'deny'|'ask',

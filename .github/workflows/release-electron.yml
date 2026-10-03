@@ -501,6 +501,47 @@ jobs:
           }
           Write-Host '[installer-smoke] signed NSIS install exposed a healthy machine-engine service'
 
+          # Every account's daemon runs the published service tree, so only
+          # SYSTEM and Administrators may change it. The broker parses
+          # untrusted model files and must only read it. Until 1.26275.85 the
+          # tree inherited the data root's Modify grant to the broker, and
+          # nothing here looked.
+          $tree = 'C:\ProgramData\Gezel\service'
+          $sidType = [System.Security.Principal.SecurityIdentifier]
+          $trusted = @('S-1-5-18', 'S-1-5-32-544')
+          # WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles,
+          # WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
+          $writeMask = 0x500D0156
+          $treeAcl = Get-Acl -LiteralPath $tree
+          if (-not $treeAcl.AreAccessRulesProtected) {
+            throw "$tree inherits its DACL from the data root, which grants GezelService Modify"
+          }
+          $owner = $treeAcl.GetOwner($sidType).Value
+          if ($owner -ne 'S-1-5-32-544') { throw "$tree is owned by $owner, not Administrators" }
+          foreach ($path in @($tree, (Join-Path $tree 'dist\bin\gezeld.js'), (Join-Path $tree '.gezel-bundle.sha256'))) {
+            foreach ($rule in (Get-Acl -LiteralPath $path).GetAccessRules($true, $true, $sidType)) {
+              if ($rule.AccessControlType -ne 'Allow') { continue }
+              $sid = $rule.IdentityReference.Value
+              if ($trusted -contains $sid) { continue }
+              if (([int]$rule.FileSystemRights -band $writeMask) -ne 0) {
+                throw "$path grants write access to $sid ($($rule.FileSystemRights))"
+              }
+            }
+          }
+          $brokerSid = ([System.Security.Principal.NTAccount]'NT SERVICE\GezelService').Translate($sidType).Value
+          $brokerRead = $treeAcl.GetAccessRules($true, $true, $sidType) |
+            Where-Object { $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -eq $brokerSid }
+          if (-not $brokerRead) { throw "$tree has no read grant for NT SERVICE\GezelService" }
+          $sentinel = (Get-Content -LiteralPath (Join-Path $tree '.gezel-bundle.sha256') -Raw).Trim()
+          $attested = Get-ItemPropertyValue `
+            -LiteralPath 'HKLM:\Software\Bendyline\Gezel' `
+            -Name SharedServiceTreeSha `
+            -ErrorAction Stop
+          if ($attested -ne $sentinel) {
+            throw "Published tree attestation $attested does not match its sentinel $sentinel"
+          }
+          Write-Host '[installer-smoke] shared service tree is writable by SYSTEM and Administrators only'
+
       - name: Smoke-test installed Windows app
         shell: pwsh
         env:

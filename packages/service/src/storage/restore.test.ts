@@ -10,19 +10,31 @@ import { runBackup } from './backup.js';
 import { StorageJobManager } from './job-manager.js';
 import { cancelRestore, readReview, runRestore, scanRestore } from './restore.js';
 
-const faults = vi.hoisted(() => ({ copyTo: '', renameFrom: '' }));
+const faults = vi.hoisted(() => ({
+  copyFrom: '',
+  renameFrom: '',
+  renameCode: 'EIO',
+  beforeRenameFrom: '',
+  beforeRename: (): void => {},
+  calls: { cp: [] as string[], rename: [] as Array<[string, string]> },
+}));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...fs,
+    // The faulted copy lands its bytes first, like a disk filling on the last
+    // file, so there is a partial tree for the code under test to clean up.
     cp: async (...args: Parameters<typeof fs.cp>) => {
-      if (String(args[1]) === faults.copyTo)
+      faults.calls.cp.push(String(args[0]));
+      await fs.cp(...args);
+      if (String(args[0]) === faults.copyFrom)
         throw Object.assign(new Error('copy interrupted'), { code: 'EIO' });
-      return fs.cp(...args);
     },
     rename: async (...args: Parameters<typeof fs.rename>) => {
+      faults.calls.rename.push([String(args[0]), String(args[1])]);
+      if (String(args[0]) === faults.beforeRenameFrom) faults.beforeRename();
       if (String(args[0]) === faults.renameFrom)
-        throw Object.assign(new Error('rename failed'), { code: 'EIO' });
+        throw Object.assign(new Error('rename failed'), { code: faults.renameCode });
       return fs.rename(...args);
     },
   };
@@ -42,8 +54,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  faults.copyTo = '';
+  faults.copyFrom = '';
   faults.renameFrom = '';
+  faults.renameCode = 'EIO';
+  faults.beforeRenameFrom = '';
+  faults.beforeRename = () => {};
+  faults.calls.cp.length = 0;
+  faults.calls.rename.length = 0;
   await rm(home, { recursive: true, force: true });
   await rm(out, { recursive: true, force: true });
 });
@@ -76,6 +93,16 @@ async function restore(review: RestoreReview, confirm: Parameters<typeof runRest
 /** Every item, restored as an addition. */
 function addAll(review: RestoreReview) {
   return { items: review.items.map((i) => ({ kind: i.kind, id: i.id, action: 'add' as const })) };
+}
+
+/** Where a gezel or project waits in staging before it is published. */
+function stagedItem(review: RestoreReview, kind: 'gezels' | 'projects', id: string): string {
+  return join(home, '.transactions', 'backup-restores', review.restoreId, 'stage', kind, id);
+}
+
+/** Parked, rejected or half-copied siblings a restore left beside its items. */
+async function restoreLeftovers(kind: 'gezels' | 'projects'): Promise<string[]> {
+  return (await readdir(join(home, kind))).filter((name) => name.includes('restore-'));
 }
 
 describe('scanRestore', () => {
@@ -122,7 +149,30 @@ describe('scanRestore', () => {
 });
 
 describe('runRestore', () => {
-  it('keeps an interrupted addition undiscoverable and preserves recovery material', async () => {
+  it('moves a same-volume addition into place in one rename and leaves no staging', async () => {
+    const project = await store.createProject({ name: 'Roof Survey' });
+    const target = join(home, 'projects', project.id);
+    await writeFile(join(target, 'workspace', 'notes.md'), 'FIELD NOTES');
+    const file = await makeBackup();
+    await store.deleteProject(project.id, { removeWorkspace: true });
+    const review = await scanRestore(deps(), file);
+    const staged = stagedItem(review, 'projects', project.id);
+
+    const { job } = await restore(review, {
+      items: [{ kind: 'project', id: project.id, action: 'add' }],
+    });
+
+    expect(job.status).toBe('done');
+    expect(faults.calls.rename).toContainEqual([staged, target]);
+    expect(faults.calls.cp.filter((source) => source.startsWith(staged))).toEqual([]);
+    expect(await readFile(join(target, 'workspace', 'notes.md'), 'utf8')).toBe('FIELD NOTES');
+    expect(await exists(join(home, '.transactions', 'backup-restores', review.restoreId))).toBe(
+      false,
+    );
+    expect(await restoreLeftovers('projects')).toEqual([]);
+  });
+
+  it('leaves nothing at the target when a copy across volumes fails, so the review retries', async () => {
     const gezel = await store.createGezel({ name: 'Archivist' });
     const target = join(home, 'gezels', gezel.id);
     await writeFile(join(target, 'about.md'), 'BACKED UP');
@@ -130,35 +180,68 @@ describe('runRestore', () => {
     await store.deleteGezel(gezel.id);
     const review = await scanRestore(deps(), file);
     const confirm = { items: [{ kind: 'gezel' as const, id: gezel.id, action: 'add' as const }] };
-    const stage = join(
-      home,
-      '.transactions',
-      'backup-restores',
-      review.restoreId,
-      'stage',
-      'gezels',
-      gezel.id,
-    );
-    faults.copyTo = join(target, 'gezel.md');
+    const staged = stagedItem(review, 'gezels', gezel.id);
+    faults.renameFrom = staged;
+    faults.renameCode = 'EXDEV';
+    faults.copyFrom = staged;
+
     const job = jobs.create('restore');
     await expect(runRestore(deps(), review, confirm, job)).rejects.toMatchObject({ code: 'EIO' });
     expect(jobs.get(job.id)?.status).toBe('error');
-    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('BACKED UP');
-    expect(await exists(join(target, 'gezel.md'))).toBe(false);
-    expect((await new Store({ home }).listGezels()).map((item) => item.id)).not.toContain(gezel.id);
-    expect(await readFile(join(stage, 'about.md'), 'utf8')).toBe('BACKED UP');
+    expect(await exists(target)).toBe(false);
+    expect(await restoreLeftovers('gezels')).toEqual([]);
+    expect(await readFile(join(staged, 'about.md'), 'utf8')).toBe('BACKED UP');
     expect(await readReview(home, review.restoreId)).not.toBeNull();
 
-    faults.copyTo = '';
-    await writeFile(join(target, 'about.md'), 'WORK ADDED AFTER INTERRUPTION');
-    await expect(restore(review, confirm)).rejects.toThrow('refusing to overwrite');
-    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('WORK ADDED AFTER INTERRUPTION');
-    // The user may explicitly choose replacement after inspecting the partial tree.
-    const retried = await restore(review, {
-      items: [{ kind: 'gezel', id: gezel.id, action: 'replace' }],
-    });
-    expect(retried.job.status).toBe('done');
+    // Still across volumes, now with a copy that completes: an addition, not
+    // a replacement, because the failed attempt left nothing in the way.
+    faults.copyFrom = '';
+    expect((await restore(review, confirm)).job.status).toBe('done');
     expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('BACKED UP');
+    expect(await restoreLeftovers('gezels')).toEqual([]);
+    expect((await new Store({ home }).listGezels()).map((item) => item.id)).toContain(gezel.id);
+  });
+
+  it('keeps an item that appears just as the addition moves into place', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const file = await makeBackup();
+    await store.deleteGezel(gezel.id);
+    const review = await scanRestore(deps(), file);
+    const target = join(home, 'gezels', gezel.id);
+    const staged = stagedItem(review, 'gezels', gezel.id);
+    faults.beforeRenameFrom = staged;
+    faults.beforeRename = () => {
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, 'about.md'), 'new live work');
+    };
+
+    await expect(
+      restore(review, { items: [{ kind: 'gezel', id: gezel.id, action: 'add' }] }),
+    ).rejects.toThrow('refusing to overwrite');
+    expect(await readFile(join(target, 'about.md'), 'utf8')).toBe('new live work');
+    expect(await exists(join(target, 'gezel.md'))).toBe(false);
+    expect(await exists(join(staged, 'gezel.md'))).toBe(true);
+  });
+
+  it('never replaces a file that appears where an addition goes', async () => {
+    const gezel = await store.createGezel({ name: 'Archivist' });
+    const file = await makeBackup();
+    await store.deleteGezel(gezel.id);
+    const review = await scanRestore(deps(), file);
+    const target = join(home, 'gezels', gezel.id);
+    const original = jobs.setPhase.bind(jobs);
+    const spy = vi.spyOn(jobs, 'setPhase').mockImplementation((...args) => {
+      if (args[1] === 'publish' && !args[2]) writeFileSync(target, 'a file, not a gezel');
+      return original(...args);
+    });
+    try {
+      await expect(
+        restore(review, { items: [{ kind: 'gezel', id: gezel.id, action: 'add' }] }),
+      ).rejects.toThrow('refusing to overwrite');
+      expect(await readFile(target, 'utf8')).toBe('a file, not a gezel');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('rolls back a failed replacement and allows the same review to be retried', async () => {

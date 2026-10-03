@@ -11,6 +11,9 @@ import type { MobileHost, ModelInventory } from './native.js';
 
 const gigabytes = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 
+/** Shown when starting or resuming a download would reach the network with it off. */
+const NETWORK_OFF_MESSAGE = 'Network access is off in Settings. Turn it on to download a model.';
+
 /** Room a model needs beyond its file to load at the smallest window. */
 const LOAD_HEADROOM_BYTES = 512 * 1024 * 1024;
 
@@ -245,12 +248,18 @@ export function ModelChooser({
         : ''
       : `provider:${selectedProviderId}`;
 
-  const networkAllowed = async () =>
-    resolveSecurityPolicy(await service.store.readConfig()).allowAppNetwork;
+  /**
+   * Every host call here that reaches the network checks the setting first.
+   * Resume once skipped it: the rewrite that merged the download panel into
+   * this list dropped the per-button flag that gated it.
+   */
+  async function requireNetwork(message = NETWORK_OFF_MESSAGE) {
+    if (!resolveSecurityPolicy(await service.store.readConfig()).allowAppNetwork)
+      throw new Error(message);
+  }
 
   async function download(model: PortableCatalogModel) {
-    if (!(await networkAllowed()))
-      throw new Error('Network access is off in Settings. Turn it on to download a model.');
+    await requireNetwork();
     const epoch = ++resolution.current;
     setResolving(model.name);
     let source: Awaited<ReturnType<MobileHost['resolveModelSource']>>;
@@ -263,10 +272,14 @@ export function ModelChooser({
     if (epoch !== resolution.current) return;
     // The lookup itself goes to the network; the setting may have changed
     // while it ran.
-    if (!(await networkAllowed()))
-      throw new Error('Network access was turned off. Turn it on in Settings to download.');
+    await requireNetwork('Network access was turned off. Turn it on in Settings to download.');
     const started = await host.startModelDownload(source, model.name);
     setPending({ downloadId: started.id, key: catalogKey(model) });
+  }
+
+  async function resume(id: string) {
+    await requireNetwork();
+    await host.resumeModelDownload(id);
   }
 
   function choose(next: string) {
@@ -387,7 +400,7 @@ export function ModelChooser({
                   type="button"
                   className="gz-key"
                   disabled={disabled || downloads.some(running)}
-                  onClick={() => void change(() => host.resumeModelDownload(item.id))}
+                  onClick={() => void change(() => resume(item.id))}
                 >
                   Resume
                 </button>

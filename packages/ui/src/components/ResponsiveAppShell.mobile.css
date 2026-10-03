@@ -345,8 +345,7 @@
   min-height: 44px;
 }
 
-/* Of the desktop status cluster, the compact header keeps two keys: the chat
-   queue (present only while something runs or waits) and the default engine,
+/* Of the desktop status cluster, the compact header keeps Activity and the default engine,
    plus the stop-narration key while a gezel is being read aloud.
    Further engines, quotas, and the task-speed menu wait for a wider window;
    the queue's panel still lists every busy engine. */
@@ -355,7 +354,9 @@
   margin-bottom: 0;
 }
 
-.app.app-compact .app-header-right > :not(.queue-meter, .engine-pill-root, .narration-stop),
+.app.app-compact
+  .app-header-right
+  > :not(.activity-control, .queue-meter, .engine-pill-root, .narration-stop),
 .app.app-compact .app-header-right > .engine-pill-root ~ .engine-pill-root {
   display: none;
 }

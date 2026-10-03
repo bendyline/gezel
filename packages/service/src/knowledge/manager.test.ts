@@ -80,6 +80,46 @@ describe('KnowledgeManager', () => {
     expect(hit?.retrievalSource).toBe('knowledge');
   });
 
+  it('resolves a citation from a search hit to its passage, and refuses made-up ones', async () => {
+    const [hit] = await manager.searchUnified('dovetail corner joint', {
+      vector: null,
+      maxResults: 5,
+    });
+    const uri = hit?.uri ?? '';
+    expect(uri).toMatch(/#chunk=[0-9a-f]{32}$/);
+    const cited = await manager.resolveCitation(uri);
+    expect(cited.ok).toBe(true);
+    if (cited.ok) {
+      expect(cited.chunk?.documentId).toBe('dovetails');
+      expect(cited.chunk?.text.length).toBeGreaterThan(0);
+    }
+    const passage = await manager.getPassage(
+      'test-notes',
+      'dovetails',
+      uri.split('#chunk=')[1] ?? '',
+    );
+    expect(passage?.text).toBe(cited.ok ? cited.chunk?.text : undefined);
+    expect(passage?.lineEnd).toBeGreaterThanOrEqual(passage?.lineStart ?? 0);
+
+    const article = await manager.resolveCitation(uri.split('#')[0] ?? '');
+    expect(article.ok && article.markdown).toContain('Tails and pins');
+    expect(
+      await manager.resolveCitation(uri.replace(/#chunk=.*/, `#chunk=${'0'.repeat(32)}`)),
+    ).toEqual({ ok: false, reason: 'no-passage' });
+    expect(
+      await manager.resolveCitation('knowledge://gezel-tests/test-notes/invented-joint'),
+    ).toEqual({ ok: false, reason: 'no-document' });
+    expect(await manager.resolveCitation('knowledge://someone-else/test-notes/dovetails')).toEqual({
+      ok: false,
+      reason: 'catalog-not-installed',
+    });
+    expect(await manager.resolveCitation('knowledge://nope')).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+    expect(await manager.getPassage('test-notes', 'dovetails', '0'.repeat(32))).toBeNull();
+  });
+
   it('semantic path reranks with the exact-vector query', async () => {
     // The fixture profile is not vector-compatible with the daemon embedder,
     // so the manager must refuse the vector and still answer via FTS.

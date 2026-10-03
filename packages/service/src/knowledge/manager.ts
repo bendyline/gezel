@@ -27,8 +27,10 @@ import type {
   KnowledgeInstallJob,
   KnowledgeInstallRequest,
   KnowledgeInstallSourceKind,
+  KnowledgePassageRead,
   KnowledgeSemanticSearchMode,
   KnowledgeUpdateCandidate,
+  KnowledgeUri,
   ProjectKnowledgeCatalogs,
   TrustedKnowledgeCoordinate,
   UnifiedSearchResult,
@@ -37,6 +39,7 @@ import {
   KnowledgeMachineInventorySchema,
   createLogger,
   formatKnowledgeUri,
+  parseKnowledgeUri,
   resolveSecurityPolicy,
   sameVectorSpace,
 } from '@bendyline/gezel';
@@ -69,6 +72,7 @@ import type {
   GlobalSearchHit,
   GlobalSearchResponse,
   KnowledgeCatalogHost,
+  KnowledgeChunk,
 } from './catalog-host.js';
 import { resolveKnowledgeCatalogSource } from './catalog-source.js';
 import {
@@ -1219,6 +1223,62 @@ export class KnowledgeManager {
     return this.opts.host.getDocument(this.requireMounted(catalogId).key, documentId);
   }
 
+  /** One passage by its citation id, with the document's title and origin. */
+  async getPassage(
+    catalogId: string,
+    documentId: string,
+    chunkUid: string,
+  ): Promise<KnowledgePassageRead | null> {
+    const info = this.requireMounted(catalogId);
+    const chunk = await this.opts.host.getChunk(info.key, documentId, chunkUid);
+    if (!chunk) return null;
+    const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
+    return {
+      catalogId,
+      catalogVersion: info.ref.version,
+      documentId,
+      chunkUid,
+      title: doc?.title ?? chunk.title,
+      headingPath: chunk.headingPath,
+      lineStart: chunk.lineStart,
+      lineEnd: chunk.lineEnd,
+      text: chunk.text,
+      ...(doc?.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...(doc?.sourceUpdatedAt ? { sourceUpdatedAt: doc.sourceUpdatedAt } : {}),
+    };
+  }
+
+  /**
+   * Resolve a `knowledge://` citation: the catalog (publisher included) is
+   * installed and enabled, the document exists, and a `#chunk=` passage is in
+   * it. A citation is only evidence when it resolves; a model can write a
+   * well-formed URI for a passage that does not exist.
+   */
+  async resolveCitation(raw: string): Promise<KnowledgeCitation> {
+    const uri = parseKnowledgeUri(raw.trim());
+    if (!uri) return { ok: false, reason: 'malformed' };
+    const info = this.mountedCatalog(uri.catalogId);
+    if (!info || info.ref.publisherId !== uri.publisherId)
+      return { ok: false, reason: 'catalog-not-installed' };
+    const doc = await this.opts.host.getDocument(info.key, uri.documentId).catch(() => null);
+    if (!doc) return { ok: false, reason: 'no-document' };
+    const base = {
+      ok: true as const,
+      uri,
+      title: doc.title,
+      catalogVersion: info.ref.version,
+      ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+    };
+    if (uri.fragment && 'chunk' in uri.fragment) {
+      const chunk = await this.opts.host
+        .getChunk(info.key, uri.documentId, uri.fragment.chunk)
+        .catch(() => null);
+      if (!chunk) return { ok: false, reason: 'no-passage' };
+      return { ...base, chunk };
+    }
+    return { ...base, markdown: doc.markdown };
+  }
+
   async assets(catalogId: string): ReturnType<KnowledgeCatalogHost['assets']> {
     return this.opts.host.assets(this.requireMounted(catalogId).key);
   }
@@ -1541,6 +1601,20 @@ function findBundledHandboekArchive(): string | null {
   const source = join(here, '..', '..', 'assets', 'handboek', 'handboek.gezk');
   return existsSync(source) ? source : null;
 }
+
+export type KnowledgeCitation =
+  | { ok: false; reason: 'malformed' | 'catalog-not-installed' | 'no-document' | 'no-passage' }
+  | {
+      ok: true;
+      uri: KnowledgeUri;
+      title: string;
+      catalogVersion: string;
+      sourceUrl?: string;
+      /** The cited passage, when the URI names one. */
+      chunk?: KnowledgeChunk;
+      /** The whole document, when the URI names no passage. */
+      markdown?: string;
+    };
 
 export class KnowledgeNotFoundError extends Error {
   constructor(message: string) {

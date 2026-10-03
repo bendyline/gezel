@@ -23,6 +23,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
 import { embeddingsHealth } from '../memory/embeddings.js';
+import { redactPathSecrets } from '../perf/redact-path.js';
 import { beginPerfRequest } from '../perf/responsiveness.js';
 import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
@@ -39,6 +40,7 @@ import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
+import { activityRoutes } from './routes/activity.js';
 import { aiAppRoutes } from './routes/ai-apps.js';
 import { aiRoutes } from './routes/ai.js';
 import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
@@ -407,8 +409,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     const reply = errorToResponse(err, { exposeUnknown: false, requestId });
     if (reply.status === 500) {
       const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      // A preview URL carries its capability token in the path.
+      const path = redactPathSecrets(c.req.path);
       httpLog.error(
-        `[http] unhandled request error id=${requestId} method=${c.req.method} path=${c.req.path}: ${detail}`,
+        `[http] unhandled request error id=${requestId} method=${c.req.method} path=${path}: ${detail}`,
       );
       notifyUnexpectedHttpError(
         options.onUnexpectedHttpError,
@@ -416,7 +420,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
           kind: 'unhandled_exception',
           requestId,
           method: c.req.method,
-          path: c.req.path,
+          path,
           status: 500,
           detail,
         },
@@ -564,6 +568,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/craftbooks', craftbookRoutes(ctx));
   app.route('/api/usage', usageRoutes(ctx));
   app.route('/api/queues', queueRoutes(ctx));
+  app.route('/api/activity', activityRoutes(ctx));
   app.route('/api/cache', cacheRoutes(ctx));
   app.route('/api/ai', aiRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));

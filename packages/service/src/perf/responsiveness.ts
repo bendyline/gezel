@@ -1,7 +1,7 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { Session } from 'node:inspector/promises';
 import { join } from 'node:path';
-import { type IntervalHistogram, monitorEventLoopDelay } from 'node:perf_hooks';
+import { type RecordableHistogram, createHistogram } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 import {
   type ClientPerfReport,
@@ -11,6 +11,7 @@ import {
   type PerfWork,
   createLogger,
 } from '@bendyline/gezel';
+import { redactPathSecrets } from './redact-path.js';
 
 /**
  * Main-thread responsiveness monitor.
@@ -23,17 +24,30 @@ import {
  * suspended": sleep that never happened (two of them during one catalog
  * update, 2026-09-30).
  *
- * Detection is a watchdog worker, not the loop's own timing: the main thread
- * bumps a shared counter and a worker with its own event loop notices when it
- * stops moving. If the worker's timer stayed on schedule, the main thread was
- * blocked; if the worker was late too, the whole process or host was paused,
- * which is the suspend clock's business. `eventLoopUtilization()` cannot make
- * that call: Electron's main process reports it as all zeros.
+ * Detection is a heartbeat on the main thread that notices its own gaps, with
+ * a watchdog worker as the witness: if the worker's timer stayed on schedule
+ * through the gap, the main thread was blocked; if the worker was late too, the
+ * whole process or host was paused, which is the suspend clock's business.
+ * `eventLoopUtilization()` cannot make that call: Electron's main process
+ * reports it as all zeros.
+ *
+ * Every tick here wakes an otherwise idle process, and the machine service is
+ * idle almost all of the time. A 20 ms event-loop-delay histogram plus 100 ms
+ * ticks on both threads took an idle daemon from 13 to 59 context switches a
+ * second (v1.26275.85), so the beat doubles as the delay sampler and both
+ * threads tick at the coarsest period that still measures a recordable stall.
  */
 
 const log = createLogger('perf');
 
-const BEAT_MS = 100;
+/**
+ * A gap is measured to within one beat, so this has to stay well inside
+ * `STALL_RECORD_MS`. At the same period, a pause long enough to log leaves the
+ * watchdog late by more than half the gap, which is what `isMainThreadBlock`
+ * needs to rule the main thread out.
+ */
+export const BEAT_MS = 250;
+export const WATCHDOG_TICK_MS = 250;
 /** Shorter blocks are ordinary GC and JSON work; not worth a record. */
 export const STALL_RECORD_MS = 500;
 const STALL_LOG_MS = 1_000;
@@ -52,32 +66,44 @@ const PROFILE_SAMPLING_US = 5_000;
 const PROFILE_KEEP = 20;
 const LABEL_MAX = 200;
 
+/**
+ * The witness. It keeps its own late ticks and, asked about a gap, answers
+ * with the worst one since the gap began. A tick late by less than a period is
+ * not kept: it cannot reach half of a recordable gap.
+ *
+ * It sleeps on a futex instead of running an event loop: a worker woken by its
+ * own timer cost about 1.6 context switches per tick on Windows, against 1.0
+ * for this. The main thread posts the question and then flips `asked` to wake
+ * it early. Ticks are settled before questions, so a late tick at a resume is
+ * always on record by the time the question about that gap is answered.
+ */
 const WATCHDOG_SOURCE = `
-const { parentPort, workerData } = require('node:worker_threads');
-const beat = new Int32Array(workerData.buffer);
+const { parentPort, receiveMessageOnPort, workerData } = require('node:worker_threads');
 const tickMs = workerData.tickMs;
-const thresholdMs = workerData.thresholdMs;
-let lastValue = Atomics.load(beat, 0);
-let lastChange = Date.now();
+const asked = new Int32Array(workerData.asked);
+const lateTicks = [];
 let lastTick = Date.now();
-let maxLate = 0;
-setInterval(() => {
+for (;;) {
+  Atomics.wait(asked, 0, 0, Math.max(0, lastTick + tickMs - Date.now()));
   const now = Date.now();
-  const late = now - lastTick - tickMs;
-  lastTick = now;
-  const value = Atomics.load(beat, 0);
-  if (value === lastValue) {
-    if (late > maxLate) maxLate = late;
-    return;
+  if (now - lastTick >= tickMs) {
+    const lateMs = now - lastTick - tickMs;
+    lastTick = now;
+    if (lateMs >= tickMs) {
+      lateTicks.push({ at: now, lateMs });
+      if (lateTicks.length > 32) lateTicks.shift();
+    }
   }
-  const stale = now - lastChange;
-  if (stale >= thresholdMs) {
-    parentPort.postMessage({ startedAt: lastChange, durationMs: stale, watchdogLateMs: maxLate });
+  Atomics.store(asked, 0, 0);
+  for (let m = receiveMessageOnPort(parentPort); m; m = receiveMessageOnPort(parentPort)) {
+    const gap = m.message;
+    let lateMs = 0;
+    for (const tick of lateTicks) {
+      if (tick.at > gap.startedAt && tick.lateMs > lateMs) lateMs = tick.lateMs;
+    }
+    parentPort.postMessage({ startedAt: gap.startedAt, durationMs: gap.durationMs, watchdogLateMs: lateMs });
   }
-  lastValue = value;
-  lastChange = now;
-  maxLate = 0;
-}, tickMs);
+}
 `;
 
 interface WatchdogReport {
@@ -271,19 +297,19 @@ class ResponsivenessMonitor {
   private readonly slowRequests: PerfSlowRequest[] = [];
   private readonly clientReports: PerfSnapshot['clientReports'] = [];
   private nextId = 1;
-  private readonly beat = new Int32Array(new SharedArrayBuffer(4));
+  private lastBeatAt = Date.now();
   private readonly beatTimer: ReturnType<typeof setInterval>;
   private readonly windowTimer: ReturnType<typeof setInterval>;
-  private readonly delay: IntervalHistogram;
+  /** Beat lateness in nanoseconds, the unit `monitorEventLoopDelay` used. */
+  private readonly delay: RecordableHistogram = createHistogram();
   private delayWindowStartedAt = Date.now();
+  private readonly watchdogAsked = new Int32Array(new SharedArrayBuffer(4));
   private watchdog: Worker | null = null;
   private readonly profiler: StallProfiler;
 
   constructor(opts: ResponsivenessMonitorOptions) {
-    this.beatTimer = setInterval(() => Atomics.add(this.beat, 0, 1), BEAT_MS);
+    this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
     this.beatTimer.unref?.();
-    this.delay = monitorEventLoopDelay({ resolution: 20 });
-    this.delay.enable();
     this.profiler = new StallProfiler(
       join(opts.logsDir, 'perf'),
       opts.profileWhen ?? (() => false),
@@ -302,7 +328,7 @@ class ResponsivenessMonitor {
 
   begin(label: string): (outcome?: { status?: number; method?: string; path?: string }) => void {
     const id = this.nextId++;
-    const work: ActiveWork = { label: clip(label), startedAt: Date.now() };
+    const work: ActiveWork = { label: clip(redactPathSecrets(label)), startedAt: Date.now() };
     this.active.set(id, work);
     return (outcome) => {
       if (!this.active.delete(id)) return;
@@ -314,7 +340,7 @@ class ResponsivenessMonitor {
         pushRing(this.slowRequests, {
           at: new Date(work.startedAt).toISOString(),
           method: outcome.method,
-          path: clip(outcome.path),
+          path: clip(redactPathSecrets(outcome.path)),
           status,
           durationMs,
         });
@@ -325,7 +351,8 @@ class ResponsivenessMonitor {
     };
   }
 
-  recordClient(report: ClientPerfReport): void {
+  recordClient(received: ClientPerfReport): void {
+    const report = redactClientReport(received);
     pushRing(this.clientReports, { receivedAt: new Date().toISOString(), report });
     log.info(`ui: ${describeClientReport(report)}`);
   }
@@ -358,10 +385,26 @@ class ResponsivenessMonitor {
   async dispose(): Promise<void> {
     clearInterval(this.beatTimer);
     clearInterval(this.windowTimer);
-    this.delay.disable();
     const watchdog = this.watchdog;
     this.watchdog = null;
     await Promise.all([watchdog?.terminate(), this.profiler.dispose()]);
+  }
+
+  /**
+   * A gap is reported from the last beat, the last moment the thread was seen
+   * alive, so it overstates the block by less than one beat rather than
+   * missing one of a recordable size.
+   */
+  private beat(): void {
+    const now = Date.now();
+    const startedAt = this.lastBeatAt;
+    this.lastBeatAt = now;
+    const gapMs = now - startedAt;
+    this.delay.record(Math.max(1, Math.round((gapMs - BEAT_MS) * 1e6)));
+    if (gapMs < STALL_RECORD_MS || !this.watchdog) return;
+    this.watchdog.postMessage({ startedAt, durationMs: gapMs });
+    Atomics.store(this.watchdogAsked, 0, 1);
+    Atomics.notify(this.watchdogAsked, 0);
   }
 
   private remember(work: FinishedWork): void {
@@ -379,7 +422,7 @@ class ResponsivenessMonitor {
     try {
       const worker = new Worker(WATCHDOG_SOURCE, {
         eval: true,
-        workerData: { buffer: this.beat.buffer, tickMs: BEAT_MS, thresholdMs: STALL_RECORD_MS },
+        workerData: { tickMs: WATCHDOG_TICK_MS, asked: this.watchdogAsked.buffer },
       });
       worker.on('message', (report: WatchdogReport) => this.onWatchdogReport(report));
       worker.on('error', (err) => {
@@ -421,6 +464,27 @@ class ResponsivenessMonitor {
       log.info(`CPU profile of the ${formatPerfMs(report.durationMs)} block: logs/perf/${name}`);
     });
   }
+}
+
+/**
+ * The renderer reports the paths it timed, so they are scrubbed like the
+ * daemon's own. Never longer than what arrived: `GET /perf` validates the
+ * stored report again against the same length caps.
+ */
+export function redactClientReport(report: ClientPerfReport): ClientPerfReport {
+  const scrub = (text: string): string => redactPathSecrets(text).slice(0, text.length);
+  if (report.kind === 'long-task') {
+    return {
+      ...report,
+      view: scrub(report.view),
+      ...(report.source !== undefined ? { source: scrub(report.source) } : {}),
+    };
+  }
+  return {
+    ...report,
+    view: scrub(report.view),
+    slowest: report.slowest.map((request) => ({ ...request, path: scrub(request.path) })),
+  };
 }
 
 export function describeClientReport(report: ClientPerfReport): string {

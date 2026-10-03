@@ -1,17 +1,30 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+import { PerfSnapshotSchema } from '@bendyline/gezel';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  BEAT_MS,
+  STALL_RECORD_MS,
+  WATCHDOG_TICK_MS,
   beginPerfRequest,
   beginPerfWork,
   describeClientReport,
   formatPerfMs,
   isMainThreadBlock,
   perfSnapshot,
+  recordClientPerfReport,
   startResponsivenessMonitor,
   workDuring,
 } from './responsiveness.js';
+
+vi.mock('node:perf_hooks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:perf_hooks')>();
+  return { ...actual, monitorEventLoopDelay: vi.fn(actual.monitorEventLoopDelay) };
+});
+
+const CAPABILITY = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eHF1dXg';
 
 function blockFor(ms: number): void {
   const end = Date.now() + ms;
@@ -106,8 +119,10 @@ describe('responsiveness monitor', () => {
     endRequest(200);
 
     const stall = await waitFor(() => perfSnapshot().stalls[0]);
-    expect(stall.durationMs).toBeGreaterThanOrEqual(1_000);
+    // Measured from the last beat before the block, so never short of it.
+    expect(stall.durationMs).toBeGreaterThanOrEqual(1_500);
     expect(stall.during[0]?.label).toBe('GET /api/config');
+    expect(perfSnapshot().eventLoopDelay?.maxMs).toBeGreaterThanOrEqual(1_500 - BEAT_MS);
     expect(perfSnapshot().slowRequests[0]).toMatchObject({
       method: 'GET',
       path: '/api/config',
@@ -125,5 +140,71 @@ describe('responsiveness monitor', () => {
     const profile = await waitFor(() => perfSnapshot().stalls[0]?.profile);
     expect(profile).toMatch(/^stall-.*\.cpuprofile$/);
     expect(await readdir(join(logs, 'perf'))).toContain(profile);
+  });
+
+  // Every tick wakes an idle machine service. The 20 ms event-loop-delay
+  // histogram alone was 50 wakeups a second; now the whole budget is two
+  // 250 ms ticks, one per thread, plus the once-a-minute window timer.
+  it('stays within its idle wakeup budget', async () => {
+    logs = await mkdtemp(join(tmpdir(), 'gezel-perf-'));
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const periods = [WATCHDOG_TICK_MS];
+    try {
+      stop = startResponsivenessMonitor({ logsDir: logs });
+      periods.push(...setIntervalSpy.mock.calls.map((call) => Number(call[1])));
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
+
+    expect(periods).toHaveLength(3);
+    expect(monitorEventLoopDelay).not.toHaveBeenCalled();
+    expect(Math.min(...periods)).toBeGreaterThanOrEqual(250);
+    expect(periods.reduce((sum, ms) => sum + 1_000 / ms, 0)).toBeLessThan(8.1);
+    // Coarser than this and a gap can no longer be told from a recordable stall.
+    expect(BEAT_MS * 2).toBeLessThanOrEqual(STALL_RECORD_MS);
+    expect(WATCHDOG_TICK_MS * 2).toBeLessThanOrEqual(STALL_RECORD_MS);
+  });
+
+  it('keeps secrets in request paths out of every label it stores', async () => {
+    logs = await mkdtemp(join(tmpdir(), 'gezel-perf-'));
+    stop = startResponsivenessMonitor({ logsDir: logs });
+    const path = `/preview/${CAPABILITY}/artifacts/proj-1/index.html`;
+    const redacted = '/preview/[capability]/artifacts/proj-1/index.html';
+    // At the schema's 300-character cap, with a segment shorter than the placeholder.
+    const atCap = `/preview/x/${'a'.repeat(289)}`;
+
+    const endRequest = beginPerfRequest('GET', path);
+    expect(perfSnapshot().inflight[0]?.label).toBe(`GET ${redacted}`);
+    await new Promise((r) => setTimeout(r, 300));
+    endRequest(200);
+    recordClientPerfReport({
+      kind: 'navigation',
+      view: 'project:proj-1',
+      firstFrameMs: 120,
+      settledMs: 1_400,
+      requests: 2,
+      slowest: [
+        { method: 'GET', path, ms: 1_100 },
+        { method: 'GET', path: atCap, ms: 900 },
+      ],
+      longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+    });
+    recordClientPerfReport({
+      kind: 'long-task',
+      view: 'project:proj-1',
+      durationMs: 640,
+      source: `classic-script https://127.0.0.1:6228/preview/${CAPABILITY}/type/proj-1/app.js`,
+    });
+
+    // The route validates the stored reports again on the way out.
+    const snapshot = PerfSnapshotSchema.parse(perfSnapshot());
+    expect(JSON.stringify(snapshot)).not.toContain(CAPABILITY);
+    expect(snapshot.slowRequests[0]?.path).toBe(redacted);
+    expect(snapshot.clientReports[0]?.report).toMatchObject({
+      slowest: [
+        { path: redacted },
+        { path: expect.stringMatching(/^\/preview\/\[capability\]\/a+$/) },
+      ],
+    });
   });
 });

@@ -147,6 +147,13 @@ export const GezelFrontmatterSchema = z.object({
   provider: ProviderNameSchema.optional(),
   reasoningEffort: z.string().optional(),
   /**
+   * Factual writing: state facts only from evidence and cite it as `[n]`.
+   * Absent follows the role (writers, researchers and reviewers are on;
+   * see grounding/factual-writing.ts). A session that can write into a
+   * person's document is factual whatever this says, unless it is `false`.
+   */
+  factualWriting: z.boolean().optional(),
+  /**
    * Per-gezel sampling / reasoning / structured-output / tool-call overrides.
    * Sparse — only set fields override the catalog's recommended defaults.
    * Resolution order is gezel `tuning` > installDefault > selected
@@ -318,6 +325,14 @@ export const GezelSummarySchema = z.object({
   model: z.string().optional(),
   provider: ProviderNameSchema.optional(),
   reasoningEffort: z.string().optional(),
+  /** Mirrors `GezelFrontmatter.factualWriting`. */
+  factualWriting: z.boolean().optional(),
+  /**
+   * Resolved: this gezel writes under the citation rule by role or setting.
+   * Document surfaces default to such a gezel; computed by the daemon so no
+   * client keeps its own copy of the role rules.
+   */
+  writesFactually: z.boolean().optional(),
   /** Mirrors `GezelFrontmatter.tuningProfile`. */
   tuningProfile: TuningProfileIdSchema.optional(),
   /** Mirrors `GezelFrontmatter.suggestedTuningProfile`. */
@@ -547,6 +562,45 @@ export const ToolCallCardSchema = z.discriminatedUnion('kind', [
 ]);
 export type ToolCallCard = z.infer<typeof ToolCallCardSchema>;
 
+/** One numbered piece of evidence a factual-mode gezel was shown, as `[n]`. */
+export const GroundingEvidenceSchema = z.object({
+  n: z.number().int().positive(),
+  /** Indexed context injected with the turn, a tool result, or a file the person attached. */
+  kind: z.enum(['retrieval', 'tool']),
+  title: z.string().optional(),
+  /** `knowledge://…`, a project path, or a web URL — whatever opens the source. */
+  ref: z.string().optional(),
+  /** The tool that produced it, for `kind: 'tool'`. */
+  tool: z.string().optional(),
+  /** The start of what the model saw, for a hover card. */
+  excerpt: z.string().max(800).optional(),
+});
+export type GroundingEvidence = z.infer<typeof GroundingEvidenceSchema>;
+
+export const MessageGroundingSchema = z.object({
+  /** Evidence the reply cites, plus any the turn added; numbers are session-wide. */
+  evidence: z.array(GroundingEvidenceSchema),
+  counts: z.object({
+    supported: z.number().int().nonnegative(),
+    cited: z.number().int().nonnegative(),
+    unattributed: z.number().int().nonnegative(),
+    uncited: z.number().int().nonnegative(),
+    unsupported: z.number().int().nonnegative(),
+    badCitation: z.number().int().nonnegative(),
+  }),
+  /** Sentences that state facts no evidence shows, worst first. */
+  problems: z
+    .array(
+      z.object({
+        text: z.string(),
+        status: z.enum(['uncited', 'unsupported', 'bad-citation']),
+        missing: z.array(z.string()),
+      }),
+    )
+    .max(20),
+});
+export type MessageGrounding = z.infer<typeof MessageGroundingSchema>;
+
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
   /**
@@ -769,6 +823,12 @@ export const ChatMessageSchema = z.object({
       ),
     })
     .optional(),
+  /**
+   * Factual writing: the numbered evidence this reply's `[n]` markers refer
+   * to, and what the deterministic citation check found. Present only on
+   * replies from a gezel writing in factual mode.
+   */
+  grounding: MessageGroundingSchema.optional(),
   /**
    * Tool calls the assistant fired during this turn. Populated on the
    * final assistant message; the UI renders them as a collapsible

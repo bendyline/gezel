@@ -413,6 +413,42 @@ export class CatalogHandle {
     return { ...rowToDocumentMeta(row), markdown: this.decodeBody(id, row) };
   }
 
+  /**
+   * One passage by its citation id (`knowledge://…#chunk=<uid>`), from the
+   * shard the document's chunks live in. Null when the document or the
+   * passage is not in this catalog, which is what a fabricated or stale
+   * citation looks like.
+   */
+  getChunk(
+    documentId: string,
+    chunkUid: string,
+  ): Omit<CatalogChunkHit, 'cosine' | 'source'> | null {
+    const doc = this.router.db
+      .prepare('SELECT shard_id FROM documents WHERE id = ?')
+      .get(documentId) as { shard_id: number | bigint } | undefined;
+    if (!doc) return null;
+    const shardId = Number(doc.shard_id);
+    const shard = this.shards.find((s) => s.id === shardId);
+    if (!shard) return null;
+    const row = this.shardDb(shard)
+      .prepare(
+        `SELECT chunk_uid, document_id, title, heading_path, line_start, line_end, text
+         FROM chunks WHERE chunk_uid = ? AND document_id = ?`,
+      )
+      .get(chunkUid, documentId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      chunkUid: row.chunk_uid as string,
+      documentId: row.document_id as string,
+      title: row.title as string,
+      headingPath: parseHeadingPath(row.heading_path as string),
+      lineStart: Number(row.line_start),
+      lineEnd: Number(row.line_end),
+      text: row.text as string,
+      shardId,
+    };
+  }
+
   /** Documents whose `topic_id` names no declared topic (a validator check). */
   documentsWithUndeclaredTopic(): number {
     return Number(

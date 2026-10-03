@@ -365,10 +365,17 @@ FunctionEnd
 ;
 ; READ is widened here, never WRITE.  The identical bytes are already readable
 ; by every local account inside $INSTDIR (resources\app.asar.unpacked\dist\
-; service-bundle.tar.gz), so this discloses nothing new; write stays with
-; SYSTEM, Administrators, and the service SID.  ${GEZEL_DATA_DIR} itself keeps
-; its traverse-only Users ACE and remains unlistable, exactly as $DATA_DIR
-; stays 0711 on Linux.
+; service-bundle.tar.gz), so this discloses nothing new.  ${GEZEL_DATA_DIR}
+; itself keeps its traverse-only Users ACE and remains unlistable, exactly as
+; $DATA_DIR stays 0711 on Linux.
+;
+; WRITE stays with SYSTEM and Administrators alone, so the tree's DACL is
+; protected rather than inherited.  The data root grants the service SID
+; (OI)(CI)(M) further down, and an inheriting tree picked that up: the broker,
+; which parses untrusted model files, could rewrite code that every account's
+; daemon executes with that person's own credentials (1.26275.85 audit, F01).
+; The broker runs this tree too, so it gets read/execute only, granted once
+; its SID exists.  Linux keeps the same rule by publishing the tree root-owned.
 ;
 ; Deliberately non-fatal, and deliberately quiet.  Publishing is an
 ; optimization: every failure below simply leaves the tree private, and each
@@ -396,11 +403,14 @@ FunctionEnd
     Goto GezelTreeUnpublished
   ${EndIf}
 
-  ; Container ACE only — no /T.  The tree was just written by the extractor,
-  ; so every child is pure-inheritance and picks (OI)(CI) up automatically;
-  ; a recursive pass over ~48k files would cost more than the extraction this
-  ; is meant to save.  Same reasoning the asset-store ACL relies on above.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /grant:r "*S-1-5-32-545:(OI)(CI)(RX)" /L'
+  ; Container DACL only — no /T.  The tree was just written by the extractor
+  ; (or carries an attested earlier publish; see the sentinel check before
+  ; extraction), so every child is pure-inheritance and takes the new DACL
+  ; automatically; a recursive pass over ~48k files would cost more than the
+  ; extraction this is meant to save.  /inheritance:r drops whatever the tree
+  ; inherited from the data root, including a service-SID ACE left there by the
+  ; previous install.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /L'
   Pop $0
   ${If} $0 != 0
     DetailPrint "Could not publish the service tree (icacls exit $0); each account will extract its own copy."
@@ -430,6 +440,20 @@ FunctionEnd
   DetailPrint "Published the shared service tree; per-user daemons will reuse it."
 
   GezelTreeUnpublished:
+!macroend
+
+; Remove a service tree's bundle sentinel so the extractor cannot take that
+; tree as already up to date.  Fails closed: a sentinel that survives would
+; let an unverified tree be published as this build's code.
+!macro InvalidateTreeSentinel TREE FAILURE_LABEL
+  ${If} ${FileExists} "${TREE}\.gezel-bundle.sha256"
+    Delete "${TREE}\.gezel-bundle.sha256"
+    ${If} ${FileExists} "${TREE}\.gezel-bundle.sha256"
+      DetailPrint "ERROR: could not invalidate the existing service tree at ${TREE}."
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not replace the existing copy of its shared engine code. The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
+      Goto ${FAILURE_LABEL}
+    ${EndIf}
+  ${EndIf}
 !macroend
 
 ; `dir /A:L` selects reparse-point entries. A zero exit code means at least
@@ -689,6 +713,25 @@ FunctionEnd
 
   !insertmacro RejectReparsePoint "${GEZEL_SERVICE_TREE}" "Gezel service tree" SkipNssm
   !insertmacro RejectReparseDescendants "${GEZEL_SERVICE_TREE}" "Gezel service tree" SkipNssm
+
+  ; Always unpack a fresh tree.  The extractor skips one whose sentinel
+  ; already names the shipped bundle, even under --force, and on Windows
+  ; nothing can tell an installer's tree from one someone else edited: there
+  ; is no owner check, and the attestation that would vouch for it is gone by
+  ; now, because the uninstaller that runs ahead of every upgrade or reinstall
+  ; deletes the whole state key.  Before PublishServiceTree protected the
+  ; tree, the broker could edit the code and keep the sentinel, and a repair
+  ; install would have re-attested those edits to every account.  Removing
+  ; the sentinel makes --force replace the tree; upgrades extract anyway, so
+  ; only a same-version repair pays for it.
+  ;
+  ; The interrupted-install backup gets the same treatment: with `service`
+  ; missing, the extractor renames `service.previous` back into place before
+  ; it reads the sentinel, and the broker could create that directory.
+  !insertmacro RejectReparsePoint "${GEZEL_SERVICE_TREE}.previous" "Gezel service tree backup" SkipNssm
+  !insertmacro InvalidateTreeSentinel "${GEZEL_SERVICE_TREE}" SkipNssm
+  !insertmacro InvalidateTreeSentinel "${GEZEL_SERVICE_TREE}.previous" SkipNssm
+
   DetailPrint "Extracting service bundle..."
   nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_EXTRACT_CLI}" --tarball="${GEZEL_BUNDLE_TARBALL}" --meta="${GEZEL_BUNDLE_META}" --dest="${GEZEL_SERVICE_TREE}" --force'
   Pop $0
@@ -771,7 +814,9 @@ FunctionEnd
   ${EndIf}
 
   ; Grant the per-service SID access to private state and separately to the
-  ; protected runtime directory (which intentionally does not inherit).
+  ; protected runtime directory (which intentionally does not inherit).  The
+  ; published service tree does not inherit either; it gets read/execute only,
+  ; below.
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)"'
   Pop $0
   ${If} $0 != 0
@@ -786,6 +831,20 @@ FunctionEnd
     DetailPrint "ERROR: failed to grant the service SID access to runtime state (exit $0)."
     !insertmacro RemoveGezelService
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to runtime state (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+  ; The broker runs <home>\service\dist\bin\gezeld.js but must never write it:
+  ; every account's daemon executes the same tree.  Read/execute is granted
+  ; explicitly rather than relied on through the service token's
+  ; BUILTIN\Users membership.  If PublishServiceTree could not protect the
+  ; tree, it still inherits the data root's Modify ACE; that tree carries no
+  ; attestation, so no other account will run it.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(RX)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to grant the service SID read access to its code (exit $0)."
+    !insertmacro RemoveGezelService
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to its own program files (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   ; Two ACEs, and the second one is load-bearing.

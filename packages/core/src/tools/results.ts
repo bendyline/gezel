@@ -595,19 +595,40 @@ export const ASK_USER_QUESTION_EMPTY_TEXT =
  * colleague to read crew-brief.md" sent a 2B model to `ask_user_question` in
  * every crew-handoff trial on two phones (2026-10-01): the card reached the
  * person using the app, never the colleague.
+ *
+ * Names in the pool double as words (Max, Rose, Grace, Jack, Ivy), so only
+ * a capital the name owns counts: a display name matches case-sensitively,
+ * and a one-word name never at the start of a sentence, where grammar
+ * supplies the capital ("What max length…", "Grace period?"). An id counts
+ * only when compound (`eval-colleague`, `max-2`); a one-word id is the
+ * lowercased name and carries no signal of its own.
  */
 export function crewMemberNamedIn(
   text: string,
   crew: readonly { id: string; name: string }[],
   selfId: string | undefined,
 ): { id: string; name: string } | undefined {
-  const names = (value: string) => {
-    const word = value.trim();
-    if (word.length < 2) return false;
+  const occurrences = (word: string, flags: string) => {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|[^\\p{L}\\p{N}_-])${escaped}($|[^\\p{L}\\p{N}_-])`, 'iu').test(text);
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_-])${escaped}(?![\\p{L}\\p{N}_-])`, `g${flags}`);
+    return [...text.matchAll(pattern)].map((match) => match.index ?? 0);
   };
-  return crew.find((member) => member.id !== selfId && (names(member.id) || names(member.name)));
+  const startsSentence = (index: number) => {
+    const lead = text.slice(0, index).replace(/[\p{Zs}\t"'“‘«(\[{*_•>#-]+$/u, '');
+    return lead === '' || /[.!?:;…\n]$/.test(lead);
+  };
+  const namesId = (id: string) => /[^\p{L}]/u.test(id) && occurrences(id, 'iu').length > 0;
+  const namesName = (value: string) => {
+    const name = value.trim();
+    if (name.length < 2) return false;
+    const found = occurrences(name, 'u');
+    // A multi-word name, or one in a script without case, is distinctive alone.
+    if (/\s/.test(name) || !/^[\p{Lu}\p{Ll}]/u.test(name)) return found.length > 0;
+    return /^\p{Lu}/u.test(name) && found.some((index) => !startsSentence(index));
+  };
+  return crew.find(
+    (member) => member.id !== selfId && (namesId(member.id) || namesName(member.name)),
+  );
 }
 
 export function askUserQuestionText(
@@ -620,7 +641,7 @@ export function askUserQuestionText(
 
 function colleagueNote(colleague: { id: string; name: string } | undefined): string {
   if (!colleague) return '';
-  return `\n\nThis card goes to the person using the app, not to ${colleague.name}. To give ${colleague.name} the work, use \`message_gezel\` with to: ${JSON.stringify(colleague.id)} once the answer arrives.`;
+  return `\n\nThis card goes to the person using the app, not to ${colleague.name}. To give ${colleague.name} the work, call message_gezel({ gezel: ${JSON.stringify(colleague.id)}, message: "<what ${colleague.name} should do>" }) once the answer arrives.`;
 }
 
 function askUserQuestionBody(questionId: string, deduplicated: boolean): string {

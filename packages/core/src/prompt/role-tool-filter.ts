@@ -643,6 +643,13 @@ export function computeToolAllowlist(opts: {
    */
   webSearchProvider?: WebSearchBackendName;
   /**
+   * Factual writing (grounding/factual-writing.ts). A cloud model normally
+   * loses `wikipedia_search` / `wikipedia_read` because it read Wikipedia in
+   * training, but a factual-mode session must cite what it states, and a
+   * memory cannot be cited. Keeps them on every tier.
+   */
+  factualWriting?: boolean;
+  /**
    * Whether the project has a GitHub link (`project.github`). When
    * false/undefined, the `github_*` tools in {@link GITHUB_REMOTE_TOOLS}
    * are stripped from the resolved allowlist — they'd 400 at the API
@@ -715,7 +722,7 @@ export function computeToolAllowlist(opts: {
   // want to hide a tool that would actively confuse the model.
   const stripWebSearch =
     opts.webSearchProvider === undefined || opts.webSearchProvider === 'wikipedia';
-  const stripWikipediaSearch = tier === 'cloud';
+  const stripWikipediaSearch = tier === 'cloud' && opts.factualWriting !== true;
 
   // Git/GitHub gates also fire independently of `mode` — same reason as
   // the search gates: a tool that's guaranteed to fail (github_* with no

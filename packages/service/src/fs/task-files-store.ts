@@ -24,6 +24,11 @@ export interface TaskFilesStoreOptions {
 const taskWriteLocks = new KeyedLock();
 const taskNumLocks = new KeyedLock();
 const log = createLogger('task-store');
+/**
+ * The largest task number a folder in the artifacts drawer may reserve. No
+ * project creates a billion tasks; anything above this is a stray folder.
+ */
+const MAX_DRAWER_TASK_NUM = 1_000_000_000;
 
 export class TaskWriteConflictError extends HttpStatusError {
   constructor(ref: string) {
@@ -69,13 +74,28 @@ export class TaskFilesStore {
       // A restored/stale counter can be valid yet lower than the surviving
       // tasks or outputs. Include every directory that reserves task IDs,
       // even when its task.json has been deleted or damaged.
+      const tasksDir = projectTasksDir(this.home, projectId, this.external);
+      for (const name of await readdirIfPresent(tasksDir)) {
+        if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, tasksDir));
+      }
+      // Gezels can create folders in the artifacts drawer, so a folder name
+      // there is a hint, not a record: one stray `tasks/99999999999999999999`
+      // must not block task creation for the project, and one near the top of
+      // the range must not use the range up.
       for (const dir of [
-        projectTasksDir(this.home, projectId, this.external),
         join(projectArtifactsDir(this.home, projectId, this.external), 'tasks'),
         projectDiffpacksDir(this.home, projectId, this.external),
       ]) {
         for (const name of await readdirIfPresent(dir)) {
-          if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, dir));
+          if (!/^\d+$/.test(name)) continue;
+          const num = Number(name);
+          if (Number.isSafeInteger(num) && num <= MAX_DRAWER_TASK_NUM) {
+            current = Math.max(current, num);
+          } else {
+            log.warn(
+              `Ignoring ${join(dir, name)} when numbering tasks: no task can have that number.`,
+            );
+          }
         }
       }
       const packsFile = projectDiffpacksFile(this.home, projectId);

@@ -119,6 +119,17 @@ class ConsentTests(unittest.TestCase):
         self.assertEqual(pick_default_gezel({}, roster, "m"), "m")
         self.assertEqual(pick_default_gezel({}, [], None), "")
 
+    def test_pick_default_gezel_prefers_a_writer(self):
+        roster = [
+            {"id": "lead"},
+            {"id": "res", "writesFactually": True},
+            {"id": "cw", "writesFactually": True},
+            {"id": "m"},
+        ]
+        self.assertEqual(pick_default_gezel({"voormanGezelId": "lead", "gezelIds": ["cw"]}, roster, "m"), "cw")
+        self.assertEqual(pick_default_gezel({"voormanGezelId": "lead"}, roster, "m"), "res")
+        self.assertEqual(pick_default_gezel({"voormanGezelId": "lead"}, roster, "m", "lead"), "lead")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@ import {
   WORKSPACE_READ_MAX_RESULT_BYTES,
   type WorkspaceReadFileSuccess,
 } from '../schemas/api.js';
+import { MessageGezelInputSchema } from './inputs/team.js';
 import {
   REANCHOR_MAX_CHARS,
   artifactCompletionHint,
@@ -337,12 +338,36 @@ describe('a question card that names a colleague', () => {
     expect(crewMemberNamedIn('Eval craftsperson here', crew, 'eval-craftsperson')).toBeUndefined();
   });
 
-  it('points at message_gezel after the card', () => {
+  it('ignores a name that is only a word in the sentence', () => {
+    const named = [
+      { id: 'max', name: 'Max' },
+      { id: 'grace', name: 'Grace' },
+    ];
+    expect(crewMemberNamedIn('What max length should the title be?', named, 'ada')).toBeUndefined();
+    expect(crewMemberNamedIn('Max length: 60 or 80?', named, 'ada')).toBeUndefined();
+    expect(crewMemberNamedIn('Keep it short. Max two lines?', named, 'ada')).toBeUndefined();
+    expect(crewMemberNamedIn('Options:\n- Grace period of 7 days?', named, 'ada')).toBeUndefined();
+    expect(crewMemberNamedIn('Should Max review this first?', named, 'ada')?.id).toBe('max');
+    expect(crewMemberNamedIn('Max is busy. Can Grace take it?', named, 'ada')?.id).toBe('grace');
+    const second = [{ id: 'max-2', name: 'Max' }];
+    expect(crewMemberNamedIn('Is max-2 free?', second, 'ada')?.id).toBe('max-2');
+  });
+
+  it('points at message_gezel with its real argument after the card', () => {
     expect(
       askUserQuestionText('q1', false, { id: 'eval-colleague', name: 'Eval colleague' }),
     ).toMatch(
-      /\n\nThis card goes to the person using the app, not to Eval colleague\. To give Eval colleague the work, use `message_gezel` with to: "eval-colleague" once the answer arrives\.$/,
+      /\n\nThis card goes to the person using the app, not to Eval colleague\. To give Eval colleague the work, call message_gezel\(\{ gezel: "eval-colleague", message: "<what Eval colleague should do>" \}\) once the answer arrives\.$/,
     );
+    const call = askUserQuestionText('q1', false, { id: 'ada', name: 'Ada' }).match(
+      /message_gezel\(\{ (.*) \}\)/,
+    )?.[1];
+    const keys = [...(call ?? '').matchAll(/(?:^|, )(\w+): /g)].map((match) => match[1]);
+    expect(keys).toEqual(['gezel', 'message']);
+    expect(
+      MessageGezelInputSchema.safeParse(Object.fromEntries(keys.map((key) => [key, 'ada'])))
+        .success,
+    ).toBe(true);
     expect(askUserQuestionText('q1', false)).not.toContain('message_gezel');
   });
 });

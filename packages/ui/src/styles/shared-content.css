@@ -827,6 +827,39 @@
   text-decoration: underline;
 }
 
+/* Factual-mode citations: `[n]` in the reply links to the evidence it names.
+   Small and raised like a footnote mark, so a cited paragraph still reads
+   as prose. */
+.msg-body-rendered a[href^="#cite:"] {
+  font-size: 0.72em;
+  vertical-align: super;
+  line-height: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.msg-body-rendered a[href^="#cite:"]:hover {
+  text-decoration: underline;
+}
+
+/* Statements a factual-mode reply made that no source showed. */
+.msg-grounding-issues {
+  margin: 0.3rem 0 0.35rem;
+  padding: 0.35rem 0.5rem 0.35rem 1.4rem;
+  border: 1px solid color-mix(in srgb, var(--warning, #e8c34a) 45%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning, #e8c34a) 10%, transparent);
+  color: var(--text);
+}
+
+.msg-grounding-issue + .msg-grounding-issue {
+  margin-top: 0.2rem;
+}
+
+.msg-grounding-missing {
+  color: var(--muted, #888);
+}
+
 .msg-refs-label {
   color: var(--muted, #888);
   font-size: 0.75rem;
