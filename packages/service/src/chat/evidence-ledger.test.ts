@@ -95,6 +95,7 @@ describe('EvidenceLedger', () => {
   it('refuses a document insert that states an unsourced fact, then lets it through with a warning', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Write about Washington.');
+    ledger.setLookupTools(['wikipedia_search', 'wikipedia_read'], 'wikipedia');
     ledger.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
     const bad = {
       text: 'Washington was born in 1732 [1]. He had a son named Samuel.',
@@ -103,7 +104,10 @@ describe('EvidenceLedger', () => {
     for (let i = 0; i < MAX_WRITE_REFUSALS; i++) {
       const verdict = ledger.checkDocumentWrite('doc_insert_text', bad);
       expect(verdict?.kind).toBe('reject');
-      if (verdict?.kind === 'reject') expect(verdict.error).toContain('no evidence shows "Samuel"');
+      if (verdict?.kind === 'reject') {
+        expect(verdict.error).toContain('no evidence shows "Samuel"');
+        expect(verdict.error).toContain('Your next tool call must be `wikipedia_search`');
+      }
     }
     const through = ledger.checkDocumentWrite('doc_insert_text', bad);
     expect(through).toEqual({
@@ -176,11 +180,7 @@ describe('EvidenceLedger', () => {
     ledger.beginTurn('Continue the task.');
     expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
 
-    ledger.labelToolResult(
-      'wikipedia_read',
-      { title: 'George Washington' },
-      article,
-    );
+    ledger.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
     ledger.beginTurn('Continue the task.');
     expect(ledger.checkProseFileWrite('write_file', write)?.kind).not.toBe('reject');
 

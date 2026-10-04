@@ -54,6 +54,7 @@ import {
   shouldDeferHardWatchdogForReEngage,
   shouldDeferRetryLoopForInflight,
   shouldDeferRetryLoopForRecentEscalation,
+  shouldDeferRetryLoopNudgeForInflight,
   shouldDeferSoftWatchdog,
   slugifyForDirName,
   sniffArtifactHasScored,
@@ -681,6 +682,20 @@ describe('soft watchdog inflight handling', () => {
         longPathTripped: true,
       }),
     ).toBe(false);
+  });
+
+  it('never queues a pre-trigger retry-loop nudge behind an active turn', () => {
+    expect(shouldDeferRetryLoopNudgeForInflight([])).toBe(false);
+    expect(
+      shouldDeferRetryLoopNudgeForInflight([
+        {
+          sessionId: 'aaaaaaaa-1111',
+          gezelId: 'researcher',
+          projectId: 'knowledge-study',
+          elapsedMs: 20 * 60_000,
+        },
+      ]),
+    ).toBe(true);
   });
 
   it('count-based retry-loop paths never defer for an in-flight turn', () => {

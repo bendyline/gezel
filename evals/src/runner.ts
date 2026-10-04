@@ -3152,35 +3152,55 @@ export async function pollUntilDone(
           plateauMs >= RETRY_LOOP_NUDGE_WINDOW_MS &&
           toolCallsInPlateau >= RETRY_LOOP_NUDGE_TOOL_THRESHOLD
         ) {
-          retryLoopNudgeAttempted = true;
-          const downstream = await pickReEngageTarget(args.client, args.meesterId, {
-            preferWritableRole: Boolean(recoveryFilePathForSniff(latestSniff)),
-          }).catch(() => null);
-          const targetId = downstream?.gezelId ?? args.meesterId;
-          const targetLabel = downstream
-            ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
-            : 'meester';
-          args.log(
-            `[poll] retry-loop nudge (${artifactExists ? 'expand-existing' : 'create-file'}): sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m with ${toolCallsInPlateau} tool calls; poking ${targetLabel} before retry-loop fires`,
+          // Never enqueue a pre-trigger nudge behind an active turn. The
+          // deliverable can move while that turn is streaming, making the
+          // queued instruction stale by the time it lands. Wild-caught on
+          // knowledge-food-carbohydrates-catalog / gemma4-31b: a valid
+          // rewrite landed, then the queued "expand existing" message
+          // immediately launched a redundant full overwrite. The terminal
+          // retry-loop paths below still decide whether a genuinely stuck
+          // in-flight turn has exceeded its bounded grace window.
+          const nudgeInflightTurns = await listInflightTurnsForWatchdog(args.client).catch(
+            () => [],
           );
-          try {
-            const filePath = recoveryFilePathForSniff(latestSniff);
-            const nudge = buildRetryLoopNudge({
-              filePath,
-              artifactPath: recoveryArtifactPathForSniff(latestSniff),
-              artifactExists,
-            });
-            retryLoopNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
-              meesterId: args.meesterId,
-              fallbackGezelId: targetId,
-              ...(filePath ? { filePath } : {}),
-              log: args.log,
-            });
-            noteHarnessInterventionDelivered(ctx);
-          } catch (err) {
+          if (shouldDeferRetryLoopNudgeForInflight(nudgeInflightTurns)) {
+            if (Date.now() - inflightRetryLoopDeferralLoggedAt >= 60_000) {
+              inflightRetryLoopDeferralLoggedAt = Date.now();
+              args.log(
+                `[poll] retry-loop nudge deferred: ${summarizeInflightTurnsForLog(nudgeInflightTurns)} is already working; refusing to queue a potentially stale edit`,
+              );
+            }
+          } else {
+            retryLoopNudgeAttempted = true;
+            const downstream = await pickReEngageTarget(args.client, args.meesterId, {
+              preferWritableRole: Boolean(recoveryFilePathForSniff(latestSniff)),
+            }).catch(() => null);
+            const targetId = downstream?.gezelId ?? args.meesterId;
+            const targetLabel = downstream
+              ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
+              : 'meester';
             args.log(
-              `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
+              `[poll] retry-loop nudge (${artifactExists ? 'expand-existing' : 'create-file'}): sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m with ${toolCallsInPlateau} tool calls; poking ${targetLabel} before retry-loop fires`,
             );
+            try {
+              const filePath = recoveryFilePathForSniff(latestSniff);
+              const nudge = buildRetryLoopNudge({
+                filePath,
+                artifactPath: recoveryArtifactPathForSniff(latestSniff),
+                artifactExists,
+              });
+              retryLoopNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
+                meesterId: args.meesterId,
+                fallbackGezelId: targetId,
+                ...(filePath ? { filePath } : {}),
+                log: args.log,
+              });
+              noteHarnessInterventionDelivered(ctx);
+            } catch (err) {
+              args.log(
+                `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
+              );
+            }
           }
         }
 
@@ -3992,6 +4012,18 @@ export function shouldDeferRetryLoopForRecentEscalation(args: {
 }
 
 const RETRY_LOOP_ESCALATION_GRACE_MS = 4 * 60_000;
+
+/**
+ * Pre-trigger retry-loop nudges are opportunistic, so they must only be sent
+ * to an idle session. Queueing one behind an active turn means its premise
+ * can be false by delivery time; the bounded terminal watchdog separately
+ * handles turns that remain in flight too long.
+ */
+export function shouldDeferRetryLoopNudgeForInflight(
+  inflightTurns: readonly InflightTurnSnapshot[],
+): boolean {
+  return inflightTurns.length > 0;
+}
 
 export function shouldDeferRetryLoopForInflight(args: {
   fastPathTripped: boolean;

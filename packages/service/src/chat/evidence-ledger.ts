@@ -409,7 +409,7 @@ export class EvidenceLedger {
       this.lookupPreference === 'knowledge' && first === 'search'
         ? '`search({ query: "<subject>", sources: ["knowledge"] })`'
         : `\`${first}\``;
-    return `You can look these up: call ${call} now for the subject${others}. Then write only what the results show and ${again}. Leave out anything you cannot find, or say in the text that it could not be verified. Do not ask the person for sources you can look up yourself.`;
+    return `Do not ${again} yet. Your next tool call must be ${call} for the missing subject${others}. Use its returned evidence before writing again. Remove anything the results do not support, or say in the text that it could not be verified. Do not ask the person for sources you can look up yourself.`;
   }
 
   /**
