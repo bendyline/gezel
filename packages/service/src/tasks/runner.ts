@@ -59,6 +59,7 @@ import type { Store } from '../fs/store.js';
 import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { mainBookSource, stepOwnerGezelId } from './manager.js';
+import { readTaskWithEffectiveStatus } from './effective-status.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 
 const log = createLogger('tasks');
@@ -794,20 +795,8 @@ export class TaskRunner {
     const normalItems: PendingHandoff[] = [];
     const nightItems: PendingHandoff[] = [];
     const taskByHandoffId = new Map<number, Task>();
-    const effectiveTasksByProject = new Map<string, Promise<Map<number, Task>>>();
-    const effectiveTask = async (projectId: string, num: number): Promise<Task | null> => {
-      let pending = effectiveTasksByProject.get(projectId);
-      if (!pending) {
-        pending = this.store
-          .listProjectTasks(projectId)
-          .then(
-            (tasks) => new Map(withEffectiveTaskStatuses(tasks).map((task) => [task.num, task])),
-          )
-          .catch(() => new Map<number, Task>());
-        effectiveTasksByProject.set(projectId, pending);
-      }
-      return (await pending).get(num) ?? null;
-    };
+    const effectiveTask = (projectId: string, num: number): Promise<Task | null> =>
+      readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
     const seenSnapshotKeys = new Set<string>();
     // One quota verdict per provider per tick: several night handoffs on
     // the same provider shouldn't each re-read config / re-probe a CLI.
@@ -1181,20 +1170,8 @@ export class TaskRunner {
   }
 
   private async pruneActiveDispatches(): Promise<void> {
-    const effectiveTasksByProject = new Map<string, Promise<Map<number, Task>>>();
-    const effectiveTask = async (projectId: string, num: number): Promise<Task | null> => {
-      let pending = effectiveTasksByProject.get(projectId);
-      if (!pending) {
-        pending = this.store
-          .listProjectTasks(projectId)
-          .then(
-            (tasks) => new Map(withEffectiveTaskStatuses(tasks).map((task) => [task.num, task])),
-          )
-          .catch(() => new Map<number, Task>());
-        effectiveTasksByProject.set(projectId, pending);
-      }
-      return (await pending).get(num) ?? null;
-    };
+    const effectiveTask = (projectId: string, num: number): Promise<Task | null> =>
+      readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
     for (const [key, dispatch] of this.activeDispatches) {
       const [projectId, numText] = dispatch.taskRef.split('/');
       const num = Number(numText);

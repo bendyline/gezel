@@ -307,6 +307,7 @@ export interface WorkspaceFileSource {
   readFiles(projectId: string): Promise<Array<{ path: string }>>;
 }
 import { extractReferencedTasks } from '../references/task-references.js';
+import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import {
@@ -2316,9 +2317,13 @@ export class ChatManager extends LocalEngineRuntime {
     // The model's own advance wins — never double-advance in one turn.
     if (drained.some((d) => d.name === 'advance_task_step' && d.success)) return {};
 
-    const tasks = withEffectiveTaskStatuses(
-      await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
-    );
+    const scopedRef = state.record.taskRef ? parseTaskRef(state.record.taskRef) : null;
+    const scopedTask = scopedRef
+      ? await this.readEffectiveTask(scopedRef.projectId, scopedRef.num)
+      : null;
+    const tasks = state.record.taskRef
+      ? scopedTask ? [scopedTask] : []
+      : withEffectiveTaskStatuses(await this.store.listProjectTasks(projectId).catch(() => [] as Task[]));
     // First owned, active edit-gate that HELD because the model didn't
     // write to the deliverable this turn. Surfaced to the caller so the
     // false-"done" re-prompt can fire (the active half of the gate).
@@ -3351,10 +3356,7 @@ export class ChatManager extends LocalEngineRuntime {
 
   /** Runtime task read whose lifecycle includes recursive parent inheritance. */
   private async readEffectiveTask(projectId: string, num: number): Promise<Task | null> {
-    const tasks = withEffectiveTaskStatuses(
-      await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
-    );
-    return tasks.find((task) => task.num === num) ?? null;
+    return readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
   }
 
   /**
@@ -10714,10 +10716,10 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * Release the provider session — and with it the session's MCP
-   * subprocesses — of every live session quiet for `idleMs`. The next send
-   * rebuilds it through the same path a client reset takes, so the only
-   * visible change is a cold first turn.
+   * Release provider sessions, MCP subprocesses and cached session records
+   * quiet for `idleMs`. History remains in Store. The next send reloads the
+   * record and resumes the provider through the normal session-build path,
+   * so the only visible change is a cold first turn.
    *
    * Nothing else releases a session whose task has finished: a 27-task
    * story round left 29 gezel-mcp children (~1.5 GB) alive until the daemon
@@ -10726,10 +10728,22 @@ export class ChatManager extends LocalEngineRuntime {
   async releaseIdleSessions(idleMs = IDLE_SESSION_RELEASE_MS, now = Date.now()): Promise<string[]> {
     const released: string[] = [];
     for (const [sessionId, state] of Array.from(this.states)) {
-      if (!state.session || this.isSessionTurnPending(sessionId)) continue;
+      if (this.isSessionTurnPending(sessionId) || this.afterSessionIdle.has(sessionId)) continue;
       const lastActivity = Date.parse(state.record.lastActivityAt);
       if (Number.isFinite(lastActivity) && now - lastActivity < idleMs) continue;
       await this.reset(sessionId);
+      // Disconnecting the provider alone retained every transcript, prompt and
+      // tool snapshot forever. Batch tasks create thousands of these records.
+      // They are already durable in Store; a later send reloads and resumes.
+      // Reset awaits bridge shutdown, so recheck for a send that arrived while
+      // it was finishing before removing the cached record.
+      if (
+        this.states.get(sessionId) !== state ||
+        state.session ||
+        this.isSessionTurnPending(sessionId) ||
+        this.afterSessionIdle.has(sessionId)
+      ) continue;
+      this.states.delete(sessionId);
       released.push(sessionId);
     }
     if (released.length > 0) log.info(`released ${released.length} idle live session(s)`);

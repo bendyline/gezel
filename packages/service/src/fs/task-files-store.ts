@@ -244,29 +244,37 @@ export class TaskFilesStore {
     }
   }
 
-  async listProjectTasks(projectId: string): Promise<Task[]> {
+  /** Stream newest first so existence checks can stop without retaining history. */
+  async *iterateProjectTasks(projectId: string): AsyncGenerator<Task> {
     const names = await safeReaddir(projectTasksDir(this.home, projectId, this.external));
-    const tasks: Task[] = [];
-    for (const name of names) {
-      if (!/^\d+$/.test(name)) continue;
-      const task = await this.readTask(projectId, Number.parseInt(name, 10));
-      if (task) tasks.push(task);
+    const nums = names.filter((name) => /^\d+$/.test(name)).map(Number).sort((a, b) => b - a);
+    for (const num of nums) {
+      const task = await this.readTask(projectId, num);
+      if (task) yield task;
     }
-    tasks.sort((a, b) => b.num - a.num);
+  }
+
+  async listProjectTasks(projectId: string): Promise<Task[]> {
+    const tasks: Task[] = [];
+    for await (const task of this.iterateProjectTasks(projectId)) tasks.push(task);
     return tasks;
   }
 
-  async listAllTasks(): Promise<Task[]> {
+  async *iterateAllTasks(): AsyncGenerator<Task> {
     const projectIds = await safeReaddir(gezelPaths(this.home).projects);
-    const all: Task[] = [];
     for (const id of projectIds) {
       // The projects root is an ordinary user-visible directory, so apply the
       // same centralized sync/OS-junk policy as other filesystem scanners.
       // Entity validation is a second boundary: it rejects `.git`, arbitrary
       // dot folders, and any other name that cannot safely be a project id.
       if (!isSafeEntityId(id) || isSyncJunkName(id)) continue;
-      all.push(...(await this.listProjectTasks(id)));
+      yield* this.iterateProjectTasks(id);
     }
+  }
+
+  async listAllTasks(): Promise<Task[]> {
+    const all: Task[] = [];
+    for await (const task of this.iterateAllTasks()) all.push(task);
     all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return all;
   }

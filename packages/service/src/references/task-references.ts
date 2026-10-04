@@ -8,17 +8,17 @@ import type { Store } from '../fs/store.js';
  * `<projectId>/<num>` either bare or wrapped in inline backticks —
  * "I created task `gezel-ux-roadmap/2`" — so we cast a wider net than
  * the artifact path matcher (no strict markdown-only requirement) and
- * gate on the ref existing in the on-disk task list to avoid promoting
+ * read only those candidate tasks to avoid promoting
  * hallucinated refs.
  */
 export async function extractReferencedTasks(store: Store, content: string): Promise<string[]> {
   if (!content || content.length === 0) return [];
-  const tasks = await store.listAllTasks();
-  if (tasks.length === 0) return [];
-  return matchReferencedTasksInContent(
-    content,
-    tasks.map((t) => t.ref),
-  );
+  const refs: string[] = [];
+  for (const candidate of candidateTaskRefs(content)) {
+    const parsed = parseTaskRef(candidate)!;
+    if (await store.readTask(parsed.projectId, parsed.num)) refs.push(candidate);
+  }
+  return refs;
 }
 
 /**
@@ -32,6 +32,10 @@ export function matchReferencedTasksInContent(content: string, taskRefs: string[
   if (!content || content.length === 0) return [];
   if (taskRefs.length === 0) return [];
   const known = new Set(taskRefs);
+  return candidateTaskRefs(content).filter((ref) => known.has(ref));
+}
+
+function candidateTaskRefs(content: string): string[] {
   // The model writes refs in three shapes we need to catch:
   //   - bare: `gezel-ux-roadmap/2`
   //   - inline code: `\`gezel-ux-roadmap/2\``
@@ -50,7 +54,7 @@ export function matchReferencedTasksInContent(content: string, taskRefs: string[
     // them, but keep this defensive in case the regex evolves.
     const normalized = candidate.trim();
     if (!parseTaskRef(normalized)) continue;
-    if (known.has(normalized)) hits.add(normalized);
+    hits.add(normalized);
   }
   // Sort for stable persisted output + tests.
   return [...hits].sort();

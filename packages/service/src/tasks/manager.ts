@@ -451,19 +451,17 @@ export class TaskManager {
       const project = await this.store.getProject(projectId);
       const status = project?.status ?? 'active';
       if (status !== 'active') return;
-      const tasks = withEffectiveTaskStatuses(await this.store.listProjectTasks(projectId));
-      // A draft is pending work (a plan waiting to be activated), so it
-      // blocks stabilization just like an active task — otherwise a project
-      // whose only task is a fresh draft would go `stable` and stop nudging.
-      if (
-        tasks.length > 0 &&
-        !tasks.some((t) => {
-          const status = taskEffectiveStatus(t);
-          return status === 'active' || status === 'draft';
-        })
-      ) {
-        await this.store.updateProject(projectId, { status: 'stable' });
+      // Task completion is frequent in bulk workflows. Stop at the first
+      // live task instead of retaining the project's entire completed history.
+      // A draft is pending work and blocks stabilization just like an active task.
+      let foundTask = false;
+      for await (const task of this.store.iterateProjectTasks(projectId)) {
+        foundTask = true;
+        if (task.status !== 'active' && task.status !== 'draft') continue;
+        const effective = taskEffectiveStatus(await this.withEffectiveStatus(task));
+        if (effective === 'active' || effective === 'draft') return;
       }
+      if (foundTask) await this.store.updateProject(projectId, { status: 'stable' });
     } catch (err) {
       log.error('[tasks] maybeStabilizeProject failed:', err);
     }
@@ -1372,10 +1370,24 @@ export class TaskManager {
       assigneeGezelId?: string;
     } = {},
   ): Promise<Task[]> {
-    const stored = filter.projectId
-      ? await this.store.listProjectTasks(filter.projectId)
-      : await this.store.listAllTasks();
-    const tasks = withEffectiveTaskStatuses(stored);
+    let tasks: Task[];
+    if (filter.status === 'active' || filter.status === 'draft') {
+      // Ancestors can only mask a child with paused/complete/canceled. A
+      // scheduler asking for active work never needs terminal task bodies.
+      tasks = [];
+      const source = filter.projectId
+        ? this.store.iterateProjectTasks(filter.projectId)
+        : this.store.iterateAllTasks();
+      for await (const task of source) {
+        if (task.status === filter.status) tasks.push(await this.withEffectiveStatus(task));
+      }
+      if (!filter.projectId) tasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    } else {
+      const stored = filter.projectId
+        ? await this.store.listProjectTasks(filter.projectId)
+        : await this.store.listAllTasks();
+      tasks = withEffectiveTaskStatuses(stored);
+    }
     return tasks.filter((t) => {
       if (filter.status && taskEffectiveStatus(t) !== filter.status) return false;
       if (filter.assigneeGezelId) {
@@ -4508,10 +4520,12 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   ): Promise<Task[]> {
     const parsed = parseTaskRef(parentRef);
     if (!parsed) return [];
-    const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(parsed.projectId));
-    let children = all.filter((t) => t.parentTaskRef === parentRef);
-    if (opts.status) {
-      children = children.filter((t) => taskEffectiveStatus(t) === opts.status);
+    let children: Task[] = [];
+    for await (const task of this.store.iterateProjectTasks(parsed.projectId)) {
+      if (task.parentTaskRef !== parentRef) continue;
+      if ((opts.status === 'active' || opts.status === 'draft') && task.status !== opts.status) continue;
+      const child = await this.withEffectiveStatus(task);
+      if (!opts.status || taskEffectiveStatus(child) === opts.status) children.push(child);
     }
     children.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (opts.limit && opts.limit > 0) children = children.slice(0, opts.limit);
