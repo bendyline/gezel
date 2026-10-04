@@ -33,19 +33,27 @@ export async function ensureModel(
   deps: EnsureModelDeps,
   opts: EnsureModelOptions,
 ): Promise<EnsureModelResult> {
+  opts.signal?.throwIfAborted();
   const engine = resolveEngine(
     opts.engine,
     deps.platform ?? process.platform,
     deps.arch ?? process.arch,
   );
-  const emit = (event: EnsureProgressEvent): void => opts.onEvent?.(event);
+  const emit = (event: EnsureProgressEvent): void => {
+    try {
+      opts.onEvent?.(event);
+    } catch {
+      /* Observers cannot change installation outcome. */
+    }
+  };
 
-  await ensureEngineBinary(deps, engine, emit);
+  await ensureEngineBinary(deps, engine, emit, opts.signal);
+  opts.signal?.throwIfAborted();
 
   let source: EnsureModelResult['source'] = 'present';
   if (!(await isInstalled(deps.client, engine, opts.model))) {
     if (opts.bundle) {
-      await importBundle(deps.client, opts.bundle, emit);
+      await importBundle(deps.client, opts.bundle, emit, opts.signal);
       source = 'bundle';
     } else if (opts.allowWeightDownload === false) {
       throw new GezelSdkError(
@@ -58,6 +66,13 @@ export async function ensureModel(
     }
   }
 
+  opts.signal?.throwIfAborted();
+  if (source !== 'present' && !(await isInstalled(deps.client, engine, opts.model))) {
+    throw new GezelSdkError('Preparation finished without installing the requested model', {
+      code: 'model_not_ready',
+    });
+  }
+  opts.signal?.throwIfAborted();
   const pinned = await maybePin(deps, engine, opts);
   emit({ phase: 'ready', model: opts.model, engine, source });
   return { model: opts.model, engine, source, pinned };
@@ -88,8 +103,9 @@ async function ensureEngineBinary(
   deps: EnsureModelDeps,
   engine: EnsureModelEngine,
   emit: (event: EnsureProgressEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const binary = engine === 'mlx' ? 'uv' : 'llama-server';
+  const binary = engine === 'mlx' ? 'uv' : engine === 'ds4' ? 'ds4-server' : 'llama-server';
   const status = await deps.client.getNativeEngineStatus().catch(() => null);
   if (!status) return;
   if (!status.pinned) {
@@ -106,6 +122,8 @@ async function ensureEngineBinary(
   await deps.client.ensureNativeEngine(
     binary,
     (event) => {
+      if (event.type === 'error')
+        throw new GezelSdkError(event.error, { code: 'engine_download_failed' });
       if (event.type === 'progress' && event.totalBytes > 0) {
         emit({
           phase: 'engine',
@@ -116,6 +134,7 @@ async function ensureEngineBinary(
       }
     },
     engine === 'mlx' ? undefined : status.llamaBackend,
+    signal,
   );
 }
 
@@ -126,8 +145,10 @@ async function isInstalled(
 ): Promise<boolean> {
   const listing =
     engine === 'mlx'
-      ? await client.listMlxModels().catch(() => null)
-      : await client.listLlamaCppModels().catch(() => null);
+      ? await client.listMlxModels()
+      : engine === 'ds4'
+        ? await client.listDs4Models()
+        : await client.listLlamaCppModels();
   return (listing?.models ?? []).some((entry) => entry.id === model);
 }
 
@@ -140,6 +161,7 @@ async function importBundle(
   client: GezelClient,
   bundlePath: string,
   emit: (event: EnsureProgressEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const size = await stat(bundlePath)
     .then((info) => info.size)
@@ -147,6 +169,7 @@ async function importBundle(
   emit({ phase: 'bundle', message: 'installing the bundled model', bytesTotal: size });
   const stream = Readable.toWeb(createReadStream(bundlePath)) as ReadableStream<Uint8Array>;
   const review = await client.scanModelBundle(stream, {
+    signal,
     ...(size === undefined ? {} : { totalBytes: size }),
     onProgress: (progress) => {
       // Only the byte-moving phases carry counts; the inspection phases are a
@@ -163,10 +186,12 @@ async function importBundle(
     },
   });
   try {
+    signal?.throwIfAborted();
     await client.confirmModelBundleImport(review.importId);
   } catch (err) {
     // Another window, or a previous run, already published these bytes.
     if (err instanceof Error && /already installed/i.test(err.message)) return;
+    await client.cancelModelBundleImport(review.importId).catch(() => {});
     throw err;
   }
 }
@@ -179,7 +204,7 @@ async function downloadModel(
   signal?: AbortSignal,
 ): Promise<void> {
   const qualified = `${engine}:${model}`;
-  const ensure = await app.ensureModel({ model: qualified }).catch((err: unknown) => {
+  const ensure = await app.ensureModel({ model: qualified }, { signal }).catch((err: unknown) => {
     if (err instanceof GezelSdkError && err.code === 'model_not_found') {
       throw new GezelSdkError(
         `Gezel's catalog has no model "${model}" for ${engine}. Ship it as a .gezmodel bundle, or use a catalog id.`,
@@ -188,11 +213,23 @@ async function downloadModel(
     }
     throw err;
   });
-  if (ensure.status === 'ready' || !ensure.job_id) return;
+  signal?.throwIfAborted();
+  if (ensure.model_id !== qualified)
+    throw new GezelSdkError('Preparation returned another model', { code: 'invalid_response' });
+  if (ensure.status === 'ready') return;
+  if (!ensure.job_id)
+    throw new GezelSdkError('Preparation returned no job', { code: 'invalid_response' });
+  let complete = false;
 
   emit({ phase: 'weights', message: `downloading ${model}` });
-  for await (const event of app.streamEnsureEvents(ensure.job_id)) {
+  for await (const event of app.streamEnsureEvents(ensure.job_id, { signal })) {
     if (signal?.aborted) throw new GezelSdkError('model download cancelled', { code: 'aborted' });
+    if (event.modelId !== qualified || event.jobId !== ensure.job_id)
+      throw new GezelSdkError('Preparation event identity changed', { code: 'invalid_response' });
+    if (event.type === 'done') {
+      complete = true;
+      break;
+    }
     if (event.type === 'progress') {
       emit({
         phase: 'weights',
@@ -206,6 +243,11 @@ async function downloadModel(
       });
     }
   }
+  signal?.throwIfAborted();
+  if (!complete)
+    throw new GezelSdkError('Model preparation stream ended before completion', {
+      code: 'incomplete_stream',
+    });
 }
 
 /**
@@ -222,7 +264,8 @@ async function maybePin(
 ): Promise<boolean> {
   const shouldPin = opts.pinAsDefault ?? deps.owned;
   if (!shouldPin) return false;
-  const config = await deps.client.getConfig().catch(() => null);
+  const config = await deps.client.getConfig();
+  opts.signal?.throwIfAborted();
   await deps.client.updateConfig({
     provider: engine,
     defaultModel: { ...(config?.defaultModel ?? {}), [engine]: opts.model },

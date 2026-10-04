@@ -142,7 +142,7 @@ if (EMBEDDED_PARAMS?.gezelId) {
 export function App() {
   if (EMBEDDED_PARAMS) {
     return (
-      <Suspense fallback={<div className="placeholder">Loading chat…</div>}>
+      <Suspense fallback={null}>
         <EmbeddedChat
           projectId={EMBEDDED_PARAMS.projectId}
           gezelId={EMBEDDED_PARAMS.gezelId}
@@ -850,7 +850,7 @@ function FullApp() {
             />
           }
         >
-          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+          <Suspense fallback={null}>
             {selection === null ? (
               <HomeView
                 platform={window.__GEZEL__?.platform}

@@ -35,9 +35,16 @@ public final class GezelRuntimePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPi
     private var runtime: GezelNativeRuntime?
     private var listener: UUID?
     private var pickerCall: CAPPluginCall?
-    public override func load() {
-        runtime = try? GezelNativeRuntime.shared()
-        listener = runtime?.listen { [weak self] event, data in self?.notifyListeners(event, data: data) }
+    private let initializationLock = NSLock()
+    // Registration must not initialize engines or model storage in opt-in hosts.
+    private func resolveRuntime() throws -> GezelNativeRuntime {
+        initializationLock.lock()
+        defer { initializationLock.unlock() }
+        if let runtime { return runtime }
+        let created = try GezelNativeRuntime.shared()
+        listener = created.listen { [weak self] event, data in self?.notifyListeners(event, data: data) }
+        runtime = created
+        return created
     }
     deinit {
         if let listener { runtime?.removeListener(listener) }
@@ -47,8 +54,8 @@ public final class GezelRuntimePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPi
         NativeCall(call.options as? [String: Any] ?? [:], resolve: { call.resolve($0) }, reject: { call.reject($0, $1) })
     }
     private func withRuntime(_ call: CAPPluginCall, _ action: (GezelNativeRuntime) -> Void) {
-        guard let runtime else { call.reject("Native runtime initialization failed", "UNAVAILABLE"); return }
-        action(runtime)
+        do { action(try resolveRuntime()) }
+        catch { call.reject(error.localizedDescription, "UNAVAILABLE") }
     }
     @objc public func listModels(_ call: CAPPluginCall) { withRuntime(call) { $0.listModels(Self.adapt(call)) } }
     @objc public func resolveModelSource(_ call: CAPPluginCall) { withRuntime(call) { $0.resolveModelSource(Self.adapt(call)) } }
@@ -69,13 +76,15 @@ public final class GezelRuntimePlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPi
     @objc public func completeToolCall(_ call: CAPPluginCall) { withRuntime(call) { $0.completeToolCall(Self.adapt(call)) } }
     @objc public func releaseModel(_ call: CAPPluginCall) { withRuntime(call) { $0.releaseModel(Self.adapt(call)) } }
     @objc public func importModel(_ call: CAPPluginCall) {
+        withRuntime(call) { runtime in
         DispatchQueue.main.async {
-            guard let runtime = self.runtime, runtime.reserveModelMutation() else { call.reject("Finish the current operation before importing", "BUSY"); return }
+            guard runtime.reserveModelMutation() else { call.reject("Finish the current operation before importing", "BUSY"); return }
             guard let controller = self.bridge?.viewController, controller.presentedViewController == nil else { runtime.releaseModelMutation(); call.reject("Document picker unavailable"); return }
             self.pickerCall = call
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
             picker.allowsMultipleSelection = false; picker.delegate = self
             controller.present(picker, animated: true)
+        }
         }
     }
     public func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {

@@ -5,9 +5,8 @@
  * against `@bendyline/gezel-app-sdk` can swap to any OpenAI-compatible
  * backend with minimal code changes.
  *
- * We deliberately do NOT import from `@bendyline/gezel` — pulling the
- * full internal contract into every consumer would lock us into
- * maintaining that contract publicly. The shapes here are stable.
+ * Model-management schemas are owned by core and exposed through the client's
+ * dedicated public subpath. Product-service internals remain outside this contract.
  */
 
 export interface DetectResult {
@@ -380,38 +379,12 @@ export type ChatStreamFor<F extends ChatResponseFormat> = AsyncIterable<
   F extends 'portable' ? PortableChatCompletionChunk : ChatCompletionChunk
 >;
 
-export interface ModelListEntry {
-  id: string;
-  object: 'model';
-  created: number;
-  owned_by: string;
-  context_window?: number;
-  /** Present when the host can explicitly report native readiness and support. */
-  availability?: 'available' | 'unavailable' | 'download-required' | 'downloading';
-  unavailable_reason?: string;
-  locality?: 'on-device';
-  /** Expected weight download size for a `download-required` entry. */
-  download_bytes?: number;
-  capabilities?: {
-    text: boolean;
-    tools: boolean;
-    structuredOutput: boolean;
-    images: boolean;
-    foregroundOnly: boolean;
-  };
-  supports_reasoning?: boolean;
-  /** Present when this model entry addresses one of the user's gezels. */
-  gezel_id?: string;
-  name?: string;
-  role?: string;
-  /** True for the gezel used when a caller requests an unknown model. */
-  is_fallback?: boolean;
-}
-
-export interface ModelListResponse {
-  object: 'list';
-  data: ModelListEntry[];
-}
+export type {
+  AppModel as ModelListEntry,
+  AppModelList as ModelListResponse,
+  AppEnsureResult as EnsureModelResult,
+  AppEnsureEvent as EnsureModelEvent,
+} from '@bendyline/gezel-client/app-models';
 
 export interface EmbeddingsRequest {
   /** Qualified gezel model id, e.g. `openai:text-embedding-3-small`. */
@@ -436,29 +409,6 @@ export interface EnsureModelInput {
   /** Backend-qualified model id, e.g. `llama-cpp:gemma4-e2b-q4`. */
   model: string;
 }
-
-export interface EnsureModelResult {
-  status: 'ready' | 'downloading';
-  model_id: string;
-  /** Set when status === 'downloading'. Subscribe via `streamEnsureEvents`. */
-  job_id?: string;
-}
-
-export type EnsureModelEvent =
-  | { type: 'progress'; jobId: string; modelId: string; bytesWritten: number; totalBytes: number }
-  | { type: 'verifying'; jobId: string; modelId: string; file?: string }
-  | { type: 'extracting-metadata'; jobId: string; modelId: string }
-  | {
-      type: 'retrying';
-      jobId: string;
-      modelId: string;
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-      reason: string;
-    }
-  | { type: 'done'; jobId: string; modelId: string; warning?: string }
-  | { type: 'error'; jobId: string; modelId: string; error: string };
 
 export type ChatStream = AsyncIterable<ChatCompletionChunk>;
 

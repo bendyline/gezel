@@ -464,7 +464,10 @@ export class PersistentShell {
         // user's command cannot race the resize. Keep this in one line: each
         // prompt cycle emits a completion sentinel, so a separate setup line
         // would resolve the run before the user's command executes.
-        commandToRun = `command stty rows 50 cols ${opts.columns} >/dev/null 2>&1 || :; ${command}`;
+        // Bash forks before applying an external command's redirections, so
+        // job-control diagnostics can bypass stty's own stderr redirect. Apply
+        // it to a shell group first, keeping setup noise out of user output.
+        commandToRun = `{ command stty rows 50 cols ${opts.columns} || :; } >/dev/null 2>&1; ${command}`;
       }
     }
     return this.runInternal(commandToRun, {

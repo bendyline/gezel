@@ -15,3 +15,12 @@ export function connect() {
     });
   return connectRuntime(GezelRuntime);
 }
+
+export * from './model-manager.js';
+export * from './embedding.js';
+import { createRuntimeEmbedding } from './embedding.js';
+/** Opt-in wrapper; construction and setEnabled(true) do not touch native services. */
+export function createMobileEmbedding(options: Parameters<typeof createRuntimeEmbedding>[1] = {}) {
+  return createRuntimeEmbedding(GezelRuntime, options);
+}
+export { selectModel } from '@bendyline/gezel-app-sdk/browser';

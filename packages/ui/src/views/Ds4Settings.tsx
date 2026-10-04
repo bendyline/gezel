@@ -275,7 +275,7 @@ function Ds4EngineLogViewer() {
       <div style={{ marginTop: '0.5rem' }}>
         <div className="new-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
           <button type="button" onClick={() => void load()} disabled={state.kind === 'loading'}>
-            {state.kind === 'loading' ? 'Loading…' : 'Refresh engine log'}
+            Refresh engine log
           </button>
           {state.kind === 'loaded' && state.path && (
             <span className="muted small" title={state.path}>

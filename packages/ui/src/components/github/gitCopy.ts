@@ -79,7 +79,6 @@ export const GIT_COPY = {
   reviewOpenInArtifacts: 'Open in artifacts',
   reviewReportMissing:
     "The review finished but no report was written. The reviewer's task notes may say why.",
-  reviewReportLoading: 'Loading the report…',
   reviewHistoryEmpty: 'No reviews yet. Run one before you save or open a pull request.',
 } as const;
 

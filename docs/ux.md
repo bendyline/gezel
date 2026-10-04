@@ -1122,8 +1122,14 @@ the docs never drift. The Home "What is gezel?" embed
 resting on the card, a Read/Watch key tray, and an "Open in Handboek →"
 link that lands on the same article.
 
-**Loading states.** Prefer inline `muted` text ("loading models…",
-"generating…") over blocking spinners. A pulsing icon (see
+**Loading states.** Routine view transitions, local reads, and lazy-loaded
+editors stay wordless while pending. Use an empty surface or retain the pane's
+frame; don't flash "Loading…" prose or show an empty-state claim before the
+request has answered. Keep refresh and pagination button labels stable while
+their controls are disabled. Use `aria-busy` on retained surfaces and keep
+screen-reader-only status text where it helps. Longer operations such as
+downloads, model preparation, and generation still need meaningful progress;
+prefer inline `muted` text over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal. When a surface needs to tell two working *phases* apart,
 it may use a small themed glyph per phase — a quiet 16px figure on the

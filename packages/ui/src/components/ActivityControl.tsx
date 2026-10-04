@@ -260,7 +260,7 @@ export function ActivityControl() {
                           key={q.id}
                         >
                           <p className="activity-context">{contextLabel(q)}</p>
-                          <Suspense fallback={<output>Loading question…</output>}>
+                          <Suspense fallback={null}>
                             <PendingQuestionCard
                               question={q}
                               compact

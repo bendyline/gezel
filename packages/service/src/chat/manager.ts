@@ -2323,8 +2323,12 @@ export class ChatManager extends LocalEngineRuntime {
       ? await this.readEffectiveTask(scopedRef.projectId, scopedRef.num)
       : null;
     const tasks = state.record.taskRef
-      ? scopedTask ? [scopedTask] : []
-      : withEffectiveTaskStatuses(await this.store.listProjectTasks(projectId).catch(() => [] as Task[]));
+      ? scopedTask
+        ? [scopedTask]
+        : []
+      : withEffectiveTaskStatuses(
+          await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
+        );
     // First owned, active edit-gate that HELD because the model didn't
     // write to the deliverable this turn. Surfaced to the caller so the
     // false-"done" re-prompt can fire (the active half of the gate).
@@ -10743,7 +10747,8 @@ export class ChatManager extends LocalEngineRuntime {
         state.session ||
         this.isSessionTurnPending(sessionId) ||
         this.afterSessionIdle.has(sessionId)
-      ) continue;
+      )
+        continue;
       this.states.delete(sessionId);
       released.push(sessionId);
     }

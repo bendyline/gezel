@@ -176,11 +176,7 @@ describe('EvidenceLedger', () => {
     ledger.beginTurn('Continue the task.');
     expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
 
-    ledger.labelToolResult(
-      'wikipedia_read',
-      { title: 'George Washington' },
-      article,
-    );
+    ledger.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
     ledger.beginTurn('Continue the task.');
     expect(ledger.checkProseFileWrite('write_file', write)?.kind).not.toBe('reject');
 

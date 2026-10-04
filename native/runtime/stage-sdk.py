@@ -74,8 +74,9 @@ let package = Package(
     ],
     targets: [
         .binaryTarget(name: "GezelLlama", path: "GezelLlama.xcframework"),
-        .target(name: "GezelModelStorage"),
-        .target(name: "GezelRuntime", dependencies: ["GezelLlama", "GezelModelStorage"])
+        .target(name: "GezelModelStorage", resources: [.copy("PrivacyInfo.xcprivacy")]),
+        .target(name: "GezelRuntime", dependencies: ["GezelLlama", "GezelModelStorage"],
+                resources: [.copy("PrivacyInfo.xcprivacy")])
     ],
     swiftLanguageModes: [.v5]
 )
@@ -93,9 +94,21 @@ let package = Package(
             subprocess.run(command, check=True)
             shutil.copyfile(REPO / 'LICENSE', staged / 'LICENSE-gezel.txt')
         shutil.copyfile(sdk / 'runtime-manifest.json', staged / 'engine-manifest.json')
+        shutil.copyfile(HERE / 'PUBLIC-DISTRIBUTION.md', staged / 'PUBLIC-DISTRIBUTION.md')
+        engine = json.loads((staged / 'engine-manifest.json').read_text())
+        legal_manifest = REPO / 'native/licenses/manifest.json'
+        notices = json.loads(legal_manifest.read_text())['engines']['llama-cpp']
+        if any(engine.get('upstream', {}).get(key) != notices[key] for key in ('tag', 'commit')):
+            raise ValueError('Engine source does not match the reviewed license inventory')
+        legal = staged / 'THIRD_PARTY_LICENSES'
+        legal.mkdir()
+        (legal / 'manifest.json').write_text(json.dumps(notices, indent=2) + '\n')
+        for name in notices['files']:
+            shutil.copyfile(REPO / 'native/licenses' / name, legal / name)
         sources = [file for folder in ('android/src', 'ios/Sources', 'models/Sources')
                    for file in (HERE / folder).rglob('*') if file.is_file()]
-        sources += [HERE / 'android/build.gradle', Path(__file__).resolve()]
+        sources += [HERE / 'android/build.gradle', HERE / 'PUBLIC-DISTRIBUTION.md', Path(__file__).resolve()]
+        sources += [legal_manifest, *(REPO / 'native/licenses' / name for name in notices['files'])]
         metadata = {
             'schemaVersion': 1, 'scope': 'provider-model-runtime', 'target': target,
             'packageVersion': manifest['packageVersion'], 'gezelABIVersion': manifest['gezelABIVersion'],

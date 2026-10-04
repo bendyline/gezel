@@ -1025,7 +1025,7 @@ export function NewTaskDialog({
                               ? searching
                                 ? 'No craftbooks match your search.'
                                 : 'No craftbooks here yet.'
-                              : 'Loading craftbooks…'}
+                              : null}
                           </p>
                         )}
                         {section.id === 'recommended' && books.length > suggestedBooks.length && (
@@ -1085,7 +1085,7 @@ export function NewTaskDialog({
                           {selectedBook
                             ? selectedBook.manifest.name
                             : pendingBook
-                              ? 'Loading craftbook…'
+                              ? 'New task'
                               : modeCopy.generalLabel}
                         </h3>
                       </Dialog.Title>
@@ -1102,7 +1102,6 @@ export function NewTaskDialog({
                   data-blank={selectedBook || pendingBook ? undefined : 'true'}
                   key={selectedBookId ?? '__general'}
                 >
-                  {pendingBook && <p className="gz-npd-empty">Loading craftbook…</p>}
                   {selectedBook && (
                     <div className="gz-npd-brief">
                       <p className="gz-npd-brief-lede">{selectedBook.manifest.description}</p>

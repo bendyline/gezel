@@ -72,8 +72,8 @@ import { planNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
-import { startResponsivenessMonitor } from './perf/responsiveness.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
+import { startResponsivenessMonitor } from './perf/responsiveness.js';
 
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';

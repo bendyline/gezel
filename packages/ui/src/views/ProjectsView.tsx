@@ -282,11 +282,7 @@ function preloadProjectTab(tab: ProjectTab): void {
 }
 
 function ProjectPaneBoundary({ children }: { children: ReactNode }) {
-  return (
-    <Suspense fallback={<p className="placeholder project-pane-loading">Loading view…</p>}>
-      {children}
-    </Suspense>
-  );
+  return <Suspense fallback={null}>{children}</Suspense>;
 }
 
 type ConfigurableProjectTab = keyof ProjectTabVisibility;
@@ -3290,7 +3286,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 <span>
                                   {workspaceIssues
                                     ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed${workspaceIssues.truncated ? ' — showing the first 1000 issues' : ''}`
-                                    : 'Loading review coverage…'}
+                                    : null}
                                 </span>
                                 {(workspaceIndexStatus?.state === 'stale' ||
                                   workspaceIndexStatus?.state === 'never') && (

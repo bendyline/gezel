@@ -14,8 +14,14 @@ export function startMemoryDiagnostics(): () => void {
   const report = () => {
     const memory = process.memoryUsage();
     const mib = (bytes: number) => Math.round(bytes / 1024 / 1024);
-    log.info(JSON.stringify({ rssMiB: mib(memory.rss), heapUsedMiB: mib(memory.heapUsed),
-      heapLimitMiB: mib(getHeapStatistics().heap_size_limit), externalMiB: mib(memory.external) }));
+    log.info(
+      JSON.stringify({
+        rssMiB: mib(memory.rss),
+        heapUsedMiB: mib(memory.heapUsed),
+        heapLimitMiB: mib(getHeapStatistics().heap_size_limit),
+        externalMiB: mib(memory.external),
+      }),
+    );
   };
   report();
   const timer = setInterval(report, 60_000);

@@ -329,11 +329,10 @@ describe('HomeView', () => {
       meesterGezelId: 'gz-meester',
     } as never);
 
-    render(<HomeView />);
+    const { container } = render(<HomeView />);
 
-    // While the probe hasn't resolved: the loading splash, not the onboarding
-    // form and not the workshop.
-    await screen.findByText(/Loading/);
+    expect(container.querySelector('.home-view-loading')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText(/Loading/)).not.toBeInTheDocument();
     expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
     // …and nothing first-run-flavoured either. The splash used to render the

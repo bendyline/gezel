@@ -1,3 +1,8 @@
+import {
+  AppEnsureEventSchema,
+  AppEnsureResultSchema,
+  AppModelListSchema,
+} from '@bendyline/gezel-client/app-models';
 import { GezelSdkError, errorFromResponse } from './errors.js';
 import { readSseDataChunks } from './sse.js';
 import type {
@@ -133,12 +138,13 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
 
   /** List selectable gezels plus models across every configured provider. */
   async models(opts: RequestOptions = {}): Promise<ModelListResponse> {
+    opts.signal?.throwIfAborted();
     const res = await this.fetchFn(`${this.baseUrl}/v1/models`, {
       headers: { Authorization: `Bearer ${this.token}` },
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
-    return (await res.json()) as ModelListResponse;
+    return parseBoundary(AppModelListSchema, await res.json());
   }
 
   /**
@@ -150,6 +156,7 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
     input: EnsureModelInput,
     opts: RequestOptions = {},
   ): Promise<EnsureModelResult> {
+    opts.signal?.throwIfAborted();
     const res = await this.fetchFn(`${this.baseUrl}/v1/models/ensure`, {
       method: 'POST',
       headers: {
@@ -160,7 +167,7 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) throw await errorFromResponse(res);
-    return (await res.json()) as EnsureModelResult;
+    return parseBoundary(AppEnsureResultSchema, await res.json());
   }
 
   /**
@@ -172,6 +179,7 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
     jobId: string,
     opts: RequestOptions = {},
   ): AsyncIterable<EnsureModelEvent> {
+    opts.signal?.throwIfAborted();
     const res = await this.fetchFn(
       `${this.baseUrl}/v1/models/ensure/${encodeURIComponent(jobId)}/events`,
       {
@@ -185,20 +193,27 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
         code: 'no_stream_body',
       });
     }
-    for await (const chunk of readSseDataChunks(res.body)) {
+    for await (const chunk of readSseDataChunks(res.body, opts.signal)) {
       // Keepalive frames carry `event: ping` and an empty data — our
       // SSE reader only yields `data:` payloads, so an empty string
       // is the ping signal. Skip.
       if (!chunk || chunk === '[DONE]') continue;
       let event: EnsureModelEvent;
       try {
-        event = JSON.parse(chunk) as EnsureModelEvent;
-      } catch {
-        continue;
+        event = parseBoundary(AppEnsureEventSchema, JSON.parse(chunk));
+        if (event.jobId !== jobId) throw new Error('Ensure event belongs to another job');
+      } catch (cause) {
+        throw new GezelSdkError('Invalid model preparation event', {
+          code: 'invalid_response',
+          cause,
+        });
       }
       yield event;
       if (event.type === 'done' || event.type === 'error') return;
     }
+    throw new GezelSdkError('Model preparation stream ended before completion', {
+      code: 'incomplete_stream',
+    });
   }
 
   /**
@@ -241,5 +256,16 @@ async function* parseChatStream(
       });
     }
     yield parsed;
+  }
+}
+
+function parseBoundary<T>(schema: { parse(value: unknown): T }, value: unknown): T {
+  try {
+    return schema.parse(value);
+  } catch (cause) {
+    throw new GezelSdkError('Invalid model-management response', {
+      code: 'invalid_response',
+      cause,
+    });
   }
 }

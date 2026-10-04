@@ -92,6 +92,10 @@
     "./svg": {
       "types": "./dist/svg/index.d.ts",
       "import": "./dist/svg/index.js"
+    },
+    "./app-models": {
+      "types": "./dist/schemas/app-models.d.ts",
+      "import": "./dist/schemas/app-models.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],

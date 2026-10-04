@@ -46,7 +46,9 @@ function makeService(
 ) {
   const store = {
     listProjects: vi.fn(async () => opts.projects ?? []),
-    iterateAllTasks: async function* () { yield* opts.tasks ?? []; },
+    iterateAllTasks: async function* () {
+      yield* opts.tasks ?? [];
+    },
     listGezels: vi.fn(async () => opts.gezels ?? []),
     listDocumentsRecursive: vi.fn(async () => opts.documents ?? []),
     sharedProjectId: vi.fn(async () => 'shared'),
@@ -701,10 +703,13 @@ describe('cross-corpus merge ordering (scoring tripwire)', () => {
 });
 
 it('indexes task titles from the streamed catalog without an all-task array', async () => {
-  const svc = makeService({ projects: [{ id: 'p1', name: 'Media' }], tasks: [
-    { projectId: 'p1', num: 1, title: 'Ancient harbor photograph', status: 'complete' },
-    { projectId: 'p1', num: 2, title: 'Modern harbor photograph', status: 'active' },
-  ] });
+  const svc = makeService({
+    projects: [{ id: 'p1', name: 'Media' }],
+    tasks: [
+      { projectId: 'p1', num: 1, title: 'Ancient harbor photograph', status: 'complete' },
+      { projectId: 'p1', num: 2, title: 'Modern harbor photograph', status: 'active' },
+    ],
+  });
   const hits = (await svc.quickOpen('harbor')).filter((hit) => hit.kind === 'task');
   expect(hits.map((hit) => hit.id).sort()).toEqual(['task:p1/1', 'task:p1/2']);
 });

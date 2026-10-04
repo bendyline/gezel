@@ -608,7 +608,6 @@ export function KnowledgeCatalogManager() {
 
       <div className="ollama-section">
         <h4>Installed catalogs</h4>
-        {catalogs === null && <p className="muted small">loading…</p>}
         {catalogs?.length === 0 && (
           <p className="muted small">
             Nothing installed yet. Download one below, build one from a folder of Markdown with{' '}

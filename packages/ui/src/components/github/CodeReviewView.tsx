@@ -161,9 +161,7 @@ export function CodeReviewView({
             ) : (
               <p className="muted">{GIT_COPY.reviewReportMissing}</p>
             )
-          ) : (
-            <p className="muted">{GIT_COPY.reviewReportLoading}</p>
-          )
+          ) : null
         ) : (
           <p className="placeholder">
             {running.length > 0

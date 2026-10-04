@@ -1,6 +1,10 @@
 import { GezelSdkError, type ModelListResponse } from '@bendyline/gezel-app-sdk/browser';
 import type { PortableInference } from '@bendyline/gezel/mobile-inference';
-import { MobileModelSchema, MobileProviderIdSchema } from '@bendyline/gezel/mobile-providers';
+import {
+  MobileModelSchema,
+  MobileProviderIdSchema,
+  resolveMobileInferenceBudget,
+} from '@bendyline/gezel/mobile-providers';
 
 export function modelIdentity(model: string) {
   const separator = model.indexOf(':');
@@ -36,12 +40,44 @@ export async function listModels(inference: PortableInference): Promise<ModelLis
         object: 'model' as const,
         created: 0,
         owned_by: provider.id,
-        name: model.name,
-        context_window: provider.contextTokens,
+        name:
+          provider.id === 'apple-foundation-models'
+            ? 'Apple Foundation Models'
+            : provider.id === 'android-mlkit'
+              ? 'Gemini Nano (Android ML Kit)'
+              : model.name,
+        context_window: resolveMobileInferenceBudget(provider).contextSize,
+        max_output_tokens: Math.min(
+          provider.maxOutputTokens,
+          resolveMobileInferenceBudget(provider).contextSize - 1,
+        ),
+        default_output_tokens: resolveMobileInferenceBudget(provider).maxTokens,
+        supported_options: ['model', 'messages', 'stream', 'max_tokens'],
         availability: provider.availability,
         unavailable_reason: provider.reason,
         locality: provider.locality,
-        capabilities: provider.capabilities,
+        capabilities: { ...provider.capabilities, tools: false, structuredOutput: false },
+        native_capabilities: provider.capabilities,
+        preparation:
+          provider.id === 'llama-cpp'
+            ? 'app-download'
+            : provider.id === 'android-mlkit'
+              ? 'system-download'
+              : 'system-settings',
+        reason_code:
+          provider.availability === 'available'
+            ? undefined
+            : provider.availability === 'unavailable'
+              ? 'provider_unavailable'
+              : 'model_download_required',
+        recovery_actions:
+          provider.availability === 'available'
+            ? []
+            : provider.availability === 'unavailable'
+              ? ['choose-model']
+              : provider.id === 'apple-foundation-models'
+                ? ['open-system-settings']
+                : ['prepare'],
       }));
     }),
   };

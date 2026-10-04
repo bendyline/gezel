@@ -151,7 +151,7 @@ export function GitChangesView({
   const fileName = (p: string) => p.split('/').pop() ?? p;
 
   if (changes === null) {
-    return <p className="muted gh-changes-loading">Loading changes…</p>;
+    return null;
   }
 
   if (changes.length === 0) {
@@ -246,9 +246,7 @@ export function GitChangesView({
                 binary={diff.binary}
                 truncated={diff.truncated}
               />
-            ) : (
-              <p className="muted gh-changes-loading">Loading…</p>
-            )}
+            ) : null}
           </>
         ) : (
           <p className="placeholder">Pick a file to see what changed.</p>

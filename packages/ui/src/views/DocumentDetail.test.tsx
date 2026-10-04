@@ -132,16 +132,17 @@ describe('DocumentDetail', () => {
     vi.useRealTimers();
   });
 
-  it('shows a loading placeholder while readDocument is in flight', async () => {
+  it('stays quiet while readDocument is in flight', async () => {
     let resolve!: (v: unknown) => void;
     vi.mocked(api.readDocument).mockReturnValue(
       new Promise((r) => {
         resolve = r;
       }) as never,
     );
-    render(<DocumentDetail path="mission.md" />);
-    expect(screen.getByText(/Loading mission\.md/)).toBeInTheDocument();
+    const { container } = render(<DocumentDetail path="mission.md" />);
+    expect(container).toBeEmptyDOMElement();
     resolve({ content: '' });
+    expect(await screen.findByTestId('editor-shell')).toBeInTheDocument();
   });
 
   it('mounts the editor with the loaded content and file name', async () => {

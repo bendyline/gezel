@@ -570,7 +570,10 @@ describe('knowledge injection ceilings', () => {
         ...STORE,
         readProjectArtifact: async () => 'pasta evidence line one',
         readTask: async (_projectId: string, num: number) => taskFor(num),
-        iterateProjectTasks: async function* () { yield taskFor(8); yield taskFor(11); },
+        iterateProjectTasks: async function* () {
+          yield taskFor(8);
+          yield taskFor(11);
+        },
       } as unknown as Store,
       search,
       record: { ...RECORD, taskRef: 'p1/11', stepId: 'research' } as unknown as ChatSession,

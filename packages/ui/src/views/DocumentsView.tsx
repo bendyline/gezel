@@ -244,7 +244,7 @@ export function DocumentsView() {
     // Selection no longer exists (e.g. deleted elsewhere) — fall back.
     viewer = <p className="placeholder">Select a document or folder on the left to view it.</p>;
   } else {
-    viewer = <p className="placeholder">Loading…</p>;
+    viewer = null;
   }
 
   const searchResultList = search.hits

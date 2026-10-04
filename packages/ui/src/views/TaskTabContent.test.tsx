@@ -53,7 +53,7 @@ describe('TaskTabContent', () => {
     vi.mocked(api.listProjects).mockResolvedValue({ projects: [] } as never);
   });
 
-  it('shows a loading placeholder before the task arrives', async () => {
+  it('stays quiet before the task arrives', async () => {
     let resolveTask!: (t: Task) => void;
     vi.mocked(api.getTaskByRef).mockReturnValue(
       new Promise<Task>((r) => {
@@ -61,12 +61,12 @@ describe('TaskTabContent', () => {
       }),
     );
 
-    render(<TaskTabContent taskRef="PROJ-42" />);
-
-    expect(screen.getByText(/Loading task/)).toBeInTheDocument();
+    const { container } = render(<TaskTabContent taskRef="PROJ-42" />);
+    expect(container).toBeEmptyDOMElement();
 
     // Drain so the cleanup tick doesn't warn about unfulfilled promises.
     resolveTask(FAKE_TASK);
+    expect(await screen.findByTestId('task-detail')).toBeInTheDocument();
   });
 
   it('renders TaskDetail with the loaded task once getTaskByRef resolves', async () => {

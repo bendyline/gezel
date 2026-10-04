@@ -56,7 +56,6 @@ export async function shot(page: Page, name: string, opts: ShotOptions): Promise
   await mkdir(dirname(absPath), { recursive: true });
 
   await settle(page, { requireLoadedFonts: regression });
-  await expect(page.getByText('Loading view…', { exact: true })).toBeHidden();
 
   const maskedSelectors = [
     ...(opts.noDefaultMasks ? [] : VOLATILE_SELECTORS),

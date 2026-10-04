@@ -267,7 +267,6 @@ function EditDiffRow({
         <div className="report-action-edit-diff">
           {error && <p className="error small">{error}</p>}
           {diff !== null && <GitDiffView diff={diff} />}
-          {diff === null && !error && <p className="muted small">Loading diff…</p>}
         </div>
       )}
     </div>

@@ -160,9 +160,7 @@ async function main() {
       ...(reasoningBudgetOverride !== undefined
         ? { llamaCppReasoningBudgetTokens: reasoningBudgetOverride }
         : {}),
-      ...(reasoningEffortOverride
-        ? { llamaCppReasoningEffort: reasoningEffortOverride }
-        : {}),
+      ...(reasoningEffortOverride ? { llamaCppReasoningEffort: reasoningEffortOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
       ...(args.flags.offline ? { offline: true } : {}),

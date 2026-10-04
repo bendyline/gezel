@@ -194,9 +194,7 @@ export function BenchmarksView() {
                 Try again
               </button>
             </>
-          ) : (
-            <p className="muted small">Loading the scenario catalog…</p>
-          )}
+          ) : null}
         </section>
       )}
 

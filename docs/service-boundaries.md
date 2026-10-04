@@ -10,6 +10,7 @@ Gezel uses two local service roles in packaged installs:
 | Cloud provider credentials and calls | Owns | None |
 | Native model downloads and deletion | Proxies | Owns |
 | Native engine processes and residency | Proxies | Owns |
+| Apple Foundation Models | Owns user-session helper and tool execution; Apple manages model assets and residency | Not hosted or advertised |
 | GPU/RAM admission and native queues | Merges broker telemetry into its local product snapshot | Owns |
 | Electron UI/API | Serves | Not mounted |
 | Ambient dashboard PNGs (`~/.gezel/ambient/`) | Owns (generator; never starts in machine-engine role) | None |
@@ -20,6 +21,15 @@ Gezel uses two local service roles in packaged installs:
 The roles use the same service package so engine/provider implementations stay shared, but
 `startService` resolves the role before importing either composition root. Treat the engine
 context and route table as capability boundaries.
+
+**Apple on-device AI is a deliberate ownership exception.** Its
+`apple-foundation-models` provider uses the logged-in account's Apple Intelligence
+availability through a small Swift helper, sharing the adapter with iOS. It has
+its own serial provider queue and never joins the machine broker's downloadable
+model pool. `/api/models/apple/status` is a product-only diagnostic; installation
+and OS readiness are separate states. There is no model download, implicit cloud
+fallback, or LAN sharing for this provider. Service-account and logged-out access
+to Apple's model have not been established. See [Apple-native AI](apple-native-ai.md).
 
 ## Configuration ownership
 

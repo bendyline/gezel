@@ -4,6 +4,7 @@ import {
   type PortableChatCompletionResponse,
 } from '@bendyline/gezel-app-sdk/browser';
 import { type PortableInference, createNativeInference } from '@bendyline/gezel/mobile-inference';
+import { AnswerText } from './answer-text.js';
 import { prepareChat } from './chat.js';
 import type { GezelRuntimePlugin } from './definitions.js';
 import { listModels, requireModel } from './models.js';
@@ -110,6 +111,8 @@ async function runChat(
   let stopped = false;
   let settled = false;
   let emitted = '';
+  let answer = '';
+  const filter = new AnswerText();
   let terminalError: Error | undefined;
   let release!: () => void;
   const done = new Promise<void>((resolve) => {
@@ -177,7 +180,9 @@ async function runChat(
       void stop();
       return;
     }
-    chunk(delta);
+    const content = filter.push(delta);
+    answer += content;
+    if (content) chunk(content);
   });
   if (signal.aborted) onAbort();
   const result = generation
@@ -197,7 +202,9 @@ async function runChat(
         throw new GezelSdkError('Native stream and final text disagree', {
           code: 'native_protocol',
         });
-      if (reply.text.length > emitted.length) chunk(reply.text.slice(emitted.length));
+      const suffix = filter.push(reply.text.slice(emitted.length)) + filter.finish();
+      answer += suffix;
+      if (suffix) chunk(suffix);
       chunk(undefined, reply.stopReason);
       frame('[DONE]');
       streamController?.close();
@@ -209,7 +216,7 @@ async function runChat(
         choices: [
           {
             index: 0,
-            message: { role: 'assistant', content: reply.text },
+            message: { role: 'assistant', content: answer },
             finish_reason: reply.stopReason,
           },
         ],

@@ -328,7 +328,6 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
       </header>
 
       {error && <p className="error">{error}</p>}
-      {loading && entries.length === 0 && <p className="muted">Loading…</p>}
       {!loading && entries.length === 0 && !error && (
         <p className="muted">
           No entries yet. Create a gezel, edit a project, or have a chat — events will show up here.

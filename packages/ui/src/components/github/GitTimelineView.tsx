@@ -62,7 +62,7 @@ export function GitTimelineView({ projectId }: Props) {
   }, [projectId, selectedSha]);
 
   if (commits === null) {
-    return <p className="muted gh-timeline-loading">Loading…</p>;
+    return null;
   }
   if (commits.length === 0) {
     return <p className="muted gh-timeline-empty">{GIT_COPY.timelineEmpty}</p>;
@@ -99,16 +99,14 @@ export function GitTimelineView({ projectId }: Props) {
               void load(commits.length).finally(() => setLoadingMore(false));
             }}
           >
-            {loadingMore ? 'Loading…' : 'Show earlier saves'}
+            Show earlier saves
           </button>
         )}
       </div>
       <div className="gh-timeline-detail">
         {selectedSha === null ? (
           <p className="placeholder">Pick a save to see what changed.</p>
-        ) : detail === null ? (
-          <p className="muted gh-timeline-loading">Loading…</p>
-        ) : (
+        ) : detail === null ? null : (
           <>
             <div className="gh-timeline-detail-header">
               <strong>{detail.subject}</strong>

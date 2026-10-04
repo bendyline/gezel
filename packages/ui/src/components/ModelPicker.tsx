@@ -273,7 +273,7 @@ export function ModelPicker({
   }, [otherDraft, onChange]);
 
   if (loading) {
-    return <span className="muted small">loading models…</span>;
+    return null;
   }
   if (localEmpty) {
     const n = localEmpty.activeInstallsCount;
@@ -491,7 +491,7 @@ export function EffortTray({
 }) {
   const models = useProviderModels(provider);
 
-  if (!models) return <span className="muted small">loading effort levels…</span>;
+  if (!models) return null;
   const info = models.find((candidate) => candidate.id === (model ?? defaultModel));
   if (!info?.supportsReasoning) return null;
 

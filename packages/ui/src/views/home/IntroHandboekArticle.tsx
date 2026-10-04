@@ -153,11 +153,7 @@ export function IntroHandboekArticle({
   }
 
   if (!doc || !mediaProvider) {
-    return (
-      <p className="muted" aria-live="polite">
-        Loading the Handboek…
-      </p>
-    );
+    return <div aria-busy="true" />;
   }
 
   return (

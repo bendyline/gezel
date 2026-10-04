@@ -10,7 +10,12 @@ test('Handboek readiness waits for article content after the view has mounted', 
   const held = new Promise<void>((resolve) => {
     releaseArticle = resolve;
   });
+  let articleRequested!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    articleRequested = resolve;
+  });
   await page.route('**/api/knowledge/catalogs/handboek/document?id=welcome', async (route) => {
+    articleRequested();
     await held;
     await route.continue();
   });
@@ -22,7 +27,12 @@ test('Handboek readiness waits for article content after the view has mounted', 
       ready = true;
     });
     const view = page.getByTestId('knowledge-view');
-    await expect(view.getByText('Loading…', { exact: true }).last()).toBeVisible();
+    await requested;
+    await expect(view.getByRole('region', { name: 'Article' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    await expect(view.getByText('Loading…', { exact: true })).toHaveCount(0);
     await expect(view.locator('.knowledge-reader-body')).toHaveCount(0);
     expect(ready).toBe(false);
   } finally {
