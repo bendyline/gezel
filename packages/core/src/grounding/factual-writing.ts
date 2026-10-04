@@ -64,20 +64,30 @@ export const EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   'sheet_describe_table',
 ]);
 
-/** Lookup tools the guidance names, in the order a writer should try them. */
-const LOOKUP_TOOLS = [
-  'search',
-  'wikipedia_search',
-  'wikipedia_read',
-  'web_search',
-  'fetch_url',
-  'read_document',
-];
+/** Which source family should lead a factual lookup. */
+export type FactualLookupPreference = 'default' | 'knowledge' | 'wikipedia';
+
+/** Lookup tools the guidance names, ordered by the source actually in scope. */
+const LOOKUP_TOOLS: Record<FactualLookupPreference, readonly string[]> = {
+  default: [
+    'search',
+    'wikipedia_search',
+    'wikipedia_read',
+    'web_search',
+    'fetch_url',
+    'read_document',
+  ],
+  knowledge: ['search', 'wikipedia_search', 'wikipedia_read', 'web_search', 'fetch_url'],
+  wikipedia: ['wikipedia_search', 'wikipedia_read', 'search', 'web_search', 'fetch_url'],
+};
 
 /** The lookup tools among `toolNames`, in the order a writer should try them. */
-export function factualLookupTools(toolNames: Iterable<string>): string[] {
+export function factualLookupTools(
+  toolNames: Iterable<string>,
+  preference: FactualLookupPreference = 'default',
+): string[] {
   const available = new Set(toolNames);
-  return LOOKUP_TOOLS.filter((t) => available.has(t));
+  return LOOKUP_TOOLS[preference].filter((t) => available.has(t));
 }
 
 const FACTUAL_ROLE_IDS = new Set(['researcher', 'reviewer', 'copywriter']);
@@ -130,9 +140,11 @@ export function resolveFactualWriting(input: FactualWritingInput): {
 export function factualWritingGuidance(opts: {
   numbered: boolean;
   toolNames?: Iterable<string>;
+  lookupPreference?: FactualLookupPreference;
 }): string {
   const available = new Set(opts.toolNames ?? []);
-  const lookups = factualLookupTools(available);
+  const preference = opts.lookupPreference ?? 'default';
+  const lookups = factualLookupTools(available, preference);
   const writesDocuments = [...DOCUMENT_WRITE_TOOLS].some((t) => available.has(t));
   const savesFiles = [...PROSE_FILE_WRITE_TOOLS].some((t) => available.has(t));
   const lines = [
@@ -147,6 +159,15 @@ export function factualWritingGuidance(opts: {
     );
   } else {
     lines.push('- After each fact, name where it came from: the document, page or result title.');
+  }
+  if (preference === 'wikipedia' && available.has('wikipedia_search')) {
+    lines.push(
+      '- No local knowledge catalog is in scope for this project. Start factual research with `wikipedia_search`; its results already include article lead text. Use `wikipedia_read` only when you need more of one exact article.',
+    );
+  } else if (preference === 'knowledge' && available.has('search')) {
+    lines.push(
+      '- A local knowledge catalog is in scope for this project. Start factual research with `search({ query, sources: ["knowledge"] })`, and preserve each returned `knowledge://` source URI in the file.',
+    );
   }
   lines.push(
     lookups.length > 0

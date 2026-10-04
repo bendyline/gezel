@@ -34,6 +34,7 @@ import {
   type ClaudePermissionMode,
   type CodexPermissionMode,
   type ExpectedDeliverable,
+  type FactualLookupPreference,
   type GezelConfig,
   type GezelDetail,
   type GezelGender,
@@ -14758,6 +14759,12 @@ export class ChatManager extends LocalEngineRuntime {
           ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
           toolNames: appToolNames,
         });
+    const factualLookupPreference: FactualLookupPreference =
+      project?.knowledgeCatalogs?.mode === 'off'
+        ? 'wikipedia'
+        : project?.knowledgeCatalogs?.mode === 'selected'
+          ? 'knowledge'
+          : 'default';
     // Evidence is numbered only where the bridge sees the tool traffic;
     // elsewhere the prompt asks for named sources and nothing is checked.
     const evidenceLedger = this.evidenceLedgerFor(
@@ -14864,7 +14871,10 @@ export class ChatManager extends LocalEngineRuntime {
       );
       thirdPartyToolsetIds = Array.from(installedToolsetIds).sort();
     }
-    evidenceLedger?.setLookupTools(availableBuiltinTools.map((tool) => tool.name));
+    evidenceLedger?.setLookupTools(
+      availableBuiltinTools.map((tool) => tool.name),
+      factualLookupPreference,
+    );
     const workspaceGestalt = workspaceGestaltActive
       ? await this.buildWorkspaceGestalt(
           record.projectId,
@@ -14972,6 +14982,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? {
             factualWriting: {
               toolNames: [...availableBuiltinTools.map((tool) => tool.name), ...appToolNames],
+              lookupPreference: factualLookupPreference,
             },
           }
         : {}),

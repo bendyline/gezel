@@ -458,6 +458,32 @@ describe('KnowledgeManager — search model download progress', () => {
       await progressManager.stop();
     }
   }, 60_000);
+
+  it('finishes the catalog install with a warning when optional profile prewarm stalls', async () => {
+    const { MULTILINGUAL_E5_SMALL_1 } = await import('@bendyline/gezel-knowledge');
+    const archive = join(progressDir, 'e5-timeout-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: archive,
+      workDir: join(progressDir, 'timeout-work'),
+      id: 'e5-timeout',
+      embeddingProfile: MULTILINGUAL_E5_SMALL_1,
+    });
+    const timeoutManager = new KnowledgeManager({
+      home: join(progressDir, 'timeout-home'),
+      host: await createInProcessCatalogHost(),
+      profilePrewarmTimeoutMs: 10,
+      embedQueryForProfile: async () => new Promise<number[]>(() => {}),
+    });
+    await timeoutManager.start();
+    try {
+      const events = await runInstall(timeoutManager, archive);
+      const done = events.at(-1);
+      expect(done).toMatchObject({ type: 'done' });
+      expect(done && 'warning' in done ? done.warning : undefined).toMatch(/prewarm exceeded 10ms/);
+    } finally {
+      await timeoutManager.stop();
+    }
+  });
 });
 
 describe('KnowledgeManager with a registered profile id whose pins differ', () => {

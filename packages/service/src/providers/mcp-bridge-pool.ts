@@ -188,6 +188,11 @@ export class McpBridgePool {
       pool.seedWrappersFromText(opts.volatileContext);
     }
 
+    const modelFacing = pool.getOpenAITools();
+    log.debug(
+      `${logPrefix} model-facing tool surface has ${modelFacing.length} tools after role/provider filtering: ${modelFacing.map((tool) => tool.name).join(', ')}`,
+    );
+
     return pool;
   }
 

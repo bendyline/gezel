@@ -147,7 +147,10 @@ import {
 } from './terminal-tool-policy.js';
 import { coerceToolCallArgs } from './tool-arg-schema-coercion.js';
 import { computeToolBudgetChars } from './tool-budget.js';
-import { type ToolFailureLoop, ToolFailureTracker } from './tool-failure-tracker.js';
+import {
+  type ToolFailureLoop,
+  ToolFailureTracker,
+} from './tool-failure-tracker.js';
 import {
   isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,

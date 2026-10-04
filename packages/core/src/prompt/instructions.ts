@@ -1,6 +1,9 @@
 import type { GeneralistMode } from '../generalist-mode.js';
 import { displayName } from '../gezel-display.js';
-import { factualWritingGuidance } from '../grounding/factual-writing.js';
+import {
+  type FactualLookupPreference,
+  factualWritingGuidance,
+} from '../grounding/factual-writing.js';
 import { createLogger } from '../log.js';
 import { pronounFormsForGender, pronounsForGender } from '../names.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
@@ -410,7 +413,10 @@ export interface BuildInstructionsOptions {
    * mentions document inserts only where they exist. Resolved by role, by a
    * gezel override, or by the session writing into a person's document.
    */
-  factualWriting?: { toolNames: Iterable<string> };
+  factualWriting?: {
+    toolNames: Iterable<string>;
+    lookupPreference?: FactualLookupPreference;
+  };
   /**
    * Lean-agent profile (a game / chat-room project type). Drops the
    * developer-agent browsing/"Web work" scaffolding. The tool-cookbook and
@@ -615,6 +621,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     ? `\n\n${factualWritingGuidance({
         numbered: providerName ? providerUsesManagedMcpBridge(providerName) : false,
         toolNames: factualWriting.toolNames,
+        ...(factualWriting.lookupPreference
+          ? { lookupPreference: factualWriting.lookupPreference }
+          : {}),
       })}`
     : '';
   // A non-writable project strips workspace-write tools from every role.

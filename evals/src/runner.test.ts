@@ -66,6 +66,7 @@ import {
   totalWorkspaceFileCount,
   trialHardProgressTimeoutMs,
   trialMaxDurationMs,
+  usesDeliverableAnchoredCeiling,
   workspacePathSignature,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
@@ -134,6 +135,17 @@ describe('model warm failure classification', () => {
       reason: 'model warm failed: checksum mismatch',
       failureMode: 'spawn-error',
     });
+  });
+});
+
+describe('hard-ceiling progress anchoring', () => {
+  it('lets bounded artifact scenarios reject activity-only extensions', () => {
+    expect(usesDeliverableAnchoredCeiling({ hardCeilingProgress: 'deliverable' })).toBe(true);
+    expect(usesDeliverableAnchoredCeiling({ hardCeilingProgress: 'activity' })).toBe(false);
+  });
+
+  it('retains deliverable anchoring for runtime-repair scenarios', () => {
+    expect(usesDeliverableAnchoredCeiling({ repairPolicy: 'runtime' })).toBe(true);
   });
 });
 
@@ -466,9 +478,9 @@ describe('evalDaemonEnvForTrial', () => {
   });
 
   it('enables embeddings only for a dedicated retrieval scenario', () => {
-    expect(evalDaemonEnvForTrial({ enableEmbeddings: true })).not.toHaveProperty(
-      'GEZEL_DISABLE_EMBEDDINGS',
-    );
+    const env = evalDaemonEnvForTrial({ enableEmbeddings: true });
+    expect(env).not.toHaveProperty('GEZEL_DISABLE_EMBEDDINGS');
+    expect(env).toHaveProperty('GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS', '30000');
   });
 
   it('enableModelRouting opts back in (a dedicated routing eval)', () => {

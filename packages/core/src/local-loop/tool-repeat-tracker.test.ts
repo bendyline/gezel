@@ -293,6 +293,30 @@ describe('ToolRepeatTracker', () => {
     expect(hard.shouldAbort).toBe(true);
   });
 
+  it('detects paraphrased retrieval calls that return the same source set', () => {
+    const t = new ToolRepeatTracker();
+    const result = '[knowledge strong] knowledge://bendyline/food/chunk-1 Carbohydrate — evidence';
+    t.recordCall('search', { query: 'carbohydrate nutrition' }, result);
+    t.recordCall('search', { query: 'role of carbs in food' }, result);
+    const soft = t.recordCall('search', { query: 'dietary carbohydrate overview' }, result);
+    expect(soft.count).toBe(3);
+    expect(soft.shouldAbort).toBe(false);
+    expect(soft.output).toContain('equivalent `search` result set');
+    expect(soft.output).toContain('next tool call must mutate');
+    const hard = t.recordCall('search', { query: 'carbohydrate report sources' }, result);
+    expect(hard.count).toBe(4);
+    expect(hard.shouldAbort).toBe(true);
+  });
+
+  it('treats rephrased empty retrievals as non-novel', () => {
+    const t = new ToolRepeatTracker({ softWarningAt: 2 });
+    const empty = 'No indexed project knowledge matched.';
+    t.recordCall('search', { query: 'one', sources: ['knowledge'] }, empty);
+    const repeated = t.recordCall('search', { query: 'two', sources: ['knowledge'] }, empty);
+    expect(repeated.count).toBe(2);
+    expect(repeated.output).toContain('not producing new evidence');
+  });
+
   // The whole France PowerPoint loop in one place: eight ensure_gezel calls,
   // seven of them resolving to the same gezel, split across two capitalizations.
   describe('ensure_gezel loops count the gezel, not the wording', () => {

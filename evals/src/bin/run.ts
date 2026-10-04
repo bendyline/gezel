@@ -16,6 +16,8 @@
  *   --offline            refuse providers or model setup that could use the network
  *   --llama-bin <path>   override the auto-resolved llama-server binary
  *   --image-bin <path>   override the auto-resolved sd-server binary
+ *   --reasoning-budget <n> override llama.cpp thinkingBudget for a controlled tuning trial
+ *   --reasoning-effort <v> override llama.cpp chat-template reasoning_effort
  *   --source-home <dir>  read local models from this gezel home; never download
  *   --write-reports      write score.json + postmortem.md when the trial ends
  *   --retrieval <mode>   retrieval arm (off|lean|balanced|deep), with
@@ -61,6 +63,8 @@ async function main() {
     'model',
     'offline',
     'references',
+    'reasoning-budget',
+    'reasoning-effort',
     'remove-behaviors',
     'retrieval',
     'runs-dir',
@@ -95,6 +99,24 @@ async function main() {
     : undefined;
   if (decodeRateOverride !== undefined && !(decodeRateOverride > 0)) {
     throw new Error(`--decode-rate must be a positive number, got "${args.flags['decode-rate']}"`);
+  }
+  const reasoningBudgetOverride = args.flags['reasoning-budget']
+    ? Number(args.flags['reasoning-budget'])
+    : undefined;
+  if (
+    reasoningBudgetOverride !== undefined &&
+    (!Number.isSafeInteger(reasoningBudgetOverride) || reasoningBudgetOverride <= 0)
+  ) {
+    throw new Error(
+      `--reasoning-budget must be a positive integer, got "${args.flags['reasoning-budget']}"`,
+    );
+  }
+  const reasoningEffortOverride =
+    typeof args.flags['reasoning-effort'] === 'string'
+      ? args.flags['reasoning-effort'].trim()
+      : undefined;
+  if (args.flags['reasoning-effort'] && !reasoningEffortOverride) {
+    throw new Error('--reasoning-effort must be a non-empty value');
   }
   const parseCsv = (v: unknown): string[] =>
     typeof v === 'string'
@@ -135,6 +157,12 @@ async function main() {
       ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
       ...(decodeRateOverride !== undefined ? { decodeRateTokensPerSec: decodeRateOverride } : {}),
+      ...(reasoningBudgetOverride !== undefined
+        ? { llamaCppReasoningBudgetTokens: reasoningBudgetOverride }
+        : {}),
+      ...(reasoningEffortOverride
+        ? { llamaCppReasoningEffort: reasoningEffortOverride }
+        : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
       ...(args.flags.offline ? { offline: true } : {}),

@@ -27,6 +27,15 @@ describe('classifyTrial — terminal classes', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'tool-roster-leak' });
   });
 
+  it('classifies a scenario setup timeout as infrastructure', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'setup-timeout',
+      reason: 'scenario setup timed out after 600000ms',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'setup-timeout' });
+  });
+
   it('capacity denial in the reason', () => {
     const c = classifyTrial({
       success: false,

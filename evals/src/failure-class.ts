@@ -267,6 +267,9 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   if (input.failureMode === 'spawn-error') {
     return { failureClass: 'infra', rule: 'spawn-error', evidence: reason.slice(0, 140) };
   }
+  if (input.failureMode === 'setup-timeout') {
+    return { failureClass: 'infra', rule: 'setup-timeout', evidence: reason.slice(0, 140) };
+  }
   // A scenario that withholds tools found them wired anyway: the treatment
   // never happened, so the trial says nothing about the model.
   if (TOOL_ROSTER_LEAK_REASON.test(reason)) {

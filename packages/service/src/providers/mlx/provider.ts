@@ -117,7 +117,10 @@ import {
   terminalToolClosingText,
 } from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
-import { type ToolFailureLoop, ToolFailureTracker } from '../tool-failure-tracker.js';
+import {
+  type ToolFailureLoop,
+  ToolFailureTracker,
+} from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
   BatchCapability,

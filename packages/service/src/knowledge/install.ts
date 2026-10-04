@@ -241,6 +241,7 @@ export async function* installKnowledgeCatalog(
 
       // Full integrity validation happens before publish. Production injects
       // the worker-backed host; direct callers use the library validator.
+      yield { type: 'verifying' };
       const report = opts.validateCatalog
         ? await opts.validateCatalog(staging, true)
         : await validateExtractedCatalog(staging, { deep: true });

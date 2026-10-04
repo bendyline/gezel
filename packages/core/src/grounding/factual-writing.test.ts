@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { factualWritingGuidance, isFactualRole, resolveFactualWriting } from './factual-writing.js';
+import {
+  factualLookupTools,
+  factualWritingGuidance,
+  isFactualRole,
+  resolveFactualWriting,
+} from './factual-writing.js';
 
 describe('isFactualRole', () => {
   it('holds writers, researchers and reviewers to the citation rule', () => {
@@ -79,4 +84,33 @@ describe('factualWritingGuidance', () => {
     expect(bare).toContain('Ask the person for a source');
     expect(bare).not.toContain('[1]');
   });
+
+  it('leads with Wikipedia when catalogs are off and with catalog search when selected', () => {
+    const tools = ['search', 'read_document', 'wikipedia_read', 'wikipedia_search'];
+    expect(factualLookupTools(tools, 'wikipedia')).toEqual([
+      'wikipedia_search',
+      'wikipedia_read',
+      'search',
+    ]);
+    expect(factualLookupTools(tools, 'knowledge')).toEqual([
+      'search',
+      'wikipedia_search',
+      'wikipedia_read',
+    ]);
+    const wikipedia = factualWritingGuidance({
+      numbered: true,
+      toolNames: tools,
+      lookupPreference: 'wikipedia',
+    });
+    expect(wikipedia).toContain('No local knowledge catalog is in scope');
+    expect(wikipedia).toContain('Start factual research with `wikipedia_search`');
+    expect(wikipedia).toContain('Look it up first: `wikipedia_search`, `wikipedia_read`, `search`');
+    const knowledge = factualWritingGuidance({
+      numbered: true,
+      toolNames: tools,
+      lookupPreference: 'knowledge',
+    });
+    expect(knowledge).toContain('`search({ query, sources: ["knowledge"] })`');
+  });
+
 });

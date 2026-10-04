@@ -22,6 +22,7 @@ import {
   DOCUMENT_WRITE_TOOLS,
   EVIDENCE_TOOLS,
   type EvidenceItem,
+  type FactualLookupPreference,
   type GroundingEvidence,
   type MessageGrounding,
   PROSE_FILE_WRITE_TOOLS,
@@ -44,6 +45,16 @@ const log = createLogger('grounding');
 export const MAX_WRITE_REFUSALS = 2;
 
 const EXCERPT_CHARS = 600;
+
+function writeRefusalKey(tool: string, place: string): string {
+  return `${tool}\u0000${place}`;
+}
+
+function isGroundingWriteRefusal(error: string | undefined): boolean {
+  return /no source evidence has been collected|facts that no evidence in this conversation shows/i.test(
+    error ?? '',
+  );
+}
 
 interface Entry extends EvidenceItem {
   kind: 'retrieval' | 'tool';
@@ -108,6 +119,55 @@ function describeToolEvidence(
   }
 }
 
+interface StructuredToolEvidence {
+  text: string;
+  title: string;
+  ref?: string;
+}
+
+/**
+ * Split multi-result retrieval tools into citation-ready source cards. The
+ * old single label made ten Wikipedia pages or five knowledge chunks all
+ * share one evidence number, which small models then reused as though it
+ * identified one source.
+ */
+function structuredToolEvidence(tool: string, text: string): StructuredToolEvidence[] {
+  if (tool === 'search') {
+    const rows: StructuredToolEvidence[] = [];
+    const knowledgeRow = /^\[[^\]]*\bknowledge\b[^\]]*\]\s+(knowledge:\/\/\S+)\s+(.+)$/gim;
+    for (const match of text.matchAll(knowledgeRow)) {
+      const ref = match[1];
+      const [rawTitle, ...snippetParts] = (match[2] ?? '').split(/\s+—\s+/);
+      const title = rawTitle?.trim();
+      if (!ref || !title) continue;
+      rows.push({
+        text: snippetParts.join(' — ').trim() || title,
+        title,
+        ref,
+      });
+    }
+    return rows;
+  }
+  if (tool !== 'wikipedia_search' && tool !== 'web_search') return [];
+  const starts = [...text.matchAll(/^\d+\.\s+\*\*(.+?)\*\*[^\n]*$/gm)];
+  return starts.flatMap((match, index) => {
+    const start = match.index ?? 0;
+    const end = starts[index + 1]?.index ?? text.length;
+    const block = text.slice(start, end).trim();
+    const urls = block.match(/https?:\/\/[^\s)>\]]+/g) ?? [];
+    const ref = urls[urls.length - 1];
+    const rawTitle = match[1]?.trim();
+    if (!rawTitle) return [];
+    return [
+      {
+        text: block,
+        title: tool === 'wikipedia_search' ? `Wikipedia: ${rawTitle}` : rawTitle,
+        ...(ref ? { ref } : {}),
+      },
+    ];
+  });
+}
+
 /** The text a document write carries, as prose sentences. */
 function documentWriteText(tool: string, args: Record<string, unknown>): string | null {
   if (tool === 'slide_insert') {
@@ -146,10 +206,12 @@ export class EvidenceLedger {
   private readonly floor: number;
   private given = '';
   private turnStart: number;
+  /** Consecutive refusals by write target, spanning task continuation turns. */
   private readonly refusals = new Map<string, number>();
   private readonly unverifiedWrites: SentenceGrounding[] = [];
   private readonly unverifiedPlaces = new Set<string>();
   private lookupTools: string[] = [];
+  private lookupPreference: FactualLookupPreference = 'default';
 
   constructor(opts: { floor?: number } = {}) {
     this.floor = opts.floor ?? 0;
@@ -163,7 +225,29 @@ export class EvidenceLedger {
     for (const message of messages) {
       for (const item of message.grounding?.evidence ?? []) floor = Math.max(floor, item.n);
     }
-    return new EvidenceLedger({ floor });
+    const ledger = new EvidenceLedger({ floor });
+    // Task continuations rebuild this object from the durable transcript.
+    // Recover each target's consecutive grounding refusals or the bounded
+    // guard silently restarts at zero on every continuation—the exact loop
+    // it is meant to stop. Successful writes reset only their own target.
+    for (const message of messages) {
+      for (const call of message.toolCalls ?? []) {
+        const place = PROSE_FILE_WRITE_TOOLS.has(call.name)
+          ? call.path
+          : DOCUMENT_WRITE_TOOLS.has(call.name)
+            ? 'the document'
+            : undefined;
+        if (!place) continue;
+        const key = writeRefusalKey(call.name, place);
+        if (call.success) {
+          ledger.refusals.delete(key);
+        } else if (isGroundingWriteRefusal(call.errorMessage)) {
+          const refused = ledger.refusals.get(key) ?? 0;
+          ledger.refusals.set(key, Math.min(MAX_WRITE_REFUSALS, refused + 1));
+        }
+      }
+    }
+    return ledger;
   }
 
   /**
@@ -173,7 +257,6 @@ export class EvidenceLedger {
   beginTurn(given: string): void {
     this.given = given;
     this.turnStart = this.next;
-    this.refusals.clear();
     this.unverifiedWrites.length = 0;
     this.unverifiedPlaces.clear();
   }
@@ -207,6 +290,19 @@ export class EvidenceLedger {
   /** The `[n]` header for an evidence tool's result, or null for any other tool. */
   labelToolResult(tool: string, args: Record<string, unknown>, text: string): string | null {
     if (!EVIDENCE_TOOLS.has(tool) || !text.trim()) return null;
+    const structured = structuredToolEvidence(tool, text);
+    if (structured.length > 0) {
+      return structured
+        .map((item) => {
+          const n = this.add('tool', item.text, {
+            tool,
+            title: item.title,
+            ...(item.ref ? { ref: item.ref } : {}),
+          });
+          return evidenceLabel(n, tool, item.title);
+        })
+        .join('\n');
+    }
     const meta = describeToolEvidence(tool, args);
     // A page read opens with its address (`wikipedia_read`: "# Title\nhttps://…").
     if (!meta.ref && (tool === 'wikipedia_read' || tool === 'fetch_url')) {
@@ -309,12 +405,35 @@ export class EvidenceLedger {
       return `Remove each of these, or say in the text that it could not be verified, then ${again}. If the person can give you a source, ask for it.`;
     }
     const others = rest.length > 0 ? ` (also: ${rest.map((t) => `\`${t}\``).join(', ')})` : '';
-    return `You can look these up: call \`${first}\` now for the subject${others}. Then write only what the results show and ${again}. Leave out anything you cannot find, or say in the text that it could not be verified. Do not ask the person for sources you can look up yourself.`;
+    const call =
+      this.lookupPreference === 'knowledge' && first === 'search'
+        ? '`search({ query: "<subject>", sources: ["knowledge"] })`'
+        : `\`${first}\``;
+    return `You can look these up: call ${call} now for the subject${others}. Then write only what the results show and ${again}. Leave out anything you cannot find, or say in the text that it could not be verified. Do not ask the person for sources you can look up yourself.`;
+  }
+
+  /**
+   * A writer that has collected no evidence cannot repair a rejected factual
+   * write by trying the same write again. Keep this deliberately shorter than
+   * the first refusal: tiny models attend better to one forced next action.
+   */
+  private researchFirstRemedy(tool: string): string {
+    const first = this.lookupTools[0];
+    if (!first) return this.remedy('write again');
+    const call =
+      this.lookupPreference === 'knowledge' && first === 'search'
+        ? '`search({ query: "<subject>", sources: ["knowledge"] })`'
+        : `\`${first}\``;
+    return `Not saved: no source evidence has been collected. Do not call \`${tool}\` again yet. Your next tool call must be ${call}. Use its returned evidence before writing.`;
   }
 
   /** The lookup tools this session has, in the order to try them. */
-  setLookupTools(toolNames: Iterable<string>): void {
-    this.lookupTools = factualLookupTools(toolNames);
+  setLookupTools(
+    toolNames: Iterable<string>,
+    preference: FactualLookupPreference = 'default',
+  ): void {
+    this.lookupPreference = preference;
+    this.lookupTools = factualLookupTools(toolNames, preference);
   }
 
   /**
@@ -327,11 +446,25 @@ export class EvidenceLedger {
     grounding: TextGrounding,
     words: { verb: string; again: string; place: string },
   ): { kind: 'reject'; error: string } | null {
+    const refusalKey = writeRefusalKey(tool, words.place);
     const problems = groundingProblems(grounding);
-    if (problems.length === 0) return null;
-    const refused = this.refusals.get(tool) ?? 0;
+    if (problems.length === 0) {
+      this.refusals.delete(refusalKey);
+      return null;
+    }
+    const refused = this.refusals.get(refusalKey) ?? 0;
+    // At zero evidence, a detailed sentence-by-sentence critique invites a
+    // model to redraft from memory. Give the only productive next action on
+    // the first rejection. Keep counting these attempts so that once evidence
+    // arrives the ordinary bounded guard can still fail open instead of
+    // trapping a long-running task.
+    if (this.entries.size === 0 && this.lookupTools.length > 0) {
+      this.refusals.set(refusalKey, Math.min(MAX_WRITE_REFUSALS, refused + 1));
+      log.warn(`${tool} blocked: no evidence collected`);
+      return { kind: 'reject', error: this.researchFirstRemedy(tool) };
+    }
     if (refused < MAX_WRITE_REFUSALS) {
-      this.refusals.set(tool, refused + 1);
+      this.refusals.set(refusalKey, refused + 1);
       log.info(
         `refused ${tool}: ${problems.length} ungrounded sentence(s) (refusal ${refused + 1}/${MAX_WRITE_REFUSALS})`,
       );
@@ -345,6 +478,10 @@ export class EvidenceLedger {
       };
     }
     log.warn(`${tool} wrote ${problems.length} ungrounded sentence(s) after ${refused} refusals`);
+    // A later rewrite must earn its own bounded set of checks. This also
+    // keeps an unrelated request in a later turn from inheriting a permanently
+    // fail-open tool merely because it writes to the same path.
+    this.refusals.delete(refusalKey);
     this.unverifiedWrites.push(...problems);
     this.unverifiedPlaces.add(words.place);
     return null;

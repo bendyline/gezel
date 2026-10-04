@@ -98,6 +98,7 @@ const ROUTE_BUDGET_EXPLICIT = 6;
 const FINAL_K = 24;
 /** Same cadence as the catalog download's own progress (download-with-retry). */
 const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
+const DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS = 5 * 60_000;
 /** Finished jobs stay pollable for a minute: the CLI and older cards poll `/jobs/:id`. */
 const JOB_TTL_MS = 60_000;
 const AUTO_UPDATE_STARTUP_DELAY_MS = 10 * 60_000;
@@ -220,6 +221,8 @@ export interface KnowledgeManagerOptions {
     profile: KnowledgeEmbeddingProfile,
     opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
   ) => Promise<number[]>;
+  /** Optional profile-model prewarm ceiling; keyword search remains usable on timeout. */
+  profilePrewarmTimeoutMs?: number;
   /** Test seam; null turns off the bundled Handboek. */
   bundledHandboekArchive?: string | null;
   /** Test seam: per-profile cosine floors (default: the measured table + env override). */
@@ -860,10 +863,29 @@ export class KnowledgeManager {
     let lastReportAt = 0;
     let outcome: { warning: string | undefined } | null = null;
     let wake: (() => void) | null = null;
+    let finished = false;
     const notify = () => {
       wake?.();
       wake = null;
     };
+    const configuredTimeout = Number.parseInt(
+      this.opts.env?.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        process.env.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        '',
+      10,
+    );
+    const timeoutMs =
+      this.opts.profilePrewarmTimeoutMs ??
+      (Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS);
+    const timeout = setTimeout(() => {
+      if (finished) return;
+      outcome = {
+        warning: `semantic search starts once the embedding model ${profile.model.repo} is available; prewarm exceeded ${timeoutMs}ms`,
+      };
+      notify();
+    }, timeoutMs);
     void (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(
       'knowledge catalog warm-up',
       profile,
@@ -875,33 +897,40 @@ export class KnowledgeManager {
       },
     ).then(
       () => {
+        if (finished) return;
         outcome = { warning: undefined };
         notify();
       },
       (err) => {
+        if (finished) return;
         outcome = {
           warning: `semantic search starts once the embedding model ${profile.model.repo} is available: ${errorMessage(err)}`,
         };
         notify();
       },
     );
-    while (true) {
-      const settled = outcome as { warning: string | undefined } | null;
-      const latest = progress.latest;
-      if (
-        latest &&
-        latest !== progress.reported &&
-        (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
-      ) {
-        progress.reported = latest;
-        lastReportAt = Date.now();
-        yield { type: 'progress', phase: 'embedder', ...latest };
-        continue;
+    try {
+      while (true) {
+        const settled = outcome as { warning: string | undefined } | null;
+        const latest = progress.latest;
+        if (
+          latest &&
+          latest !== progress.reported &&
+          (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
+        ) {
+          progress.reported = latest;
+          lastReportAt = Date.now();
+          yield { type: 'progress', phase: 'embedder', ...latest };
+          continue;
+        }
+        if (settled) return settled.warning;
+        await new Promise<void>((resolveWake) => {
+          wake = resolveWake;
+        });
       }
-      if (settled) return settled.warning;
-      await new Promise<void>((resolveWake) => {
-        wake = resolveWake;
-      });
+    } finally {
+      finished = true;
+      clearTimeout(timeout);
     }
   }
 

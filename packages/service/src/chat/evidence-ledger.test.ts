@@ -38,6 +38,60 @@ describe('EvidenceLedger', () => {
     });
   });
 
+  it('turns Wikipedia search results into distinct citation-ready evidence cards', () => {
+    const ledger = new EvidenceLedger();
+    const label = ledger.labelToolResult(
+      'wikipedia_search',
+      { query: 'carbohydrates nutrition' },
+      [
+        '2 results from wikipedia (query: "carbohydrates nutrition") · 20ms',
+        '',
+        '1. **Carbohydrate**  ·  en.wikipedia.org',
+        '   Carbohydrates are biomolecules.',
+        '   https://en.wikipedia.org/wiki/Carbohydrate',
+        '',
+        '2. **Dietary fiber**  ·  en.wikipedia.org',
+        '   Dietary fiber is a plant-derived carbohydrate.',
+        '   https://en.wikipedia.org/wiki/Dietary_fiber',
+      ].join('\n'),
+    );
+    expect(label).toContain('[1] Evidence from `wikipedia_search` — Wikipedia: Carbohydrate');
+    expect(label).toContain('[2] Evidence from `wikipedia_search` — Wikipedia: Dietary fiber');
+    expect(
+      ledger
+        .grounding('Dietary fiber is a plant-derived carbohydrate [2].')
+        ?.evidence.find((item) => item.n === 2),
+    ).toMatchObject({
+      n: 2,
+      title: 'Wikipedia: Dietary fiber',
+      ref: 'https://en.wikipedia.org/wiki/Dietary_fiber',
+    });
+  });
+
+  it('turns knowledge search rows into distinct source cards with stable URIs', () => {
+    const ledger = new EvidenceLedger();
+    const label = ledger.labelToolResult(
+      'search',
+      { query: 'carbohydrates' },
+      [
+        'Found 2 relevant results.',
+        '[knowledge strong] knowledge://bendyline/wikipedia-food-drink/chunk-1 Carbohydrate — Carbohydrates are biomolecules.',
+        '[knowledge] knowledge://bendyline/wikipedia-food-drink/chunk-2 Dietary fiber — Fiber is not digested in the small intestine.',
+      ].join('\n'),
+    );
+    expect(label).toContain('[1] Evidence from `search` — Carbohydrate');
+    expect(label).toContain('[2] Evidence from `search` — Dietary fiber');
+    expect(
+      ledger
+        .grounding('Fiber is not digested in the small intestine [2].')
+        ?.evidence.find((item) => item.n === 2),
+    ).toMatchObject({
+      n: 2,
+      title: 'Dietary fiber',
+      ref: 'knowledge://bendyline/wikipedia-food-drink/chunk-2',
+    });
+  });
+
   it('refuses a document insert that states an unsourced fact, then lets it through with a warning', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Write about Washington.');
@@ -73,9 +127,128 @@ describe('EvidenceLedger', () => {
     ledger.setLookupTools(['read_file', 'wikipedia_read', 'wikipedia_search', 'write_file']);
     const armed = ledger.checkProseFileWrite('write_artifact', write);
     expect(armed?.kind === 'reject' && armed.error).toContain(
-      'call `wikipedia_search` now for the subject (also: `wikipedia_read`)',
+      'Your next tool call must be `wikipedia_search`',
     );
-    expect(armed?.kind === 'reject' && armed.error).toContain('Do not ask the person for sources');
+  });
+
+  it('does not fail open while lookup tools exist but no evidence was collected', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('Write a sourced report.');
+    ledger.setLookupTools(['write_file', 'wikipedia_read', 'wikipedia_search'], 'wikipedia');
+    const write = { path: 'report.md', content: 'Patsy Custis died in 1778.' };
+    for (let i = 0; i < MAX_WRITE_REFUSALS; i++) {
+      expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
+    }
+    const stillBlocked = ledger.checkProseFileWrite('write_file', write);
+    expect(stillBlocked).toEqual({
+      kind: 'reject',
+      error:
+        'Not saved: no source evidence has been collected. Do not call `write_file` again yet. Your next tool call must be `wikipedia_search`. Use its returned evidence before writing.',
+    });
+  });
+
+  it('routes the first zero-evidence write directly to the configured research source', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('Write a sourced report.');
+    ledger.setLookupTools(['write_file', 'wikipedia_read', 'wikipedia_search'], 'wikipedia');
+
+    const rejected = ledger.checkProseFileWrite('write_file', {
+      path: 'report.md',
+      content: 'Patsy Custis died in 1778.',
+    });
+    expect(rejected).toEqual({
+      kind: 'reject',
+      error:
+        'Not saved: no source evidence has been collected. Do not call `write_file` again yet. Your next tool call must be `wikipedia_search`. Use its returned evidence before writing.',
+    });
+  });
+
+  it('keeps the bounded write guard across continuation turns, then resets after an allowed write', () => {
+    const ledger = new EvidenceLedger();
+    ledger.setLookupTools(['write_file', 'wikipedia_read', 'wikipedia_search'], 'wikipedia');
+    const write = {
+      path: 'report.md',
+      content: 'Washington was born in 1732. He had a son named Samuel.',
+    };
+
+    ledger.beginTurn('Write a sourced report.');
+    expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
+    ledger.beginTurn('Continue the task.');
+    expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
+
+    ledger.labelToolResult(
+      'wikipedia_read',
+      { title: 'George Washington' },
+      article,
+    );
+    ledger.beginTurn('Continue the task.');
+    expect(ledger.checkProseFileWrite('write_file', write)?.kind).not.toBe('reject');
+
+    // Fail-open is bounded per attempted rewrite, not permanently enabled.
+    ledger.beginTurn('Revise the report.');
+    expect(ledger.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
+  });
+
+  it('restores per-target grounding refusals from persisted continuation history', () => {
+    const refusal =
+      'Not saved: one sentence states facts that no evidence in this conversation shows.';
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        at: '2026-10-04T00:00:00.000Z',
+        toolCalls: [
+          {
+            name: 'write_file',
+            path: 'report.md',
+            durationMs: 1,
+            success: false,
+            errorMessage: refusal,
+          },
+          {
+            name: 'write_file',
+            path: 'report.md',
+            durationMs: 1,
+            success: false,
+            errorMessage: refusal,
+          },
+        ],
+      },
+    ];
+    const restored = EvidenceLedger.fromMessages(messages);
+    restored.beginTurn('Continue the report.');
+    restored.setLookupTools(['wikipedia_search'], 'wikipedia');
+    restored.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
+    const write = {
+      path: 'report.md',
+      content: 'Washington was born in 1732. He had a son named Samuel.',
+    };
+    expect(restored.checkProseFileWrite('write_file', write)?.kind).not.toBe('reject');
+
+    messages[0]!.toolCalls!.push({
+      name: 'write_file',
+      path: 'report.md',
+      durationMs: 1,
+      success: true,
+    });
+    const reset = EvidenceLedger.fromMessages(messages);
+    reset.beginTurn('Revise the report.');
+    reset.setLookupTools(['wikipedia_search'], 'wikipedia');
+    reset.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
+    expect(reset.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
+  });
+
+  it('uses a source-scoped catalog call when project knowledge is selected', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    ledger.setLookupTools(['search', 'read_document', 'wikipedia_search'], 'knowledge');
+    const rejected = ledger.checkProseFileWrite('write_file', {
+      path: 'notes.md',
+      content: 'Patsy Custis died in 1778.',
+    });
+    expect(rejected?.kind === 'reject' && rejected.error).toContain(
+      'Your next tool call must be `search({ query: "<subject>", sources: ["knowledge"] })`',
+    );
   });
 
   it('holds a saved prose file to the evidence, and leaves code and data files alone', () => {

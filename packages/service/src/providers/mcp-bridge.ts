@@ -610,7 +610,9 @@ export class McpBridge {
     if (this.wrappers.length > 0) {
       log.debug(`applying wrappers: ${this.wrappers.map((w) => w.id).join(', ')}`);
     }
-    log.debug(`ready with ${this.tools.length} tools: ${this.tools.map((t) => t.name).join(', ')}`);
+    log.debug(
+      `registered bridge roster has ${this.tools.length} tools: ${this.tools.map((t) => t.name).join(', ')}`,
+    );
   }
 
   getOpenAITools(): OpenAIFunctionTool[] {
