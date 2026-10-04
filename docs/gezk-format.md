@@ -8,9 +8,12 @@ Python reference reader. Gezel is its reference
 TypeScript implementation and the decision that opened it is
 [ADR 0012](decisions/0012-gezk-open-format.md).
 
-Current version: **0.6** (preliminary — a minor may break compatibility
-until 1.0; readers support exactly the versions they name). This
-implementation writes 0.6 (index schema 3) and reads 0.5 (schema 2) as well.
+Current implementation: **0.7** (index schema 4), retaining reads of 0.5
+(schema 2) and 0.6 (schema 3). The new shared TOC reference contract is
+documented in [gezk-shared-toc.md](gezk-shared-toc.md); its public specification
+and Python reader release must be coordinated in bendyline/gezk. Readers
+support exactly the versions they name, so older readers reject 0.7 instead of
+losing its shared references. Each document still has one body and search index.
 0.6 is additive over 0.5: documents are filed at the leaf of their topic
 path and readers roll descendants up at read time (0.5 filed everything at
 a root, which left nested topics empty), `documents.ordinal` orders a
@@ -42,6 +45,11 @@ pnpm --filter @bendyline/gezel-knowledge build-conformance # conformance/ (fixtu
 `packages/knowledge/src/conformance.test.ts` holds this implementation to
 the vendored kit; the gezk repository's CI holds the Python reader to the
 same files. Regenerate both whenever the format changes, and bump the spec.
+When the public checkout is unavailable, append `--local` to either generator
+to update the Gezel-local artifacts only: `packages/gezk/schemas/` and
+`packages/knowledge/conformance/`. This does not update the public repository
+or the website.
+
 The conformance generator never wipes the kit: the previous generation's
 fixture stays under `fixtures/` and its facts move to `vectors.legacy[]`,
 so both readers keep proving they open it. The schemas of an earlier line

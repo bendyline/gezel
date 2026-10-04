@@ -42,6 +42,6 @@ describe('core forwards the gezk format surface', () => {
   it('forwards live bindings, not undefined placeholders', () => {
     expect(typeof core.parseKnowledgeUri).toBe('function');
     expect(typeof core.KnowledgeCatalogManifestSchema.safeParse).toBe('function');
-    expect(core.GEZK_FORMAT_VERSION).toBe('0.6');
+    expect(core.GEZK_FORMAT_VERSION).toBe('0.7');
   });
 });

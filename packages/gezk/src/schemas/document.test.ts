@@ -25,6 +25,22 @@ describe('CatalogDocumentSchema', () => {
     expect(parsed.meta).toEqual({ area: 'whats-new', tags: ['release'], nested: { order: 1 } });
   });
 
+  it('preserves additional TOC paths and enforces their shape', () => {
+    const tocReferences = [{ topicPath: ['news', 'day-two'], ordinal: -1 }];
+    expect(CatalogDocumentSchema.parse({ ...base, tocReferences }).tocReferences).toEqual(
+      tocReferences,
+    );
+    for (const value of [
+      [{ topicPath: [] }],
+      [{ topicPath: ['news'], ordinal: 2147483648 }],
+      [{ topicPath: ['news'], ordinal: 0.5 }],
+      [{ topicPath: ['news'], markdown: 'duplicate body' }],
+    ])
+      expect(CatalogDocumentSchema.safeParse({ ...base, tocReferences: value }).success).toBe(
+        false,
+      );
+  });
+
   it('bounds the ordinal to an int32 and requires a topic path', () => {
     expect(KnowledgeOrdinalSchema.safeParse(2_147_483_647).success).toBe(true);
     expect(KnowledgeOrdinalSchema.safeParse(2_147_483_648).success).toBe(false);

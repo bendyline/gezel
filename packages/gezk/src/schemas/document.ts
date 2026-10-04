@@ -13,6 +13,15 @@ export const KnowledgeOrdinalSchema = z.number().int().min(-2_147_483_648).max(2
 export const KnowledgeDocumentMetaSchema = z.record(z.string(), z.unknown());
 export type KnowledgeDocumentMeta = z.infer<typeof KnowledgeDocumentMetaSchema>;
 
+/** An additional TOC placement of the same document, without a second body or index. */
+export const KnowledgeTocReferenceSchema = z
+  .object({
+    topicPath: z.array(KnowledgeIdSchema).min(1),
+    ordinal: KnowledgeOrdinalSchema.optional(),
+  })
+  .strict();
+export type KnowledgeTocReference = z.infer<typeof KnowledgeTocReferenceSchema>;
+
 /** One normalized document streamed into the compiler. */
 export const CatalogDocumentSchema = z.object({
   id: KnowledgeDocumentIdSchema,
@@ -25,6 +34,8 @@ export const CatalogDocumentSchema = z.object({
    * must be the parent of the next; the document is filed at the last one.
    */
   topicPath: z.array(KnowledgeIdSchema).min(1),
+  /** Additional root-to-leaf paths. Each leaf may list this document only once. */
+  tocReferences: z.array(KnowledgeTocReferenceSchema).optional(),
   markdown: z.string(),
   sourceUrl: z.string().optional(),
   sourceRevision: z.string().optional(),

@@ -18,7 +18,8 @@
  */
 
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import {
   CatalogDocumentSchema,
@@ -126,7 +127,10 @@ function main(): void {
     ([filename, schema]) => [filename, renderSchema(filename, schema)] as const,
   );
 
-  const schemasRoot = join(requireGezkCheckout(), 'schemas');
+  const localOnly = process.argv.includes('--local');
+  const schemasRoot = localOnly
+    ? resolve(dirname(fileURLToPath(import.meta.url)), '..', 'schemas')
+    : join(requireGezkCheckout(), 'schemas');
   const outDir = join(schemasRoot, GEZK_FORMAT_VERSION);
   mkdirSync(outDir, { recursive: true });
   for (const [filename, body] of rendered) {
@@ -145,6 +149,7 @@ function main(): void {
   // The $id of every schema is a bendyline.com URL, so the site checkout holds
   // the copy those URLs actually resolve to. Mirroring here keeps a published
   // schema from drifting behind the Zod definition it was generated from.
+  if (localOnly) return;
   const site = resolveSiteCheckout();
   if (!site) {
     console.log('[schemas] no bendyline.github.io checkout found; $id URLs not refreshed');

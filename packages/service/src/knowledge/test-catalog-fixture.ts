@@ -61,6 +61,8 @@ export async function buildTestCatalog(opts: {
    * ordinals, metadata, and one PNG asset referenced from a body.
    */
   withExtras?: boolean;
+  /** List the existing dovetail article under Finishing too. */
+  withSharedToc?: boolean;
 }): Promise<void> {
   const extras = opts.withExtras ?? false;
   await compileKnowledgeCatalog({
@@ -89,6 +91,9 @@ export async function buildTestCatalog(opts: {
         summary: 'Interlocking corner joinery.',
         language: 'en',
         topicPath: ['joinery'],
+        ...(opts.withSharedToc
+          ? { tocReferences: [{ topicPath: ['finishing'], ordinal: -1 }] }
+          : {}),
         markdown: `# Dovetail Joints\n\nTails and pins interlock to form a strong corner joint that resists pulling forces.\n${extras ? '\n![mark](assets/mark.png)\n' : ''}`,
         sourceUrl: 'https://example.test/dovetails',
         ...(extras ? { ordinal: 2, meta: { area: 'joinery', order: 2 } } : {}),

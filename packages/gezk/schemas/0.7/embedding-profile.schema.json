@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bendyline.com/gezk/0.7/schemas/embedding-profile.schema.json",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "onnxFile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "onnxDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "repo",
+        "revision"
+      ]
+    },
+    "tokenizer": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "pooling": {
+      "type": "string",
+      "enum": [
+        "mean",
+        "cls",
+        "last"
+      ]
+    },
+    "normalized": {
+      "type": "boolean"
+    },
+    "dimensions": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "maxTokens": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "queryInstruction": {
+      "type": "string"
+    },
+    "passageInstruction": {
+      "type": "string"
+    },
+    "vectorEncoding": {
+      "type": "string",
+      "enum": [
+        "bit+int8"
+      ]
+    },
+    "distance": {
+      "type": "object",
+      "properties": {
+        "stage1": {
+          "type": "string",
+          "const": "hamming"
+        },
+        "stage2": {
+          "type": "string",
+          "const": "cosine"
+        }
+      },
+      "required": [
+        "stage1",
+        "stage2"
+      ]
+    },
+    "quantization": {
+      "type": "object",
+      "properties": {
+        "int8": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "symmetric-linear"
+            },
+            "scale": {
+              "type": "number",
+              "const": 127
+            }
+          },
+          "required": [
+            "method",
+            "scale"
+          ]
+        },
+        "binary": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "sign",
+                "centered-sign"
+              ]
+            },
+            "threshold": {
+              "type": "number",
+              "const": 0
+            },
+            "packing": {
+              "type": "string",
+              "const": "lsb-first"
+            },
+            "center": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "method",
+            "threshold",
+            "packing"
+          ]
+        }
+      },
+      "required": [
+        "int8",
+        "binary"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "model",
+    "tokenizer",
+    "pooling",
+    "normalized",
+    "dimensions",
+    "maxTokens",
+    "queryInstruction",
+    "passageInstruction",
+    "vectorEncoding",
+    "distance",
+    "quantization"
+  ]
+}

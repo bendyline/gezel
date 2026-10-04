@@ -40,7 +40,7 @@ export const KnowledgeCatalogManifestSchema = z
   .object({
     kind: z.literal(GEZK_MANIFEST_KIND),
     formatVersion: z.enum(GEZK_SUPPORTED_FORMAT_VERSIONS),
-    indexSchemaVersion: z.union([z.literal(2), z.literal(3)]),
+    indexSchemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]),
     id: KnowledgeIdSchema,
     version: KnowledgeVersionSchema,
     name: z.string().min(1),

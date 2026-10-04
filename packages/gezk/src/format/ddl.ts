@@ -1,5 +1,5 @@
 /**
- * Index schema 3 DDL. Readers never migrate these. Every table is plain
+ * Index schema 4 DDL. Readers never migrate these. Every table is plain
  * SQLite (FTS5 is the only virtual-table module used), so any SQLite client
  * can read a catalog without extensions.
  */
@@ -27,6 +27,18 @@ CREATE TABLE documents(
 );
 CREATE INDEX documents_topic ON documents(topic_id, ordinal, slug);
 CREATE INDEX documents_shard ON documents(shard_id);
+
+-- Includes the primary placement in documents.topic_id/ordinal as well as
+-- shared TOC references. Bodies, chunks and vectors remain keyed by document id.
+CREATE TABLE topic_documents(
+  topic_id TEXT NOT NULL REFERENCES topics(id),
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  ordinal INTEGER CHECK (ordinal IS NULL OR
+    (typeof(ordinal) = 'integer' AND ordinal BETWEEN -2147483648 AND 2147483647)),
+  PRIMARY KEY (topic_id, document_id)
+) WITHOUT ROWID;
+CREATE INDEX topic_documents_document ON topic_documents(document_id);
+CREATE INDEX topic_documents_order ON topic_documents(topic_id, ordinal, document_id);
 
 CREATE TABLE aliases(alias TEXT NOT NULL, document_id TEXT NOT NULL,
   PRIMARY KEY (alias, document_id)) WITHOUT ROWID;
