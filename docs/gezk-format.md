@@ -2,16 +2,18 @@
 
 The `.gezk` knowledge-catalog format is an **open format** specified outside
 this repository: [bendyline/gezk](https://github.com/bendyline/gezk) holds
-the specification (`spec/gezk-0.6.md`, CC BY 4.0; `spec/gezk-0.5.md` stays
-as published), the JSON Schemas per version, the conformance kit and a
+the draft specification (`spec/gezk-0.7.md`, CC BY 4.0; the 0.5 and 0.6
+specifications stay as published), the JSON Schemas per version, the conformance kit and a
 Python reference reader. Gezel is its reference
 TypeScript implementation and the decision that opened it is
 [ADR 0012](decisions/0012-gezk-open-format.md).
 
 Current implementation: **0.7** (index schema 4), retaining reads of 0.5
 (schema 2) and 0.6 (schema 3). The new shared TOC reference contract is
-documented in [gezk-shared-toc.md](gezk-shared-toc.md); its public specification
-and Python reader release must be coordinated in bendyline/gezk. Readers
+documented in [gezk-shared-toc.md](gezk-shared-toc.md) and the 0.7 draft in
+bendyline/gezk, whose Python reference reader now exercises the same conformance
+kit. Publishing the draft specification, schema URLs, and npm reader releases
+remains a coordinated release step. Readers
 support exactly the versions they name, so older readers reject 0.7 instead of
 losing its shared references. Each document still has one body and search index.
 0.6 is additive over 0.5: documents are filed at the leaf of their topic

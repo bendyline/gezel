@@ -63,6 +63,7 @@ ordinal types and bounds, per-topic counts, and canonical document counts.
 The schema version distinguishes this table from 0.5/0.6 catalogs, whose
 single-placement browse behavior remains supported.
 
-The public specification and Python reference reader live in the separate
-`bendyline/gezk` repository. This document records the 0.7 contract for that
-coordinated format release; it does not claim that public release has happened.
+The draft specification (`spec/gezk-0.7.md`) and Python reference reader live
+in the separate `bendyline/gezk` repository and share this conformance kit.
+The public website and npm packages still need a coordinated release; these
+local changes do not publish them.
