@@ -101,6 +101,52 @@ test('the build matrix parses into a plausible set of legs', () => {
   }
 });
 
+test('Apple system inference ships only on Apple silicon and compiles the shared iOS adapter', () => {
+  const entries = parseMatrix().filter((entry) => entry.engine === 'apple-fm');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].platform, 'darwin-arm64');
+  assert.equal(entries[0].kind, 'helper');
+  assert.equal(entries[0].runner, 'xcode-27');
+  assert.ok(expectedBinaries('darwin-arm64').includes('gezel-apple-fm'));
+  const build = readFileSync(
+    new URL('../native/helpers/apple-fm/build.sh', import.meta.url),
+    'utf8',
+  );
+  assert.match(build, /runtime\/ios\/Sources\/GezelRuntime/);
+  assert.match(build, /-weak_framework -Xlinker FoundationModels/);
+  assert.match(workflow, /run: bash native\/helpers\/apple-fm\/check-mobile\.sh/);
+  const mobile = readFileSync(
+    new URL('../.github/workflows/mobile-native.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(mobile, /options: \[all, ios, android\]/);
+  for (const platform of ['ios', 'android']) {
+    assert.match(mobile, new RegExp(`name: mobile-sdk-${platform}`));
+    assert.match(mobile, new RegExp(`release-sdk\\.py pack ${platform}`));
+  }
+});
+
+test('tagged native releases require both mobile SDKs and exclude app artifacts', () => {
+  const mobile = readFileSync(
+    new URL('../.github/workflows/mobile-native.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(mobile, /workflow_call:/);
+  assert.match(workflow, /needs: \[build, mobile\]/);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/mobile-native\.yml/);
+  assert.match(workflow, /startsWith\(github.ref, 'refs\/tags\/native-v'\) && 'all'/);
+  assert.match(workflow, /pattern: mobile-sdk-\*/);
+  assert.match(workflow, /for platform in ios android/);
+  assert.match(workflow, /release-sdk\.py verify/);
+  assert.match(mobile, /GEZEL_MOBILE_SDK_VERSION: \$\{\{ needs.bridge.outputs.sdk-version \}\}/);
+  assert.doesNotMatch(mobile, /secrets: inherit|secrets\./);
+  assert.equal(
+    (mobile.match(/if: \$\{\{ !startsWith\(github.ref, 'refs\/tags\/native-v'\) \}\}/g) ?? [])
+      .length,
+    3,
+  );
+});
+
 test('x64 CUDA builds retain the Pascal PTX compatibility floor', () => {
   const llamaCuda = parseMatrix().filter(
     (entry) =>

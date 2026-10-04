@@ -86,6 +86,60 @@ describe('GezelApp native transport', () => {
     await expect(app.models()).rejects.toMatchObject({ code: 'closed' });
   });
 
+  for (const providerId of ['apple-foundation-models', 'android-mlkit'] as const) {
+    it.each(['available', 'unavailable', 'download-required', 'downloading'] as const)(
+      `${providerId} remains discoverable when %s and only generates when ready`,
+      async (availability) => {
+        const { plugin } = fixture();
+        const { providers } = await plugin.providers();
+        const system = {
+          ...providers[0]!,
+          id: providerId,
+          name: 'System model',
+          availability,
+          ...(availability === 'available' ? {} : { reason: 'System model is not ready.' }),
+        };
+        vi.mocked(plugin.providers).mockResolvedValue({ providers: [...providers, system] });
+        const app = connectRuntime(plugin);
+        try {
+          const model = `${providerId}:${providerId}`;
+          const listing = await app.models();
+          expect(listing.data).toHaveLength(2);
+          expect(listing.data.find((entry) => entry.id === model)).toMatchObject({
+            owned_by: providerId,
+            availability,
+            locality: 'on-device',
+            context_window: 2048,
+          });
+          if (availability === 'available') {
+            await expect(app.ensureModel({ model })).resolves.toEqual({
+              status: 'ready',
+              model_id: model,
+            });
+            await app.chat({ ...request, model });
+            expect(plugin.generate).toHaveBeenCalledWith(
+              expect.objectContaining({ providerId, modelId: providerId }),
+            );
+          } else {
+            expect(listing.data.find((entry) => entry.id === model)?.unavailable_reason).toBe(
+              system.reason,
+            );
+            await expect(app.ensureModel({ model })).rejects.toMatchObject({ code: availability });
+            await expect(app.chat({ ...request, model })).rejects.toMatchObject({
+              code: availability,
+            });
+            expect(plugin.generate).not.toHaveBeenCalled();
+          }
+          expect(plugin.prepareProvider).not.toHaveBeenCalled();
+          expect(plugin.importModel).not.toHaveBeenCalled();
+          expect(plugin.startModelDownload).not.toHaveBeenCalled();
+        } finally {
+          await app.close();
+        }
+      },
+    );
+  }
+
   it('streams only the current request and reconciles the final suffix without fabricating usage', async () => {
     const { plugin } = fixture();
     const app = connectRuntime(plugin);
@@ -243,3 +297,31 @@ describe('GezelApp native transport', () => {
     await other.close();
   });
 });
+
+it.each([true, false])(
+  'keeps split model thought tags out of assistant content (stream=%s)',
+  async (stream) => {
+    const f = fixture();
+    const raw = '<think>private reasoning</think>\n\nThe meeting moves to Tuesday.';
+    vi.mocked(f.plugin.generate).mockImplementation(async (input) => {
+      for (let i = 0; i < raw.length - 1; i += 2)
+        f.emit(input.requestId, raw.slice(i, Math.min(i + 2, raw.length - 1)));
+      return { text: raw, stopReason: 'stop' };
+    });
+    const app = connectRuntime(f.plugin);
+    try {
+      if (stream) {
+        let answer = '';
+        for await (const chunk of await app.chat({ ...request, stream: true }))
+          answer += chunk.choices[0]?.delta.content ?? '';
+        expect(answer).toBe('The meeting moves to Tuesday.');
+      } else {
+        expect((await app.chat(request)).choices[0]?.message.content).toBe(
+          'The meeting moves to Tuesday.',
+        );
+      }
+    } finally {
+      await app.close();
+    }
+  },
+);

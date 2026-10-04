@@ -187,7 +187,10 @@
     "mobile:test:android": "node scripts/run-with-dependency-lease.mjs mobile:test:android:unleased",
     "mobile:test:android:unleased": "pnpm mobile:sync:android && node packages/mobile/scripts/stage-android-test-fixture.mjs && node packages/mobile/scripts/test-android.mjs",
     "mobile:test:scripts": "node scripts/run-with-dependency-lease.mjs mobile:test:scripts:unleased",
-    "mobile:test:scripts:unleased": "node packages/mobile/scripts/test-scripts.mjs"
+    "mobile:test:scripts:unleased": "node packages/mobile/scripts/test-scripts.mjs",
+    "check:embedding-consumers": "node scripts/check-embedding-consumers.mjs",
+    "mobile:catalog:refresh": "node scripts/run-with-dependency-lease.mjs mobile:catalog:refresh:unleased",
+    "mobile:catalog:refresh:unleased": "pnpm --filter @bendyline/gezel-catalog exec tsx ../capacitor/scripts/refresh-catalog.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

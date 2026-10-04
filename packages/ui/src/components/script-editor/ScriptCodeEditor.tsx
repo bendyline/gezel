@@ -238,8 +238,7 @@ export const ScriptCodeEditor = forwardRef<ScriptCodeEditorHandle, ScriptCodeEdi
     );
 
     return (
-      <div className="script-code-editor">
-        {!ready && !loadError && <p className="muted small">Loading editor…</p>}
+      <div className="script-code-editor" aria-busy={!ready && !loadError}>
         {loadError && (
           <p className="script-code-editor__error">Editor failed to load: {loadError}</p>
         )}

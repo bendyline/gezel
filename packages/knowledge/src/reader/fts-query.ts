@@ -219,7 +219,8 @@ export function namedTitleMatches(
     } else {
       score = 0;
       for (const w of distinct) {
-        score += (capitalized.has(w) ? 2 : 1) * Math.log(stats.documents / Math.max(1, titleDf(stats, w)));
+        score +=
+          (capitalized.has(w) ? 2 : 1) * Math.log(stats.documents / Math.max(1, titleDf(stats, w)));
       }
     }
     named.push({ documentId: row.document_id, score, order: named.length });

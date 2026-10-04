@@ -132,7 +132,6 @@ export function GezelTemplatePicker({
               Replace this gezel's <code>about.md</code> with a template from the gilde. Current
               content is overwritten — you can edit back to undo.
             </Dialog.Description>
-            {loading && <p className="muted">Loading templates…</p>}
             {!loading && sortedItems.length === 0 && (
               <p className="muted">No gilde templates available.</p>
             )}

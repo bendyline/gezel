@@ -211,3 +211,26 @@ export const MobileEnginePhaseEventSchema = z.object({
   tokensPerSec: z.number().nonnegative().optional(),
 });
 export type MobileEnginePhaseEvent = z.infer<typeof MobileEnginePhaseEventSchema>;
+
+/** Distributable catalog projection consumed by embedding apps without repository imports. */
+export const MobileCatalogEntrySchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    license: z.string().max(500),
+    approxSizeBytes: z
+      .number()
+      .int()
+      .min(4)
+      .max(4 * 1024 ** 3),
+    contextWindow: z.number().int().positive(),
+    source: MobileModelSourceIdentitySchema,
+  })
+  .strict();
+export const MobileCatalogSchema = z
+  .array(MobileCatalogEntrySchema)
+  .max(1000)
+  .refine(
+    (entries) => new Set(entries.map((entry) => entry.source.catalogId)).size === entries.length,
+    'Duplicate catalog identity',
+  );
+export type MobileCatalogEntry = z.infer<typeof MobileCatalogEntrySchema>;

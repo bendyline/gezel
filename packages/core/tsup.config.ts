@@ -4,6 +4,7 @@ import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-c
 export default defineConfig({
   entry: [
     'src/index.ts',
+    'src/schemas/app-models.ts',
     'src/browser.ts',
     'src/paths.ts',
     'src/schemas/index.ts',

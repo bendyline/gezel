@@ -34,6 +34,28 @@ on admission. `releaseModel` waits for cancellation and native cleanup. The
 singleton lives for the process lifetime; client teardown removes listeners and
 cancels only its own request, not another client's work.
 
+## Coordinated native releases
+
+`build-native.yml` calls `mobile-native.yml` to build these SDKs with desktop
+engines. A `native-vX.Y.Z` tag requires both platforms and publishes their
+archives into the same **draft** release, under the same version, SHA256SUMS
+and build provenance. Publication is still manual. Manual native builds default
+to both mobile platforms and accept `mobile=all|ios|android|none`; the reusable
+mobile workflow also retains its PR and manual checks.
+
+Release assets are `gezel-mobile-X.Y.Z-ios.tar.gz` and
+`gezel-mobile-X.Y.Z-android.tar.gz`. CI test builds use
+`0.0.0-ci.<run-id>.<attempt>` versions and upload `mobile-sdk-ios` /
+`mobile-sdk-android` artifacts. App verification archives have separate artifact
+names and never enter the native release.
+
+The release packager verifies exact inventories, platform/version identity,
+privacy resource packaging, license notices and an allowlist of SDK contents,
+including Android's nested AAR/JAR files. Assembly checks the source commit again
+before including the SDK in the draft. See
+[PUBLIC-DISTRIBUTION.md](PUBLIC-DISTRIBUTION.md), included in every SDK, for
+signing, proprietary-app use, licenses and ML Kit restrictions.
+
 ## Producer staging (no publication needed)
 
 First stage verified low-level engine packages using
@@ -63,11 +85,10 @@ at that folder, or stage it inside the Capacitor package. The *development*
 manifest under `ios/` additionally accepts `GEZEL_LLAMA_PACKAGE` for compiling
 directly against a staged low-level package.
 
-No registry is necessary for these local integrations. Later, distribute Swift
-source/package metadata with a versioned repository and binary release assets,
-and the Android artifacts through a Maven repository. GitHub release assets can
-hold binaries, but an AAR by itself is not a Maven dependency with its POM and
-transitive dependencies.
+No registry is necessary for these integrations. Extract the released Swift
+package or folder Maven repository and reference it locally. Android consumers
+need the complete Maven folder, including POM/module metadata for transitive
+dependencies. A bare AAR does not carry that dependency-resolution contract.
 
 Gezel mobile consumes the same Capacitor package as an external app. Its
 product-only storage adapters retain the existing paths and legacy state format;

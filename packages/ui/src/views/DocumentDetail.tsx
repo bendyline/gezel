@@ -219,7 +219,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
     );
   }
   if (content === null) {
-    return <p className="placeholder">Loading {path}…</p>;
+    return null;
   }
   // Backstop for binary types the extension didn't reveal — the same one the
   // project file panels use. Raw bytes in the editor render as garbage and an

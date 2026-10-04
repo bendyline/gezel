@@ -24,6 +24,7 @@ export type { ScriptRunnerOptions, RunScriptOptions } from './scripts/runner.js'
 export { QuickJSWorkerExecutor } from './scripts/quickjs-executor.js';
 export {
   reuseVerifiedElectronNativeBinaries,
+  verifyNativeBinaries,
   type ElectronNativeReuseOptions,
   type ElectronNativeReuseResult,
 } from './engines/electron-native-reuse.js';

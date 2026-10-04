@@ -623,12 +623,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
           Back to tasks
         </button>
       )}
-      <div className="tasks-layout">
-        {!hasLoadedTasks && (
-          <output className="tasks-empty-state">
-            <p>Loading tasks…</p>
-          </output>
-        )}
+      <div className="tasks-layout" aria-busy={!hasLoadedTasks}>
         {showEmptyState && (
           <div className="tasks-empty-state">
             {!error && (

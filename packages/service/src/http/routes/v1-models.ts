@@ -1,4 +1,10 @@
-import { type ChatModelManifest, externalGezelModelId, isRecommendedModel } from '@bendyline/gezel';
+import {
+  type ChatModelManifest,
+  externalGezelModelId,
+  isRecommendedModel,
+  resolveDistributionProfile,
+} from '@bendyline/gezel';
+import type { AppModel } from '@bendyline/gezel/app-models';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ProviderName } from '../../providers/types.js';
@@ -38,31 +44,13 @@ interface V1ModelsRouteOptions {
   localOnly?: boolean;
 }
 
-interface OpenAIModelEntry {
-  id: string;
-  object: 'model';
-  created: number;
-  owned_by: ProviderName | 'gezel';
-  /** Gezel-specific extras useful to richer clients; ignored by strict OpenAI SDKs. */
-  context_window?: number;
-  supports_reasoning?: boolean;
-  gezel_id?: string;
-  name?: string;
-  role?: string;
-  is_fallback?: boolean;
-  availability?: 'available' | 'download-required';
-  locality?: 'on-device';
-  download_bytes?: number;
-  capabilities?: {
-    text: boolean;
-    tools: boolean;
-    structuredOutput: boolean;
-    images: boolean;
-    foregroundOnly: boolean;
-  };
-}
+type OpenAIModelEntry = AppModel;
 
 function catalogBackend(manifest: ChatModelManifest): 'llama-cpp' | 'mlx' | 'ds4' | null {
+  // Store hosts have no provisioned Python runtime. Only advertise models
+  // backed by bundled native engines until a frozen MLX runtime ships.
+  const store = resolveDistributionProfile().pythonProvisioning === 'frozen-only';
+  if (store) return manifest.llamaCpp ? 'llama-cpp' : manifest.ds4 ? 'ds4' : null;
   const preferred = resolveOnDeviceProvider(process.platform, process.arch);
   if (preferred === 'mlx' && manifest.mlx && !manifest.mlx.disabledReason) return 'mlx';
   if (preferred === 'llama-cpp' && manifest.llamaCpp) return 'llama-cpp';
@@ -96,6 +84,9 @@ async function downloadableCatalogEntries(
             owned_by: provider,
             name: manifest.name,
             availability: 'download-required',
+            preparation: 'app-download',
+            reason_code: 'model_download_required',
+            recovery_actions: ['prepare'],
             locality: 'on-device',
             download_bytes: manifest.approxSizeBytes,
             ...(manifest.contextWindow ? { context_window: manifest.contextWindow } : {}),
@@ -155,8 +146,12 @@ async function buildModelEntries(
       }));
   }
 
+  const providers = (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).filter(
+    (provider) =>
+      provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only',
+  );
   const buckets = await Promise.all(
-    (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).map(async (provider) => {
+    providers.map(async (provider) => {
       try {
         const models = await ctx.chat.listModelsForProvider(provider);
         return models.map<OpenAIModelEntry>((m) => ({
@@ -165,7 +160,11 @@ async function buildModelEntries(
           created,
           owned_by: provider,
           ...(provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4'
-            ? { availability: 'available' as const, locality: 'on-device' as const }
+            ? {
+                availability: 'available' as const,
+                locality: 'on-device' as const,
+                preparation: 'app-download' as const,
+              }
             : {}),
           ...(m.contextWindow ? { context_window: m.contextWindow } : {}),
           ...(m.supportsReasoning ? { supports_reasoning: true } : {}),

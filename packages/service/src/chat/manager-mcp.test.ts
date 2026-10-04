@@ -197,7 +197,7 @@ beforeEach(async () => {
   // 'provider' pins the injected mock: without it, routing falls through to
   // the platform default (an on-device engine) and the mock is never reached.
   await store.writeConfig({ provider: 'copilot', toolFilterMode: 'never' });
-}, 20_000);
+});
 
 afterEach(async () => {
   await manager?.drainBackground();

@@ -16,9 +16,15 @@ public final class GezelRuntimePlugin extends Plugin {
     private GezelNativeRuntime runtime;
     private AutoCloseable listener;
     private boolean pickingModel;
-    @Override public void load() {
-        runtime = GezelNativeRuntime.shared(getContext());
-        listener = runtime.listen((name, data) -> notifyListeners(name, toJS(data)));
+    private boolean foreground;
+    // Registration must not initialize engines or model storage in opt-in hosts.
+    private synchronized GezelNativeRuntime runtime() {
+        if (runtime == null) {
+            runtime = GezelNativeRuntime.shared(getContext());
+            listener = runtime.listen((name, data) -> notifyListeners(name, toJS(data)));
+            if (foreground) runtime.onForeground();
+        }
+        return runtime;
     }
     public static JSObject toJS(JSONObject value) {
         JSObject copy = new JSObject();
@@ -31,25 +37,25 @@ public final class GezelRuntimePlugin extends Plugin {
             public void reject(String message, String code) { call.reject(message, code); }
         });
     }
-    @PluginMethod public void providers(PluginCall call) { runtime.providers(adapt(call)); }
-    @PluginMethod public void prepareProvider(PluginCall call) { runtime.prepareProvider(adapt(call)); }
-    @PluginMethod public void cancelProviderPreparation(PluginCall call) { runtime.cancelProviderPreparation(adapt(call)); }
-    @PluginMethod public void generate(PluginCall call) { runtime.generate(adapt(call)); }
-    @PluginMethod public void chat(PluginCall call) { runtime.chat(adapt(call)); }
-    @PluginMethod public void cancel(PluginCall call) { runtime.cancel(adapt(call)); }
-    @PluginMethod public void releaseModel(PluginCall call) { runtime.releaseModel(adapt(call)); }
-    @PluginMethod public void listModels(PluginCall call) { runtime.listModels(adapt(call)); }
-    @PluginMethod public void selectModel(PluginCall call) { runtime.selectModel(adapt(call)); }
-    @PluginMethod public void removeModel(PluginCall call) { runtime.removeModel(adapt(call)); }
-    @PluginMethod public void resolveModelSource(PluginCall call) { runtime.resolveModelSource(adapt(call)); }
-    @PluginMethod public void cancelModelSourceResolution(PluginCall call) { runtime.cancelModelSourceResolution(adapt(call)); }
-    @PluginMethod public void listModelDownloads(PluginCall call) { runtime.listModelDownloads(adapt(call)); }
-    @PluginMethod public void startModelDownload(PluginCall call) { runtime.startModelDownload(adapt(call)); }
-    @PluginMethod public void resumeModelDownload(PluginCall call) { runtime.resumeModelDownload(adapt(call)); }
-    @PluginMethod public void cancelModelDownload(PluginCall call) { runtime.cancelModelDownload(adapt(call)); }
-    @PluginMethod public void removeModelDownload(PluginCall call) { runtime.removeModelDownload(adapt(call)); }
+    @PluginMethod public void providers(PluginCall call) { runtime().providers(adapt(call)); }
+    @PluginMethod public void prepareProvider(PluginCall call) { runtime().prepareProvider(adapt(call)); }
+    @PluginMethod public void cancelProviderPreparation(PluginCall call) { runtime().cancelProviderPreparation(adapt(call)); }
+    @PluginMethod public void generate(PluginCall call) { runtime().generate(adapt(call)); }
+    @PluginMethod public void chat(PluginCall call) { runtime().chat(adapt(call)); }
+    @PluginMethod public void cancel(PluginCall call) { runtime().cancel(adapt(call)); }
+    @PluginMethod public void releaseModel(PluginCall call) { runtime().releaseModel(adapt(call)); }
+    @PluginMethod public void listModels(PluginCall call) { runtime().listModels(adapt(call)); }
+    @PluginMethod public void selectModel(PluginCall call) { runtime().selectModel(adapt(call)); }
+    @PluginMethod public void removeModel(PluginCall call) { runtime().removeModel(adapt(call)); }
+    @PluginMethod public void resolveModelSource(PluginCall call) { runtime().resolveModelSource(adapt(call)); }
+    @PluginMethod public void cancelModelSourceResolution(PluginCall call) { runtime().cancelModelSourceResolution(adapt(call)); }
+    @PluginMethod public void listModelDownloads(PluginCall call) { runtime().listModelDownloads(adapt(call)); }
+    @PluginMethod public void startModelDownload(PluginCall call) { runtime().startModelDownload(adapt(call)); }
+    @PluginMethod public void resumeModelDownload(PluginCall call) { runtime().resumeModelDownload(adapt(call)); }
+    @PluginMethod public void cancelModelDownload(PluginCall call) { runtime().cancelModelDownload(adapt(call)); }
+    @PluginMethod public void removeModelDownload(PluginCall call) { runtime().removeModelDownload(adapt(call)); }
     @PluginMethod public void importModel(PluginCall call) {
-        if (!runtime.reserveModelMutation()) { call.reject("Finish the current operation before importing", "BUSY"); return; }
+        if (!runtime().reserveModelMutation()) { call.reject("Finish the current operation before importing", "BUSY"); return; }
         pickingModel = true;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("application/octet-stream");
@@ -68,8 +74,8 @@ public final class GezelRuntimePlugin extends Plugin {
         runtime.importModel(adapt(call), uri);
     }
     // Start and stop pair per activity; the runtime counts them.
-    @Override protected void handleOnStart() { runtime.onForeground(); }
-    @Override protected void handleOnStop() { runtime.onBackground(); }
+    @Override protected synchronized void handleOnStart() { foreground = true; if (runtime != null) runtime.onForeground(); }
+    @Override protected synchronized void handleOnStop() { foreground = false; if (runtime != null) runtime.onBackground(); }
     @Override protected void handleOnDestroy() {
         if (pickingModel) { pickingModel = false; runtime.releaseModelMutation(); }
         try { if (listener != null) listener.close(); } catch (Exception ignored) {}

@@ -74,11 +74,7 @@ export function GrowthPanel({ gezel, onUpdated }: GrowthPanelProps) {
     );
   }
   if (!g.growth) {
-    return (
-      <section className="growth-panel" data-testid="growth-panel">
-        <p className="placeholder">Loading growth…</p>
-      </section>
-    );
+    return <section className="growth-panel" data-testid="growth-panel" aria-busy="true" />;
   }
 
   const { state, nextLevelXp, activeTraits, driftedTraitIds } = g.growth;

@@ -439,3 +439,9 @@ The daemon serves the public contract at `GET /v1/openapi.json` (unauth). Point 
 ## Spec
 
 See the upstream gezel docs for the full route table and the OpenAPI document. The SDK is a thin wrapper over those routes; the routes are the source of truth.
+
+## Application embedding wrapper
+
+For opt-in lifecycle, model readiness/preparation, cancellation, and packaging, see
+[the embedding guide](https://github.com/bendyline/gezel/blob/main/docs/embedding-sdk.md).
+The existing low-level connection APIs remain available.

@@ -2,7 +2,7 @@
 
 All platform-specific native code that ships with Gezel lives here: pinned
 upstream inference engines and small first-party helpers such as the device
-health telemetry adapter.
+health telemetry adapter and Apple Foundation Models bridge.
 
 ## Why a separate top-level directory
 
@@ -24,6 +24,7 @@ native/
 │       ├── README.md
 │       └── build.{sh,ps1}
 ├── helpers/
+│   ├── apple-fm/               # Mac helper sharing the iOS Foundation Models adapter
 │   ├── device-health/          # first-party Windows/Linux telemetry helper
 │   │   ├── CMakeLists.txt
 │   │   ├── README.md
@@ -56,6 +57,7 @@ native/build/<platform>/            # single-backend engines + helpers
 ├── gezel-sd-server[.exe]
 ├── gezel-whisper-server[.exe]
 ├── gezel-ds4-server                # darwin-arm64 + linux-* (GPU-only)
+├── gezel-apple-fm                  # darwin-arm64, OS-managed Apple Intelligence
 ├── uv[.exe]                        # vendored unmodified, never gezel- prefixed
 └── THIRD_PARTY_LICENSES/           # staged per artifact before upload
 
@@ -120,8 +122,14 @@ The Electron main process resolves it via
 [`nativeBinDir`](../packages/app/src/supervisor/native-bin.ts) and exports
 absolute paths to the service through `GEZEL_NATIVE_BIN_DIR`,
 `GEZEL_LLAMA_SERVER_BIN`, `GEZEL_SD_SERVER_BIN`, `GEZEL_WHISPER_SERVER_BIN`,
-`GEZEL_DS4_SERVER_BIN`, `GEZEL_UV_BIN`, and `GEZEL_DEVICE_HEALTH_BIN` (the
+`GEZEL_DS4_SERVER_BIN`, `GEZEL_APPLE_FM_BIN`, `GEZEL_UV_BIN`, and `GEZEL_DEVICE_HEALTH_BIN` (the
 last points the service's device safety probe at the bundled helper).
+
+The Apple helper needs Xcode 27 to build and macOS 26+ with Apple Intelligence
+ready to generate; older macOS releases can still launch its weak-linked unavailable
+response. Its adapter is compiled from `native/runtime/ios`, with no duplicate
+Mac model implementation. See [its build and release instructions](helpers/apple-fm/README.md)
+for the Mac native lane and coordinated iOS/Android SDK artifacts.
 
 ## "Uber dll" aspiration
 
@@ -252,9 +260,20 @@ pnpm app
 
 ## CI pipelines
 
-`.github/workflows/build-native.yml` matrix-builds engines and helpers,
-uploads artifacts, and aggregates tagged runs into a **draft** native
-release. It runs on tag push (`native-vX.Y.Z`, via
+`.github/workflows/build-native.yml` matrix-builds desktop engines and helpers,
+calls `mobile-native.yml` for both mobile SDKs, and aggregates tagged runs into
+one **draft** native release. All desktop and mobile jobs must succeed before
+assembly. Mobile archives use the native tag version and join the same
+`SHA256SUMS` and provenance attestations. They are unsigned reusable libraries;
+only the desktop payload follows the signing rules below. App signing and
+store submission stay in the app release process. See the
+[mobile SDK distribution review](runtime/PUBLIC-DISTRIBUTION.md).
+
+Manual runs accept `mobile=all|ios|android|none` (default `all`). Release tags
+always require both SDKs. `mobile-native.yml` remains callable independently
+for PR/manual checks, with app archives retained only as separate CI artifacts.
+
+The coordinated workflow runs on tag push (`native-vX.Y.Z`, via
 `scripts/cut-native-release.mjs`) or manual dispatch (build-only, no
 draft). Before creating the draft, the workflow validates the exact
 production archive set and verifies every archive against `SHA256SUMS`.
@@ -263,7 +282,7 @@ directly from the GitHub Releases UI.
 
 ### Integrity model
 
-Binaries are **signed at birth** in the build matrix, immediately after
+Desktop binaries are **signed at birth** in the build matrix, immediately after
 the smoke test and before hashing/upload, so every published hash covers
 signed bytes:
 

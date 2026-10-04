@@ -76,7 +76,7 @@ export function CraftbookScriptEditorView({
   }, [craftbookId, scriptName, data]);
 
   if (error && !data) return <p className="error">{error}</p>;
-  if (!data) return <p className="placeholder">Loading…</p>;
+  if (!data) return null;
 
   const errorCount = problems.filter((p) => p.severity === 'error').length;
 

@@ -317,7 +317,16 @@ describe('GezelApp cancellation', () => {
     ];
 
     for (const [name, run] of cases) {
-      const { fetch: impl, calls } = recordingFetch(() => jsonResponse(200, {}));
+      const { fetch: impl, calls } = recordingFetch(() =>
+        jsonResponse(
+          200,
+          name === 'models'
+            ? { object: 'list', data: [] }
+            : name === 'ensureModel'
+              ? { status: 'ready', model_id: 'm' }
+              : {},
+        ),
+      );
       await run(new GezelApp(options(impl)));
       expect(calls[0]?.signal, name).toBe(controller.signal);
     }
@@ -326,7 +335,9 @@ describe('GezelApp cancellation', () => {
   it('omits the signal entirely when the caller passes none', async () => {
     // An explicit `signal: undefined` is not the same as no signal at all to
     // every fetch implementation, so the field must simply be absent.
-    const { fetch: impl, calls } = recordingFetch(() => jsonResponse(200, {}));
+    const { fetch: impl, calls } = recordingFetch(() =>
+      jsonResponse(200, { object: 'list', data: [] }),
+    );
     await new GezelApp(options(impl)).models();
     expect('signal' in (calls[0] ?? {})).toBe(false);
   });

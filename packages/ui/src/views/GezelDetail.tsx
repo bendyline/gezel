@@ -220,7 +220,7 @@ export function GezelDetail({
     );
   }
   if (!selected) {
-    return <p className="placeholder">Loading gezel…</p>;
+    return null;
   }
 
   return (

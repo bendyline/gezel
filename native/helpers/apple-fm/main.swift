@@ -8,9 +8,9 @@ import FoundationModels
 // GezelRuntime/Apple*.swift), so both hosts build the same transcripts.
 //
 // daemon -> helper: hello | generate | tool_result | cancel | count
-// helper -> daemon: hello | delta | tool_call | done | error | count
+// helper -> daemon: hello | delta | usage | tool_call | done | error | count
 
-let helperVersion = "1"
+let helperVersion = "2"
 let usage = """
 gezel-apple-fm \(helperVersion): serves Apple's on-device model to the gezel daemon.
 
@@ -35,21 +35,32 @@ final class Wire: @unchecked Sendable {
 
 final class Requests: @unchecked Sendable {
     private let lock = NSLock()
-    private var tasks: [String: Task<Void, Never>] = [:]
+    private struct Entry {
+        var task: Task<Void, Never>?
+        var cancelled = false
+    }
+    private var tasks: [String: Entry] = [:]
     private var calls: [String: (request: String, continuation: CheckedContinuation<NativeToolReply, Error>)] = [:]
 
-    func start(_ id: String, _ task: Task<Void, Never>) -> Bool {
+    func reserve(_ id: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard tasks[id] == nil else { return false }
-        tasks[id] = task
+        guard tasks.isEmpty else { return false }
+        tasks[id] = Entry()
         return true
+    }
+    func start(_ id: String, _ task: Task<Void, Never>) {
+        lock.lock()
+        let cancelled = tasks[id]?.cancelled ?? true
+        if tasks[id] != nil { tasks[id]?.task = task }
+        lock.unlock()
+        if cancelled { task.cancel() }
     }
     func finish(_ id: String) {
         lock.lock(); tasks.removeValue(forKey: id); lock.unlock()
     }
     func park(_ callId: String, request: String, _ continuation: CheckedContinuation<NativeToolReply, Error>) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard tasks[request] != nil else { return false }
+        guard let entry = tasks[request], !entry.cancelled, !Task.isCancelled else { return false }
         calls[callId] = (request, continuation)
         return true
     }
@@ -62,11 +73,12 @@ final class Requests: @unchecked Sendable {
     func cancel(_ id: String?) {
         lock.lock()
         let stopping = tasks.filter { id == nil || $0.key == id }
+        for key in stopping.keys { tasks[key]?.cancelled = true }
         let parked = calls.filter { entry in stopping.keys.contains(entry.value.request) }
         for key in parked.keys { calls.removeValue(forKey: key) }
         lock.unlock()
         parked.values.forEach { $0.continuation.resume(throwing: CancellationError()) }
-        stopping.values.forEach { $0.cancel() }
+        stopping.values.forEach { $0.task?.cancel() }
     }
 }
 
@@ -97,8 +109,11 @@ func turns(_ raw: Any?) throws -> [MobileChatTurn] {
 
 @available(macOS 26.0, *)
 func generate(_ message: [String: Any], id: String) {
+    guard requests.reserve(id) else {
+        wire.send(["type": "error", "id": id, "code": "BUSY", "message": "Apple on-device AI is already responding."])
+        return
+    }
     let task = Task {
-        defer { requests.finish(id) }
         do {
             let reason = try await AppleFoundationProvider.generate(
                 turns: try turns(message["messages"]),
@@ -118,16 +133,20 @@ func generate(_ message: [String: Any], id: String) {
                         _ = requests.resume(callId, with: .failure(CancellationError()))
                     }
                 },
+                onUsage: { usage in
+                    wire.send(["type": "usage", "id": id,
+                               "inputTokens": usage["inputTokens"] ?? 0,
+                               "outputTokens": usage["outputTokens"] ?? 0])
+                },
                 onDelta: { wire.send(["type": "delta", "id": id, "text": $0]) })
+            requests.finish(id)
             wire.send(["type": "done", "id": id, "stopReason": reason])
         } catch {
+            requests.finish(id)
             fail(id, error)
         }
     }
-    if !requests.start(id, task) {
-        task.cancel()
-        wire.send(["type": "error", "id": id, "code": "BUSY", "message": "This request is already running."])
-    }
+    requests.start(id, task)
 }
 
 @available(macOS 26.0, *)
@@ -153,6 +172,8 @@ func hello() {
     let readiness = AppleFoundationProvider.availability()
     reply["available"] = readiness.reason == nil
     reply["contextTokens"] = readiness.contextTokens
+    if #available(macOS 27.0, *) { reply["supportsTokenUsage"] = true }
+    if readiness.reason == nil { reply["modelCapabilities"] = AppleFoundationProvider.modelCapabilities() }
     if let reason = readiness.reason { reply["reason"] = reason }
     wire.send(reply)
 }
@@ -177,6 +198,27 @@ func selfTest() -> Int32 {
     do {
         let tool = try AppleBridgedTool(spec) { _, _ in NativeToolReply(output: "", endTurn: false) }
         _ = Transcript.ToolDefinition(tool: tool)
+        try AppleFoundationProvider.requireContextBudget(promptTokens: 256, maxTokens: 512, contextSize: 1024, modelContext: 8192)
+        do {
+            try AppleFoundationProvider.requireContextBudget(promptTokens: 257, maxTokens: 512, contextSize: 1024, modelContext: 8192)
+            throw MobileInferenceError(code: "SELF_TEST", message: "Context overflow was accepted.")
+        } catch let error as MobileInferenceError where error.code == "CONTEXT_LIMIT" {}
+        if #available(macOS 27.0, *) {
+            let overflow = LanguageModelError.contextSizeExceeded(.init(contextSize: 8192, tokenCount: 9000, debugDescription: "fixture"))
+            guard (AppleFoundationProvider.described(overflow) as? MobileInferenceError)?.code == "CONTEXT_LIMIT",
+                  (AppleFoundationProvider.described(LanguageModelSession.Error.concurrentRequests) as? MobileInferenceError)?.code == "BUSY" else {
+                throw MobileInferenceError(code: "SELF_TEST", message: "OS 27 error mapping failed.")
+            }
+        }
+        let lifecycle = Requests()
+        guard lifecycle.reserve("fixture"), !lifecycle.reserve("second") else {
+            throw MobileInferenceError(code: "SELF_TEST", message: "Concurrent generation was admitted.")
+        }
+        lifecycle.cancel("fixture")
+        lifecycle.finish("fixture")
+        guard lifecycle.reserve("next") else {
+            throw MobileInferenceError(code: "SELF_TEST", message: "Generation did not release its slot.")
+        }
         print("gezel-apple-fm self-test passed: \(tool.name) schema translated.")
         return 0
     } catch {

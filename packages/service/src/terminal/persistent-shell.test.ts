@@ -82,6 +82,36 @@ describe('PersistentShell (POSIX)', () => {
     }
   });
 
+  itPosix(
+    'keeps resize setup diagnostics out of captured and streamed command output',
+    async () => {
+      const shell = await PersistentShell.start({ cwd: tmpdir(), columns: 120 });
+      try {
+        // Job-control diagnostics precede an external command's redirections.
+        // A DEBUG trap reproduces that ordering without depending on a fork race.
+        await shell.run(
+          `trap 'case "$BASH_COMMAND" in "command stty rows "*) printf "bash: child setpgid (123 to 123): Operation not permitted\\n" >&2 ;; esac' DEBUG`,
+        );
+        const chunks: string[] = [];
+        const narrow = await shell.run('stty size; printf "user diagnostic\\n" >&2; false', {
+          columns: 72,
+          onChunk: (chunk) => chunks.push(chunk),
+        });
+        expect(narrow.output).toBe('50 72\nuser diagnostic');
+        expect(narrow.exitCode).toBe(1);
+        expect(chunks.join('')).toContain('user diagnostic');
+        expect(chunks.join('')).not.toContain('child setpgid');
+
+        const wider = await shell.run('stty size', { columns: 96 });
+        expect(wider.output).toBe('50 96');
+        expect(wider.exitCode).toBe(0);
+      } finally {
+        shell.kill();
+        await shell.whenExited();
+      }
+    },
+  );
+
   itPosix('non-zero exit code is captured', async () => {
     const shell = await PersistentShell.start({ cwd: tmpdir() });
     try {
@@ -187,7 +217,7 @@ describe('PersistentShell (POSIX)', () => {
       // Start a 30s sleep, then SIGINT it 150ms later. Should
       // resolve with non-zero exit (typically 130 = 128 + SIGINT)
       // and the shell should still be alive afterward.
-      const runP = shell.run('sleep 30');
+      const runP = shell.run('sleep 30', { columns: 72 });
       setTimeout(() => shell.interrupt(), 150);
       const res = await runP;
       expect(res.exitCode).not.toBe(0);

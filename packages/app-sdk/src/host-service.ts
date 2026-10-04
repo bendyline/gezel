@@ -51,6 +51,17 @@ export async function hostInProcess(
   active = true;
   try {
     const service = await loadService(opts);
+    if (opts.distributionProfile === 'store' && opts.nativeBinDir) {
+      if (!service.verifyNativeBinaries)
+        throw new GezelSdkError('This service cannot verify bundled native engines', {
+          code: 'native_verification_unavailable',
+        });
+      const verified = await service.verifyNativeBinaries({ candidates: [opts.nativeBinDir] });
+      if (!verified.reused)
+        throw new GezelSdkError(`Bundled native engines failed verification: ${verified.reason}`, {
+          code: 'native_verification_failed',
+        });
+    }
     let running: Awaited<ReturnType<HostServiceModule['startService']>>;
     try {
       running = await service.startService({

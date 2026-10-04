@@ -4253,7 +4253,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     let children: Task[] = [];
     for await (const task of this.store.iterateProjectTasks(parsed.projectId)) {
       if (task.parentTaskRef !== parentRef) continue;
-      if ((opts.status === 'active' || opts.status === 'draft') && task.status !== opts.status) continue;
+      if ((opts.status === 'active' || opts.status === 'draft') && task.status !== opts.status)
+        continue;
       const child = await this.withEffectiveStatus(task);
       if (!opts.status || taskEffectiveStatus(child) === opts.status) children.push(child);
     }

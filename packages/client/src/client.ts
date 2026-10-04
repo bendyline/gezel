@@ -9,6 +9,7 @@ import { withReadTransportRetry } from './read-retry.js';
 export { GezelApiError, apiErrorMessage } from './api-error.js';
 import type {
   AppToolCallResultRequest,
+  AppleFoundationModelsStatus,
   AudioEngineStatusResponse,
   AudioModelPullEvent,
   AudioSynthesizeChunk,
@@ -2784,6 +2785,10 @@ export class GezelClient {
     config: ConfigResponse;
   }> {
     return this.request('POST', '/api/config/keurmeester', body);
+  }
+
+  appleFoundationModelsStatus(): Promise<AppleFoundationModelsStatus> {
+    return this.request('GET', '/api/models/apple/status');
   }
 
   testProvider(

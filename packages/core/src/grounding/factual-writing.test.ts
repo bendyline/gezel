@@ -112,5 +112,4 @@ describe('factualWritingGuidance', () => {
     });
     expect(knowledge).toContain('`search({ query, sources: ["knowledge"] })`');
   });
-
 });

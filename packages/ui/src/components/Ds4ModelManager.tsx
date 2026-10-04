@@ -395,7 +395,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     );
   }
   if (items === null) {
-    return <p className="muted small">Loading models…</p>;
+    return null;
   }
   if (ds4Models.length === 0) {
     return <p className="muted small">No DwarfStar models in the catalog.</p>;

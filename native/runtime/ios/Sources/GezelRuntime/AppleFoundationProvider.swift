@@ -16,6 +16,19 @@ public struct MobileInferenceError: LocalizedError {
 enum AppleFoundationProvider {
     static let maximumOutputTokens = 1024
 
+    /// Model features are diagnostic; hosts must only advertise features their
+    /// request protocol can carry. This adapter currently exposes text/tools.
+    static func modelCapabilities() -> [String: Bool] {
+        if #available(iOS 27.0, macOS 27.0, *) {
+            let model = SystemLanguageModel.default
+            return ["tools": model.capabilities.contains(.toolCalling),
+                    "guidedGeneration": model.capabilities.contains(.guidedGeneration),
+                    "vision": model.capabilities.contains(.vision),
+                    "reasoning": model.capabilities.contains(.reasoning)]
+        }
+        return ["tools": true, "guidedGeneration": true, "vision": false, "reasoning": false]
+    }
+
     static func availability() -> (reason: String?, contextTokens: Int) {
         guard #available(iOS 26.0, macOS 26.0, *) else {
             return ("Apple on-device AI requires iOS 26 or macOS 26 or later.", 4096)
@@ -59,6 +72,30 @@ enum AppleFoundationProvider {
     /// Apple's generation errors carry no user-facing description ("error -1").
     @available(iOS 26.0, macOS 26.0, *)
     static func described(_ error: Error) -> Error {
+        if #available(iOS 27.0, macOS 27.0, *) {
+            if let error = error as? LanguageModelError {
+                switch error {
+                case .contextSizeExceeded:
+                    return MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation exceeds Apple on-device AI's context budget. Start a new conversation.")
+                case .guardrailViolation, .refusal:
+                    return MobileInferenceError(code: "GUARDRAIL", message: "Apple on-device AI declined this request.")
+                case .rateLimited:
+                    return MobileInferenceError(code: "BUSY", message: "Apple on-device AI is busy. Try again in a moment.")
+                case .timeout:
+                    return MobileInferenceError(code: "TIMEOUT", message: "Apple on-device AI timed out. Try again.")
+                case .unsupportedLanguageOrLocale, .unsupportedCapability, .unsupportedGenerationGuide, .unsupportedTranscriptContent:
+                    return MobileInferenceError(code: "UNSUPPORTED", message: "Apple on-device AI does not support this request.")
+                @unknown default:
+                    return MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI could not complete this response.")
+                }
+            }
+            if error is SystemLanguageModel.Error {
+                return MobileInferenceError(code: "UNAVAILABLE", message: "Apple's on-device model is not ready. The system manages its download and preparation.")
+            }
+            if error is LanguageModelSession.Error {
+                return MobileInferenceError(code: "BUSY", message: "Apple on-device AI is busy. Try again in a moment.")
+            }
+        }
         guard let error = error as? LanguageModelSession.GenerationError else { return error }
         NSLog("[GezelRuntime] Apple on-device generation failed: %@", String(describing: error))
         switch error {
@@ -144,6 +181,7 @@ enum AppleFoundationProvider {
         turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
         tools toolSpecs: [[String: Any]] = [],
         invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply = { _, _ in throw CancellationError() },
+        onUsage: ([String: Int]) -> Void = { _ in },
         onDelta: (String) throws -> Void
     ) async throws -> String {
         let readiness = availability()
@@ -194,6 +232,8 @@ enum AppleFoundationProvider {
                 text = next
                 if #available(iOS 27.0, macOS 27.0, *) {
                     reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
+                    onUsage(["inputTokens": snapshot.usage.input.totalTokenCount,
+                             "outputTokens": snapshot.usage.output.totalTokenCount])
                 }
             }
         } catch let error as LanguageModelSession.ToolCallError where error.underlyingError is NativeToolTurnEnded {

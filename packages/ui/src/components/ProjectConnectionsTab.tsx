@@ -559,7 +559,7 @@ export function ProjectConnectionsTab({
               </p>
             </div>
             <span className="gz-connector-picker-count">
-              {loadingTypes ? 'Loading…' : `${types.length} available`}
+              {loadingTypes ? null : `${types.length} available`}
             </span>
           </div>
 

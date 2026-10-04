@@ -5,5 +5,5 @@ let package = Package(
     name: "GezelModelStorage",
     platforms: [.iOS("16.4"), .macOS(.v13)],
     products: [.library(name: "GezelModelStorage", targets: ["GezelModelStorage"])],
-    targets: [.target(name: "GezelModelStorage")]
+    targets: [.target(name: "GezelModelStorage", resources: [.copy("PrivacyInfo.xcprivacy")])]
 )

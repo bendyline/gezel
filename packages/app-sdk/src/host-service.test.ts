@@ -190,3 +190,32 @@ describe('hostInProcess', () => {
     ).rejects.toMatchObject({ code: 'service_not_installed' });
   });
 });
+
+describe('store embedding verification', () => {
+  it('verifies before starting and restores ambient engine overrides on failure', async () => {
+    const before = process.env.GEZEL_LLAMA_SERVER_BIN;
+    process.env.GEZEL_LLAMA_SERVER_BIN = '/developer/override';
+    const service = stubService();
+    service.verifyNativeBinaries = vi.fn(async () => {
+      expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBeUndefined();
+      return { reused: false, reason: 'fixture mismatch' };
+    });
+    try {
+      await expect(
+        hostInProcess('fixture', {
+          home: join(root, 'store-home'),
+          mode: 'in-process',
+          inferenceOnly: true,
+          distributionProfile: 'store',
+          nativeBinDir: join(root, 'native'),
+          serviceModule: service,
+        }),
+      ).rejects.toMatchObject({ code: 'native_verification_failed' });
+      expect(service.calls).toEqual([]);
+      expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe('/developer/override');
+    } finally {
+      if (before === undefined) delete process.env.GEZEL_LLAMA_SERVER_BIN;
+      else process.env.GEZEL_LLAMA_SERVER_BIN = before;
+    }
+  });
+});

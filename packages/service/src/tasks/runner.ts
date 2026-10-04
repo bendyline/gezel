@@ -58,8 +58,8 @@ import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
 import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
-import { mainBookSource, stepOwnerGezelId } from './manager.js';
 import { readTaskWithEffectiveStatus } from './effective-status.js';
+import { mainBookSource, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 
 const log = createLogger('tasks');

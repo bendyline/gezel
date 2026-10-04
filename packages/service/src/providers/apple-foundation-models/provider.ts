@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
 import {
+  type AppleFoundationModelsUsage,
   NATIVE_TOOL_LISTINGS,
   type NativeTool,
   type NativeToolListing,
@@ -25,25 +25,14 @@ import type {
   SessionOpts,
 } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
+import { appleFmBinaryPath } from './binary.js';
 import { AppleFmError, type AppleFmHello, AppleFmHelper } from './helper.js';
+export { appleFoundationModelsInstalled } from './binary.js';
 
 const log = createLogger('apple-fm');
 
 export const APPLE_FOUNDATION_MODEL_ID = 'apple-foundation-models';
 
-/**
- * Passive presence for pickers: an Apple silicon Mac with the helper on disk.
- * Whether Apple Intelligence is on is only known by asking the helper, which
- * the provider does when it starts (and Settings' connection test surfaces).
- */
-export function appleFoundationModelsInstalled(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-  arch: string = process.arch,
-): boolean {
-  const bin = env.GEZEL_APPLE_FM_BIN;
-  return platform === 'darwin' && arch === 'arm64' && !!bin && existsSync(bin);
-}
 const TURN_BUDGET_MS = 300_000;
 const MAX_TOOL_CALLS = 12;
 const ACTION_LIMIT_TEXT =
@@ -101,7 +90,7 @@ export class AppleFoundationModelsProvider implements LLMProvider {
   ) {
     const platform = opts.platform ?? process.platform;
     const arch = opts.arch ?? process.arch;
-    const binaryPath = opts.binaryPath ?? process.env.GEZEL_APPLE_FM_BIN;
+    const binaryPath = opts.binaryPath ?? appleFmBinaryPath();
     this.helper =
       opts.helper ??
       (platform === 'darwin' && arch === 'arm64' && binaryPath
@@ -111,7 +100,6 @@ export class AppleFoundationModelsProvider implements LLMProvider {
   }
 
   async initialize(): Promise<void> {
-    if (this.hello?.available) return;
     if (!this.platformSupported)
       throw actionable('Apple on-device AI is only available on Apple silicon Macs.');
     if (!this.helper)
@@ -250,6 +238,7 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
       : 'full';
     let droppedHistory = false;
     let text = '';
+    let usage: AppleFoundationModelsUsage | undefined;
     let calls = 0;
     let ended: string | null = null;
     const failures = new Map<string, number>();
@@ -258,6 +247,7 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
     let serial: Promise<unknown> = Promise.resolve();
 
     const runTool = async (name: string, rawArgs: string, tools: NativeTool[]) => {
+      if (signal.aborted) return { output: '', endTurn: true };
       if (ended !== null) return { output: '', endTurn: true };
       if (++calls > MAX_TOOL_CALLS) {
         ended = ACTION_LIMIT_TEXT;
@@ -334,6 +324,9 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
               contextSize: this.deps.contextTokens,
             },
             {
+              onUsage: (value) => {
+                usage = value;
+              },
               onDelta: (chunk) => {
                 text += chunk;
                 this.emitDelta(chunk);
@@ -350,7 +343,7 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
             throw new Error(
               `Apple on-device AI timed out after ${Math.round((opts?.timeoutMs ?? TURN_BUDGET_MS) / 1000)}s.`,
             );
-          await this.reportUsage(messages, tools, text, started);
+          await this.reportUsage(messages, tools, text, started, usage);
           break;
         } catch (error) {
           // The helper refuses an oversized prompt before generating anything,
@@ -397,7 +390,22 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
     tools: NativeTool[],
     text: string,
     started: number,
+    exact?: AppleFoundationModelsUsage,
   ): Promise<void> {
+    if (exact) {
+      this.emitUsage(
+        buildTurnUsage({
+          model: APPLE_FOUNDATION_MODEL_ID,
+          ...exact,
+          durationMs: Date.now() - started,
+          contextUtilization: {
+            used: exact.inputTokens + exact.outputTokens,
+            limit: this.deps.contextTokens,
+          },
+        }),
+      );
+      return;
+    }
     let inputTokens = 0;
     try {
       inputTokens = await this.deps.helper.countTokens(messages, tools);

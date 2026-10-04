@@ -247,7 +247,10 @@ export class TaskFilesStore {
   /** Stream newest first so existence checks can stop without retaining history. */
   async *iterateProjectTasks(projectId: string): AsyncGenerator<Task> {
     const names = await safeReaddir(projectTasksDir(this.home, projectId, this.external));
-    const nums = names.filter((name) => /^\d+$/.test(name)).map(Number).sort((a, b) => b - a);
+    const nums = names
+      .filter((name) => /^\d+$/.test(name))
+      .map(Number)
+      .sort((a, b) => b - a);
     for (const num of nums) {
       const task = await this.readTask(projectId, num);
       if (task) yield task;

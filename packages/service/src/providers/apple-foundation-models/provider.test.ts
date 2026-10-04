@@ -83,6 +83,20 @@ function session(
 }
 
 describe('Apple on-device sessions', () => {
+  it('uses native usage when present without an extra tokenizer request', async () => {
+    const { s, helper } = session(async (_request, handlers) => {
+      handlers.onDelta('A short answer.');
+      handlers.onUsage?.({ inputTokens: 711, outputTokens: 23 });
+      return 'stop';
+    });
+    const usage = vi.fn();
+    s.onUsage(usage);
+    await s.sendAndWait('Hello');
+    expect(helper.countTokens).not.toHaveBeenCalled();
+    expect(usage).toHaveBeenCalledWith(
+      expect.objectContaining({ inputTokens: 711, outputTokens: 23 }),
+    );
+  });
   it('runs native tool calls through the MCP bridge with decoded arguments', async () => {
     const { s, requests, callToolRich } = session(async (request, handlers) => {
       expect(request.tools?.map(({ name }) => name)).toEqual([

@@ -1605,7 +1605,7 @@ function TaskContext({ taskRef }: { taskRef: string }) {
   if (!task) {
     return (
       <div className="pending-question-context-row">
-        <span className="muted">Task {taskRef} (loading…)</span>
+        <span className="muted">Task {taskRef}</span>
       </div>
     );
   }
@@ -1745,7 +1745,6 @@ function DocumentContext({
         </button>
       </div>
       {error && <p className="muted small">Couldn't load preview: {error}</p>}
-      {panel && content === null && !error && <p className="muted small">Loading document…</p>}
       {content !== null && (
         <>
           <div className="pending-question-document-preview">

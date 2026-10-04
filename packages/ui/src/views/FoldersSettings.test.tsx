@@ -89,7 +89,7 @@ describe('FoldersSettings', () => {
     delete bridge?.openPath;
   });
 
-  it('renders a Loading… placeholder before the status arrives', async () => {
+  it('keeps the section quiet before the status arrives', async () => {
     let resolveStatus!: (s: unknown) => void;
     vi.mocked(api.getFolders).mockReturnValue(
       new Promise((r) => {
@@ -97,8 +97,11 @@ describe('FoldersSettings', () => {
       }) as never,
     );
     render(<FoldersSettings />);
-    expect(screen.getByText(/Loading/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Folders' })).toBeInTheDocument();
+    expect(screen.queryByText(/Loading/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Documents library/)).not.toBeInTheDocument();
     resolveStatus(STATUS);
+    expect(await screen.findByText(/Documents library/)).toBeInTheDocument();
   });
 
   it('renders three scope rows with their default-location markers', async () => {

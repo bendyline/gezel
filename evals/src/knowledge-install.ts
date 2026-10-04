@@ -27,9 +27,7 @@ export class KnowledgeInstallTimeoutError extends Error {
     cancellation: string,
     label: string,
   ) {
-    super(
-      `${label} install timed out after ${timeoutMs}ms (job=${jobId}, ${cancellation})`,
-    );
+    super(`${label} install timed out after ${timeoutMs}ms (job=${jobId}, ${cancellation})`);
     this.name = 'KnowledgeInstallTimeoutError';
   }
 }
@@ -58,8 +56,7 @@ export async function waitForKnowledgeInstall(
     positiveEnvMs('GEZEL_EVAL_KNOWLEDGE_INSTALL_TIMEOUT_MS') ??
     DEFAULT_KNOWLEDGE_INSTALL_TIMEOUT_MS;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const progressLogIntervalMs =
-    options.progressLogIntervalMs ?? DEFAULT_PROGRESS_LOG_INTERVAL_MS;
+  const progressLogIntervalMs = options.progressLogIntervalMs ?? DEFAULT_PROGRESS_LOG_INTERVAL_MS;
   const startedAt = Date.now();
   let nextProgressLogAt = progressLogIntervalMs;
 
@@ -83,8 +80,6 @@ export async function waitForKnowledgeInstall(
   const cancellation = await client
     .cancelKnowledgeJob(jobId)
     .then((result) => (result.cancelled ? 'cancelled' : 'already-terminal'))
-    .catch(
-      (error) => `cancel-failed:${error instanceof Error ? error.message : String(error)}`,
-    );
+    .catch((error) => `cancel-failed:${error instanceof Error ? error.message : String(error)}`);
   throw new KnowledgeInstallTimeoutError(jobId, timeoutMs, cancellation, options.label);
 }

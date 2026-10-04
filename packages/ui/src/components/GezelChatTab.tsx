@@ -231,7 +231,7 @@ export function GezelChatTab({
   }, [selectedProjectId]);
 
   if (projects === null) {
-    return <p className="muted small">Loading projects…</p>;
+    return null;
   }
   if (projects.length === 0) {
     return (

@@ -73,7 +73,7 @@ export function TrialDetailDialog({
           <Dialog.Description className="muted small">
             {trial
               ? `${modelLabel(trial.provider ?? '', trial.modelId)} on ${providerLabel(trial.provider)} · ${formatAbsoluteTime(trial.startedAt)}`
-              : 'Loading…'}
+              : null}
           </Dialog.Description>
           {error && <p className="error small">{error}</p>}
           {trial && detail && (

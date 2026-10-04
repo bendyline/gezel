@@ -133,16 +133,17 @@ describe('GezelDetail', () => {
     );
   });
 
-  it('renders Loading… until getGezel resolves', async () => {
+  it('stays quiet until getGezel resolves', async () => {
     let resolve!: (v: GezelDetailData) => void;
     vi.mocked(api.getGezel).mockReturnValue(
       new Promise<GezelDetailData>((r) => {
         resolve = r;
       }),
     );
-    render(<GezelDetail gezelId="gz-maya" />);
-    expect(screen.getByText(/Loading gezel/)).toBeInTheDocument();
+    const { container } = render(<GezelDetail gezelId="gz-maya" />);
+    expect(container).toBeEmptyDOMElement();
     resolve(DETAIL);
+    expect(await screen.findByRole('heading', { name: 'Maya' })).toBeInTheDocument();
   });
 
   it('renders the gezel name + role + editor with about content', async () => {

@@ -113,9 +113,7 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
             />
           ) : primaryError ? (
             <p className="error small">{primaryError}</p>
-          ) : (
-            <p className="muted small">Loading {primary.title}…</p>
-          )}
+          ) : null}
         </div>
       )}
       {rest.length > 0 && (

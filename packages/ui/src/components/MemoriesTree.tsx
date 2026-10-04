@@ -101,7 +101,7 @@ export function MemoriesTree({
   }, []);
 
   if (tree === null) {
-    return <p className="muted small">Loading memories…</p>;
+    return null;
   }
   if (tree.days.length === 0 && !tree.summary && !tree.lessons) {
     return (
@@ -222,7 +222,6 @@ function MemoryPreview({
           <header className="memories-preview-header">
             <code>{selected.label}</code>
           </header>
-          {preview.loading && <p className="muted small">Loading…</p>}
           {preview.error && <p className="error">{preview.error}</p>}
           {preview.content !== null && !preview.loading && !preview.error && (
             <pre className="memories-preview-body">{preview.content || '(empty)'}</pre>
@@ -313,9 +312,7 @@ export function ProjectMemoriesEditor({
         Notes shared by every gezel working in this project. Changes are saved to the project’s
         memory files and used in future recall.
       </p>
-      {days === null ? (
-        <p className="muted small">Loading memories…</p>
-      ) : daysError ? (
+      {days === null ? null : daysError ? (
         <p className="error">{daysError}</p>
       ) : days.length === 0 ? (
         <p className="placeholder">
@@ -339,7 +336,6 @@ export function ProjectMemoriesEditor({
             </ul>
           </div>
           <div className="project-memory-editor">
-            {dayContent?.loading && <p className="muted small">Loading…</p>}
             {dayContent?.error && <p className="error">{dayContent.error}</p>}
             {dayContent?.content !== null &&
               dayContent &&

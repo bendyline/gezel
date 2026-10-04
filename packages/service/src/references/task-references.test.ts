@@ -78,11 +78,21 @@ once more for emphasis.`;
 });
 
 it('validates only unique mentioned references and never reads all task history', async () => {
-  const readTask = vi.fn(async (_project: string, num: number) => num === 2 ? { ref: 'p/2' } : null);
-  const store = { readTask, listAllTasks: vi.fn(() => { throw new Error('unbounded scan'); }) } as unknown as Store;
+  const readTask = vi.fn(async (_project: string, num: number) =>
+    num === 2 ? { ref: 'p/2' } : null,
+  );
+  const store = {
+    readTask,
+    listAllTasks: vi.fn(() => {
+      throw new Error('unbounded scan');
+    }),
+  } as unknown as Store;
   expect(await extractReferencedTasks(store, 'Saved the review.')).toEqual([]);
   expect(readTask).not.toHaveBeenCalled();
   expect(await extractReferencedTasks(store, 'p/2, p/2 and unknown/99')).toEqual(['p/2']);
-  expect(readTask.mock.calls).toEqual([['p', 2], ['unknown', 99]]);
+  expect(readTask.mock.calls).toEqual([
+    ['p', 2],
+    ['unknown', 99],
+  ]);
   expect(store.listAllTasks).not.toHaveBeenCalled();
 });

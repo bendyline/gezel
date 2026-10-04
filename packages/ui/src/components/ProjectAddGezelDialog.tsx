@@ -573,7 +573,6 @@ export function ProjectAddGezelDialog({
 
                 <section aria-labelledby="project-add-role-title">
                   <h4 id="project-add-role-title">Add a new gezel for a role</h4>
-                  {loading && <p className="muted small">Loading roles…</p>}
                   {!loading && visibleTemplates.length > 0 ? (
                     <ul className="project-add-gezel-list">
                       {visibleTemplates.map((template) => (

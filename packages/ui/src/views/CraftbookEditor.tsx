@@ -138,7 +138,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
   );
 
   if (error && !book) return <p className="error">{error}</p>;
-  if (!book) return <p className="placeholder">Loading…</p>;
+  if (!book) return null;
 
   const onPatch = (stepId: string, patch: UpdateTaskStepRequest) => {
     void persist({

@@ -90,7 +90,13 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'uv',
   ],
   'win32-arm64-cpu': ['gezel-llama-server'],
-  'darwin-arm64': ['gezel-sd-server', 'gezel-ds4-server', 'gezel-whisper-server', 'uv'],
+  'darwin-arm64': [
+    'gezel-sd-server',
+    'gezel-ds4-server',
+    'gezel-whisper-server',
+    'gezel-apple-fm',
+    'uv',
+  ],
   'darwin-arm64-metal': ['gezel-llama-server'],
   'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-x64-cpu': ['gezel-llama-server'],
@@ -123,6 +129,7 @@ export const ENGINE_FOR_BINARY = Object.freeze({
   uv: 'uv',
   'gezel-device-health': null,
   'gezel-service-host': null,
+  'gezel-apple-fm': null,
 });
 
 /** Every platform key a native release publishes an archive for. */

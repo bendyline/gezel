@@ -1041,7 +1041,7 @@ function TaskRailCard({
     };
   }, [task]);
 
-  if (!loaded) return <p className="muted small chat-rail-task-empty">Loading task…</p>;
+  if (!loaded) return null;
   if (!task)
     return (
       <p className="muted small chat-rail-task-empty">
@@ -1199,7 +1199,6 @@ function TaskRailCard({
       )}
       <section className="chat-rail-task-history" aria-label="History and notes">
         <h5>History &amp; notes</h5>
-        {notesState === 'loading' && <p className="muted small">Loading notes…</p>}
         {notesState === 'error' && <p className="muted small">Notes unavailable.</p>}
         {notesState === 'ready' && notes.length === 0 && (
           <p className="muted small">No notes yet.</p>
@@ -1639,7 +1638,6 @@ function ReferenceViewer({
       </header>
       {actionError && <p className="error small chat-rail-viewer-action-error">{actionError}</p>}
       <div className="chat-rail-viewer-body">
-        {loading && <p className="muted small">Loading…</p>}
         {error && (
           <p className="chat-rail-viewer-error" role="alert">
             {error}

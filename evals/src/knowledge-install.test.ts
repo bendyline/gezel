@@ -1,10 +1,7 @@
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
 import { waitForKnowledgeInstall } from './knowledge-install.ts';
-import {
-  ScenarioSetupTimeoutError,
-  runScenarioSetupWithTimeout,
-} from './runner.ts';
+import { ScenarioSetupTimeoutError, runScenarioSetupWithTimeout } from './runner.ts';
 
 function clientWith(
   getKnowledgeJob: () => Promise<{

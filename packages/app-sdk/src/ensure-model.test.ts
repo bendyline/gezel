@@ -62,7 +62,10 @@ describe('ensureModel', () => {
         engines: [],
       }),
       ensureNativeEngine,
-      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listLlamaCppModels: vi
+        .fn()
+        .mockResolvedValueOnce({ models: [] })
+        .mockResolvedValue({ models: [{ id: 'new-model' }] }),
       getConfig: vi.fn().mockResolvedValue({ defaultModel: { mlx: 'existing-mlx' } }),
       updateConfig,
     } as unknown as GezelClient;
@@ -96,8 +99,16 @@ describe('ensureModel', () => {
       source: 'download',
       pinned: true,
     });
-    expect(ensureNativeEngine).toHaveBeenCalledWith('llama-server', expect.any(Function), 'cuda');
-    expect(app.ensureModel).toHaveBeenCalledWith({ model: 'llama-cpp:new-model' });
+    expect(ensureNativeEngine).toHaveBeenCalledWith(
+      'llama-server',
+      expect.any(Function),
+      'cuda',
+      undefined,
+    );
+    expect(app.ensureModel).toHaveBeenCalledWith(
+      { model: 'llama-cpp:new-model' },
+      { signal: undefined },
+    );
     expect(updateConfig).toHaveBeenCalledWith({
       provider: 'llama-cpp',
       defaultModel: { mlx: 'existing-mlx', 'llama-cpp': 'new-model' },
@@ -144,5 +155,70 @@ describe('ensureModel', () => {
 
     expect(client.ensureNativeEngine).toHaveBeenCalledOnce();
     expect(app.ensureModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('preparation terminal guarantees', () => {
+  function fixture() {
+    const client = {
+      getNativeEngineStatus: vi.fn(async () => ({ pinned: false })),
+      listLlamaCppModels: vi.fn(async () => ({ models: [] })),
+      getConfig: vi.fn(async () => ({})),
+      updateConfig: vi.fn(),
+    };
+    const app = {
+      ensureModel: vi.fn(async () => ({
+        status: 'downloading',
+        model_id: 'llama-cpp:fixture',
+        job_id: 'job',
+      })),
+      streamEnsureEvents: vi.fn(async function* () {}),
+    };
+    return {
+      client,
+      app,
+      deps: {
+        client: client as unknown as GezelClient,
+        app: app as unknown as GezelApp,
+        owned: true,
+        platform: 'linux' as const,
+      },
+    };
+  }
+  it('does not pin or report ready after a truncated stream', async () => {
+    const { deps, client } = fixture();
+    await expect(ensureModel(deps, { model: 'fixture' })).rejects.toMatchObject({
+      code: 'incomplete_stream',
+    });
+    expect(client.updateConfig).not.toHaveBeenCalled();
+  });
+  it('does no work after pre-abort', async () => {
+    const { deps, client, app } = fixture();
+    await expect(
+      ensureModel(deps, { model: 'fixture', signal: AbortSignal.abort() }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(client.getNativeEngineStatus).not.toHaveBeenCalled();
+    expect(app.ensureModel).not.toHaveBeenCalled();
+  });
+  it('propagates inventory errors instead of authorizing a download', async () => {
+    const { deps, client, app } = fixture();
+    client.listLlamaCppModels.mockRejectedValue(new Error('permission denied'));
+    await expect(ensureModel(deps, { model: 'fixture' })).rejects.toThrow('permission denied');
+    expect(app.ensureModel).not.toHaveBeenCalled();
+  });
+  it('passes cancellation to pending HTTP preparation and never pins', async () => {
+    const { deps, client, app } = fixture();
+    const controller = new AbortController();
+    app.ensureModel.mockImplementation(
+      async (_input?: unknown, options?: { signal?: AbortSignal }) => {
+        expect(options?.signal).toBe(controller.signal);
+        controller.abort();
+        return { status: 'downloading', model_id: 'llama-cpp:fixture', job_id: 'job' };
+      },
+    );
+    await expect(
+      ensureModel(deps, { model: 'fixture', signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(client.updateConfig).not.toHaveBeenCalled();
   });
 });

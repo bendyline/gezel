@@ -349,7 +349,11 @@ export function HandboekView() {
   );
 
   return (
-    <div className="handboek-view" data-testid="handboek-view">
+    <div
+      className="handboek-view"
+      data-testid="handboek-view"
+      aria-busy={loading || (!toc && !error)}
+    >
       <nav className="handboek-toc" aria-label="Handboek contents">
         <div className="handboek-toc-brand">
           <AreaIcon area="handboek" size={16} />
@@ -363,7 +367,6 @@ export function HandboekView() {
           value={tocFilter}
           onChange={(e) => setTocFilter(e.target.value)}
         />
-        {!toc && !error && <div className="handboek-toc-loading">Loading contents…</div>}
         {tocFilter.trim() ? (
           <section className="handboek-toc-area">
             {filteredEntries.length > 0 ? (
@@ -479,7 +482,6 @@ export function HandboekView() {
           </div>
         </header>
         {error && <div className="handboek-error">{error}</div>}
-        {loading && !article && <div className="handboek-loading">Loading article…</div>}
         {doc && mediaProvider && (
           <MediaContext.Provider value={mediaProvider}>
             {mode === 'doc' ? (

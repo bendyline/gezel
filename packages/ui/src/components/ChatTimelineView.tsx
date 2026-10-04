@@ -3284,11 +3284,7 @@ export function ChatTimelineView({
   };
 
   if (loading && messages.length === 0) {
-    return (
-      <div className="chat-timeline chat-timeline-loading">
-        <p className="muted small">Loading…</p>
-      </div>
-    );
+    return <div className="chat-timeline chat-timeline-loading" aria-busy="true" />;
   }
 
   if (error) {
@@ -4034,7 +4030,7 @@ export function ChatTimelineView({
       >
         {hasMore && (
           <div className="timeline-loading-pill muted small">
-            {paginatingRef.current ? 'Loading older messages…' : 'Scroll up for older messages'}
+            {!paginatingRef.current && 'Scroll up for older messages'}
           </div>
         )}
         {/* `rows` can be non-empty while nothing visible comes out of it — a
