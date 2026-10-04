@@ -361,7 +361,7 @@ describe('signed build', () => {
 
 describe('gezk 0.6: leaf filing, ordering, metadata, assets', () => {
   it('files documents at the leaf and rolls descendants up at read time', () => {
-    expect(handle.schemaVersion).toBe(3);
+    expect(handle.schemaVersion).toBe(GEZK_INDEX_SCHEMA_VERSION);
     const topics = handle.topics();
     const craft = topics.find((t) => t.id === 'craft');
     const metals = topics.find((t) => t.id === 'metals');

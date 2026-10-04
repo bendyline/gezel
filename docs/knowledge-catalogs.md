@@ -214,8 +214,8 @@ Markdown folder                     Wikipedia + Wikidata dumps
 ## Container format: `.gezk`
 
 `.gezk` is an **open format** specified in
-[bendyline/gezk](https://github.com/bendyline/gezk) (version 0.6, preliminary
-until 1.0; readers also open 0.5 archives); [gezk-format.md](gezk-format.md) maps it onto this repository and
+[bendyline/gezk](https://github.com/bendyline/gezk) (public version 0.6; the 0.7 shared-reference implementation is documented in
+[gezk-shared-toc.md](gezk-shared-toc.md); readers also open 0.5 and 0.6 archives); [gezk-format.md](gezk-format.md) maps it onto this repository and
 [ADR 0012](decisions/0012-gezk-open-format.md) records why it was opened.
 What this document needs from it:
 
@@ -226,13 +226,16 @@ What this document needs from it:
   `index/shards/NNN.db` (chunks, chunk FTS, sign-bit and int8 vectors in
   plain BLOB tables). Every entry is stored uncompressed. Nothing beyond stock
   SQLite with FTS5 reads it — sqlite-vec is not part of the format.
-- The manifest (`kind: gezk-catalog`, `formatVersion: "0.6"`,
-  `indexSchemaVersion: 3`) carries identity, publisher, license (with the
+- The manifest (`kind: gezk-catalog`, `formatVersion: "0.7"`,
+  `indexSchemaVersion: 4`) carries identity, publisher, license (with the
   notice path), the full embedding and chunking profiles, the shipped table of
   contents, shard statistics, every file's SHA-256, and an optional Ed25519
   signature over its RFC 8785 canonical form. The archive's own SHA-256 lives
   wherever the archive is named (the gilde entry, a registry row).
-- Documents are filed at the leaf of their topic path and readers roll
+- A document can appear under several TOC topics through shared references,
+  with one body, search entry, and set of vectors. Parent listings and counts
+  deduplicate shared document IDs before pagination.
+- Documents are filed at the leaf of their primary topic path and readers roll
   descendants up (a 0.5 catalog filed everything at a root); `ordinal`
   orders a topic's documents and `meta` carries opaque producer metadata
   (canonical JSON, 16 KiB). Images ship under `assets/` — PNG, JPEG, GIF,

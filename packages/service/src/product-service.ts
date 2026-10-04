@@ -73,6 +73,7 @@ import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startResponsivenessMonitor } from './perf/responsiveness.js';
+import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
@@ -2972,6 +2973,7 @@ export async function startProductService(
     5 * 60 * 1000,
   );
   idleSessionTimer.unref();
+  const stopMemoryDiagnostics = startMemoryDiagnostics();
   if (!embeddedInferenceOnly) {
     setTimeout(() => {
       chat.runIdleSummarizationSweep().catch(() => {
@@ -3067,6 +3069,7 @@ export async function startProductService(
       await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
       clearInterval(idleSessionTimer);
+      stopMemoryDiagnostics();
       await shutdownStep('channels', () => channels.stop());
       await shutdownStep('app serve', async () => appServe?.stopAll());
       await shutdownStep('remote serving', () => remoteServing.stop());

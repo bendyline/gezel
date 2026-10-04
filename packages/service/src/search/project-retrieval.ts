@@ -550,8 +550,11 @@ async function otherTasksFolders(
   taskRef: string,
 ): Promise<TaskOwnedPrefix[]> {
   try {
-    const tasks = await store.listProjectTasks(projectId);
-    return tasks.filter((task) => task.ref !== taskRef).flatMap(taskDeclaredFolders);
+    const folders: TaskOwnedPrefix[] = [];
+    for await (const task of store.iterateProjectTasks(projectId)) {
+      if (task.ref !== taskRef) folders.push(...taskDeclaredFolders(task));
+    }
+    return folders;
   } catch {
     return [];
   }

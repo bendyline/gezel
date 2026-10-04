@@ -67,6 +67,40 @@ describe('KnowledgeManager', () => {
     expect(doc?.markdown).toContain('Tails and pins');
   });
 
+  it('installs and browses shared TOC references without duplicating documents or citations', async () => {
+    const path = join(dir, 'shared-toc.gezk');
+    await buildTestCatalog({
+      outputPath: path,
+      workDir: join(dir, 'shared-toc-work'),
+      id: 'shared-toc',
+      withSharedToc: true,
+    });
+    const local = new KnowledgeManager({
+      home: join(dir, 'shared-toc-home'),
+      host: await createInProcessCatalogHost(),
+    });
+    await local.start();
+    try {
+      const events = await runInstall(local, path);
+      expect(
+        events.some((e) => e.type === 'done'),
+        JSON.stringify(events),
+      ).toBe(true);
+      const listing = await local.documentsPage('shared-toc', { topicId: 'finishing' });
+      expect(listing.documents.map((d) => d.id)).toEqual(['dovetails', 'shellac']);
+      expect(listing.documents[0]?.topicId).toBe('finishing');
+      expect((await local.documentsPage('shared-toc', {})).total).toBe(2);
+      const topic = (await local.topics('shared-toc')).find((t) => t.id === 'finishing');
+      expect(topic?.totalDocumentCount).toBe(2);
+      const read = await local.getDocument('shared-toc', listing.documents[0]?.id ?? '');
+      expect(read?.markdown).toContain('Tails and pins');
+      const citation = await local.resolveCitation('knowledge://gezel-tests/shared-toc/dovetails');
+      expect(citation.ok && citation.markdown).toBe(read?.markdown);
+    } finally {
+      await local.stop();
+    }
+  });
+
   it('answers explicit search with cited knowledge results', async () => {
     const results = await manager.searchUnified('dovetail corner joint', {
       vector: null,

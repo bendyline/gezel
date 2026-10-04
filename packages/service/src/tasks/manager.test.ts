@@ -2558,3 +2558,19 @@ describe('TaskManager — a last step with no next ends the book', () => {
     expect((await store.readTask('website', task.num))!.status).toBe('complete');
   });
 });
+
+it('streams active-task listings and still honors a paused ancestor', async () => {
+  const parent = await tasks.create('website', { title: 'Collection', steps: [{ name: 'Work' }] });
+  const child = await tasks.create('website', { title: 'Review', parentTaskRef: parent.ref, steps: [{ name: 'Work' }] });
+  const projectList = vi.spyOn(store, 'listProjectTasks');
+  const allList = vi.spyOn(store, 'listAllTasks');
+  expect((await tasks.listChildren(parent.ref, { status: 'active', limit: 1 })).map((task) => task.ref)).toEqual([child.ref]);
+  expect((await tasks.list({ status: 'active', projectId: 'website' })).map((task) => task.ref)).toContain(child.ref);
+  await tasks.setStatus('website', parent.num, 'paused');
+  expect(await tasks.list({ status: 'active' })).toEqual([]);
+  expect(await tasks.listChildren(parent.ref, { status: 'active' })).toEqual([]);
+  await tasks.setStatus('website', parent.num, 'active');
+  expect((await tasks.list({ status: 'active' })).map((task) => task.ref)).toContain(child.ref);
+  expect(projectList).not.toHaveBeenCalled();
+  expect(allList).not.toHaveBeenCalled();
+});

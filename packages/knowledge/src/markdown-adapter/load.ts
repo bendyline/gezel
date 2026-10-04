@@ -706,24 +706,18 @@ export async function loadMarkdownCatalog(
     chain: OutlineTopic[];
     entry: OutlineEntry;
   }
-  const placements = new Map<string, Placement>();
+  const placements = new Map<string, Placement[]>();
   if (outline) {
-    const duplicates: string[] = [];
     const walk = (topic: OutlineTopic, chain: OutlineTopic[]): void => {
       for (const entry of topic.entries) {
         const key = entry.file.normalize('NFC');
-        if (placements.has(key)) duplicates.push(entry.file);
-        else placements.set(key, { chain, entry });
+        const existing = placements.get(key) ?? [];
+        existing.push({ chain, entry });
+        placements.set(key, existing);
       }
       for (const child of topic.children) walk(child, [...chain, child]);
     };
     walk(outline.root, []);
-    warnCapped(
-      warn,
-      duplicates,
-      (file) => `${file}: listed more than once in the table of contents; the first place wins`,
-      (more) => `${more} more files are listed more than once in the table of contents`,
-    );
   }
   const outlineTopicIds = new Map<OutlineTopic, string>();
   let outlineTooDeep = false;
@@ -817,7 +811,8 @@ export async function loadMarkdownCatalog(
       : (fm.title ?? firstHeading(fm.body) ?? stem);
     let ordinal = fm.order;
     let topicPath: string[];
-    const placement = placements.get(rel.normalize('NFC'));
+    const documentPlacements = placements.get(rel.normalize('NFC')) ?? [];
+    const placement = documentPlacements[0];
     if (placement) {
       topicPath = ensureOutlineChain(placement.chain);
       if (placement.entry.title) title = placement.entry.title;
@@ -849,6 +844,19 @@ export async function loadMarkdownCatalog(
       const parentId = topicPath[topicPath.length - 1] as string;
       topicPath = [...topicPath, ensureShelf(parentId, fm.subcategory, rel)];
     }
+    const tocReferences: NonNullable<CatalogDocument['tocReferences']> = [];
+    const placedLeaves = new Set([topicPath.at(-1)]);
+    for (const extra of documentPlacements.slice(1)) {
+      let path = ensureOutlineChain(extra.chain);
+      if (fm.subcategory) path = [...path, ensureShelf(path.at(-1) as string, fm.subcategory, rel)];
+      const leaf = path.at(-1);
+      // Repeated links inside the same section (or depth-folded sections)
+      // represent a single placement. The first listing position wins.
+      if (placedLeaves.has(leaf)) continue;
+      placedLeaves.add(leaf);
+      const order = extra.entry.order ?? fm.order;
+      tocReferences.push({ topicPath: path, ...(order !== undefined ? { ordinal: order } : {}) });
+    }
     const summary = fm.summary ?? fm.description ?? firstParagraph(fm.body);
     loaded.push({
       rel,
@@ -860,6 +868,7 @@ export async function loadMarkdownCatalog(
         ...(summary ? { summary } : {}),
         language: opts.language,
         topicPath,
+        ...(tocReferences.length ? { tocReferences } : {}),
         markdown: fm.body,
         ...(fm.aliases && fm.aliases.length > 0 ? { aliases: fm.aliases } : {}),
         ...(ordinal !== undefined ? { ordinal } : {}),
@@ -893,7 +902,7 @@ export async function loadMarkdownCatalog(
     );
     warnCapped(
       warn,
-      [...placements].filter(([file]) => !seenRel.has(file)).map(([, p]) => p.entry.file),
+      [...placements].filter(([file]) => !seenRel.has(file)).map(([file]) => file),
       (file) => `${file}: named by the table of contents but not found among the Markdown files`,
       (more) =>
         `${more} more files named by the table of contents are not among the Markdown files`,

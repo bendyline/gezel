@@ -49,9 +49,9 @@ export interface CatalogTopic {
   name: string;
   description: string | null;
   sortKey: string;
-  /** Documents filed directly at this topic (`topics.document_count`). */
+  /** Unique documents listed directly at this topic, including shared references. */
   documentCount: number;
-  /** Direct plus every descendant topic's documents (computed at read time). */
+  /** Unique documents in this topic and its descendants, deduplicated at read time. */
   totalDocumentCount: number;
 }
 
@@ -61,7 +61,7 @@ export interface CatalogDocumentMeta {
   slug: string;
   summary: string | null;
   language: string;
-  /** The topic the document is filed at — the leaf of its path on 0.6, the root on 0.5. */
+  /** Listing placement for a scoped page; primary topic for getDocument/search/global listings. */
   topicId: string;
   /** Listing position among the documents of its topic; null when unordered. */
   ordinal: number | null;
@@ -150,7 +150,12 @@ export class CatalogHandle {
   /** Open a catalog's extracted version directory (the dir holding manifest.json). */
   static open(rootDir: string): CatalogHandle {
     const router = openCatalogDatabase(join(rootDir, ROUTER_DB_PATH));
-    return new CatalogHandle(rootDir, router);
+    try {
+      return new CatalogHandle(rootDir, router);
+    } catch (error) {
+      router.close();
+      throw error;
+    }
   }
 
   close(): void {
@@ -300,10 +305,18 @@ export class CatalogHandle {
     return this.meta.format_version ?? '';
   }
 
-  private documentColumns(): string {
+  private documentColumns(documentPrefix = '', placementPrefix = documentPrefix): string {
     const base =
       'id, title, slug, summary, language, topic_id, source_url, source_revision, source_updated_at, attribution_json';
-    return this.schemaVersion >= 3 ? `${base}, ordinal, meta_json` : base;
+    const columns = this.schemaVersion >= 3 ? `${base}, ordinal, meta_json` : base;
+    return columns
+      .split(', ')
+      .map((column) => {
+        const prefix =
+          column === 'topic_id' || column === 'ordinal' ? placementPrefix : documentPrefix;
+        return prefix ? `${prefix}.${column} AS ${column}` : column;
+      })
+      .join(', ');
   }
 
   private documentOrder(): string {
@@ -317,6 +330,12 @@ export class CatalogHandle {
    * 0.5 catalog every document sits at a root, so both counts agree there.
    */
   topics(): CatalogTopic[] {
+    const rollup =
+      this.schemaVersion >= 4
+        ? `SELECT sub.root AS id, COUNT(DISTINCT td.document_id) AS total
+         FROM sub LEFT JOIN topic_documents td ON td.topic_id = sub.id GROUP BY sub.root`
+        : `SELECT sub.root AS id, SUM(t.document_count) AS total
+         FROM sub JOIN topics t ON t.id = sub.id GROUP BY sub.root`;
     return (
       this.router.db
         .prepare(
@@ -327,8 +346,7 @@ export class CatalogHandle {
              WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}
            ),
            rollup AS (
-             SELECT sub.root AS id, SUM(t.document_count) AS total
-             FROM sub JOIN topics t ON t.id = sub.id GROUP BY sub.root
+             ${rollup}
            )
            SELECT t.id, t.parent_id, t.name, t.description, t.sort_key, t.document_count,
                   rollup.total AS total_document_count
@@ -368,6 +386,9 @@ export class CatalogHandle {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
     const offset = Math.max(0, opts.offset ?? 0);
     const descendants = opts.descendants ?? true;
+    if (this.schemaVersion >= 4 && opts.topicId) {
+      return this.sharedDocumentsPage(opts.topicId, descendants, limit, offset);
+    }
     let scope = '';
     let where = '';
     const params: unknown[] = [];
@@ -400,6 +421,90 @@ export class CatalogHandle {
         .all(...(params as []), limit, offset) as Array<Record<string, unknown>>
     ).map(rowToDocumentMeta);
     return { documents, total };
+  }
+
+  /** A reference is a placement, not a duplicate result or a redirect page. */
+  private sharedDocumentsPage(
+    topicId: string,
+    descendants: boolean,
+    limit: number,
+    offset: number,
+  ): {
+    documents: CatalogDocumentMeta[];
+    total: number;
+  } {
+    const sub = descendants
+      ? `SELECT ?, 0 UNION ALL SELECT t.id, sub.depth + 1 FROM topics t
+         JOIN sub ON t.parent_id = sub.id WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}`
+      : 'SELECT ?, 0';
+    const scope = `WITH RECURSIVE sub(id, depth) AS (${sub}), scoped AS (
+      SELECT td.document_id, td.topic_id, td.ordinal, t.sort_key
+      FROM topic_documents td JOIN topics t ON t.id = td.topic_id
+      WHERE td.topic_id IN (SELECT id FROM sub)
+    )`;
+    const total = Number(
+      (
+        this.router.db
+          .prepare(`${scope} SELECT COUNT(DISTINCT document_id) AS n FROM scoped`)
+          .get(topicId) as { n: number | bigint }
+      ).n,
+    );
+    const documents = (
+      this.router.db
+        .prepare(
+          `${scope}, ranked AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY document_id
+          ORDER BY (ordinal IS NULL), ordinal, sort_key, topic_id) AS placement_rank FROM scoped
+      ) SELECT ${this.documentColumns('d', 'p')}
+        FROM documents d JOIN ranked p ON p.document_id = d.id AND p.placement_rank = 1
+        ORDER BY (p.ordinal IS NULL), p.ordinal, d.slug, d.id LIMIT ? OFFSET ?`,
+        )
+        .all(topicId, limit, offset) as Array<Record<string, unknown>>
+    ).map(rowToDocumentMeta);
+    return { documents, total };
+  }
+
+  /** Integrity facts kept separate from browse counts, which include shared references. */
+  tocIntegrity(): {
+    placements: number;
+    invalidReferences: number;
+    missingPrimary: number;
+    incorrectCounts: number;
+    duplicateReferences: number;
+  } {
+    const count = (sql: string) =>
+      Number((this.router.db.prepare(sql).get() as { n: number | bigint }).n);
+    const relation = this.schemaVersion >= 4 ? 'topic_documents' : 'documents';
+    const incorrectCounts = count(
+      `SELECT COUNT(*) AS n FROM topics t LEFT JOIN
+       (SELECT topic_id, COUNT(*) AS n FROM ${relation} GROUP BY topic_id) r ON r.topic_id = t.id
+       WHERE t.document_count != COALESCE(r.n, 0)`,
+    );
+    if (this.schemaVersion < 4)
+      return {
+        placements: count('SELECT COUNT(*) AS n FROM documents'),
+        invalidReferences: 0,
+        missingPrimary: 0,
+        incorrectCounts,
+        duplicateReferences: 0,
+      };
+    return {
+      placements: count('SELECT COUNT(*) AS n FROM topic_documents'),
+      invalidReferences: count(
+        `SELECT COUNT(*) AS n FROM topic_documents r
+         LEFT JOIN documents d ON d.id = r.document_id LEFT JOIN topics t ON t.id = r.topic_id
+         WHERE d.id IS NULL OR t.id IS NULL OR
+           (r.ordinal IS NOT NULL AND (typeof(r.ordinal) != 'integer' OR r.ordinal < -2147483648 OR r.ordinal > 2147483647))`,
+      ),
+      missingPrimary: count(
+        `SELECT COUNT(*) AS n FROM documents d WHERE NOT EXISTS (
+           SELECT 1 FROM topic_documents r WHERE r.document_id = d.id AND r.topic_id = d.topic_id AND r.ordinal IS d.ordinal)`,
+      ),
+      incorrectCounts,
+      duplicateReferences: count(
+        'SELECT COUNT(*) AS n FROM (SELECT topic_id, document_id FROM topic_documents GROUP BY topic_id, document_id HAVING COUNT(*) > 1)',
+      ),
+    };
   }
 
   getDocument(id: string): (CatalogDocumentMeta & { markdown: string }) | null {

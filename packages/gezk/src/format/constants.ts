@@ -5,9 +5,9 @@
  * breaking changes may land in any minor until 1.0, and a reader supports
  * exactly the versions it names (see {@link GEZK_FORMAT_GENERATIONS}).
  */
-export const GEZK_FORMAT_VERSION = '0.6';
+export const GEZK_FORMAT_VERSION = '0.7';
 /** SQLite schema generation this implementation writes (`PRAGMA user_version`). */
-export const GEZK_INDEX_SCHEMA_VERSION = 3;
+export const GEZK_INDEX_SCHEMA_VERSION = 4;
 
 /**
  * Every (formatVersion, indexSchemaVersion) pairing this implementation
@@ -15,7 +15,7 @@ export const GEZK_INDEX_SCHEMA_VERSION = 3;
  * readable so a catalog published under an earlier 0.x keeps opening after
  * a reader upgrade. A manifest that pairs the two differently is corrupt.
  */
-export const GEZK_FORMAT_GENERATIONS = { '0.5': 2, '0.6': 3 } as const;
+export const GEZK_FORMAT_GENERATIONS = { '0.5': 2, '0.6': 3, '0.7': 4 } as const;
 export type GezkFormatVersion = keyof typeof GEZK_FORMAT_GENERATIONS;
 export type GezkIndexSchemaVersion = (typeof GEZK_FORMAT_GENERATIONS)[GezkFormatVersion];
 export const GEZK_SUPPORTED_FORMAT_VERSIONS = Object.keys(GEZK_FORMAT_GENERATIONS) as [

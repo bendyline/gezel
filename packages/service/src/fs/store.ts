@@ -6468,8 +6468,16 @@ export class Store {
     await this.taskFiles.deleteTaskAbout(projectId, num);
   }
 
+  iterateProjectTasks(projectId: string): AsyncIterable<Task> {
+    return this.taskFiles.iterateProjectTasks(projectId);
+  }
+
   async listProjectTasks(projectId: string): Promise<Task[]> {
     return this.taskFiles.listProjectTasks(projectId);
+  }
+
+  iterateAllTasks(): AsyncIterable<Task> {
+    return this.taskFiles.iterateAllTasks();
   }
 
   async listAllTasks(): Promise<Task[]> {
