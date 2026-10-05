@@ -111,6 +111,8 @@ gezel create-audio "..."    read text aloud into an audio file
 
 ## Knowledge catalogs
 
+See [Working with knowledge catalogs](knowledge-command-line.md) for the complete reference, including validation, signing, location search, removal, Parquet export, and a build–validate–install walkthrough. [How knowledge works in Gezel](how-knowledge-works.md) explains the embeddings and storage behind these commands.
+
 ```
 gezel knowledge init <dir>  scaffold a catalog folder
 gezel knowledge build <dir> compile it into a .gezk file
