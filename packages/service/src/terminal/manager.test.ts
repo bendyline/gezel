@@ -274,7 +274,12 @@ describe('TerminalManager', () => {
     // so this runs on every platform (unlike the argv shell tests).
     const projectId = (await store.listProjects())[0]!.id;
     const collected: TerminalEventEnvelope[] = [];
-    events.subscribeProject(projectId, (env) => collected.push(env));
+    const settled = new Promise<void>((resolve) => {
+      events.subscribeProject(projectId, (env) => {
+        collected.push(env);
+        if (env.kind === 'message' && env.message.kind === 'output') resolve();
+      });
+    });
 
     const mgr = makeManager({
       workspaceIndex: stubIndex(null),
@@ -290,8 +295,8 @@ describe('TerminalManager', () => {
     const outcome = await mgr.enqueueRun(projectId, '', 'demo-book');
     expect(outcome.resolution.kind).toBe('craftbook');
 
-    // Let the per-thread queue drain the invocation.
-    await new Promise((r) => setTimeout(r, 100));
+    // The result is emitted after persistence; wait for it even under coverage load.
+    await settled;
 
     // Command echo, then the immediate live bubble (runStarted + a
     // progress chunk), then the final result — in that exact order.
