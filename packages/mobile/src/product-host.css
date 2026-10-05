@@ -134,6 +134,26 @@ html:root[data-platform] .gz-dialog {
     1.5rem
   );
 }
+/* Activity hangs from the header; the modal centering rule would put its
+   top-left corner in the middle of the phone and hide the answer keys. */
+html:root[data-platform] .activity-panel.gz-dialog {
+  top: calc(
+    var(--app-viewport-top, 0px) +
+    var(--app-safe-top) +
+    var(--app-compact-header-height, 52px)
+  );
+  left: auto;
+  right: calc(var(--app-safe-right) + 6px);
+  width: min(600px, calc(100vw - var(--app-safe-left) - var(--app-safe-right) - 12px));
+  max-width: calc(100vw - var(--app-safe-left) - var(--app-safe-right) - 12px);
+  max-height: calc(
+    var(--app-viewport-height, 100dvh) -
+    var(--app-safe-top) -
+    var(--app-safe-bottom) -
+    var(--app-compact-header-height, 52px) -
+    6px
+  );
+}
 html #root:has(.app-main:not([hidden]) .chat-composer) {
   background: linear-gradient(
     to bottom,

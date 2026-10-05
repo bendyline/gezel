@@ -4,6 +4,10 @@ import { setTheme } from './helpers/determinism.js';
 import { gotoHome } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
+// Dispatching held work changes the runner's queue state as well as creating
+// chats. Keep those mutations out of the shared screenshot world.
+test.use({ daemonGroup: 'activity' });
+
 test('Activity answers inline, retains drafts, and explains held work', async ({
   page,
   daemon,

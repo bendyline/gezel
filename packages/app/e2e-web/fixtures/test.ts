@@ -39,6 +39,7 @@ export interface DaemonInfo {
 }
 
 interface WorkerFixtures {
+  daemonGroup: string;
   daemon: DaemonInfo;
 }
 interface TestFixtures {
@@ -55,9 +56,11 @@ interface TestFixtures {
 const MAX_DIAGNOSTIC_LINES = 800;
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
+  // A distinct group gives a mutating spec its own worker and seeded daemon,
+  // so it cannot change later specs' conversations or task-runner state.
+  daemonGroup: ['gallery', { scope: 'worker', option: true }],
   daemon: [
-    // biome-ignore lint/correctness/noEmptyPattern: Playwright worker fixture with no fixture deps
-    async ({}, use, workerInfo) => {
+    async ({ daemonGroup }, use, workerInfo) => {
       // Set before startService reads them. Mock provider implies skip-bootstrap
       // (no model downloads); insecure transport serves plain HTTP a browser can
       // connect to; file secrets avoids OS-keychain prompts in CI.
@@ -71,7 +74,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = '1';
       process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
 
-      const home = await mkdtemp(join(tmpdir(), `gezel-web-e2e-w${workerInfo.workerIndex}-`));
+      const home = await mkdtemp(
+        join(tmpdir(), `gezel-web-e2e-${daemonGroup}-w${workerInfo.workerIndex}-`),
+      );
       // Keep scheduled/background work from changing the seeded world mid-capture.
       await writeFile(
         join(home, 'config.json'),

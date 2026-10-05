@@ -1011,8 +1011,7 @@
     result.questionId = question.questionId;
     return result;
   }
-  async function finishContracts(result) {
-    await finishTaskDraftContracts(result);
+  async function finishQuestionContracts(result) {
     const until = async (fn, label) => {
       for (let attempt = 0; attempt < 200; attempt++) {
         const value = await fn();
@@ -1021,66 +1020,18 @@
       }
       throw new Error(`Shared UI did not show ${label}`);
     };
-    const source = await api(`${projectPath(result.projectId)}/scripts/source?name=saveLocal`);
-    assertion(
-      result,
-      'authored-source-reopened',
-      source.source === result.script.source && source.hash === result.script.hash,
-      source,
-    );
-    const record = await api(`${projectPath(result.projectId)}/script-runs/${result.script.runId}`);
-    assertion(
-      result,
-      'authored-audit-reopened',
-      record.status === 'ok' && record.calls?.length > 0,
-      record,
-    );
-    if (result.mechanics?.messageSessionId) {
-      const saved = await api(`/api/sessions/${result.mechanics.messageSessionId}`);
-      assertion(
-        result,
-        'crew-message-metadata-reopened',
-        saved.messages.some((message) =>
-          Object.entries(result.mechanics.fileTurnIntent).every(
-            ([key, value]) =>
-              JSON.stringify(message.fileTurnIntent?.[key]) === JSON.stringify(value),
-          ),
-        ),
-        saved.messages,
-      );
-    }
-    if (result.mechanics?.task) {
-      const task = await api(taskPath(result.mechanics.task));
-      const sessions = (await api(`${taskPath(task)}/sessions`)).sessions;
-      assertion(
-        result,
-        'generalist-task-continuity-reopened',
-        task.status === 'complete' &&
-          task.executionMode === 'generalist' &&
-          sessions.length === 1 &&
-          sessions[0].id === result.mechanics.task.sessionId,
-        { task, sessions },
-      );
-    }
-    const navigation = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent.trim() === 'Navigation' && button.getClientRects().length,
-    );
-    navigation?.click();
     const open = await until(
       () =>
         [...document.querySelectorAll('button')].find(
           (button) =>
-            /Resolve .* pending question/.test(button.getAttribute('aria-label') || '') &&
-            (button.getAttribute('aria-label') || '').includes('Contract workshop'),
+            /^Activity —/.test(button.getAttribute('aria-label') || '') &&
+            button.getClientRects().length,
         ),
-      'project question affordance',
+      'Activity control',
     );
     open.click();
     const card = await until(
-      () =>
-        [...document.querySelectorAll('.pending-question-pending')].find((element) =>
-          element.textContent.includes('Which report format?'),
-        ),
+      () => document.getElementById(`activity-question-${result.questionId}`),
       'restored question card',
     );
     const skip = await until(
@@ -1135,6 +1086,51 @@
         session.messages.length === 0,
       session,
     );
+  }
+  async function finishContracts(result) {
+    await finishTaskDraftContracts(result);
+    const source = await api(`${projectPath(result.projectId)}/scripts/source?name=saveLocal`);
+    assertion(
+      result,
+      'authored-source-reopened',
+      source.source === result.script.source && source.hash === result.script.hash,
+      source,
+    );
+    const record = await api(`${projectPath(result.projectId)}/script-runs/${result.script.runId}`);
+    assertion(
+      result,
+      'authored-audit-reopened',
+      record.status === 'ok' && record.calls?.length > 0,
+      record,
+    );
+    if (result.mechanics?.messageSessionId) {
+      const saved = await api(`/api/sessions/${result.mechanics.messageSessionId}`);
+      assertion(
+        result,
+        'crew-message-metadata-reopened',
+        saved.messages.some((message) =>
+          Object.entries(result.mechanics.fileTurnIntent).every(
+            ([key, value]) =>
+              JSON.stringify(message.fileTurnIntent?.[key]) === JSON.stringify(value),
+          ),
+        ),
+        saved.messages,
+      );
+    }
+    if (result.mechanics?.task) {
+      const task = await api(taskPath(result.mechanics.task));
+      const sessions = (await api(`${taskPath(task)}/sessions`)).sessions;
+      assertion(
+        result,
+        'generalist-task-continuity-reopened',
+        task.status === 'complete' &&
+          task.executionMode === 'generalist' &&
+          sessions.length === 1 &&
+          sessions[0].id === result.mechanics.task.sessionId,
+        { task, sessions },
+      );
+    }
+    await finishQuestionContracts(result);
     result.passed = result.assertions.every((a) => a.passed);
     return result;
   }
@@ -1627,6 +1623,7 @@
     prepareContracts,
     productMechanicsContracts,
     finishContracts,
+    finishQuestionContracts,
     mergeReports,
     verifyFreshProduct,
     snapshotTrial,
