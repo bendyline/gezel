@@ -78,6 +78,17 @@ pacing of a transition. If a first-time user can't quite put a finger on
 - **No emojis in committed UI** (repeating the rule from CLAUDE.md). The
   ⭐ Meester badge is the single sanctioned exception.
 
+## Permission requests
+
+Permission requests use a shield-and-check glyph, the explicit heading
+"Permission request", and a service-authored scope summary before the action.
+Show the operations, project, full folder, recipients and duration. A project
+file-edit grant covers all files and subfolders until revoked in the project's
+settings; never present it as a one-file or one-task approval. The primary action
+is "Allow project file edits and continue", paired with "Keep current permissions".
+Only structured permission requests get these controls. An ordinary question's
+choice text never changes access.
+
 ## Controls: keys in trays
 
 The standard treatment for **radio-like choice controls** — any row of
@@ -509,6 +520,11 @@ The bench and step-details assignee pickers share one control. When poppetjes
 are enabled, show a 20 × 20px portrait beside the name in both the selected
 value and menu options, including a resolved default assignee. Keep every row
 on one line; disabling poppetjes returns these pickers to text only.
+
+In a task's Chat tab, keep the composer at the bottom of the available pane
+and scroll the conversation above it. The task header and bench stay visible.
+This holds both when opening a task directly and beside the Tasks list;
+the Task overview and step details keep their normal page scrolling.
 
 ### Activity: what’s going on
 

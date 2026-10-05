@@ -54,16 +54,25 @@ With no connection flags, the CLI follows this order:
    service that stops with the command. The interactive TUI
    retains ownership when it starts a daemon itself, so exiting the TUI runs
    the daemon's complete shutdown path and cleans up its local engine children.
-3. On first use, the terminal waits while the Gezel app asks you to approve
-   **Gezel CLI**. The terminal shows a six-character code that you enter in
-   the app to confirm that you initiated the request. The resulting revocable,
-   CLI-scoped credential is saved under `~/.gezel/cli/tokens/`. Its logical
-   local key survives daemon port and certificate rotation.
+
+For the per-user local daemon, the CLI connects with your same-user owner
+credential from the protected runtime directory. This works on first use and
+when adopting an already-running daemon, with no desktop approval prompt. The
+npm package is sufficient for local CLI use; you do not need to install or open
+the desktop app.
 
 `gezel run` has one deliberate lifecycle exception: if no user daemon exists,
 it starts a user-role service in-process for that one invocation and stops it
 afterward. It does not take that fallback after a denied grant or when a live
 daemon is unhealthy.
+
+External service connections use a separate authorization path: an explicit
+`--connect <url>`, or an older `legacy-full` machine service selected in step 1,
+requires a CLI-scoped grant. If there is no valid saved grant or supplied
+`--token`, the terminal shows a six-character code and waits for you to approve
+**Gezel CLI** in the Gezel app. The resulting revocable credential is saved
+under `~/.gezel/cli/tokens/` for that service. A valid saved grant or explicit
+`--token` lets the connection proceed without that interaction.
 
 The per-user daemon owns gezels, projects, settings, credentials, and
 conversations with ordinary user filesystem permissions. It discovers the

@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question, Task } from '@bendyline/gezel';
+import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -208,6 +209,66 @@ afterEach(async () => {
 });
 
 describe('ChatManager turn intent routing', () => {
+  it('resumes a permission request with newly enabled write tools', async () => {
+    const originalChat = svc.context.chat;
+    svc.context.chat = manager;
+    try {
+      await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+      const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+      mock.scriptToolCalls([
+        {
+          name: 'ask_user_question',
+          arguments: {
+            question: 'Allow project file edits so I can save the deck?',
+            permissionRequest: 'workspace-write',
+          },
+        },
+      ]);
+      mock.script('Waiting for permission.');
+      await manager.send(session.id, 'Save a deck outline to deck.md.');
+      await manager.drainBackground();
+      const question = (await store.listProjectQuestions('default')).find(
+        (q) => q.intent?.kind === 'workspace-write-permission',
+      );
+      expect(question).toBeDefined();
+      expect((await store.assertWorkspaceWritable('default', { initiatedByGezel: true })).ok).toBe(
+        false,
+      );
+      mock.scriptToolCalls([
+        {
+          name: 'write_file',
+          arguments: { path: 'deck.md', content: '# Deck\nOverview and next steps.' },
+        },
+      ]);
+      mock.script('Saved the deck outline.');
+      const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+      const response = await httpFetch(
+        `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}/api/questions/${question!.id}/answer`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${svc.context.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ selectedChoices: [0] }),
+        },
+      );
+      expect(response.status).toBe(200);
+      await expect
+        .poll(() => store.readProjectWorkspaceFile('default', 'deck.md'), { timeout: 15_000 })
+        .toBe('# Deck\nOverview and next steps.');
+      await expect.poll(() => manager.isSessionTurnPending(session.id)).toBe(false);
+      expect((await manager.history(session.id)).at(-1)?.content).toBe('Saved the deck outline.');
+      expect(
+        mock.calls.filter((call) => call.kind === 'create' || call.kind === 'resume').at(-1)?.opts
+          ?.systemMessage,
+      ).not.toContain('Built-in file tools are read-only');
+    } finally {
+      await manager.drainBackground();
+      svc.context.chat = originalChat;
+    }
+  }, 30_000);
+
   it('injects the exact-format route and retries one false capability denial', async () => {
     const meester = await store.createGezel({ name: 'Mila', role: 'Meester' });
     await store.writeConfig({

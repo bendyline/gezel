@@ -1,0 +1,51 @@
+.workspace-permission-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-size: var(--text-sm);
+}
+
+.workspace-permission-icon {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.workspace-permission-scope {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.workspace-permission-scope dt {
+  color: var(--text-muted);
+}
+
+.workspace-permission-scope dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-permission-scope code {
+  user-select: text;
+}
+
+.workspace-permission-note {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.workspace-permission .pending-question-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}

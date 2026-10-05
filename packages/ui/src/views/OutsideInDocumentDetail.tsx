@@ -25,6 +25,7 @@ import {
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
 import { recordDocumentUsed } from '../components/document-quick-list.js';
+import { looksBinary } from '../components/file-browser/index.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -54,6 +55,9 @@ async function prepareDocument(path: string, layout: OutsideInLayout): Promise<P
   } else {
     const blob = await api.fetchDocumentBlob(path);
     const imported = await importOutsideInDocument(await blob.arrayBuffer(), layout);
+    if (looksBinary(imported.markdown)) {
+      throw new Error('Could not open this document: its Markdown preview contains binary data.');
+    }
     const container = createDocumentsContentContainer({
       root: layout.companionDirectory,
       client: api,
@@ -81,6 +85,9 @@ async function prepareDocument(path: string, layout: OutsideInLayout): Promise<P
     sourcePath = layout.markdownPath;
   }
 
+  if (looksBinary(content)) {
+    throw new Error('Could not open this document: its Markdown preview contains binary data.');
+  }
   const linked = withOutsideInMetadata(content, layout);
   if (linked !== content) {
     await api.writeDocument(sourcePath, linked);
@@ -303,7 +310,7 @@ function OutsideInEditor({
           // Squisq correctly treat an unhandled CSV as code and force Source
           // view, which hides the data card this host just synthesized.
           fileName={prepared.sourcePath}
-          initialView="wysiwyg"
+          initialView={layout.format === 'pptx' ? 'preview' : 'wysiwyg'}
           readOnly={!prepared.editingEnabled}
           onChange={prepared.editingEnabled ? handleChange : undefined}
           height="100%"

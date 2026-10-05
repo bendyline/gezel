@@ -107,7 +107,7 @@ export function ProjectOutsideInEditor({
         initialMarkdown={autosave.desiredValue()}
         // Detect the mode from the Markdown companion, not the rendered target.
         fileName={sourcePath}
-        initialView="wysiwyg"
+        initialView={layout.format === 'pptx' ? 'preview' : 'wysiwyg'}
         readOnly={isReadOnly}
         onChange={isReadOnly ? undefined : handleChange}
         height="100%"

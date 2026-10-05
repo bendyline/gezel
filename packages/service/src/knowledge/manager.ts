@@ -230,7 +230,10 @@ export interface KnowledgeManagerOptions {
   embedQueryForProfile?: (
     text: string,
     profile: KnowledgeEmbeddingProfile,
-    opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
+    opts?: {
+      onDownloadProgress?: (progress: ModelDownloadProgress) => void;
+      localFilesOnly?: boolean;
+    },
   ) => Promise<number[]>;
   /** Optional profile-model prewarm ceiling; keyword search remains usable on timeout. */
   profilePrewarmTimeoutMs?: number;
@@ -1444,6 +1447,8 @@ export class KnowledgeManager {
       catalogs?: string[];
       /** Search a profile group keyword-only when its query model is not ready by then. */
       queryEmbedBudgetMs?: number;
+      /** Query cached profile models only, falling back to keywords when absent. */
+      localModelsOnly?: boolean;
     },
   ): Promise<UnifiedSearchResult[]> {
     const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
@@ -1458,8 +1463,8 @@ export class KnowledgeManager {
     for (const key of active) {
       const info = this.mountedByKey.get(key);
       if (!info) continue;
-      if (info.semanticSearch === 'shared') shared.push(key);
-      else if (info.semanticSearch === 'profile') {
+      if (info.semanticSearch === 'shared' && !opts.localModelsOnly) shared.push(key);
+      else if (info.semanticSearch === 'profile' || info.semanticSearch === 'shared') {
         const group = byProfile.get(info.embedding.id) ?? { profile: info.embedding, keys: [] };
         group.keys.push(key);
         byProfile.set(info.embedding.id, group);
@@ -1472,7 +1477,12 @@ export class KnowledgeManager {
       });
     }
     for (const group of byProfile.values()) {
-      const vector = await this.embedForProfile(query, group.profile, opts.queryEmbedBudgetMs);
+      const vector = await this.embedForProfile(
+        query,
+        group.profile,
+        opts.queryEmbedBudgetMs,
+        opts.localModelsOnly,
+      );
       groups.push({ keys: group.keys, ...(vector ? { vector } : {}) });
     }
     if (keyword.length > 0) groups.push({ keys: keyword });
@@ -1672,8 +1682,11 @@ export class KnowledgeManager {
     query: string,
     profile: KnowledgeEmbeddingProfile,
     budgetMs?: number,
+    localFilesOnly = false,
   ): Promise<Float32Array | undefined> {
-    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile);
+    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile, {
+      localFilesOnly,
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const vector =

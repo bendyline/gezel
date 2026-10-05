@@ -445,3 +445,30 @@ See the upstream gezel docs for the full route table and the OpenAPI document. T
 For opt-in lifecycle, model readiness/preparation, cancellation, and packaging, see
 [the embedding guide](https://github.com/bendyline/gezel/blob/main/docs/embedding-sdk.md).
 The existing low-level connection APIs remain available.
+
+## Knowledge catalogs
+
+Request the `knowledge` scope alongside `openai` and show the verification code
+when connecting a user's Gezel. The SDK probes both scopes on reconnect; an old
+inference-only grant cannot silently gain catalog-management authority. The same
+API works through the private in-process host's direct Fetch transport.
+
+- `app.knowledge.state({ signal })` lists installed and available catalogs,
+  updates, download progress, errors, and relevance-model readiness.
+- `app.knowledge.update({ action, catalogId }, { signal })` supports
+  `install` (also updates), `remove`, `enable`, `disable`, and `cancel`.
+  Only curated IDs are accepted; downloads use private user placement. Removal
+  affects every app using that provider's catalog registry.
+- `app.knowledge.update({ action: 'prepare-reranker' }, { signal })` explicitly
+  downloads the selected relevance model. Poll state for completion or failure.
+- `app.knowledge.retrieve({ query, rerank: 'required', maxResults: 4,
+  maxCharacters: 12000 }, { signal })` returns bounded, cited passages from
+  enabled catalogs. It waits for reranker loading and refuses incomplete scoring.
+  It never installs the relevance model or bypasses missing-model errors.
+
+The caller includes returned passages in its own chat prompt as untrusted
+reference material. Plain `app.chat()` does not implicitly retrieve knowledge.
+With no enabled catalogs or no candidates, retrieval returns an empty list.
+Catalog and relevance-model downloads must follow an explicit user action.
+This surface grants no access to projects, sessions, arbitrary paths, URLs,
+machine-wide catalogs, or broader product administration.

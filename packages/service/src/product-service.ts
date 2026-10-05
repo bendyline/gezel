@@ -409,7 +409,7 @@ export async function startProductService(
       // A machine runtime credential is readable across local accounts, so
       // it receives inference and model-lifecycle authority only. The user
       // daemon's credential retains the first-party product API scopes.
-      scopes: ['ui', 'openai'],
+      scopes: ['ui', 'openai', 'knowledge'],
       token: clientToken,
     },
     ...(webUiToken

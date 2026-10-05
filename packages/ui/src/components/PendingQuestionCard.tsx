@@ -10,6 +10,7 @@ import type {
 import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { PermissionIcon, WorkspacePermissionForm } from './WorkspacePermissionForm.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
 import { useQuestionDraft } from './question-drafts.js';
@@ -115,6 +116,28 @@ function QuestionBody({
 }) {
   if (question.answer) {
     return <AnsweredView question={question} />;
+  }
+  if (question.intent?.kind === 'workspace-write-permission') {
+    return (
+      <WorkspacePermissionForm
+        question={question}
+        intent={question.intent}
+        onAnswered={onAnswered}
+        context={<ContextStrip question={question} />}
+        actions={(disabled, onError) => (
+          <>
+            <TaskLifecycleActions
+              question={question}
+              onAnswered={onAnswered}
+              onError={onError}
+              disabled={disabled}
+              dismiss={SILENT_SKIP}
+            />
+            <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
+          </>
+        )}
+      />
+    );
   }
   if (question.intent?.kind === 'npm-install-approval') {
     return (
@@ -1072,6 +1095,20 @@ function ToolsetInstallApprovalForm({
 function AnsweredView({ question }: { question: Question }) {
   const ans = question.answer;
   if (!ans) return null;
+  if (question.intent?.kind === 'workspace-write-permission') {
+    const granted = !ans.silentSkip && !ans.declined && ans.selectedChoices?.[0] === 0;
+    return (
+      <div className="pending-question pending-question-answered">
+        <span className="pending-question-label">
+          <PermissionIcon /> Permission
+        </span>
+        <span className="pending-question-summary">
+          {granted ? 'Project file edits allowed' : 'Permissions unchanged'}:{' '}
+          {question.intent.workspaceDir}
+        </span>
+      </div>
+    );
+  }
   if (ans.silentSkip) {
     return (
       <div className="pending-question pending-question-answered">

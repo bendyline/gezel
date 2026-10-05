@@ -263,7 +263,8 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     profileManager = new KnowledgeManager({
       home: profileHome,
       host: await createInProcessCatalogHost(),
-      embedQueryForProfile: async (text, profile) => {
+      embedQueryForProfile: async (text, profile, opts) => {
+        if (opts?.localFilesOnly) embedded.push(`cached:${text}`);
         embedded.push(`${profile.id}:${text}`);
         if (embedGate) await embedGate;
         return embedOverride ? embedOverride(text) : testHashVector(text);
@@ -311,6 +312,15 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     const dovetails = results.find((r) => r.documentId === 'dovetails');
     expect(dovetails).toBeDefined();
     expect(dovetails?.relevance).toBe(1);
+  });
+
+  it('propagates the app retrieval policy to catalog embedding models', async () => {
+    await profileManager.searchUnified('dovetail', {
+      vector: null,
+      maxResults: 5,
+      localModelsOnly: true,
+    });
+    expect(embedded).toContain('cached:dovetail');
   });
 
   it('fuses the arms: two lexical arms naming a document outrank a lone vector hit', async () => {

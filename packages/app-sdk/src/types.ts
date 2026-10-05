@@ -42,7 +42,9 @@ export interface ConnectInput {
   /**
    * The scope set you're asking for. For OpenAI-shaped chat /
    * embeddings / models / ensure, request `['openai']`. External clients
-   * that use ordinary Gezel product APIs request `['product']`; the Gezel CLI
+   * that manage reference catalogs add `knowledge`; this triggers the code
+   * handshake and grants only `/v1/knowledge/*`. Apps that use ordinary
+   * Gezel product APIs request `['product']`; the Gezel CLI
    * requests `['cli']`. Both stateful scopes trigger the requester-visible
    * code handshake. Third-party apps should request the narrowest available
    * scope.

@@ -224,7 +224,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   // Backstop for binary types the extension didn't reveal — the same one the
   // project file panels use. Raw bytes in the editor render as garbage and an
   // autosave would write that garbage back.
-  if (looksBinary(content)) {
+  if (looksBinary(content, path)) {
     return (
       <NonTextFilePreview
         content={BINARY_FILE}

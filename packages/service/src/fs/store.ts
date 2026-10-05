@@ -226,6 +226,7 @@ import {
 import {
   assertNoTemplatePlaceholderPath,
   intoWorkspaceRelative,
+  realpathNearest,
   resolveInside,
   safeJoin,
 } from './safe-paths.js';
@@ -4726,6 +4727,25 @@ export class Store {
   async projectWorkspaceDir(id: string): Promise<string> {
     const meta = await this.tryGetProjectMeta(id);
     return this.resolveWorkspaceDir(id, meta).dir;
+  }
+
+  /** Only a first-party permission answer may call this; bind consent under the project lock. */
+  async grantProjectWorkspaceWrites(
+    id: string,
+    expectedDir: string,
+    expectedRealDir: string,
+  ): Promise<void> {
+    await this.projectUpdateLocks.run(id, async () => {
+      const meta = await this.tryGetProjectMeta(id);
+      if (!meta) throw new Error('The project no longer exists.');
+      const { dir } = this.resolveWorkspaceDir(id, meta);
+      if (dir !== expectedDir || (await realpathNearest(dir)) !== expectedRealDir) {
+        throw new Error(
+          'The project folder changed. Request permission again to review the new folder.',
+        );
+      }
+      await this.updateProjectUnlocked(id, { managedWorkspaceWritePolicy: 'allow' });
+    });
   }
 
   async listProjectWorkspace(

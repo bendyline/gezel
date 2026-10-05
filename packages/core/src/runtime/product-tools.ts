@@ -367,6 +367,11 @@ export async function executePortableTool(
       throw new Error('The destination project does not accept changes');
   }
   if (name === 'ask_user_question') {
+    if (args.permissionRequest) {
+      throw new Error(
+        'Permission changes require the desktop app; a plain answer does not grant access.',
+      );
+    }
     if (!actions.askQuestion) throw new Error('Questions are unavailable on this host');
     const { question, prompt, description, ...rest } = args;
     const text = [question, prompt, description].find(

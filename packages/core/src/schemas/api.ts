@@ -115,6 +115,7 @@ import { CraftbookSuggestionSchema } from './craftbook.js';
 import { DiffpackSummarySchema } from './diffpack.js';
 import { Ds4ConfigSchema } from './ds4-config.js';
 import { EntityIdSchema } from './entity-id.js';
+import { FileGlobSchema } from './file-glob.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import {
@@ -147,7 +148,11 @@ import {
   ProjectTypeProvenanceSchema,
 } from './project.js';
 import { PromptDraftConfigSchema } from './prompt-draft.js';
-import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
+import {
+  NpmInstallApprovalDecisionSchema,
+  QuestionSchema,
+  RequestedPermissionSchema,
+} from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
@@ -3475,6 +3480,7 @@ export const AskQuestionRequestSchema = z.object({
   gezelId: z.string(),
   sessionId: z.string(),
   prompt: z.string().min(1),
+  permissionRequest: RequestedPermissionSchema.optional(),
   choices: z.array(z.string()).max(20).optional(),
   allowWriteIn: z.boolean().optional(),
   multiSelect: z.boolean().optional(),
@@ -3486,12 +3492,9 @@ export type AskQuestionRequest = z.infer<typeof AskQuestionRequestSchema>;
 export const AskQuestionResponseSchema = z.object({
   questionId: z.string(),
   /**
-   * True when the runtime suppressed this call because the session
-   * already has an unanswered, intent-less question card — i.e. the
-   * gezel re-asked before the user answered the previous one. No new
-   * card is created; `questionId` points at the existing one. The MCP
-   * tool turns this into a "stop re-asking, end your turn" corrective so
-   * a looping model doesn't keep stacking near-duplicate cards.
+   * Reuses an outstanding plain question or matching permission request
+   * in this chat. The MCP tool tells the model to wait for that card's
+   * answer rather than stack duplicates.
    */
   deduped: z.boolean().optional(),
 });
@@ -4994,7 +4997,7 @@ export const QueryTableResponseSchema = z.object({
 export type QueryTableResponse = z.infer<typeof QueryTableResponseSchema>;
 
 export const FindFilesRequestSchema = z.object({
-  glob: z.string().min(1),
+  glob: FileGlobSchema,
   path: z.string().optional(),
   caseInsensitive: z.boolean().optional(),
   maxResults: z.number().int().positive().max(5000).optional(),

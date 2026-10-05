@@ -150,6 +150,19 @@ export const ToolPermissionIntentSchema = z.object({
 });
 export type ToolPermissionIntent = z.infer<typeof ToolPermissionIntentSchema>;
 
+/** A request may only name an implemented permission, never arbitrary policy keys. */
+export const RequestedPermissionSchema = z.enum(['workspace-write']);
+export type RequestedPermission = z.infer<typeof RequestedPermissionSchema>;
+
+export const WorkspaceWritePermissionIntentSchema = z.object({
+  kind: z.literal('workspace-write-permission'),
+  projectName: z.string(),
+  workspaceDir: z.string().min(1),
+  /** Bind approval to the folder reviewed, including symlink/junction resolution. */
+  realWorkspaceDir: z.string().min(1),
+});
+export type WorkspaceWritePermissionIntent = z.infer<typeof WorkspaceWritePermissionIntentSchema>;
+
 /**
  * A clarifying question asked by Claude CLI's built-in `AskUserQuestion`
  * tool, intercepted by the tool-permission broker
@@ -386,6 +399,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   }),
   CommandApprovalIntentSchema,
   ToolPermissionIntentSchema,
+  WorkspaceWritePermissionIntentSchema,
   ClaudeUserQuestionIntentSchema,
   ToolsetInstallApprovalIntentSchema,
   ImageGenerationApprovalIntentSchema,

@@ -33,12 +33,30 @@ export function mediaSentinel(name: string): string | null {
   return null;
 }
 
+/** Formats that must use a dedicated viewer or a binary download. */
+export function isBinaryFileName(name: string): boolean {
+  return /\.(?:pdf|docx?|pptx?|xlsx?|odt|odp|ods|zip|gz|tgz|bz2|xz|7z|rar|tar|exe|dll|so|dylib|bin|wasm|sqlite3?|db|woff2?|ttf|otf|ico|tiff?|avif|heic|psd|parquet|arrow|feather|gezk|gezapp)$/i.test(
+    name,
+  );
+}
+
 /**
  * Backstop for binary types not recognized by extension: a high density of
  * replacement chars or control bytes means the content is not text, whatever
  * the name says. Keeps raw bytes out of the editor.
  */
-export function looksBinary(content: string): boolean {
+export function looksBinary(content: string, name?: string): boolean {
+  if (name && isBinaryFileName(name)) return true;
+  // Stored ZIP entries can be mostly XML, so a suspicious-byte ratio misses
+  // Office files. A NUL anywhere or a known binary header is decisive.
+  if (
+    content.includes('\0') ||
+    ['PK\u0003\u0004', 'PK\u0005\u0006', 'PK\u0007\u0008', '%PDF-'].some((header) =>
+      content.startsWith(header),
+    )
+  ) {
+    return true;
+  }
   const sample = content.slice(0, 4096);
   if (!sample) return false;
   let suspicious = 0;

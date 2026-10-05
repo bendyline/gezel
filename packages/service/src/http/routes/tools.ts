@@ -646,14 +646,40 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!startPath) return c.json({ error: 'path traversal' }, 400);
     const { default: fg } = await import('fast-glob');
     const limit = body.maxResults ?? 1000;
-    const entries = await fg(body.glob, {
+    // Expand only after schema validation, and check the resulting paths: a
+    // brace alternative can introduce an absolute path or a '..' segment.
+    const patterns = fg.generateTasks(body.glob).flatMap((task) => task.positive);
+    if (
+      patterns.some(
+        (pattern) =>
+          posix.isAbsolute(pattern) ||
+          win32.isAbsolute(pattern) ||
+          pattern.split('/').includes('..'),
+      )
+    ) {
+      return c.json(
+        { error: 'glob must stay within the search directory; use relative paths without ..' },
+        400,
+      );
+    }
+    if (!patterns.length) return c.json({ files: [], truncated: false });
+    const entries: string[] = [];
+    const stream = fg.stream(patterns, {
       cwd: startPath,
+      // Avoid sending expanded/literal braces through the expansion parser again.
+      braceExpansion: false,
       onlyFiles: true,
       caseSensitiveMatch: body.caseInsensitive !== true,
       dot: false,
       followSymbolicLinks: false,
       ignore: ['**/node_modules/**', '**/.git/**'],
     });
+    // Read one extra match to establish truncation, then close the glob stream
+    // (and its directory walkers) instead of materializing every matching file.
+    for await (const entry of stream) {
+      entries.push(String(entry));
+      if (entries.length > limit) break;
+    }
     const truncated = entries.length > limit;
     const files = (truncated ? entries.slice(0, limit) : entries).map((rel) => {
       const abs = resolve(startPath, rel);

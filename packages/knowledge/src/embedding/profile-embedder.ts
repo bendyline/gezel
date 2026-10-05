@@ -191,6 +191,8 @@ export async function createProfileEmbedder(
   profile: KnowledgeEmbeddingProfile,
   opts: {
     cacheDir?: string;
+    /** Read cached model files only; never initiate a download. */
+    localFilesOnly?: boolean;
     /**
      * onnxruntime session options (e.g. `{ intraOpNumThreads }`), passed
      * through to the pipeline. Worker pools use this to divide cores between
@@ -225,11 +227,13 @@ export async function createProfileEmbedder(
   const [pipe, tokenizer] = await Promise.all([
     transformers.pipeline('feature-extraction', profile.model.repo, {
       ...modelOptions,
+      ...(opts.localFilesOnly ? { local_files_only: true } : {}),
       ...(opts.sessionOptions ? { session_options: opts.sessionOptions } : {}),
       ...progress,
     }),
     transformers.AutoTokenizer.from_pretrained(profile.model.repo, {
       revision: modelOptions.revision,
+      ...(opts.localFilesOnly ? { local_files_only: true } : {}),
       ...progress,
     }),
   ]);

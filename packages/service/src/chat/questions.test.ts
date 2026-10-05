@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -297,6 +297,39 @@ describe('Store — question persistence', () => {
 });
 
 describe('ChatManager.deliverQuestionAnswer', () => {
+  it('waits for an in-flight permission requester and its bridge teardown before continuing', async () => {
+    const session = await manager.createSession({ gezelId: 'leo' });
+    const stalled = mock.scriptStreamThenStall('Waiting for permission.');
+    const sending = manager.send(session.id, 'Prepare a presentation.');
+    await expect.poll(() => mock.calls.some((call) => call.kind === 'send')).toBe(true);
+    const live = mock.sessions[0]!;
+    const originalDisconnect = live.disconnect.bind(live);
+    let finishDisconnect = () => {};
+    const disconnectGate = new Promise<void>((resolve) => {
+      finishDisconnect = resolve;
+    });
+    const disconnect = vi.spyOn(live, 'disconnect').mockImplementation(async () => {
+      await disconnectGate;
+      await originalDisconnect();
+    });
+    let refreshed = false;
+    const refresh = manager.resetProjectToolsets('default', session.id).then(() => {
+      refreshed = true;
+    });
+    try {
+      expect(refreshed).toBe(false);
+      stalled.release();
+      await sending;
+      await expect.poll(() => disconnect.mock.calls.length).toBe(1);
+      expect(refreshed).toBe(false);
+    } finally {
+      stalled.release();
+      finishDisconnect();
+      await Promise.all([sending, refresh]);
+    }
+    expect(refreshed).toBe(true);
+  });
+
   it('injects the formatted answer as a synthetic user message + triggers next turn', async () => {
     const session = await manager.createSession({ gezelId: 'leo' });
     mock.script('Roger, will draft something.', 'NONE'); // initial assistant + extractor placeholder

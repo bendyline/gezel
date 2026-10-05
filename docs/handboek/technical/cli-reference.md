@@ -22,6 +22,16 @@ npx gezel
 
 The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-packages.md) for the complete package map and the SDKs to use when a shell command is not the right integration boundary.
 
+## Local use and external connections
+
+The npm package is sufficient for local CLI use, including first use. The CLI discovers your per-user daemon through its runtime files and pinned TLS certificate, then connects with your same-user owner credential. You do not need to install or open the desktop app or approve a connection to your own local daemon.
+
+Management commands can start your user daemon when it is absent; it keeps running until you use `gezel stop --daemon`. The interactive terminal app shuts down a daemon it started when you exit. `gezel run` adopts an already-running user daemon, or starts a service in-process for that one invocation and stops it afterward. An unhealthy running daemon remains an error.
+
+An explicit `--connect <url>` uses a separate CLI-scoped grant for that service. Without a valid saved grant or supplied `--token`, the terminal displays a six-character code and waits for you to approve Gezel CLI in the Gezel app. The resulting revocable credential is saved under `~/.gezel/cli/tokens/`. A valid saved grant or `--connect <url> --token <token>` lets you connect without that interaction.
+
+Rolling-upgrade compatibility may also select an older `legacy-full` machine service, which uses that approval path. Use `--standalone` to skip this compatibility choice; `--home <path>` or an explicit `GEZEL_HOME` also implies standalone operation. A modern machine service is an engine broker; your per-user daemon handles product data and connects to that broker for inference.
+
 ## Everyday commands
 
 ```

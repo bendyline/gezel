@@ -6,6 +6,7 @@ import {
   CreateTaskInputSchema,
   EmptyInputSchema,
   EnsureGezelInputSchema,
+  FindFilesRequestSchema,
   GEZEL_TOOL_DESCRIPTIONS,
   GetScriptRunInputSchema,
   GetTaskInputSchema,
@@ -6998,6 +6999,7 @@ server.tool(
   AskUserQuestionInputSchema.shape,
   async ({
     question,
+    permissionRequest,
     prompt,
     description,
     choices,
@@ -7034,6 +7036,7 @@ server.tool(
         gezelId,
         sessionId,
         prompt: body,
+        ...(permissionRequest ? { permissionRequest } : {}),
         ...(choices ? { choices } : {}),
         ...(allowWriteIn !== undefined ? { allowWriteIn } : {}),
         ...(multiSelect !== undefined ? { multiSelect } : {}),
@@ -10504,12 +10507,7 @@ server.tool(
 server.tool(
   'find_files',
   'Find files in the project workspace by glob (e.g. `**/*.spec.ts`). Complement to `grep_files`, which searches contents. Skips `node_modules` and `.git`.',
-  {
-    glob: z.string().min(1),
-    path: z.string().optional(),
-    caseInsensitive: z.boolean().optional(),
-    maxResults: z.number().int().positive().optional(),
-  },
+  FindFilesRequestSchema.shape,
   async (args) => {
     try {
       const res = await api.toolFindFiles(projectId, args);

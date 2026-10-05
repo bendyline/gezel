@@ -2,6 +2,7 @@ import type { Project } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OutsideInLayout } from '../components/SquisqIntegration/outside-in.js';
+import { consumeOpenFile, queueOpenFile } from '../components/pending-open-file.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -59,17 +60,26 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     statusBarSlotRight,
     toolbarSlotRight,
     calcEngineFactory,
+    initialView,
+    fileName,
+    readOnly,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
     statusBarSlotRight?: React.ReactNode;
     toolbarSlotRight?: React.ReactNode;
     calcEngineFactory?: unknown;
+    initialView?: string;
+    fileName?: string;
+    readOnly?: boolean;
   }) => (
     <div
       data-testid="editor"
       data-initial={initialMarkdown}
       data-calc-engine={typeof calcEngineFactory === 'function'}
+      data-initial-view={initialView}
+      data-file={fileName}
+      data-readonly={String(Boolean(readOnly))}
     >
       <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
       {onChange && (
@@ -255,6 +265,8 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    consumeOpenFile('pj-alpha');
+    consumeOpenFile('pj-beta');
     outsideInMocks.resolveLayout.mockReset().mockReturnValue(null);
     outsideInMocks.chooseSource.mockReset().mockReturnValue(null);
     outsideInMocks.importDocument.mockReset();
@@ -1754,7 +1766,127 @@ describe('ProjectsView', () => {
         );
         expect(outsideInMocks.importDocument).toHaveBeenCalledWith(expect.any(ArrayBuffer), layout);
         expect(writeDocument).toHaveBeenCalledWith('# Imported office document', 'report.md');
+        expect(screen.getByTestId('editor')).toHaveAttribute(
+          'data-initial-view',
+          format === 'pptx' ? 'preview' : 'wysiwyg',
+        );
+        expect(api.readProjectArtifact).not.toHaveBeenCalledWith('pj-alpha', layout.targetPath);
         expect(screen.queryByTestId('html-preview')).toBeNull();
+      },
+    );
+
+    const pptxLayout: OutsideInLayout = {
+      ...htmlLayout,
+      format: 'pptx',
+      targetPath: 'reports/report.pptx',
+      relativeTargetPath: '../report.pptx',
+      backupFilename: 'original.pptx',
+      backupPath: 'reports/report_files/.original/original.pptx',
+    };
+
+    function mockPresentation() {
+      outsideInMocks.resolveLayout.mockImplementation((path) =>
+        path === pptxLayout.targetPath ? pptxLayout : null,
+      );
+      const writeDocument = vi.fn().mockResolvedValue(undefined);
+      outsideInMocks.createContainer.mockReturnValue({ writeDocument });
+      outsideInMocks.importDocument.mockResolvedValue({
+        markdown: '# First slide\n\n---\n\n# Second slide',
+        container: { listFiles: async () => [] },
+      });
+      vi.mocked(api.fetchProjectArtifactBlob).mockResolvedValue(new Blob(['PK\u0003\u0004']));
+      return writeDocument;
+    }
+
+    it('imports task-menu Open as a read-only slideshow in the current project', async () => {
+      const writeDocument = mockPresentation();
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent('gezel:open-file', {
+            detail: { projectId: 'pj-alpha', path: pptxLayout.targetPath, source: 'artifacts' },
+          }),
+        );
+      });
+      const editor = await screen.findByTestId('editor');
+      expect(editor).toHaveAttribute('data-initial', '# First slide\n\n---\n\n# Second slide');
+      expect(editor).toHaveAttribute('data-initial-view', 'preview');
+      expect(editor).toHaveAttribute('data-file', pptxLayout.markdownPath);
+      expect(editor).toHaveAttribute('data-readonly', 'true');
+      expect(writeDocument).toHaveBeenCalledWith(
+        expect.stringContaining('# First slide'),
+        'report.md',
+      );
+      expect(api.readProjectArtifact).not.toHaveBeenCalled();
+      expect(api.writeProjectArtifactBinary).not.toHaveBeenCalled();
+      expect(screen.getByRole('tab', { name: 'Artifacts' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
+
+    it('reuses the destination project companion for a queued cross-project Open', async () => {
+      mockPresentation();
+      outsideInMocks.chooseSource.mockReturnValue(pptxLayout.markdownPath);
+      vi.mocked(api.readProjectArtifact).mockResolvedValue({
+        path: pptxLayout.markdownPath,
+        content: '# Existing slides',
+      } as never);
+      const { rerender } = render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      queueOpenFile({ projectId: 'pj-beta', path: pptxLayout.targetPath, source: 'artifacts' });
+      rerender(<ProjectsView forceProjectId="pj-beta" />);
+      const editor = await screen.findByTestId('editor');
+      expect(editor).toHaveAttribute('data-initial', '# Existing slides');
+      expect(editor).toHaveAttribute('data-initial-view', 'preview');
+      expect(api.listProjectArtifacts).toHaveBeenCalledWith(
+        'pj-beta',
+        pptxLayout.companionDirectory,
+        false,
+        { hidden: true },
+      );
+      expect(api.readProjectArtifact).toHaveBeenCalledWith('pj-beta', pptxLayout.markdownPath);
+      expect(api.readProjectArtifact).not.toHaveBeenCalledWith('pj-beta', pptxLayout.targetPath);
+      expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
+      expect(api.fetchProjectArtifactBlob).not.toHaveBeenCalled();
+    });
+
+    it('shows a conversion failure without opening or reading the PPTX as text', async () => {
+      mockPresentation();
+      outsideInMocks.importDocument.mockRejectedValue(new Error('Could not convert presentation.'));
+      queueOpenFile({ projectId: 'pj-alpha', path: pptxLayout.targetPath, source: 'artifacts' });
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      expect(await screen.findByText('Could not convert presentation.')).toBeInTheDocument();
+      expect(screen.queryByTestId('editor')).toBeNull();
+      expect(api.readProjectArtifact).not.toHaveBeenCalled();
+    });
+
+    it('honors the workspace write gate when Open needs to import a companion', async () => {
+      mockPresentation();
+      queueOpenFile({ projectId: 'pj-alpha', path: pptxLayout.targetPath, source: 'workspace' });
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      expect(
+        await screen.findByText(/Enable workspace writes.*Markdown companion/),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId('editor')).toBeNull();
+      expect(api.readProjectWorkspaceFile).not.toHaveBeenCalled();
+      expect(api.fetchProjectWorkspaceBlob).not.toHaveBeenCalled();
+      expect(outsideInMocks.importDocument).not.toHaveBeenCalled();
+    });
+
+    it.each(['archive.zip', 'unknown.data'])(
+      'keeps binary %s out of the editor when opened through navigation',
+      async (path) => {
+        vi.mocked(api.readProjectArtifact).mockResolvedValue({
+          path,
+          content: `PK\u0003\u0004${'<xml>slide text</xml>'.repeat(500)}`,
+        } as never);
+        queueOpenFile({ projectId: 'pj-alpha', path, source: 'artifacts' });
+        render(<ProjectsView forceProjectId="pj-alpha" />);
+        expect(await screen.findByText(/Binary file.*no text preview/)).toBeInTheDocument();
+        expect(screen.queryByTestId('editor')).toBeNull();
+        if (path.endsWith('.zip')) expect(api.readProjectArtifact).not.toHaveBeenCalled();
       },
     );
   });

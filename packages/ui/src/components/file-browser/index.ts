@@ -4,6 +4,7 @@ export {
   AuthedMediaPreview,
   BINARY_FILE,
   isAudio,
+  isBinaryFileName,
   isImage,
   isVideo,
   looksBinary,

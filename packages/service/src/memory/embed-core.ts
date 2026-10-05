@@ -397,12 +397,14 @@ function armIdleDisposal(id: string, entry: ProfileEntry): void {
 export async function loadProfileEmbedder(
   profile: KnowledgeEmbeddingProfile,
   onDownloadProgress?: (progress: ModelDownloadProgress) => void,
+  localFilesOnly = false,
 ): Promise<ProfileEmbedder> {
   let entry = profileEmbedders.get(profile.id);
   if (!entry) {
     const cacheDir = process.env[HF_CACHE_DIR_ENV];
     const progressListeners = new Set<(progress: ModelDownloadProgress) => void>();
     const promise = createProfileEmbedder(profile, {
+      localFilesOnly,
       ...(cacheDir ? { cacheDir } : {}),
       onDownloadProgress: (progress) => {
         for (const listener of progressListeners) listener(progress);
@@ -438,9 +440,10 @@ export async function runProfileQueryEmbed(
   texts: string[],
   profile: KnowledgeEmbeddingProfile,
   onDownloadProgress?: (progress: ModelDownloadProgress) => void,
+  localFilesOnly = false,
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
-  const embedder = await loadProfileEmbedder(profile, onDownloadProgress);
+  const embedder = await loadProfileEmbedder(profile, onDownloadProgress, localFilesOnly);
   const out: number[][] = [];
   for (const text of texts) out.push(Array.from(await embedder.embedQuery(capText(text))));
   return out;

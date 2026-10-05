@@ -40,6 +40,7 @@ export * from './ambient-dashboard.js';
 export * from './app-serve.js';
 export * from './app-tools.js';
 export * from './file-review.js';
+export * from './file-glob.js';
 export * from './api.js';
 export * from './image-intel.js';
 export * from './village-file.js';

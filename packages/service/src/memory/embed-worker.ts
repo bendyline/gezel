@@ -35,6 +35,7 @@ interface EmbedRequest {
   texts: string[];
   profile?: KnowledgeEmbeddingProfile;
   reportProgress?: boolean;
+  localFilesOnly?: boolean;
 }
 
 port.on('message', (msg: EmbedRequest) => {
@@ -47,6 +48,7 @@ port.on('message', (msg: EmbedRequest) => {
             msg.reportProgress
               ? (progress) => port.postMessage({ id: msg.id, progress })
               : undefined,
+            msg.localFilesOnly,
           )
         : await runEmbed(msg.texts);
       port.postMessage({ id: msg.id, vectors });

@@ -182,6 +182,7 @@ async function tokenHasRequestedScopes(opts: {
     paths.add('/api/config');
   }
   if (opts.scopes.includes('openai')) paths.add('/v1/models');
+  if (opts.scopes.includes('knowledge')) paths.add('/v1/knowledge/state');
   if (opts.scopes.includes('remote-inference')) paths.add('/v1/remote/models');
   if (paths.size === 0) return true;
 

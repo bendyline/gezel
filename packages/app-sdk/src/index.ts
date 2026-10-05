@@ -43,6 +43,13 @@ export { detectGezel, type DetectGezelOptions } from './detect.js';
 export { authorize, connect } from './connect.js';
 export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
+export { KnowledgeClient } from './knowledge-client.js';
+export type {
+  AppKnowledgeState,
+  AppKnowledgeAction,
+  AppKnowledgeQuery,
+  AppKnowledgeRetrieval,
+} from '@bendyline/gezel-client/app-models';
 export { registerAppTools } from './app-tools.js';
 export { scopeNeedsVerificationCode } from './scopes.js';
 export { GezelSdkError } from './errors.js';

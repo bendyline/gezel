@@ -10760,14 +10760,23 @@ export class ChatManager extends LocalEngineRuntime {
    * Rebuild only the sessions and terminal bridge belonging to one project.
    * Used by the workspace watcher when a canonical MCP config changes.
    */
-  async resetProjectToolsets(projectId: string): Promise<void> {
+  async resetProjectToolsets(projectId: string, waitForSessionId?: string): Promise<void> {
     const resets: Promise<void>[] = [];
     for (const [sessionId, state] of this.states) {
       if (state.record.projectId !== projectId) continue;
-      if (this.inflight.has(sessionId)) {
+      if (this.inflight.has(sessionId) && sessionId !== waitForSessionId) {
         this.runAfterSessionIdle(sessionId, () => {
           void this.reset(sessionId);
         });
+      } else if (this.inflight.has(sessionId)) {
+        // A quick permission answer must wait for the asking turn AND bridge teardown.
+        resets.push(
+          new Promise<void>((resolve, reject) => {
+            this.runAfterSessionIdle(sessionId, () => {
+              void this.reset(sessionId).then(resolve, reject);
+            });
+          }),
+        );
       } else {
         resets.push(this.reset(sessionId));
       }

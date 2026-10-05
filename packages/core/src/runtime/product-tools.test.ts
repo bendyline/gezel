@@ -28,6 +28,23 @@ async function fixture() {
 }
 
 describe('portable tool authority and durable effects', () => {
+  it('refuses permission changes on a host without the grant handler', async () => {
+    const { store, session } = await fixture();
+    const askQuestion = vi.fn();
+    await expect(
+      executePortableTool(
+        store,
+        session,
+        'ask_user_question',
+        {
+          question: 'May I save this?',
+          permissionRequest: 'workspace-write',
+        },
+        { ...actions, askQuestion },
+      ),
+    ).rejects.toThrow('desktop app');
+    expect(askQuestion).not.toHaveBeenCalled();
+  });
   it('applies the same exact authored step ceiling before advertising and executing', async () => {
     const { store, gezel } = await fixture();
     const task = await store.createTask('default', {

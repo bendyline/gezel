@@ -50,6 +50,8 @@ describe('embedded inference profile', () => {
     const base = `https://127.0.0.1:${service.port}`;
     const auth = { headers: { Authorization: `Bearer ${service.clientToken}` } };
     expect((await fetch(`${base}/v1/models`, auth)).status).toBe(200);
+    // Catalog inventory is available on the same private direct transport.
+    expect((await fetch(`${base}/v1/knowledge/state`, auth)).status).toBe(200);
     for (const path of ['/v1/identity', '/v1/remote/models', '/api/remotes']) {
       expect((await fetch(`${base}${path}`, auth)).status, path).toBe(404);
     }

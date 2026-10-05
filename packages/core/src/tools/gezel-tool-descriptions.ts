@@ -6,6 +6,7 @@
  */
 export const GEZEL_TOOL_DESCRIPTIONS = {
   ask_user_question:
+    'For project write access on desktop, set permissionRequest: "workspace-write" and explain why in question; omit choices. The app shows the exact scope, grants access only on user approval, then resumes you. An ordinary answer never changes permissions. ' +
     'Ask the user a question and end your turn. Call this whenever you\'d otherwise stall waiting on the user — a design choice, a scope confirmation, an approval on something you drafted, a missing asset. The user sees a structured card in chat AND on the Home "Needs your input" panel AND as a count badge on the Home nav, so they WILL see it. Their answer arrives in your next turn as a new user message starting with `[Answer to: …]`. When the answer is bounded (colors, yes/no, pick one of these three), always pass concrete `choices`; the user can still write a free-text note alongside unless `allowWriteIn: false`. For approvals where you\'ve drafted a task or a document, attach `taskRef` (`projectId/num`) or `documentPath` so the user can review the artifact inline without leaving the card.',
   list_gilde:
     'List the gezel templates ("gilde" — the guild roster) bundled with Gezel. Each template has a canonical role and curated about.md. For normal recruitment call ensure_gezel with the role; to force a separate new gezel from an exact template, call create_gezel with templateId.',

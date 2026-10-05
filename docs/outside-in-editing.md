@@ -15,6 +15,13 @@ Tucson_files/
   .versions/
 ```
 
+Task-menu **Open**, search results, and file-tree selection use the same loader,
+including when navigation switches projects. PPTX companions open in slideshow
+preview. Other office companions open in the linear document view. Conversion
+errors stay visible; they never fall back to opening the rendered file as text.
+Known binary formats, binary signatures, and null bytes are also guarded at the
+text-viewer boundary, including files with unrecognized extensions.
+
 CSV and XLSX imports use Squisq's data-sidecar thresholds. A CSV with more than
 100 data rows or more than 256 KiB, or an XLSX region with more than 100 rows or
 2,000 cells, stays byte-for-byte in the imported container under
