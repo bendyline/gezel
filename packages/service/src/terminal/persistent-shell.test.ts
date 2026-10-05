@@ -6,6 +6,9 @@ import { NodePtyUnavailableError, PersistentShell, loadNodePty } from './persist
 const bashAvailable = process.platform !== 'win32' && existsSync('/bin/bash');
 const itPosix = bashAvailable ? it : it.skip;
 const itWindows = process.platform === 'win32' ? it : it.skip;
+// Bash's job-control warnings precede an external command's redirections.
+// Isolate the geometry probe's stdout at the shell-group level instead.
+const ptySizeCommand = '{ stty size; } 2>/dev/null';
 
 describe('optional node-pty runtime', () => {
   it('wraps an absent or unloadable native addon in a stable terminal error', async () => {
@@ -72,11 +75,13 @@ describe('PersistentShell (POSIX)', () => {
   itPosix('resizes a persistent PTY to the client width before each command', async () => {
     const shell = await PersistentShell.start({ cwd: tmpdir(), columns: 120 });
     try {
-      const narrow = await shell.run('stty size', { columns: 72 });
+      const narrow = await shell.run(ptySizeCommand, { columns: 72 });
       expect(narrow.output).toBe('50 72');
+      expect(narrow.exitCode).toBe(0);
 
-      const wider = await shell.run('stty size', { columns: 96 });
+      const wider = await shell.run(ptySizeCommand, { columns: 96 });
       expect(wider.output).toBe('50 96');
+      expect(wider.exitCode).toBe(0);
     } finally {
       shell.kill();
     }
@@ -90,19 +95,22 @@ describe('PersistentShell (POSIX)', () => {
         // Job-control diagnostics precede an external command's redirections.
         // A DEBUG trap reproduces that ordering without depending on a fork race.
         await shell.run(
-          `trap 'case "$BASH_COMMAND" in "command stty rows "*) printf "bash: child setpgid (123 to 123): Operation not permitted\\n" >&2 ;; esac' DEBUG`,
+          `trap 'case "$BASH_COMMAND" in "command stty rows "*|"stty size") printf "bash: child setpgid (123 to 123): Operation not permitted\\n" >&2 ;; esac' DEBUG`,
         );
         const chunks: string[] = [];
-        const narrow = await shell.run('stty size; printf "user diagnostic\\n" >&2; false', {
-          columns: 72,
-          onChunk: (chunk) => chunks.push(chunk),
-        });
+        const narrow = await shell.run(
+          `${ptySizeCommand}; printf "user diagnostic\\n" >&2; false`,
+          {
+            columns: 72,
+            onChunk: (chunk) => chunks.push(chunk),
+          },
+        );
         expect(narrow.output).toBe('50 72\nuser diagnostic');
         expect(narrow.exitCode).toBe(1);
         expect(chunks.join('')).toContain('user diagnostic');
         expect(chunks.join('')).not.toContain('child setpgid');
 
-        const wider = await shell.run('stty size', { columns: 96 });
+        const wider = await shell.run(ptySizeCommand, { columns: 96 });
         expect(wider.output).toBe('50 96');
         expect(wider.exitCode).toBe(0);
       } finally {
