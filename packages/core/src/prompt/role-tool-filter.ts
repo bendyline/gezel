@@ -57,17 +57,6 @@ export function roleToolAllowlist(role: string | undefined): Set<string> {
 }
 
 /**
- * Whether a gezel SESSION should carry the cross-project `team` capability
- * on its scoped MCP token — true exactly when its role gets the
- * `team-management` group AND the project isn't a solo "job" (which strips
- * it, mirroring `computeToolAllowlist`'s `projectMode === 'solo'` branch).
- * Sharing this source keeps the token's cross-project reach from drifting
- * from the team tools the model is actually offered: a coordinator (meester
- * / voorman / planner) gets `team` and may operate across projects; a plain
- * worker doesn't and is confined to its session's project.
- */
-
-/**
  * Strip `team-management` from a list of group ids. Used for solo
  * projects ("jobs") where one Builder handles everything and must
  * not reach for `ensure_gezel`, `message_gezel`, `create_gezel*`,
@@ -102,6 +91,8 @@ function roleDelegationGroups(
   isProjectVoorman: boolean,
 ): readonly string[] {
   const canonical = canonicalRoleKey(role);
+  // Keep the compact ask_specialist/ask_gezel surface for conversation.
+  if (canonical === 'conversationalist') return [];
   // Project ownership is an assignment, not a job-title string. A Reviewer,
   // Developer, or other specialist can be selected as the project's voorman;
   // offering that gezel `delegate_voorman` / `consult_voorman` points them
@@ -402,6 +393,7 @@ const GITHUB_REMOTE_TOOLS: ReadonlySet<string> = new Set([
  * something's off" as good guidance.
  */
 export function isPureDelegationRole(role: string | undefined): boolean {
+  if (canonicalRoleKey(role) === 'conversationalist') return false;
   const groups = roleToolsetGroups(role);
   return !groups.includes('workspace-fs-write') && !groups.includes('code-execution');
 }
@@ -807,7 +799,7 @@ export function computeToolAllowlist(opts: {
   // demotion reuses the same strip.
   const stripOnwardConsultation =
     opts.consultationMode === true ||
-    opts.rolesAsTools === true ||
+    (opts.rolesAsTools === true && canonicalRoleKey(opts.role) !== 'conversationalist') ||
     (!hasToolsetOverride && DIRECT_IMPLEMENTER_ROLES.has(canonicalRoleKey(opts.role) ?? ''));
   if (stripOnwardConsultation) {
     const next = new Set(resolved);

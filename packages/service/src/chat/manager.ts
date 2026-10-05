@@ -6125,9 +6125,8 @@ export class ChatManager extends LocalEngineRuntime {
     // "one line of table talk" iteration is where a verbose medium
     // model re-runs its whole analysis (wild-caught: gemma4-12b,
     // ~1,000 tokens at 12 t/s where one sentence belonged). 300 tokens
-    // fits any real table-talk line several times over; the
-    // post-action rumination fold turns a truncated remainder into
-    // collapsed reasoning instead of a visible wall.
+    // fits any real table-talk line several times over. This cap is
+    // specific to game reactions; ordinary chat keeps its full budget.
     const reactionProject = await this.store.getProject(args.projectId).catch(() => null);
     const leanReactionCap = reactionProject?.leanProfile ? 300 : undefined;
     this.trackBackground(
@@ -17450,34 +17449,24 @@ export function buildFailedToolRecoveryNudge(calls: ReadonlyArray<ToolOutcome>):
 }
 
 /**
- * Nudge specific to "ran an action tool, then went silent" — small models
- * often emit a `tool_use` block as their entire turn output and stop, leaving
- * the user staring at an expanded tool-call card with no closing
- * narrative. The tier-keyed system-prompt rules already ask the model
- * to wrap up after tools (see {@link tinyTierPromptHints} +
- * {@link SMALL_TIER_PROMPT_HINTS}); this is the deterministic backstop
- * for when the model didn't follow that.
- *
- * Distinct from CONTINUATION_NUDGE on purpose: this case is "the requested
- * action ran, just say what happened" — telling the model to execute it again
- * (the CONTINUATION_NUDGE wording) would be misleading since the tool
- * already succeeded.
+ * Recover a tool-only turn without repeating successful actions or limiting
+ * the answer to a status sentence. Tool results may still need synthesis,
+ * and a completed call does not imply that the user's request is complete.
  */
 const CLOSING_SUMMARY_NUDGE =
   "Your tool call(s) returned but you didn't finish with a reply. " +
-  'In one sentence, tell the user what happened. No more tools — just words.';
+  "Use the results to answer the user's original request with the detail it needs. " +
+  'Do not repeat actions that already succeeded. If work remains, continue it with the tools available.';
 
 /**
- * A read-only call is an intermediate observation, not the deliverable.
- * Keep the model moving toward the first mutating/action tool instead of
- * applying the terminal closing-summary nudge. This wording covers both
- * task-scoped work and untasked coordinator lookups.
+ * A lookup may lead to a prose answer or further work. Do not require a
+ * mutation after research or mistake gathering information for answering.
  */
 const READ_ONLY_PROGRESS_NUDGE =
-  "The read-only tool returned useful context, but it did not complete the user's request. " +
-  'Continue now with the next concrete action using the appropriate action tool. ' +
-  'If the lookup result named a next tool call, make that call now. ' +
-  'Do not stop merely to summarize what you read, inspected, retrieved, or were advised to invoke.';
+  'The read-only tool returned useful context. ' +
+  "Use it to answer the user's original question in prose, or continue the work they requested. " +
+  'If the lookup result named a next tool call needed to fulfill that request, make it now. ' +
+  'Give the substantive answer or deliverable, not just a status update about gathering information.';
 
 /**
  * Nudge specific to the voorman-idle case: the project's voorman just
@@ -17625,6 +17614,7 @@ const VOORMAN_NOT_DONE_NUDGE =
  * search_*) that `isReadOnlyToolName` falls back on for forward compat.
  */
 const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
+  'search',
   'search_memory',
   'list_memories',
   'list_dir',

@@ -24,7 +24,6 @@ import {
   findUnrecognizedToolEnvelope,
   findXmlTagToolCallSpan,
   findXmlTagToolCallSpans,
-  foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
   isPayloadMutationToolName,
@@ -2682,69 +2681,6 @@ describe('findBareInvokeToolCallSpans', () => {
 
   it('returns [] when there are no known tools', () => {
     expect(findBareInvokeToolCallSpans('invoke write_file {"path":"a"}', new Set())).toEqual([]);
-  });
-});
-
-describe('foldPostActionRumination', () => {
-  const WALL = [
-    'Let me look at the legal moves: b8-c7, d8-c7, f8-g7.',
-    'Wait, the board shows my pieces on row 8. If I am moving down, why are they there? Let me re-read the position and recount: row 8 has b pieces, row 1 has r pieces, so I am on top moving toward row 1. '.repeat(
-      6,
-    ),
-    'Hmm, are there captures I missed? The engine says the legal moves are authoritative.',
-    'Solid central square it is — e7 to f6, and the game rolls on! 😄',
-  ].join('\n\n');
-
-  it('keeps a conclusive final paragraph and folds the analysis into reasoning', () => {
-    const { visible, reasoning } = foldPostActionRumination({
-      text: WALL,
-      actionFiredEarlierThisTurn: true,
-      modelLeaksReasoning: true,
-    });
-    expect(visible).toBe('Solid central square it is — e7 to f6, and the game rolls on! 😄');
-    expect(reasoning).toContain('Let me look at the legal moves');
-    expect(reasoning).not.toContain('game rolls on');
-  });
-
-  it('folds everything when the tail is truncated mid-thought', () => {
-    const truncated = `${WALL.slice(0, WALL.lastIndexOf('\n\n'))}\n\nI should check if there are any captures I missed. The engine says "Legal moves:". If it doesn't list`;
-    const { visible, reasoning } = foldPostActionRumination({
-      text: truncated,
-      actionFiredEarlierThisTurn: true,
-      modelLeaksReasoning: true,
-    });
-    expect(visible).toBe('');
-    expect(reasoning).toContain("If it doesn't list");
-  });
-
-  it('leaves short wrap-ups untouched', () => {
-    const short = 'Played e5 — your move! 😄';
-    expect(
-      foldPostActionRumination({
-        text: short,
-        actionFiredEarlierThisTurn: true,
-        modelLeaksReasoning: true,
-      }),
-    ).toEqual({ visible: short, reasoning: '' });
-  });
-
-  it('never fires without a prior action this turn (long answers to questions survive)', () => {
-    const { visible, reasoning } = foldPostActionRumination({
-      text: WALL,
-      actionFiredEarlierThisTurn: false,
-      modelLeaksReasoning: true,
-    });
-    expect(visible).toBe(WALL);
-    expect(reasoning).toBe('');
-  });
-
-  it('never fires for non-leaky models', () => {
-    const { visible } = foldPostActionRumination({
-      text: WALL,
-      actionFiredEarlierThisTurn: true,
-      modelLeaksReasoning: false,
-    });
-    expect(visible).toBe(WALL);
   });
 });
 

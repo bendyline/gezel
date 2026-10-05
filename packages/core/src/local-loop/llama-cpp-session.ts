@@ -78,7 +78,6 @@ import {
   findUnrecognizedFunctionMarkup,
   findUnrecognizedToolEnvelope,
   findXmlTagToolCallSpans,
-  foldPostActionRumination,
   foldPreToolPreamble,
   isPayloadMutationToolName,
   isWriteShapedToolName,
@@ -2172,6 +2171,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       ...promptReadInputs(prompt),
     ];
     let requiredInputHoldLogged = false;
+    // A grounding refusal takes precedence over file-only recovery. Otherwise
+    // the next request cannot call the research tool the write guard requires.
+    let groundingRecoveryActive = false;
+    let groundingLookupPending: string | null = null;
     const prerequisiteRepairReadPaths =
       opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
         ? opts.fileTurnIntent.readPaths.map(normalizeWorkspacePathForCompare)
@@ -2209,10 +2212,6 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
     // budget the engine cannot enforce itself; its re-issue runs thinking-off.
     let thinkingOffRetryPending = false;
     const directFileWorkReadFilePaths: string[] = [];
-    // Whether any earlier iteration of THIS turn fired an action tool —
-    // drives `foldPostActionRumination` on later reply-only iterations
-    // (the wrap-up wall a verbose model emits after its tool ran).
-    let actionFiredEarlierThisTurn = false;
     // llama.cpp builds vary in which JSON-Schema constructs their aggregate
     // tool-grammar converter accepts. Recover in stages while MCP/Zod remains
     // the authority at execution: patterns first (only when that changes the
@@ -2358,7 +2357,9 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
-        const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
+        const fileTurnPlan = groundingRecoveryActive
+          ? { kind: 'ordinary' as const }
+          : planFileTurn(prompt, tools, opts?.fileTurnIntent);
         const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
         const immediateFileWriteTurn =
           fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
@@ -2383,6 +2384,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         // helper script mutation, before that helper is executed. Prefer the
         // scripted direct-file state machine whenever its tools are present.
         const scriptedDataFileWorkTurn =
+          !groundingRecoveryActive &&
           !immediateFileWriteTurn &&
           shouldPreferScriptedDataFileWork(prompt, inferredDirectFileWorkTarget) &&
           hasWriteFileTool(tools) &&
@@ -2390,6 +2392,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         const scenarioFileRepairTurn =
           !scriptedDataFileWorkTurn && fileTurnPlan.kind === 'repair-file';
         const existingSourceEditTurn =
+          !groundingRecoveryActive &&
           !scriptedDataFileWorkTurn &&
           fileTurnPlan.kind === 'ordinary' &&
           isExistingSourceEditTurn(prompt, tools);
@@ -2398,11 +2401,13 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         // explicit guards document the intended precedence — every existing
         // mode wins; this mode fills the previously-inert gap.
         const gateSurgicalEditTurn =
+          !groundingRecoveryActive &&
           !immediateFileWriteTurn &&
           !scenarioFileRepairTurn &&
           !existingSourceEditTurn &&
           isGateSurgicalEditTurn(prompt, tools);
         const directFileWorkTurn =
+          !groundingRecoveryActive &&
           !immediateFileWriteTurn &&
           !scenarioFileRepairTurn &&
           !existingSourceEditTurn &&
@@ -2998,7 +3003,21 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             }, max_tokens=${body.max_tokens}`,
           );
         }
-        if (missingFileCreatePath) {
+        if (groundingLookupPending) {
+          requestTools = tools?.filter(
+            (tool) => chatCompletionToolName(tool) === groundingLookupPending,
+          );
+          this.forceToolChoice(body);
+          disableThinkingForConstrainedTurn(
+            body,
+            this.deps.disableThinkingRequestShape,
+            this.deps.model,
+          );
+          log.debug(
+            `[llama-cpp] grounding recovery: research-only surface=${groundingLookupPending}`,
+          );
+        }
+        if (missingFileCreatePath && !groundingRecoveryActive) {
           if (
             typeof userMsg.content === 'string' &&
             !userMsg.content.includes('[Local-model missing-file recovery:')
@@ -4976,41 +4995,6 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           modelLeaksReasoning: profileHasBehavior(this.deps.profile, 'turn.preamble-folding'),
           askedQuestionThisTurn,
         });
-        // Post-action continuation iterations (tool already ran, this
-        // is the wrap-up) get the rumination fold: a verbose model that
-        // re-runs its analysis in the visible reply keeps only a
-        // conclusive final line; the wall moves to the collapsed
-        // reasoning expander. See {@link foldPostActionRumination}.
-        // Note this runs on the FOLDED content, after `replayTurnContent`
-        // was captured — the ds4 replay transcript keeps the raw bytes.
-        // …but only when this iteration's reasoning did NOT arrive on the
-        // dedicated `reasoning_content` channel. A native-channel model
-        // (ds4) has already handed us its reasoning separately, so its
-        // visible content is the answer — folding it as "rumination" blanks
-        // a real reply and makes the turn look empty, which then trips the
-        // manager's tool-only continuation nudge (a spurious second cycle).
-        // The rumination fold is for models that leak untagged reasoning
-        // *into* the visible channel (gemma), whose `turnReasoning` is empty
-        // here — see the mutually-exclusive-channel note above. This holds
-        // regardless of whether the manifest mis-assigns the behavior.
-        if (toolCalls.length === 0 && actionFiredEarlierThisTurn && turnReasoning.length === 0) {
-          const foldedPostAction = foldPostActionRumination({
-            text: turnContent,
-            actionFiredEarlierThisTurn: true,
-            modelLeaksReasoning: profileHasBehavior(this.deps.profile, 'turn.preamble-folding'),
-          });
-          if (foldedPostAction.reasoning) {
-            log.info(
-              `[llama-cpp] folded ${foldedPostAction.reasoning.length} chars of post-action rumination into reasoning (visible=${foldedPostAction.visible.length} chars)`,
-            );
-            turnContent = foldedPostAction.visible;
-            this.lastTurnReasoning =
-              this.lastTurnReasoning.length > 0
-                ? `${this.lastTurnReasoning}\n\n${foldedPostAction.reasoning}`
-                : foldedPostAction.reasoning;
-          }
-        }
-        if (toolCalls.length > 0) actionFiredEarlierThisTurn = true;
 
         if (
           toolCalls.length === 0 &&
@@ -5696,6 +5680,20 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           const tracked = failureTracker.recordResult(call.function.name, output);
+          if (tracked.sourceFailureKind === 'grounding-required') {
+            groundingRecoveryActive = true;
+            const requestedLookup = output.match(/next tool call must be\s+`([^`]+)`/i)?.[1];
+            groundingLookupPending =
+              requestedLookup &&
+              tools?.some((tool) => chatCompletionToolName(tool) === requestedLookup)
+                ? requestedLookup
+                : null;
+          } else if (
+            call.function.name === groundingLookupPending &&
+            mutationToolOutputSucceeded(output)
+          ) {
+            groundingLookupPending = null;
+          }
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,
             call.function.name,

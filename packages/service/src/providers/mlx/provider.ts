@@ -64,7 +64,6 @@ import {
   findUnrecognizedFunctionMarkup,
   findUnrecognizedToolEnvelope,
   findXmlTagToolCallSpans,
-  foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
   isPayloadMutationToolName,
@@ -1428,13 +1427,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const statusHeartbeat = setInterval(emitPrep, 4_000);
     emitPrep();
 
-    // Whether any earlier iteration of THIS turn fired an action tool.
-    // Drives `foldPostActionRumination` on later reply-only iterations —
-    // the per-iteration ramble detector and `foldPreToolPreamble` both
-    // reset every iteration, which is exactly how a verbose model's
-    // post-move analysis wall reached the visible reply (wild-caught:
-    // gemma4-12b checkers, ~1,000 tokens where one line belonged).
-    let actionFiredEarlierThisTurn = false;
     // The physical request lease must outlive all per-iteration setup, but it
     // must never outlive this send. In particular, a fetch-level AbortError
     // happens before the SSE-body `finally`; keeping the active release here
@@ -3089,29 +3081,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           modelLeaksReasoning: profileHasBehavior(this.deps.profile, 'turn.preamble-folding'),
           askedQuestionThisTurn,
         });
-        // Post-action continuation iterations (tool already ran, this
-        // is the wrap-up) get the rumination fold: a verbose model that
-        // re-runs its analysis in the visible reply keeps only a
-        // conclusive final line; the wall moves to the collapsed
-        // reasoning expander. See {@link foldPostActionRumination}.
-        if (toolCalls.length === 0 && actionFiredEarlierThisTurn) {
-          const folded = foldPostActionRumination({
-            text: turnContent,
-            actionFiredEarlierThisTurn: true,
-            modelLeaksReasoning: profileHasBehavior(this.deps.profile, 'turn.preamble-folding'),
-          });
-          if (folded.reasoning) {
-            log.info(
-              `turn#${seq}.${turn} folded ${folded.reasoning.length} chars of post-action rumination into reasoning (visible=${folded.visible.length} chars)`,
-            );
-            turnContent = folded.visible;
-            this.lastTurnReasoning =
-              this.lastTurnReasoning.length > 0
-                ? `${this.lastTurnReasoning}\n\n${folded.reasoning}`
-                : folded.reasoning;
-          }
-        }
-        if (toolCalls.length > 0) actionFiredEarlierThisTurn = true;
         // Append to fullText AFTER every salvage path has had its turn
         // at stripping — earlier ordering meant the un-stripped prose /
         // envelope / reasoning text still landed in the persisted

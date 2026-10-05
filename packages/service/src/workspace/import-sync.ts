@@ -278,6 +278,8 @@ export async function ensureProjectVoorman(
   if (!projectId || projectId === 'default') return {};
   const project = await store.getProject(projectId).catch(() => null);
   if (!project) return {};
+  // A conversation has a companion on its roster, not a project foreman.
+  if (project.projectType?.id === 'just-chat') return {};
   if (project.voormanAutoAssignedAt) return {}; // already ensured once — respect the user's choice
 
   // A voorman is already set (by the user, the Meester, or a project type

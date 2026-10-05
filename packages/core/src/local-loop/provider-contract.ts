@@ -117,9 +117,8 @@ export interface SendAndWaitOpts {
    * supposed to wrap up, not re-analyze). The first iteration keeps
    * the catalog `tuning.sampling.maxTokens` so a tool call is never
    * cut off before it starts. Game reaction turns pass a tight value
-   * (~300) so a verbose medium model's post-move analysis wall gets
-   * physically bounded; the post-action rumination fold turns the
-   * truncated remainder into collapsed reasoning.
+   * (~300) to bound post-move table talk. Ordinary research and chat
+   * replies keep the model's normal output budget.
    */
   continuationMaxTokens?: number;
   queue?: {

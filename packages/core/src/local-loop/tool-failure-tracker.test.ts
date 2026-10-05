@@ -7,7 +7,8 @@ describe('ToolFailureTracker', () => {
     const t = new ToolFailureTracker({ softWarningAt: 2, hardAbortAt: 5 });
     const output =
       'Not saved: no source evidence has been collected. Your next tool call must be `wikipedia_search`.';
-    t.recordResult('write_file', output);
+    const first = t.recordResult('write_file', output);
+    expect(first).toMatchObject({ shouldAbort: false, sourceFailureKind: 'grounding-required' });
     const soft = t.recordResult('write_file', output);
     expect(soft.sourceFailureKind).toBe('grounding-required');
     expect(soft.output).toContain('Follow the lookup instruction above now');

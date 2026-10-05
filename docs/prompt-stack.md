@@ -118,6 +118,17 @@ inert arms up front).
 Universal defaults (every profile): `tools.gezels-as-roles` and
 `prompt.meester-craftbook-prelude` (self-gating — inert unless the turn matches).
 
+The Conversationalist role uses the condensed cookbook when a model selects the
+full one, and skips coordinator routing. Its small tool kit supports research,
+reference reading, adviser consultation, and optional craftbook launches. Just chat
+projects select this role without assigning a voorman.
+
+Tool results can lead to a substantial prose answer. Cookbooks and recovery nudges
+must not impose a one-sentence wrap-up or require a mutation after research. The
+read-only classifier includes `search`. Local providers preserve post-tool answer
+text regardless of its length; explicit reasoning tags/channels still separate
+reasoning from the visible answer.
+
 The intent stays capability-inverse — **the coddling budget scales inversely with what
 the model can carry** — but the dial is per-model curation in the manifest; tier defaults
 are the conservative floor for models nobody has curated.
