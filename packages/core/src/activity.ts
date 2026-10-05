@@ -62,26 +62,27 @@ export function resolveActivity(input: {
     if (task.spawnsCraftbook && task.fanout && !task.cron) continue;
     const wait = waits.get(task.ref);
     const assignee = taskActiveAssignee(task);
+    const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
     const item: ActivityItem = {
       id: `task:${task.ref}`,
       section: 'next',
       title: task.title,
-      detail: 'Not running. Open the task to check its next step.',
+      detail: step ? `Not running. Current step: ${step.name}.` : 'Not running.',
       projectId: task.projectId,
       taskRef: task.ref,
       questionIds: [],
       ...(assignee.kind === 'gezel' ? { gezelId: assignee.gezelId } : {}),
       ...(wait ? { since: wait.since, sessionId: wait.sessionId } : {}),
     };
-    if (status === 'paused') item.detail = 'Paused. Resume from the task when you are ready.';
+    if (status === 'paused') item.detail = step ? `Paused at: ${step.name}.` : 'Paused.';
     else if (input.inactiveProjectIds?.has(task.projectId)) item.detail = 'This project is paused.';
     else if (task.cron) {
-      item.detail = task.cron.nextTickAt
-        ? `Scheduled · ${task.cron.nextTickAt}`
-        : 'Scheduled. Open the task for its schedule.';
+      item.detail = task.cron.nextTickAt ? `Scheduled · ${task.cron.nextTickAt}` : 'Scheduled.';
     } else if (assignee.kind === 'user') {
       item.section = 'needs-you';
-      item.detail = 'Your step is ready. Open the task to continue.';
+      item.detail = step
+        ? `Current step: ${step.name}. Waiting for your direction.`
+        : 'Waiting for your direction.';
     } else if (wait) {
       switch (wait.reason) {
         case 'dispatching':

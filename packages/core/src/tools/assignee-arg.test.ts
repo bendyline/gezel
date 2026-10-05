@@ -13,6 +13,18 @@ describe('normalizeAssigneeArg', () => {
     expect(normalizeAssigneeArg({ kind: 'user' })).toEqual({ kind: 'user' });
   });
 
+  it('keeps concrete instructions through object and textual tool arguments', () => {
+    const instructions = 'Add the launch date to the description, then confirm it in your reply.';
+    const input = { kind: 'user', instructions: `  ${instructions}  ` };
+    for (const raw of [input, JSON.stringify(input)]) {
+      expect(normalizeAssigneeArg(assigneeArg().parse(raw))).toEqual({
+        kind: 'user',
+        instructions,
+      });
+    }
+    expect(assigneeArg().safeParse({ kind: 'user', instructions: '  ' }).success).toBe(false);
+  });
+
   it('accepts the legacy object form', () => {
     expect(normalizeAssigneeArg({ kind: 'gezel', gezelId: 'wren' })).toEqual({
       kind: 'gezel',

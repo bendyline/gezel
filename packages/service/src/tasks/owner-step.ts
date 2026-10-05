@@ -76,7 +76,9 @@ export function ownerStepQuestion(opts: {
   const sendBack = returnTo
     ? `, or write what should change and it goes back to "${returnTo.name}"`
     : ', or write what should change';
-  const head = `**${step.name}** on "${task.title}" is waiting for you.`;
+  const assignee = step.assignee ?? task.assignee;
+  const instructions = assignee.kind === 'user' ? assignee.instructions : undefined;
+  const head = `**${step.name}** on "${task.title}" is waiting for you.${instructions ? `\n\n${instructions}` : ''}`;
   const choose = `Choose ${OWNER_STEP_APPROVE} to continue${sendBack}.`;
   const files = filesUnderReview(task, step, opts.outputs ?? []);
   const shown = files.slice(0, REVIEW_MAX_FILES);

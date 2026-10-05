@@ -17,7 +17,7 @@ function task(overrides: Partial<Task> = {}): Task {
     craftbook: {
       id: 'newsletter',
       title: 'Newsletter',
-      steps: [{ id: 'write', title: 'Write', createdAt: at }],
+      steps: [{ id: 'write', name: 'Write', createdAt: at }],
     },
     createdAt: at,
     updatedAt: at,
@@ -182,7 +182,15 @@ describe('Activity reflects execution rather than task lifecycle', () => {
   it('uses the current step owner rather than the task entry owner', () => {
     const owned = task();
     owned.craftbook.steps[0]!.assignee = { kind: 'user' };
-    expect(resolve({ tasks: [owned] }).items[0]?.section).toBe('needs-you');
+    expect(resolve({ tasks: [owned] }).items[0]).toMatchObject({
+      section: 'needs-you',
+      detail: 'Current step: Write. Waiting for your direction.',
+    });
+    owned.assignee = { kind: 'user' };
+    delete owned.craftbook.steps[0]!.assignee;
+    expect(resolve({ tasks: [owned] }).items[0]?.detail).toBe(
+      'Current step: Write. Waiting for your direction.',
+    );
   });
   it('separates finished work from questions and keeps an unrelated live turn visible', () => {
     const ready: Question = {

@@ -116,6 +116,27 @@ describe('portable ordinary task lifecycle', () => {
     expect(await reopened.listTaskNotes(first.ref)).toEqual([note]);
     expect(await reopened.listTasks({ projectId: 'default', status: 'active' })).toHaveLength(2);
   });
+  it('persists the expected user action on both task and step assignments', async () => {
+    const { store, options } = fixture();
+    await store.ensureLayout();
+    const assignee = {
+      kind: 'user' as const,
+      instructions: 'Add the launch date, then confirm it here.',
+    };
+    const stepAssignee = {
+      kind: 'user' as const,
+      instructions: 'Review the prices and reply with corrections.',
+    };
+    const task = await store.createTask('default', {
+      ...input,
+      assignee,
+      steps: [{ name: 'Review prices', assignee: stepAssignee, terminal: true }],
+    });
+    const reopened = await new PortableStore(options).getTask(task.ref);
+    expect(reopened?.assignee).toEqual(assignee);
+    expect(reopened?.craftbook.steps[0]?.assignee).toEqual(stepAssignee);
+  });
+
   it('starts project, crew and task in one journal; a failed precommit creates none', async () => {
     const { store, files } = fixture();
     await store.ensureLayout();

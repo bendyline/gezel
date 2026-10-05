@@ -716,14 +716,21 @@
   overflow: hidden;
 }
 
-/* ── Step tracker (Domino's-tracker style) ──────────────────────── */
+/* ── Shared step route: task bench, chat rail, and receipts ─────── */
 
 .step-tracker {
+  user-select: none;
+  --step-stop-size: 24px;
+  --step-active-size: 32px;
+  --step-lane-height: 48px;
+  --step-line-y: 50%;
+  --step-route: color-mix(in srgb, var(--accent) 40%, var(--border));
+  --step-done: var(--sage-deep);
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  flex-wrap: nowrap;
   gap: 0;
-  padding: 0.75rem 0.25rem 0.5rem;
+  padding: 0.5rem 0.25rem;
   margin-bottom: 0.4rem;
 }
 
@@ -731,20 +738,133 @@
   margin-right: 0.5rem;
 }
 
-.step-dot-wrap {
+/* Each station owns half of each adjacent segment. They meet at the
+   station centre, behind its opaque stop, regardless of label height. */
+.step-stop-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: var(--step-lane-height);
+  flex: none;
+}
+
+.step-stop-stage[data-incoming]::before,
+.step-stop-stage[data-outgoing]::after {
+  content: "";
+  position: absolute;
+  top: var(--step-line-y);
+  height: 3px;
+  width: 50%;
+  transform: translateY(-50%);
+  background: var(--step-route);
+  pointer-events: none;
+}
+
+.step-stop-stage::before {
+  left: 0;
+}
+
+.step-stop-stage::after {
+  right: 0;
+}
+
+.step-stop-stage[data-incoming="done"]::before,
+.step-stop-stage[data-outgoing="done"]::after {
+  background: var(--step-done);
+}
+
+.step-stop {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: var(--step-stop-size);
+  height: var(--step-stop-size);
+  border: 2px solid color-mix(in srgb, var(--text-muted) 65%, var(--bg));
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-muted);
+  line-height: 1;
+  transition: border-color 140ms ease-out, background 140ms ease-out;
+}
+
+.step-stop-glyph {
+  display: block;
+  width: 70%;
+  height: 70%;
+}
+
+.status-done .step-stop,
+.terminal-complete .step-stop {
+  background: var(--step-done);
+  border-color: var(--step-done);
+  color: var(--titlebar-ink);
+}
+
+.status-active .step-stop {
+  width: var(--step-active-size);
+  height: var(--step-active-size);
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  color: var(--accent-selection-ink);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.status-active .step-stop::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 50%;
+  animation: step-stop-breathe 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes step-stop-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.step-stop-portrait > svg {
+  max-width: 100%;
+  max-height: 100%;
+  /* Poppetjes allow their full figure to overflow the cropped viewBox. */
+  clip-path: circle(50%);
+}
+
+.step-stop.is-add {
+  border-style: dashed;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+  background: var(--bg);
+  font-size: var(--text-lg);
+}
+
+.step-dot-wrap {
+  display: flex;
+  flex: 1 0 auto;
 }
 
 .step-dot {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.3rem;
+  width: 100%;
+  gap: 0.2rem;
   background: transparent;
   border: none;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  padding: 0.1rem 0.5rem;
+  padding: 0;
   font: inherit;
   color: var(--text);
 }
@@ -753,230 +873,61 @@
   cursor: default;
 }
 
-.step-dot-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
-  background: var(--surface, #fff);
-  color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1;
-  transition: background 120ms, border-color 120ms, color 120ms;
+.step-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .step-dot-label {
-  font-size: 0.78rem;
-  color: var(--text-muted, var(--muted));
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   white-space: nowrap;
   max-width: 9rem;
+  margin-inline: 0.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.step-dot.status-done .step-dot-badge {
-  background: var(--accent, #b0724c);
-  border-color: var(--accent, #b0724c);
-  color: var(--surface, #fff);
-}
-
-/* Active = "this is live work right now". Loud on purpose: green
-   (vs the brown of done) for color separation, larger badge, full-
-   opacity ring, slow pulse. The label is always bold + colored so it
-   reads even at a glance, and an "Active" tag sits below the phase
-   name as a redundant cue. */
-.step-dot.status-active .step-dot-badge {
-  background: var(--success, #27ae60);
-  border-color: var(--success, #27ae60);
-  color: #fff;
-  width: 26px;
-  height: 26px;
-  font-size: 0.85rem;
-  box-shadow: 0 0 0 3px var(--success-bg, rgba(39, 174, 96, 0.25));
-  animation: step-active-pulse 2.4s ease-in-out infinite;
-}
-
-.step-dot.status-active .step-dot-label {
-  color: var(--success-text, #27ae60);
+.step-dot.status-active .step-dot-label,
+.bench-step.status-active .bench-step-name {
+  color: var(--accent-text);
   font-weight: 700;
 }
 
-.step-dot.status-active::after {
-  content: "Active now";
-  font-size: 0.65rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--success-text, #27ae60);
-  margin-top: -0.15rem;
+.step-dot-status {
+  font-size: var(--text-2xs);
+  color: var(--accent-text);
+  font-weight: 600;
 }
 
-@keyframes step-active-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px var(--success-bg, rgba(39, 174, 96, 0.25));
-  }
-  50% {
-    box-shadow: 0 0 0 6px var(--success-bg, rgba(39, 174, 96, 0.18));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .step-dot.status-active .step-dot-badge {
-    animation: none;
-  }
-}
-
-.step-dot.status-pending .step-dot-badge {
-  background: var(--surface, #fff);
-  border-color: var(--border);
-  color: var(--muted);
-}
-
-/* Selection underline. When the active phase is also the selected
-   one (the default), the green-bold label still wins on color and
-   the underline reads as a secondary "you're viewing this" cue. */
 .step-dot.selected .step-dot-label {
   text-decoration: underline;
   text-underline-offset: 4px;
   text-decoration-thickness: 1.5px;
 }
 
-.step-dot.selected:not(.status-active) .step-dot-label {
-  color: var(--text);
-  font-weight: 600;
-}
-
+.step-dot.selected:not(.status-active) .step-dot-label,
 .step-dot:hover:not(:disabled) .step-dot-label {
   color: var(--text);
 }
 
-.step-dot.status-active:hover:not(:disabled) .step-dot-label {
-  color: var(--success-text, #27ae60);
-}
-
-/* Connector segment between two adjacent steps. Color tracks the
-   *previous* step's status so a chain of completes paints all the way
-   to the current active. */
-.step-dot-connector {
-  flex: 0 0 24px;
-  height: 2px;
-  background: var(--border);
-  margin: 0 -0.25rem;
-  position: relative;
-  top: -0.6rem; /* lift to align with the badge centerline */
-}
-
-.step-dot-connector.status-done {
-  background: var(--accent, #b0724c);
-}
-
-/* Connector AFTER the active step: fades from active green to pending
-   gray. Visually anchors where "now" sits in the chain. */
-.step-dot-connector.status-active {
-  background: linear-gradient(to right, var(--success, #27ae60), var(--border));
-}
-
-.step-dot-add .step-dot-badge {
-  border-style: dashed;
-  background: transparent;
-  color: var(--muted);
-}
-
-.step-dot-add .step-dot-label {
-  color: var(--muted);
-}
-
-/* The entry step is marked after every status, so an active entry step
-   keeps both its bold label and its ring. */
 .step-dot.entry .step-dot-label {
   font-weight: 600;
 }
-.step-dot.entry .step-dot-badge {
-  outline: 2px solid var(--accent, #6af);
-  outline-offset: 1px;
-}
 
-/* ── Step tracker · bench-rail variant (task mode) ──────────────────
-   The workshop "bench": numbered stations whose pegs — or, for the step
-   that's active, a carved poppetje — stand on a continuous wooden rail, with
-   the assignee captioned above and the lifecycle word below. The rail is
-   one absolutely-positioned beam; stations are flex columns sized off a
-   shared set of height vars so every peg's base lands on the rail. */
+/* ── Full bench: assignees above, step captions docked below ─────── */
 
 .step-bench {
+  --step-stop-size: 30px;
+  --step-active-size: 44px;
+  --step-lane-height: 84px;
+  --step-line-y: 60px;
+  --bench-tab-gap: 4px;
   position: relative;
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: nowrap;
-  gap: 0.25rem;
-  padding: var(--bench-pad-top) 0.75rem 0.4rem;
+  padding: 0.5rem 0.75rem 0.4rem;
   margin-bottom: 0.5rem;
-  /* Fit content but never narrower than the viewport: few steps stretch to
-     fill, many steps hold their min-width and the viewport scrolls. */
   width: max-content;
   min-width: 100%;
-
-  /* Geometry — the rail's top sits at pad-top + stage. Assignee captions
-     are out of flow (centered above a peg, or beside the active figure),
-     so they don't add to the column height. */
-  --bench-pad-top: 0.5rem;
-  --bench-stage-h: 84px;
-  --bench-rail-h: 9px;
-  --bench-tab-gap: 4px;
-
-  /* Carved-wood palette (day). */
-  --bench-rail-hi: #dcc79c;
-  --bench-rail-mid: #c8ad7c;
-  --bench-rail-lo: #a98a5a;
-  --bench-peg-hi: #d9c9a3;
-  --bench-peg-lo: #bfa87d;
-  --bench-done: #8a9a76;
-  --bench-active-hi: #d98a68;
-  --bench-active-lo: #b85c3c;
-}
-
-[data-theme="dark"] .step-bench {
-  --bench-rail-hi: #6a5838;
-  --bench-rail-mid: #564527;
-  --bench-rail-lo: #3c2f1c;
-  --bench-peg-hi: #6b5a3c;
-  --bench-peg-lo: #4e4029;
-  --bench-done: #6f7e5c;
-  --bench-active-hi: #c0875d;
-  --bench-active-lo: #9a4e30;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .step-bench {
-    --bench-rail-hi: #6a5838;
-    --bench-rail-mid: #564527;
-    --bench-rail-lo: #3c2f1c;
-    --bench-peg-hi: #6b5a3c;
-    --bench-peg-lo: #4e4029;
-    --bench-done: #6f7e5c;
-    --bench-active-hi: #c0875d;
-    --bench-active-lo: #9a4e30;
-  }
-}
-
-.step-rail {
-  position: absolute;
-  left: 0.75rem;
-  right: 0.75rem;
-  top: calc(var(--bench-pad-top) + var(--bench-stage-h));
-  height: var(--bench-rail-h);
-  border-radius: 4px;
-  background: linear-gradient(
-    180deg,
-    var(--bench-rail-hi),
-    var(--bench-rail-mid) 55%,
-    var(--bench-rail-lo)
-  );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
-  z-index: 0;
 }
 
 .step-bench .step-tracker-empty {
@@ -985,11 +936,6 @@
 
 .bench-step {
   position: relative;
-  z-index: 1;
-  /* Equal widths when they fit; a firm min-width so the caption + dropdown
-     never crush into the neighbour — past that the bench scrolls. Keep this
-     wider than the dropdown's own bounds: the caption is out of flow, so a
-     select that outgrows its column lands on top of the next one. */
   flex: 1 1 0;
   min-width: 11.5rem;
   display: flex;
@@ -997,17 +943,13 @@
   align-items: center;
 }
 
-/* Out of flow so it never adds to the column height. Default: centered
-   near the top of the stage, reading as a caption above the peg. */
 .bench-step-assignee {
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
-  /* Leave a gutter either side of the column so neighbouring captions read
-     as separate, never touching. */
-  max-width: calc(100% - 0.5rem);
+  max-width: calc(100% - 0.75rem);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1018,10 +960,8 @@
 }
 
 .bench-step-assignee-name {
-  font-family: Georgia, "Times New Roman", serif;
-  font-style: italic;
-  font-size: 0.84rem;
-  color: var(--text);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1029,55 +969,41 @@
 }
 
 .bench-step-assignee-role {
-  font-size: 0.66rem;
-  color: var(--text-muted, var(--muted));
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
 
-/* Inline assignee picker — reads as the caption text (italic serif) with a
-   small caret so it's clearly a dropdown, instead of the heavy brown app
-   select that would dominate the rail. The three-class selector intentionally
-   out-specifies the global `:root:not([data-theme="dark"]) select` rule.
-   Re-enables pointer events (the caption wrapper sets none so it can't block
-   the peg). */
+/* Specificity keeps the global select face from overpowering the route. */
 .step-bench .bench-step-assignee .bench-step-select {
-  appearance: none;
-  -webkit-appearance: none;
   pointer-events: auto;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-family: Georgia, "Times New Roman", serif;
-  font-style: italic;
-  font-size: 0.84rem;
-  color: var(--text);
-  background-color: transparent;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%238b7e6b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 0.3rem center;
-  background-size: 0.6rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1px 1.15rem 1px 0.45rem;
+  border-radius: var(--radius-md);
+  padding: 2px 0.4rem;
   cursor: pointer;
-  text-align: center;
-  text-align-last: center;
 }
 
 .step-bench .bench-step-assignee .bench-step-select:hover:not(:disabled),
 .step-bench .bench-step-assignee .bench-step-select:focus-visible {
-  border-color: var(--border);
-  background-color: var(--panel, var(--surface));
+  color: var(--text);
+  background: var(--panel);
 }
 
 .step-bench .bench-step-assignee .bench-step-select:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline-offset: 1px;
 }
 
 .step-bench .bench-step-assignee .bench-step-select:disabled {
@@ -1085,148 +1011,127 @@
   opacity: 0.7;
 }
 
-.bench-step-stage {
-  height: var(--bench-stage-h);
-  width: 100%;
+.task-assignee-picker,
+.task-assignee-picker > span:first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-assignee-picker > span:first-child {
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.task-assignee-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.task-assignee-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-assignee-avatar {
+  display: inline-flex;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.task-assignee-avatar .gezel-icon {
+  border-radius: var(--radius-sm);
+}
+
+.task-assignee-menu {
+  max-width: min(28rem, var(--radix-select-content-available-width));
+}
+
+.task-assignee-menu .gz-select-item {
+  font-size: var(--text-sm);
+}
+
+.task-assignee-menu .gz-select-item > span {
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  /* Let a tall poppetje rise a hair past the stage top if needed. */
-  overflow: visible;
+  min-width: 0;
+}
+
+.bench-step-stage {
+  box-sizing: border-box;
+  padding-top: 36px;
 }
 
 .bench-step-marker {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
   background: transparent;
   border: none;
   padding: 0;
   margin: 0;
   cursor: pointer;
   font: inherit;
-  border-radius: 8px;
-  transition: transform 120ms ease;
+  border-radius: 50%;
 }
 
 .bench-step-marker:disabled {
   cursor: default;
 }
 
-.bench-step-marker:hover:not(:disabled) {
-  transform: translateY(-2px);
+.bench-step-marker:hover:not(:disabled) .step-stop {
+  border-color: var(--accent);
 }
 
 .bench-step-marker:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--text);
+  outline-offset: 5px;
 }
 
-.bench-step-marker svg {
-  display: block;
-}
-
-/* CSS pegs (every station but the active one, which gets a figure). */
-.bench-peg {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  line-height: 1;
-}
-
-.bench-step.status-pending .bench-peg {
-  width: 18px;
-  height: 34px;
-  border-radius: 7px 7px 3px 3px;
-  background: linear-gradient(180deg, var(--bench-peg-hi), var(--bench-peg-lo));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 3px rgba(0, 0, 0, 0.18);
-}
-
-.bench-step.status-done .bench-peg {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--bench-done);
-  color: #fff;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
-}
-
-/* Fallback peg for the active step when poppetjes are off or the
-   assignee has no figure — a taller, terracotta peg. */
-.bench-step.status-active .bench-peg {
-  width: 22px;
-  height: 44px;
-  border-radius: 9px 9px 3px 3px;
-  background: linear-gradient(180deg, var(--bench-active-hi), var(--bench-active-lo));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 3px 5px rgba(0, 0, 0, 0.2);
-}
-
-/* Terminal dot — the whole task's end state, pinned to the rail's right
-   end. A flat disc (no peg), green for complete, muted for canceled. */
-.bench-step-terminal {
-  flex: 0 0 auto;
-}
-
-.bench-peg-terminal {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
-}
-
-.terminal-complete .bench-peg-terminal {
-  background: var(--bench-done);
-}
-
-.terminal-canceled .bench-peg-terminal {
-  background: var(--ink-3, #8b7e6b);
-}
-
-.bench-step-terminal .bench-step-status {
-  color: var(--text-muted, var(--muted));
-}
-
-.terminal-complete .bench-step-status {
-  color: var(--bench-done);
+.terminal-canceled .step-stop {
+  background: var(--panel);
 }
 
 .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.5rem + var(--bench-tab-gap));
+  margin-top: calc(0.5rem + var(--bench-tab-gap));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.12rem;
+  gap: 0.2rem;
   text-align: center;
   max-width: 100%;
-  padding: 0 0.2rem;
-  /* Regular step feet are <button>s (click the title to select the step);
-     these resets keep them looking like the plain caption they replaced. */
+  padding: 0 0.4rem;
   background: none;
   border: 0;
   color: inherit;
   font: inherit;
 }
+
 button.bench-step-foot {
   cursor: pointer;
 }
+
 button.bench-step-foot:disabled {
   cursor: default;
 }
 
 .bench-step-num {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
   letter-spacing: 0.08em;
-  color: var(--text-muted, var(--muted));
+  color: var(--text-muted);
   min-height: 0.8rem;
 }
 
 .bench-step-name {
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
@@ -1236,98 +1141,44 @@ button.bench-step-foot:disabled {
 }
 
 .bench-step-status {
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-muted, var(--muted));
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
 }
 
-/* The active step: terracotta status word with a pulsing tracker dot. */
 .bench-step.status-active .bench-step-status {
   color: var(--accent-text);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35em;
+  font-weight: 600;
 }
 
-.bench-step.status-active .bench-step-status::before {
-  content: "";
-  width: 0.4em;
-  height: 0.4em;
-  border-radius: 50%;
-  background: currentColor;
-  animation: bench-active-pulse 1.6s ease-in-out infinite;
+.bench-step.status-done .bench-step-status,
+.terminal-complete .bench-step-status {
+  color: var(--sage-ink);
 }
 
-@keyframes bench-active-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent);
-  }
-  50% {
-    opacity: 0.72;
-    transform: scale(1.16);
-    box-shadow: 0 0 0 0.32em transparent;
-  }
-}
-
-/* The active step is marked by its poppetje, the terracotta "Active" word,
-   and the peg glyph — deliberately NOT a card fill/border, so it doesn't read
-   like the selected tab. It sits on the rail like any other pending step. */
-
-/* Viewing a station that isn't the live one: a quiet underline so selection
-   reads without competing with the active highlight. (The card itself is
-   the shared selected-foot rule below.) */
+/* Viewing a step is separate from the live cursor. Its caption docks to
+   the panel without moving the route or the neighbouring captions. */
 .bench-step.selected:not(.status-active) .bench-step-name {
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1.5px;
 }
 
-/* Selected step = the active tab for the editor panel below. Its foot turns
-   into a bordered card that merges into the docked panel's top edge: square
-   bottom corners, no bottom border, and a raised z-index so the panel's top
-   border is hidden beneath it. Wins over the active / selected foot rules
-   above (equal-or-higher specificity, later in source), so it applies whether
-   or not this is also the live (active) step.
-
-   The margin backs off by exactly the card's block padding + top border
-   (0.4rem + 1px), so the step's number/name/status land on the SAME line as
-   its unselected neighbours' — the card grows downward around the text
-   rather than pushing it down. Keep that relationship if you retune the
-   padding: the card's downward growth is also what
-   `.task-bench-row.has-selected-step .task-tab-rail` compensates for. */
 .step-bench .bench-step.selected .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.1rem + var(--bench-tab-gap) - 1px);
+  margin-top: calc(0.1rem + var(--bench-tab-gap) - 1px);
   padding: 0.4rem 0.6rem;
-  background: var(--panel, var(--surface));
+  background: var(--panel);
   border: 1px solid var(--border);
   border-bottom: none;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   box-shadow: none;
   position: relative;
   z-index: 2;
 }
 
-/* "add a step" and the terminal marker hug their content — exempt from the
-   regular step min-width. */
 .bench-step-add,
 .bench-step-terminal {
   flex: 0 0 auto;
-  min-width: auto;
-}
-
-.bench-step-add .bench-peg.is-add {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1.5px dashed var(--border);
-  background: transparent;
-  color: var(--text-muted, var(--muted));
-  font-size: 0.95rem;
-  box-shadow: none;
+  min-width: 5.5rem;
 }
 
 .bench-step-add .bench-step-name {
@@ -1335,11 +1186,11 @@ button.bench-step-foot:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bench-step.status-active .bench-step-status::before {
+  .status-active .step-stop::after {
     animation: none;
   }
 
-  .bench-step-marker {
+  .step-stop {
     transition: none;
   }
 }
@@ -1354,10 +1205,11 @@ button.bench-step-foot:disabled {
   margin-bottom: 0.75rem;
 }
 
-/* The Task/Chat view switch lives as two tall buttons seated to the left of
-   the bench (replacing the old middle-of-page tab row). The rail stretches to
-   the bench height; the buttons split that height. */
+/* The latest file and Task/Chat tabs share the narrow column beside the
+   bench. Keep the tabs seated against the panel below. */
 .task-bench-row {
+  --task-tab-width: 80px;
+  --task-tab-gap: 0.4rem;
   display: flex;
   align-items: stretch;
   gap: 0.6rem;
@@ -1377,17 +1229,77 @@ button.bench-step-foot:disabled {
   border-bottom: none;
 }
 
+.task-bench-sidebar {
+  flex: 0 0 calc(2 * var(--task-tab-width) + var(--task-tab-gap));
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+/* Fit the latest file into the space above the two tabs, leaving the step
+   tracker beside it and the panel directly beneath. */
+.task-deliverable {
+  min-width: 0;
+}
+
+.task-deliverable .deliverable-card {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.5rem;
+  gap: 0.25rem;
+}
+
+.task-deliverable .deliverable-card-face {
+  gap: 0.4rem;
+}
+
+.task-deliverable .deliverable-card-tile {
+  width: 1.5rem;
+  height: 2rem;
+  border: none;
+  background: none;
+}
+
+.task-deliverable .deliverable-card-tile-ext,
+.task-deliverable .deliverable-card-meta {
+  display: none;
+}
+
+.task-deliverable .deliverable-card-eyebrow {
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-deliverable .deliverable-card-name {
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-deliverable .deliverable-card-actions {
+  padding-left: 0;
+  gap: 0.25rem;
+}
+
+.task-deliverable .deliverable-card-actions button {
+  padding: 0.3rem 0.5rem;
+}
+
+.task-deliverable .deliverable-card-action-icon {
+  display: inline-block;
+}
+
+.task-deliverable .deliverable-card-action-label {
+  display: none;
+}
+
 /* The Task overview "page": docks up to merge under the active Task tab —
    same fill, hidden seam — exactly like the step panel docks under a selected
    step's foot. The active tab (z-index 2, no bottom border) covers this
    panel's top border where they meet. */
-/* The task's deliverable, under the step tracker on every tab — the product
-   the tracker is walking toward. Recipe in shared-content.css. */
-.task-deliverable .deliverable-card {
-  max-width: 44rem;
-  margin: 0.75rem 0 0.25rem;
-}
-
 .task-view-panel {
   margin-top: calc(-1rem - 1px);
   margin-bottom: 0.75rem;
@@ -1422,6 +1334,16 @@ button.bench-step-foot:disabled {
 .bench-viewport::-webkit-scrollbar {
   display: none;
 }
+.bench-viewport.is-panning,
+.bench-viewport.is-panning * {
+  cursor: grabbing;
+}
+/* Overflowing routes need breathing room at both ends so even their first
+   and last stops can reach the centre. Short routes keep their usual fit. */
+.bench-scroll .bench-viewport > .step-tracker {
+  padding-left: max(0.75rem, var(--tracker-leading-space, 0px));
+  padding-right: max(0.75rem, var(--tracker-trailing-space, 0px));
+}
 .bench-scrollbar {
   position: relative;
   height: 6px;
@@ -1435,12 +1357,17 @@ button.bench-step-foot:disabled {
   height: 100%;
   min-width: 28px;
   border-radius: 999px;
-  background: var(--bench-rail-mid, #c8ad7c);
+  background: var(--scrollbar-thumb);
   cursor: grab;
   touch-action: none;
 }
 .bench-scrollbar-thumb:active {
   cursor: grabbing;
+}
+.bench-scrollbar-thumb::before {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
 }
 
 .task-tab-rail {
@@ -1458,7 +1385,7 @@ button.bench-step-foot:disabled {
   align-self: flex-end;
   display: flex;
   flex-direction: row;
-  gap: 0.4rem;
+  gap: var(--task-tab-gap);
   padding: 0;
 }
 
@@ -1474,8 +1401,8 @@ button.bench-step-foot:disabled {
 }
 
 .task-tab-btn {
-  flex: 0 0 80px;
-  width: 80px;
+  flex: 0 0 var(--task-tab-width);
+  width: var(--task-tab-width);
   /* Block padding above and below the label so the tab grows from a thin strip
      into a band that lines up with the bench's step labels beside it (num /
      name / status). The rail is bottom-anchored (see .task-tab-rail), so this

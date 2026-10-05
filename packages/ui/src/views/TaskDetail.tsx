@@ -629,25 +629,46 @@ export function TaskDetail({
           selectedStepId !== null || tab === 'task' ? ' has-docked-panel' : ''
         }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
-        <fieldset className="task-tab-rail" aria-label="Task view">
-          <button
-            type="button"
-            aria-pressed={selectedStepId === null && tab === 'task'}
-            className={`task-tab-btn${selectedStepId === null && tab === 'task' ? ' active' : ''}`}
-            onClick={() => handleSelectTab('task')}
-          >
-            Task
-          </button>
-          <button
-            type="button"
-            aria-pressed={selectedStepId === null && tab === 'chat'}
-            className={`task-tab-btn${selectedStepId === null && tab === 'chat' ? ' active' : ''}`}
-            onClick={() => handleSelectTab('chat')}
-          >
-            Chat{sessions.length > 0 ? ` (${sessions.length})` : ''}
-          </button>
-        </fieldset>
+        <div className="task-bench-sidebar">
+          {result?.deliverable && (
+            <div className="task-deliverable">
+              <DeliverableCard
+                deliverable={result.deliverable}
+                projectId={task.projectId}
+                state={effectiveStatus === 'complete' ? 'final' : 'draft'}
+                onOpen={(file) =>
+                  runNavActions(
+                    openProjectFileActions({
+                      projectId: task.projectId,
+                      path: file.path,
+                      source: file.kind === 'workspace' ? 'workspace' : 'artifacts',
+                    }),
+                  )
+                }
+              />
+            </div>
+          )}
+          <fieldset className="task-tab-rail" aria-label="Task view">
+            <button
+              type="button"
+              aria-pressed={selectedStepId === null && tab === 'task'}
+              className={`task-tab-btn${selectedStepId === null && tab === 'task' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('task')}
+            >
+              Task
+            </button>
+            <button
+              type="button"
+              aria-pressed={selectedStepId === null && tab === 'chat'}
+              className={`task-tab-btn${selectedStepId === null && tab === 'chat' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('chat')}
+            >
+              Chat{sessions.length > 0 ? ` (${sessions.length})` : ''}
+            </button>
+          </fieldset>
+        </div>
         <TaskStepTracker
+          key={task.ref}
           steps={task.craftbook.steps}
           {...(task.activeStepId ? { activeStepId: task.activeStepId } : {})}
           selectedStepId={selectedStepId}
@@ -666,25 +687,6 @@ export function TaskDetail({
           taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
         />
       </div>
-
-      {result?.deliverable && (
-        <div className="task-deliverable">
-          <DeliverableCard
-            deliverable={result.deliverable}
-            projectId={task.projectId}
-            state={effectiveStatus === 'complete' ? 'final' : 'draft'}
-            onOpen={(file) =>
-              runNavActions(
-                openProjectFileActions({
-                  projectId: task.projectId,
-                  path: file.path,
-                  source: file.kind === 'workspace' ? 'workspace' : 'artifacts',
-                }),
-              )
-            }
-          />
-        </div>
-      )}
 
       {selectedStepId !== null && (
         <TaskStepPanel

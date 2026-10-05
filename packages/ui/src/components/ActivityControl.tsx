@@ -21,6 +21,10 @@ const PendingQuestionCard = lazy(() =>
   import('./PendingQuestionCard.js').then((module) => ({ default: module.PendingQuestionCard })),
 );
 
+const ActivityTaskStep = lazy(() =>
+  import('./ActivityTaskStep.js').then((module) => ({ default: module.ActivityTaskStep })),
+);
+
 const SECTIONS: { id: ActivitySection; label: string; empty: string }[] = [
   { id: 'needs-you', label: 'Needs you', empty: 'Nothing needs your attention.' },
   { id: 'working', label: 'Working', empty: 'No work is running right now.' },
@@ -277,14 +281,25 @@ export function ActivityControl() {
                         <article className="activity-work" key={item.id}>
                           <p className="activity-context">{contextLabel(item)}</p>
                           <strong>{item.title}</strong>
-                          <p>{formatDetail(item.detail)}</p>
-                          {item.taskRef || item.sessionId ? (
+                          {item.section === 'needs-you' && item.taskRef ? (
+                            <Suspense fallback={<p>Loading the current step…</p>}>
+                              <ActivityTaskStep
+                                taskRef={item.taskRef}
+                                snapshotAt={snapshot.at}
+                                onContinued={activity.refresh}
+                              />
+                            </Suspense>
+                          ) : (
+                            <p>{formatDetail(item.detail)}</p>
+                          )}
+                          {(item.section !== 'needs-you' || !item.taskRef) &&
+                          (item.taskRef || item.sessionId) ? (
                             <button
                               type="button"
                               className="btn secondary"
                               onClick={() => void openItem(item)}
                             >
-                              {item.taskRef ? 'Open task' : 'Open chat'}
+                              {item.taskRef ? 'View task details' : 'Open chat'}
                             </button>
                           ) : null}
                           {item.heldByActivity && (

@@ -8361,10 +8361,12 @@ server.tool(
  */
 async function resolveAssigneeArg(
   raw: AssigneeArg | undefined,
-): Promise<{ kind: 'gezel'; gezelId: string } | { kind: 'user' } | undefined> {
+): Promise<
+  { kind: 'gezel'; gezelId: string } | { kind: 'user'; instructions?: string } | undefined
+> {
   const normalized = normalizeAssigneeArg(raw);
   if (!normalized) return undefined;
-  if (normalized.kind === 'user') return { kind: 'user' as const };
+  if (normalized.kind === 'user') return normalized;
   return { kind: 'gezel' as const, gezelId: await resolveGezelId(normalized.ref) };
 }
 
@@ -8484,6 +8486,7 @@ function blueprintToStep(s: z.infer<typeof stepBlueprintSchema>): NewCraftbookSt
   const d = coerceBlueprintDeliverable(s.deliverable);
   return {
     name: s.name,
+    ...(s.assignee ? { assignee: s.assignee } : {}),
     ...(s.description ? { description: s.description } : {}),
     ...(s.prompt ? { prompt: s.prompt } : {}),
     ...(s.suggestedGezelId ? { suggestedGezelId: s.suggestedGezelId } : {}),
@@ -9182,6 +9185,7 @@ server.tool(
     name: z.string().min(1),
     description: z.string().optional(),
     prompt: z.string().optional(),
+    assignee: StepBlueprintSchema.shape.assignee,
     suggestedGezelId: z.string().optional(),
     suggestedRole: z.string().optional().describe('Role hint, e.g. "developer", "reviewer".'),
     deliverable: deliverableArg,
@@ -9194,6 +9198,7 @@ server.tool(
     name,
     description,
     prompt,
+    assignee,
     suggestedGezelId,
     suggestedRole,
     deliverable,
@@ -9213,6 +9218,7 @@ server.tool(
         name,
         ...(description ? { description } : {}),
         ...(prompt ? { prompt } : {}),
+        ...(assignee ? { assignee } : {}),
         ...(suggestedGezelId ? { suggestedGezelId } : {}),
         ...(suggestedRole ? { suggestedRole } : {}),
         ...(d ? { deliverable: d } : {}),

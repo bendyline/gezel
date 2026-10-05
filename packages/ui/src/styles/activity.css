@@ -2,40 +2,40 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  min-height: 30px;
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--border);
+  padding: 0.2rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
   border-radius: var(--radius-md);
-  background: var(--panel);
-  color: var(--text);
+  background: color-mix(in srgb, var(--titlebar-ink) 5%, var(--titlebar));
+  color: var(--titlebar-ink);
   font: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
   -webkit-app-region: no-drag;
 }
 .activity-control:hover,
 .activity-control[data-state="open"] {
-  background: var(--surface);
-}
-.activity-control.needs-attention {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--titlebar-ink) 10%, var(--titlebar));
 }
 .activity-control-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--muted);
+  color: color-mix(in srgb, var(--titlebar-ink) 35%, transparent);
+  background: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
   flex-shrink: 0;
 }
 .needs-attention .activity-control-dot {
-  background: var(--accent);
+  color: var(--warning);
 }
 .activity-control-label {
-  font-weight: 650;
+  font-weight: 600;
 }
 .activity-control-summary {
-  color: var(--muted);
+  color: inherit;
 }
 .activity-control-count {
   display: none;
@@ -204,4 +204,52 @@
   .activity-panel .btn {
     min-height: 40px;
   }
+}
+
+.activity-task-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+}
+.activity-task-step p {
+  margin: 0;
+}
+.activity-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.25rem;
+}
+.activity-task-step textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  font: inherit;
+}
+.activity-step-instructions {
+  max-height: min(32vh, 20rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Embedded instructions use the panel's reading surface. Squisq sets these
+   page defaults inline, so the embedded overrides must take precedence. */
+.activity-step-instructions .squisq-linear,
+.activity-step-instructions .squisq-page {
+  background: transparent !important;
+}
+.activity-step-instructions .squisq-linear-content {
+  font-size: var(--text-sm) !important;
+  font-family: var(--font-ui) !important;
+  color: var(--text) !important;
+}
+.activity-step-instructions .squisq-page-prose {
+  font-size: 1em;
+}
+.activity-step-instructions .squisq-page--thin .squisq-page-section {
+  padding-block: 0;
+}
+.activity-step-instructions .squisq-page-section-inner {
+  margin-inline: 0 !important;
 }

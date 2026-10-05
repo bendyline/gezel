@@ -3,17 +3,16 @@ import type {
   GezelSummary,
   ListScriptsResponse,
   Task,
-  TaskAssignee,
   TaskCraftbookStep,
   UpdateTaskStepRequest,
 } from '@bendyline/gezel';
 import { normalizeScriptRefs } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { Select } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { MarkdownField } from './MarkdownField.js';
 import { StepAutomationRow, StepGateRow } from './StepAutomationRow.js';
+import { TaskAssigneePicker } from './TaskAssigneePicker.js';
 
 interface TaskStepPanelProps {
   task: Task;
@@ -126,18 +125,6 @@ export function TaskStepPanel({
     if (next === (phase.prompt ?? '')) return;
     void onPatch(phase.id, { prompt: next });
   };
-  const onAssigneeChange = (v: string) => {
-    if (v === '__user') void onPatch(phase.id, { assignee: { kind: 'user' } });
-    else if (v === '__none') void onPatch(phase.id, { assignee: null });
-    else void onPatch(phase.id, { assignee: { kind: 'gezel', gezelId: v } });
-  };
-
-  const assigneeValue: string = phase.assignee
-    ? phase.assignee.kind === 'user'
-      ? '__user'
-      : phase.assignee.gezelId
-    : '__none';
-
   return (
     <section className="task-step-panel" data-testid="task-step-panel">
       <header className="task-step-panel-header">
@@ -210,24 +197,18 @@ export function TaskStepPanel({
 
         <label className="task-step-field">
           <span className="task-step-field-label">Assignee</span>
-          <Select.Root
-            value={assigneeValue}
+          <TaskAssigneePicker
+            gezels={gezels}
+            value={phase.assignee ?? null}
+            inheritedAssignee={
+              phase.suggestedGezelId
+                ? { kind: 'gezel', gezelId: phase.suggestedGezelId }
+                : task.assignee
+            }
+            ariaLabel="Step assignee"
             disabled={busy || !runtimeCapabilities().taskStructureEditing}
-            onValueChange={onAssigneeChange}
-          >
-            <Select.Trigger aria-label="Step assignee">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="__none">Same as the task</Select.Item>
-              <Select.Item value="__user">→ You</Select.Item>
-              {gezels.map((g) => (
-                <Select.Item key={g.id} value={g.id}>
-                  → {g.name}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select.Root>
+            onValueChange={(assignee) => void onPatch(phase.id, { assignee })}
+          />
         </label>
 
         <div className="task-step-field full-width">

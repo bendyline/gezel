@@ -289,7 +289,8 @@ describe('portable tool authority and durable effects', () => {
       steps: [{ id: 'plan', name: 'Plan', suggestedRole: 'Generalist' }],
       ...(assignee === undefined ? {} : { assignee }),
     });
-    for (const assignee of ['Noor', 'noor', gezel.id, 'user', 'gezel'])
+    const humanHandoff = { kind: 'user', instructions: 'Choose the repair date and reply here.' };
+    for (const assignee of ['Noor', 'noor', gezel.id, 'user', 'gezel', humanHandoff])
       await executePortableTool(store, session, 'create_task', task(assignee), recording);
     expect(created.map((input) => (input as { assignee?: unknown }).assignee)).toEqual([
       { kind: 'gezel', gezelId: gezel.id },
@@ -297,6 +298,7 @@ describe('portable tool authority and durable effects', () => {
       { kind: 'gezel', gezelId: gezel.id },
       { kind: 'user' },
       undefined,
+      humanHandoff,
     ]);
     await expect(
       executePortableTool(store, session, 'create_task', task('Zed'), recording),

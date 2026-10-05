@@ -752,17 +752,9 @@
   margin-bottom: 0;
 }
 
-.msg-tool-card-track .step-dot {
-  padding-inline: 0.4rem;
-}
-
 .msg-tool-card-track .step-dot-label {
   max-width: 7rem;
-  font-size: 0.72rem;
-}
-
-.msg-tool-card-track .step-dot-connector {
-  flex-basis: 18px;
+  font-size: var(--text-2xs);
 }
 
 .msg-tool-card-actions {
@@ -4216,17 +4208,9 @@ button.timeline-session-divider-child::before {
   margin-bottom: 0;
 }
 
-.chat-rail-task-track .step-dot {
-  padding-inline: 0.4rem;
-}
-
 .chat-rail-task-track .step-dot-label {
   max-width: 7rem;
-  font-size: 0.72rem;
-}
-
-.chat-rail-task-track .step-dot-connector {
-  flex-basis: 18px;
+  font-size: var(--text-2xs);
 }
 
 .chat-rail-task-track .bench-scrollbar {

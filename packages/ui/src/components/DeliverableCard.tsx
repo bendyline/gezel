@@ -137,18 +137,30 @@ export function DeliverableCard({
             <button
               type="button"
               className="secondary deliverable-card-action"
+              title="Show in folder"
+              aria-label="Show in folder"
               onClick={() => void runBridge(bridge.showReferenceInFolder)}
             >
-              Show in folder
+              <span
+                className="fa-solid fa-folder-open deliverable-card-action-icon"
+                aria-hidden="true"
+              />
+              <span className="deliverable-card-action-label">Show in folder</span>
             </button>
           )}
           {bridge?.saveReferenceCopy && (
             <button
               type="button"
               className="secondary deliverable-card-action"
+              title="Save a copy…"
+              aria-label="Save a copy…"
               onClick={() => void runBridge(bridge.saveReferenceCopy)}
             >
-              Save a copy…
+              <span
+                className="fa-solid fa-download deliverable-card-action-icon"
+                aria-hidden="true"
+              />
+              <span className="deliverable-card-action-label">Save a copy…</span>
             </button>
           )}
         </div>

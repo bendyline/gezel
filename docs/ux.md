@@ -483,6 +483,33 @@ What lives where:
 
 ## Patterns
 
+### Task progress: stops on a route
+
+The task bench, chat rail, craftbook receipts, and craftbook editor share
+`StepTracker`. Use the same circular stops at both sizes: sage filled checks
+for completed steps, a larger terracotta stop with a play glyph and outer ring
+for the current step, and quiet outlined circles for upcoming steps. A gezel
+portrait may fill the current stop, but its ring stays visible. The warm route
+passes behind each stop's centre; completed segments turn sage. Avoid wooden
+beams and upright pegs. The active halo breathes gently, with no animation under
+reduced motion; size, glyph, ring, and an explicit Active label also carry state.
+
+Opening a task centres its current step, and advancing or resizing recentres
+it. Manual scrolling remains free until one of those changes. Selecting a step
+to inspect is separate from progress: underline its label and, on the full
+bench, dock its caption into the panel. Assignees remain above the full route;
+step names and status stay below. Both sizes use the shared semantic palette.
+While hovering the route, wheel down moves right and wheel up moves left;
+horizontal trackpad gestures keep their direction. At either end, unused wheel
+movement can scroll the surrounding page. Drag the route or its scrollbar thumb
+to pan; touch uses native swiping. A drag must not select a step or select its
+caption text. Assignee pickers and the craftbook editor's drag-to-reorder keep
+their own interaction, and pinch/Ctrl-wheel zoom is left to the browser.
+The bench and step-details assignee pickers share one control. When poppetjes
+are enabled, show a 20 × 20px portrait beside the name in both the selected
+value and menu options, including a resolved default assignee. Keep every row
+on one line; disabling poppetjes returns these pickers to text only.
+
 ### Activity: what’s going on
 
 The header’s **Activity** key opens one non-modal panel for work and questions
@@ -491,12 +518,29 @@ across projects. It stays available when quiet. **Needs you**, **Working**,
 scheduled work, and finished results. A task’s saved “active” lifecycle is not
 evidence that it is running; runtime queue and conversation facts decide that.
 Link the task, handoff, and conversation by identity so they appear as one job.
+The key uses the title bar's sage face, cream ink, and subtle border, matching
+its neighboring status controls in both themes. A small indicator light carries
+attention in amber; the whole key does not change color when something needs you.
 
 Question choices and text fields are visible inline. Keep drafts when the panel
 closes or changes project, keep cards in a stable order during refresh, and
 leave an answer receipt in place until the panel closes. Answering the last
 question does not close the panel. Project attention links open the same panel
 scoped to that project, with a clear way back to all projects.
+
+A human assignment can carry its own plain-language expectation (`assignee.instructions`):
+the specific action the person should take and how to confirm they are ready.
+Show that expectation ahead of general step prose in Activity and owner review
+cards. Task and step authors should provide it when handing work to the user.
+
+A task waiting on a human step must show the current step, its instructions,
+and a **What should happen next?** textbox even when it has no question card.
+Place **Pause task** and **Cancel task** above that textbox; neither requires a
+reply. Keep the draft on failure and disable all actions while one is pending.
+**Continue task** saves that direction before advancing through the normal
+completion checks. Keep the draft and explain any failure inline; never send
+the person away with “Open the task to continue.” Task navigation elsewhere
+is labelled **View task details** so it describes what opening the view does.
 
 Status failures retain the last known work and label it stale. Never turn a
 failed fetch into “All quiet.” Advanced queue controls live in an expandable
@@ -1014,9 +1058,14 @@ PowerPoint deck"), the file name at reading size, and a muted line saying where
 it lives. **Open** is the one filled key. *Show in folder* and *Save a copy…*
 are secondary keys, shown only where the desktop shell provides them. The whole
 face opens the file too: it is the big link. The card closes the wrap-up
-bubble. It also sits under the task tracker, both in the chat rail and on the
-task page. On a receipt that finished its task, it shrinks to a one-line chip
-beside the task chip. Three rules keep it honest:
+bubble and sits under the task tracker in the chat rail. On the task page it
+sits directly above the Task/Chat tabs in their narrow column, to the left of
+the step tracker, so each tab joins directly to its panel. The card stays within
+the two tabs' combined width, with a smaller format tile and file name; the
+location, size, timestamp, and repeated extension label are hidden. Open keeps
+its label; Show in folder and Save a copy use icon buttons with tooltips and
+accessible names. On a receipt that finished its task, it shrinks to a one-line
+chip beside the task chip. Three rules keep it honest:
 
 - **The daemon decides what the deliverable is, and only a file that exists
   gets a card.** The resolver lives in
