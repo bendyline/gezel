@@ -29,7 +29,8 @@
   flex-shrink: 0;
 }
 .needs-attention .activity-control-dot {
-  color: var(--warning);
+  background: var(--warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 18%, transparent);
 }
 .activity-control-label {
   font-weight: 600;

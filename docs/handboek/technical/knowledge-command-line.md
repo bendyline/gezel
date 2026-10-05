@@ -37,7 +37,7 @@ There are two command groups:
 | `init`, `build`, `inspect`, `validate`, `search`, `nearby`, `export-parquet` | Work on files without the Gezel daemon |
 | `available`, `install`, `list`, `find`, `remove` | Connect to your user daemon and can start it when absent |
 
-File commands operate on a named source folder, archive, or extracted catalog. Installed-catalog commands use the daemon's registry. The [general CLI reference](cli-reference.md#local-use-and-external-connections) explains home selection, local discovery, and explicit external connections.
+File commands operate on a named source folder, archive, or extracted catalog. Installed-catalog commands use the daemon's registry. The [general CLI reference](cli-reference.md) explains home selection, local discovery, and explicit external connections.
 
 ## Build your first catalog
 
@@ -111,6 +111,10 @@ gezel knowledge build ./existing-docs --out ./existing-docs.gezk
 
 `init` creates `catalog.json` without inserting a sample `content/` folder when it detects an existing Markdown tree. It refuses to overwrite an existing `catalog.json`.
 
+For a text-only catalog, run `gezel knowledge build ./existing-docs --skip-images`. Images are bundled for display; they are not embedded by the text embedding model. `--skip-images` keeps image alt text without resolving or reading the image files, avoiding the catalog's 256 MiB total asset limit. For a larger illustrated collection, split it into multiple catalogs.
+
+The build warns and skips images with mismatched or unrecognized file data, images over the per-file size limit, and unsafe SVGs. References to a skipped image become their alt text (or link label), preserving the surrounding document. Valid images are still included, and source files are unchanged.
+
 The build locates content in this order: the explicit `content` setting; a `content/` subfolder; an applicable MkDocs `docs_dir`; otherwise the catalog folder itself. It detects common table-of-contents formats, or uses folders as topics. Supported outlines include GitBook `SUMMARY.md`, MkDocs `nav`, Jupyter Book `_toc.yml`, DocFX `toc.yml`, and Hugo `_index.md` conventions.
 
 You can make the selection explicit in `catalog.json`:
@@ -132,7 +136,7 @@ Choose an embedding profile appropriate to the documents: `bge-small-en-v1.5@1` 
 | Command | Arguments and options | Result |
 | --- | --- | --- |
 | `gezel knowledge init <dir>` | A new folder or an existing Markdown tree | Create the catalog configuration and, for a new tree, sample content |
-| `gezel knowledge build <dir>` | `--out <file>`, `--sign-key <pemfile>` | Compile Markdown, assets, and indexes into a `.gezk` archive |
+| `gezel knowledge build <dir>` | `--out <file>`, `--sign-key <pemfile>`, `--skip-images` | Compile Markdown, assets, and indexes into a `.gezk` archive |
 | `gezel knowledge inspect <path>` | Archive or extracted catalog directory | Show manifest identity, license, counts, profiles, signature metadata, and sizes |
 | `gezel knowledge validate <path>` | `--deep` | Verify declared files, hashes, schema, and counts; deep mode adds database/vector checks |
 | `gezel knowledge search <path> <query>` | `--semantic`, `--limit <n>`, optional radius options | Search that file or extracted catalog; default limit 10, clamped to 1–50 |

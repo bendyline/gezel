@@ -300,32 +300,52 @@ describe('ChatManager.deliverQuestionAnswer', () => {
   it('waits for an in-flight permission requester and its bridge teardown before continuing', async () => {
     const session = await manager.createSession({ gezelId: 'leo' });
     const stalled = mock.scriptStreamThenStall('Waiting for permission.');
+    // MCP startup can exceed expect.poll's one-second default on CI.
+    // Synchronize on the provider call instead of a wall-clock polling budget.
+    let markSendStarted = () => {};
+    const sendStarted = new Promise<void>((resolve) => {
+      markSendStarted = resolve;
+    });
+    const recordCall = mock.recordCall.bind(mock);
+    vi.spyOn(mock, 'recordCall').mockImplementation((call) => {
+      recordCall(call);
+      if (call.kind === 'send') markSendStarted();
+    });
     const sending = manager.send(session.id, 'Prepare a presentation.');
-    await expect.poll(() => mock.calls.some((call) => call.kind === 'send')).toBe(true);
-    const live = mock.sessions[0]!;
-    const originalDisconnect = live.disconnect.bind(live);
+    const settledSending = sending.catch(() => {});
+    let refresh: Promise<void> | undefined;
+    let refreshed = false;
     let finishDisconnect = () => {};
     const disconnectGate = new Promise<void>((resolve) => {
       finishDisconnect = resolve;
     });
-    const disconnect = vi.spyOn(live, 'disconnect').mockImplementation(async () => {
-      await disconnectGate;
-      await originalDisconnect();
-    });
-    let refreshed = false;
-    const refresh = manager.resetProjectToolsets('default', session.id).then(() => {
-      refreshed = true;
-    });
     try {
+      await Promise.race([sendStarted, sending]);
+      expect(mock.calls.some((call) => call.kind === 'send')).toBe(true);
+      const live = mock.sessions[0]!;
+      const originalDisconnect = live.disconnect.bind(live);
+      let markDisconnectStarted = () => {};
+      const disconnectStarted = new Promise<void>((resolve) => {
+        markDisconnectStarted = resolve;
+      });
+      const disconnect = vi.spyOn(live, 'disconnect').mockImplementation(async () => {
+        markDisconnectStarted();
+        await disconnectGate;
+        await originalDisconnect();
+      });
+      refresh = manager.resetProjectToolsets('default', session.id).then(() => {
+        refreshed = true;
+      });
       expect(refreshed).toBe(false);
       stalled.release();
       await sending;
-      await expect.poll(() => disconnect.mock.calls.length).toBe(1);
+      await disconnectStarted;
+      expect(disconnect).toHaveBeenCalledTimes(1);
       expect(refreshed).toBe(false);
     } finally {
       stalled.release();
       finishDisconnect();
-      await Promise.all([sending, refresh]);
+      await Promise.all([settledSending, refresh]);
     }
     expect(refreshed).toBe(true);
   });

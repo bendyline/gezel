@@ -1058,6 +1058,7 @@ knowledge
   .description('Compile a catalog folder into a .gezk archive')
   .option('--out <file>', 'output path (default <dir>/<id>-<version>.gezk)')
   .option('--sign-key <pemfile>', 'Ed25519 private key (PKCS#8 PEM) to sign the manifest')
+  .option('--skip-images', 'Build without image assets, keeping image alt text')
   .action(async (dir: string, opts: { out?: string; signKey?: string }) => {
     const { runKnowledgeBuild } = await loadKnowledgeCommand();
     await runKnowledgeBuild(dir, opts);

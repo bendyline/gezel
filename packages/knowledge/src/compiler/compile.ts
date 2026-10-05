@@ -39,21 +39,13 @@ import type {
 } from '@bendyline/gezk';
 import {
   GEZK_MANIFEST_KIND,
-  KnowledgeAssetPathSchema,
   KnowledgeCatalogManifestSchema,
   KnowledgeLocationsSchema,
   KnowledgeOrdinalSchema,
   KnowledgeTocReferenceSchema,
-  MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
-  MAX_KNOWLEDGE_ASSET_BYTES,
-  MAX_KNOWLEDGE_ASSET_COUNT,
-  assetExtension,
-  assetKindForExtension,
   canonicalizeJson,
   normalizeLongitude,
-  sniffAssetType,
   spatialManifest,
-  svgInertnessProblem,
 } from '@bendyline/gezk';
 import { writeGezkArchive } from '../archive/write.js';
 import { type MarkdownChunk, chunkMarkdownProfile } from '../chunking/markdown-chunker.js';
@@ -83,6 +75,14 @@ import { DatabaseSync } from '../format/node-sqlite.js';
 import { l2Normalize, quantizeBinaryForProfile, quantizeInt8 } from '../format/quantize.js';
 import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
+import {
+  type CompileAsset,
+  type PreparedAsset,
+  omitSkippedAssetReferences,
+  prepareAssets,
+} from './assets.js';
+
+export type { CompileAsset } from './assets.js';
 
 export interface CompileTopic {
   id: string;
@@ -90,14 +90,6 @@ export interface CompileTopic {
   parentId?: string;
   description?: string;
   sortKey?: string;
-}
-
-export interface CompileAsset {
-  /** Archive path, `assets/…`, matching the format's asset path grammar. */
-  path: string;
-  /** Exactly one of `absPath` / `content`. */
-  absPath?: string;
-  content?: Buffer;
 }
 
 export interface CompileKnowledgeCatalogOptions {
@@ -163,6 +155,13 @@ export interface CompileKnowledgeCatalogOptions {
    */
   assets?: CompileAsset[];
   /**
+   * Invalid image content (type mismatch, oversized file, or active SVG)
+   * fails by default. `warn` omits it and replaces its body references with
+   * their text. Invalid paths, duplicates, and aggregate limits still fail.
+   */
+  invalidAssets?: 'error' | 'warn';
+  onWarning?: (message: string) => void;
+  /**
    * Last touch before the manifest is archived — the signing seam
    * (signatures/signing.ts `signManifest`). Must only add/replace the
    * `signature` field; the result is re-parsed, so structural edits fail
@@ -227,7 +226,11 @@ export async function compileKnowledgeCatalog(
     );
   }
   const topicById = assertTopicForest(opts.topics);
-  const preparedAssets = prepareAssets(opts.assets ?? [], opts.extraFiles ?? {});
+  const { assets: preparedAssets, skippedPaths } = prepareAssets(
+    opts.assets ?? [],
+    opts.extraFiles ?? {},
+    opts,
+  );
   const profile = opts.embeddingProfile;
   const chunkerOpts = {
     unit: opts.chunkingProfile.unit,
@@ -246,7 +249,11 @@ export async function compileKnowledgeCatalog(
         longitude: normalizeLongitude(location.longitude),
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    const doc = { ...input, locations };
+    const doc = {
+      ...input,
+      locations,
+      markdown: omitSkippedAssetReferences(input.markdown, skippedPaths),
+    };
     if (seenIds.has(doc.id)) throw new Error(`duplicate document id: ${doc.id}`);
     seenIds.add(doc.id);
     const leafTopicId = assertTopicPath(topicById, doc.id, doc.topicPath);
@@ -937,70 +944,6 @@ function encodeDocumentMeta(doc: CatalogDocument): string | null {
     );
   }
   return json;
-}
-
-interface PreparedAsset {
-  path: string;
-  bytes: Buffer;
-  sizeBytes: number;
-  sha256: string;
-}
-
-/** Validate and load every asset up front so a bad image fails before any embedding runs. */
-function prepareAssets(
-  assets: CompileAsset[],
-  extraFiles: Record<string, string>,
-): PreparedAsset[] {
-  for (const path of Object.keys(extraFiles)) {
-    if (path.startsWith('assets/')) {
-      throw new Error(`extraFiles cannot carry '${path}': files under assets/ go through 'assets'`);
-    }
-  }
-  if (assets.length > MAX_KNOWLEDGE_ASSET_COUNT) {
-    throw new Error(`${assets.length} assets exceed the limit of ${MAX_KNOWLEDGE_ASSET_COUNT}`);
-  }
-  const seen = new Set<string>();
-  const prepared: PreparedAsset[] = [];
-  let total = 0;
-  for (const asset of assets) {
-    const parsed = KnowledgeAssetPathSchema.safeParse(asset.path);
-    if (!parsed.success) throw new Error(`invalid asset path: ${asset.path}`);
-    const key = asset.path.toLowerCase();
-    if (seen.has(key)) throw new Error(`duplicate asset path (case-insensitive): ${asset.path}`);
-    seen.add(key);
-    if ((asset.content === undefined) === (asset.absPath === undefined)) {
-      throw new Error(`asset ${asset.path} must supply exactly one of content / absPath`);
-    }
-    const bytes = asset.content ?? readFileSync(asset.absPath as string);
-    if (bytes.byteLength > MAX_KNOWLEDGE_ASSET_BYTES) {
-      throw new Error(
-        `asset ${asset.path} is ${bytes.byteLength} bytes; the limit is ${MAX_KNOWLEDGE_ASSET_BYTES}`,
-      );
-    }
-    total += bytes.byteLength;
-    if (total > MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES) {
-      throw new Error(`assets exceed ${MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES} bytes in total`);
-    }
-    const ext = assetExtension(asset.path);
-    const expected = ext ? assetKindForExtension(ext) : null;
-    const actual = sniffAssetType(bytes);
-    if (expected === null || actual !== expected) {
-      throw new Error(
-        `asset ${asset.path}: the leading bytes say ${actual ?? 'unknown'}, the extension says ${expected ?? 'unknown'}`,
-      );
-    }
-    if (ext === 'svg') {
-      const problem = svgInertnessProblem(bytes);
-      if (problem) throw new Error(`asset ${asset.path} is not an inert SVG: it ${problem}`);
-    }
-    prepared.push({
-      path: asset.path,
-      bytes,
-      sizeBytes: bytes.byteLength,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-    });
-  }
-  return prepared.sort((a, b) => (a.path < b.path ? -1 : 1));
 }
 
 /** A body may only reference assets the archive ships. */

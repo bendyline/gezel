@@ -99,6 +99,8 @@ export interface LoadMarkdownCatalogOptions {
   uri?: { publisherId: string; catalogId: string };
   /** What to do with an image link whose file is missing (default `error`; `warn` for docfx). */
   missingAssets?: 'error' | 'warn';
+  /** Keep image alt text without resolving or bundling image files. */
+  skipImages?: boolean;
   onWarning?: (message: string) => void;
 }
 
@@ -540,6 +542,7 @@ interface LinkRewriteContext {
   uri: LoadMarkdownCatalogOptions['uri'];
   assets: Map<string, CompileAsset>;
   missingAssets: 'error' | 'warn';
+  skipImages: boolean;
   /** docfx: a target starting `~/` is relative to the docset root, not the page. */
   tildeIsRoot: boolean;
   warn: (message: string) => void;
@@ -632,6 +635,7 @@ function rewriteLinks(ctx: LinkRewriteContext, markdown: string): string {
       return line.replace(
         INLINE_LINK,
         (whole, bang: string, text: string, target: string, title: string) => {
+          if (bang === '!' && ctx.skipImages) return text;
           const rewritten = rewriteTarget(ctx, bang === '!', target);
           return rewritten === null ? whole : `${bang}[${text}](${rewritten}${title})`;
         },
@@ -961,6 +965,7 @@ export async function loadMarkdownCatalog(
       // A docfx docset draws on dependent repositories (`~/reusable-content`)
       // that a checkout never holds, so a missing image is expected there.
       missingAssets: opts.missingAssets ?? (docfx ? 'warn' : 'error'),
+      skipImages: opts.skipImages ?? false,
       tildeIsRoot: docfx,
       warn: (message) => linkWarnings.push(message),
     };

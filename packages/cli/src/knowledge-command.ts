@@ -237,7 +237,7 @@ function describeToc(toc: { format: TableOfContentsFormat; path?: string }, root
 
 export async function runKnowledgeBuild(
   dir: string,
-  opts: { out?: string; signKey?: string },
+  opts: { out?: string; signKey?: string; skipImages?: boolean },
   deps: KnowledgeCommandDeps = {},
 ): Promise<void> {
   const root = resolve(dir);
@@ -249,6 +249,7 @@ export async function runKnowledgeBuild(
     uri: { publisherId: config.publisher.id, catalogId: config.id },
     ...(config.ignore ? { ignore: config.ignore } : {}),
     toc,
+    skipImages: opts.skipImages ?? false,
     onWarning: (message) => console.warn(`warning: ${message}`),
   });
   console.log(`Content: ${displayPath(root, contentRoot)}`);
@@ -293,6 +294,8 @@ export async function runKnowledgeBuild(
       countTokens: (text) => embedder.countTokens(text),
       workDir,
       assets: source.assets,
+      invalidAssets: 'warn',
+      onWarning: (message) => console.warn(`warning: ${message}`),
       ...(signKeyPem ? { finalizeManifest: (manifest) => signManifest(manifest, signKeyPem) } : {}),
       onProgress: ({ done, total }) => {
         if (!process.stderr.isTTY || total === 0) return;

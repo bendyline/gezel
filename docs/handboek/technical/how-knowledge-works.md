@@ -133,7 +133,7 @@ Catalog databases need **stock SQLite with FTS5**, without sqlite-vec. Vectors a
 
 In the 0.7 draft, `topic_documents` lets one document appear under several table-of-contents topics. Its body, chunks, vectors, and citation identity remain canonical. A subtree listing deduplicates documents before counting and pagination, so a shared placement does not create another search result or another copy of a passage.
 
-The draft also carries typed geographic points in `document_locations`. A `subject` location describes what an article is about; an `associated` location records a related place. Radius discovery uses subject locations and the `sphere-6371000` distance contract, not a guess based on place names in prose. A spatial search first restricts eligible documents, then searches passages in that set. Catalogs without usable subject coordinates can still be searched normally. See the companion reference for [`nearby` and radius-filtered search](knowledge-command-line.md#search-by-location).
+The draft also carries typed geographic points in `document_locations`. A `subject` location describes what an article is about; an `associated` location records a related place. Radius discovery uses subject locations and the `sphere-6371000` distance contract, not a guess based on place names in prose. A spatial search first restricts eligible documents, then searches passages in that set. Catalogs without usable subject coordinates can still be searched normally. See the companion reference for [`nearby` and radius-filtered search](knowledge-command-line.md).
 
 ### Catalog compilation
 
