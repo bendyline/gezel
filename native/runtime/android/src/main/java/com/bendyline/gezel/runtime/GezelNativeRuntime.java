@@ -26,7 +26,7 @@ public final class GezelNativeRuntime {
     /** Configure once before attaching a plugin. All clients share this model root and gate. */
     public static synchronized GezelNativeRuntime shared(Context context, java.io.File root) {
         final java.io.File canonical;
-        try { canonical = root.getCanonicalFile(); }
+        try { canonical = MobileModelStore.validatedRoot(root); }
         catch (java.io.IOException error) { throw new IllegalArgumentException("Invalid model root", error); }
         if (shared != null) {
             if (!canonical.equals(sharedRoot)) throw new IllegalStateException("The process runtime already owns another model root");

@@ -22,7 +22,8 @@
         "LICENSE-llama-cpp-unicode-data-Unicode-3.0.txt",
         "LICENSE-llama-cpp-openvino-APACHE.txt",
         "LICENSE-nvidia-cub-BSD-3-Clause.txt",
-        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt"
+        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
+        "LICENSE-vulkan-loader-APACHE.txt"
       ]
     },
     "sd-cpp": {

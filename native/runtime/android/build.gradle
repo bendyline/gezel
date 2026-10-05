@@ -20,6 +20,7 @@ android {
     publishing { singleVariant('release') { withSourcesJar() } }
 }
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     api "com.bendyline.gezel:gezel-llama:${version}"
     implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
     // ML Kit GenAI beta4 calls Job.cancel$default, which kotlinx-coroutines

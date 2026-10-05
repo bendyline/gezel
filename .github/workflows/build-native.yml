@@ -125,7 +125,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test native release contracts
         run: |
-          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs
+          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs scripts/verify-vulkan-payload.test.mjs
           python3 -m unittest discover -s native/runtime -p 'test_*.py'
 
   mobile:
@@ -242,9 +242,8 @@ jobs:
             runner: ubuntu-latest
             script: build.sh
             artifact: gezel-sd-server
-            # Vulkan-linked: `libvulkan.so.1` must be present on the user's
-            # machine or the process dies at exec, before sd.cpp can fall
-            # back to CPU. See native/engines/sd-cpp/README.md.
+            # Bundle libvulkan.so.1 so minimal hosts can reach CPU fallback.
+            # Hardware-specific ICDs are still supplied by the user's driver.
             sd_backend: vulkan
             needs_cuda: false
             needs_vulkan: true
@@ -1050,6 +1049,19 @@ jobs:
           if [[ "${{ matrix.variant }}" == cuda && "${{ matrix.engine }}" == llama-cpp ]]; then
             ls "$out" | grep -Ei 'cudart|cublas' || { echo "CUDA runtime libraries missing alongside exe"; exit 1; }
           fi
+
+      - name: Verify bundled Linux Vulkan loader
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_vulkan && startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          consumer="$out/${{ matrix.artifact }}"
+          # llama-server dlopens this module; ldd on the server misses it.
+          if [[ "${{ matrix.engine }}" == llama-cpp ]]; then
+            consumer="$out/libggml-vulkan.so"
+          fi
+          node scripts/verify-vulkan-payload.mjs "$out" "$consumer"
 
       - name: Verify llama.cpp CUDA architecture payload
         if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'linux-')

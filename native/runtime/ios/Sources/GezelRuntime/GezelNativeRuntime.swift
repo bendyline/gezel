@@ -82,7 +82,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private static var sharedRoot: URL?
     public static func shared(root: URL) throws -> GezelNativeRuntime {
         sharedLock.lock(); defer { sharedLock.unlock() }
-        let canonical = root.standardizedFileURL.resolvingSymlinksInPath()
+        let canonical = try MobileModelStore.validatedRoot(root)
         if let existing = sharedRuntime {
             guard sharedRoot == canonical else { throw MobileInferenceError(code: "ALREADY_CONFIGURED", message: "The process runtime already owns another model root") }
             return existing

@@ -103,6 +103,41 @@ final class MobileBridgeTests: XCTestCase {
         }
     }
 
+    /// OS model assets are not provisioned on hosted simulators. Keep live
+    /// qualification explicit so it cannot short-circuit fixture/bridge coverage.
+    @MainActor
+    func testLiveAppleFoundationModels() async throws {
+        guard ProcessInfo.processInfo.environment["GEZEL_TEST_LIVE_APPLE_FM"] == "1" else {
+            throw XCTSkip("Set GEZEL_TEST_LIVE_APPLE_FM=1 on a device with Apple model assets to qualify live inference")
+        }
+        let view = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).compactMap { $0.rootViewController as? MainViewController }.first?.webView)
+        for _ in 0..<600 {
+            if (try? await view.evaluateJavaScript("Boolean(window.__GEZEL__ && window.Capacitor?.Plugins?.GezelMobile)")) as? Bool == true { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let result = try await view.callAsyncJavaScript("""
+            const plugin = window.Capacitor.Plugins.GezelMobile;
+            const apple = (await plugin.providers()).providers.find(item => item.id === 'apple-foundation-models');
+            if (apple?.availability !== 'available') throw new Error(apple?.reason ?? 'Apple model is unavailable');
+            let appleStreamed = '';
+            const appleListener = await plugin.addListener('chatDelta', event => {
+                if (event.requestId === 'apple-smoke') appleStreamed += event.delta;
+            });
+            const appleResult = await plugin.generate({providerId:'apple-foundation-models',requestId:'apple-smoke',messages:[{role:'user',content:'Say hello.'}],maxTokens:32});
+            await appleListener.remove();
+            if (!appleResult.text) throw new Error('Available Apple model produced no response');
+            if (appleStreamed !== appleResult.text) throw new Error('Apple stream differed from final response');
+            const applePending = plugin.generate({providerId:'apple-foundation-models',requestId:'apple-cancel',messages:[{role:'user',content:'Tell a long story about a garden.'}],maxTokens:1024});
+            try { await plugin.generate({requestId:'cross-provider-busy',modelId:'busy-admission-probe',contextSize:2048,messages:[{role:'user',content:'Hello'}],maxTokens:8}); throw new Error('Providers ran concurrently'); }
+            catch (error) { if (error.code !== 'BUSY') throw error; }
+            await plugin.cancel({requestId:'apple-cancel'});
+            if ((await applePending).stopReason !== 'cancelled') throw new Error('Apple cancellation did not release its session');
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page) as? Bool
+        XCTAssertEqual(result, true)
+    }
+
     @MainActor
     func testSharedProductAndNativeStreamingChat() async throws {
         var candidate: WKWebView?
@@ -344,21 +379,7 @@ final class MobileBridgeTests: XCTestCase {
             const apple = inventory.providers.find(item => item.id === 'apple-foundation-models');
             if (local?.availability !== 'available') throw new Error('Selected fixture should be available');
             if (!apple || apple.locality !== 'on-device' || apple.capabilities.tools !== true) throw new Error('Invalid Apple descriptor');
-            if (apple.availability === 'available') {
-                let appleStreamed = '';
-                const appleListener = await plugin.addListener('chatDelta', event => {
-                    if (event.requestId === 'apple-smoke') appleStreamed += event.delta;
-                });
-                const appleResult = await plugin.generate({providerId:'apple-foundation-models',requestId:'apple-smoke',messages:[{role:'user',content:'Say hello.'}],maxTokens:32});
-                await appleListener.remove();
-                if (!appleResult.text) throw new Error('Available Apple model produced no response');
-                if (appleStreamed !== appleResult.text) throw new Error('Apple stream differed from final response');
-                const applePending = plugin.generate({providerId:'apple-foundation-models',requestId:'apple-cancel',messages:[{role:'user',content:'Tell a long story about a garden.'}],maxTokens:1024});
-                try { await plugin.generate({requestId:'cross-provider-busy',modelId:fixtureId,contextSize:2048,messages:[{role:'user',content:'Hello'}],maxTokens:8}); throw new Error('Providers ran concurrently'); }
-                catch (error) { if (error.code !== 'BUSY') throw error; }
-                await plugin.cancel({requestId:'apple-cancel'});
-                if ((await applePending).stopReason !== 'cancelled') throw new Error('Apple cancellation did not release its session');
-            } else {
+            if (apple.availability !== 'available') {
                 if (!apple.reason) throw new Error('Unavailable Apple model must explain why');
                 try { await plugin.generate({providerId:'apple-foundation-models',requestId:'apple-unavailable',messages:[{role:'user',content:'Hello'}]}); throw new Error('Unavailable Apple provider silently fell back'); }
                 catch (error) { if (error.code !== 'UNAVAILABLE') throw error; }

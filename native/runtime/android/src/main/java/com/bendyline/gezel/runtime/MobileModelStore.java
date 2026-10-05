@@ -29,9 +29,7 @@ public class MobileModelStore {
 
     public MobileModelStore(File storageRoot) throws IOException { this(storageRoot, true); }
     protected MobileModelStore(File storageRoot, boolean recoverModels) throws IOException {
-        // Android may expose its trusted app directory through /data/data while
-        // the actual directory lives under /data/user/0 (or the reverse).
-        root = storageRoot.getCanonicalFile();
+        root = validatedRoot(storageRoot);
         models = new File(root, "models");
         requireUnaliased(root);
         requireUnaliased(models);
@@ -39,6 +37,18 @@ public class MobileModelStore {
         if (!recoverModels) return;
         File[] files = models.listFiles();
         if (files != null) for (File file : files) if (file.getName().endsWith(".partial")) file.delete();
+    }
+
+    /** Resolve trusted parent aliases (/data/data), without erasing a link at
+     * the storage boundary itself before the check. Shared runtime admission
+     * must use this same check before retaining its canonical root. */
+    static File validatedRoot(File storageRoot) throws IOException {
+        File absolute = storageRoot.getAbsoluteFile();
+        File parent = absolute.getParentFile();
+        if (parent == null) throw new IOException("Storage path is invalid");
+        File resolved = new File(parent.getCanonicalFile(), absolute.getName());
+        requireUnaliased(resolved);
+        return resolved;
     }
 
     private static void requireUnaliased(File file) throws IOException {

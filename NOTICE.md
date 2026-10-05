@@ -222,7 +222,7 @@ copies and their engine- and helper-aware manifest live in
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-919-19bbbca` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
-| **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
+| **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64` and llama.cpp on `linux-x64-vulkan`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 | **AMD Display Library (ADL) SDK headers** (ABI definitions compiled into Windows `gezel-device-health.exe`; no AMD binary redistributed) | `18.0` | MIT | [GPUOpen-LibrariesAndSDKs/display-library](https://github.com/GPUOpen-LibrariesAndSDKs/display-library) |
 
 The `ggml` compute library is an in-tree copy inside llama.cpp and

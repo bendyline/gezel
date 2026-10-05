@@ -39,9 +39,27 @@ open class MobileModelStore: @unchecked Sendable {
     private let lock = NSRecursiveLock()
     private let fm = FileManager.default
 
+    /// The OS may alias the app container's parent (/var on Apple platforms).
+    /// Resolve that parent, then check the storage boundary before following it.
+    public static func validatedRoot(_ root: URL) throws -> URL {
+        guard root.isFileURL, !root.lastPathComponent.isEmpty else { throw MobileStoreError.invalidModel }
+        let parent = root.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let resolved = parent.appendingPathComponent(root.lastPathComponent, isDirectory: true)
+        try requireUnaliased(resolved)
+        return resolved
+    }
+
+    private static func requireUnaliased(_ directory: URL) throws {
+        // destinationOfSymbolicLink also detects dangling links, unlike fileExists.
+        guard (try? FileManager.default.destinationOfSymbolicLink(atPath: directory.path)) == nil else {
+            throw MobileStoreError.invalidModel
+        }
+    }
+
     public init(root: URL, recoverModels: Bool = true) throws {
-        self.root = root
-        self.modelsRoot = root.appendingPathComponent("models", isDirectory: true)
+        self.root = try Self.validatedRoot(root)
+        self.modelsRoot = self.root.appendingPathComponent("models", isDirectory: true)
+        try Self.requireUnaliased(modelsRoot)
         try fm.createDirectory(at: modelsRoot, withIntermediateDirectories: true)
         var modelDirectory = modelsRoot
         var values = URLResourceValues()
@@ -82,6 +100,7 @@ open class MobileModelStore: @unchecked Sendable {
     public func downloadsDirectory() throws -> URL {
         try synchronized {
             let folder = root.appendingPathComponent("model-downloads", isDirectory: true)
+            try Self.requireUnaliased(folder)
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             guard try folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { throw MobileStoreError.invalidModel }
             var target = folder; var attributes = URLResourceValues(); attributes.isExcludedFromBackup = true

@@ -645,7 +645,10 @@ public final class MobileUiSmokeTest {
             check(/bicycle/i.test(transcript.text) && /window/i.test(transcript.text), 'Whisper did not understand the saved Kokoro artifact: ' + transcript.text);
             await openNavigation();
             await clickButton('Settings');
-            await clickButton('Audio');
+            const sections = await until(()=>document.querySelector('[aria-label="Settings section"]'),'compact settings chooser');
+            sections.click();
+            const audio = await until(()=>Array.from(document.querySelectorAll('[role="option"]')).find(item=>visible(item)&&item.textContent.trim()==='Audio'),'Audio settings option');
+            audio.click();
             await until(()=>document.body.innerText.includes('Preview a voice'),'shared audio settings');
             check(!document.body.innerText.includes('Pull a model'), 'Bundled speech must not offer unavailable downloads');
             return true;

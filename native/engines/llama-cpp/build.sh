@@ -578,6 +578,33 @@ if [[ "$os" == "Linux" && "$backend" == "cuda" ]]; then
   fi
 fi
 
+# ── 7b. Linux Vulkan loader bundling ───────────────────────────────
+# The Vulkan backend is a dlopen-able module, so checking llama-server's
+# DT_NEEDED alone misses its libvulkan.so.1 dependency. The resolver fetches
+# this variant independently of sd-cpp's bare archive: stage the loader here
+# as well, rather than relying on that sibling archive or the build host.
+if [[ "$os" == "Linux" && "$backend" == "vulkan" ]]; then
+  vulkan_lib=""
+  for candidate in \
+      "${VULKAN_SDK:+$VULKAN_SDK/lib}" \
+      /usr/lib/x86_64-linux-gnu \
+      /usr/lib/aarch64-linux-gnu \
+      /usr/lib64 \
+      /usr/lib; do
+    if [[ -n "$candidate" && -f "$candidate/libvulkan.so.1" ]]; then
+      vulkan_lib="$candidate/libvulkan.so.1"
+      break
+    fi
+  done
+  if [[ -z "$vulkan_lib" ]]; then
+    echo "[build] error: Vulkan build requires libvulkan.so.1 in the SDK or system library directories" >&2
+    exit 1
+  fi
+  # Dereference the SDK's versioned symlink into the required SONAME path.
+  cp -L "$vulkan_lib" "$out_dir/libvulkan.so.1"
+  echo "[build] bundled libvulkan.so.1 (from $vulkan_lib)"
+fi
+
 # ── 8. OpenSSL: not linked, not bundled ────────────────────────────
 # There used to be an OpenSSL bundling step here. At b8892 llama.cpp
 # called find_package(OpenSSL) unconditionally and ignored
@@ -619,9 +646,15 @@ if [[ "$os" == "Linux" ]]; then
   echo "[build] patchelf set rpath \$ORIGIN on $server_name"
   shopt -s nullglob
   for so in "$out_dir"/*.so "$out_dir"/*.so.*; do
+    # The loader has only system dependencies; keep the vendor bytes intact.
+    [[ "$(basename "$so")" == libvulkan.so* ]] && continue
     patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
   done
   shopt -u nullglob
+  if [[ "$backend" == "vulkan" ]]; then
+    node "$repo_root/scripts/verify-vulkan-payload.mjs" \
+      "$out_dir" "$out_dir/libggml-vulkan.so"
+  fi
 
 elif [[ "$os" == "Darwin" ]]; then
   # @loader_path is the dir containing the loader (binary or dylib),

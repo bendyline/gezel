@@ -184,6 +184,15 @@ pnpm mobile:test:scripts
 pnpm mobile:test:android
 ```
 
+The `AppSmoke` iOS scheme checks the shared product and native bridge with a
+deterministic llama.cpp fixture. Live Apple Foundation Models inference is a
+separate opt-in test, `MobileBridgeTests/testLiveAppleFoundationModels`: set
+`GEZEL_TEST_LIVE_APPLE_FM=1` in the test scheme, or prefix `xcodebuild test` with
+`TEST_RUNNER_GEZEL_TEST_LIVE_APPLE_FM=1`. It requires working Apple model assets
+on the test device and fails if an advertised model cannot generate. Hosted
+simulators can advertise availability without those assets; their default smoke
+test still checks the Apple descriptor, admission, and OS-managed preparation.
+
 For the responsive production-browser check, serve the compiled assets in a
 separate terminal:
 

@@ -186,6 +186,13 @@ uses this.
    library is still supplied by the user's system.
 6. Copies to `native/build/<platform>[-<backend>]/`.
 
+Linux Vulkan builds also bundle `libvulkan.so.1` directly in the variant
+archive. The runtime downloader fetches one archive at a time, so the loader
+in the image engine's bare archive cannot serve this variant. The build and
+CI verify that `libggml-vulkan.so` resolves the bundled loader with
+`LD_LIBRARY_PATH` cleared. GPU drivers and their Vulkan ICDs remain host
+requirements.
+
 ## Verifying a build
 
 ```sh
