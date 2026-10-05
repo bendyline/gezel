@@ -174,12 +174,23 @@ export async function validateExtractedCatalog(
       manifest.files.some((f) => f.path === manifest.license.noticePath),
       `manifest.files lacks the declared notice ${manifest.license.noticePath}`,
     );
+    const toc = handle.tocIntegrity();
+    check(
+      'toc-references',
+      toc.invalidReferences === 0 && toc.missingPrimary === 0 && toc.duplicateReferences === 0,
+      `${toc.invalidReferences} invalid references, ${toc.missingPrimary} missing primary placements, ${toc.duplicateReferences} duplicate placements`,
+    );
+    check(
+      'toc-counts',
+      toc.incorrectCounts === 0,
+      `${toc.incorrectCounts} incorrect per-topic counts`,
+    );
     const topicDocSum = topics.reduce((sum, t) => sum + t.documentCount, 0);
     check(
       'counts-documents',
       handle.documentsPage({ limit: 1 }).total === manifest.counts.documents &&
-        topicDocSum === manifest.counts.documents,
-      `documents table ${handle.documentsPage({ limit: 1 }).total}, topic sum ${topicDocSum}, manifest ${manifest.counts.documents}`,
+        topicDocSum === toc.placements,
+      `documents table ${handle.documentsPage({ limit: 1 }).total}, topic sum ${topicDocSum}, placements ${toc.placements}, manifest documents ${manifest.counts.documents}`,
     );
     check(
       'counts-shards',
@@ -335,6 +346,8 @@ export async function validateExtractedCatalog(
         );
       }
     }
+  } catch (error) {
+    check('catalog-structure', false, error instanceof Error ? error.message : String(error));
   } finally {
     handle.close();
   }

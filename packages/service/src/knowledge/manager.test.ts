@@ -67,6 +67,40 @@ describe('KnowledgeManager', () => {
     expect(doc?.markdown).toContain('Tails and pins');
   });
 
+  it('installs and browses shared TOC references without duplicating documents or citations', async () => {
+    const path = join(dir, 'shared-toc.gezk');
+    await buildTestCatalog({
+      outputPath: path,
+      workDir: join(dir, 'shared-toc-work'),
+      id: 'shared-toc',
+      withSharedToc: true,
+    });
+    const local = new KnowledgeManager({
+      home: join(dir, 'shared-toc-home'),
+      host: await createInProcessCatalogHost(),
+    });
+    await local.start();
+    try {
+      const events = await runInstall(local, path);
+      expect(
+        events.some((e) => e.type === 'done'),
+        JSON.stringify(events),
+      ).toBe(true);
+      const listing = await local.documentsPage('shared-toc', { topicId: 'finishing' });
+      expect(listing.documents.map((d) => d.id)).toEqual(['dovetails', 'shellac']);
+      expect(listing.documents[0]?.topicId).toBe('finishing');
+      expect((await local.documentsPage('shared-toc', {})).total).toBe(2);
+      const topic = (await local.topics('shared-toc')).find((t) => t.id === 'finishing');
+      expect(topic?.totalDocumentCount).toBe(2);
+      const read = await local.getDocument('shared-toc', listing.documents[0]?.id ?? '');
+      expect(read?.markdown).toContain('Tails and pins');
+      const citation = await local.resolveCitation('knowledge://gezel-tests/shared-toc/dovetails');
+      expect(citation.ok && citation.markdown).toBe(read?.markdown);
+    } finally {
+      await local.stop();
+    }
+  });
+
   it('answers explicit search with cited knowledge results', async () => {
     const results = await manager.searchUnified('dovetail corner joint', {
       vector: null,
@@ -78,6 +112,46 @@ describe('KnowledgeManager', () => {
     expect(hit?.catalogId).toBe('test-notes');
     expect(hit?.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
     expect(hit?.retrievalSource).toBe('knowledge');
+  });
+
+  it('resolves a citation from a search hit to its passage, and refuses made-up ones', async () => {
+    const [hit] = await manager.searchUnified('dovetail corner joint', {
+      vector: null,
+      maxResults: 5,
+    });
+    const uri = hit?.uri ?? '';
+    expect(uri).toMatch(/#chunk=[0-9a-f]{32}$/);
+    const cited = await manager.resolveCitation(uri);
+    expect(cited.ok).toBe(true);
+    if (cited.ok) {
+      expect(cited.chunk?.documentId).toBe('dovetails');
+      expect(cited.chunk?.text.length).toBeGreaterThan(0);
+    }
+    const passage = await manager.getPassage(
+      'test-notes',
+      'dovetails',
+      uri.split('#chunk=')[1] ?? '',
+    );
+    expect(passage?.text).toBe(cited.ok ? cited.chunk?.text : undefined);
+    expect(passage?.lineEnd).toBeGreaterThanOrEqual(passage?.lineStart ?? 0);
+
+    const article = await manager.resolveCitation(uri.split('#')[0] ?? '');
+    expect(article.ok && article.markdown).toContain('Tails and pins');
+    expect(
+      await manager.resolveCitation(uri.replace(/#chunk=.*/, `#chunk=${'0'.repeat(32)}`)),
+    ).toEqual({ ok: false, reason: 'no-passage' });
+    expect(
+      await manager.resolveCitation('knowledge://gezel-tests/test-notes/invented-joint'),
+    ).toEqual({ ok: false, reason: 'no-document' });
+    expect(await manager.resolveCitation('knowledge://someone-else/test-notes/dovetails')).toEqual({
+      ok: false,
+      reason: 'catalog-not-installed',
+    });
+    expect(await manager.resolveCitation('knowledge://nope')).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+    expect(await manager.getPassage('test-notes', 'dovetails', '0'.repeat(32))).toBeNull();
   });
 
   it('semantic path reranks with the exact-vector query', async () => {
@@ -418,6 +492,32 @@ describe('KnowledgeManager — search model download progress', () => {
       await progressManager.stop();
     }
   }, 60_000);
+
+  it('finishes the catalog install with a warning when optional profile prewarm stalls', async () => {
+    const { MULTILINGUAL_E5_SMALL_1 } = await import('@bendyline/gezel-knowledge');
+    const archive = join(progressDir, 'e5-timeout-1.0.0.gezk');
+    await buildTestCatalog({
+      outputPath: archive,
+      workDir: join(progressDir, 'timeout-work'),
+      id: 'e5-timeout',
+      embeddingProfile: MULTILINGUAL_E5_SMALL_1,
+    });
+    const timeoutManager = new KnowledgeManager({
+      home: join(progressDir, 'timeout-home'),
+      host: await createInProcessCatalogHost(),
+      profilePrewarmTimeoutMs: 10,
+      embedQueryForProfile: async () => new Promise<number[]>(() => {}),
+    });
+    await timeoutManager.start();
+    try {
+      const events = await runInstall(timeoutManager, archive);
+      const done = events.at(-1);
+      expect(done).toMatchObject({ type: 'done' });
+      expect(done && 'warning' in done ? done.warning : undefined).toMatch(/prewarm exceeded 10ms/);
+    } finally {
+      await timeoutManager.stop();
+    }
+  });
 });
 
 describe('KnowledgeManager with a registered profile id whose pins differ', () => {

@@ -142,6 +142,81 @@ describe('ChatManager + app tools', () => {
     expect(logged.some((entry) => JSON.stringify(entry).includes('add_travel_points'))).toBe(true);
   }, 30_000);
 
+  it('holds a document session to the evidence it read before text reaches the document', async () => {
+    const inserted: string[] = [];
+    const { relayId } = relays.open({ appId: 'office', appName: 'Word' });
+    relays.attachStream(relayId, {
+      write(event) {
+        if (event.type !== 'tool_call') return;
+        if (event.tool === 'doc_insert_text')
+          inserted.push((event.arguments as { text: string }).text);
+        queueMicrotask(() =>
+          relays.resolveCall(relayId, event.callId, {
+            ok: true,
+            content:
+              event.tool === 'doc_read'
+                ? 'Augustine Washington died in 1743, when George was 11.'
+                : '{"inserted":true}',
+          }),
+        );
+      },
+    });
+    relays.register(relayId, {
+      projectId: 'default',
+      tools: [
+        {
+          name: 'doc_read',
+          description: 'Read the open document.',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'doc_insert_text',
+          description: 'Insert text into the open document.',
+          inputSchema: {
+            type: 'object',
+            properties: { text: { type: 'string' } },
+            required: ['text'],
+          },
+        },
+      ],
+    });
+
+    // Ada is a Developer: the document tools alone put the session in factual mode.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptToolCalls([
+      { name: 'doc_read', arguments: {} },
+      {
+        name: 'doc_insert_text',
+        arguments: { text: 'His father died in 1743 [1]. He had a brother named Ezekiel.' },
+      },
+      {
+        name: 'doc_insert_text',
+        arguments: { text: 'His father, Augustine Washington, died in 1743 [1].' },
+      },
+    ]);
+    mock.script('Added a sentence about his father, who died in 1743 [1].');
+    await manager.send(session.id, 'Add a sentence about his father.');
+
+    const created = mock.calls.find((c) => c.kind === 'create');
+    expect(created?.opts?.systemMessage).toContain('## Facts and sources');
+    expect(created?.opts?.grounding).toBeDefined();
+    expect(mock.toolCallOutputs.find(({ name }) => name === 'doc_read')?.output).toContain(
+      '[1] Evidence from `doc_read`',
+    );
+    const refused = mock.toolCallOutputs.filter(({ name }) => name === 'doc_insert_text')[0];
+    expect(refused?.output).toContain('Not inserted');
+    expect(refused?.output).toContain('"Ezekiel"');
+    expect(inserted).toEqual(['His father, Augustine Washington, died in 1743.']);
+
+    const persisted = await store.getSession('ada', session.id);
+    const reply = persisted?.messages.find(({ content }) => content.startsWith('Added a sentence'));
+    expect(reply?.grounding?.evidence).toEqual([
+      expect.objectContaining({ n: 1, kind: 'tool', tool: 'doc_read', title: 'the open document' }),
+    ]);
+    expect(reply?.grounding?.counts.supported).toBe(1);
+    expect(reply?.grounding?.problems).toEqual([]);
+  }, 30_000);
+
   it('tells the model the call failed when the app reports an error', async () => {
     connectApp((relayId, call) =>
       relays.resolveCall(relayId, call.callId, {

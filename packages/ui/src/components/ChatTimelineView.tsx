@@ -3284,11 +3284,7 @@ export function ChatTimelineView({
   };
 
   if (loading && messages.length === 0) {
-    return (
-      <div className="chat-timeline chat-timeline-loading">
-        <p className="muted small">Loading…</p>
-      </div>
-    );
+    return <div className="chat-timeline chat-timeline-loading" aria-busy="true" />;
   }
 
   if (error) {
@@ -3515,6 +3511,7 @@ export function ChatTimelineView({
         {...(files.length > 0 ? { referencedFiles: files } : {})}
         {...(m.deliverable ? { deliverable: m.deliverable } : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
+        {...(m.grounding ? { grounding: m.grounding } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {})}
         {...(onOpenReference ? { onOpenReference } : {})}
@@ -4033,7 +4030,7 @@ export function ChatTimelineView({
       >
         {hasMore && (
           <div className="timeline-loading-pill muted small">
-            {paginatingRef.current ? 'Loading older messages…' : 'Scroll up for older messages'}
+            {!paginatingRef.current && 'Scroll up for older messages'}
           </div>
         )}
         {/* `rows` can be non-empty while nothing visible comes out of it — a

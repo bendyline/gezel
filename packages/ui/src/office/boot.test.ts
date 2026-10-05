@@ -310,4 +310,44 @@ describe('pickDefaultGezel', () => {
       '',
     );
   });
+
+  it('prefers a writer over the lead and the Meester when nothing is remembered', () => {
+    const crew = [
+      { id: 'lead', name: 'Lead', role: 'Voorman' },
+      { id: 'dev', name: 'Dev', role: 'Developer' },
+      { id: 'res', name: 'Res', role: 'Researcher' },
+      { id: 'cw', name: 'Cw', role: 'Copywriter' },
+      { id: 'm', name: 'M', role: 'Meester' },
+    ];
+    const project = {
+      id: 'p',
+      name: 'P',
+      readOnly: true,
+      voormanGezelId: 'lead',
+      gezelIds: ['dev', 'cw'],
+    };
+    expect(pickDefaultGezel(project, crew, 'm', undefined)).toBe('cw');
+    expect(pickDefaultGezel({ ...project, gezelIds: ['dev'] }, crew, 'm', undefined)).toBe('res');
+    expect(pickDefaultGezel(project, crew, 'm', 'dev')).toBe('dev');
+  });
+
+  it('passes over gezels that cannot reach the document tools while anyone else can', () => {
+    const crew = [
+      { id: 'cw', name: 'Cw', role: 'Copywriter', provider: 'copilot' as const },
+      { id: 'res', name: 'Res', role: 'Researcher' },
+      { id: 'm', name: 'M', role: 'Meester' },
+    ];
+    const project = { id: 'p', name: 'P', readOnly: true, gezelIds: ['cw'] };
+    expect(pickDefaultGezel(project, crew, 'm', undefined, 'llama-cpp')).toBe('res');
+    expect(pickDefaultGezel(project, crew, 'm', undefined, 'copilot')).toBe('cw');
+    expect(
+      pickDefaultGezel(
+        { ...project, gezelIds: [] },
+        [crew[0]!, crew[2]!],
+        'm',
+        undefined,
+        'llama-cpp',
+      ),
+    ).toBe('m');
+  });
 });

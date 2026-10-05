@@ -580,7 +580,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
                         disabled={already || busy !== null}
                         onClick={() => void install(m.id)}
                       >
-                        {already ? 'Installed' : busy === m.id ? 'Loading…' : 'Install'}
+                        {already ? 'Installed' : busy === m.id ? 'Installing…' : 'Install'}
                       </button>
                     );
                   }}

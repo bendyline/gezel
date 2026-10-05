@@ -32,6 +32,7 @@
 
 import type { Task } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { waitForKnowledgeInstall } from '../knowledge-install.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 
 interface FoundFile {
@@ -592,16 +593,11 @@ async function installFoodCatalogForQuiche(ctx: EvalContext): Promise<void> {
     return;
   }
   const { jobId } = await ctx.client.installKnowledgeCatalog({ source: { kind: 'file', path } });
-  for (let i = 0; i < 6_000; i++) {
-    const job = await ctx.client.getKnowledgeJob(jobId);
-    if (job.finished) {
-      if (job.error) throw new Error(`food catalog install failed: ${job.error}`);
-      ctx.log(`[scenario:setup] installed the food catalog from ${path}`);
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`food catalog install from ${path} did not finish`);
+  await waitForKnowledgeInstall(ctx.client, jobId, {
+    label: 'food catalog',
+    log: ctx.log,
+  });
+  ctx.log(`[scenario:setup] installed the food catalog from ${path}`);
 }
 
 async function quicheRetrievalGaps(task: Task, client: GezelClient): Promise<string[]> {

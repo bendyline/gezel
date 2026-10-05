@@ -81,6 +81,7 @@ export class McpBridgePool {
     if (opts.mcpServer) {
       const primary = new McpBridge();
       primary.failureLedger = pool.failureLedger;
+      if (opts.grounding) primary.grounding = opts.grounding;
       if (opts.onToolCall) primary.onToolCall = opts.onToolCall;
       if (opts.imagePersister) primary.imagePersister = opts.imagePersister;
       if (opts.audioPersister) primary.audioPersister = opts.audioPersister;
@@ -122,6 +123,7 @@ export class McpBridgePool {
     for (const extra of opts.extraMcpServers ?? []) {
       const bridge = new McpBridge();
       bridge.failureLedger = pool.failureLedger;
+      if (opts.grounding) bridge.grounding = opts.grounding;
       if (opts.onToolCall) bridge.onToolCall = opts.onToolCall;
       if (opts.imagePersister) bridge.imagePersister = opts.imagePersister;
       if (opts.audioPersister) bridge.audioPersister = opts.audioPersister;
@@ -185,6 +187,11 @@ export class McpBridgePool {
     if (opts.volatileContext) {
       pool.seedWrappersFromText(opts.volatileContext);
     }
+
+    const modelFacing = pool.getOpenAITools();
+    log.debug(
+      `${logPrefix} model-facing tool surface has ${modelFacing.length} tools after role/provider filtering: ${modelFacing.map((tool) => tool.name).join(', ')}`,
+    );
 
     return pool;
   }

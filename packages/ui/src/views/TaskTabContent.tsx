@@ -58,7 +58,7 @@ export function TaskTabContent({ taskRef, onTaskChanged }: TaskTabContentProps) 
       </div>
     );
   }
-  if (!task) return <p className="placeholder">Loading task…</p>;
+  if (!task) return null;
 
   return <TaskDetail task={task} gezels={gezels} projectName={projectName} onChanged={onChanged} />;
 }

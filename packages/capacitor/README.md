@@ -40,6 +40,24 @@ The native API also exposes pinned-source resolution, resumable GGUF downloads,
 selection, removal, and `releaseModel()`. It is separate from ordinary inference
 so an availability probe cannot start a large download.
 
+## System models in a model picker
+
+The system provider for the current platform is included in `app.models()` even
+when it is unavailable. Keep it visible with its `unavailable_reason` instead of
+filtering it out; only enable selection when `availability === 'available'`.
+The qualified IDs are `apple-foundation-models:apple-foundation-models` for Apple
+Foundation Models and `android-mlkit:android-mlkit` for Gemini Nano through ML Kit.
+Use the returned IDs rather than constructing a choice for a different platform.
+Both run through the same `app.chat({ model: selectedId, ... })` call as a GGUF.
+
+Apple readiness depends on supported hardware, OS version, Apple Intelligence
+settings, and system preparation. The app cannot download Apple's model itself.
+ML Kit can report `download-required` or `downloading`; offer an explicit action
+that awaits `GezelRuntime.prepareProvider({ providerId: 'android-mlkit' })`, then
+refresh `app.models()`. Listing and `ensureModel` never authorize preparation.
+Refresh after returning from system Settings. If a saved choice becomes
+unavailable, preserve it and show the reason; do not silently pick another model.
+
 ## Contract and lifecycle
 
 - Text messages (`system`, `user`, `assistant`), streaming, explicit model ID,
@@ -119,3 +137,9 @@ preview includes arm64 Android, arm64 iOS devices and arm64 iOS simulators.
 Native generation on physical devices, store distribution, and third-party
 application adoption remain qualification steps; package compilation alone is
 not an inference-quality certification.
+
+## Application embedding wrapper
+
+For opt-in lifecycle, model readiness/preparation, cancellation, and packaging, see
+[the embedding guide](https://github.com/bendyline/gezel/blob/main/docs/embedding-sdk.md).
+The existing low-level connection APIs remain available.

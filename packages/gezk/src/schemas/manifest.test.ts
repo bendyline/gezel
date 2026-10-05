@@ -16,7 +16,7 @@ import { KnowledgeRegistryIndexSchema } from './registry.js';
 
 const SHA = 'a'.repeat(64);
 
-function manifestFor(formatVersion: '0.5' | '0.6', patch: Record<string, unknown> = {}) {
+function manifestFor(formatVersion: '0.5' | '0.6' | '0.7', patch: Record<string, unknown> = {}) {
   return {
     kind: 'gezk-catalog',
     formatVersion,
@@ -71,26 +71,33 @@ function manifestFor(formatVersion: '0.5' | '0.6', patch: Record<string, unknown
 describe('format generations', () => {
   it('the writer emits the newest supported pair', () => {
     expect(GEZK_FORMAT_GENERATIONS[GEZK_FORMAT_VERSION]).toBe(GEZK_INDEX_SCHEMA_VERSION);
-    expect(GEZK_SUPPORTED_FORMAT_VERSIONS).toEqual(['0.5', '0.6']);
-    expect(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS).toEqual([2, 3]);
+    expect(GEZK_SUPPORTED_FORMAT_VERSIONS).toEqual(['0.5', '0.6', '0.7']);
+    expect(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS).toEqual([2, 3, 4]);
     expect(KNOWLEDGE_MANIFEST_INDEX_SCHEMA_VERSIONS).toEqual(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS);
   });
 
   it('answers membership for both axes', () => {
     expect(isSupportedFormatVersion('0.5')).toBe(true);
     expect(isSupportedFormatVersion('0.6')).toBe(true);
+    expect(isSupportedFormatVersion('0.7')).toBe(true);
     expect(isSupportedFormatVersion('0.4')).toBe(false);
     expect(isSupportedFormatVersion(0.6)).toBe(false);
     expect(isSupportedIndexSchemaVersion(2)).toBe(true);
     expect(isSupportedIndexSchemaVersion(3)).toBe(true);
-    expect(isSupportedIndexSchemaVersion(4)).toBe(false);
+    expect(isSupportedIndexSchemaVersion(4)).toBe(true);
+    expect(isSupportedIndexSchemaVersion(5)).toBe(false);
   });
 });
 
 describe('KnowledgeCatalogManifestSchema across generations', () => {
-  it('parses a 0.5 manifest and a 0.6 manifest', () => {
+  it('parses 0.5, 0.6 and 0.7 manifests', () => {
     expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.5')).success).toBe(true);
     expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.6')).success).toBe(true);
+    expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.7')).success).toBe(true);
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.7', { indexSchemaVersion: 3 }))
+        .success,
+    ).toBe(false);
   });
 
   it('rejects a mismatched format/index pairing', () => {
@@ -108,7 +115,7 @@ describe('KnowledgeCatalogManifestSchema across generations', () => {
   it('rejects an unknown version and a requires mismatch', () => {
     expect(
       KnowledgeCatalogManifestSchema.safeParse(
-        manifestFor('0.6', { formatVersion: '0.7', indexSchemaVersion: 3 }),
+        manifestFor('0.6', { formatVersion: '0.8', indexSchemaVersion: 4 }),
       ).success,
     ).toBe(false);
     expect(

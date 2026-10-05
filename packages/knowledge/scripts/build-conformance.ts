@@ -66,6 +66,13 @@ MCowBQYDK2VwAyEAjEGBSH8XNNyYVwtWJ8NaHPkmQ0tlJdpl8BwgtIlxsc4=
 
 const FIXTURE_NAME = `conformance-${GEZK_FORMAT_VERSION}.gezk`;
 const DOCS = generateFixtureCorpus(40, 7);
+const SHARED_DOCUMENT_ID = 'doc-0000';
+const sharedDocument = DOCS.find((doc) => doc.id === SHARED_DOCUMENT_ID);
+if (!sharedDocument) throw new Error('Missing shared fixture document');
+sharedDocument.tocReferences = [
+  { topicPath: ['nature'], ordinal: -5 },
+  { topicPath: ['craft', 'metals'], ordinal: -4 },
+];
 
 interface LegacyFixture {
   formatVersion: string;
@@ -97,7 +104,7 @@ function carryLegacy(previousVectorsPath: string): LegacyFixture[] {
 }
 
 async function main(): Promise<void> {
-  const gezkRoot = requireGezkCheckout();
+  const gezkRoot = process.argv.includes('--local') ? null : requireGezkCheckout();
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const work = mkdtempSync(join(tmpdir(), 'gezk-conformance-'));
   try {
@@ -287,6 +294,12 @@ async function main(): Promise<void> {
             )
             .digest('hex'),
         },
+        // 0.7: one canonical document shared across topics and an ancestor.
+        sharedToc: {
+          documentId: SHARED_DOCUMENT_ID,
+          primaryTopicId: 'craft',
+          referenceTopicIds: ['nature', 'metals'],
+        },
         // 0.6: leaf filing with reader rollup, ordinals, metadata, assets.
         nestedTopic: (() => {
           const metals = topicsSnapshot.find((t) => t.id === 'metals');
@@ -333,7 +346,7 @@ edit by hand. An implementation conforms when it reproduces every entry in
 - \`fixture\` — archive digest, counts, full-text queries, a document body
   round trip, a two-stage semantic probe embedded with the documented hash
   embedder, and (0.6) the nested topic's rollup, an ordinal-first listing,
-  a metadata sample, and the shipped asset.
+  a metadata sample, and the shipped asset; (0.7) shared TOC placements without\n  duplicated canonical documents.
 - \`legacy\` — the same fixture facts for every earlier generation whose
   archive still ships under \`fixtures/\`; a reader for this version reads
   those too.
@@ -342,7 +355,10 @@ The fixture is signed with a TEST key whose private half is published in
 the generator; it proves signature handling, never provenance.
 `;
 
-    const outputs = [join(gezkRoot, 'conformance'), join(packageRoot, 'conformance')];
+    const outputs = [
+      ...(gezkRoot ? [join(gezkRoot, 'conformance')] : []),
+      join(packageRoot, 'conformance'),
+    ];
     for (const out of outputs) {
       // Never wipe: earlier generations' fixtures stay beside the current one.
       mkdirSync(join(out, 'fixtures'), { recursive: true });

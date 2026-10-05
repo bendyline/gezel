@@ -598,9 +598,7 @@ function ScriptPicker({
         return (
           <section key={group.label}>
             <h4 className="muted small">{group.label}</h4>
-            {list === null ? (
-              <p className="muted small">Loading…</p>
-            ) : list.length === 0 ? (
+            {list === null ? null : list.length === 0 ? (
               <p className="muted small">Nothing here yet.</p>
             ) : (
               <ul className="script-picker-list">

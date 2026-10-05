@@ -95,6 +95,14 @@
       }
     }
   },
+  "overrides": [
+    {
+      "include": ["packages/gezk/schemas/**/*.schema.json"],
+      "formatter": {
+        "enabled": false
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

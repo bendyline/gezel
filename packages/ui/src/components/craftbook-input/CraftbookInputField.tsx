@@ -414,7 +414,7 @@ function WorkspacePicker({
   }, [entries, filter]);
 
   if (error) return <p className="error small gz-cbi-error">{error}</p>;
-  if (!entries) return <p className="muted small">Loading the project’s files…</p>;
+  if (!entries) return null;
   if (entries.length === 0) {
     return (
       <p className="muted small">

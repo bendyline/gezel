@@ -52,6 +52,13 @@ export interface EvalContext {
   client: GezelClient;
   meesterId: string;
   /**
+   * Per-trial state shared by the one-shot setup hook and every polled
+   * success check. Setup and polling receive different context objects, so
+   * scenarios must use this map—not ctx identity—when setup measurements
+   * need to reach the grader.
+   */
+  state?: Map<string, unknown>;
+  /**
    * Effective repair policy for this trial: the scenario's own, or the
    * `--repair-policy` override the runner applied. Craftbook scenarios read
    * this before their spec so an A/B bin can switch the harness channel off
@@ -201,6 +208,17 @@ export interface EvalScenario {
   /** Sent verbatim to the Meester as the kickoff message. */
   prompt: string;
   /**
+   * Model-initiated network surface required by this scenario. `wikipedia`
+   * opts the isolated eval home into external-service calls and selects the
+   * keyless Wikipedia backend. The ordinary `web_search` tool remains hidden
+   * because that backend has no open-web search capability.
+   *
+   * Keep this separate from `requires: ['network']`: `requires` is an
+   * admission check for the host, while this field is explicit authority for
+   * the model to make an outbound call inside the trial.
+   */
+  modelNetworkAccess?: 'wikipedia';
+  /**
    * Opt into the local embedding pipeline for scenarios whose asserted
    * behavior is semantic retrieval itself. Ordinary task trials keep it off
    * so first-use model loading cannot consume the chat watchdog or silently
@@ -258,6 +276,14 @@ export interface EvalScenario {
    */
   timeoutMs?: number;
   /**
+   * Which progress signal may extend `timeoutMs` at the hard ceiling.
+   * The default, `activity`, preserves the general harness behavior: tool,
+   * session, workspace, or sniff progress can earn more time. Use
+   * `deliverable` for bounded production tasks where continued research or
+   * coordination is not useful unless the checked artifact itself changes.
+   */
+  hardCeilingProgress?: 'activity' | 'deliverable';
+  /**
    * No-progress threshold (ms). When the progress fingerprint hasn't
    * changed for this long, the trial fails with `failureMode:
    * 'no-progress'`. Defaults to `DEFAULT_PROGRESS_TIMEOUT_MS` (5 min)
@@ -268,6 +294,12 @@ export interface EvalScenario {
    * qwen3.6-class models doesn't trip the watchdog.
    */
   progressTimeoutMs?: number;
+  /**
+   * Hard ceiling for the one-shot setup hook. Setup runs before the normal
+   * progress watchdog exists, so it needs its own bound. Defaults to 15 min;
+   * catalog scenarios should normally use a shorter install-specific bound.
+   */
+  setupTimeoutMs?: number;
   /**
    * Optional one-shot daemon-restart exercise. The runner polls this predicate
    * with the same live eval context as `successCheck`; once it returns true,
@@ -559,6 +591,7 @@ export type FailureMode =
   | 'model-stuck'
   | 'success-check-false'
   | 'spawn-error'
+  | 'setup-timeout'
   | 'crash'
   | 'engine-crash'
   | 'interrupted'

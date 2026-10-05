@@ -11,6 +11,10 @@ import type { LocalConnectInput, LocalDaemonMode } from './types.js';
 
 /** Minimal shape of `@bendyline/gezel-service` this SDK depends on. */
 export interface HostServiceModule {
+  verifyNativeBinaries?(options: {
+    candidates: string[];
+    allowStandaloneMacPayload?: boolean;
+  }): Promise<{ reused: boolean; reason: string; nativeBinDir?: string }>;
   startService(opts: Record<string, unknown>): Promise<{
     port: number;
     clientToken: string;

@@ -13,6 +13,7 @@ import {
 } from './llama-quarantine.js';
 
 const dirs: string[] = [];
+const memoryHome = join(tmpdir(), 'gezel-quarantine-memory');
 afterAll(async () => {
   await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
 });
@@ -47,28 +48,26 @@ function fakeIo(stats: Record<string, { size: number; mtimeMs: number }>): Quara
 }
 
 describe('llama quarantine', () => {
-  it('records a crashed backend and matches it back by binary identity', async () => {
-    const home = await tmpHome();
+  it('records a crashed backend and matches it back by binary identity', () => {
     const bin = '/opt/Gezel/native-bin/linux-x64-cuda/gezel-llama-server';
     const io = fakeIo({ [bin]: { size: 14600, mtimeMs: 1_785_547_847_453 } });
 
     const entry = recordLlamaQuarantine(
-      home,
+      memoryHome,
       { backend: 'cuda', binaryPath: bin, signal: 'SIGILL', reason: 'crashed before ready' },
       io,
     );
 
     expect(entry).toMatchObject({ backend: 'cuda', signal: 'SIGILL' });
     expect(entry?.fingerprint).toBe('14600:1785547847453');
-    expect(isBinaryQuarantined(readLlamaQuarantine(home, io), 'cuda', bin, io)).toBe(true);
+    expect(isBinaryQuarantined(readLlamaQuarantine(memoryHome, io), 'cuda', bin, io)).toBe(true);
   });
 
-  it('expires the entry when the binary is replaced, so a fixed build is retried', async () => {
-    const home = await tmpHome();
+  it('expires the entry when the binary is replaced, so a fixed build is retried', () => {
     const bin = '/opt/Gezel/native-bin/linux-x64-cuda/gezel-llama-server';
     const io = fakeIo({ [bin]: { size: 14600, mtimeMs: 1_785_547_847_453 } });
     recordLlamaQuarantine(
-      home,
+      memoryHome,
       { backend: 'cuda', binaryPath: bin, signal: 'SIGILL', reason: 'crashed before ready' },
       io,
     );
@@ -77,53 +76,56 @@ describe('llama quarantine', () => {
     // version-keyed quarantine gets wrong: the SIGILL fix that motivated
     // this file was a compiler-flag change at an unchanged llama.cpp pin.
     const upgraded = fakeIo({ [bin]: { size: 21344, mtimeMs: 1_785_999_999_999 } });
-    upgraded.files.set(llamaQuarantinePath(home), io.files.get(llamaQuarantinePath(home)) ?? '');
-
-    expect(isBinaryQuarantined(readLlamaQuarantine(home, upgraded), 'cuda', bin, upgraded)).toBe(
-      false,
+    upgraded.files.set(
+      llamaQuarantinePath(memoryHome),
+      io.files.get(llamaQuarantinePath(memoryHome)) ?? '',
     );
+
+    expect(
+      isBinaryQuarantined(readLlamaQuarantine(memoryHome, upgraded), 'cuda', bin, upgraded),
+    ).toBe(false);
   });
 
-  it('replaces rather than appends when the same backend crashes again', async () => {
-    const home = await tmpHome();
+  it('replaces rather than appends when the same backend crashes again', () => {
     const bin = '/bin/llama';
     const io = fakeIo({ [bin]: { size: 10, mtimeMs: 1 } });
     recordLlamaQuarantine(
-      home,
+      memoryHome,
       { backend: 'cuda', binaryPath: bin, signal: 'SIGILL', reason: 'a' },
       io,
     );
     recordLlamaQuarantine(
-      home,
+      memoryHome,
       { backend: 'cuda', binaryPath: bin, signal: 'SIGILL', reason: 'b' },
       io,
     );
 
-    const entries = readLlamaQuarantine(home, io);
+    const entries = readLlamaQuarantine(memoryHome, io);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.reason).toBe('b');
   });
 
-  it('returns null when the binary cannot be fingerprinted', async () => {
-    const home = await tmpHome();
+  it('returns null when the binary cannot be fingerprinted', () => {
     const io = fakeIo({});
     expect(
       recordLlamaQuarantine(
-        home,
+        memoryHome,
         { backend: 'cuda', binaryPath: '/gone', signal: 'SIGILL', reason: 'x' },
         io,
       ),
     ).toBeNull();
   });
 
-  it('treats a missing or malformed file as no quarantine', async () => {
-    const home = await tmpHome();
+  it('treats a missing or malformed file as no quarantine', () => {
     const io = fakeIo({});
-    expect(readLlamaQuarantine(home, io)).toEqual([]);
-    io.files.set(llamaQuarantinePath(home), '{ not json');
-    expect(readLlamaQuarantine(home, io)).toEqual([]);
-    io.files.set(llamaQuarantinePath(home), JSON.stringify({ schemaVersion: 99, entries: [] }));
-    expect(readLlamaQuarantine(home, io)).toEqual([]);
+    expect(readLlamaQuarantine(memoryHome, io)).toEqual([]);
+    io.files.set(llamaQuarantinePath(memoryHome), '{ not json');
+    expect(readLlamaQuarantine(memoryHome, io)).toEqual([]);
+    io.files.set(
+      llamaQuarantinePath(memoryHome),
+      JSON.stringify({ schemaVersion: 99, entries: [] }),
+    );
+    expect(readLlamaQuarantine(memoryHome, io)).toEqual([]);
   });
 
   it('fingerprints a real file on disk', async () => {

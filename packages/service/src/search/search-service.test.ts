@@ -20,6 +20,7 @@ import { MERGE_WEIGHTS, SearchService, fuzzyScore } from './search-service.js';
 function makeService(
   opts: {
     projects?: Array<{ id: string; name: string }>;
+    tasks?: Array<{ projectId: string; num: number; title: string; status: string }>;
     gezels?: Array<{ id: string; name: string; role?: string; roleBasedName?: string }>;
     documents?: Array<{ name: string; path: string; isDirectory: boolean }>;
     files?: Record<string, Array<{ path: string; size: number; mtimeMs: number }>>;
@@ -45,6 +46,9 @@ function makeService(
 ) {
   const store = {
     listProjects: vi.fn(async () => opts.projects ?? []),
+    iterateAllTasks: async function* () {
+      yield* opts.tasks ?? [];
+    },
     listGezels: vi.fn(async () => opts.gezels ?? []),
     listDocumentsRecursive: vi.fn(async () => opts.documents ?? []),
     sharedProjectId: vi.fn(async () => 'shared'),
@@ -696,4 +700,16 @@ describe('cross-corpus merge ordering (scoring tripwire)', () => {
     expect(results.find((r) => r.id === 'content:p1:src/engine.ts:3')?.tier).toBe('strong');
     expect(results.find((r) => r.id === 'content:p1:src/hud.ts:1')?.tier).toBe('weak');
   });
+});
+
+it('indexes task titles from the streamed catalog without an all-task array', async () => {
+  const svc = makeService({
+    projects: [{ id: 'p1', name: 'Media' }],
+    tasks: [
+      { projectId: 'p1', num: 1, title: 'Ancient harbor photograph', status: 'complete' },
+      { projectId: 'p1', num: 2, title: 'Modern harbor photograph', status: 'active' },
+    ],
+  });
+  const hits = (await svc.quickOpen('harbor')).filter((hit) => hit.kind === 'task');
+  expect(hits.map((hit) => hit.id).sort()).toEqual(['task:p1/1', 'task:p1/2']);
 });

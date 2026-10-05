@@ -1,4 +1,4 @@
-# Build (and, on tag pushes, draft) Gezel's native engine binaries.
+# Build (and, on tag pushes, draft) desktop engines and mobile SDKs together.
 #
 # Triggers:
 #   - Push of a tag named `native-vX.Y.Z` (the tagged commit is what the
@@ -27,7 +27,7 @@
 #      `native-<engine>-<platform>[-<variant>]` for the draft-release
 #      job below and for pre-publication validation.
 #
-# Produced binaries are code-signed in place when signing secrets are
+# Produced desktop binaries are code-signed in place when signing secrets are
 # configured (Windows Authenticode via Azure Trusted Signing; macOS
 # Developer ID) — done BEFORE the sha is computed so the release's
 # SHA256SUMS and the runtime engine resolver's signature check both see
@@ -41,7 +41,7 @@
 # pattern silently broke when the workflow file changed on a feature
 # branch (`workflow_run` reads the workflow definition from the
 # default branch only) — we lost the 0.1.2 release that way. Putting
-# draft assembly as a `needs: build` job in the same workflow eliminates
+# draft assembly after desktop and mobile builds in the same workflow eliminates
 # that whole class of trigger failure. Publication is a separate,
 # deliberately manual `workflow_dispatch` after the draft is validated.
 
@@ -57,9 +57,14 @@ on:
   workflow_dispatch:
     inputs:
       engines:
-        description: 'Comma-separated engine list (default: all)'
+        description: 'Comma-separated desktop engine list (default: all)'
         required: false
         default: 'all'
+      mobile:
+        description: 'Mobile SDKs for test builds (tagged releases always build both)'
+        type: choice
+        options: [all, ios, android, none]
+        default: all
 
 # Manual re-runs of the same tag cancel the prior in-flight run so we
 # don't fight ourselves over scarce ubuntu/macos-13 runners. Tag
@@ -119,7 +124,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test native release contracts
-        run: node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs
+        run: |
+          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs
+          python3 -m unittest discover -s native/runtime -p 'test_*.py'
+
+  mobile:
+    name: Build mobile SDKs
+    needs: native_contract_tests
+    if: startsWith(github.ref, 'refs/tags/native-v') || inputs.mobile != 'none'
+    uses: ./.github/workflows/mobile-native.yml
+    with:
+      platform: ${{ startsWith(github.ref, 'refs/tags/native-v') && 'all' || inputs.mobile || 'all' }}
+    # Libraries need no app-signing credentials. Do not inherit release secrets.
 
   build:
     needs: native_contract_tests
@@ -127,6 +143,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Apple Intelligence uses the same Swift adapter as iOS. No model
+          # weights or upstream engine checkout are bundled with this helper.
+          - engine: apple-fm
+            kind: helper
+            platform: darwin-arm64
+            variant: ''
+            runner: xcode-27
+            script: build.sh
+            artifact: gezel-apple-fm
+            needs_cuda: false
+            needs_vulkan: false
+
           # Gezel device-health helper (Windows + Linux). This is
           # first-party source, so it does not have an upstream VERSION pin.
           - engine: device-health
@@ -840,6 +868,10 @@ jobs:
             bash "$script"
           fi
 
+      - name: Compile shared Apple adapter for iOS device and simulator
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'apple-fm'
+        run: bash native/helpers/apple-fm/check-mobile.sh
+
       # ── Resolve output dir for the rest of the steps ──────────
       - name: Resolve output dir
         if: steps.preflight.outputs.pinned == 'true'
@@ -1537,6 +1569,7 @@ jobs:
             echo "::error::$bin produced no --help output after hardened-runtime signing — the engine likely needs an entitlement (allow-jit / disable-library-validation). Add a per-engine entitlements plist rather than dropping --options runtime."
             exit 1
           fi
+          if [[ "${{ matrix.engine }}" == apple-fm ]]; then "$bin" --self-test; fi
           echo "[sign] post-sign launch probe OK"
 
       - name: Notarize macOS native payload
@@ -1676,13 +1709,13 @@ jobs:
   # workflow_dispatch runs build + upload artifacts but skip draft
   # creation — same intent as the old release-native.yml's `if:`.
   #
-  # `needs: build` waits for every matrix entry to finish (incl.
+  # `needs: [build, mobile]` waits for both SDKs and every desktop entry (incl.
   # any preflight-skipped ones, which exit success). If a single
   # matrix job fails, we don't create a partial draft.
   # ─────────────────────────────────────────────────────────────────
   draft_release:
     name: Assemble draft native release
-    needs: build
+    needs: [build, mobile]
     if: startsWith(github.ref, 'refs/tags/native-v')
     runs-on: ubuntu-latest
     # Downloads every matrix artifact and assembles the draft; 6 min typical,
@@ -1703,13 +1736,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Default behaviour pulls every artifact uploaded by `build`
-      # in this same workflow run — no run-id juggling, no 90-day
-      # artifact-expiry concern.
+      # Download desktop artifacts separately from public mobile SDKs,
+      # all from this same workflow run.
       - name: Download all native build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: native-artifacts
+          pattern: native-*
+
+      - name: Download public mobile SDK artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: mobile-artifacts
+          pattern: mobile-sdk-*
 
       - name: List artifacts
         run: find native-artifacts -type f | sort
@@ -1852,6 +1891,20 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -la release/
 
+      - name: Verify and stage both public mobile SDKs
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          for platform in ios android; do
+            archive="gezel-mobile-${VERSION}-${platform}.tar.gz"
+            source="mobile-artifacts/mobile-sdk-${platform}"
+            (cd "$source" && sha256sum -c "$archive.sha256")
+            python3 native/runtime/release-sdk.py verify "$source/$archive" \
+              --target "$platform" --version "$VERSION" --commit "$GITHUB_SHA"
+            cp "$source/$archive" release/
+          done
+
       # GitHub caps a single release asset at 2 GiB. Blowing it surfaces as
       # a 422 from the upload step at the very END of a ~1h build — and
       # softprops keeps uploading the rest, so the run leaves behind a draft
@@ -1892,7 +1945,7 @@ jobs:
           # Archive names are derived from scripts/native-payload.mjs — the
           # same table the build matrix, the fetch script, and the Electron
           # preflight read. Add a variant there, not here.
-          expected=()
+          expected=("gezel-mobile-${VERSION}-ios.tar.gz" "gezel-mobile-${VERSION}-android.tar.gz")
           while read -r key; do
             [[ -n "$key" ]] || continue
             case "$key" in
@@ -1932,11 +1985,11 @@ jobs:
             release/NATIVE_FILE_MANIFESTS.json
 
       # ── Create / update the draft GitHub Release ──────────────────
-      # No signing happens in this job: the build matrix signed every
-      # binary at birth (Authenticode on Windows first-party exes/DLLs; Developer
+      # No signing happens in this job: the matrix signed desktop payloads
+      # at birth (Authenticode on Windows first-party exes/DLLs; Developer
       # ID + hardened runtime on every macOS Mach-O, dylibs included),
       # so the tarballs packed above — and the SHA256SUMS over them —
-      # already reflect signed bytes.
+      # already reflect signed bytes. Mobile libraries stay unsigned.
       - name: Create draft Release
         uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
@@ -1967,7 +2020,9 @@ jobs:
           # be retried without rebuilding every native engine.
           preserve_order: true
           body: |
-            Prebuilt Gezel native engine binaries, signed at birth:
+            Coordinated desktop engine and mobile SDK release from the same commit.
+
+            Desktop engine binaries are signed at birth:
             Windows first-party executables and DLLs carry Bendyline Authenticode
             signatures (Azure Trusted Signing); macOS binaries — engine
             executables and peer dylibs — are Developer ID-signed with
@@ -1985,7 +2040,17 @@ jobs:
             It remains a prerelease by design so GitHub's stable/latest
             release namespace belongs only to the Electron application.
 
-            Each archive contains the engine binaries for one platform plus
+            `gezel-mobile-*-ios.tar.gz` contains the reusable Swift runtime,
+            static XCFramework (device + simulator), privacy manifests and licenses.
+            `gezel-mobile-*-android.tar.gz` contains a folder Maven repository with
+            runtime/llama AARs, POMs and licenses; Google ML Kit stays a declared
+            dependency resolved by the consumer, with its own usage terms.
+            Mobile SDKs are unsigned libraries, covered by SHA256SUMS and build
+            provenance. Each consuming app uses its own app signing identity.
+            No app archives, provisioning profiles, private keys, or model weights
+            are included. See PUBLIC-DISTRIBUTION.md inside each mobile SDK.
+
+            Each desktop archive contains the engine binaries for one platform plus
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution
             texts. CUDA archives also carry the CUDA Toolkit EULA supplied by
             the build image.

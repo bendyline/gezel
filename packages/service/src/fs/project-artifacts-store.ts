@@ -19,7 +19,8 @@ import {
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
-import { assertNoTemplatePlaceholderPath, resolveMutationPath, safeJoin } from './safe-paths.js';
+import { resolveOwnedMutationPath } from './mutation-path-refusal.js';
+import { assertNoTemplatePlaceholderPath, safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,
@@ -507,7 +508,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = await resolveMutationPath(base, cleaned);
+    const full = await resolveArtifactMutationPath(base, cleaned);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content);
     await this.touchProject(id);
@@ -532,7 +533,7 @@ export class ProjectArtifactsStore {
     if (options?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = await resolveMutationPath(base, cleaned);
+    const full = await resolveArtifactMutationPath(base, cleaned);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.touchProject(id);
@@ -555,7 +556,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && touchesTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = await resolveMutationPath(base, cleaned);
+    const full = await resolveArtifactMutationPath(base, cleaned);
     if (namesArtifactsRoot(base, cleaned, full)) throw new ArtifactRootDeniedError('deleted');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
@@ -579,7 +580,7 @@ export class ProjectArtifactsStore {
     if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const full = await resolveMutationPath(base, cleaned);
+    const full = await resolveArtifactMutationPath(base, cleaned);
     await mkdir(full, { recursive: true });
     await this.touchProject(id);
     return cleaned;
@@ -620,8 +621,8 @@ export class ProjectArtifactsStore {
     ) {
       throw new TaskInputPathWriteDeniedError();
     }
-    const fromFull = await resolveMutationPath(base, from);
-    const toFull = await resolveMutationPath(base, to);
+    const fromFull = await resolveArtifactMutationPath(base, from);
+    const toFull = await resolveArtifactMutationPath(base, to);
     if (namesArtifactsRoot(base, from, fromFull)) throw new ArtifactRootDeniedError('renamed');
     if (namesArtifactsRoot(base, to, toFull)) throw new ArtifactRootDeniedError('replaced');
     if (fromFull === toFull) return { fromPath: from, toPath: to };
@@ -644,6 +645,10 @@ export class ProjectArtifactsStore {
     await this.touchProject(id);
     return { fromPath: from, toPath: to };
   }
+}
+
+function resolveArtifactMutationPath(base: string, cleaned: string): Promise<string> {
+  return resolveOwnedMutationPath(base, cleaned, "this project's artifacts");
 }
 
 async function pathExists(full: string): Promise<boolean> {

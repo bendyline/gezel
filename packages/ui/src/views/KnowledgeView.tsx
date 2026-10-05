@@ -573,11 +573,6 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
             <div className="knowledge-list-header">
               {selectedTopicId ? (topicNames.get(selectedTopicId) ?? 'Documents') : 'All documents'}
             </div>
-            {documents === null && (
-              <p className="muted small" style={{ padding: '0 1rem' }}>
-                Loading…
-              </p>
-            )}
             <ul className="knowledge-doc-list">
               {(documents ?? []).map((d) => (
                 <li key={d.id}>
@@ -606,14 +601,14 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                   void loadDocuments(documents.length).finally(() => setLoadingMore(false));
                 }}
               >
-                {loadingMore ? 'Loading…' : `Show more (${documentsTotal - documents.length} left)`}
+                {`Show more (${documentsTotal - documents.length} left)`}
               </button>
             )}
           </>
         )}
       </section>
 
-      <section className="knowledge-reader" aria-label="Article">
+      <section className="knowledge-reader" aria-label="Article" aria-busy={docLoading}>
         <button
           type="button"
           className="knowledge-nav-back"
@@ -672,9 +667,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
           </>
         ) : (
           <div className="knowledge-empty">
-            {docLoading ? (
-              <p className="muted">Loading…</p>
-            ) : docError ? (
+            {docLoading ? null : docError ? (
               <p className="error">{docError}</p>
             ) : (
               <p className="placeholder">Pick a document on the left to read it here.</p>

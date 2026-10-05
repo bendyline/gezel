@@ -59,6 +59,7 @@ interface Vectors {
     ftsQueries: Array<{ query: string; expectedDocumentId: string }>;
     semanticProbe: { chunkUid: string; embedInput: string; documentId: string };
     documentRoundTrip: { documentId: string; markdownSha256: string };
+    sharedToc: { documentId: string; primaryTopicId: string; referenceTopicIds: string[] };
     nestedTopic: {
       id: string;
       parentId: string | null;
@@ -165,6 +166,29 @@ describe('conformance fixture', () => {
       shards: vectors.fixture.shards,
       assets: vectors.fixture.assets.length,
     });
+  });
+
+  it('reads shared TOC references with canonical identity and deduplicated counts', () => {
+    const handle = CatalogHandle.open(extracted);
+    try {
+      const { documentId, primaryTopicId, referenceTopicIds } = vectors.fixture.sharedToc;
+      expect(handle.getDocument(documentId)?.topicId).toBe(primaryTopicId);
+      for (const topicId of [primaryTopicId, ...referenceTopicIds]) {
+        expect(
+          handle
+            .documentsPage({ topicId, descendants: false, limit: 200 })
+            .documents.filter((d) => d.id === documentId),
+        ).toHaveLength(1);
+      }
+      expect(
+        handle
+          .documentsPage({ topicId: primaryTopicId, limit: 200 })
+          .documents.filter((d) => d.id === documentId),
+      ).toHaveLength(1);
+      expect(handle.documentsPage().total).toBe(vectors.fixture.documents);
+    } finally {
+      handle.close();
+    }
   });
 
   it('reads the 0.6 additions the kit records', () => {

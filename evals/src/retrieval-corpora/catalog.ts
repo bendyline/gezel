@@ -5,6 +5,7 @@ import type { CatalogDocument } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { KNOWLEDGE_EMBEDDING_PROFILES, compileKnowledgeCatalog } from '@bendyline/gezel-knowledge';
 import { embedBatch, embedModelId } from '@bendyline/gezel-service';
+import { waitForKnowledgeInstall } from '../knowledge-install.ts';
 
 /**
  * Compile a `.gezk` with the DAEMON'S OWN embedder and install it over HTTP.
@@ -72,14 +73,10 @@ export async function compileAndInstallCatalog(
     const { jobId } = await client.installKnowledgeCatalog({
       source: { kind: 'file', path: archivePath },
     });
-    for (let i = 0; i < 600; i++) {
-      const job = await client.getKnowledgeJob(jobId);
-      if (job.finished) {
-        if (job.error) throw new Error(`catalog install failed: ${job.error}`);
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await waitForKnowledgeInstall(client, jobId, {
+      label: spec.catalogId,
+      log,
+    });
     const { catalogs } = await client.listKnowledgeCatalogs();
     const status = catalogs.find((c) => c.ref.catalogId === spec.catalogId);
     if (!status?.mounted) throw new Error(`catalog ${spec.catalogId} did not mount`);

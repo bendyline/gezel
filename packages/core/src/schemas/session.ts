@@ -815,6 +815,8 @@ export const TimelineMessageSchema = z.object({
    * it; citation-only messages from older sessions remain supported.
    */
   retrieval: ChatMessageSchema.shape.retrieval,
+  /** Mirrors `ChatMessage.grounding` — a factual-mode reply's numbered sources and check. */
+  grounding: ChatMessageSchema.shape.grounding,
   /**
    * Mirrors `ChatMessage.referencedArtifacts` — the artifact-only
    * projection of `referencedFiles`, kept for older clients.

@@ -21,6 +21,7 @@ import {
   HAIR_PART_OPTIONS,
   HAIR_SHAPES,
   HAT_OPTIONS,
+  isFactualRole,
   normalizeCodexPermissionMode,
 } from '@bendyline/gezel';
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
@@ -219,7 +220,7 @@ export function GezelDetail({
     );
   }
   if (!selected) {
-    return <p className="placeholder">Loading gezel…</p>;
+    return null;
   }
 
   return (
@@ -1253,7 +1254,25 @@ function ProviderOverride({
     [gezel.id, gezel.retrieval, onUpdated],
   );
 
+  const saveFactual = useCallback(
+    async (value: 'role' | 'on' | 'off') => {
+      setSaving(true);
+      try {
+        const updated = await api.updateGezelSettings(gezel.id, {
+          factualWriting: value === 'role' ? null : value === 'on',
+        });
+        onUpdated(updated);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [gezel.id, onUpdated],
+  );
+
   const effectiveProvider = gezel.provider ?? globalProvider;
+  const factualCurrent: 'role' | 'on' | 'off' =
+    gezel.factualWriting === undefined ? 'role' : gezel.factualWriting ? 'on' : 'off';
+  const factualByRole = isFactualRole(gezel.role) || isFactualRole(gezel.roleBasedName);
   const sandboxCurrent: 'default' | 'on' | 'off' =
     gezel.sandboxCopilot === undefined ? 'default' : gezel.sandboxCopilot ? 'on' : 'off';
   const codexCurrent: CodexPermissionMode | 'inherit' = gezel.codexPermissionMode
@@ -1299,6 +1318,29 @@ function ProviderOverride({
               : value === 'off'
                 ? 'Off'
                 : value[0]!.toUpperCase() + value.slice(1)}
+          </button>
+        ))}
+      </span>
+      <span className="provider-override-group">
+        <span
+          className="muted small"
+          title="Cite a source for every name, date and number, look up what is missing, and never fill gaps from memory. Writers, researchers and reviewers do this by role, and so does anyone writing into an open document."
+        >
+          Sources:
+        </span>
+        {(['role', 'on', 'off'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={`provider-chip${factualCurrent === value ? ' provider-chip-active' : ''}`}
+            onClick={() => void saveFactual(value)}
+            disabled={saving}
+          >
+            {value === 'role'
+              ? `By role (${factualByRole ? 'cites' : 'free'})`
+              : value === 'on'
+                ? 'Always cite'
+                : 'Off'}
           </button>
         ))}
       </span>

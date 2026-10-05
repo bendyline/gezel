@@ -74,6 +74,20 @@ export type HookRunner = (
   },
 ) => Promise<HookResult>;
 
+/**
+ * A factual-mode session's hold on its tool traffic (chat/evidence-ledger.ts).
+ * `checkWrite` runs before dispatch and may refuse a document write whose
+ * facts no evidence shows, or rewrite its arguments; `labelEvidence` runs on
+ * a successful result and returns the `[n]` header the model cites it by.
+ */
+export interface ToolGroundingHooks {
+  checkWrite(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): { kind: 'reject'; error: string } | { kind: 'allow'; args: Record<string, unknown> } | null;
+  labelEvidence(toolName: string, args: Record<string, unknown>, text: string): string | null;
+}
+
 const log = createLogger('mcp-bridge');
 
 // The spec type and its `kind` predicates live in the leaf `mcp-spec.ts` (wrappers import them
@@ -232,6 +246,12 @@ export class McpBridge {
    * standalone bridge, which then behaves exactly as before.
    */
   failureLedger?: UnresolvedToolFailureLedger;
+  /**
+   * Factual writing: numbers evidence the model reads and checks text it
+   * writes into a person's document. Set by `McpBridgePool` from the
+   * session; unset outside factual mode.
+   */
+  grounding?: ToolGroundingHooks;
   /**
    * Optional persister that writes any image content blocks returned by a
    * tool into the project's artifacts/ tree. When set, the bridge resolves
@@ -590,7 +610,9 @@ export class McpBridge {
     if (this.wrappers.length > 0) {
       log.debug(`applying wrappers: ${this.wrappers.map((w) => w.id).join(', ')}`);
     }
-    log.debug(`ready with ${this.tools.length} tools: ${this.tools.map((t) => t.name).join(', ')}`);
+    log.debug(
+      `registered bridge roster has ${this.tools.length} tools: ${this.tools.map((t) => t.name).join(', ')}`,
+    );
   }
 
   getOpenAITools(): OpenAIFunctionTool[] {
@@ -950,6 +972,18 @@ export class McpBridge {
           }
         }
       }
+      if (rejected === null && this.grounding) {
+        try {
+          const verdict = this.grounding.checkWrite(toolName, effectiveArgs);
+          if (verdict?.kind === 'reject') rejected = verdict.error;
+          else if (verdict?.kind === 'allow') effectiveArgs = verdict.args;
+        } catch (err) {
+          log.warn(
+            `grounding check threw for ${toolName}; allowing call:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
       if (rejected !== null) {
         combined = rejected;
         isError = true;
@@ -1116,6 +1150,17 @@ export class McpBridge {
           opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : undefined,
         );
         deliveredResultTruncated = capped !== redactedText;
+        if (this.grounding) {
+          try {
+            const label = this.grounding.labelEvidence(toolName, effectiveArgs, capped);
+            if (label) capped = `${label}\n${capped}`;
+          } catch (err) {
+            log.warn(
+              `evidence label threw for ${toolName}:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
       }
       if (this.onToolCall) {
         try {

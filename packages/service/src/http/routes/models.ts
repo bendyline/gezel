@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { appleFoundationModelsStatus } from '../../providers/apple-foundation-models/status.js';
 import { startOllamaIfPossible } from '../../providers/ollama-launch.js';
 import type { ModelInfo, ProviderName } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
@@ -90,6 +91,8 @@ async function listModelsWithOllamaAutoStart(
 
 export function modelsRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+
+  app.get('/apple/status', async (c) => c.json(await appleFoundationModelsStatus()));
 
   app.get('/', async (c) => {
     const provider = parseProvider(c.req.query('provider'));

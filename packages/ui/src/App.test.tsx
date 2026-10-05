@@ -30,9 +30,6 @@ vi.mock('./components/ModelBundleControls.js', () => ({
   ModelBundleImportController: () => null,
 }));
 vi.mock('./components/NeedsInputPanel.js', () => ({ NeedsInputPanel: () => null }));
-vi.mock('./components/QueueMeter.js', () => ({
-  QueueMeter: () => <span data-testid="queue-meter" />,
-}));
 vi.mock('./components/Sidebar.js', () => ({
   Sidebar: ({
     activeProjectIds,
@@ -110,7 +107,7 @@ describe('Responsive navigation in the desktop app', () => {
     try {
       render(<App />);
       const header = await screen.findByTestId('app-header');
-      expect(within(header).getByTestId('queue-meter')).toBeInTheDocument();
+      expect(within(header).getByRole('button', { name: /Activity —/ })).toBeInTheDocument();
       expect(within(header).getByTestId('engine-pill')).toBeInTheDocument();
       expect(within(header).queryByTestId('boekwachter-pill')).toBeNull();
       expect(within(header).queryByTestId('claude-pool-pill')).toBeNull();
@@ -119,24 +116,17 @@ describe('Responsive navigation in the desktop app', () => {
     }
   });
 
-  it('shows Updates as a bell key on a phone and as a labelled tab when wide', async () => {
-    vi.mocked(api.listQuestions).mockResolvedValue({
-      questions: [
-        { id: 'q1', projectId: 'p1' },
-        { id: 'q2', projectId: 'p1' },
-      ],
-    } as never);
+  it('keeps Activity available on both narrow and wide windows with the engine separate', async () => {
     render(<App />);
-    const key = await screen.findByRole('button', { name: /^Updates\s*2$/ });
-    expect(key.querySelector('.app-header-questions-icon')).toBeInTheDocument();
-
+    const key = await screen.findByRole('button', { name: /Activity —/ });
+    expect(screen.queryByRole('button', { name: /^Updates/ })).toBeNull();
+    expect(screen.getByTestId('engine-pill')).toBeInTheDocument();
     act(() => {
       narrow = false;
       mediaEvents.dispatchEvent(new Event('change'));
     });
-    const tab = screen.getByRole('button', { name: /^Updates\s*2$/ });
-    expect(tab.querySelector('.app-header-questions-icon')).not.toBeInTheDocument();
-    expect(tab).toHaveTextContent('Updates');
+    expect(screen.getByRole('button', { name: /Activity —/ })).toBe(key);
+    expect(screen.getByTestId('engine-pill')).toBeInTheDocument();
   });
 
   it('opens navigation on a phone, routes through the same project view, and keeps drafts on resize', async () => {

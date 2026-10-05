@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GezelClient } from '@bendyline/gezel-client';
+import { GezelApiError, GezelClient } from '@bendyline/gezel-client';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
@@ -194,5 +194,60 @@ describe('artifact folder operations', () => {
     await expect(client.renameProjectArtifactPath(projectId, 'movable', 'shadow')).rejects.toThrow(
       /400/,
     );
+  });
+
+  // The MCP artifact tools reach these routes through this client and hand the
+  // reply's `error` to the gezel, so the refusal has to arrive as a sentence.
+  it('refuses changes through a folder that is a shortcut elsewhere, saying why', async ({
+    skip,
+  }) => {
+    const outside = await mkdtemp(join(tmpdir(), 'gezel-artifacts-outside-'));
+    const link = join(svc.context.store.projectArtifactsDir(projectId), 'elsewhere');
+    try {
+      await writeFile(join(outside, 'keep.md'), 'outside work');
+      try {
+        await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch {
+        skip();
+      }
+      await svc.context.store.writeProjectArtifact(projectId, 'here.md', 'here');
+      const refusal =
+        /goes through a shortcut to a location outside this project's artifacts, so Gezel won't change files through it/;
+      const attempts: Array<[string, () => Promise<unknown>]> = [
+        ['write', () => client.writeProjectArtifact(projectId, 'elsewhere/keep.md', 'changed')],
+        ['delete', () => client.deleteProjectArtifact(projectId, 'elsewhere/keep.md')],
+        ['mkdir', () => client.createProjectArtifactFolder(projectId, 'elsewhere/folder')],
+        [
+          'rename',
+          () => client.renameProjectArtifactPath(projectId, 'here.md', 'elsewhere/here.md'),
+        ],
+      ];
+      for (const [name, attempt] of attempts) {
+        const err = await attempt().then(
+          () => null,
+          (error: unknown) => error,
+        );
+        expect(err, name).toBeInstanceOf(GezelApiError);
+        expect((err as GezelApiError).status, name).toBe(403);
+        expect((err as GezelApiError).details, name).toMatchObject({
+          code: 'symlink-escape',
+          error: expect.stringMatching(refusal),
+        });
+      }
+      // The binary upload keeps the reply body in its message, not `details`.
+      await expect(
+        client.writeProjectArtifactBinary(
+          projectId,
+          'elsewhere/a.bin',
+          new Uint8Array([1]),
+          'application/octet-stream',
+        ),
+      ).rejects.toMatchObject({ status: 403, message: expect.stringMatching(refusal) });
+      expect(await readFile(join(outside, 'keep.md'), 'utf8')).toBe('outside work');
+      expect(await svc.context.store.readProjectArtifact(projectId, 'here.md')).toBe('here');
+    } finally {
+      await rm(link, { force: true }).catch(() => {});
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

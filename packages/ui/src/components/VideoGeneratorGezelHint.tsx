@@ -208,7 +208,6 @@ function VideoGeneratorInstallDialog({
             Passes your exact prompt straight to the video-generation AI. Works best with terse,
             concrete descriptions.
           </Dialog.Description>
-          {loadingTemplate && <p className="muted small">Loading template…</p>}
           {description && <p className="muted small">{description}</p>}
           <form
             onSubmit={(e) => {

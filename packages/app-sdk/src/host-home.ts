@@ -147,6 +147,22 @@ export function computeHostEnvironment(
   } else {
     variables.set('GEZEL_NODE_PATH', undefined);
   }
+  if (opts.distributionProfile === 'store') {
+    // Developer overrides must never bypass the pinned executable payload of a store build.
+    for (const key of [
+      'GEZEL_NATIVE_ENGINE_VERSION',
+      'GEZEL_LLAMA_SERVER_BIN',
+      'GEZEL_DS4_SERVER_BIN',
+      'GEZEL_SD_SERVER_BIN',
+      'GEZEL_WHISPER_SERVER_BIN',
+      'GEZEL_DEVICE_HEALTH_BIN',
+      'GEZEL_APPLE_FM_BIN',
+      'GEZEL_UV_BIN',
+      'GEZEL_DUCKDB_BIN',
+    ])
+      variables.set(key, undefined);
+    variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
+  }
   if (opts.nativeBinDir) variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
 
   if (borrowed.length > 0) variables.set('GEZEL_READONLY_MODEL_HOMES', borrowed.join(delimiter));

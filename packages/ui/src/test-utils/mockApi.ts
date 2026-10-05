@@ -26,6 +26,18 @@ import { vi } from 'vitest';
 export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>>>;
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
+  getActivityStatus: {
+    items: [],
+    questions: [],
+    at: '2026-10-02T12:00:00.000Z',
+    queues: {
+      providers: {},
+      sessions: [],
+      cache: [],
+      at: '2026-10-02T12:00:00.000Z',
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+    },
+  },
   getEngineRetention: { idleTimeoutMs: 300_000 },
   // Prompt drafts: an empty composer with nothing saved is the common case
   // for a view test, so listing returns nothing and a create hands back a

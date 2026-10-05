@@ -74,6 +74,7 @@ allowBuilds:
   "node-pty": true
   "onnxruntime-node": true
   "protobufjs": true
+  sharp: set this to true or false
 
 ignoredOptionalDependencies:
   - "@napi-rs/canvas"

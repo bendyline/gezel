@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "GezelRuntime", dependencies: [
             .product(name: "GezelModelStorage", package: "models"),
             .product(name: "GezelLlama", package: "GezelLlama")
-        ])
+        ], resources: [.copy("PrivacyInfo.xcprivacy")])
     ],
     swiftLanguageModes: [.v5]
 )

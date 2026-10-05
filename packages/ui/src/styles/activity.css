@@ -1,0 +1,207 @@
+.activity-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 30px;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.activity-control:hover,
+.activity-control[data-state="open"] {
+  background: var(--surface);
+}
+.activity-control.needs-attention {
+  border-color: var(--accent);
+}
+.activity-control-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.needs-attention .activity-control-dot {
+  background: var(--accent);
+}
+.activity-control-label {
+  font-weight: 650;
+}
+.activity-control-summary {
+  color: var(--muted);
+}
+.activity-control-count {
+  display: none;
+}
+.activity-control[data-density="compact"] .activity-control-summary,
+.activity-control[data-density="tight"] .activity-control-summary {
+  display: none;
+}
+.activity-control[data-density="compact"] .activity-control-count,
+.activity-control[data-density="tight"] .activity-control-count {
+  display: inline;
+}
+.activity-panel.gz-dialog {
+  position: fixed;
+  inset: 56px 12px auto auto;
+  transform: none;
+  width: min(600px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 72px);
+  padding: 0;
+  min-width: 0;
+  gap: 0;
+  border-radius: var(--radius-lg);
+  animation: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: var(--text-md);
+}
+.activity-panel-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.6rem;
+}
+.activity-panel-header h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.activity-panel-header p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.activity-section-links {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.activity-section-links .btn {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+.activity-section-links span,
+.activity-section h3 span {
+  color: var(--muted);
+  font-weight: 400;
+}
+.activity-panel-scroll {
+  padding: 0 1rem 1rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+.activity-section {
+  scroll-margin-top: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-lg);
+  margin: 0 0 0.65rem;
+}
+.activity-question,
+.activity-work {
+  margin: 0.75rem 0;
+  overflow-wrap: anywhere;
+}
+.activity-context {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin: 0 0 0.25rem;
+}
+.activity-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.activity-work {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+}
+.activity-work > p:not(.activity-context) {
+  margin: 0.25rem 0 0.5rem;
+  font-size: var(--text-sm);
+}
+.activity-work .btn {
+  font-size: var(--text-sm);
+  margin-right: 0.4rem;
+}
+.activity-question .pending-question {
+  margin: 0;
+}
+.activity-question .pending-question-prompt:has(> .squisq-linear) {
+  max-height: min(32vh, 20rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.activity-question:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.activity-warning {
+  padding: 0.75rem;
+  margin-top: 1rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+.activity-warning p {
+  margin: 0.3rem 0 0.6rem;
+}
+.activity-details {
+  margin-top: 1rem;
+}
+.activity-details > summary {
+  cursor: pointer;
+  padding: 0.4rem 0;
+  font-size: var(--text-sm);
+}
+.activity-queue-details.queue-meter-panel {
+  position: static;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  padding: 0.5rem 0;
+  border: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.activity-all-projects {
+  align-self: flex-start;
+  margin-left: 1rem;
+}
+@media (max-width: 760px) {
+  .activity-control-summary {
+    display: none;
+  }
+  .activity-control-count {
+    display: inline;
+  }
+  .activity-panel.gz-dialog {
+    inset: 52px 6px auto;
+    width: calc(100vw - 12px);
+    max-width: calc(100vw - 12px);
+    max-height: calc(100dvh - 58px);
+  }
+  .activity-panel .btn {
+    min-height: 40px;
+  }
+}

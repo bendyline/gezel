@@ -204,7 +204,7 @@ describe('launchReadiness with a "fill at least one" rule', () => {
   it('says so when the catalog answered without the book', () => {
     const launch: PromptDraftTaskLaunch = { craftbookId: 'gone', params: {}, origin: 'user' };
     expect(launchReadiness(launch, null, { missing: true }).reason).toMatch(/not available/);
-    expect(launchReadiness(launch, null).reason).toBe('Loading the craftbook…');
+    expect(launchReadiness(launch, null)).toEqual({ ready: false });
   });
 
   it('holds Send in plain words when the rule does not include the main content', () => {

@@ -658,7 +658,7 @@ async function isSessionRouteAllowed(
   // such read 403'd and a powerpoint-deck researcher fell back to search
   // snippets, writing "restricted by permissions" into its source packet
   // (gemma4-12b, 2026-09-23). Catalog install/admin routes stay first-party.
-  if (method === 'GET' && /^\/api\/knowledge\/catalogs\/[^/]+\/document$/.test(path)) {
+  if (method === 'GET' && /^\/api\/knowledge\/catalogs\/[^/]+\/(?:document|passage)$/.test(path)) {
     return SESSION_ALLOW;
   }
 

@@ -478,30 +478,31 @@ export class SearchService {
 
   private async buildCatalog(): Promise<CatalogEntry[]> {
     const entries: CatalogEntry[] = [];
-    const [projects, gezels, documents, tasks, craftbooks, handboek, mail] = await Promise.all([
+    const [projects, gezels, documents, craftbooks, handboek, mail] = await Promise.all([
       this.store.listProjects().catch(() => []),
       this.store.listGezels().catch(() => []),
       this.store.listDocumentsRecursive().catch(() => []),
-      Promise.resolve()
-        .then(() => this.store.listAllTasks())
-        .catch(() => []),
       this.extraCatalogs.craftbookEntries?.().catch(() => []) ?? Promise.resolve([]),
       this.extraCatalogs.handboekEntries?.().catch(() => []) ?? Promise.resolve([]),
       this.extraCatalogs.mailEntries?.().catch(() => []) ?? Promise.resolve([]),
     ]);
     const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
 
-    for (const t of tasks) {
-      entries.push({
-        kind: 'task',
-        id: `task:${t.projectId}/${t.num}`,
-        title: t.title,
-        subtitle: `Task · ${projectNameById.get(t.projectId) ?? t.projectId} · ${t.status}`,
-        projectId: t.projectId,
-        ...(projectNameById.has(t.projectId)
-          ? { projectName: projectNameById.get(t.projectId)! }
-          : {}),
-      });
+    try {
+      for await (const t of this.store.iterateAllTasks()) {
+        entries.push({
+          kind: 'task',
+          id: `task:${t.projectId}/${t.num}`,
+          title: t.title,
+          subtitle: `Task · ${projectNameById.get(t.projectId) ?? t.projectId} · ${t.status}`,
+          projectId: t.projectId,
+          ...(projectNameById.has(t.projectId)
+            ? { projectName: projectNameById.get(t.projectId)! }
+            : {}),
+        });
+      }
+    } catch {
+      // Search remains available when task storage is unavailable.
     }
     for (const c of craftbooks) {
       entries.push({

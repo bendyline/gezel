@@ -36,6 +36,10 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "import": "./dist/node.js"
+    },
+    "./app-models": {
+      "types": "./dist/app-models.d.ts",
+      "import": "./dist/app-models.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],

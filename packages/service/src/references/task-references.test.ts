@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { matchReferencedTasksInContent } from './task-references.js';
+import { describe, expect, it, vi } from 'vitest';
+import type { Store } from '../fs/store.js';
+import { extractReferencedTasks, matchReferencedTasksInContent } from './task-references.js';
 
 const KNOWN_REFS = [
   'gezel-ux-roadmap/1',
@@ -74,4 +75,24 @@ once more for emphasis.`;
     const text = `Phase 4 - Development Handoff: Completed. I've written \`reports/developer-handoff.md\` and created task \`gezel-ux-roadmap/2\` "Implement Mega-Menu v1 (Core Structure)".`;
     expect(matchReferencedTasksInContent(text, KNOWN_REFS)).toEqual(['gezel-ux-roadmap/2']);
   });
+});
+
+it('validates only unique mentioned references and never reads all task history', async () => {
+  const readTask = vi.fn(async (_project: string, num: number) =>
+    num === 2 ? { ref: 'p/2' } : null,
+  );
+  const store = {
+    readTask,
+    listAllTasks: vi.fn(() => {
+      throw new Error('unbounded scan');
+    }),
+  } as unknown as Store;
+  expect(await extractReferencedTasks(store, 'Saved the review.')).toEqual([]);
+  expect(readTask).not.toHaveBeenCalled();
+  expect(await extractReferencedTasks(store, 'p/2, p/2 and unknown/99')).toEqual(['p/2']);
+  expect(readTask.mock.calls).toEqual([
+    ['p', 2],
+    ['unknown', 99],
+  ]);
+  expect(store.listAllTasks).not.toHaveBeenCalled();
 });

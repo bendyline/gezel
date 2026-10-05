@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/node.ts'],
+  entry: ['src/index.ts', 'src/app-models.ts', 'src/node.ts'],
   format: ['esm'],
   dts: true,
   sourcemap: true,

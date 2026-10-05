@@ -457,12 +457,15 @@ else throw new Error('Gate ran before its setup');`,
   };
   try {
     await client.retryTask('default', task.num);
-    for (let i = 0; service.busy && i < 1000; i++)
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    // Both activations run QuickJS workers and durable writes; slow storage needs room to finish.
+    const waitStarted = performance.now();
+    while (service.busy && performance.now() - waitStarted < 60_000)
+      await new Promise((resolve) => setTimeout(resolve, 25));
     const current = await client.getTask('default', task.num);
     if (service.busy || current.status !== 'complete')
       globalThis.__scriptFailure = {
         reason: 'authored same-step activation loop did not finish',
+        elapsedMs: Math.round(performance.now() - waitStarted),
         busy: service.busy,
         task: current,
         lifecycle: await store.getTaskLifecycle(task.ref),

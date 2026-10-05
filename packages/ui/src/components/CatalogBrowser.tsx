@@ -272,7 +272,6 @@ export function CatalogBrowser({
       {showsCommunity && (
         <p className="muted small catalog-community-notice">{COMMUNITY_CATALOG_NOTICE}</p>
       )}
-      {loading && <p className="muted small">Loading…</p>}
       {error && <p className="error">{error}</p>}
       {!loading && visible.length === 0 && (
         <p className="muted small">{emptyMessage ?? 'Nothing in the catalog for this kind yet.'}</p>

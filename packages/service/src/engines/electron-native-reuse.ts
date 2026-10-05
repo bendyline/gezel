@@ -59,7 +59,8 @@ export interface ElectronNativeReuseOptions {
  * file set and hashes come from this package, which pin-native-release.mjs
  * updates from the separately published native release.
  */
-export async function reuseVerifiedElectronNativeBinaries(
+/** Pure verification for embedders; never changes process.env. */
+export async function verifyNativeBinaries(
   opts: ElectronNativeReuseOptions,
 ): Promise<ElectronNativeReuseResult> {
   const platform = opts.platform ?? process.platform;
@@ -98,7 +99,6 @@ export async function reuseVerifiedElectronNativeBinaries(
         verifySignature: opts.verifySignature ?? verifyCodeSignature,
         allowStandaloneMacPayload: opts.allowStandaloneMacPayload === true,
       });
-      process.env.GEZEL_NATIVE_BIN_DIR = resolve(candidate);
       return {
         reused: true,
         nativeBinDir: resolve(candidate),
@@ -398,4 +398,13 @@ function sha256File(path: string): Promise<string> {
     stream.on('error', reject);
     stream.on('end', () => resolveHash(hash.digest('hex')));
   });
+}
+
+/** Legacy adoption API. New embedding hosts should use the side-effect-free verifier. */
+export async function reuseVerifiedElectronNativeBinaries(
+  opts: ElectronNativeReuseOptions,
+): Promise<ElectronNativeReuseResult> {
+  const result = await verifyNativeBinaries(opts);
+  if (result.reused && result.nativeBinDir) process.env.GEZEL_NATIVE_BIN_DIR = result.nativeBinDir;
+  return result;
 }

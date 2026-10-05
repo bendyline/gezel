@@ -86,3 +86,7 @@ export type {
   ChatResponseFor,
   ChatStreamFor,
 } from './types.js';
+
+export * from './model-manager.js';
+export * from './embedding.js';
+export * from './desktop-embedding.js';

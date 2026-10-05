@@ -31,6 +31,19 @@ export interface EvalSuite {
 }
 
 export const SUITES: Record<string, EvalSuite> = {
+  'knowledge-effectiveness': {
+    id: 'knowledge-effectiveness',
+    description:
+      'Prompt-identical catalog-vs-free-Wikipedia controls for long-form food, medical, and astronomy research. Generic web search is out of scope. Each pair uses the same artifact gate; treatment provenance is reported separately.',
+    scenarios: [
+      'knowledge-food-carbohydrates-control',
+      'knowledge-food-carbohydrates-catalog',
+      'knowledge-medicine-antibiotic-resistance-control',
+      'knowledge-medicine-antibiotic-resistance-catalog',
+      'knowledge-astronomy-exoplanets-control',
+      'knowledge-astronomy-exoplanets-catalog',
+    ],
+  },
   docblocks: {
     id: 'docblocks',
     description:

@@ -1,4 +1,5 @@
 import type { InferProjectForPathResponse, ProviderName } from '@bendyline/gezel';
+import { isFactualRole, providerUsesManagedMcpBridge } from '@bendyline/gezel';
 import {
   type HttpDeps,
   type KeyValueStorage,
@@ -129,27 +130,52 @@ export interface RosterGezel {
   role?: string;
   /** This gezel's own provider; absent means the install's default. */
   provider?: ProviderName;
+  /** The daemon's answer to "does this gezel write under the citation rule?". */
+  writesFactually?: boolean;
 }
+
+/** An older daemon does not say; judge by the role as the daemon would. */
+const writesFactually = (g: RosterGezel | undefined): boolean =>
+  g ? (g.writesFactually ?? isFactualRole(g.role)) : false;
 
 export async function listGezels(deps: HttpDeps, token: string): Promise<RosterGezel[]> {
   const res = await apiJson<{ gezels: RosterGezel[] }>(deps, token, '/api/gezels');
   return res.gezels ?? [];
 }
 
-/** Remembered choice, else the project lead, else its first member, else the Meester, else anyone. */
+/**
+ * Remembered choice, else a writer (a gezel whose role states facts for a
+ * living: the project's lead or crew first, then anyone), else the project
+ * lead, its first member, the Meester, anyone. Every document session writes
+ * under the citation rule whoever is picked; a writer is also briefed for it.
+ *
+ * Gezels whose provider runs its own tool loop (Copilot, the CLI providers)
+ * cannot reach the document tools, so they are passed over while anyone
+ * else qualifies; `defaultProvider` stands in for a gezel without its own.
+ */
 export function pickDefaultGezel(
   project: PaneProject,
   roster: readonly RosterGezel[],
   meesterId: string | undefined,
   remembered: string | undefined,
+  defaultProvider?: ProviderName,
 ): string {
-  const known = (id: string | undefined): id is string => !!id && roster.some((g) => g.id === id);
-  if (known(remembered)) return remembered;
-  if (known(project.voormanGezelId)) return project.voormanGezelId;
-  const member = project.gezelIds?.find((id) => known(id));
-  if (member) return member;
-  if (known(meesterId)) return meesterId;
-  return roster[0]?.id ?? '';
+  const byId = new Map(roster.map((g) => [g.id, g]));
+  if (remembered && byId.has(remembered)) return remembered;
+  const crew = [project.voormanGezelId, ...(project.gezelIds ?? [])];
+  const isWriter = (id: string | undefined) => writesFactually(id ? byId.get(id) : undefined);
+  const order = [
+    ...crew.filter(isWriter),
+    ...roster.filter((g) => writesFactually(g)).map((g) => g.id),
+    ...crew,
+    meesterId,
+    ...roster.map((g) => g.id),
+  ].filter((id): id is string => !!id && byId.has(id));
+  const reaches = (id: string) => {
+    const provider = byId.get(id)?.provider ?? defaultProvider;
+    return provider === undefined || providerUsesManagedMcpBridge(provider);
+  };
+  return order.find(reaches) ?? order[0] ?? '';
 }
 
 async function obtainToken(
@@ -233,6 +259,7 @@ export async function bootPane(
       roster,
       config.meesterGezelId,
       remembered.gezelId,
+      config.provider,
     );
     const ready: PaneReady = {
       token,

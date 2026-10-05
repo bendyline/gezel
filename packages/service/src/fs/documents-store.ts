@@ -9,7 +9,8 @@ import { writeFileAtomic } from './atomic.js';
 import { looksBinaryText } from './binary-text.js';
 import { DocumentAuditCoalescer } from './document-audit.js';
 import { mimeTypeForFilename } from './media-types.js';
-import { resolveMutationPath, safeJoin } from './safe-paths.js';
+import { resolveOwnedMutationPath } from './mutation-path-refusal.js';
+import { safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,
@@ -307,7 +308,7 @@ export class DocumentsStore {
   }
 
   private resolveWritePath(filePath: string): Promise<string> {
-    return resolveMutationPath(this.documentsDir(), filePath);
+    return resolveOwnedMutationPath(this.documentsDir(), filePath, 'your library');
   }
 }
 

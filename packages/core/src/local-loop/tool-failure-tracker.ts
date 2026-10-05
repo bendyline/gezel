@@ -34,6 +34,8 @@ const SOFT_WARNING_AT_DEFAULT = 3;
 const HARD_ABORT_AT_DEFAULT = 5;
 const TRANSPORT_ABORT_AT = 2;
 const NON_RETRYABLE_ABORT_AT = 2;
+/** A write cannot recover from missing evidence by changing its prose. */
+const GROUNDING_REQUIRED_ABORT_AT = 3;
 
 /**
  * `write_artifact` refusals caused by an existing workspace file at the
@@ -89,7 +91,7 @@ export interface ToolFailureTrackerOpts {
 export interface ToolFailureLoop {
   tool: string;
   count: number;
-  sourceFailureKind?: 'truncated' | 'not-persisted';
+  sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
   transportFailure?: boolean;
   missingPath?: boolean;
 }
@@ -102,7 +104,7 @@ export interface ToolFailureResult {
   /** Current consecutive-fail count for this tool (0 when result was a success). */
   count: number;
   /** Source-write failure class used to choose the next-turn corrective. */
-  sourceFailureKind?: 'truncated' | 'not-persisted';
+  sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
   /** The shared internal MCP/service transport failed, not this tool's schema. */
   transportFailure?: boolean;
   /** The failing calls were reads of a path that does not exist. */
@@ -217,24 +219,38 @@ export class ToolFailureTracker {
       }
       return { output, shouldAbort: false, count: fails, missingPath: true };
     }
-    if (fails >= this.hardAbortAt) {
-      return { output, shouldAbort: true, count: fails };
-    }
-    if (fails >= this.softWarningAt) {
-      if (isSourceEditFailureTool(toolName)) {
-        const sourceFailureKind = isTruncatedSourceWriteFailure(output)
+    const sourceFailureKind = isSourceEditFailureTool(toolName)
+      ? isGroundingRequiredWriteFailure(output)
+        ? 'grounding-required'
+        : isTruncatedSourceWriteFailure(output)
           ? 'truncated'
           : isAtomicallyRejectedSourceWriteFailure(output)
             ? 'not-persisted'
-            : undefined;
+            : undefined
+      : undefined;
+    if (sourceFailureKind === 'grounding-required' && fails >= GROUNDING_REQUIRED_ABORT_AT) {
+      return { output, shouldAbort: true, count: fails, sourceFailureKind };
+    }
+    if (fails >= this.hardAbortAt) {
+      return {
+        output,
+        shouldAbort: true,
+        count: fails,
+        ...(sourceFailureKind ? { sourceFailureKind } : {}),
+      };
+    }
+    if (fails >= this.softWarningAt) {
+      if (isSourceEditFailureTool(toolName)) {
         const output2 =
-          this.surgicalEditsAvailable && !sourceFailureKind
-            ? `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP re-emitting the whole file — retyping the full source keeps corrupting it. Make a TARGETED edit by LINE NUMBER: \`replace_lines({ path, startLine, endLine, content })\` — read the line range off the \`read_file\` gutter and supply ONLY the corrected lines (no \`find\` string to reproduce). If the latest user/check message names a different missing deliverable path, write that exact path next.${this.delegationAvailable ? DELEGATE_HANDOFF_HINT : ''}`
-            : `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP retrying fragments or surgical edits.${
-                this.delegationAvailable
-                  ? DELEGATE_HANDOFF_HINT
-                  : ' If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise read the current file if needed, then call `write_file` once with the complete corrected source file: full HTML/JS/CSS from the first byte through the final closing tag.'
-              }`;
+          sourceFailureKind === 'grounding-required'
+            ? `${output}\n\n[runtime] This write is blocked because you have not collected source evidence. STOP calling \`${toolName}\`. Follow the lookup instruction above now; only write after a research tool returns evidence.`
+            : this.surgicalEditsAvailable && !sourceFailureKind
+              ? `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP re-emitting the whole file — retyping the full source keeps corrupting it. Make a TARGETED edit by LINE NUMBER: \`replace_lines({ path, startLine, endLine, content })\` — read the line range off the \`read_file\` gutter and supply ONLY the corrected lines (no \`find\` string to reproduce). If the latest user/check message names a different missing deliverable path, write that exact path next.${this.delegationAvailable ? DELEGATE_HANDOFF_HINT : ''}`
+              : `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP retrying fragments or surgical edits.${
+                  this.delegationAvailable
+                    ? DELEGATE_HANDOFF_HINT
+                    : ' If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise read the current file if needed, then call `write_file` once with the complete corrected source file: full HTML/JS/CSS from the first byte through the final closing tag.'
+                }`;
         return {
           output: output2,
           shouldAbort: false,
@@ -266,7 +282,7 @@ export class ToolFailureTracker {
     /** See {@link ToolFailureTrackerOpts.delegationAvailable}. */
     delegationAvailable?: boolean;
     /** See {@link ToolFailureResult.sourceFailureKind}. */
-    sourceFailureKind?: 'truncated' | 'not-persisted';
+    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
     transportFailure?: boolean;
     /** See {@link ToolFailureResult.missingPath}. */
     missingPath?: boolean;
@@ -280,6 +296,9 @@ export class ToolFailureTracker {
       return `[${opts.providerLabel}] aborting — Gezel's internal tool connection failed ${opts.count} times in this turn. The calls were not rejected by their schemas; the local service backchannel was unavailable, so changing tools or arguments cannot recover this turn.`;
     }
     if (isSourceEditFailureTool(opts.toolName)) {
+      if (opts.sourceFailureKind === 'grounding-required') {
+        return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was blocked ${opts.count} times because no source evidence had been collected. STOP writing. In the next continuation, call the research or search tool named in the latest refusal first, then write from its returned evidence.`;
+      }
       // Burned the whole budget failing to edit one file — a coordination/
       // coherence limit more nudging won't clear. If the model can delegate,
       // that's the move (a bigger model lands the edit); only fall back to
@@ -312,6 +331,7 @@ export class ToolFailureTracker {
     toolName: string;
     count: number;
     delegationAvailable?: boolean;
+    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
     transportFailure?: boolean;
     missingPath?: boolean;
   }): string {
@@ -322,6 +342,9 @@ export class ToolFailureTracker {
       return `Gezel lost its internal tool connection, so the turn was stopped after ${opts.count} failed calls. Your chat and completed tool history were preserved; retry after the service reconnects.`;
     }
     if (isSourceEditFailureTool(opts.toolName)) {
+      if (opts.sourceFailureKind === 'grounding-required') {
+        return `The model kept trying to save factual text before researching, so the turn was stopped after ${opts.count} blocked writes. The next continuation will be directed to collect source evidence first.`;
+      }
       const handoff = opts.delegationAvailable
         ? ' Try sending your message again, or hand the file to a more capable model.'
         : ' Try sending your message again, or switch to a more capable model in Settings.';
@@ -370,7 +393,7 @@ export class ToolFailureTracker {
     count: number;
     surgicalEditsAvailable?: boolean;
     delegationAvailable?: boolean;
-    sourceFailureKind?: 'truncated' | 'not-persisted';
+    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
     transportFailure?: boolean;
     missingPath?: boolean;
     artifactWriterAvailable?: boolean;
@@ -431,6 +454,7 @@ function isFailureOutput(output: string): boolean {
     /^[\w.-]+\s+was\s+rejected\b/i.test(trimmed) ||
     /^Write failed:/i.test(trimmed) ||
     /^Tool call failed:/i.test(trimmed) ||
+    isGroundingRequiredWriteFailure(trimmed) ||
     isDraftPlanGateFailure('', trimmed)
   );
 }
@@ -469,6 +493,12 @@ function isTruncatedSourceWriteFailure(output: string): boolean {
 
 function isAtomicallyRejectedSourceWriteFailure(output: string): boolean {
   return /THE FILE WAS NOT WRITTEN|no bytes from this call were persisted|rejected atomically/i.test(
+    output,
+  );
+}
+
+function isGroundingRequiredWriteFailure(output: string): boolean {
+  return /no source evidence has been collected|facts that no evidence in this conversation shows/i.test(
     output,
   );
 }

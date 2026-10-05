@@ -122,7 +122,7 @@ export function ConflictResolutionView({
   }, [projectId, showToast, onExited]);
 
   if (conflicts === null) {
-    return <p className="muted gh-conflict-loading">Loading…</p>;
+    return null;
   }
 
   const resolvedCount = conflicts.filter((c) => resolutions.has(c.path)).length;

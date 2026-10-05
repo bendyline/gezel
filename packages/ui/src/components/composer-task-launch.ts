@@ -113,7 +113,7 @@ export function launchReadiness(
           ready: false,
           reason: 'This craftbook is not available here any more. Remove it or pick another.',
         }
-      : { ready: false, reason: 'Loading the craftbook…' };
+      : { ready: false };
   }
   for (const input of craftbookInputParams(manifest.paramSchema)) {
     if (input.required && !launch.inputs?.[input.key]) {

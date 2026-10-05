@@ -530,7 +530,7 @@ describe('Sidebar', () => {
     expect(alphaActions.nextElementSibling).toHaveClass('app-sidebar-proj-signal');
     // p1 is pending + poisoned + active → intervene (pending) wins.
     expect(
-      screen.getByRole('button', { name: /Resolve 2 pending questions in Alpha/ }),
+      screen.getByRole('button', { name: /Open Activity: 2 items need you in Alpha/ }),
     ).toBeInTheDocument();
     // p4 is poisoned + active → poisoned beats working.
     expect(
@@ -566,7 +566,7 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens the resolution dialog when the intervene button is clicked', async () => {
+  it('opens Activity scoped to the project when the attention button is clicked', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [{ id: 'p1', name: 'Alpha' } as Project],
     } as never);
@@ -580,8 +580,17 @@ describe('Sidebar', () => {
       />,
     );
     await screen.findByText('Alpha');
-    fireEvent.click(screen.getByRole('button', { name: /Resolve 1 pending question in Alpha/ }));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-updates', opened);
+    try {
+      fireEvent.click(
+        screen.getByRole('button', { name: /Open Activity: 1 item needs you in Alpha/ }),
+      );
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ projectId: 'p1' });
+    } finally {
+      window.removeEventListener('gezel:open-updates', opened);
+    }
   });
 
   it('jumps to the failed turn when the error indicator is clicked', async () => {

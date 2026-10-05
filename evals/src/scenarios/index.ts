@@ -29,6 +29,7 @@ import { indexBenchScenario } from './index-bench.ts';
 import { interfaceContractScenario } from './interface-contract.ts';
 import { jobHuntScenario } from './job-hunt.ts';
 import { knowledgeBenchScenario } from './knowledge-bench.ts';
+import { knowledgeEffectivenessScenarios } from './knowledge-effectiveness.ts';
 import { largePrReviewScenario } from './large-pr-review.ts';
 import { meesterEndToEndScenarios } from './meester-e2e.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
@@ -143,6 +144,9 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // own embedder (Phase-4 gate: p95 < 750 ms; injection budgets are
   // CI-guarded in the service suite).
   [knowledgeBenchScenario.id]: knowledgeBenchScenario,
+  ...Object.fromEntries(
+    knowledgeEffectivenessScenarios().map((scenario) => [scenario.id, scenario]),
+  ),
   [retrievalBenchScenario.id]: retrievalBenchScenario,
   // Index-leverage agent probes on the same pinned corpus:
   // a 34-file mechanical rename and a 6-question "where does X live" Q&A.

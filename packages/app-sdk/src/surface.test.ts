@@ -14,42 +14,62 @@ import * as root from './index.js';
  * Type-only exports do not appear here — they carry no runtime value — so the
  * lists are shorter than the entry points read.
  */
+const shared = [
+  'abortableDelay',
+  'createEmbedding',
+  'createHttpModelManager',
+  'createModelManager',
+  'describeModel',
+  'notify',
+  'sdkError',
+  'selectModel',
+];
+
 describe('published surface', () => {
   it('root entry', () => {
-    expect(Object.keys(root).sort()).toEqual([
-      'GezelApp',
-      'GezelSdkError',
-      'authorize',
-      'authorizeLocal',
-      'authorizeLocalOwner',
-      'connect',
-      'connectLocal',
-      'createPatientFetch',
-      'createTrustingFetch',
-      'detectGezel',
-      'registerAppTools',
-      'scopeNeedsVerificationCode',
-    ]);
+    expect(Object.keys(root).sort()).toEqual(
+      [
+        'GezelApp',
+        'GezelSdkError',
+        'authorize',
+        'authorizeLocal',
+        'authorizeLocalOwner',
+        'connect',
+        'connectLocal',
+        'createPatientFetch',
+        'createTrustingFetch',
+        'detectGezel',
+        'registerAppTools',
+        'scopeNeedsVerificationCode',
+        ...shared,
+      ].sort(),
+    );
   });
 
   it('browser entry stays free of anything that needs Node', () => {
     // A browser app supplies its own baseUrl and token: discovery, consent and
     // hosting all need the filesystem and are deliberately absent here. App
     // tools need only fetch and streams, so a token-holding renderer gets them.
-    expect(Object.keys(browser).sort()).toEqual(['GezelApp', 'GezelSdkError', 'registerAppTools']);
+    expect(Object.keys(browser).sort()).toEqual(
+      ['GezelApp', 'GezelSdkError', 'registerAppTools', ...shared].sort(),
+    );
   });
 
   it('host entry', () => {
-    expect(Object.keys(host).sort()).toEqual([
-      'Gezel',
-      'GezelApp',
-      'GezelChat',
-      'GezelProject',
-      'GezelSdkError',
-      'connectOrHost',
-      'hostedGezelHome',
-      'registerAppTools',
-    ]);
+    expect(Object.keys(host).sort()).toEqual(
+      [
+        'Gezel',
+        'GezelApp',
+        'GezelChat',
+        'GezelProject',
+        'GezelSdkError',
+        'connectOrHost',
+        'hostedGezelHome',
+        'registerAppTools',
+        'createDesktopEmbedding',
+        ...shared,
+      ].sort(),
+    );
   });
 
   it('advanced entry carries only the escape hatch', () => {

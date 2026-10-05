@@ -274,6 +274,37 @@ describe('keyword hits must be grounded in what they inject', () => {
     expect(result?.hits).toHaveLength(1);
   });
 
+  it('numbers each injected row for a factual-mode session, and only rows that made it in', async () => {
+    const search = {
+      searchProject: async () => ({
+        results: [ftsHit({ snippet: 'Create PowerPoint decks from annotated sections' })],
+        truncated: false,
+      }),
+    } as unknown as SearchService;
+    const cited: string[] = [];
+    const result = await retrieveProjectContext({
+      store: {
+        ...STORE,
+        readDocumentAsMarkdown: async () => ({
+          content: 'Create PowerPoint decks from annotated sections',
+        }),
+      } as unknown as Store,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'Can you create a PowerPoint about France',
+      messageOrigin: 'direct-user',
+      citeHit: (hit) => {
+        cited.push(hit.path ?? '');
+        return 7;
+      },
+    });
+    expect(cited).toEqual(['aboutDocBlocks.md']);
+    expect(result?.prompt).toContain('\n[7] [shared] aboutDocBlocks.md');
+    expect(result?.prompt).toContain('cite facts from it by that number, as [n]');
+  });
+
   it('grounds on the path too — a filename match is injected on the header line', async () => {
     const result = await runQuery(
       [ftsHit({ path: 'decks/france-overview.md', snippet: 'unrelated body text' })],
@@ -539,7 +570,10 @@ describe('knowledge injection ceilings', () => {
         ...STORE,
         readProjectArtifact: async () => 'pasta evidence line one',
         readTask: async (_projectId: string, num: number) => taskFor(num),
-        listProjectTasks: async () => [taskFor(8), taskFor(11)],
+        iterateProjectTasks: async function* () {
+          yield taskFor(8);
+          yield taskFor(11);
+        },
       } as unknown as Store,
       search,
       record: { ...RECORD, taskRef: 'p1/11', stepId: 'research' } as unknown as ChatSession,

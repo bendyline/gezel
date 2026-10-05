@@ -47,11 +47,6 @@ export function PullRequestsView({ projectId }: Props) {
             {error}
           </p>
         )}
-        {pulls === null && (
-          <p className="muted" style={{ padding: '0.5rem' }}>
-            Loading…
-          </p>
-        )}
         {pulls && pulls.length === 0 && !error && (
           <p className="muted" style={{ padding: '0.5rem' }}>
             No open pull requests.
@@ -142,12 +137,7 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
         {error}
       </p>
     );
-  if (!detail)
-    return (
-      <p className="muted" style={{ padding: '1rem' }}>
-        Loading…
-      </p>
-    );
+  if (!detail) return null;
 
   return (
     <div style={{ padding: '0.5rem 0.75rem', overflow: 'auto', height: 'calc(100vh - 320px)' }}>

@@ -11,6 +11,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./packaging": {
+      "types": "./scripts/embedding-package.d.mts",
+      "import": "./scripts/embedding-package.mjs"
     }
   },
   "files": [
@@ -23,7 +28,11 @@
     "README.md",
     "LICENSE",
     "!native/**/.build/**",
-    "!native/**/.swiftpm/**"
+    "!native/**/.swiftpm/**",
+    "scripts/embedding-package.mjs",
+    "scripts/embedding-package.d.mts",
+    "scripts/stage-native.mjs",
+    "embedding-manifest.json"
   ],
   "capacitor": {
     "ios": {

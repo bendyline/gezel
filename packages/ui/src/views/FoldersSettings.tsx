@@ -200,9 +200,8 @@ export function FoldersSettings() {
 
   if (!status) {
     return (
-      <section className="settings-section">
+      <section className="settings-section" aria-busy="true">
         <h2>Folders</h2>
-        <p className="muted small">Loading…</p>
       </section>
     );
   }

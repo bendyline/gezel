@@ -32,7 +32,16 @@ dependencies {
 afterEvaluate {
     publishing {
         publications {
-            release(MavenPublication) { from components.release; artifactId = 'gezel-runtime' }
+            release(MavenPublication) {
+                from components.release
+                artifactId = 'gezel-runtime'
+                pom {
+                    name = 'Gezel native provider and model runtime'
+                    licenses {
+                        license { name = 'MIT'; url = 'https://opensource.org/license/mit' }
+                    }
+                }
+            }
         }
         repositories { maven { url = uri(providers.gradleProperty('gezelMavenRepository').get()) } }
     }

@@ -3,6 +3,28 @@ import { ToolFailureTracker } from './tool-failure-tracker.js';
 import { TurnAbortError } from './turn-abort-error.js';
 
 describe('ToolFailureTracker', () => {
+  it('preserves research-first recovery through warning and abort', () => {
+    const t = new ToolFailureTracker({ softWarningAt: 2, hardAbortAt: 5 });
+    const output =
+      'Not saved: no source evidence has been collected. Your next tool call must be `wikipedia_search`.';
+    t.recordResult('write_file', output);
+    const soft = t.recordResult('write_file', output);
+    expect(soft.sourceFailureKind).toBe('grounding-required');
+    expect(soft.output).toContain('Follow the lookup instruction above now');
+    expect(soft.output).not.toContain('complete corrected source file');
+
+    const hard = t.recordResult('write_file', output);
+    expect(hard).toMatchObject({ shouldAbort: true, sourceFailureKind: 'grounding-required' });
+    const message = ToolFailureTracker.buildAbortMessage({
+      providerLabel: 'llama.cpp',
+      toolName: 'write_file',
+      count: hard.count,
+      sourceFailureKind: hard.sourceFailureKind,
+    });
+    expect(message).toContain('call the research or search tool named in the latest refusal first');
+    expect(message).not.toContain('one complete `write_file');
+  });
+
   it('passes successful tool output through unchanged with count 0', () => {
     const t = new ToolFailureTracker();
     const r = t.recordResult('create_task', 'Created tk-1 — "Build x" with 3 phases.');

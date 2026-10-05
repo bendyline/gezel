@@ -72,6 +72,7 @@ import { planNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
+import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { startResponsivenessMonitor } from './perf/responsiveness.js';
 
 import { ModelFitnessManager } from './fitness/manager.js';
@@ -1813,6 +1814,7 @@ export async function startProductService(
     search.setKnowledgeSearch({
       search: (query, opts) => knowledge.searchUnified(query, opts),
     });
+    tasks.setKnowledgeCitationResolver(async (uri) => (await knowledge.resolveCitation(uri)).ok);
     knowledge.startAutoUpdateTimer();
   }
   // Drop the cached name catalog when a project/gezel/document is
@@ -2971,6 +2973,7 @@ export async function startProductService(
     5 * 60 * 1000,
   );
   idleSessionTimer.unref();
+  const stopMemoryDiagnostics = startMemoryDiagnostics();
   if (!embeddedInferenceOnly) {
     setTimeout(() => {
       chat.runIdleSummarizationSweep().catch(() => {
@@ -3066,6 +3069,7 @@ export async function startProductService(
       await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
       clearInterval(idleSessionTimer);
+      stopMemoryDiagnostics();
       await shutdownStep('channels', () => channels.stop());
       await shutdownStep('app serve', async () => appServe?.stopAll());
       await shutdownStep('remote serving', () => remoteServing.stop());

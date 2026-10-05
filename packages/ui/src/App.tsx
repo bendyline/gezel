@@ -10,6 +10,7 @@ import type {
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
+import { ActivityControl } from './components/ActivityControl.js';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
@@ -19,8 +20,6 @@ import { GrantConsentDialog } from './components/GrantConsentDialog.js';
 import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NarrationStopButton } from './components/NarrationStopButton.js';
-import { NeedsInputPanel } from './components/NeedsInputPanel.js';
-import { QueueMeter } from './components/QueueMeter.js';
 import { ResponsiveAppShell } from './components/ResponsiveAppShell.js';
 import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
 import { Sidebar } from './components/Sidebar.js';
@@ -28,16 +27,15 @@ import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { ActivityProvider, useActivity } from './components/activity-context.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
-import { OPEN_UPDATES_EVENT } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
   requestOutputPaneRestore,
 } from './components/output-pane-maximize.js';
-import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
@@ -144,7 +142,7 @@ if (EMBEDDED_PARAMS?.gezelId) {
 export function App() {
   if (EMBEDDED_PARAMS) {
     return (
-      <Suspense fallback={<div className="placeholder">Loading chat…</div>}>
+      <Suspense fallback={null}>
         <EmbeddedChat
           projectId={EMBEDDED_PARAMS.projectId}
           gezelId={EMBEDDED_PARAMS.gezelId}
@@ -158,7 +156,11 @@ export function App() {
       </Suspense>
     );
   }
-  return <FullApp />;
+  return (
+    <ActivityProvider>
+      <FullApp />
+    </ActivityProvider>
+  );
 }
 
 function FullApp() {
@@ -170,7 +172,6 @@ function FullApp() {
   const toggleNavigation = useCallback(() => setNavigationOpen((open) => !open), []);
   useBackNavigation(compact, navigationOpen, openNavigation);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
   // Per-project signals painted on the sidebar rows: which projects have a
   // gezel mid-turn (the animated "thinking" indicator), and how many pending
@@ -182,7 +183,19 @@ function FullApp() {
     new Map(),
   );
   const [activeTurnsReady, setActiveTurnsReady] = useState(false);
-  const [pendingByProject, setPendingByProject] = useState<Map<string, number>>(new Map());
+  const activity = useActivity();
+  const pendingByProject = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of activity?.snapshot?.items ?? []) {
+      if (item.section === 'needs-you' && item.projectId) {
+        counts.set(
+          item.projectId,
+          (counts.get(item.projectId) ?? 0) + Math.max(1, item.questionIds.length),
+        );
+      }
+    }
+    return counts;
+  }, [activity?.snapshot]);
   // Projects with a "poisoned" session — last turn aborted, awaiting a user
   // turn to clear. Durable (survives reload) so it's seeded from a real fetch,
   // not the live stream; error/complete events + a 20s reconcile keep it fresh.
@@ -260,11 +273,6 @@ function FullApp() {
     window.addEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
     return () => window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
   }, []);
-  // Questions overlay — top-of-window dropdown that renders the pending
-  // structured questions across every project. Opens on nav click.
-  // Auto-closes when the last question is answered.
-  const [questionsOpen, setQuestionsOpen] = useState(false);
-
   const commitSelection = useCallback((next: RecentTab | null) => {
     // Any navigation closes the first-run window. The estimate is re-run on
     // every config save, and a provider switched before its key is pasted
@@ -475,27 +483,6 @@ function FullApp() {
     return () => window.removeEventListener('gezel:document-renamed', onRenamed);
   }, [commitSelection]);
 
-  // Auto-close the Questions overlay once the queue drains. Esc also
-  // closes it so the user can dismiss without reaching for the mouse.
-  useEffect(() => {
-    if (questionsOpen && pendingQuestionCount === 0) setQuestionsOpen(false);
-  }, [questionsOpen, pendingQuestionCount]);
-  useEffect(() => {
-    if (!questionsOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setQuestionsOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [questionsOpen]);
-  // Anything that counts the owner's questions (Home's "waiting on you" chip)
-  // opens the same drawer the titlebar's Updates button does.
-  useEffect(() => {
-    const onOpenUpdates = () => setQuestionsOpen(true);
-    window.addEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
-    return () => window.removeEventListener(OPEN_UPDATES_EVENT, onOpenUpdates);
-  }, []);
-
   // Global search shortcuts: ⌘P / Ctrl+P → quick-open (names/files),
   // ⌘K / Ctrl+K → full unified search. Both focus the titlebar box via
   // `gezel:focus-search`; TitlebarSearch owns the rest. Kept here so App
@@ -536,22 +523,6 @@ function FullApp() {
     return () => clearInterval(interval);
   }, [refreshUsage]);
 
-  // Pending-question count for the Home tab badge. Loaded once at mount,
-  // refreshed whenever a `question_asked` / `question_answered` SSE
-  // envelope arrives — same global stream the Home pane subscribes to,
-  // so a single source feeds both surfaces.
-  const refreshPendingCount = useCallback(() => {
-    if (!runtimeCapabilities().structuredQuestions) return;
-    api
-      .listQuestions({ pending: true })
-      .then((r) => {
-        setPendingQuestionCount(r.questions.length);
-        const m = new Map<string, number>();
-        for (const q of r.questions) m.set(q.projectId, (m.get(q.projectId) ?? 0) + 1);
-        setPendingByProject(m);
-      })
-      .catch(() => {});
-  }, []);
   // Seed the mid-turn set from every in-flight turn (each tagged with its
   // projectId), and re-sync on an interval to self-heal any missed `done`.
   const reconcileActiveProjects = useCallback(() => {
@@ -597,7 +568,6 @@ function FullApp() {
     return () => window.removeEventListener('gezel:session-error-cleared', onCleared);
   }, [refreshPoisoned]);
   useEffect(() => {
-    refreshPendingCount();
     const ctrl = new AbortController();
     void (async () => {
       try {
@@ -608,9 +578,6 @@ function FullApp() {
           fetch: api.getFetch(),
         })) {
           const ev = (env as ChatEventEnvelope).event;
-          if (ev.type === 'question_asked' || ev.type === 'question_answered') {
-            refreshPendingCount();
-          }
           // Keep the sidebar "thinking" set live: a turn opens on user_message
           // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
           // joined mid-flight.
@@ -734,7 +701,7 @@ function FullApp() {
       }
     })();
     return () => ctrl.abort();
-  }, [refreshPendingCount, recomputeActiveTurns, refreshPoisoned]);
+  }, [recomputeActiveTurns, refreshPoisoned]);
 
   useEffect(() => {
     const platform = window.__GEZEL__?.platform;
@@ -798,30 +765,6 @@ function FullApp() {
           {!compact && (
             <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
           )}
-          {pendingQuestionCount > 0 && (
-            <button
-              type="button"
-              className={
-                questionsOpen
-                  ? 'nav active app-nav-questions app-header-questions'
-                  : 'nav app-nav-questions app-header-questions'
-              }
-              onClick={() => setQuestionsOpen((o) => !o)}
-              title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
-              aria-expanded={questionsOpen}
-            >
-              {compact ? (
-                <>
-                  <UpdatesIcon />
-                  <span className="sr-only">Updates</span>
-                </>
-              ) : (
-                'Updates'
-              )}
-              <span className="app-nav-badge">{pendingQuestionCount}</span>
-              {!compact && <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>}
-            </button>
-          )}
           {/* Unified search is anchored near the brand so changing status-pill
             widths do not recenter it. It stays shrinkable in the flex row, so
             crowded titlebars still give the pills room without overlap — and
@@ -840,7 +783,9 @@ function FullApp() {
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
             <NarrationStopButton />
-            {runtimeCapabilities().engineStatus && <QueueMeter />}
+            {(runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
+              <ActivityControl />
+            )}
             {runtimeCapabilities().daemonSettings && <BoekwachterPill />}
             {runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {runtimeCapabilities().daemonSettings && (
@@ -869,46 +814,6 @@ function FullApp() {
           </div>
         </header>
       </HeaderDensityContext.Provider>
-      {questionsOpen && (
-        <>
-          {/* Scrim is a real <button> so keyboard users can close the
-             overlay (Enter / Space) — biome's useKeyWithClickEvents
-             caught the original <div onClick> version. Styling in
-             `.app-questions-scrim` strips every native button look so
-             it still reads as a dim translucent layer. */}
-          <button
-            type="button"
-            className="app-questions-scrim"
-            onClick={() => setQuestionsOpen(false)}
-            aria-label="Close updates panel"
-          />
-          {/* Native <dialog open> satisfies biome's useSemanticElements
-             rule (beats <div role="dialog">). `open` (not `showModal`)
-             keeps the existing non-modal behavior — the rest of the UI
-             stays interactive — and all our custom affordances (Esc
-             handler, auto-close on empty queue, scrim click) still
-             apply. Going fully modal via showModal would trap focus
-             and inert the rest of the app, which is stricter than
-             intended for a top-of-window notification drawer. */}
-          <dialog open className="app-questions-overlay" aria-label="Needs your input">
-            <button
-              type="button"
-              className="app-questions-overlay-close"
-              onClick={() => setQuestionsOpen(false)}
-              aria-label="Close"
-              title="Close"
-            >
-              ×
-            </button>
-            <NeedsInputPanel
-              onOpenInChat={(question) => {
-                openQuestionInChat(question);
-                setQuestionsOpen(false);
-              }}
-            />
-          </dialog>
-        </>
-      )}
       {compact && (outputPaneMaximized || preview) && (
         <div className="app-compact-navigation">
           {outputPaneMaximized && (
@@ -945,7 +850,7 @@ function FullApp() {
             />
           }
         >
-          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+          <Suspense fallback={null}>
             {selection === null ? (
               <HomeView
                 platform={window.__GEZEL__?.platform}
@@ -1005,25 +910,6 @@ function NavigationMenuIcon() {
       focusable="false"
     >
       <path d="M3 5.25h14M3 10h14M3 14.75h14" />
-    </svg>
-  );
-}
-
-function UpdatesIcon() {
-  return (
-    <svg
-      className="app-header-questions-icon"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M10 3a4.5 4.5 0 0 0-4.5 4.5v3.2L4 13.5h12l-1.5-2.8V7.5A4.5 4.5 0 0 0 10 3Z" />
-      <path d="M8.3 16.2a1.8 1.8 0 0 0 3.4 0" />
     </svg>
   );
 }

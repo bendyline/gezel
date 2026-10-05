@@ -1306,6 +1306,7 @@ describe('ChatManager — task context', () => {
       steps: [{ name: 'Layout' }],
     });
 
+    const listing = vi.spyOn(store, 'listProjectTasks');
     const session = await manager.createSession({
       gezelId: 'ada',
       projectId: proj.id,
@@ -1317,6 +1318,8 @@ describe('ChatManager — task context', () => {
 
     const create = mock.calls.find((c) => c.kind === 'create');
     const sys = create!.opts!.systemMessage;
+    expect(listing).not.toHaveBeenCalled();
+    listing.mockRestore();
     // The current-task block is rendered; the assigned-tasks
     // hint is suppressed (would just duplicate the same task).
     expect(sys).toContain(`### Current task: ${t.ref}`);
@@ -1413,6 +1416,18 @@ describe('ChatManager — task context', () => {
 });
 
 describe('ChatManager — idle session release', () => {
+  it('also evicts already disconnected records while preserving the saved transcript', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('saved result');
+    await manager.send(session.id, 'review');
+    const cached = await manager.getSessionRecord(session.id);
+    await manager.reset(session.id);
+    const later = Date.parse(cached!.lastActivityAt) + 61_000;
+    expect(await manager.releaseIdleSessions(60_000, later)).toContain(session.id);
+    expect(await manager.getSessionRecord(session.id)).not.toBe(cached);
+    expect((await store.getSession('ada', session.id))?.messages).toEqual(cached?.messages);
+  });
+
   it('releases only quiet sessions, and a released session resumes on its next send', async () => {
     const quiet = await manager.createSession({ gezelId: 'ada' });
     const recent = await manager.createSession({ gezelId: 'ada' });
@@ -1430,6 +1445,7 @@ describe('ChatManager — idle session release', () => {
     );
     expect(released).toEqual([]);
 
+    const cachedRecord = await manager.getSessionRecord(quiet.id);
     const later = Math.max(quietAt, recentAt) + 61_000;
     expect(await manager.releaseIdleSessions(60_000, later)).toEqual(
       expect.arrayContaining([quiet.id, recent.id]),
@@ -1439,6 +1455,9 @@ describe('ChatManager — idle session release', () => {
       disconnectsBefore + 2,
     );
     expect(await manager.releaseIdleSessions(60_000, later)).toEqual([]);
+    const reloaded = await manager.getSessionRecord(quiet.id);
+    expect(reloaded).not.toBe(cachedRecord);
+    expect(reloaded?.messages).toEqual(cachedRecord?.messages);
 
     mock.script('three');
     const reply = await manager.send(quiet.id, 'still there?');

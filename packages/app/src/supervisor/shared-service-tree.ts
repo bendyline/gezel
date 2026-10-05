@@ -52,12 +52,14 @@
  *
  * Windows instead pairs an elevated attestation with an empirical probe:
  *
- *   - the installer publishes the tree (`Users:(OI)(CI)(RX)`, write left to
- *     SYSTEM/Administrators/the service SID) and, only when that succeeded,
- *     records the published bundle sha under HKLM. HKLM is writable by
- *     administrators alone and readable by everyone, which is exactly the
- *     shape an attestation needs: a low-privilege account can neither forge
- *     the record nor suppress it.
+ *   - the installer unpacks a fresh tree, gives it a protected DACL (write for
+ *     SYSTEM and Administrators only; read/execute for Users and the service
+ *     SID) and, only when that succeeded, records the published bundle sha
+ *     under HKLM. HKLM is writable by administrators alone and readable by
+ *     everyone, which is exactly the shape an attestation needs: a
+ *     low-privilege account can neither forge the record nor suppress it. The
+ *     broker gets no write access because it parses untrusted model files and
+ *     every account's daemon runs this code.
  *   - we then probe the tree, its parent, and the daemon entry for write
  *     access *from this account*, which is the property the POSIX branch
  *     ultimately cares about and the one thing a DACL read would have told us
@@ -68,10 +70,13 @@
  * can only prove it is not writable by *us*. A second unprivileged account
  * holding an explicit write ACE would pass here and fail there. Closing that
  * needs an enumerable DACL, which is precisely what we cannot read. It is
- * acceptable because the parent is administrator-only: nothing below it can
- * be created, replaced, or re-permissioned without administrator rights, so
- * such an ACE can only exist if an administrator deliberately granted it —
- * and an administrator is already inside the trust boundary.
+ * acceptable because only administrators can re-permission the tree. The
+ * broker can create entries in the parent, but the tree's protected DACL
+ * denies it the delete access needed to move `service` aside, and the
+ * installer re-extracts rather than trusting any tree it finds there. Such an
+ * ACE can therefore only exist if an administrator deliberately granted it,
+ * and an administrator is already inside the trust boundary. Release CI
+ * asserts the installed DACL.
  */
 
 import { randomUUID } from 'node:crypto';

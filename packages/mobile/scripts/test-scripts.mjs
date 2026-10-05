@@ -678,6 +678,7 @@ if(result.status!=='ok')throw new Error(result.error); gezel.output(result);`;
 } catch (error) {
   const diagnostics = await page?.evaluate(() => globalThis.__scriptFailure).catch(() => null);
   if (diagnostics) {
+    console.error(`Script failure state: ${JSON.stringify(diagnostics, null, 2)}`);
     const path = join(tmpdir(), `gezel-mobile-scripts-failure-${Date.now()}.json`);
     await writeFile(path, JSON.stringify(diagnostics, null, 2));
     console.error(`Script failure diagnostics: ${path}`);

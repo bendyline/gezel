@@ -1543,7 +1543,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       let abortDueToFailureLoop: {
         tool: string;
         count: number;
-        sourceFailureKind?: 'truncated' | 'not-persisted';
+        sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
         transportFailure?: boolean;
       } | null = null;
       let terminalActionClosing: string | null = null;

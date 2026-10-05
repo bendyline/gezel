@@ -841,9 +841,7 @@ export function ProjectGitStatusBar({
               </button>
               {branchMenuOpen && (
                 <div className="project-git-branch-menu" role="menu">
-                  {branches === null ? (
-                    <div className="project-git-branch-loading muted small">Loading branches…</div>
-                  ) : (
+                  {branches === null ? null : (
                     <>
                       {branches.local.length > 0 && (
                         <div className="project-git-branch-group">

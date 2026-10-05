@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceContext } from '../context.js';
 import { v1ModelsRoutes } from './v1-models.js';
 
@@ -44,6 +44,7 @@ function modelContext(): ServiceContext {
 }
 
 describe('GET /v1/models catalog metadata', () => {
+  afterEach(() => vi.unstubAllEnvs());
   it('keeps installed models selectable and advertises downloadable on-device models', async () => {
     const response = await v1ModelsRoutes(modelContext()).request('http://localhost/');
     expect(response.status).toBe(200);
@@ -67,6 +68,29 @@ describe('GET /v1/models catalog metadata', () => {
         context_window: 32_768,
       }),
     );
+  });
+
+  it('offers native catalog weights and never enumerates Python engines in store hosts', async () => {
+    vi.stubEnv('GEZEL_DISTRIBUTION_PROFILE', 'store');
+    const ctx = modelContext();
+    const items = await ctx.catalog.list('chat-model');
+    const first = items[0];
+    if (!first) throw new Error('missing catalog fixture');
+    const dual = { ...first, manifest: { ...first.manifest, mlx: {} } };
+    const mlxOnly = {
+      ...dual,
+      manifest: { ...dual.manifest, id: 'python-only', llamaCpp: undefined },
+    };
+    ctx.catalog.list = vi.fn(async () => [dual, mlxOnly]) as typeof ctx.catalog.list;
+    const providers: string[] = [];
+    ctx.chat.listModelsForProvider = vi.fn(async (provider: string) => {
+      providers.push(provider);
+      return [];
+    });
+    const response = await v1ModelsRoutes(ctx, { localOnly: true }).request('http://localhost/');
+    const body = (await response.json()) as { data: Array<{ id: string }> };
+    expect(body.data.map((entry) => entry.id)).toEqual(['llama-cpp:small-writer']);
+    expect(providers).toEqual(['llama-cpp', 'ds4']);
   });
 
   it('keeps the embedded profile local and does not enumerate gezels or cloud providers', async () => {

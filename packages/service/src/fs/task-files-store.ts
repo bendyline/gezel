@@ -24,6 +24,11 @@ export interface TaskFilesStoreOptions {
 const taskWriteLocks = new KeyedLock();
 const taskNumLocks = new KeyedLock();
 const log = createLogger('task-store');
+/**
+ * The largest task number a folder in the artifacts drawer may reserve. No
+ * project creates a billion tasks; anything above this is a stray folder.
+ */
+const MAX_DRAWER_TASK_NUM = 1_000_000_000;
 
 export class TaskWriteConflictError extends HttpStatusError {
   constructor(ref: string) {
@@ -69,13 +74,28 @@ export class TaskFilesStore {
       // A restored/stale counter can be valid yet lower than the surviving
       // tasks or outputs. Include every directory that reserves task IDs,
       // even when its task.json has been deleted or damaged.
+      const tasksDir = projectTasksDir(this.home, projectId, this.external);
+      for (const name of await readdirIfPresent(tasksDir)) {
+        if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, tasksDir));
+      }
+      // Gezels can create folders in the artifacts drawer, so a folder name
+      // there is a hint, not a record: one stray `tasks/99999999999999999999`
+      // must not block task creation for the project, and one near the top of
+      // the range must not use the range up.
       for (const dir of [
-        projectTasksDir(this.home, projectId, this.external),
         join(projectArtifactsDir(this.home, projectId, this.external), 'tasks'),
         projectDiffpacksDir(this.home, projectId, this.external),
       ]) {
         for (const name of await readdirIfPresent(dir)) {
-          if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, dir));
+          if (!/^\d+$/.test(name)) continue;
+          const num = Number(name);
+          if (Number.isSafeInteger(num) && num <= MAX_DRAWER_TASK_NUM) {
+            current = Math.max(current, num);
+          } else {
+            log.warn(
+              `Ignoring ${join(dir, name)} when numbering tasks: no task can have that number.`,
+            );
+          }
         }
       }
       const packsFile = projectDiffpacksFile(this.home, projectId);
@@ -224,29 +244,40 @@ export class TaskFilesStore {
     }
   }
 
-  async listProjectTasks(projectId: string): Promise<Task[]> {
+  /** Stream newest first so existence checks can stop without retaining history. */
+  async *iterateProjectTasks(projectId: string): AsyncGenerator<Task> {
     const names = await safeReaddir(projectTasksDir(this.home, projectId, this.external));
-    const tasks: Task[] = [];
-    for (const name of names) {
-      if (!/^\d+$/.test(name)) continue;
-      const task = await this.readTask(projectId, Number.parseInt(name, 10));
-      if (task) tasks.push(task);
+    const nums = names
+      .filter((name) => /^\d+$/.test(name))
+      .map(Number)
+      .sort((a, b) => b - a);
+    for (const num of nums) {
+      const task = await this.readTask(projectId, num);
+      if (task) yield task;
     }
-    tasks.sort((a, b) => b.num - a.num);
+  }
+
+  async listProjectTasks(projectId: string): Promise<Task[]> {
+    const tasks: Task[] = [];
+    for await (const task of this.iterateProjectTasks(projectId)) tasks.push(task);
     return tasks;
   }
 
-  async listAllTasks(): Promise<Task[]> {
+  async *iterateAllTasks(): AsyncGenerator<Task> {
     const projectIds = await safeReaddir(gezelPaths(this.home).projects);
-    const all: Task[] = [];
     for (const id of projectIds) {
       // The projects root is an ordinary user-visible directory, so apply the
       // same centralized sync/OS-junk policy as other filesystem scanners.
       // Entity validation is a second boundary: it rejects `.git`, arbitrary
       // dot folders, and any other name that cannot safely be a project id.
       if (!isSafeEntityId(id) || isSyncJunkName(id)) continue;
-      all.push(...(await this.listProjectTasks(id)));
+      yield* this.iterateProjectTasks(id);
     }
+  }
+
+  async listAllTasks(): Promise<Task[]> {
+    const all: Task[] = [];
+    for await (const task of this.iterateAllTasks()) all.push(task);
     all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return all;
   }

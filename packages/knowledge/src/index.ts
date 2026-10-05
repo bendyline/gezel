@@ -38,6 +38,7 @@ export * from './signatures/signing.js';
 // instead of also depending on @bendyline/gezk for the schemas.
 export type {
   CatalogDocument,
+  KnowledgeTocReference,
   KnowledgeCatalogManifest,
   KnowledgeChunkingProfile,
   KnowledgeEmbeddingProfile,

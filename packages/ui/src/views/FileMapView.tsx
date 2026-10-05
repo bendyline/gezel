@@ -841,9 +841,7 @@ export function FileMapView({
                   </section>
                 )}
                 <div className="filemap-fileview-body">
-                  {!file || file.kind === 'loading' ? (
-                    <div className="filemap-empty">Loading {selected.label}…</div>
-                  ) : file.kind === 'error' ? (
+                  {!file || file.kind === 'loading' ? null : file.kind === 'error' ? (
                     <div className="filemap-empty">Couldn’t read this file: {file.error}</div>
                   ) : file.kind === 'binary' ? (
                     <div className="filemap-empty">Binary file — no preview.</div>

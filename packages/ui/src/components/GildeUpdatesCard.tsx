@@ -137,7 +137,7 @@ export function GildeUpdatesCard() {
           className="muted small"
           title={status?.lastCheck ? formatAbsoluteTime(status.lastCheck.at) : undefined}
         >
-          {status ? contentSourceLabel(status) : 'loading…'}
+          {status ? contentSourceLabel(status) : null}
           {status?.updateInProgress
             ? ' · checking…'
             : status?.lastCheck

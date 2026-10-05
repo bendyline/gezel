@@ -8,6 +8,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2022',
-  splitting: false,
+  // One error/lifecycle identity across root, browser and host entry points.
+  splitting: true,
   onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

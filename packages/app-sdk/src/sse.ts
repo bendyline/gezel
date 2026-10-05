@@ -1,3 +1,4 @@
+import { GezelSdkError } from './errors.js';
 /**
  * Minimal SSE chunk reader over a fetch `Response.body`. Yields parsed
  * `data:` payloads as strings; ignores `event:`, `id:`, comments, and
@@ -9,13 +10,22 @@
  * Designed to work over both undici (Node) and the browser fetch
  * since both expose `body` as a ReadableStream<Uint8Array>.
  */
-export async function* readSseDataChunks(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
+export async function* readSseDataChunks(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
+  const abort = () => {
+    void reader.cancel(signal?.reason).catch(() => {});
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
     while (true) {
+      signal?.throwIfAborted();
       const { value, done } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       // SSE frames are separated by a blank line (`\n\n` or
@@ -23,6 +33,8 @@ export async function* readSseDataChunks(body: ReadableStream<Uint8Array>): Asyn
       // buffer.
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() ?? '';
+      if ([buffer, ...frames].some((frame) => frame.length > 4 * 1024 * 1024))
+        throw new GezelSdkError('SSE frame exceeds its size limit', { code: 'invalid_response' });
       for (const frame of frames) {
         const lines = frame.split(/\r?\n/);
         // Collect every `data:` line and join with `\n` per SSE spec.
@@ -49,6 +61,7 @@ export async function* readSseDataChunks(body: ReadableStream<Uint8Array>): Asyn
       if (dataParts.length > 0) yield dataParts.join('\n');
     }
   } finally {
+    signal?.removeEventListener('abort', abort);
     try {
       // Async-iterator return/break must stop native work as well as HTTP bodies.
       await reader.cancel().catch(() => {});

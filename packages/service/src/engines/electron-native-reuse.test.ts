@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type ElectronNativeReuseOptions,
   reuseVerifiedElectronNativeBinaries,
+  verifyNativeBinaries,
 } from './electron-native-reuse.js';
 import type { VerifyOptions } from './signature.js';
 
@@ -57,6 +58,47 @@ describe('Electron native reuse', () => {
 
     expect(result.reused).toBe(true);
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(root);
+    expect(verifySignature).toHaveBeenCalledOnce();
+  });
+
+  it('pure verifier: adopts only a fully pinned and publisher-verified payload', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-'));
+    roots.push(root);
+    const dir = join(root, 'win32-x64');
+    await mkdir(dir, { recursive: true });
+    const bytes = Buffer.from('signed executable fixture');
+    await writeFile(join(dir, 'gezel-device-health.exe'), bytes);
+    const verifySignature = vi.fn(async (_path: string, _opts: VerifyOptions) => ({
+      accepted: true,
+      result: { status: 'valid' as const, detail: 'Bendyline LLC' },
+    }));
+
+    const result = await verifyNativeBinaries({
+      candidates: [root],
+      platform: 'win32',
+      arch: 'x64',
+      release: '9.9.9',
+      manifest: {
+        schemaVersion: 2,
+        release: '9.9.9',
+        platforms: {
+          'win32-x64': {
+            files: {
+              'gezel-device-health.exe': {
+                sha256: createHash('sha256').update(bytes).digest('hex'),
+                sizeBytes: bytes.length,
+                signature: 'bendyline',
+              },
+            },
+            symlinks: {},
+          },
+        },
+      },
+      verifySignature,
+    });
+
+    expect(result.reused).toBe(true);
+    expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(originalNativeRoot);
     expect(verifySignature).toHaveBeenCalledOnce();
   });
 

@@ -1,4 +1,5 @@
 export * from './assignee.js';
+export * from './apple-foundation-models.js';
 export * from './craftbook.js';
 export * from './craftbook-doc.js';
 export * from './craftbook-test.js';
@@ -78,3 +79,6 @@ export * from './turn-intent-plan.js';
 export * from './native-capacity.js';
 export * from './offline-speech.js';
 export * from './perf.js';
+export * from './activity.js';
+
+export * from './app-models.js';

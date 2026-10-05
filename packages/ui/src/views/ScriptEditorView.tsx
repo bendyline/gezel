@@ -531,11 +531,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
     );
   }
   if (!data) {
-    return (
-      <div className="script-editor-view">
-        <p className="muted small">Loading script…</p>
-      </div>
-    );
+    return <div className="script-editor-view" aria-busy="true" />;
   }
 
   return (

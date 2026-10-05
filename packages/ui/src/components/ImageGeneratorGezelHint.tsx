@@ -225,7 +225,6 @@ function ImageGeneratorInstallDialog({
             Forwards your @-mention text straight to <code>{IMAGE_GENERATOR_TOOL}</code>. No LLM is
             invoked.
           </Dialog.Description>
-          {loadingTemplate && <p className="muted small">Loading template…</p>}
           {description && <p className="muted small">{description}</p>}
           <form
             onSubmit={(e) => {

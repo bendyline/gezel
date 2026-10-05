@@ -27,8 +27,10 @@ import type {
   KnowledgeInstallJob,
   KnowledgeInstallRequest,
   KnowledgeInstallSourceKind,
+  KnowledgePassageRead,
   KnowledgeSemanticSearchMode,
   KnowledgeUpdateCandidate,
+  KnowledgeUri,
   ProjectKnowledgeCatalogs,
   TrustedKnowledgeCoordinate,
   UnifiedSearchResult,
@@ -37,6 +39,7 @@ import {
   KnowledgeMachineInventorySchema,
   createLogger,
   formatKnowledgeUri,
+  parseKnowledgeUri,
   resolveSecurityPolicy,
   sameVectorSpace,
 } from '@bendyline/gezel';
@@ -69,6 +72,7 @@ import type {
   GlobalSearchHit,
   GlobalSearchResponse,
   KnowledgeCatalogHost,
+  KnowledgeChunk,
 } from './catalog-host.js';
 import { resolveKnowledgeCatalogSource } from './catalog-source.js';
 import {
@@ -94,6 +98,7 @@ const ROUTE_BUDGET_EXPLICIT = 6;
 const FINAL_K = 24;
 /** Same cadence as the catalog download's own progress (download-with-retry). */
 const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
+const DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS = 5 * 60_000;
 /** Finished jobs stay pollable for a minute: the CLI and older cards poll `/jobs/:id`. */
 const JOB_TTL_MS = 60_000;
 const AUTO_UPDATE_STARTUP_DELAY_MS = 10 * 60_000;
@@ -216,6 +221,8 @@ export interface KnowledgeManagerOptions {
     profile: KnowledgeEmbeddingProfile,
     opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
   ) => Promise<number[]>;
+  /** Optional profile-model prewarm ceiling; keyword search remains usable on timeout. */
+  profilePrewarmTimeoutMs?: number;
   /** Test seam; null turns off the bundled Handboek. */
   bundledHandboekArchive?: string | null;
   /** Test seam: per-profile cosine floors (default: the measured table + env override). */
@@ -856,10 +863,29 @@ export class KnowledgeManager {
     let lastReportAt = 0;
     let outcome: { warning: string | undefined } | null = null;
     let wake: (() => void) | null = null;
+    let finished = false;
     const notify = () => {
       wake?.();
       wake = null;
     };
+    const configuredTimeout = Number.parseInt(
+      this.opts.env?.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        process.env.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        '',
+      10,
+    );
+    const timeoutMs =
+      this.opts.profilePrewarmTimeoutMs ??
+      (Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS);
+    const timeout = setTimeout(() => {
+      if (finished) return;
+      outcome = {
+        warning: `semantic search starts once the embedding model ${profile.model.repo} is available; prewarm exceeded ${timeoutMs}ms`,
+      };
+      notify();
+    }, timeoutMs);
     void (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(
       'knowledge catalog warm-up',
       profile,
@@ -871,33 +897,40 @@ export class KnowledgeManager {
       },
     ).then(
       () => {
+        if (finished) return;
         outcome = { warning: undefined };
         notify();
       },
       (err) => {
+        if (finished) return;
         outcome = {
           warning: `semantic search starts once the embedding model ${profile.model.repo} is available: ${errorMessage(err)}`,
         };
         notify();
       },
     );
-    while (true) {
-      const settled = outcome as { warning: string | undefined } | null;
-      const latest = progress.latest;
-      if (
-        latest &&
-        latest !== progress.reported &&
-        (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
-      ) {
-        progress.reported = latest;
-        lastReportAt = Date.now();
-        yield { type: 'progress', phase: 'embedder', ...latest };
-        continue;
+    try {
+      while (true) {
+        const settled = outcome as { warning: string | undefined } | null;
+        const latest = progress.latest;
+        if (
+          latest &&
+          latest !== progress.reported &&
+          (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
+        ) {
+          progress.reported = latest;
+          lastReportAt = Date.now();
+          yield { type: 'progress', phase: 'embedder', ...latest };
+          continue;
+        }
+        if (settled) return settled.warning;
+        await new Promise<void>((resolveWake) => {
+          wake = resolveWake;
+        });
       }
-      if (settled) return settled.warning;
-      await new Promise<void>((resolveWake) => {
-        wake = resolveWake;
-      });
+    } finally {
+      finished = true;
+      clearTimeout(timeout);
     }
   }
 
@@ -1217,6 +1250,62 @@ export class KnowledgeManager {
     documentId: string,
   ): ReturnType<KnowledgeCatalogHost['getDocument']> {
     return this.opts.host.getDocument(this.requireMounted(catalogId).key, documentId);
+  }
+
+  /** One passage by its citation id, with the document's title and origin. */
+  async getPassage(
+    catalogId: string,
+    documentId: string,
+    chunkUid: string,
+  ): Promise<KnowledgePassageRead | null> {
+    const info = this.requireMounted(catalogId);
+    const chunk = await this.opts.host.getChunk(info.key, documentId, chunkUid);
+    if (!chunk) return null;
+    const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
+    return {
+      catalogId,
+      catalogVersion: info.ref.version,
+      documentId,
+      chunkUid,
+      title: doc?.title ?? chunk.title,
+      headingPath: chunk.headingPath,
+      lineStart: chunk.lineStart,
+      lineEnd: chunk.lineEnd,
+      text: chunk.text,
+      ...(doc?.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...(doc?.sourceUpdatedAt ? { sourceUpdatedAt: doc.sourceUpdatedAt } : {}),
+    };
+  }
+
+  /**
+   * Resolve a `knowledge://` citation: the catalog (publisher included) is
+   * installed and enabled, the document exists, and a `#chunk=` passage is in
+   * it. A citation is only evidence when it resolves; a model can write a
+   * well-formed URI for a passage that does not exist.
+   */
+  async resolveCitation(raw: string): Promise<KnowledgeCitation> {
+    const uri = parseKnowledgeUri(raw.trim());
+    if (!uri) return { ok: false, reason: 'malformed' };
+    const info = this.mountedCatalog(uri.catalogId);
+    if (!info || info.ref.publisherId !== uri.publisherId)
+      return { ok: false, reason: 'catalog-not-installed' };
+    const doc = await this.opts.host.getDocument(info.key, uri.documentId).catch(() => null);
+    if (!doc) return { ok: false, reason: 'no-document' };
+    const base = {
+      ok: true as const,
+      uri,
+      title: doc.title,
+      catalogVersion: info.ref.version,
+      ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+    };
+    if (uri.fragment && 'chunk' in uri.fragment) {
+      const chunk = await this.opts.host
+        .getChunk(info.key, uri.documentId, uri.fragment.chunk)
+        .catch(() => null);
+      if (!chunk) return { ok: false, reason: 'no-passage' };
+      return { ...base, chunk };
+    }
+    return { ...base, markdown: doc.markdown };
   }
 
   async assets(catalogId: string): ReturnType<KnowledgeCatalogHost['assets']> {
@@ -1541,6 +1630,20 @@ function findBundledHandboekArchive(): string | null {
   const source = join(here, '..', '..', 'assets', 'handboek', 'handboek.gezk');
   return existsSync(source) ? source : null;
 }
+
+export type KnowledgeCitation =
+  | { ok: false; reason: 'malformed' | 'catalog-not-installed' | 'no-document' | 'no-passage' }
+  | {
+      ok: true;
+      uri: KnowledgeUri;
+      title: string;
+      catalogVersion: string;
+      sourceUrl?: string;
+      /** The cited passage, when the URI names one. */
+      chunk?: KnowledgeChunk;
+      /** The whole document, when the URI names no passage. */
+      markdown?: string;
+    };
 
 export class KnowledgeNotFoundError extends Error {
   constructor(message: string) {

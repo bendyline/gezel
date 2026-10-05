@@ -345,7 +345,6 @@ export function HomeView({
       <div className="home-view home-view-loading" aria-busy="true">
         <div className="home-loading-placeholder" aria-live="polite">
           <span className="home-loading-spinner" aria-hidden />
-          <span>Loading…</span>
         </div>
       </div>
     );

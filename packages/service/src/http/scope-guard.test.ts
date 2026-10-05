@@ -394,6 +394,14 @@ describe('sessionRouteGuard', () => {
       (await app.request('/api/knowledge/catalogs/wikipedia-food-drink/document?id=11797861'))
         .status,
     ).toBe(200);
+    // A passage citation opens the passage it names.
+    expect(
+      (
+        await app.request(
+          `/api/knowledge/catalogs/wikipedia-food-drink/passage?id=11797861&chunk=${'a'.repeat(32)}`,
+        )
+      ).status,
+    ).toBe(200);
     expect((await app.request('/api/knowledge/catalogs')).status).toBe(403);
     expect((await app.request('/api/knowledge/install', { method: 'POST' })).status).toBe(403);
     expect(

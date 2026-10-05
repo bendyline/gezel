@@ -1,5 +1,5 @@
 /**
- * `.gezk` compiler (gezk 0.6; spec in bendyline/gezk). One owner of normalization, chunk
+ * `.gezk` compiler (gezk 0.7; spec in bendyline/gezk). One owner of normalization, chunk
  * ids, embedding-profile conformance, SQLite schema, shard assignment,
  * centroid routing, and deterministic archive layout — the CLI's Markdown
  * adapter and Qualla's Wikipedia adapter both feed this API.
@@ -41,6 +41,8 @@ import {
   GEZK_MANIFEST_KIND,
   KnowledgeAssetPathSchema,
   KnowledgeCatalogManifestSchema,
+  KnowledgeOrdinalSchema,
+  KnowledgeTocReferenceSchema,
   MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
   MAX_KNOWLEDGE_ASSET_BYTES,
   MAX_KNOWLEDGE_ASSET_COUNT,
@@ -208,6 +210,7 @@ interface PreparedDocument {
   topicPathKey: string;
   /** The topic the document is filed at: the last segment of its path. */
   leafTopicId: string;
+  placements: Array<{ topicId: string; ordinal: number | null }>;
   metaJson: string | null;
   chunks: MarkdownChunk[];
 }
@@ -236,10 +239,28 @@ export async function compileKnowledgeCatalog(
   for await (const doc of opts.documents) {
     if (seenIds.has(doc.id)) throw new Error(`duplicate document id: ${doc.id}`);
     seenIds.add(doc.id);
+    const leafTopicId = assertTopicPath(topicById, doc.id, doc.topicPath);
+    const placements = [
+      {
+        topicId: leafTopicId,
+        ordinal: doc.ordinal === undefined ? null : KnowledgeOrdinalSchema.parse(doc.ordinal),
+      },
+    ];
+    const leaves = new Set([leafTopicId]);
+    for (const raw of doc.tocReferences ?? []) {
+      const reference = KnowledgeTocReferenceSchema.parse(raw);
+      const topicId = assertTopicPath(topicById, doc.id, reference.topicPath);
+      if (leaves.has(topicId))
+        throw new Error(`document ${doc.id} has a repeated TOC placement at '${topicId}'`);
+      leaves.add(topicId);
+      placements.push({ topicId, ordinal: reference.ordinal ?? null });
+    }
+    placements.sort((a, b) => (a.topicId < b.topicId ? -1 : a.topicId > b.topicId ? 1 : 0));
     prepared.push({
       doc,
       topicPathKey: doc.topicPath.join('/'),
-      leafTopicId: assertTopicPath(topicById, doc.id, doc.topicPath),
+      leafTopicId,
+      placements,
       metaJson: encodeDocumentMeta(doc),
       chunks: chunkMarkdownProfile(normalizeMarkdown(doc.markdown), chunkerOpts),
     });
@@ -373,7 +394,9 @@ export async function compileKnowledgeCatalog(
     // topics (document_count filled below)
     const topicDocCount = new Map<string, number>();
     for (const p of prepared) {
-      topicDocCount.set(p.leafTopicId, (topicDocCount.get(p.leafTopicId) ?? 0) + 1);
+      for (const placement of p.placements) {
+        topicDocCount.set(placement.topicId, (topicDocCount.get(placement.topicId) ?? 0) + 1);
+      }
     }
     {
       const stmt = router.prepare(
@@ -398,6 +421,9 @@ export async function compileKnowledgeCatalog(
         chunk_count, source_url, source_revision, source_updated_at, attribution_json, meta_json,
         body_codec, body_blob)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const insertPlacement = router.prepare(
+        'INSERT INTO topic_documents (topic_id, document_id, ordinal) VALUES (?, ?, ?)',
       );
       const insertAlias = router.prepare(
         'INSERT OR IGNORE INTO aliases (alias, document_id) VALUES (?, ?)',
@@ -439,6 +465,13 @@ export async function compileKnowledgeCatalog(
           useBrotli ? 'br' : 'none',
           blob,
         );
+        for (const placement of p.placements) {
+          insertPlacement.run(
+            placement.topicId,
+            p.doc.id,
+            placement.ordinal === null ? null : BigInt(placement.ordinal),
+          );
+        }
         const aliases = [...new Set(p.doc.aliases ?? [])].sort();
         for (const alias of aliases) insertAlias.run(alias, p.doc.id);
         insertFts.run(p.doc.title, p.doc.summary ?? '', aliases.join(' '), p.doc.id);

@@ -1,14 +1,17 @@
-name: Mobile native contracts
+name: Mobile native SDKs and contracts
 
 on:
   pull_request:
     paths:
       - 'native/mobile/**'
       - 'native/runtime/**'
+      - 'native/helpers/apple-fm/**'
       - 'native/engines/llama-cpp/VERSION'
       - 'native/scripts/fetch-upstream.sh'
       - 'packages/mobile/**'
       - 'packages/capacitor/**'
+      - 'tests/embedding-consumers/**'
+      - 'scripts/check-embedding-consumers.mjs'
       - 'packages/app-sdk/**'
       - 'packages/core/**'
       - 'packages/client/**'
@@ -30,13 +33,26 @@ on:
       - 'package.json'
       - '.github/actions/setup-workspace/**'
       - '.github/workflows/mobile-native.yml'
+      - '.github/workflows/build-native.yml'
+  workflow_call:
+    inputs:
+      platform:
+        description: 'Mobile SDK platforms to build'
+        type: string
+        default: all
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Build and upload native SDKs and unsigned app archives'
+        type: choice
+        options: [all, ios, android]
+        default: all
 
 permissions:
   contents: read
 
 concurrency:
-  group: mobile-native-${{ github.ref }}
+  group: mobile-native-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -44,8 +60,13 @@ jobs:
     name: Pinned llama.cpp host contracts
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    outputs:
+      sdk-version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve coordinated SDK version
+        id: version
+        run: python3 native/runtime/release-sdk.py version >> "$GITHUB_OUTPUT"
       - name: Resolve the exact pinned upstream source
         run: |
           node --input-type=module <<'JS'
@@ -68,6 +89,7 @@ jobs:
             for (const [command, ...args] of [
               ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs', 'packages/capacitor/scripts/stage-native.test.mjs'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'native/mobile', '-p', 'test_*.py'],
+              ['python3', '-m', 'unittest', 'discover', '-s', 'native/runtime', '-p', 'test_*.py'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'packages/mobile/scripts', '-p', 'test_*.py'],
               ['python3', 'native/mobile/build-llama.py', 'host', '--jobs', '2'],
               ['native/mobile/.build/host/build/gezel-llama-tests', '--write-fixture', 'native/mobile/.build/ios-fixture.gguf'],
@@ -88,12 +110,14 @@ jobs:
           retention-days: 3
 
   android-build:
+    if: inputs.platform != 'ios'
     name: Android arm64 release archives and instrumentation compilation
     needs: bridge
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
+      GEZEL_MOBILE_SDK_VERSION: ${{ needs.bridge.outputs.sdk-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -149,7 +173,7 @@ jobs:
               // mobile:sync:android stages the offline speech pack and fails
               // without it; --models pulls the checksum-pinned voice pack.
               ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--models'],
-              ['python3', 'native/mobile/stage-sdk.py', 'android', '--build', 'native/mobile/.build/android', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`, '--ndk', process.env.ANDROID_NDK_HOME, '--javac', `${process.env.JAVA_HOME}/bin/javac`],
+              ['python3', 'native/mobile/stage-sdk.py', 'android', '--build', 'native/mobile/.build/android', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', process.env.GEZEL_MOBILE_SDK_VERSION, '--ndk', process.env.ANDROID_NDK_HOME, '--javac', `${process.env.JAVA_HOME}/bin/javac`],
               ['python3', 'native/runtime/stage-sdk.py', 'android', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['node', 'packages/capacitor/scripts/stage-native.mjs', 'android', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['pnpm', 'mobile:sync:android'],
@@ -220,13 +244,38 @@ jobs:
       # deliberately build-only; pnpm mobile:test:android runs the same tests
       # on the dedicated local arm64 AVD, never a translated x86 engine.
 
+      - name: Package public Android SDK
+        run: >-
+          python3 native/runtime/release-sdk.py pack android
+          --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release"
+          --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mobile-sdk-android
+          path: ${{ runner.temp }}/mobile-release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve unsigned Android app for development verification
+        if: ${{ !startsWith(github.ref, 'refs/tags/native-v') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-app-verification
+          path: |
+            packages/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+            packages/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
   ios-simulator:
+    if: inputs.platform != 'android'
     name: iOS simulator product and native bridge tests
     needs: bridge
     runs-on: xcode-27
     timeout-minutes: 60
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
+      GEZEL_MOBILE_SDK_VERSION: ${{ needs.bridge.outputs.sdk-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -279,7 +328,7 @@ jobs:
               // mobile:sync:ios stages the offline speech pack and fails
               // without it; --models pulls the checksum-pinned voice pack.
               ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--models'],
-              ['python3', 'native/mobile/stage-sdk.py', 'ios', '--build', 'native/mobile/.build/ios-bridge', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', `0.1.0-ci.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}`],
+              ['python3', 'native/mobile/stage-sdk.py', 'ios', '--build', 'native/mobile/.build/ios-bridge', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', process.env.GEZEL_MOBILE_SDK_VERSION],
               ['python3', 'native/runtime/stage-sdk.py', 'ios', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['node', 'packages/capacitor/scripts/stage-native.mjs', 'ios', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['pnpm', 'mobile:sync:ios'],
@@ -377,6 +426,28 @@ jobs:
             writeFileSync(path.join(process.env.RUNNER_TEMP, 'ios-archive-verification.json'), check.stdout);
           }, { command: 'iOS native CI cached device archive verification' });
           JS
+      - name: Package public iOS SDK
+        run: >-
+          python3 native/runtime/release-sdk.py pack ios
+          --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release"
+          --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mobile-sdk-ios
+          path: ${{ runner.temp }}/mobile-release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve unsigned iOS app for development verification
+        if: ${{ !startsWith(github.ref, 'refs/tags/native-v') }}
+        run: tar -czf "$RUNNER_TEMP/gezel-ios-app.xcarchive.tar.gz" -C "$RUNNER_TEMP" Gezel.xcarchive
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !startsWith(github.ref, 'refs/tags/native-v') }}
+        with:
+          name: ios-app-verification
+          path: ${{ runner.temp }}/gezel-ios-app.xcarchive.tar.gz
+          if-no-files-found: error
+          retention-days: 14
       - name: Preserve simulator and release verification results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -394,3 +465,82 @@ jobs:
         run: |
           xcrun simctl shutdown "$GEZEL_CI_SIMULATOR" || true
           xcrun simctl delete "$GEZEL_CI_SIMULATOR"
+
+  embedding-consumers:
+    name: External embedding consumer (${{ matrix.platform }})
+    needs: [bridge, android-build, ios-simulator]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            runner: xcode-27
+          - platform: android
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      # SDK declaration generation exceeds Node's default worker heap.
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      GEZEL_MOBILE_SDK_VERSION: ${{ needs.bridge.outputs.sdk-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: '24'
+          pnpm-version: '11.15.1'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mobile-sdk-*
+          path: ${{ runner.temp }}/embedding-native-artifacts
+      - name: Stage verified native release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in ios android; do
+            archive="$RUNNER_TEMP/embedding-native-artifacts/mobile-sdk-$target/gezel-mobile-$GEZEL_MOBILE_SDK_VERSION-$target.tar.gz"
+            python3 native/runtime/release-sdk.py verify "$archive" --target "$target" --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+            mkdir -p "$RUNNER_TEMP/embedding-runtime-$target"
+            tar -xzf "$archive" -C "$RUNNER_TEMP/embedding-runtime-$target"
+            node packages/capacitor/scripts/stage-native.mjs "$target" "$RUNNER_TEMP/embedding-runtime-$target"
+          done
+      - name: Select Android consumer toolchains
+        if: matrix.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          node --input-type=module <<'JS'
+          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
+          import { spawnSync } from 'node:child_process';
+          import path from 'node:path';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
+            const command = path.join(process.env.ANDROID_HOME, 'cmdline-tools/latest/bin/sdkmanager');
+            const child = spawnSync(command, ['platforms;android-36', 'build-tools;36.0.0'], {
+              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 }, stdio: 'inherit',
+            });
+            if (child.error) throw child.error;
+            if (child.status !== 0) throw new Error(`Android toolchain setup exited with ${child.status}`);
+          }, { command: 'Resolve external embedding consumer Android toolchains' });
+          JS
+      - name: Build SDK packages and qualify the isolated consumer
+        env:
+          GEZEL_CONSUMER_PLATFORM: ${{ matrix.platform }}
+        run: |
+          node --input-type=module <<'JS'
+          import { withDependencyReadLease } from './scripts/dependency-lease.mjs';
+          import { spawnPnpm } from './scripts/pnpm-cli.mjs';
+          import { spawn } from 'node:child_process';
+          const wait = child => new Promise((resolve, reject) => {
+            child.once('error', reject);
+            child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Consumer build exited with ${code}`)));
+          });
+          await withDependencyReadLease(process.cwd(), async ({ leaseEnv }) => {
+            const env = { ...process.env, ...leaseEnv };
+            for (const name of ['gezk', 'gezel', 'gezel-client', 'gezel-app-sdk', 'gezel-capacitor']) {
+              await wait(spawnPnpm(['--filter', `@bendyline/${name}`, 'build'], { env, stdio: 'inherit' }));
+            }
+            await wait(spawn(process.execPath, ['scripts/check-embedding-consumers.mjs', `--native-${process.env.GEZEL_CONSUMER_PLATFORM}`], { env, stdio: 'inherit' }));
+          }, { command: 'Fresh external embedding SDK consumer' });
+          JS

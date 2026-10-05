@@ -50,12 +50,17 @@ const HELLO = {
   maxOutputTokens: 1024,
 };
 
-function helperWith(respond: (message: Record<string, unknown>, child: FakeChild) => void) {
+function helperWith(
+  respond: (message: Record<string, unknown>, child: FakeChild) => void,
+  hello: () => Record<string, unknown> | undefined = () => HELLO,
+) {
   const children: FakeChild[] = [];
   const spawnImpl = vi.fn(() => {
     const child = new FakeChild((message, self) => {
-      if (message.type === 'hello') self.reply(HELLO);
-      else respond(message, self);
+      if (message.type === 'hello') {
+        const reply = hello();
+        if (reply) self.reply(reply);
+      } else respond(message, self);
     });
     children.push(child);
     return child;
@@ -68,6 +73,108 @@ function helperWith(respond: (message: Record<string, unknown>, child: FakeChild
 }
 
 describe('gezel-apple-fm client', () => {
+  it('rechecks OS readiness without restarting the helper', async () => {
+    let available = false;
+    const { helper, spawnImpl } = helperWith(
+      () => {},
+      () => ({ ...HELLO, available }),
+    );
+    expect((await helper.ready()).available).toBe(false);
+    available = true;
+    expect((await helper.ready()).available).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    await helper.shutdown();
+  });
+
+  it('bounds a hung readiness check and closes the helper', async () => {
+    vi.useFakeTimers();
+    const { helper, children } = helperWith(
+      () => {},
+      () => undefined,
+    );
+    try {
+      const failed = expect(helper.ready()).rejects.toMatchObject({ code: 'TIMEOUT' });
+      await vi.advanceTimersByTimeAsync(16_000);
+      await failed;
+      expect(children[0]?.exitCode).toBe(0);
+    } finally {
+      await helper.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
+  it('delivers validated native usage and rejects invalid token counts', async () => {
+    const { helper } = helperWith((message, child) => {
+      if (message.type === 'generate') {
+        child.reply({ type: 'usage', id: message.id, inputTokens: -1, outputTokens: 10 });
+        child.reply({ type: 'usage', id: message.id, inputTokens: 130, outputTokens: 22 });
+        child.reply({ type: 'done', id: message.id, stopReason: 'stop' });
+      } else if (message.type === 'count')
+        child.reply({ type: 'count', id: message.id, tokens: 'bad' });
+    });
+    const onUsage = vi.fn();
+    await helper.generate(
+      { messages: [{ role: 'user', content: 'Hello' }], maxTokens: 128, contextSize: 4096 },
+      { onDelta: () => {}, onUsage, onToolCall: async () => ({ output: '' }) },
+    );
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith({ inputTokens: 130, outputTokens: 22 });
+    await expect(helper.countTokens([])).rejects.toMatchObject({ code: 'PROTOCOL' });
+    await helper.shutdown();
+  });
+
+  it('does not execute queued tools after cancellation and recovers if the SDK hangs', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const onToolCall = vi.fn(async () => ({ output: 'must not run' }));
+    const { helper, children } = helperWith((message, child) => {
+      if (message.type !== 'generate') return;
+      child.reply({
+        type: 'tool_call',
+        id: message.id,
+        callId: 'k1',
+        name: 'write_file',
+        arguments: '{}',
+      });
+      controller.abort();
+      child.reply({ type: 'delta', id: message.id, text: 'late' });
+      // Simulate an SDK that never acknowledges cancellation.
+    });
+    const onDelta = vi.fn();
+    try {
+      const running = helper.generate(
+        { messages: [{ role: 'user', content: 'Go' }], maxTokens: 128, contextSize: 4096 },
+        { onDelta, onToolCall },
+        controller.signal,
+      );
+      const failed = expect(running).rejects.toMatchObject({ code: 'SHUTDOWN' });
+      await vi.advanceTimersByTimeAsync(6_000);
+      await failed;
+      expect(onToolCall).not.toHaveBeenCalled();
+      expect(onDelta).not.toHaveBeenCalled();
+      expect(children[0]?.sent.some((message) => message.type === 'cancel')).toBe(true);
+      await expect(helper.ready()).resolves.toMatchObject({ available: true });
+      expect(children).toHaveLength(2);
+    } finally {
+      await helper.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores late readiness messages from a previous process', async () => {
+    const { helper, children } = helperWith(
+      () => {},
+      () => undefined,
+    );
+    const first = helper.ready();
+    const failed = expect(first).rejects.toMatchObject({ code: 'HELPER_EXITED' });
+    children[0]!.exit(9);
+    await failed;
+    const next = helper.ready();
+    children[0]!.reply({ ...HELLO, available: false });
+    children[1]!.reply(HELLO);
+    await expect(next).resolves.toMatchObject({ available: true });
+    await helper.shutdown();
+  });
   it('streams a generation, answers its tool call, and resolves with the stop reason', async () => {
     const { helper, children } = helperWith((message, child) => {
       if (message.type === 'generate') {

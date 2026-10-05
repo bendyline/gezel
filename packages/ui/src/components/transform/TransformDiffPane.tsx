@@ -103,8 +103,7 @@ export function TransformDiffPane({ original, value, onChange }: TransformDiffPa
   }, [theme]);
 
   return (
-    <div className="gz-transform-diff">
-      {!ready && !loadError && <p className="muted small">Loading diff view…</p>}
+    <div className="gz-transform-diff" aria-busy={!ready && !loadError}>
       {loadError && (
         <p className="gz-transform-diff-error">Diff view failed to load: {loadError}</p>
       )}

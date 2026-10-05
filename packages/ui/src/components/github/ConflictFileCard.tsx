@@ -64,7 +64,7 @@ export function ConflictFileCard({ projectId, path, kind, busy, onResolve }: Pro
     return <p className="error gh-conflict-error">{error}</p>;
   }
   if (!versions) {
-    return <p className="muted gh-conflict-loading">Loading…</p>;
+    return null;
   }
 
   const aiAvailable =

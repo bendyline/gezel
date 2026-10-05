@@ -33,6 +33,9 @@ export interface GlobalSearchHit extends CatalogChunkHit {
   catalogId: string;
 }
 
+/** A passage read by its citation id, without search scoring. */
+export type KnowledgeChunk = Omit<CatalogChunkHit, 'cosine' | 'source'>;
+
 export interface GlobalSearchRequest {
   /** Unit query vector, or absent for FTS-only search. */
   vector?: Float32Array;
@@ -67,6 +70,8 @@ export interface KnowledgeCatalogHost {
     key: string,
     documentId: string,
   ): Promise<(CatalogDocumentMeta & { markdown: string }) | null>;
+  /** One passage by its citation id; null when the catalog does not hold it. */
+  getChunk(key: string, documentId: string, chunkUid: string): Promise<KnowledgeChunk | null>;
   /** The catalog's declared `assets/` files. */
   assets(key: string): Promise<CatalogAssetInfo[]>;
   /** One declared asset's bytes, or null when the catalog ships no such asset. */
@@ -155,6 +160,8 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     topics: async (key) => mustGet(handles, key).topics(),
     documentsPage: async (key, opts) => mustGet(handles, key).documentsPage(opts),
     getDocument: async (key, documentId) => mustGet(handles, key).getDocument(documentId),
+    getChunk: async (key, documentId, chunkUid) =>
+      mustGet(handles, key).getChunk(documentId, chunkUid),
     assets: async (key) => mustGet(handles, key).assets(),
     readAsset: async (key, path) => mustGet(handles, key).readAsset(path),
     search: async (request) => searchImpl(request),

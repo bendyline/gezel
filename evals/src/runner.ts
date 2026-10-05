@@ -1141,6 +1141,25 @@ export async function runTrial(
             },
           }
         : {}),
+      ...(scenario.modelNetworkAccess === 'wikipedia'
+        ? {
+            // Eval homes default to lockdown, where every model-initiated
+            // outbound tool is absent. A Wikipedia research scenario must
+            // opt in explicitly or it silently measures model memory instead
+            // of the advertised free lookup. Selecting the wikipedia backend
+            // keeps `web_search` hidden in computeToolAllowlist while exposing
+            // the keyless `wikipedia_search` / `wikipedia_read` pair.
+            webSearch: { provider: 'wikipedia' as const },
+            securityPolicy: {
+              level: 'custom' as const,
+              allowFileEdits: true,
+              allowExternalChat: true,
+              allowExternalServices: true,
+              allowScriptExecution: true,
+              allowAppNetwork: true,
+            },
+          }
+        : {}),
       // Mock-enabled trials need the `network` script capability (the
       // http.authed rail) — the trial home is isolated and every
       // reachable service is a per-trial loopback fake, so the free
@@ -1160,7 +1179,7 @@ export async function runTrial(
       firstRunCompleted: true,
     });
     log(
-      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.
@@ -1178,16 +1197,23 @@ export async function runTrial(
     // and before the kickoff prompt — gives scenarios like
     // `self-correction-broken-js` a place to seed workspace state the
     // prompt then references. Errors bubble up and fail the trial.
+    const scenarioState = new Map<string, unknown>();
     if (scenario.setup) {
       log('[trial] running scenario setup hook');
-      await scenario.setup({
-        client,
-        meesterId,
-        ...(mockRuntime ? { mocks: mockRuntime } : {}),
-        log,
-        // logChanged is a no-op during setup; setup is one-shot, not polled.
-        logChanged: (_key, line) => log(line),
-      });
+      const setupTimeoutMs = scenario.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS;
+      await runScenarioSetupWithTimeout(
+        () =>
+          scenario.setup!({
+            client,
+            meesterId,
+            ...(mockRuntime ? { mocks: mockRuntime } : {}),
+            state: scenarioState,
+            log,
+            // logChanged is a no-op during setup; setup is one-shot, not polled.
+            logChanged: (_key, line) => log(line),
+          }),
+        setupTimeoutMs,
+      );
       log('[trial] scenario setup complete');
     }
 
@@ -1265,6 +1291,7 @@ export async function runTrial(
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(evalHints ? { evalHints } : {}),
         ...(mockRuntime ? { mocks: mockRuntime } : {}),
+        state: scenarioState,
         ...(scenario.restartWhen ? { restartDaemon } : {}),
       });
       success = verdict.success;
@@ -1277,9 +1304,22 @@ export async function runTrial(
     }
   } catch (err) {
     success = false;
-    reason = `runner crashed: ${err instanceof Error ? err.message : String(err)}`;
-    failureMode = 'crash';
-    log(`[trial] crash: ${reason}`);
+    if (opts.signal?.aborted) {
+      reason = 'interrupted (SIGINT/SIGTERM); cleanup ran';
+      failureMode = 'interrupted';
+      log(`[trial] interrupted: ${reason}`);
+    } else if (
+      err instanceof ScenarioSetupTimeoutError ||
+      (err instanceof Error && err.name === 'KnowledgeInstallTimeoutError')
+    ) {
+      reason = err.message;
+      failureMode = 'setup-timeout';
+      log(`[trial] setup timeout: ${reason}`);
+    } else {
+      reason = `runner crashed: ${err instanceof Error ? err.message : String(err)}`;
+      failureMode = 'crash';
+      log(`[trial] crash: ${reason}`);
+    }
   } finally {
     // Phase 8: stop perf collector (one usage probe before the daemon
     // goes away), capture forensic state, then shut down.
@@ -1432,6 +1472,31 @@ export async function ensureMeester(client: GezelClient): Promise<string> {
  * full day are not.
  */
 export const DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000;
+export const DEFAULT_SETUP_TIMEOUT_MS = 15 * 60_000;
+
+export class ScenarioSetupTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`scenario setup timed out after ${timeoutMs}ms`);
+    this.name = 'ScenarioSetupTimeoutError';
+  }
+}
+
+export async function runScenarioSetupWithTimeout(
+  setup: () => Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      setup(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new ScenarioSetupTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * Default soft no-progress window. If the SOFT digest (engine-alive
@@ -1523,6 +1588,13 @@ export function envHardProgressFloorMs(): number {
   if (!raw) return 0;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Whether only checked-deliverable movement may extend a trial's ceiling. */
+export function usesDeliverableAnchoredCeiling(
+  scenario: Pick<EvalScenario, 'hardCeilingProgress' | 'repairPolicy'>,
+): boolean {
+  return scenario.hardCeilingProgress === 'deliverable' || scenario.repairPolicy === 'runtime';
 }
 
 const MAX_ACTIVE_TRIAL_SESSIONS = 64;
@@ -1636,6 +1708,15 @@ export function evalDaemonEnvForTrial(opts: {
     // Production never sets this seam.
     GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA: '1',
     ...(opts.enableEmbeddings ? {} : { GEZEL_DISABLE_EMBEDDINGS: '1' }),
+    ...(opts.enableEmbeddings
+      ? {
+          // A catalog is already usable through FTS if its optional profile
+          // model is cold. Do not make an effectiveness trial spend minutes
+          // downloading that model before the task starts.
+          GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS:
+            process.env.GEZEL_EVAL_KNOWLEDGE_PREWARM_TIMEOUT_MS ?? '30000',
+        }
+      : {}),
     ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),
     ...(opts.relevanceModel === null ? { GEZEL_RELEVANCE_MODEL: 'off' } : {}),
     ...(opts.relevanceModel
@@ -2254,6 +2335,8 @@ export async function pollUntilDone(
     evalHints?: import('@bendyline/gezel').EvalHints;
     /** Live mock-service runtime, threaded onto the EvalContext. */
     mocks?: import('./mock/mock-server.ts').MockServicesRuntime;
+    /** State map created once by the trial runner and shared with setup. */
+    state?: Map<string, unknown>;
     /** Respawn the trial daemon against the same home and return its fresh client. */
     restartDaemon?: () => Promise<GezelClient>;
   },
@@ -2373,6 +2456,7 @@ export async function pollUntilDone(
     snapshotRepairActions,
     ...(args.evalHints ? { evalHints: args.evalHints } : {}),
     ...(args.mocks ? { mocks: args.mocks } : {}),
+    ...(args.state ? { state: args.state } : {}),
   };
 
   // Progress-fingerprint state. We capture a baseline before the first
@@ -2554,7 +2638,7 @@ export async function pollUntilDone(
       // deliverable moving (workspace bytes, sniff verdict), never by tool
       // calls or new sessions: a Meester check-in every few minutes kept a
       // dead invoice-run task "progressing" to the 100-minute cap (2026-09-18).
-      const deliverableAnchored = scenario.repairPolicy === 'runtime';
+      const deliverableAnchored = usesDeliverableAnchoredCeiling(scenario);
       const sinceHardMs =
         Date.now() - (deliverableAnchored ? lastDeliverableChangeAt : lastHardChangeAt);
       const step = Math.min(ceilingExtendStepMs, hardCeilingCapMs - (hardDeadline - startedAt));
@@ -3068,35 +3152,55 @@ export async function pollUntilDone(
           plateauMs >= RETRY_LOOP_NUDGE_WINDOW_MS &&
           toolCallsInPlateau >= RETRY_LOOP_NUDGE_TOOL_THRESHOLD
         ) {
-          retryLoopNudgeAttempted = true;
-          const downstream = await pickReEngageTarget(args.client, args.meesterId, {
-            preferWritableRole: Boolean(recoveryFilePathForSniff(latestSniff)),
-          }).catch(() => null);
-          const targetId = downstream?.gezelId ?? args.meesterId;
-          const targetLabel = downstream
-            ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
-            : 'meester';
-          args.log(
-            `[poll] retry-loop nudge (${artifactExists ? 'expand-existing' : 'create-file'}): sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m with ${toolCallsInPlateau} tool calls; poking ${targetLabel} before retry-loop fires`,
+          // Never enqueue a pre-trigger nudge behind an active turn. The
+          // deliverable can move while that turn is streaming, making the
+          // queued instruction stale by the time it lands. Wild-caught on
+          // knowledge-food-carbohydrates-catalog / gemma4-31b: a valid
+          // rewrite landed, then the queued "expand existing" message
+          // immediately launched a redundant full overwrite. The terminal
+          // retry-loop paths below still decide whether a genuinely stuck
+          // in-flight turn has exceeded its bounded grace window.
+          const nudgeInflightTurns = await listInflightTurnsForWatchdog(args.client).catch(
+            () => [],
           );
-          try {
-            const filePath = recoveryFilePathForSniff(latestSniff);
-            const nudge = buildRetryLoopNudge({
-              filePath,
-              artifactPath: recoveryArtifactPathForSniff(latestSniff),
-              artifactExists,
-            });
-            retryLoopNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
-              meesterId: args.meesterId,
-              fallbackGezelId: targetId,
-              ...(filePath ? { filePath } : {}),
-              log: args.log,
-            });
-            noteHarnessInterventionDelivered(ctx);
-          } catch (err) {
+          if (shouldDeferRetryLoopNudgeForInflight(nudgeInflightTurns)) {
+            if (Date.now() - inflightRetryLoopDeferralLoggedAt >= 60_000) {
+              inflightRetryLoopDeferralLoggedAt = Date.now();
+              args.log(
+                `[poll] retry-loop nudge deferred: ${summarizeInflightTurnsForLog(nudgeInflightTurns)} is already working; refusing to queue a potentially stale edit`,
+              );
+            }
+          } else {
+            retryLoopNudgeAttempted = true;
+            const downstream = await pickReEngageTarget(args.client, args.meesterId, {
+              preferWritableRole: Boolean(recoveryFilePathForSniff(latestSniff)),
+            }).catch(() => null);
+            const targetId = downstream?.gezelId ?? args.meesterId;
+            const targetLabel = downstream
+              ? `${downstream.role ?? 'gezel'} ${downstream.gezelId.slice(0, 8)}`
+              : 'meester';
             args.log(
-              `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
+              `[poll] retry-loop nudge (${artifactExists ? 'expand-existing' : 'create-file'}): sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m with ${toolCallsInPlateau} tool calls; poking ${targetLabel} before retry-loop fires`,
             );
+            try {
+              const filePath = recoveryFilePathForSniff(latestSniff);
+              const nudge = buildRetryLoopNudge({
+                filePath,
+                artifactPath: recoveryArtifactPathForSniff(latestSniff),
+                artifactExists,
+              });
+              retryLoopNudgeDelivery = await deliverRecoveryNudge(args.client, nudge, downstream, {
+                meesterId: args.meesterId,
+                fallbackGezelId: targetId,
+                ...(filePath ? { filePath } : {}),
+                log: args.log,
+              });
+              noteHarnessInterventionDelivered(ctx);
+            } catch (err) {
+              args.log(
+                `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
+              );
+            }
           }
         }
 
@@ -3908,6 +4012,18 @@ export function shouldDeferRetryLoopForRecentEscalation(args: {
 }
 
 const RETRY_LOOP_ESCALATION_GRACE_MS = 4 * 60_000;
+
+/**
+ * Pre-trigger retry-loop nudges are opportunistic, so they must only be sent
+ * to an idle session. Queueing one behind an active turn means its premise
+ * can be false by delivery time; the bounded terminal watchdog separately
+ * handles turns that remain in flight too long.
+ */
+export function shouldDeferRetryLoopNudgeForInflight(
+  inflightTurns: readonly InflightTurnSnapshot[],
+): boolean {
+  return inflightTurns.length > 0;
+}
 
 export function shouldDeferRetryLoopForInflight(args: {
   fastPathTripped: boolean;

@@ -112,6 +112,13 @@ const ARG_KEY_NORMALIZERS: Record<
   // task step are one mutation target for loop-detection purposes; three still
   // permit acceptance/progress/handoff notes, while five in one turn is spin.
   write_task_note: ({ ref, stepId }) => ({ ref, stepId: stepId ?? null }),
+  // Retrieval loops often paraphrase the query while returning the same
+  // source set. Keying only on raw args let those loops run indefinitely.
+  // Stable source handles are the actual progress signal; an empty result is
+  // likewise one result state regardless of how the model rewords the query.
+  search: (args, output) => retrievalFingerprint(args, output),
+  wikipedia_search: (args, output) => retrievalFingerprint(args, output),
+  web_search: (args, output) => retrievalFingerprint(args, output),
 };
 
 export interface ToolRepeatTrackerOpts {
@@ -152,6 +159,9 @@ export class ToolRepeatTracker {
     const key = `${toolName}:${stringifyArgs(toolName, args, output)}`;
     const count = (this.counts.get(key) ?? 0) + 1;
     this.counts.set(key, count);
+    if (RETRIEVAL_TOOL_NAMES.has(toolName) && count >= 4) {
+      return { output, shouldAbort: true, count };
+    }
     if (count >= this.hardAbortAt) {
       return { output, shouldAbort: true, count };
     }
@@ -169,6 +179,13 @@ export class ToolRepeatTracker {
     }
     if (count >= this.softWarningAt) {
       const target = repeatTargetDescription(toolName, args, count);
+      if (RETRIEVAL_TOOL_NAMES.has(toolName)) {
+        return {
+          output: `${output}\n\n[runtime] This is the ${count}th equivalent \`${toolName}\` result set this turn. Rephrasing the lookup is not producing new evidence. Do not call another retrieval tool now. Your next tool call must mutate the requested deliverable (for example \`write_file\` or \`replace_in_file\`), or end the turn and state the specific missing evidence.`,
+          shouldAbort: false,
+          count,
+        };
+      }
       if (WRITE_TOOL_NAMES.has(toolName)) {
         return {
           output: `${output}\n\n[runtime] You've called \`${toolName}\` for ${target} this turn. Stop re-writing the same target. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise, if this file is correct, validate it or end the turn; if it is still wrong, make one focused edit with \`replace_in_file\` or one complete corrected \`write_file\`, then stop.`,
@@ -376,6 +393,14 @@ const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'write_task_note',
 ]);
 
+const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'search',
+  'read_document',
+  'wikipedia_search',
+  'wikipedia_read',
+  'web_search',
+]);
+
 function filterOutTool(
   registered: ReadonlySet<string> | readonly string[] | undefined,
   toolName: string,
@@ -469,6 +494,29 @@ function looseKey(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, ' ') : '';
 }
 
+function retrievalFingerprint(args: Record<string, unknown>, output: string): unknown {
+  const refs = [...output.matchAll(/(?:knowledge:\/\/|https?:\/\/)[^\s)>\]]+/gi)]
+    .map((match) => match[0].replace(/[.,;:]+$/, ''))
+    .filter((ref, index, all) => all.indexOf(ref) === index)
+    .sort();
+  const sources = Array.isArray(args.sources)
+    ? args.sources.filter((source): source is string => typeof source === 'string').sort()
+    : [];
+  if (refs.length > 0) return { sources, results: refs };
+  if (
+    /(?:No indexed project knowledge matched|No closely relevant results|Nothing returned yet|^0 results from)/im.test(
+      output,
+    )
+  ) {
+    return { sources, results: 'empty' };
+  }
+  return {
+    sources,
+    query: looseKey(args.query ?? args.q),
+    result: looseKey(output.slice(0, 800)),
+  };
+}
+
 function stringifyArgs(toolName: string, args: unknown, output: string): string {
   if (args == null) return '{}';
   // An atomically rejected write_file draft never reached disk. Count a
@@ -517,6 +565,9 @@ function repeatTargetDescription(toolName: string, args: unknown, count: number)
   }
   if (toolName === 'ensure_gezel') {
     return `the same gezel ${count} times`;
+  }
+  if (RETRIEVAL_TOOL_NAMES.has(toolName)) {
+    return `an equivalent result set ${count} times`;
   }
   return `these exact arguments ${count} times`;
 }

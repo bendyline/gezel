@@ -483,6 +483,26 @@ What lives where:
 
 ## Patterns
 
+### Activity: what’s going on
+
+The header’s **Activity** key opens one non-modal panel for work and questions
+across projects. It stays available when quiet. **Needs you**, **Working**,
+**Next**, and **Ready** separate decisions, current execution, waiting or
+scheduled work, and finished results. A task’s saved “active” lifecycle is not
+evidence that it is running; runtime queue and conversation facts decide that.
+Link the task, handoff, and conversation by identity so they appear as one job.
+
+Question choices and text fields are visible inline. Keep drafts when the panel
+closes or changes project, keep cards in a stable order during refresh, and
+leave an answer receipt in place until the panel closes. Answering the last
+question does not close the panel. Project attention links open the same panel
+scoped to that project, with a clear way back to all projects.
+
+Status failures retain the last known work and label it stale. Never turn a
+failed fetch into “All quiet.” Advanced queue controls live in an expandable
+section at the bottom. Engine, quota, and activity-setting keys remain separate.
+
+
 **Dialog vs AlertDialog.** Use `AlertDialog` only for confirmations that
 interrupt a destructive or significant action (delete a gezel, discard
 changes). Everything else — create forms, rename prompts, icon iteration,
@@ -1011,6 +1031,19 @@ beside the task chip. Three rules keep it honest:
   index has not caught up with, the daemon checks it directly on disk, within a
   fixed limit. It never guesses from a same-named file.
 
+**A cited fact shows its source; an unsourced one is said out loud.** A
+gezel writing in factual mode (see [factual-writing.md](factual-writing.md))
+cites its evidence as `[n]`. In the bubble each marker is a small raised
+link, like a footnote mark, so a cited paragraph still reads as prose.
+Clicking a marker opens what it names: a knowledge passage in the Knowledge
+area, a web page in the browser, anything else in the reply's **Sources**
+row. That row is one collapsed line under the reply ("4 sources · 1 statement
+not found in any source") and opens to the numbered sources with their
+excerpts. Statements no source showed sit at the top of it in a quiet
+warning tray with the missing detail named, never in red. They are a
+reason to check, not an error. A marker whose number is not a source stays
+plain text, because a link to nothing is worse than no link.
+
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
 salvage layer fails to promote a call it is literal tool-call markup.
@@ -1089,8 +1122,14 @@ the docs never drift. The Home "What is gezel?" embed
 resting on the card, a Read/Watch key tray, and an "Open in Handboek →"
 link that lands on the same article.
 
-**Loading states.** Prefer inline `muted` text ("loading models…",
-"generating…") over blocking spinners. A pulsing icon (see
+**Loading states.** Routine view transitions, local reads, and lazy-loaded
+editors stay wordless while pending. Use an empty surface or retain the pane's
+frame; don't flash "Loading…" prose or show an empty-state claim before the
+request has answered. Keep refresh and pagination button labels stable while
+their controls are disabled. Use `aria-busy` on retained surfaces and keep
+screen-reader-only status text where it helps. Longer operations such as
+downloads, model preparation, and generation still need meaningful progress;
+prefer inline `muted` text over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal. When a surface needs to tell two working *phases* apart,
 it may use a small themed glyph per phase — a quiet 16px figure on the

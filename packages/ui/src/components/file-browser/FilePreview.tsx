@@ -85,7 +85,7 @@ export function AuthedMediaPreview({
     };
   }, [fetchBlob, path]);
   if (error) return <p className="muted small">Preview failed: {error}</p>;
-  if (!blobUrl) return <p className="muted small">Loading…</p>;
+  if (!blobUrl) return null;
   if (kind === 'image') return <img src={blobUrl} alt={path} />;
   if (kind === 'audio') {
     // biome-ignore lint/a11y/useMediaCaption: user-supplied audio file; no caption track exists.

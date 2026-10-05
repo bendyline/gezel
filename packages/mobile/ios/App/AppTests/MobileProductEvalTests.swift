@@ -29,7 +29,7 @@ final class MobileProductEvalTests: XCTestCase {
         let view = try XCTUnwrap(candidate)
         func stage(_ value: String) { print("MOBILE_EVAL_STAGE \(value)") }
         func runAsync(_ source: String, seconds: TimeInterval = 60) async throws -> Any? {
-            _ = try await view.evaluateJavaScript("window.__gezelEvalPhase=null;(async()=>{\(source)})().then(value=>window.__gezelEvalPhase={value},error=>window.__gezelEvalPhase={error:String(error.stack||error)});true")
+            _ = try await view.evaluateJavaScript("window.__gezelEvalPhase=null;(async()=>{\(source)})().then(value=>window.__gezelEvalPhase={value},error=>window.__gezelEvalPhase={error:String(error.message||error)+'\\n'+String(error.stack||'')});true")
             let deadline = Date().addingTimeInterval(seconds)
             while Date() < deadline {
                 if let result = try await view.evaluateJavaScript("window.__gezelEvalPhase||null") as? [String: Any] {

@@ -17,6 +17,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { AppleFoundationModelsStatus } from '../components/AppleFoundationModelsStatus.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
@@ -1707,9 +1708,7 @@ function DaemonSettingsView() {
         className={`settings-panel${flatPanel ? ' settings-panel-flat' : ''}`}
         data-testid={`settings-section-${section}`}
       >
-        <Suspense
-          fallback={<p className="placeholder settings-section-loading">Loading settings…</p>}
-        >
+        <Suspense fallback={null}>
           {section === 'general' && (
             <>
               <section style={{ marginBottom: '2rem' }}>
@@ -2701,7 +2700,7 @@ function DaemonSettingsView() {
                       type="button"
                       className={`provider-pill${provider === 'apple-foundation-models' ? ' provider-pill-active' : ''}`}
                       onClick={() => void setProvider('apple-foundation-models')}
-                      title="Apple's own on-device model (Apple Intelligence). Nothing to download and very little memory; a small model with a short context, best for chat, notes and short tasks."
+                      title="Apple Intelligence on this Mac, managed by macOS. Works offline for chat, notes and short tasks."
                     >
                       {providerLabel('apple-foundation-models', uiPlatform)}
                     </button>
@@ -2970,6 +2969,8 @@ function DaemonSettingsView() {
                     )}
                   </>
                 )}
+
+                {provider === 'apple-foundation-models' && <AppleFoundationModelsStatus />}
 
                 {(provider === 'llama-cpp' || provider === 'mlx') && (
                   <div

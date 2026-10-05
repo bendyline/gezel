@@ -1,9 +1,14 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import {
+  type AppleFoundationModelsHello,
+  AppleFoundationModelsHelloSchema,
+  type AppleFoundationModelsUsage,
+  AppleFoundationModelsUsageSchema,
   type NativeTool,
   type NativeToolCall,
   type NativeToolReply,
+  createAwakeTimeout,
   createLogger,
 } from '@bendyline/gezel';
 
@@ -13,14 +18,7 @@ const STDIN_CLOSE_GRACE_MS = 2_000;
 const KILL_GRACE_MS = 2_000;
 
 /** What the helper reports about Apple's on-device model on this Mac. */
-export interface AppleFmHello {
-  version: string;
-  os: string;
-  available: boolean;
-  reason?: string;
-  contextTokens: number;
-  maxOutputTokens: number;
-}
+export type AppleFmHello = AppleFoundationModelsHello;
 
 export interface AppleFmGenerateRequest {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
@@ -31,6 +29,7 @@ export interface AppleFmGenerateRequest {
 
 export interface AppleFmGenerateHandlers {
   onDelta(text: string): void;
+  onUsage?(usage: AppleFoundationModelsUsage): void;
   onToolCall(call: Omit<NativeToolCall, 'requestId'>): Promise<NativeToolReply>;
 }
 
@@ -52,6 +51,7 @@ interface Pending {
   resolve(value: StopReason | number): void;
   reject(error: Error): void;
   handlers?: AppleFmGenerateHandlers;
+  cancelled?: boolean;
 }
 
 /**
@@ -80,14 +80,30 @@ export class AppleFmHelper {
     this.spawn = opts.spawnImpl ?? nodeSpawn;
   }
 
-  /** Starts the helper if needed and returns its (cached) handshake. */
+  /** Coalesces concurrent probes, but never caches OS readiness across requests. */
   ready(): Promise<AppleFmHello> {
     this.ensureChild();
-    this.hello ??= new Promise<AppleFmHello>((resolve, reject) => {
+    if (this.hello) return this.hello;
+    const budget = createAwakeTimeout(15_000);
+    const onTimeout = () => {
+      this.failAll(
+        new AppleFmError('TIMEOUT', 'Apple on-device AI did not answer its readiness check.'),
+      );
+      void this.shutdown();
+    };
+    budget.signal.addEventListener('abort', onTimeout, { once: true });
+    const pending = new Promise<AppleFmHello>((resolve, reject) => {
       this.helloWaiter = { resolve, reject };
       this.write({ type: 'hello' });
     });
-    return this.hello;
+    this.hello = pending;
+    const cleanup = () => {
+      budget.signal.removeEventListener('abort', onTimeout);
+      budget.dispose();
+      if (this.hello === pending) this.hello = null;
+    };
+    void pending.then(cleanup, cleanup);
+    return pending;
   }
 
   /**
@@ -104,7 +120,15 @@ export class AppleFmHelper {
     await this.ready();
     if (signal?.aborted) return 'cancelled';
     const id = `g${++this.nextId}`;
-    const onAbort = () => this.write({ type: 'cancel', id });
+    let cancelBudget: ReturnType<typeof createAwakeTimeout> | undefined;
+    const onAbort = () => {
+      const pending = this.pending.get(id);
+      if (pending) pending.cancelled = true;
+      this.write({ type: 'cancel', id });
+      // A stuck SDK must not hold the provider queue forever after cancellation.
+      cancelBudget = createAwakeTimeout(5_000);
+      cancelBudget.signal.addEventListener('abort', () => void this.shutdown(), { once: true });
+    };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       return (await new Promise<StopReason | number>((resolve, reject) => {
@@ -113,6 +137,7 @@ export class AppleFmHelper {
       })) as StopReason;
     } finally {
       signal?.removeEventListener('abort', onAbort);
+      cancelBudget?.dispose();
     }
   }
 
@@ -123,10 +148,21 @@ export class AppleFmHelper {
   ): Promise<number> {
     await this.ready();
     const id = `c${++this.nextId}`;
-    return (await new Promise<StopReason | number>((resolve, reject) => {
-      this.pending.set(id, { kind: 'count', resolve, reject });
-      this.write({ type: 'count', id, messages, tools });
-    })) as number;
+    const budget = createAwakeTimeout(15_000);
+    const onTimeout = () => {
+      this.pending.get(id)?.reject(new AppleFmError('TIMEOUT', 'Apple token counting timed out.'));
+      this.pending.delete(id);
+    };
+    budget.signal.addEventListener('abort', onTimeout, { once: true });
+    try {
+      return (await new Promise<StopReason | number>((resolve, reject) => {
+        this.pending.set(id, { kind: 'count', resolve, reject });
+        this.write({ type: 'count', id, messages, tools });
+      })) as number;
+    } finally {
+      budget.signal.removeEventListener('abort', onTimeout);
+      budget.dispose();
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -152,7 +188,9 @@ export class AppleFmHelper {
     const child = this.spawn(this.opts.binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
     this.hello = null;
-    createInterface({ input: child.stdout! }).on('line', (line) => this.onLine(line));
+    createInterface({ input: child.stdout! }).on('line', (line) => {
+      if (this.child === child) this.onLine(line);
+    });
     child.stderr?.on('data', (chunk: Buffer) => log.warn(`helper: ${String(chunk).trim()}`));
     child.stdin?.on('error', () => {
       /* surfaced through 'exit' */
@@ -196,37 +234,54 @@ export class AppleFmHelper {
     const id = typeof message.id === 'string' ? message.id : '';
     switch (message.type) {
       case 'hello': {
-        this.helloWaiter?.resolve(message as unknown as AppleFmHello);
+        const parsed = AppleFoundationModelsHelloSchema.safeParse(message);
+        if (parsed.success) this.helloWaiter?.resolve(parsed.data);
+        else
+          this.helloWaiter?.reject(
+            new AppleFmError('PROTOCOL', 'Invalid Apple model readiness response.'),
+          );
         this.helloWaiter = null;
         return;
       }
       case 'delta':
-        this.pending.get(id)?.handlers?.onDelta(String(message.text ?? ''));
+        if (!this.pending.get(id)?.cancelled)
+          this.pending.get(id)?.handlers?.onDelta(String(message.text ?? ''));
         return;
+      case 'usage': {
+        const parsed = AppleFoundationModelsUsageSchema.safeParse(message);
+        if (parsed.success) this.pending.get(id)?.handlers?.onUsage?.(parsed.data);
+        return;
+      }
       case 'tool_call': {
         const entry = this.pending.get(id);
         const callId = String(message.callId ?? '');
-        if (!entry?.handlers) {
+        if (!entry?.handlers || entry.cancelled) {
           this.write({ type: 'tool_result', id, callId, error: 'Request ended' });
           return;
         }
         Promise.resolve()
-          .then(() =>
-            entry.handlers!.onToolCall({
+          .then(() => {
+            if (this.pending.get(id) !== entry || entry.cancelled) throw new Error('Request ended');
+            return entry.handlers!.onToolCall({
               callId,
               name: String(message.name ?? ''),
               arguments: String(message.arguments ?? '{}'),
-            }),
-          )
+            });
+          })
           .then(
-            (reply) => this.write({ type: 'tool_result', id, callId, ...reply }),
-            (error: unknown) =>
+            (reply) => {
+              if (this.pending.get(id) === entry)
+                this.write({ type: 'tool_result', id, callId, ...reply });
+            },
+            (error: unknown) => {
+              if (this.pending.get(id) !== entry) return;
               this.write({
                 type: 'tool_result',
                 id,
                 callId,
                 error: error instanceof Error ? error.message : String(error),
-              }),
+              });
+            },
           );
         return;
       }
@@ -240,7 +295,13 @@ export class AppleFmHelper {
       case 'count': {
         const entry = this.pending.get(id);
         this.pending.delete(id);
-        entry?.resolve(Number(message.tokens));
+        if (
+          typeof message.tokens === 'number' &&
+          Number.isSafeInteger(message.tokens) &&
+          message.tokens >= 0
+        )
+          entry?.resolve(message.tokens);
+        else entry?.reject(new AppleFmError('PROTOCOL', 'Invalid Apple token count.'));
         return;
       }
       case 'error': {
