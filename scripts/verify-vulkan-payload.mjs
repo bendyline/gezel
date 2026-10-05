@@ -2,7 +2,7 @@
 /** Prove a Linux Vulkan consumer resolves its loader inside its own archive. */
 import { spawnSync } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function verifyVulkanPayload(output, consumer) {
@@ -14,7 +14,8 @@ export function verifyVulkanPayload(output, consumer) {
     throw new Error('libvulkan.so.1 must be a regular file inside the bundle');
   }
   const target = realpathSync(consumer);
-  if (!target.startsWith(`${bundle}/`)) {
+  const relativeTarget = relative(bundle, target);
+  if (!relativeTarget || isAbsolute(relativeTarget) || relativeTarget.split(sep)[0] === '..') {
     throw new Error(`Vulkan consumer is outside the bundle: ${target}`);
   }
 

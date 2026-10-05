@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,15 +11,23 @@ const verifier = fileURLToPath(new URL('./verify-vulkan-payload.mjs', import.met
 // Exercise the CLI and real filesystem without needing Linux ELF execution
 // on developer Macs. ldd is the sole platform seam; its output represents the
 // bundled, host-resolved, and unresolved cases the Linux CI check must reject.
-function fixture(t, { loader = true, hostLoader = false, missingPeer = false } = {}) {
+function fixture(
+  t,
+  { loader = true, hostLoader = false, missingPeer = false, consumerLocation = 'bundled' } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gezel-vulkan-payload-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const output = join(root, 'bundle with spaces');
   const tools = join(root, 'tools');
   mkdirSync(output);
   mkdirSync(tools);
-  const consumer = join(output, 'libggml-vulkan.so');
-  writeFileSync(consumer, 'Vulkan backend fixture');
+  const consumerRoot = consumerLocation === 'bundled' ? output : `${output}-backup`;
+  mkdirSync(consumerRoot, { recursive: true });
+  const consumerTarget = join(consumerRoot, 'libggml-vulkan.so');
+  writeFileSync(consumerTarget, 'Vulkan backend fixture');
+  const consumer =
+    consumerLocation === 'symlink' ? join(output, 'libggml-vulkan.so') : consumerTarget;
+  if (consumerLocation === 'symlink') symlinkSync(consumerTarget, consumer);
   if (loader) writeFileSync(join(output, 'libvulkan.so.1'), 'Bundled loader fixture');
   const host = join(root, 'libvulkan.so.1');
   writeFileSync(host, 'Host loader fixture');
@@ -65,4 +73,16 @@ test('rejects unresolved dependencies of the dynamically loaded Vulkan plugin', 
   const result = fixture(t, { missingPeer: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unresolved dependencies/);
+});
+
+test('rejects a consumer in a sibling directory sharing the bundle prefix', (t) => {
+  const result = fixture(t, { consumerLocation: 'sibling' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Vulkan consumer is outside the bundle/);
+});
+
+test('rejects a consumer symlink escaping the bundle', (t) => {
+  const result = fixture(t, { consumerLocation: 'symlink' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Vulkan consumer is outside the bundle/);
 });

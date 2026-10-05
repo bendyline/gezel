@@ -3,7 +3,7 @@
 Gezk 0.7 (index schema 4) stores document point locations in the router.
 `locations` are optional compiler inputs; `document_locations` and the
 manifest `spatial` summary are present even for catalogs with no points.
-The public contract lives in the [0.7 specification](../../gezk/spec/gezk-0.7.md).
+See [the .gezk format documentation](gezk-format.md) for the public contract.
 The portable schemas and sphere predicate live in `packages/gezk/src/spatial.ts`;
 SQLite candidate scans live in the knowledge reader and its worker host.
 
