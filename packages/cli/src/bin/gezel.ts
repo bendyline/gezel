@@ -1099,11 +1099,42 @@ knowledge
   .command('search <path> <query>')
   .description('Search a catalog file offline (full-text; --semantic adds vector search)')
   .option('--semantic', 'embed the query with the catalog profile (loads the model)')
+  .option('--latitude <degrees>', 'radius center latitude', Number)
+  .option('--longitude <degrees>', 'radius center longitude', Number)
+  .option('--radius-meters <meters>', 'subject radius in meters', Number)
   .option('--limit <n>', 'maximum results', (v: string) => Number.parseInt(v, 10), 10)
   .action(async (path: string, query: string, opts: { semantic?: boolean; limit?: number }) => {
     const { runKnowledgeSearch } = await loadKnowledgeCommand();
     await runKnowledgeSearch(path, query, opts);
   });
+
+knowledge
+  .command('nearby <path>')
+  .description('Find articles near a coordinate in a catalog file, offline')
+  .requiredOption('--latitude <degrees>', 'center latitude', Number)
+  .requiredOption('--longitude <degrees>', 'center longitude', Number)
+  .requiredOption('--radius-meters <meters>', 'subject radius in meters', Number)
+  .option('--limit <n>', 'page size (maximum 500)', Number, 50)
+  .option('--json', 'emit document metadata and distances as JSON')
+  .action(
+    async (
+      path: string,
+      opts: {
+        latitude: number;
+        longitude: number;
+        radiusMeters: number;
+        limit: number;
+        json?: boolean;
+      },
+    ) => {
+      const { runKnowledgeNearby } = await loadKnowledgeCommand();
+      await runKnowledgeNearby(
+        path,
+        { latitude: opts.latitude, longitude: opts.longitude, radiusMeters: opts.radiusMeters },
+        opts,
+      );
+    },
+  );
 
 knowledge
   .command('available')

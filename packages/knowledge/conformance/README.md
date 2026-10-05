@@ -18,6 +18,8 @@ edit by hand. An implementation conforms when it reproduces every entry in
   embedder, and (0.6) the nested topic's rollup, an ordinal-first listing,
   a metadata sample, and the shipped asset; (0.7) shared TOC placements without
   duplicated canonical documents.
+- `spatial` — spherical-distance probes and radius results for multiple subject
+  anchors, associated places, date-line and pole coordinates.
 - `legacy` — the same fixture facts for every earlier generation whose
   archive still ships under `fixtures/`; a reader for this version reads
   those too.

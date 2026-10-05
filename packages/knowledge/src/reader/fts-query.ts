@@ -69,15 +69,25 @@ export function documentFtsTopIds(
   match: string,
   limit: number,
   exactTitle?: string,
+  allowedDocumentIds?: ReadonlySet<string>,
 ): string[] {
+  if (allowedDocumentIds?.size === 0) return [];
+  const scope = allowedDocumentIds ? JSON.stringify([...allowedDocumentIds]) : null;
   const title = exactTitle?.normalize('NFKC').trim() ?? '';
-  const ids = exactTitle ? namedTitleMatches(db, exactTitle, limit).map((m) => m.documentId) : [];
+  const ids = exactTitle
+    ? namedTitleMatches(db, exactTitle, limit, allowedDocumentIds).map((m) => m.documentId)
+    : [];
   const rest = db
     .prepare(
       `SELECT document_id FROM fts_documents WHERE fts_documents MATCH ?
+       ${scope === null ? '' : 'AND document_id IN (SELECT value FROM json_each(?))'}
        ORDER BY (title = ? COLLATE NOCASE) DESC, ${DOCUMENT_FTS_ORDER} LIMIT ?`,
     )
-    .all(match, title, limit + ids.length) as Array<{ document_id: string }>;
+    .all(
+      ...(scope === null
+        ? [match, title, limit + ids.length]
+        : [match, scope, title, limit + ids.length]),
+    ) as Array<{ document_id: string }>;
   for (const row of rest) {
     if (ids.length >= limit) break;
     if (!ids.includes(row.document_id)) ids.push(row.document_id);
@@ -188,7 +198,9 @@ export function namedTitleMatches(
   db: DatabaseSync,
   query: string,
   limit: number,
+  allowedDocumentIds?: ReadonlySet<string>,
 ): NamedTitleMatch[] {
+  if (allowedDocumentIds?.size === 0) return [];
   const raw = query.normalize('NFKC').trim();
   const words = [...new Set(nameWords(raw))].slice(0, 16);
   const content = words.filter((w) => !NAME_STOPWORDS.has(w));
@@ -201,9 +213,14 @@ export function namedTitleMatches(
   );
   const queryWords = nameWords(raw).join(' ');
   const stats = titleStats(db);
-  const rows = stats.candidates.all(
-    `title : (${content.map(quoteToken).join(' OR ')})`,
-    NAMED_TITLE_CANDIDATES,
+  const expression = `title : (${content.map(quoteToken).join(' OR ')})`;
+  const rows = (
+    allowedDocumentIds
+      ? db
+          .prepare(`SELECT document_id, title FROM fts_documents WHERE fts_documents MATCH ?
+        AND document_id IN (SELECT value FROM json_each(?)) ORDER BY ${DOCUMENT_FTS_ORDER} LIMIT ?`)
+          .all(expression, JSON.stringify([...allowedDocumentIds]), NAMED_TITLE_CANDIDATES)
+      : stats.candidates.all(expression, NAMED_TITLE_CANDIDATES)
   ) as Array<{ document_id: string; title: string }>;
   const named: Array<NamedTitleMatch & { order: number }> = [];
   for (const row of rows) {

@@ -174,6 +174,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
 
   // Search / files
   'search',
+  'knowledge_nearby',
   'grep_files',
   'find_files',
   'diff_files',

@@ -27,7 +27,10 @@ import {
   KnowledgeCatalogManifestSchema,
   KnowledgeChunkingProfileSchema,
   KnowledgeEmbeddingProfileSchema,
+  KnowledgeLocationSchema,
+  KnowledgeRadiusSchema,
   KnowledgeRegistryIndexSchema,
+  KnowledgeSpatialManifestSchema,
   SourceNoticesSchema,
 } from '../src/index.js';
 import { requireGezkCheckout, resolveSiteCheckout } from './gezk-checkout.js';
@@ -50,6 +53,9 @@ export const GEZK_SCHEMA_EXPORTS: ReadonlyArray<[filename: string, schema: z.Zod
   ['embedding-profile.schema.json', KnowledgeEmbeddingProfileSchema],
   ['chunking-profile.schema.json', KnowledgeChunkingProfileSchema],
   ['catalog-document.schema.json', CatalogDocumentSchema],
+  ['document-location.schema.json', KnowledgeLocationSchema],
+  ['radius-query.schema.json', KnowledgeRadiusSchema],
+  ['spatial-manifest.schema.json', KnowledgeSpatialManifestSchema],
 ];
 
 export function renderSchema(filename: string, schema: z.ZodType): string {
@@ -57,11 +63,20 @@ export function renderSchema(filename: string, schema: z.ZodType): string {
     string,
     unknown
   >;
-  const withId = {
+  const withId: Record<string, unknown> = {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: `${SCHEMA_ID_BASE}/${filename}`,
     ...json,
   };
+  if (filename === 'catalog-manifest.schema.json') {
+    withId.allOf = [
+      {
+        if: { properties: { formatVersion: { const: '0.7' } }, required: ['formatVersion'] },
+        // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditionals require the then keyword.
+        then: { required: ['spatial'] },
+      },
+    ];
+  }
   withId.$schema = 'https://json-schema.org/draft/2020-12/schema';
   return `${JSON.stringify(withId, null, 2)}\n`;
 }
@@ -90,6 +105,9 @@ schemas that catalogs published under ${GEZK_FORMAT_VERSION} point at.
 | \`embedding-profile.schema.json\` | The \`embedding\` block of a manifest |
 | \`chunking-profile.schema.json\` | The \`chunking\` block of a manifest |
 | \`catalog-document.schema.json\` | One normalized document fed to a compiler |
+| \`document-location.schema.json\` | A typed subject/associated document point |
+| \`radius-query.schema.json\` | A radius predicate in degrees and metres |
+| \`spatial-manifest.schema.json\` | Location counts and subject-point coverage |
 `;
 
 function compareVersions(a: string, b: string): number {

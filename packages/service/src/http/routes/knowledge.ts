@@ -41,12 +41,14 @@ import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
 import {
   KnowledgeAssetPathSchema,
   KnowledgeInstallRequestSchema,
+  KnowledgeNearbyRequestSchema,
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { KnowledgeNotFoundError } from '../../knowledge/manager.js';
+import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
 import { embedQuery } from '../../memory/embeddings.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
@@ -59,6 +61,7 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
   };
 
   app.onError((err, c) => {
+    if (err instanceof KnowledgeSpatialCursorError) return c.json({ error: err.message }, 400);
     if (err instanceof KnowledgeNotFoundError) return c.json({ error: err.message }, 404);
     throw err;
   });
@@ -165,6 +168,10 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     return c.json({ ok: true });
   });
 
+  app.post('/nearby', async (c) =>
+    c.json(await manager().nearby(KnowledgeNearbyRequestSchema.parse(await c.req.json()))),
+  );
+
   app.post('/search', async (c) => {
     const body = KnowledgeSearchRequestSchema.parse(await c.req.json());
     let vector: number[] | null = null;
@@ -176,11 +183,10 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     const results = await manager().searchUnified(body.query, {
       vector,
       maxResults: body.maxResults ?? 20,
+      catalogs: body.catalogs,
+      spatial: body.spatial,
     });
-    const filtered = body.catalogs
-      ? results.filter((r) => r.catalogId && body.catalogs?.includes(r.catalogId))
-      : results;
-    return c.json({ results: filtered.slice(0, body.maxResults ?? 20) });
+    return c.json({ results: results.slice(0, body.maxResults ?? 20) });
   });
 
   app.get('/catalogs/:catalogId/topics', async (c) => {

@@ -13,7 +13,12 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { CatalogDocument, KnowledgeCatalogManifest } from '@bendyline/gezel';
-import { KnowledgeIdSchema, formatKnowledgeUri } from '@bendyline/gezel';
+import {
+  KnowledgeIdSchema,
+  type KnowledgeRadius,
+  KnowledgeRadiusSchema,
+  formatKnowledgeUri,
+} from '@bendyline/gezel';
 import type { ProfileEmbedder, TableOfContentsFormat } from '@bendyline/gezel-knowledge';
 import {
   CatalogHandle,
@@ -378,9 +383,27 @@ export async function runKnowledgeInspect(path: string): Promise<void> {
 export async function runKnowledgeSearch(
   path: string,
   query: string,
-  opts: { semantic?: boolean; limit?: number },
+  opts: {
+    semantic?: boolean;
+    limit?: number;
+    latitude?: number;
+    longitude?: number;
+    radiusMeters?: number;
+  },
   deps: KnowledgeCommandDeps = {},
 ): Promise<void> {
+  const supplied = [opts.latitude, opts.longitude, opts.radiusMeters].filter(
+    (value) => value !== undefined,
+  ).length;
+  if (supplied !== 0 && supplied !== 3)
+    throw new CliError('Provide --latitude, --longitude and --radius-meters together.');
+  const spatial = supplied
+    ? KnowledgeRadiusSchema.parse({
+        latitude: opts.latitude,
+        longitude: opts.longitude,
+        radiusMeters: opts.radiusMeters,
+      })
+    : undefined;
   const limit = Math.min(50, Math.max(1, opts.limit ?? 10));
   const { rootDir, cleanup } = await materializeCatalog(path);
   try {
@@ -389,7 +412,8 @@ export async function runKnowledgeSearch(
     ) as KnowledgeCatalogManifest;
     const handle = CatalogHandle.open(rootDir);
     try {
-      const docHits = handle.searchDocumentsFts(query, limit);
+      const allowed = spatial ? new Set(handle.spatialMatches(spatial).keys()) : undefined;
+      const docHits = handle.searchDocumentsFts(query, limit, allowed);
       if (docHits.length > 0) {
         console.log('Documents:');
         for (const hit of docHits) {
@@ -404,6 +428,7 @@ export async function runKnowledgeSearch(
         query,
         handle.shards.map((s) => s.id),
         Math.ceil(limit / Math.max(1, handle.shards.length)),
+        allowed,
       );
       if (opts.semantic) {
         const embedder = await (deps.createEmbedder ?? defaultCreateEmbedder)(
@@ -411,7 +436,10 @@ export async function runKnowledgeSearch(
         );
         try {
           const vector = await embedder.embedQuery(query);
-          chunkHits = [...handle.searchSemantic(vector, { finalK: limit }), ...chunkHits];
+          chunkHits = [
+            ...handle.searchSemantic(vector, { finalK: limit, allowedDocumentIds: allowed }),
+            ...chunkHits,
+          ];
         } finally {
           await embedder.dispose().catch(() => {});
         }
@@ -553,4 +581,37 @@ export async function runKnowledgeExportParquet(
   console.log(
     `  written with DuckDB ${report.duckdbVersion}; report in ${join(outDir, 'parquet-manifest.json')}`,
   );
+}
+
+/** File-based radius discovery, usable offline for both typed and legacy regional archives. */
+export async function runKnowledgeNearby(
+  path: string,
+  radius: KnowledgeRadius,
+  opts: { limit?: number; json?: boolean } = {},
+): Promise<void> {
+  const spatial = KnowledgeRadiusSchema.parse(radius);
+  const { rootDir, cleanup } = await materializeCatalog(path);
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(rootDir, 'manifest.json'), 'utf8'),
+    ) as KnowledgeCatalogManifest;
+    const handle = CatalogHandle.open(rootDir);
+    try {
+      const result = handle.nearbyDocuments(spatial, { limit: opts.limit });
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(
+          `${result.total} articles within ${(spatial.radiusMeters / 1000).toFixed(1)} km`,
+        );
+        for (const doc of result.documents)
+          console.log(
+            `  ${(doc.distanceMeters / 1000).toFixed(2)} km  ${doc.title}  ${formatKnowledgeUri({ publisherId: manifest.publisher.id, catalogId: manifest.id, documentId: doc.id })}`,
+          );
+      }
+    } finally {
+      handle.close();
+    }
+  } finally {
+    await cleanup();
+  }
 }

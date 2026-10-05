@@ -28,6 +28,7 @@ export interface KnowledgeWorkerRequest {
     | 'validate'
     | 'topics'
     | 'documentsPage'
+    | 'nearbyDocuments'
     | 'getDocument'
     | 'getChunk'
     | 'assets'

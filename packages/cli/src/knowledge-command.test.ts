@@ -15,6 +15,7 @@ import {
   runKnowledgeBuild,
   runKnowledgeInit,
   runKnowledgeInspect,
+  runKnowledgeNearby,
   runKnowledgeSearch,
   runKnowledgeValidate,
 } from './knowledge-command.js';
@@ -75,7 +76,7 @@ beforeAll(async () => {
   await mkdir(join(catalogDir, 'content', 'Joinery'), { recursive: true });
   await writeFile(
     join(catalogDir, 'content', 'Joinery', 'dovetails.md'),
-    '# Dovetail Joints\n\nTails and pins interlock for a mechanically strong corner.\n',
+    '---\nlocations:\n  - id: seattle\n    latitude: 47.6062\n    longitude: -122.3321\n    role: subject\n---\n# Dovetail Joints\n\nTails and pins interlock for a mechanically strong corner.\n',
   );
   await runKnowledgeBuild(catalogDir, {}, deps);
   archivePath = join(catalogDir, 'field-notes-1.0.0.gezk');
@@ -155,6 +156,31 @@ describe('gezel knowledge (offline)', () => {
     const output = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(output).toContain('semantic');
     expect(output).toContain('#chunk=');
+  });
+
+  it('discovers authored locations offline and applies radius filters to text search', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const radius = { latitude: 47.6062, longitude: -122.3321, radiusMeters: 50_000 };
+    await runKnowledgeNearby(archivePath, radius, { json: true, limit: 1 });
+    const page = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(page.total).toBe(1);
+    expect(page.documents[0]?.title).toBe('Dovetail Joints');
+    expect(page.documents[0]?.distanceMeters).toBe(0);
+    expect(page.documents[0]?.matchedLocation.id).toBe('seattle');
+    log.mockClear();
+    await runKnowledgeSearch(archivePath, 'dovetail', radius, deps);
+    expect(log.mock.calls.flat().join('\n')).toContain('Dovetail Joints');
+    log.mockClear();
+    await runKnowledgeSearch(
+      archivePath,
+      'dovetail',
+      { ...radius, latitude: 0, longitude: 0 },
+      deps,
+    );
+    expect(log.mock.calls.flat().join('\n')).not.toContain('Dovetail Joints');
+    await expect(
+      runKnowledgeSearch(archivePath, 'dovetail', { latitude: 47.6 }, deps),
+    ).rejects.toThrow(/together/);
   });
 
   it('build --sign-key produces a verifiable signed manifest', async () => {

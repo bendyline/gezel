@@ -1076,3 +1076,9 @@ installed catalogs or requiring a Gezel release.
 These defaults keep the first version understandable and local-first while leaving
 clean seams for larger corpora, additional publishers, and alternate embedding
 profiles.
+
+
+Location discovery and radius-constrained retrieval are documented in
+[knowledge-spatial.md](knowledge-spatial.md). The 0.7 draft includes document
+point locations; existing Qualla regional 0.6 catalogs remain queryable through
+an explicit metadata adapter.

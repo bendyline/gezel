@@ -36,11 +36,12 @@ import {
   ROUTER_DB_PATH,
 } from '../format/constants.js';
 import { type CatalogDb, openCatalogDatabase } from '../reader/open.js';
+import { DocumentSpatialIndex } from '../reader/spatial-index.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 import { type DuckdbCli, assertDuckdbCli, runDuckdbScript } from './duckdb.js';
 
-/** 3: the bit-rule metadata follows the profile's binary method (was always plain sign). */
-export const PARQUET_EXPORT_VERSION = 3;
+/** 4: document-locations companion, including the explicit legacy Qualla adapter. */
+export const PARQUET_EXPORT_VERSION = 4;
 const DEFAULT_ROW_GROUP_SIZE = 32_768;
 /** `read_ndjson` refuses objects above this; a document body can approach MAX_KNOWLEDGE_DOCUMENT_BYTES. */
 const NDJSON_MAX_OBJECT_BYTES = Math.max(64 * 1024 * 1024, MAX_KNOWLEDGE_DOCUMENT_BYTES * 2);
@@ -60,7 +61,7 @@ export type ParquetExportProgress =
   | { phase: 'stage'; table: ParquetTable; shardId?: number; rows: number }
   | { phase: 'write'; file: string };
 
-export type ParquetTable = 'documents' | 'chunks' | 'topics';
+export type ParquetTable = 'documents' | 'chunks' | 'topics' | 'document_locations';
 
 export interface ParquetExportFile {
   /** Relative to `outDir`, forward slashes. */
@@ -134,6 +135,37 @@ export async function exportCatalogParquet(
         }),
       );
 
+      const spatial = new DocumentSpatialIndex(router.db, router.schemaVersion === 3);
+      const locations = spatial.rows();
+      if (spatial.hasTable || locations.length) {
+        const path = join(staging, 'document-locations.ndjson');
+        const out = ndjsonWriter(path);
+        for (const { documentId, location } of locations)
+          await out.write({
+            document_id: documentId,
+            location_id: location.id,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            role: location.role,
+            provenance_json: location.provenance ? JSON.stringify(location.provenance) : null,
+          });
+        await out.close();
+        const columns =
+          "{document_id:'VARCHAR',location_id:'VARCHAR',latitude:'DOUBLE',longitude:'DOUBLE',role:'VARCHAR',provenance_json:'VARCHAR'}";
+        const source = locations.length
+          ? `read_ndjson(${sqlString(path)}, columns=${columns})`
+          : '(SELECT NULL::VARCHAR document_id, NULL::VARCHAR location_id, NULL::DOUBLE latitude, NULL::DOUBLE longitude, NULL::VARCHAR role, NULL::VARCHAR provenance_json WHERE false)';
+        files.push(
+          await writeParquet(opts.duckdb, {
+            outDir,
+            file: 'document-locations.parquet',
+            table: 'document_locations',
+            rows: locations.length,
+            sql: `${PRELUDE}COPY (SELECT * FROM ${source}) TO ${sqlString(join(outDir, 'document-locations.parquet'))} ${copyOptions(rowGroupSize, metadata)};`,
+            onProgress: opts.onProgress,
+          }),
+        );
+      }
       for (const shard of manifest.router.shards) {
         const tag = String(shard.id).padStart(3, '0');
         const documentsNdjson = join(staging, `documents-${tag}.ndjson`);

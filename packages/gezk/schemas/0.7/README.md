@@ -22,3 +22,6 @@ schemas that catalogs published under 0.7 point at.
 | `embedding-profile.schema.json` | The `embedding` block of a manifest |
 | `chunking-profile.schema.json` | The `chunking` block of a manifest |
 | `catalog-document.schema.json` | One normalized document fed to a compiler |
+| `document-location.schema.json` | A typed subject/associated document point |
+| `radius-query.schema.json` | A radius predicate in degrees and metres |
+| `spatial-manifest.schema.json` | Location counts and subject-point coverage |

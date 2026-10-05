@@ -1,5 +1,8 @@
 import {
   KnowledgeIdSchema,
+  KnowledgeLocationSchema,
+  KnowledgeLocationsSchema,
+  KnowledgeRadiusSchema,
   KnowledgeRegistryEntrySchema,
   KnowledgeVersionSchema,
   Sha256HexSchema,
@@ -46,8 +49,20 @@ export {
   KnowledgeDocumentMetaSchema,
   KnowledgeEmbeddingProfileSchema,
   KnowledgeIdSchema,
+  KnowledgeLocationsSchema,
+  KnowledgeLocationSchema,
+  KnowledgeRadiusSchema,
   KnowledgeManifestFileSchema,
   KnowledgeOrdinalSchema,
+  KnowledgeSpatialManifestSchema,
+  KnowledgeBoundsSchema,
+  GEZK_EARTH_RADIUS_METERS,
+  MAX_DOCUMENT_LOCATIONS,
+  normalizeLongitude,
+  locationDistanceMeters,
+  locationInBounds,
+  radiusBounds,
+  spatialManifest,
   KnowledgeTocReferenceSchema,
   KnowledgeRegistryEntrySchema,
   KnowledgeRegistryIndexSchema,
@@ -91,6 +106,10 @@ export type {
   KnowledgeRegistryEntry,
   KnowledgeRegistryIndex,
   KnowledgeSignature,
+  KnowledgeLocation,
+  KnowledgeRadius,
+  KnowledgeBounds,
+  KnowledgeSpatialManifest,
   KnowledgeUri,
   KnowledgeVectorEncoding,
   SourceNotices,
@@ -444,6 +463,7 @@ export const KnowledgeDocumentSummarySchema = z.object({
   sourceUpdatedAt: z.string().nullable(),
   attribution: z.record(z.string(), z.string()).nullable(),
   meta: z.record(z.string(), z.unknown()).nullable(),
+  locations: KnowledgeLocationsSchema.optional(),
 });
 export type KnowledgeDocumentSummary = z.infer<typeof KnowledgeDocumentSummarySchema>;
 
@@ -487,9 +507,34 @@ export const KnowledgeSearchRequestSchema = z.object({
   query: z.string().min(1),
   maxResults: z.number().int().min(1).max(50).optional(),
   /** Restrict to these catalog ids (default: every enabled catalog). */
-  catalogs: z.array(KnowledgeIdSchema).optional(),
+  catalogs: z.array(KnowledgeIdSchema).max(256).optional(),
+  spatial: KnowledgeRadiusSchema.optional(),
 });
 export type KnowledgeSearchRequest = z.infer<typeof KnowledgeSearchRequestSchema>;
+
+/** Text-free radius discovery, scoped to enabled catalogs before pagination. */
+export const KnowledgeNearbyRequestSchema = z.object({
+  spatial: KnowledgeRadiusSchema,
+  catalogs: z.array(KnowledgeIdSchema).max(256).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  cursor: z.string().max(1024).optional(),
+});
+export type KnowledgeNearbyRequest = z.input<typeof KnowledgeNearbyRequestSchema>;
+export const KnowledgeNearbyDocumentSchema = KnowledgeDocumentSummarySchema.extend({
+  publisherId: KnowledgeIdSchema,
+  catalogId: KnowledgeIdSchema,
+  catalogVersion: KnowledgeVersionSchema,
+  uri: z.string(),
+  distanceMeters: z.number().finite().nonnegative(),
+  matchedLocation: KnowledgeLocationSchema,
+});
+export type KnowledgeNearbyDocument = z.infer<typeof KnowledgeNearbyDocumentSchema>;
+export const KnowledgeNearbyResponseSchema = z.object({
+  documents: z.array(KnowledgeNearbyDocumentSchema),
+  total: z.number().int().nonnegative(),
+  nextCursor: z.string().optional(),
+});
+export type KnowledgeNearbyResponse = z.infer<typeof KnowledgeNearbyResponseSchema>;
 
 // ── history events ──────────────────────────────────────────────────────────
 

@@ -131,6 +131,7 @@ export function asymmetricTopK(
   index: ShardBitIndex,
   query: ArrayLike<number>,
   k: number,
+  eligibleChunkIds?: ReadonlySet<number>,
 ): AsymmetricHit[] {
   const { bits, bytesPerRow, rows } = index;
   if (Math.ceil(query.length / 8) !== bytesPerRow) {
@@ -138,7 +139,7 @@ export function asymmetricTopK(
       `query has ${query.length} dimensions, shard rows have ${bytesPerRow} bytes of bits`,
     );
   }
-  const limit = Math.min(k, rows);
+  const limit = Math.min(k, eligibleChunkIds?.size ?? rows);
   if (limit <= 0) return [];
 
   const lut = new Float32Array(bytesPerRow * 256);
@@ -196,6 +197,10 @@ export function asymmetricTopK(
 
   let offset = 0;
   for (let r = 0; r < rows; r++) {
+    if (eligibleChunkIds && !eligibleChunkIds.has(r + 1)) {
+      offset += bytesPerRow;
+      continue;
+    }
     let score = 0;
     for (let p = 0; p < bytesPerRow; p++) {
       score += lut[p * 256 + (bits[offset + p] as number)] as number;

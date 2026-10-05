@@ -63,6 +63,7 @@ export async function buildTestCatalog(opts: {
   withExtras?: boolean;
   /** List the existing dovetail article under Finishing too. */
   withSharedToc?: boolean;
+  withLocations?: boolean;
 }): Promise<void> {
   const extras = opts.withExtras ?? false;
   await compileKnowledgeCatalog({
@@ -85,7 +86,22 @@ export async function buildTestCatalog(opts: {
     ],
     documents: (async function* () {
       yield {
-        id: 'dovetails',
+        id:
+          opts.withLocations && opts.id?.startsWith('qualla-region-')
+            ? 'qualla-wikipedia-1'
+            : 'dovetails',
+        ...(opts.withLocations
+          ? {
+              locations: [
+                {
+                  id: 'seattle',
+                  latitude: 47.6062,
+                  longitude: -122.3321,
+                  role: 'subject' as const,
+                },
+              ],
+            }
+          : {}),
         title: 'Dovetail Joints',
         slug: 'dovetails',
         summary: 'Interlocking corner joinery.',
@@ -111,7 +127,22 @@ export async function buildTestCatalog(opts: {
         };
       }
       yield {
-        id: 'shellac',
+        id:
+          opts.withLocations && opts.id?.startsWith('qualla-region-')
+            ? 'qualla-wikipedia-2'
+            : 'shellac',
+        ...(opts.withLocations
+          ? {
+              locations: [
+                {
+                  id: 'near-seattle',
+                  latitude: 47.6162,
+                  longitude: -122.3321,
+                  role: 'subject' as const,
+                },
+              ],
+            }
+          : {}),
         title: 'Shellac',
         slug: 'shellac',
         summary: 'A natural resin finish.',

@@ -37,6 +37,11 @@ import type {
 } from '@bendyline/gezel';
 import {
   KnowledgeMachineInventorySchema,
+  type KnowledgeNearbyDocument,
+  type KnowledgeNearbyRequest,
+  KnowledgeNearbyRequestSchema,
+  type KnowledgeNearbyResponse,
+  type KnowledgeRadius,
   createLogger,
   formatKnowledgeUri,
   parseKnowledgeUri,
@@ -85,6 +90,12 @@ import {
 } from './install.js';
 import { KnowledgeRegistry, type KnowledgeRegistryEntry } from './registry.js';
 import type { SharedEnsureResult, SharedKnowledgeInstaller } from './shared-install.js';
+import {
+  KnowledgeSpatialCursorError,
+  encodeNearbyCursor,
+  nearbyCursorOffset,
+  regionalDocumentIdentity,
+} from './spatial-query.js';
 import { type KnowledgeVectorFloors, resolveKnowledgeVectorFloors } from './vector-floors.js';
 
 type GlobalSearchDocumentHit = GlobalSearchResponse['documents'][number];
@@ -1324,12 +1335,104 @@ export class KnowledgeManager {
   // ── the SearchService knowledge arm ───────────────────────────────────────
 
   /**
-   * Explicit search across active catalogs. Catalogs are grouped by how their
-   * queries are embedded — the daemon's own vector for profiles it shares,
-   * one profile-embedded vector per foreign profile, none for keyword-only —
-   * and each group searches with its own vector, so every catalog is
-   * searched in the space it was built in. Results come back FINISHED —
-   * provenance, topic names, scoring.
+   * Discover subject articles under the active catalog policy. Source replicas
+   * deduplicate before counts and cursor pages, and scope is checked again
+   * before returning the response if catalogs changed during worker scans.
+   */
+  async nearby(
+    request: KnowledgeNearbyRequest,
+    projectId?: string,
+  ): Promise<KnowledgeNearbyResponse> {
+    const body = KnowledgeNearbyRequestSchema.parse(request);
+    const keys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          !body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+      )
+      .sort();
+    const snapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: keys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    const offset = nearbyCursorOffset(body.cursor, snapshot);
+    const unique = new Map<string, KnowledgeNearbyDocument>();
+    for (const key of keys) {
+      const info = this.mountedByKey.get(key)!;
+      let start = 0;
+      for (;;) {
+        const page = await this.opts.host.nearbyDocuments(key, body.spatial, {
+          offset: start,
+          limit: 500,
+        });
+        for (const document of page.documents) {
+          const result: KnowledgeNearbyDocument = {
+            ...document,
+            publisherId: info.ref.publisherId,
+            catalogId: info.ref.catalogId,
+            catalogVersion: info.ref.version,
+            uri: formatKnowledgeUri({
+              publisherId: info.ref.publisherId,
+              catalogId: info.ref.catalogId,
+              documentId: document.id,
+            }),
+          };
+          const identity = regionalDocumentIdentity(
+            info.ref.publisherId,
+            info.ref.catalogId,
+            document.id,
+          );
+          const previous = unique.get(identity);
+          if (!previous || result.distanceMeters < previous.distanceMeters)
+            unique.set(identity, result);
+        }
+        start += page.documents.length;
+        if (start >= page.total || !page.documents.length) break;
+      }
+    }
+    const ordered = [...unique.values()].sort(
+      (a, b) =>
+        a.distanceMeters - b.distanceMeters ||
+        a.publisherId.localeCompare(b.publisherId) ||
+        a.catalogId.localeCompare(b.catalogId) ||
+        a.id.localeCompare(b.id),
+    );
+    const currentKeys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          this.mountedByKey.has(key) &&
+          (!body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId)),
+      )
+      .sort();
+    const currentSnapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: currentKeys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    if (currentSnapshot !== snapshot)
+      throw new KnowledgeSpatialCursorError(
+        'Catalog scope changed during nearby query; restart the query.',
+      );
+    const documents = ordered.slice(offset, offset + body.limit);
+    const next = offset + documents.length;
+    return {
+      documents,
+      total: ordered.length,
+      ...(next < ordered.length ? { nextCursor: encodeNearbyCursor(snapshot, next) } : {}),
+    };
+  }
+
+  /**
+   * Search each catalog in its embedding space and fuse lexical/vector ranks.
+   * Spatial eligibility applies inside workers before candidate selection.
    */
   async searchUnified(
     query: string,
@@ -1337,11 +1440,15 @@ export class KnowledgeManager {
       vector: number[] | null;
       maxResults: number;
       projectId?: string;
+      spatial?: KnowledgeRadius;
+      catalogs?: string[];
       /** Search a profile group keyword-only when its query model is not ready by then. */
       queryEmbedBudgetMs?: number;
     },
   ): Promise<UnifiedSearchResult[]> {
-    const active = await this.activeCatalogKeys(opts.projectId);
+    const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
+      (key) => !opts.catalogs || opts.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+    );
     if (active.length === 0) return [];
 
     const groups: Array<{ keys: string[]; vector?: Float32Array }> = [];
@@ -1383,6 +1490,7 @@ export class KnowledgeManager {
         includeChunkFts: true,
         catalogKeys: group.keys,
         docFtsLimit: 6,
+        spatial: opts.spatial,
       });
       response.chunks.push(...part.chunks);
       response.documents.push(...part.documents);
@@ -1461,13 +1569,28 @@ export class KnowledgeManager {
         (b.chunk?.cosine ?? -1) - (a.chunk?.cosine ?? -1) ||
         a.documentId.localeCompare(b.documentId),
     );
+    const matches = new Map(
+      [...response.documents, ...response.chunks]
+        .filter((hit) => hit.matchedLocation)
+        .map((hit) => [
+          `${hit.catalogKey}\u0000${hit.documentId}`,
+          { distanceMeters: hit.distanceMeters!, matchedLocation: hit.matchedLocation! },
+        ]),
+    );
+    const seenSpatial = new Set<string>();
     const out: UnifiedSearchResult[] = [];
     const perCatalogCount = new Map<string, number>();
     for (const entry of ordered) {
       const info = this.mountedByKey.get(entry.catalogKey);
       if (!info) continue;
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
-      if (count >= PER_CATALOG_CAP) continue;
+      if (!opts.spatial && count >= PER_CATALOG_CAP) continue;
+      const spatialIdentity = regionalDocumentIdentity(
+        info.ref.publisherId,
+        info.ref.catalogId,
+        entry.documentId,
+      );
+      if (opts.spatial && seenSpatial.has(spatialIdentity)) continue;
       const relevance = fusedRankRelevance(out.length);
       // `vector` only when the hit cleared a measured floor; everything else
       // is lexical evidence, which proactive injection asks to be grounded.
@@ -1480,7 +1603,8 @@ export class KnowledgeManager {
         : await this.toDocumentResult(info, entry.documentId, relevance, evidence);
       if (!result) continue;
       perCatalogCount.set(entry.catalogKey, count + 1);
-      out.push(result);
+      seenSpatial.add(spatialIdentity);
+      out.push({ ...result, ...matches.get(`${entry.catalogKey}\u0000${entry.documentId}`) });
       if (out.length >= Math.max(10, opts.maxResults)) break;
     }
     return out;
@@ -1609,10 +1733,12 @@ export class KnowledgeManager {
   }
 
   /** Enabled+mounted catalogs, intersected with the project policy. */
-  private async activeCatalogKeys(projectId?: string): Promise<string[]> {
+  private async activeCatalogKeys(projectId?: string, failClosed = false): Promise<string[]> {
     const mounted = [...this.mountedByKey.values()];
     if (!projectId || !this.opts.projectPolicy) return mounted.map((m) => m.key);
-    const policy = await this.opts.projectPolicy(projectId).catch(() => null);
+    const policy = await this.opts
+      .projectPolicy(projectId)
+      .catch(() => (failClosed ? { mode: 'off' as const } : null));
     if (!policy || policy.mode === 'inherit') return mounted.map((m) => m.key);
     if (policy.mode === 'off') return [];
     const selected = new Set((policy.refs ?? []).map((r) => `${r.publisherId}/${r.catalogId}`));

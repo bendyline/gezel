@@ -45,3 +45,5 @@ export type {
   KnowledgeRegistryEntry,
   KnowledgeRegistryIndex,
 } from '@bendyline/gezk';
+
+export type { SpatialMatch, DocumentLocationRow } from './reader/spatial-index.js';

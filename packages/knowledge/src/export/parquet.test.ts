@@ -56,6 +56,9 @@ async function compileFixture(
   count: number,
 ): Promise<void> {
   const docs = generateFixtureCorpus(count, 7);
+  docs[0]!.locations = [
+    { id: 'subject', latitude: 47.6062, longitude: -122.3321, role: 'subject' },
+  ];
   await compileKnowledgeCatalog({
     catalog: {
       id: 'fixture-en',
@@ -115,6 +118,7 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
     });
     expect(first.files.map((f) => f.path)).toEqual([
       'topics.parquet',
+      'document-locations.parquet',
       'documents-000.parquet',
       'chunks-000.parquet',
     ]);
@@ -133,6 +137,12 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
     const chunks = join(dir, 'out-1', 'chunks-000.parquet');
     const documents = join(dir, 'out-1', 'documents-000.parquet');
     const topics = join(dir, 'out-1', 'topics.parquet');
+    const locations = await query(
+      `SELECT * FROM '${join(dir, 'out-1', 'document-locations.parquet')}';`,
+    );
+    expect(locations).toHaveLength(1);
+    expect(locations[0]?.latitude).toBe(47.6062);
+    expect(locations[0]?.role).toBe('subject');
     const [counts] = await query(
       `SELECT (SELECT count(*) FROM '${chunks}') AS chunks, (SELECT count(*) FROM '${documents}') AS documents, (SELECT count(*) FROM '${topics}') AS topics;`,
     );

@@ -1,5 +1,84 @@
 {
   "formatVersion": "0.7",
+  "spatial": {
+    "distance": [
+      {
+        "from": {
+          "latitude": 0,
+          "longitude": 0
+        },
+        "to": {
+          "latitude": 0,
+          "longitude": 1
+        },
+        "expectedMeters": 111194.92664455874
+      },
+      {
+        "from": {
+          "latitude": 90,
+          "longitude": 0
+        },
+        "to": {
+          "latitude": 90,
+          "longitude": 180
+        },
+        "expectedMeters": 0
+      },
+      {
+        "from": {
+          "latitude": 0,
+          "longitude": 180
+        },
+        "to": {
+          "latitude": 0,
+          "longitude": -180
+        },
+        "expectedMeters": 0
+      }
+    ],
+    "nearby": [
+      {
+        "radius": {
+          "latitude": 47.6062,
+          "longitude": -122.3321,
+          "radiusMeters": 50000
+        },
+        "expectedDocumentIds": [
+          "doc-0000"
+        ]
+      },
+      {
+        "radius": {
+          "latitude": 0,
+          "longitude": -180,
+          "radiusMeters": 50000
+        },
+        "expectedDocumentIds": [
+          "doc-0001"
+        ]
+      },
+      {
+        "radius": {
+          "latitude": 90,
+          "longitude": 170,
+          "radiusMeters": 0
+        },
+        "expectedDocumentIds": [
+          "doc-0002"
+        ]
+      },
+      {
+        "radius": {
+          "latitude": 30.1,
+          "longitude": 50.2,
+          "radiusMeters": 0
+        },
+        "expectedDocumentIds": [
+          "doc-0004"
+        ]
+      }
+    ]
+  },
   "hashEmbedder": {
     "id": "test-hash-embed@1",
     "description": "A deterministic stand-in for a model: SHA-256 of the UTF-8 text, extended by re-hashing the previous digest, each byte read as a signed int8 and mapped to (b + 0.5) / 128; the compiler L2-normalizes the result.",
@@ -227,8 +306,8 @@
   },
   "fixture": {
     "path": "fixtures/conformance-0.7.gezk",
-    "sha256": "2825a7358ad73d8a309ee01cf2e559dd5020e7fcb18b20f525b4f3fe165ae3aa",
-    "sizeBytes": 545339,
+    "sha256": "cea4616f3a4dc91e5c0ce8c4cc30d4547834bf2b68f1a7eb6e60e60998595b37",
+    "sizeBytes": 570309,
     "catalogId": "conformance",
     "version": "0.7.0",
     "publisherId": "bendyline",

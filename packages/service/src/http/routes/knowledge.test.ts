@@ -40,7 +40,11 @@ beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-knowledge-routes-'));
   home = join(dir, 'home');
   archivePath = join(dir, 'test-notes-1.0.0.gezk');
-  await buildTestCatalog({ outputPath: archivePath, workDir: join(dir, 'work') });
+  await buildTestCatalog({
+    outputPath: archivePath,
+    workDir: join(dir, 'work'),
+    withLocations: true,
+  });
   svc = await startService({ home });
   const baseUrl = `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}`;
   const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
@@ -80,6 +84,38 @@ describe('knowledge routes', () => {
     const { results } = await client.searchKnowledge({ query: 'dovetail corner joint' });
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]?.uri).toMatch(/^knowledge:\/\/gezel-tests\/test-notes\//);
+  });
+
+  it('discovers locations through first-party and project APIs and filters search before ranking', async () => {
+    const spatial = { latitude: 47.6062, longitude: -122.3321, radiusMeters: 50_000 };
+    const first = await client.nearbyKnowledge({ spatial, limit: 1 });
+    expect(first.total).toBe(2);
+    expect(first.documents[0]?.id).toBe('dovetails');
+    expect(first.documents[0]?.distanceMeters).toBe(0);
+    const next = await client.nearbyKnowledge({ spatial, limit: 1, cursor: first.nextCursor });
+    expect(next.documents[0]?.id).toBe('shellac');
+    expect((await client.toolKnowledgeNearby('default', { spatial })).total).toBe(2);
+    const found = await client.searchKnowledge({
+      query: 'dovetail',
+      spatial,
+      catalogs: ['test-notes'],
+    });
+    expect(found.results[0]?.distanceMeters).toBe(0);
+    const scoped = await client.toolSearch('default', {
+      query: 'dovetail',
+      sources: ['knowledge'],
+      spatial,
+    });
+    expect(scoped.results[0]?.matchedLocation?.id).toBe('seattle');
+    expect(
+      (await client.searchKnowledge({ query: 'dovetail', spatial, catalogs: [] })).results,
+    ).toEqual([]);
+    await expect(
+      client.nearbyKnowledge({
+        spatial: { ...spatial, radiusMeters: 1 },
+        cursor: first.nextCursor,
+      }),
+    ).rejects.toThrow();
   });
 
   it('model-facing project search returns knowledge hits alongside project arms', async () => {

@@ -34,6 +34,8 @@ import type {
   KnowledgeDocumentSummary as KnowledgeDocumentSummaryWire,
   KnowledgeInstallEvent,
   KnowledgeInstallRequest,
+  KnowledgeNearbyRequest,
+  KnowledgeNearbyResponse,
   KnowledgePassageRead as KnowledgePassageReadWire,
   KnowledgeSearchRequest,
   KnowledgeTopicNode as KnowledgeTopicNodeWire,
@@ -2554,6 +2556,10 @@ export class GezelClient {
 
   removeKnowledgeCatalog(catalogId: string): Promise<{ ok: boolean }> {
     return this.request('DELETE', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}`);
+  }
+
+  nearbyKnowledge(body: KnowledgeNearbyRequest): Promise<KnowledgeNearbyResponse> {
+    return this.request('POST', '/api/knowledge/nearby', body);
   }
 
   searchKnowledge(body: KnowledgeSearchRequest): Promise<{ results: UnifiedSearchResult[] }> {
@@ -6544,6 +6550,14 @@ export class GezelClient {
   }
 
   /** Unified indexed search across project content, artifacts, memory, and shared documents. */
+  toolKnowledgeNearby(id: string, body: KnowledgeNearbyRequest): Promise<KnowledgeNearbyResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/knowledge-nearby`,
+      body,
+    );
+  }
+
   toolSearch(id: string, body: ProjectSearchRequest): Promise<ProjectSearchResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search`, body);
   }

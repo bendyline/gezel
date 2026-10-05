@@ -18,6 +18,9 @@ import type {
   CatalogValidationReport,
 } from '@bendyline/gezel-knowledge';
 
+import type { KnowledgeRadius } from '@bendyline/gezel';
+import type { SpatialMatch } from '@bendyline/gezel-knowledge';
+
 type OpenHandle = CatalogHandle & { catalogId: string };
 
 export interface MountSpec {
@@ -28,7 +31,7 @@ export interface MountSpec {
   version: string;
 }
 
-export interface GlobalSearchHit extends CatalogChunkHit {
+export interface GlobalSearchHit extends CatalogChunkHit, Partial<SpatialMatch> {
   catalogKey: string;
   catalogId: string;
 }
@@ -48,11 +51,19 @@ export interface GlobalSearchRequest {
   /** Restrict to these catalog keys (default: all mounted). */
   catalogKeys?: string[];
   docFtsLimit?: number;
+  spatial?: KnowledgeRadius;
 }
 
 export interface GlobalSearchResponse {
   chunks: GlobalSearchHit[];
-  documents: Array<{ catalogKey: string; catalogId: string; documentId: string; rank: number }>;
+  documents: Array<
+    {
+      catalogKey: string;
+      catalogId: string;
+      documentId: string;
+      rank: number;
+    } & Partial<SpatialMatch>
+  >;
 }
 
 export interface KnowledgeCatalogHost {
@@ -66,6 +77,14 @@ export interface KnowledgeCatalogHost {
     key: string,
     opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
   ): Promise<{ documents: CatalogDocumentMeta[]; total: number }>;
+  nearbyDocuments(
+    key: string,
+    radius: KnowledgeRadius,
+    opts: { offset?: number; limit?: number },
+  ): Promise<{
+    documents: Array<CatalogDocumentMeta & SpatialMatch>;
+    total: number;
+  }>;
   getDocument(
     key: string,
     documentId: string,
@@ -93,14 +112,29 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
       .map((key) => ({ key, handle: handles.get(key) }))
       .filter((e): e is { key: string; handle: OpenHandle } => Boolean(e.handle));
 
+    const spatial = new Map(
+      active.map(({ key, handle }) => [
+        key,
+        request.spatial ? handle.spatialMatches(request.spatial) : undefined,
+      ]),
+    );
+    const allowed = (key: string) => {
+      const matches = spatial.get(key);
+      return matches ? new Set(matches.keys()) : undefined;
+    };
     const documents: GlobalSearchResponse['documents'] = [];
     for (const { key, handle } of active) {
-      for (const hit of handle.searchDocumentsFts(request.query, request.docFtsLimit ?? 8)) {
+      for (const hit of handle.searchDocumentsFts(
+        request.query,
+        request.docFtsLimit ?? 8,
+        allowed(key),
+      )) {
         documents.push({
           catalogKey: key,
           catalogId: handle.catalogId,
           documentId: hit.documentId,
           rank: hit.rank,
+          ...spatial.get(key)?.get(hit.documentId),
         });
       }
     }
@@ -108,9 +142,14 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     const chunks: GlobalSearchHit[] = [];
     /** Global routing: score shards across all catalogs, spend S once. */
     const routed = new Map<string, number[]>();
+    if (request.spatial) {
+      for (const { key, handle } of active)
+        routed.set(key, handle.shardsForDocuments(allowed(key)!));
+    }
     if (request.vector) {
       const scored: Array<{ key: string; shardId: number; score: number }> = [];
       for (const { key, handle } of active) {
+        if (request.spatial) continue;
         for (const s of handle.scoreShards(request.vector)) {
           scored.push({ key, shardId: s.shardId, score: s.score });
         }
@@ -123,16 +162,31 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
       for (const { key, handle } of active) {
         const shardIds = routed.get(key);
         if (!shardIds || shardIds.length === 0) continue;
-        for (const hit of handle.searchShards(request.vector, shardIds, request.finalK)) {
-          chunks.push({ ...hit, catalogKey: key, catalogId: handle.catalogId });
+        for (const hit of handle.searchShards(
+          request.vector,
+          shardIds,
+          request.finalK,
+          allowed(key),
+        )) {
+          chunks.push({
+            ...hit,
+            catalogKey: key,
+            catalogId: handle.catalogId,
+            ...spatial.get(key)?.get(hit.documentId),
+          });
         }
       }
     }
     if (request.includeChunkFts) {
       for (const { key, handle } of active) {
         const shardIds = routed.get(key) ?? handle.shards.map((s) => s.id);
-        for (const hit of handle.searchChunksFts(request.query, shardIds, 8)) {
-          chunks.push({ ...hit, catalogKey: key, catalogId: handle.catalogId });
+        for (const hit of handle.searchChunksFts(request.query, shardIds, 8, allowed(key))) {
+          chunks.push({
+            ...hit,
+            catalogKey: key,
+            catalogId: handle.catalogId,
+            ...spatial.get(key)?.get(hit.documentId),
+          });
         }
       }
     }
@@ -159,6 +213,8 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     validate: async (rootDir, deep) => validateExtractedCatalog(rootDir, { deep }),
     topics: async (key) => mustGet(handles, key).topics(),
     documentsPage: async (key, opts) => mustGet(handles, key).documentsPage(opts),
+    nearbyDocuments: async (key, radius, opts) =>
+      mustGet(handles, key).nearbyDocuments(radius, opts),
     getDocument: async (key, documentId) => mustGet(handles, key).getDocument(documentId),
     getChunk: async (key, documentId, chunkUid) =>
       mustGet(handles, key).getChunk(documentId, chunkUid),

@@ -1,3 +1,4 @@
+import { KnowledgeLocationSchema } from '@bendyline/gezk';
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
@@ -5653,6 +5654,8 @@ export const UnifiedSearchResultSchema = z.object({
   /** Catalog the hit came from, plus the exact installed version. */
   catalogId: z.string().optional(),
   catalogVersion: z.string().optional(),
+  distanceMeters: z.number().finite().nonnegative().optional(),
+  matchedLocation: KnowledgeLocationSchema.optional(),
   documentId: z.string().optional(),
   /** Root→leaf topic names for display ("Physics › Mechanics"). */
   topicPath: z.array(z.string()).optional(),
@@ -5694,28 +5697,8 @@ export const MemorySearchRequestSchema = z.object({
 });
 export type MemorySearchRequest = z.infer<typeof MemorySearchRequestSchema>;
 
-/** Project-bound form used by the model-facing generic `search` tool. */
-export const ProjectSearchRequestSchema = z.object({
-  query: z.string().min(1).max(400),
-  maxResults: z.number().int().positive().max(100).optional(),
-  /**
-   * Skip this many merged results before returning `maxResults` — the tool
-   * cursor. Narrowing only; the project scope stays server-derived.
-   */
-  offset: z.number().int().nonnegative().max(10_000).optional(),
-  /**
-   * Keep only results whose path starts with this prefix (forward-slashed,
-   * relative). Pathless results (memories, area overviews) are excluded when
-   * set — a path filter asks for files. Narrowing only.
-   */
-  pathPrefix: z.string().min(1).max(500).optional(),
-  /** Current gezel id enables its private-memory arm. */
-  gezelId: z.string().min(1).optional(),
-  /** Shared documents are included by default. */
-  includeShared: z.boolean().optional(),
-  sources: z.array(RetrievalSourceSchema).min(1).optional(),
-});
-export type ProjectSearchRequest = z.infer<typeof ProjectSearchRequestSchema>;
+export { ProjectSearchRequestSchema } from './project-search.js';
+export type { ProjectSearchRequest } from './project-search.js';
 export const ProjectSearchCraftbookSuggestionSchema = CraftbookSuggestionSchema.pick({
   id: true,
   name: true,

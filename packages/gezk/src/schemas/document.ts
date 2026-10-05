@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { KnowledgeLocationsSchema } from '../spatial.js';
 import { KnowledgeDocumentIdSchema, KnowledgeIdSchema } from './ids.js';
 
 /** A signed 32-bit listing position; unordered documents sort after ordered ones. */
@@ -45,5 +46,6 @@ export const CatalogDocumentSchema = z.object({
   /** Explicit position among the documents of its topic in a listing. */
   ordinal: KnowledgeOrdinalSchema.optional(),
   meta: KnowledgeDocumentMetaSchema.optional(),
+  locations: KnowledgeLocationsSchema.optional(),
 });
 export type CatalogDocument = z.infer<typeof CatalogDocumentSchema>;

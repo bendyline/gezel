@@ -40,6 +40,7 @@ import {
   FindSymbolRequestSchema,
   FixBoekwachterIssueRequestSchema,
   GetBoekwachterIssueRequestSchema,
+  KnowledgeNearbyRequestSchema,
   ListEntityMentionsRequestSchema,
   ListFileIssuesRequestSchema,
   MapRepoRequestSchema,
@@ -79,6 +80,8 @@ import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/su
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
+import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
+import { embedQuery } from '../../memory/embeddings.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
 import {
   NoTablesError,
@@ -888,10 +891,46 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     );
   });
 
+  app.post('/:id/tools/knowledge-nearby', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    if (!ctx.knowledge) return c.json({ error: 'knowledge subsystem not available' }, 404);
+    const body = KnowledgeNearbyRequestSchema.parse(await c.req.json());
+    try {
+      return c.json(await ctx.knowledge.nearby(body, id));
+    } catch (error) {
+      if (error instanceof KnowledgeSpatialCursorError)
+        return c.json({ error: error.message }, 400);
+      throw error;
+    }
+  });
+
   app.post('/:id/tools/search', async (c) => {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = ProjectSearchRequestSchema.parse(await c.req.json());
+    if (body.spatial) {
+      if (!ctx.knowledge) return c.json({ results: [], truncated: false, craftbooks: [] });
+      let vector: number[] | null = null;
+      try {
+        vector = await embedQuery(body.query);
+      } catch {
+        /* Keyword retrieval remains available offline. */
+      }
+      const limit = body.maxResults ?? 30;
+      const results = await ctx.knowledge.searchUnified(body.query, {
+        vector,
+        maxResults: limit + 1,
+        projectId: id,
+        spatial: body.spatial,
+        catalogs: body.catalogs,
+      });
+      return c.json({
+        results: results.slice(0, limit),
+        truncated: results.length > limit,
+        craftbooks: [],
+      });
+    }
     const linkedProjectIds = await ctx.store.linkedProjectIds(id);
     const [searchResult, rankedCraftbooks] = await Promise.all([
       ctx.search.searchProject(body.query, {

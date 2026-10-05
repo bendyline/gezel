@@ -27,6 +27,7 @@ import type { CatalogDocument } from '@bendyline/gezk';
 import {
   CatalogDocumentSchema,
   KnowledgeDocumentIdSchema,
+  KnowledgeLocationsSchema,
   KnowledgeOrdinalSchema,
   MAX_KNOWLEDGE_TOPIC_DEPTH,
   assetExtension,
@@ -122,6 +123,7 @@ interface Subcategory {
 }
 
 interface FrontMatter {
+  locations?: CatalogDocument['locations'];
   title?: string;
   summary?: string;
   aliases?: string[];
@@ -138,7 +140,15 @@ interface FrontMatter {
   body: string;
 }
 
-const RESERVED_KEYS = new Set(['title', 'summary', 'aliases', 'id', 'order', 'subcategory']);
+const RESERVED_KEYS = new Set([
+  'title',
+  'summary',
+  'aliases',
+  'id',
+  'order',
+  'subcategory',
+  'locations',
+]);
 
 function readFrontMatter(
   raw: string,
@@ -164,6 +174,12 @@ function readFrontMatter(
       throw new Error(`${file}: front matter '${key}' must be a string`);
     return value.trim() || undefined;
   };
+  if (data.locations !== undefined) {
+    const locations = KnowledgeLocationsSchema.safeParse(data.locations);
+    if (!locations.success)
+      throw new Error(`${file}: invalid front matter locations: ${locations.error.message}`);
+    out.locations = locations.data;
+  }
   out.title = str('title');
   out.summary = str('summary');
   out.id = str('id');
@@ -869,6 +885,7 @@ export async function loadMarkdownCatalog(
         language: opts.language,
         topicPath,
         ...(tocReferences.length ? { tocReferences } : {}),
+        ...(fm.locations ? { locations: fm.locations } : {}),
         markdown: fm.body,
         ...(fm.aliases && fm.aliases.length > 0 ? { aliases: fm.aliases } : {}),
         ...(ordinal !== undefined ? { ordinal } : {}),

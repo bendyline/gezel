@@ -41,6 +41,7 @@ import {
   GEZK_MANIFEST_KIND,
   KnowledgeAssetPathSchema,
   KnowledgeCatalogManifestSchema,
+  KnowledgeLocationsSchema,
   KnowledgeOrdinalSchema,
   KnowledgeTocReferenceSchema,
   MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
@@ -49,7 +50,9 @@ import {
   assetExtension,
   assetKindForExtension,
   canonicalizeJson,
+  normalizeLongitude,
   sniffAssetType,
+  spatialManifest,
   svgInertnessProblem,
 } from '@bendyline/gezk';
 import { writeGezkArchive } from '../archive/write.js';
@@ -236,7 +239,14 @@ export async function compileKnowledgeCatalog(
   // ── collect + sort + chunk ────────────────────────────────────────────────
   const prepared: PreparedDocument[] = [];
   const seenIds = new Set<string>();
-  for await (const doc of opts.documents) {
+  for await (const input of opts.documents) {
+    const locations = KnowledgeLocationsSchema.parse(input.locations ?? [])
+      .map((location) => ({
+        ...location,
+        longitude: normalizeLongitude(location.longitude),
+      }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const doc = { ...input, locations };
     if (seenIds.has(doc.id)) throw new Error(`duplicate document id: ${doc.id}`);
     seenIds.add(doc.id);
     const leafTopicId = assertTopicPath(topicById, doc.id, doc.topicPath);
@@ -422,6 +432,10 @@ export async function compileKnowledgeCatalog(
         body_codec, body_blob)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
+      const insertLocation = router.prepare(
+        `INSERT INTO document_locations (document_id, location_id, latitude, longitude, role, provenance_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
       const insertPlacement = router.prepare(
         'INSERT INTO topic_documents (topic_id, document_id, ordinal) VALUES (?, ?, ?)',
       );
@@ -465,6 +479,22 @@ export async function compileKnowledgeCatalog(
           useBrotli ? 'br' : 'none',
           blob,
         );
+        for (const location of p.doc.locations ?? []) {
+          const provenance = location.provenance ? canonicalizeJson(location.provenance) : null;
+          if (provenance !== null && Buffer.byteLength(provenance) > 16_384) {
+            throw new Error(
+              `document ${p.doc.id} location ${location.id} provenance exceeds 16384 bytes`,
+            );
+          }
+          insertLocation.run(
+            p.doc.id,
+            location.id,
+            location.latitude,
+            location.longitude,
+            location.role,
+            provenance,
+          );
+        }
         for (const placement of p.placements) {
           insertPlacement.run(
             placement.topicId,
@@ -790,6 +820,11 @@ export async function compileKnowledgeCatalog(
         assets: preparedAssets.length,
       },
       files: [...files].sort((a, b) => (a.path < b.path ? -1 : 1)),
+      spatial: spatialManifest(
+        prepared.flatMap((p) =>
+          (p.doc.locations ?? []).map((location) => ({ documentId: p.doc.id, location })),
+        ),
+      ),
       requires: { formatVersion: GEZK_FORMAT_VERSION, features: [] },
       ...(smokeQueries && smokeQueries.length > 0 ? { smokeQueries } : {}),
       toolchain: opts.toolchain ?? KNOWLEDGE_TOOLCHAIN,

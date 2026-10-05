@@ -9,6 +9,9 @@ import {
   GEZEL_TOOL_DESCRIPTIONS,
   GetScriptRunInputSchema,
   GetTaskInputSchema,
+  KnowledgeIdSchema,
+  KnowledgeNearbyRequestSchema,
+  KnowledgeRadiusSchema,
   ListArtifactsInputSchema,
   ListDirectoryInputSchema,
   ListDocumentsInputSchema,
@@ -10846,11 +10849,59 @@ server.tool(
   },
 );
 
+server.tool(
+  'knowledge_nearby',
+  GEZEL_TOOL_DESCRIPTIONS.knowledge_nearby,
+  KnowledgeNearbyRequestSchema.shape,
+  async (body) => {
+    try {
+      const found = await api.toolKnowledgeNearby(projectId, body);
+      const result = {
+        ...found,
+        documents: found.documents.map((document) => ({
+          documentId: document.id,
+          title: document.title,
+          summary: document.summary,
+          distanceMeters: document.distanceMeters,
+          matchedLocation: {
+            id: document.matchedLocation.id,
+            latitude: document.matchedLocation.latitude,
+            longitude: document.matchedLocation.longitude,
+            role: document.matchedLocation.role,
+          },
+          uri: document.uri,
+          publisherId: document.publisherId,
+          catalogId: document.catalogId,
+          catalogVersion: document.catalogVersion,
+        })),
+      };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: 'text' as const, text: `knowledge_nearby failed: ${unwrapApiError(error)}` },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 /** Per-hit snippet cap in the rendered `search` text (structuredContent keeps the full snippet). */
 server.tool(
   'search',
   GEZEL_TOOL_DESCRIPTIONS.search,
   SearchInputSchema.extend({
+    spatial: KnowledgeRadiusSchema.optional().describe(
+      'Restrict knowledge to subject locations within this radius, in meters.',
+    ),
+    catalogs: z
+      .array(KnowledgeIdSchema)
+      .optional()
+      .describe('Restrict knowledge catalogs before retrieval.'),
     sources: z
       .array(
         z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
@@ -10881,13 +10932,15 @@ server.tool(
         'Only results under this path prefix (e.g. "src/engine/" or "../<project-id>/docs/"). Narrowing only.',
       ),
   }).shape,
-  async ({ query, sources, maxResults, cursor, pathPrefix }) => {
+  async ({ query, sources, maxResults, cursor, pathPrefix, spatial, catalogs }) => {
     try {
       const res = await api.toolSearch(projectId, {
         query,
         gezelId,
         includeShared: true,
-        ...(sources ? { sources } : {}),
+        ...(sources ? { sources } : spatial ? { sources: ['knowledge'] as const } : {}),
+        ...(spatial ? { spatial } : {}),
+        ...(catalogs ? { catalogs } : {}),
         ...(maxResults ? { maxResults } : {}),
         ...(cursor ? { offset: cursor } : {}),
         ...(pathPrefix ? { pathPrefix } : {}),
