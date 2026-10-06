@@ -315,8 +315,14 @@ test('the release config normalizes package state before committing without crea
   );
 });
 
-test('the real core source keeps release stamps at the development baseline', async () => {
+// The root manifest is the baseline, not a literal: stamp-version.mjs writes it
+// together with these constants, and the Electron release runs this suite on
+// the stamped tree. A checkout reads 0.0.0 in both places, so a source-only stamp
+// leaked into a commit (prepare-package never touches the root manifest) still fails.
+test('the real core source keeps release stamps in step with the root manifest', async () => {
+  const { version } = JSON.parse(await readFile(join(here, '..', 'package.json'), 'utf8'));
   const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'browser.ts'), 'utf8');
-  assert.match(source, /export const GEZEL_VERSION = '0\.0\.0';/);
-  assert.match(source, /export const GEZEL_CONTENT_COMPAT = '0\.0\.0';/);
+  const declared = (name) => source.match(new RegExp(`export const ${name} = '([^']*)';`))?.[1];
+  assert.equal(declared('GEZEL_VERSION'), version);
+  assert.equal(declared('GEZEL_CONTENT_COMPAT'), version);
 });
