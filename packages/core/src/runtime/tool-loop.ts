@@ -20,6 +20,7 @@ import {
 import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
 import { extractReasoning } from '../transform/reasoning.js';
 import type { ResolvedTuning } from '../tuning-resolve.js';
+import { type HistoryMessage, historyExchanges, latestExchanges } from './conversation-history.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
 import { portableToolResultText } from './portable-tool-results.js';
@@ -34,6 +35,8 @@ export interface PortableToolSpec {
   name: string;
   description: string;
   parameters: unknown;
+  /** Survives the narrowest native listing (a project type's own tools). */
+  core?: boolean;
 }
 
 /**
@@ -55,7 +58,10 @@ export function toolProtocol(
 ): string {
   if (listing === 'none')
     return `${TOOLS_HEADING}\nNone: the tool list does not fit in this model's context. Answer in normal text.`;
-  if (listing === 'full') return `${TOOLS_HEADING}\n${TOOL_PROTOCOL}\n${JSON.stringify(inventory)}`;
+  if (listing === 'full')
+    return `${TOOLS_HEADING}\n${TOOL_PROTOCOL}\n${JSON.stringify(
+      inventory.map(({ name, description, parameters }) => ({ name, description, parameters })),
+    )}`;
   const lines = inventory.map((tool) => {
     const summary = listing === 'compact' ? firstSentence(tool.description) : '';
     return `- ${tool.name}(${renderFields(tool.parameters as JsonSchema, 0)})${summary ? `: ${summary}` : ''}`;
@@ -291,6 +297,20 @@ export async function recordPortableToolCall(
   return { call, value, serialized, ...(failure === undefined ? {} : { error: failure }) };
 }
 
+/**
+ * How much of a conversation's history a small model was last given:
+ * whether older tool results were left out, and how many of the newest
+ * exchanges were kept (all of them when absent).
+ */
+export interface PortableHistoryFit {
+  lean: boolean;
+  keep?: number;
+}
+
+/** Tells the model why the conversation starts partway through. */
+export const HISTORY_TRIMMED_NOTE =
+  'Earlier turns of this conversation are left out so it fits this model. The most recent ones follow; anything the work keeps lives in its files, so read them rather than guess.';
+
 /** Host-neutral bounded loop. A durable started record precedes every effect;
  * incomplete calls are never replayed after an OS kill or a persistence error.
  * With `nativeTools`, the provider's own tool loop calls back into the same
@@ -309,6 +329,19 @@ export async function runPortableToolLoop(options: {
   /** Set when the provider calls tools through its own API (`capabilities.tools`). */
   nativeTools?: NativeToolBinding;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  /**
+   * The conversation so far, oldest first, given separately so the loop can
+   * fit it: when the provider refuses the prompt's size, older tool results
+   * and then the oldest exchanges go before any tool does. `messages` then
+   * holds the system message and the turn itself. Start at `fit` (where this
+   * conversation last fitted); `fitted` hears only what the conversation
+   * itself forced, on the turn's first request.
+   */
+  history?: {
+    messages: readonly HistoryMessage[];
+    fit?: PortableHistoryFit;
+    fitted?(fit: PortableHistoryFit): void;
+  };
   /**
    * Appended to the system message at the size the provider accepts. Start at
    * `listing` (where this conversation last fitted). `narrowed` hears only the
@@ -350,6 +383,41 @@ export async function runPortableToolLoop(options: {
   const ladder: readonly PortableToolListing[] = native ? NATIVE_TOOL_LISTINGS : TOOL_LISTINGS;
   let listing: PortableToolListing =
     tools?.listing && ladder.includes(tools.listing) ? tools.listing : 'full';
+  const { history } = options;
+  const exchanges = history ? historyExchanges(history.messages) : 0;
+  let fit: PortableHistoryFit = history?.fit ?? { lean: false };
+  /** The system message, the history that fits, then the turn so far. */
+  const conversation = (): typeof messages => {
+    if (!history) return messages;
+    const kept =
+      fit.keep === undefined ? history.messages : latestExchanges(history.messages, fit.keep);
+    const [system, ...turn] = messages;
+    const trimmed = fit.keep !== undefined && fit.keep < exchanges;
+    return [
+      ...(system
+        ? [
+            trimmed
+              ? { ...system, content: `${system.content}\n\n${HISTORY_TRIMMED_NOTE}` }
+              : system,
+          ]
+        : []),
+      ...kept.map((message) => ({
+        role: message.role,
+        content: fit.lean ? (message.leanContent ?? message.content) : message.content,
+      })),
+      ...turn,
+    ];
+  };
+  /** One step smaller: older results first, then half the remaining exchanges. */
+  const narrowerHistory = (): PortableHistoryFit | undefined => {
+    if (!history) return undefined;
+    const kept =
+      fit.keep === undefined ? history.messages : latestExchanges(history.messages, fit.keep);
+    if (!fit.lean && kept.some((message) => message.leanContent !== undefined))
+      return { ...fit, lean: true };
+    const count = fit.keep ?? exchanges;
+    return count > 0 ? { lean: true, keep: Math.floor(count / 2) } : undefined;
+  };
   let actionCount = 0;
   // Greedy decoding re-emits the same rejected call; Apple's model repeated one
   // invalid run_installed_script seven times, spending the whole action budget.
@@ -482,13 +550,21 @@ export async function runPortableToolLoop(options: {
     let result!: Awaited<ReturnType<PortableInference['generate']>>;
     let ended: Omit<LoopResult, 'message'> | undefined;
     for (;;) {
+      const base = conversation();
       const prompt = !tools
-        ? messages
+        ? base
         : native
-          ? withNativeToolNote(messages, listing)
-          : withToolListing(messages, tools.inventory, listing);
+          ? withNativeToolNote(base, listing)
+          : withToolListing(base, tools.inventory, listing);
       const inputError = portableInputLimitError(prompt);
-      if (inputError) throw new Error(inputError);
+      if (inputError) {
+        // This host's own ceiling on a request: the oldest turns give way.
+        const smaller = narrowerHistory();
+        if (!smaller) throw new Error(inputError);
+        fit = smaller;
+        if (iteration === 0) history?.fitted?.(fit);
+        continue;
+      }
       const nativeSpecs = binding
         ? nativeToolSpecs(tools!.inventory, listing as NativeToolListing, binding)
         : [];
@@ -578,11 +654,25 @@ export async function runPortableToolLoop(options: {
         if (ended) break;
         if (limited) throw new Error(ACTION_LIMIT);
         // Only the provider's tokenizer knows whether a prompt fits, and it
-        // refuses before generating anything. Retry that refusal with a smaller
-        // tool listing; a failure after output or after a native tool call
-        // (whose effect is already committed), or of any other kind, stands.
+        // refuses before generating anything. Retry that refusal with less of
+        // the conversation's past first: an old turn matters less than a tool
+        // the work needs now, and a game whose state lives in its files loses
+        // nothing by it. Only then shrink the tool listing. A failure after
+        // output or after a native tool call (whose effect is already
+        // committed), or of any other kind, stands.
+        const refused = !buffered && !nativeCalls && isContextOverflowError(error);
+        const smaller = refused ? narrowerHistory() : undefined;
+        if (smaller) {
+          await check();
+          log.info(
+            `session=${session.id} ${options.providerId}:${options.modelId} context=${options.contextSize} history ${fit.lean ? 'lean' : 'full'}/${fit.keep ?? exchanges} -> lean/${smaller.keep ?? exchanges} of ${exchanges} exchanges`,
+          );
+          fit = smaller;
+          if (iteration === 0) history?.fitted?.(fit);
+          continue;
+        }
         const next =
-          tools && !buffered && !nativeCalls && isContextOverflowError(error)
+          tools && refused
             ? binding
               ? narrowerNativeListing(tools.inventory, listing as NativeToolListing, binding)
               : narrowerToolListing(tools.inventory, listing)

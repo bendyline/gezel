@@ -595,6 +595,25 @@ describe('computeToolAllowlist', () => {
       expect(allow!.has('run_playwright_script')).toBe(false);
     });
 
+    it('strips scripted Playwright under lockdown, where scripts run but the open web is off', () => {
+      const lockdown = resolveSecurityPolicy({
+        securityPolicy: securityPolicyForLevel('lockdown'),
+      });
+      expect(lockdown.allowScriptExecution).toBe(true);
+      expect(lockdown.allowExternalServices).toBe(false);
+      for (const role of ['researcher', 'generalist']) {
+        const allow = computeToolAllowlist({
+          role,
+          mode: 'always',
+          provider: 'mlx',
+          modelId: 'meta-llama/Llama-3-70B',
+          securityPolicy: lockdown,
+        });
+        expect(roleToolAllowlist(role).has('run_playwright_script'), role).toBe(true);
+        expect(allow!.has('run_playwright_script'), role).toBe(false);
+      }
+    });
+
     it('strips workspace-write when the project is not writable, regardless of policy', () => {
       const allow = computeToolAllowlist({
         role: 'developer',

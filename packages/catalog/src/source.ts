@@ -1243,6 +1243,9 @@ function mergeIdentityAndVersion(
       ...(version.mode !== undefined ? { mode: version.mode } : {}),
       ...(version.leadLabel !== undefined ? { leadLabel: version.leadLabel } : {}),
       ...(version.leanProfile !== undefined ? { leanProfile: version.leanProfile } : {}),
+      ...(version.capabilityFloor !== undefined
+        ? { capabilityFloor: version.capabilityFloor }
+        : {}),
       ...(version.indexingEnabled !== undefined
         ? { indexingEnabled: version.indexingEnabled }
         : {}),

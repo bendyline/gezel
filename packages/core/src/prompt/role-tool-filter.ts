@@ -1236,6 +1236,10 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_post',
   'queue_post',
   'publish_post',
+  // A Playwright script drives a real browser with unrestricted network and
+  // runs outside the script sandbox, so it is open-web egress. Before this,
+  // lockdown stripped `fetch_url` yet left this tool reaching the same web.
+  'run_playwright_script',
 ]);
 
 /**

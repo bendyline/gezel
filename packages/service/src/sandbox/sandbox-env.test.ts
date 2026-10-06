@@ -1,5 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { sandboxEnv } from './runner.js';
+import { browserScriptEnv, sandboxEnv } from './runner.js';
+
+describe('browserScriptEnv allowlist', () => {
+  it('drops daemon and provider credentials, including npm auth', () => {
+    const out = browserScriptEnv({
+      PATH: '/usr/bin',
+      HOME: '/home/dev',
+      GEZEL_TOKEN: 'should-not-leak',
+      GEZEL_NODE_PATH: '/opt/node',
+      OPENAI_API_KEY: 'sk-nope',
+      ANTHROPIC_API_KEY: 'sk-ant-nope',
+      GITHUB_TOKEN: 'ghp-nope',
+      AWS_SECRET_ACCESS_KEY: 'nope',
+      NODE_AUTH_TOKEN: 'npm-nope',
+      NODE_OPTIONS: '--require /tmp/evil.cjs',
+    });
+    for (const key of [
+      'GEZEL_TOKEN',
+      'GEZEL_NODE_PATH',
+      'OPENAI_API_KEY',
+      'ANTHROPIC_API_KEY',
+      'GITHUB_TOKEN',
+      'AWS_SECRET_ACCESS_KEY',
+      'NODE_AUTH_TOKEN',
+      'NODE_OPTIONS',
+    ]) {
+      expect(out, key).not.toHaveProperty(key);
+    }
+    expect(out.PATH).toBe('/usr/bin');
+    expect(out.HOME).toBe('/home/dev');
+  });
+
+  it('keeps what a browser and pnpm need: proxy, CA bundle, display and app-data roots', () => {
+    const out = browserScriptEnv({
+      https_proxy: 'http://proxy.corp:3128',
+      NO_PROXY: 'localhost',
+      NODE_EXTRA_CA_CERTS: '/etc/corp-ca.pem',
+      DISPLAY: ':0',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      LocalAppData: 'C:/Users/dev/AppData/Local',
+      APPDATA: 'C:/Users/dev/AppData/Roaming',
+    });
+    expect(out.https_proxy).toBe('http://proxy.corp:3128');
+    expect(out.NO_PROXY).toBe('localhost');
+    expect(out.NODE_EXTRA_CA_CERTS).toBe('/etc/corp-ca.pem');
+    expect(out.DISPLAY).toBe(':0');
+    expect(out.XDG_RUNTIME_DIR).toBe('/run/user/1000');
+    expect(out.LocalAppData).toBe('C:/Users/dev/AppData/Local');
+    expect(out.APPDATA).toBe('C:/Users/dev/AppData/Roaming');
+  });
+});
 
 describe('sandboxEnv allowlist', () => {
   it('strips known secret keys', () => {

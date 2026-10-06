@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { nativeToolSpecs } from '../tools/native-tools.js';
+import type { HistoryMessage } from './conversation-history.js';
 import type { PortableInference } from './product-service.js';
 import { type PortableToolActions, portableToolSurface } from './product-tools.js';
 import { portableFixture } from './test-files.js';
 import {
+  HISTORY_TRIMMED_NOTE,
   PORTABLE_TURN_ACTION_LIMIT,
+  type PortableHistoryFit,
   type PortableToolListing,
   type PortableToolSpec,
   runPortableToolLoop,
@@ -650,5 +653,129 @@ describe('native tool calling', () => {
     );
     const { result } = await runNative(generate);
     await expect(result).rejects.toThrow('This turn reached its action limit');
+  });
+});
+
+describe('fitting the conversation history to a small model', () => {
+  /** Exchange i: a user turn and a reply whose recorded result is large. */
+  function history(count: number, size = 400) {
+    const messages: HistoryMessage[] = [];
+    for (let i = 0; i < count; i++) {
+      messages.push({ role: 'user', content: `Move ${i}: ${'u'.repeat(size)}` });
+      messages.push({
+        role: 'assistant',
+        content: `Reply ${i} ${'r'.repeat(size)}`,
+        ...(i < count - 1 ? { leanContent: `Reply ${i} (result left out)` } : {}),
+      });
+    }
+    return messages;
+  }
+
+  async function runWithHistory(
+    generate: PortableInference['generate'],
+    past: HistoryMessage[],
+    options: {
+      fit?: PortableHistoryFit;
+      fitted?(fit: PortableHistoryFit): void;
+      context?: number;
+    } = {},
+  ) {
+    const { store, session, inventory } = await fixture();
+    const narrowed = vi.fn();
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: { providers: async () => [], generate, cancel: async () => {} },
+      requestId: 'req',
+      providerId: 'android-mlkit',
+      modelId: 'android-mlkit',
+      contextSize: options.context ?? 8192,
+      maxTokens: 256,
+      messages: [
+        { role: 'system', content: 'Reply briefly.' },
+        { role: 'user', content: 'Your move.' },
+      ],
+      history: {
+        messages: past,
+        ...(options.fit ? { fit: options.fit } : {}),
+        ...(options.fitted ? { fitted: options.fitted } : {}),
+      },
+      tools: { inventory, narrowed },
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: () => {},
+      delta: () => {},
+    });
+    return { result, narrowed };
+  }
+
+  it('leaves out old results, then old exchanges, before it touches the tools', async () => {
+    const { generate, systems } = byteTokenizer();
+    const prompts: string[][] = [];
+    generate.mockImplementation(async (request) => {
+      prompts.push(request.messages.map((message) => message.content));
+      systems.push(request.messages[0]!.content);
+      const size = (text: string) => new TextEncoder().encode(text).byteLength;
+      const bytes = request.messages.reduce((sum, message) => sum + size(message.content), 0);
+      // Room for the instructions, the full tool listing and a few exchanges.
+      const room =
+        size(request.messages[0]!.content.replace(`\n\n${HISTORY_TRIMMED_NOTE}`, '')) + 5_000;
+      if (bytes > room) throw new Error(LLAMA_OVERFLOW);
+      return { text: 'Done.', stopReason: 'stop' };
+    });
+    const fitted = vi.fn();
+    const past = history(40);
+    const { result, narrowed } = await runWithHistory(generate, past, { fitted });
+    expect(result).toMatchObject({ text: 'Done.', stopReason: 'stop' });
+    // Tools were never narrowed: the full JSON listing is still there.
+    expect(narrowed).not.toHaveBeenCalled();
+    expect(systems.at(-1)).toContain('"parameters"');
+    expect(systems.at(-1)).toContain(HISTORY_TRIMMED_NOTE);
+    // First the results went, then whole exchanges, oldest first.
+    expect(fitted.mock.calls[0]![0]).toEqual({ lean: true });
+    const last = fitted.mock.calls.at(-1)![0] as PortableHistoryFit;
+    expect(last.lean).toBe(true);
+    expect(last.keep).toBeLessThan(40);
+    const final = prompts.at(-1)!;
+    expect(final.at(-1)).toBe('Your move.');
+    expect(final.at(-2)).toContain('Reply 39 rrrr');
+    expect(final.some((content) => content.startsWith('Move 0:'))).toBe(false);
+  });
+
+  it('starts from where the conversation last fitted', async () => {
+    const generate = vi.fn<PortableInference['generate']>(async () => ({
+      text: 'Done.',
+      stopReason: 'stop',
+    }));
+    await runWithHistory(generate, history(10), { fit: { lean: true, keep: 2 } });
+    expect(generate).toHaveBeenCalledTimes(1);
+    const sent = generate.mock.calls[0]![0].messages.map((message) => message.content);
+    expect(sent.filter((content) => content.startsWith('Move'))).toEqual([
+      expect.stringMatching(/^Move 8:/),
+      expect.stringMatching(/^Move 9:/),
+    ]);
+    expect(sent).toContain('Reply 8 (result left out)');
+  });
+
+  it('narrows the tools only once no history is left to leave out', async () => {
+    const generate = vi.fn<PortableInference['generate']>(async (request) => {
+      if (request.messages[0]!.content.includes('"parameters"') || request.messages.length > 2)
+        throw Object.assign(new Error('Budget refused'), { code: 'CONTEXT_LIMIT' });
+      return { text: 'Done.', stopReason: 'stop' };
+    });
+    const { result, narrowed } = await runWithHistory(generate, history(3));
+    expect(result).toMatchObject({ text: 'Done.' });
+    expect(narrowed.mock.calls.map(([listing]) => listing)).toEqual(['compact']);
+  });
+
+  it('trims a history past this host’s own message cap instead of refusing the turn', async () => {
+    const generate = vi.fn<PortableInference['generate']>(async () => ({
+      text: 'Done.',
+      stopReason: 'stop',
+    }));
+    const { result } = await runWithHistory(generate, history(100, 10));
+    expect(result).toMatchObject({ text: 'Done.' });
+    expect(generate.mock.calls.at(-1)![0].messages.length).toBeLessThanOrEqual(128);
   });
 });

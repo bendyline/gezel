@@ -54,6 +54,12 @@ export interface NativeToolSource {
   name: string;
   description: string;
   parameters: unknown;
+  /**
+   * Kept in the `core` listing whatever its name: a project type's own tools
+   * are the whole point of its sessions (a checkers gezel without
+   * `make_move` cannot play).
+   */
+  core?: boolean;
 }
 
 /** The first sentence of a description, for listings that must stay small. */
@@ -287,7 +293,10 @@ export function nativeToolSpecs(
   const offered = binding?.taskRef
     ? inventory
     : inventory.filter((tool) => !binding || !TASK_STEP_TOOLS.has(tool.name));
-  const core = listing === 'core' ? offered.filter((tool) => NATIVE_CORE_TOOLS.has(tool.name)) : [];
+  const core =
+    listing === 'core'
+      ? offered.filter((tool) => tool.core === true || NATIVE_CORE_TOOLS.has(tool.name))
+      : [];
   return (core.length ? core : offered).map((tool) => {
     const parameters = nativeToolParameters(tool.parameters, listing === 'full');
     if (binding) {

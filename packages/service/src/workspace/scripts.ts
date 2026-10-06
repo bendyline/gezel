@@ -9,6 +9,7 @@ import type { HistoryManager } from '../history/manager.js';
 import { resolvePnpmCommand } from '../packages/pnpm.js';
 import {
   type CommandApprovalsFile,
+  describeApprovalCommand,
   hashCommandInvocation,
   lookupApproval,
   readCommandApprovals,
@@ -28,6 +29,9 @@ import { WorkspaceWriteDeniedError } from './errors.js';
  * `run_npx`: invoked as `<workspace>/node_modules/.bin/<name> [args]`.
  * Name must appear in the union of manifest deps
  * (`dependencies` + `devDependencies`) and `.bin` basenames.
+ *
+ * `run_playwright_script` reuses the same gate through
+ * `checkPlaywrightApproval`; the route still owns spawning the browser.
  */
 
 export interface RunScriptsOptions {
@@ -173,6 +177,63 @@ export async function runNpx(opts: RunNpxOptions): Promise<RunCommandOutcome> {
   return { ...toOutcome(res), resolvedBinPath };
 }
 
+// ── Playwright scripts ─────────────────────────────────────────────────────
+
+export interface PlaywrightApprovalOptions extends RunScriptsOptions {
+  /** Artifact-relative path the route resolved; the approval key. */
+  scriptPath: string;
+  scriptAbs: string;
+  artifactsDir: string;
+  mode: 'test' | 'script';
+}
+
+/** Longest script source the approval prompt will carry for review. */
+const MAX_PLAYWRIGHT_REVIEW_CHARS = 200_000;
+
+/**
+ * Gate a gezel-authored `run_playwright_script` run on the user's approval
+ * of the exact script. Playwright cannot run inside the script sandbox — it
+ * must spawn a browser and reach the network — so the user's consent is the
+ * boundary instead, as it is for package commands. The decision binds the
+ * script source, the run mode, and every relative import the script pulls
+ * from the artifacts tree; editing any of them asks again.
+ *
+ * Returns `undefined` when the run may proceed, or the outcome to report.
+ */
+export async function checkPlaywrightApproval(
+  opts: PlaywrightApprovalOptions,
+): Promise<RunCommandOutcome | undefined> {
+  let body: string;
+  try {
+    body = await readFile(opts.scriptAbs, 'utf8');
+  } catch (err) {
+    return failure(
+      `Could not read ${opts.scriptPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (body.length > MAX_PLAYWRIGHT_REVIEW_CHARS) {
+    return failure(
+      `${opts.scriptPath} is too large to show the user for approval (${body.length} characters; the limit is ${MAX_PLAYWRIGHT_REVIEW_CHARS}). Split it into smaller scripts.`,
+    );
+  }
+  const inputFiles = await fingerprintCommandInputs({
+    workspaceDir: opts.artifactsDir,
+    body: '',
+    args: [],
+    entryFiles: [opts.scriptAbs],
+  });
+  const approvals = await readCommandApprovals(opts.home, opts.projectId);
+  return checkApprovalGate({
+    ...opts,
+    approvals,
+    scope: 'playwright',
+    name: opts.scriptPath,
+    body,
+    args: [`--mode=${opts.mode}`],
+    inputFiles,
+  });
+}
+
 // ── approval gate ──────────────────────────────────────────────────────────
 
 interface ApprovalGateInput extends RunScriptsOptions {
@@ -192,18 +253,19 @@ async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOu
     hashCommandInvocation(input.body, input.args, input.inputFiles),
   );
   if (decision === 'approved') return undefined;
+  const command = describeApprovalCommand(input.scope, input.name);
   if (decision === 'declined') {
-    const evtKind =
-      input.scope === 'script' ? 'workspace.script.declined' : 'workspace.npx.declined';
-    await input.history
-      ?.log({
-        kind: evtKind,
-        projectId: input.projectId,
-        ...(input.gezelId ? { gezelId: input.gezelId } : {}),
-        summary: `Blocked ${input.scope === 'script' ? 'npm run' : 'npx'} ${input.name} — previously declined`,
-        details: { name: input.name, args: input.args },
-      })
-      .catch(() => undefined);
+    if (input.scope !== 'playwright') {
+      await input.history
+        ?.log({
+          kind: input.scope === 'script' ? 'workspace.script.declined' : 'workspace.npx.declined',
+          projectId: input.projectId,
+          ...(input.gezelId ? { gezelId: input.gezelId } : {}),
+          summary: `Blocked ${input.scope === 'script' ? 'npm run' : 'npx'} ${input.name} — previously declined`,
+          details: { name: input.name, args: input.args },
+        })
+        .catch(() => undefined);
+    }
     return {
       ok: false,
       code: -1,
@@ -212,15 +274,16 @@ async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOu
       stdoutTruncated: false,
       stderrTruncated: false,
       timedOut: false,
-      declined: `User previously declined to run ${input.scope === 'script' ? `npm run ${input.name}` : `npx ${input.name}`}. Try a different approach.`,
+      declined: `User previously declined to run ${command}. Try a different approach.`,
     };
   }
 
   // No decision on file → raise an approval question unless we can't
   // (no session to route the answer back into).
   if (!input.sessionId) {
+    const where = input.scope === 'playwright' ? '' : ' from Project → Packages';
     return failure(
-      `Running ${input.scope === 'script' ? `npm run ${input.name}` : `npx ${input.name}`} requires first-time user approval, but there is no active session to prompt the user. Tell the user what you'd like to run and they can approve it from Project → Packages.`,
+      `Running ${command} requires first-time user approval, but there is no active session to prompt the user. Tell the user what you'd like to run and they can approve it${where}.`,
     );
   }
   const pending = await findPendingApproval(input);
@@ -286,7 +349,8 @@ async function findPendingApproval(input: ApprovalGateInput): Promise<Question |
 }
 
 function buildApprovalPrompt(input: ApprovalGateInput): string {
-  const verb = input.scope === 'script' ? `\`npm run ${input.name}\`` : `\`npx ${input.name}\``;
+  if (input.scope === 'playwright') return buildPlaywrightApprovalPrompt(input);
+  const verb = describeApprovalCommand(input.scope, input.name);
   const bodyBlock = input.body ? `\n\nCommand body:\n\n\`\`\`\n${input.body}\n\`\`\`` : '';
   const argsLine = input.args.length > 0 ? `\n\nExtra args: \`${input.args.join(' ')}\`` : '';
   const shownFiles = input.inputFiles.slice(0, 12);
@@ -295,6 +359,23 @@ function buildApprovalPrompt(input: ApprovalGateInput): string {
       ? `\n\nIdentifiable files bound to this approval:\n${shownFiles.map((file) => `- \`${file.path}\` — \`${file.sha256.slice(0, 12)}…\``).join('\n')}${input.inputFiles.length > shownFiles.length ? `\n- …and ${input.inputFiles.length - shownFiles.length} more` : ''}`
       : '';
   return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}${filesBlock}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body, argument list, and the identifiable file contents above. Editing one of those files will ask again. Files outside the project, directory or glob contents, dynamically discovered files, implicit configuration, PATH-resolved programs, package imports, and network inputs may not be identifiable in advance.`;
+}
+
+function buildPlaywrightApprovalPrompt(input: ApprovalGateInput): string {
+  const mode = input.args.includes('--mode=test') ? 'Playwright test runner' : 'bare-script mode';
+  // A fence longer than any backtick run in the script, so the script
+  // cannot close the block early and smuggle markdown into the prompt.
+  const longestRun = Math.max(0, ...(input.body.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(Math.max(3, longestRun + 1));
+  const imports = input.inputFiles.filter((file) => file.path !== input.name);
+  const importsBlock =
+    imports.length > 0
+      ? `\n\nLocal files the script imports, also bound to this approval:\n${imports
+          .slice(0, 12)
+          .map((file) => `- \`${file.path}\` — \`${file.sha256.slice(0, 12)}…\``)
+          .join('\n')}${imports.length > 12 ? `\n- …and ${imports.length - 12} more` : ''}`
+      : '';
+  return `A gezel wants to run the Playwright script \`${input.name}\` (${mode}) from this project's artifacts.\n\nScript:\n\n${fence}ts\n${input.body}\n${fence}${importsBlock}\n\nSecurity warning: Playwright scripts are not isolated from your OS account. They drive a real browser with full network access, can start other programs, and can read or modify files outside this project. Approve only if you have read this script and trust what it does.\n\nApproving stores this decision for this exact script and the files listed above. Editing any of them will ask again.`;
 }
 
 // ── npx allowlist ──────────────────────────────────────────────────────────

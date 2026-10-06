@@ -28,6 +28,7 @@ import * as gezels from './gezels.js';
 import { ensureLayout } from './layout.js';
 import * as memories from './memories.js';
 import * as files from './project-files.js';
+import * as projectTypes from './project-types.js';
 import * as projects from './projects.js';
 import * as questions from './questions.js';
 import { PortableRepository, type PortableStoreOptions } from './repository.js';
@@ -138,6 +139,13 @@ export class PortableStore {
   }
   createProject(input: CreateProjectRequest) {
     return this.run((repo) => projects.createProject(repo, input));
+  }
+  /** A planned typed project, written in one transaction with its crew, scripts and seeds. */
+  createTypedProject(
+    plan: projectTypes.PortableTypedProjectPlan,
+    applied: Parameters<typeof projectTypes.commitPortableTypedProject>[2],
+  ) {
+    return this.run((repo) => projectTypes.commitPortableTypedProject(repo, plan, applied));
   }
   updateProject(id: string, patch: UpdateProjectRequest) {
     return this.run((repo) => projects.updateProject(repo, id, patch));

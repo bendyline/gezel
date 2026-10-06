@@ -13,10 +13,11 @@ import { winShellSafe } from './win-shell.js';
  *     `GEZEL_PNPM_PATH` at pnpm's JavaScript entrypoint and
  *     `GEZEL_NODE_PATH` at bundled Node. Development can still use a
  *     configured executable or `pnpm` on PATH.
- *  2. **`--ignore-scripts` everywhere** — post-install hooks are the
- *     exact supply-chain vector we're eliminating. Any legitimate
- *     post-install work (e.g. Playwright's chromium download) is invoked
- *     explicitly by the service in its own dedicated step.
+ *  2. **No install-time code execution** — every install carries
+ *     {@link INSTALL_GUARD_FLAGS}. Post-install hooks are the exact
+ *     supply-chain vector we're eliminating; any legitimate post-install
+ *     work (e.g. Playwright's chromium download) is invoked explicitly by
+ *     the service in its own dedicated step.
  *  3. **Console-free Windows launches** — package installs are owned by the
  *     daemon, so their console windows are hidden without detaching them.
  */
@@ -46,16 +47,42 @@ export interface RunPnpmOptions {
   signal?: AbortSignal;
   /**
    * Lifecycle-script policy:
-   *   - `'ignore'` (default): prepend `--ignore-scripts`, blocking
-   *     post-install hooks — the supply-chain vector install paths
-   *     should never trip.
-   *   - `'allow'`: run pnpm without the flag. Only `run_package_script`
-   *     passes this, and only because `pnpm run <script>` is itself a
-   *     lifecycle-script invocation — forcing `--ignore-scripts` would
-   *     silently turn `pnpm run build` into a no-op.
+   *   - `'ignore'` (default): prepend {@link INSTALL_GUARD_FLAGS}, blocking
+   *     post-install hooks and every other way an install runs project
+   *     code — the supply-chain vectors install paths should never trip.
+   *   - `'allow'`: run pnpm without them. For `pnpm run <script>`, which is
+   *     itself a lifecycle-script invocation — forcing `--ignore-scripts`
+   *     would silently turn `pnpm run build` into a no-op — and for
+   *     read-only queries such as `pnpm config get`.
    */
   lifecycle?: 'ignore' | 'allow';
 }
+
+/**
+ * Flags every install-class pnpm run carries, because the directory being
+ * installed into may be one a gezel can write. Each closes a way pnpm would
+ * otherwise run code the directory chose:
+ *
+ *   - `--ignore-scripts` — package lifecycle scripts.
+ *   - `--ignore-pnpmfile` — `.pnpmfile.cjs` / `.pnpmfile.mjs` hooks, which pnpm
+ *     loads from the install directory, from a `pnpmfile` path in
+ *     `pnpm-workspace.yaml`, and from `pnpm-plugin-*` config dependencies.
+ *     `--ignore-scripts` does not cover them.
+ *   - `pm-on-fail=ignore` (pnpm 11) and `manage-package-manager-versions=false`
+ *     (pnpm 10) — otherwise a `packageManager` or `devEngines.packageManager`
+ *     field makes pnpm download and run the version it names instead of the
+ *     bundled one. Both go through `--config.` because pnpm 10 rejects an
+ *     unknown `--pm-on-fail` outright, and npm-installed Gezel may resolve an
+ *     older pnpm from PATH.
+ *
+ * Verified against pnpm 11.27.1 (the bundled release) and pnpm 10.18.
+ */
+export const INSTALL_GUARD_FLAGS: readonly string[] = [
+  '--ignore-scripts',
+  '--ignore-pnpmfile',
+  '--config.pm-on-fail=ignore',
+  '--config.manage-package-manager-versions=false',
+];
 
 export function resolvePnpmCommand(args: string[] = []): PnpmInvocation {
   return resolvePnpmInvocation(args, {
@@ -137,14 +164,15 @@ export function spawnPnpm(
 }
 
 /**
- * Spawn pnpm. With `lifecycle: 'ignore'` (default) `--ignore-scripts` is
- * prepended — callers MUST NOT include that flag themselves. Pass
- * `lifecycle: 'allow'` only for `pnpm run`-style script invocations.
+ * Spawn pnpm. With `lifecycle: 'ignore'` (default) {@link INSTALL_GUARD_FLAGS}
+ * are prepended — callers MUST NOT include those flags themselves. Pass
+ * `lifecycle: 'allow'` only for `pnpm run`-style script invocations and
+ * read-only queries.
  */
 export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResult> {
   return new Promise((resolve) => {
     const lifecycle = opts.lifecycle ?? 'ignore';
-    const rawArgs = lifecycle === 'ignore' ? ['--ignore-scripts', ...args] : [...args];
+    const rawArgs = lifecycle === 'ignore' ? [...INSTALL_GUARD_FLAGS, ...args] : [...args];
     const invocation = resolvePnpmCommand(rawArgs);
     // Only the Windows PATH/.cmd fallback needs cmd.exe. The bundled JS
     // route invokes Node directly and never passes through a shell.

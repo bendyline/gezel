@@ -42,6 +42,7 @@ function TypeCard({
   description,
   active,
   disabled = false,
+  disabledReason,
   badge,
   iconSvg,
   logoUrl,
@@ -53,6 +54,8 @@ function TypeCard({
   description: string;
   active: boolean;
   disabled?: boolean;
+  /** Why this host cannot offer the card; replaces the description and names it to screen readers. */
+  disabledReason?: string;
   badge?: string;
   iconSvg?: string;
   logoUrl?: string;
@@ -66,7 +69,7 @@ function TypeCard({
       // biome-ignore lint/a11y/useSemanticElements: cards form one visual radio group; native inputs would duplicate the interactive surface.
       role="radio"
       aria-checked={active}
-      aria-label={disabled ? `${label} (coming soon)` : label}
+      aria-label={disabled ? `${label} (${disabledReason ?? 'coming soon'})` : label}
       className={`gz-npd-card${active ? ' active' : ''}`}
       disabled={disabled}
       onClick={onSelect}
@@ -81,7 +84,7 @@ function TypeCard({
         />
       </span>
       <span className="gz-npd-card-name">{label}</span>
-      <span className="gz-npd-card-description">{description}</span>
+      <span className="gz-npd-card-description">{disabledReason ?? description}</span>
       {badge && (
         <span className="gz-npd-card-badge" aria-hidden="true">
           {badge}
@@ -281,7 +284,8 @@ export function NewProjectDialog({
   // Load the custom project types offered in the gallery, once per open.
   // `email` is excluded — it has its own kind (with mailbox linking) above.
   useEffect(() => {
-    if (!open || !runtimeCapabilities().catalog) return;
+    const caps = runtimeCapabilities();
+    if (!open || !(caps.catalog || caps.projectTypes)) return;
     let cancelled = false;
     const projectTypesRequest = api.listCatalogItems('project-type');
     const connectorBooksRequest = showWorkInProgressFeatures
@@ -847,6 +851,13 @@ export function NewProjectDialog({
                               glyph={catalogProjectTypeGlyph(item)}
                               index={section.builtins.length + index}
                               active={item.manifest.id === selectedTypeId}
+                              {...(item.unavailableReason
+                                ? {
+                                    disabled: true,
+                                    disabledReason: item.unavailableReason,
+                                    badge: 'Unavailable',
+                                  }
+                                : {})}
                               {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
                               item.iconSvg
                                 ? { iconSvg: item.iconSvg }

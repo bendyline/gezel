@@ -1,6 +1,7 @@
 declare module 'virtual:gezel-portable-sdk' {
   export const sdkModuleSource: string;
   export const checksModuleSource: string;
+  export const storesModuleSource: string;
 }
 declare module 'virtual:gezel-portable-sdk-types' {
   export const sdkTypes: import('@bendyline/gezel').SdkTypesResponse;

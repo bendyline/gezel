@@ -1,6 +1,7 @@
 import {
   type ChatSession,
   type GezelConfig,
+  LEAN_PROFILE_BUILTIN_TOOLS,
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
@@ -325,7 +326,7 @@ export function availableBuiltinToolsForAllowlist(
  * they pass the bridge's allowlist filter regardless and don't need listing
  * here — this is purely the essential builtin escape hatch.
  */
-export const LEAN_PROFILE_BUILTIN_TOOLS: readonly string[] = ['ask_user_question'];
+export { LEAN_PROFILE_BUILTIN_TOOLS };
 
 export async function resolveSessionToolSurface(
   opts: ResolveSessionToolSurfaceOptions,

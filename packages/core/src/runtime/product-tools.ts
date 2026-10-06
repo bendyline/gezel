@@ -1,16 +1,19 @@
 import { z } from 'zod';
 import { isEngagementAllowed } from '../engagement.js';
 import { isSafeEntityId } from '../entity-id.js';
+import { formatJsonSchemaViolations, validateJsonSchema } from '../json-schema/validate.js';
 import {
   normalizeArtifactPath,
   normalizeRelativeToolPath,
   workspaceDrawerPrefix,
 } from '../path-rules.js';
+import { LEAN_PROFILE_BUILTIN_TOOLS } from '../project-types/composition.js';
 import {
   type AskQuestionRequest,
   AskQuestionRequestSchema,
   UpdateProjectRequestSchema,
 } from '../schemas/api.js';
+import type { ProjectTypeTool } from '../schemas/catalog.js';
 import type { ScriptScope } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import { type CreateTaskRequest, CreateTaskRequestSchema, parseTaskRef } from '../schemas/task.js';
@@ -203,6 +206,8 @@ export interface PortableToolActions {
    * committed, so a model that retried on the refusal created the work twice.
    */
   assertHandoffAllowed(gezelId?: string): void;
+  /** The session project's type tools, run as project scripts (see `portableProjectScriptTools`). */
+  projectTools?: readonly ProjectTypeTool[];
   message(gezelId: string, projectId: string, message: string): Promise<unknown>;
   startProject(input: {
     name: string;
@@ -219,6 +224,8 @@ export async function portableToolSurface(
   store: PortableStore,
   session: Pick<ChatSession, 'gezelId' | 'projectId' | 'taskRef' | 'stepId'>,
   scripts = false,
+  /** The project type's model tools; they run as scripts, so they need the executor. */
+  projectTools: readonly ProjectTypeTool[] = [],
 ) {
   const { gezel, project } = await store.getProjectContext(session.projectId, session.gezelId);
   const task = session.taskRef ? await store.getTask(session.taskRef) : null;
@@ -253,20 +260,37 @@ export async function portableToolSurface(
     }
   }
   const grants = applyStepToolPolicy(roleGrants, step)!;
+  // A lean type (a game, the chat room) keeps only its own tools and a way
+  // to ask the person, as on the desktop.
+  const lean = project.leanProfile === true ? new Set(LEAN_PROFILE_BUILTIN_TOOLS) : null;
 
-  return (
+  const builtins = (
     Object.entries(definitions) as Array<[PortableToolName, (typeof definitions)[PortableToolName]]>
   )
     .filter(
       ([name]) =>
         grants.has(name) &&
+        (!lean || lean.has(name)) &&
         (scripts || !['list_scripts', 'run_installed_script', 'get_script_run'].includes(name)),
     )
     .map(([name, spec]) => ({
       name,
       description: spec.description,
-      parameters: z.toJSONSchema(spec.input, { target: 'openapi-3.0' }),
+      parameters: z.toJSONSchema(spec.input, { target: 'openapi-3.0' }) as unknown,
     }));
+  if (!scripts) return builtins;
+  const named = new Set(Object.keys(definitions));
+  return [
+    ...builtins,
+    ...projectTools
+      .filter((tool) => !named.has(tool.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: (tool.inputs ?? { type: 'object', properties: {} }) as unknown,
+        core: true,
+      })),
+  ];
 }
 
 /** Tools whose `path` is relative to the artifacts drawer. */
@@ -305,10 +329,31 @@ export async function executePortableTool(
   if (context.project.status === 'inactive') throw new Error('This project is inactive');
   await assertPortableTaskSessionActive(store, session);
   const grants = new Set(
-    (await portableToolSurface(store, session, !!actions.scripts)).map((tool) => tool.name),
+    (await portableToolSurface(store, session, !!actions.scripts, actions.projectTools)).map(
+      (tool) => tool.name,
+    ),
   );
-  if (!grants.has(name as PortableToolName))
-    throw new Error(`Tool ${name} is unavailable to this gezel`);
+  if (!grants.has(name)) throw new Error(`Tool ${name} is unavailable to this gezel`);
+  const projectTool = Object.hasOwn(definitions, name)
+    ? undefined
+    : actions.projectTools?.find((tool) => tool.name === name);
+  if (projectTool) {
+    // The desktop's dispatch: the declared script, the model's arguments
+    // checked against the tool's schema, the manifest's `bind` merged last.
+    if (projectTool.inputs) {
+      const violations = validateJsonSchema(raw, projectTool.inputs);
+      if (violations.length)
+        throw new Error(
+          `${name}: arguments do not match the tool's schema: ${formatJsonSchemaViolations(violations)}`,
+        );
+    }
+    return actions.scripts!.run(
+      projectTool.script,
+      { ...raw, ...(projectTool.bind ?? {}) },
+      session,
+      'project',
+    );
+  }
   const schema = definitions[name as PortableToolName].input;
   const parsed = schema.safeParse(raw);
   if (!parsed.success)

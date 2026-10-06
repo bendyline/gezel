@@ -1,7 +1,34 @@
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 
-type HistoryMessage = { role: 'user' | 'assistant'; content: string };
-function receipt(call: ChatMessageToolCall) {
+export type HistoryMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  /**
+   * The same turn with its recorded tool results left out, for a model whose
+   * window cannot hold them. Absent when there is nothing to leave out, and
+   * on the latest exchange, whose results the model is still acting on.
+   */
+  leanContent?: string;
+};
+function receipt(call: ChatMessageToolCall, withResult = true) {
+  if (!withResult)
+    return {
+      name: call.name,
+      at: call.at,
+      arguments: call.argsFull ?? call.argsSummary,
+      argumentsAreSummary: call.argsFull === undefined && call.argsSummary !== undefined,
+      path: call.path,
+      paths: call.paths,
+      recordedSuccess: call.success,
+      outcome:
+        call.resultText === undefined
+          ? 'unconfirmed'
+          : call.success
+            ? 'returned'
+            : 'reported-error',
+      resultOmitted: call.resultText !== undefined || undefined,
+      error: call.errorMessage,
+    };
   return {
     name: call.name,
     at: call.at,
@@ -18,7 +45,7 @@ function receipt(call: ChatMessageToolCall) {
     error: call.errorMessage,
   };
 }
-function record(message: ChatMessage, includeContent = true) {
+function record(message: ChatMessage, includeContent = true, withResults = true) {
   return {
     id: message.id,
     at: message.at,
@@ -27,7 +54,7 @@ function record(message: ChatMessage, includeContent = true) {
     stopReason: message.stopReason,
     error: message.error,
     pendingQuestionId: message.pendingQuestionId,
-    calls: message.toolCalls?.map(receipt),
+    calls: message.toolCalls?.map((call) => receipt(call, withResults)),
   };
 }
 const REFERENCE =
@@ -64,7 +91,13 @@ export function portableConversationHistory(messages: ChatMessage[]): HistoryMes
         ]
           .filter(Boolean)
           .join('\n\n');
-        if (content) history.push({ role: 'assistant', content });
+        const leanContent = message.toolCalls?.some((call) => call.resultText !== undefined)
+          ? [message.content, `${REFERENCE}\n${JSON.stringify(record(message, false, false))}`]
+              .filter(Boolean)
+              .join('\n\n')
+          : undefined;
+        if (content)
+          history.push({ role: 'assistant', content, ...(leanContent ? { leanContent } : {}) });
       }
     } else if (responses.length > 0) {
       // Keeping an unfinished brief in a user slot would make it an implicit new
@@ -86,5 +119,35 @@ export function portableConversationHistory(messages: ChatMessage[]): HistoryMes
     } else responses.push(message);
   }
   flush();
+  // The model is still acting on the latest exchange's results.
+  let latest = history.length - 1;
+  while (latest > 0 && history[latest]!.role !== 'user') latest--;
+  for (const message of history.slice(Math.max(0, latest))) delete message.leanContent;
   return history;
+}
+
+/** How many exchanges (a user turn and the replies to it) a history holds. */
+export function historyExchanges(history: readonly HistoryMessage[]): number {
+  return (
+    history.filter((message) => message.role === 'user').length +
+    (history[0]?.role === 'assistant' ? 1 : 0)
+  );
+}
+
+/**
+ * The newest `keep` exchanges of a history. Exchanges are kept whole, so a
+ * reply never arrives without the turn it answers.
+ */
+export function latestExchanges<T extends HistoryMessage>(
+  history: readonly T[],
+  keep: number,
+): T[] {
+  if (keep <= 0) return [];
+  let seen = 0;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const startsExchange =
+      history[index]!.role === 'user' || (index === 0 && history[index]!.role === 'assistant');
+    if (startsExchange && ++seen === keep) return history.slice(index);
+  }
+  return [...history];
 }

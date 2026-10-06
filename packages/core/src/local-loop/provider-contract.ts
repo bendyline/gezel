@@ -121,6 +121,13 @@ export interface SendAndWaitOpts {
    * replies keep the model's normal output budget.
    */
   continuationMaxTokens?: number;
+  /**
+   * Answer this turn from the system messages and the turn's own message
+   * alone, leaving the earlier conversation out of the request. For a seed
+   * that carries the whole current state (a game reaction); the transcript
+   * still records the turn.
+   */
+  standalone?: boolean;
   queue?: {
     lane: 'interactive' | 'background';
     /**

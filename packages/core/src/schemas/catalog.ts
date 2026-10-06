@@ -887,6 +887,15 @@ export const ProjectTypeToolReactionSchema = z.object({
    * to false, so existing project types are unchanged.
    */
   hideSeed: z.boolean().optional(),
+  /**
+   * The seed carries the whole current state (the board, the deck), so the
+   * gezel answers it from its instructions and the seed alone, without the
+   * earlier conversation. A small model handed old turns copies its last
+   * reply and plays from a stale position, and those turns spend the window
+   * a 4K model needs for the state itself. The transcript keeps every turn;
+   * only what this turn's model call sees changes. Defaults to false.
+   */
+  standalone: z.boolean().optional(),
 });
 export type ProjectTypeToolReaction = z.infer<typeof ProjectTypeToolReactionSchema>;
 
@@ -1034,6 +1043,13 @@ const ProjectTypeCompositionShape = {
    * Omit for the default full-agent profile.
    */
   leanProfile: z.boolean().optional(),
+  /**
+   * Smallest model tier the type's sessions work on. A host whose model sits
+   * below it offers the type as needing a larger model and refuses to create
+   * it, rather than running it on a model that cannot hold the turn shape.
+   * Omit when any model with tool support will do.
+   */
+  capabilityFloor: ModelTierSchema.optional(),
   /**
    * Whether projects instantiated from this type should participate in
    * workspace indexing. `false` is appropriate for lightweight stateful
@@ -2562,6 +2578,12 @@ export const CatalogItemSummarySchema = z.object({
   logoUrl: z.string().optional(),
   /** Inline SVG markup. Treat as untrusted until structurally sanitized; live/community catalogs can supply it. */
   iconSvg: z.string().optional(),
+  /**
+   * Why this host cannot use the item, in words for a person ("Needs a larger
+   * model than this phone runs"). Absent when it can. Galleries show the item
+   * disabled with this reason instead of hiding it.
+   */
+  unavailableReason: z.string().optional(),
 });
 export type CatalogItemSummary = z.infer<typeof CatalogItemSummarySchema>;
 

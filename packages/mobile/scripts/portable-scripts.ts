@@ -69,13 +69,17 @@ export function portableScriptsPlugin(): Plugin {
         const sdkRoot = dirname(runtimeRequire.resolve('@bendyline/gezel-sdk/package.json'));
         const sdk = join(sdkRoot, 'dist/portable.js');
         const checks = join(sdkRoot, 'dist/checks.js');
+        // Project-type scripts keep their logs and rosters through these helpers.
+        const stores = join(sdkRoot, 'dist/stores.js');
         this.addWatchFile(sdk);
         this.addWatchFile(checks);
-        const [sdkModuleSource, checksModuleSource] = await Promise.all([
+        this.addWatchFile(stores);
+        const [sdkModuleSource, checksModuleSource, storesModuleSource] = await Promise.all([
           readFile(sdk, 'utf8'),
           readFile(checks, 'utf8'),
+          readFile(stores, 'utf8'),
         ]);
-        return `export const sdkModuleSource = ${JSON.stringify(sdkModuleSource)};\nexport const checksModuleSource = ${JSON.stringify(checksModuleSource)};`;
+        return `export const sdkModuleSource = ${JSON.stringify(sdkModuleSource)};\nexport const checksModuleSource = ${JSON.stringify(checksModuleSource)};\nexport const storesModuleSource = ${JSON.stringify(storesModuleSource)};`;
       }
       if (id !== `\0${scriptsId}`) return null;
       const scripts: Record<string, unknown> = {};

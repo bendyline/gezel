@@ -138,6 +138,7 @@ import {
   unreadRequiredInputs,
 } from './required-input-reads.js';
 import { isSseComment, readSseEvents } from './sse.js';
+import { standaloneTurnMessages } from './standalone-turn.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from './streaming-session.js';
 import {
   DeliverableReadySteer,
@@ -2302,9 +2303,14 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           releaseEngineRequestOnce();
           throw err;
         }
-        let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
-          ? flattenToolMessagesForStrictAlternation(this.messages)
+        // A standalone turn's seed carries the whole state: earlier turns
+        // stay in the transcript but not in the request.
+        const transcript = opts?.standalone
+          ? standaloneTurnMessages(this.messages, this.currentTurnStartIdx)
           : this.messages;
+        let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
+          ? flattenToolMessagesForStrictAlternation(transcript)
+          : transcript;
         if (this.mergeSystemMessages) {
           wireMessages = mergeSystemMessagesIntoFirst(wireMessages);
         }

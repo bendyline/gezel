@@ -5918,10 +5918,22 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/artifacts/grep`, body);
   }
 
+  /**
+   * A run attributed to a gezel (`gezelId`/`sessionId`, or a session token)
+   * needs the user's approval of the exact script first: the reply then
+   * carries `approvalPending` + `questionId`, or `declined`.
+   */
   runPlaywrightScript(
     projectId: string,
-    body: { path: string; mode?: 'test' | 'script' },
-  ): Promise<{ ok: boolean; log: string; error?: string }> {
+    body: { path: string; mode?: 'test' | 'script'; gezelId?: string; sessionId?: string },
+  ): Promise<{
+    ok: boolean;
+    log: string;
+    error?: string;
+    approvalPending?: boolean;
+    questionId?: string;
+    declined?: string;
+  }> {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(projectId)}/run-playwright`,

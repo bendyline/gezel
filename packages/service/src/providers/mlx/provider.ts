@@ -36,6 +36,7 @@ import {
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
+import { leadingSystemMessages, standaloneTurnMessages } from '@bendyline/gezel/local-loop';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
@@ -1449,9 +1450,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         if (budget.expired()) throw turnTimeoutError();
 
         // Before the URL: loading the vision tower restarts the engine.
+        // A standalone turn's seed carries the whole state: earlier turns
+        // stay in the transcript but not in the request.
+        const transcript = opts?.standalone
+          ? standaloneTurnMessages(this.messages, this.currentTurnStartIdx)
+          : this.messages;
         const messages = await this.deps.provider.visionMode.prepareRequest(
-          retireInspectedToolImages(this.messages),
-          this.currentTurnStartIdx,
+          retireInspectedToolImages(transcript),
+          opts?.standalone ? leadingSystemMessages(this.messages) : this.currentTurnStartIdx,
           opts?.queue?.signal,
         );
         const baseUrl = await this.deps.resolveBaseUrl();

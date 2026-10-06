@@ -85,13 +85,17 @@ export const NpmInstallApprovalPackageSchema = z.object({
 export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackageSchema>;
 
 /**
- * First-use approval for `run_package_script` / `run_npx`. The gezel
- * calling one of those MCP tools against an unapproved entry creates
- * this intent; the answer handler (questions route) flips the entry in
- * the project's `command-approvals.json` and emits a follow-up seed.
+ * First-use approval for `run_package_script` / `run_npx` /
+ * `run_playwright_script`. The gezel calling one of those MCP tools against
+ * an unapproved entry creates this intent; the answer handler (questions
+ * route) flips the entry in the project's `command-approvals.json` and
+ * emits a follow-up seed.
  *
- *   - `scope: 'script'` — a `package.json` script key.
- *   - `scope: 'npx'`    — a binary in the workspace's `node_modules/.bin`.
+ *   - `scope: 'script'`     — a `package.json` script key.
+ *   - `scope: 'npx'`        — a binary in the workspace's `node_modules/.bin`.
+ *   - `scope: 'playwright'` — an artifact-relative Playwright script path;
+ *     `body` is the script source and `inputFiles` pin it plus its relative
+ *     imports, because the script runs outside the script sandbox.
  *
  * `body` carries the script body (or resolved bin path) verbatim so the
  * approval UI can show the user what they're consenting to. `args` are
@@ -100,7 +104,7 @@ export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackage
  * `inputFiles` content snapshot, so a persisted approval cannot be replayed
  * with different arguments or modified identifiable input files.
  */
-export const CommandApprovalScopeSchema = z.enum(['script', 'npx']);
+export const CommandApprovalScopeSchema = z.enum(['script', 'npx', 'playwright']);
 export type CommandApprovalScope = z.infer<typeof CommandApprovalScopeSchema>;
 
 export const CommandApprovalInputFileSchema = z.object({

@@ -12,6 +12,11 @@ const capabilities = new Set([
   'tasks.write',
 ]);
 const members = new Set([
+  // The file APIs themselves, handed to an SDK store helper, which calls
+  // only their methods; the runtime still checks every call.
+  'fs',
+  'artifacts',
+  'documents',
   'output',
   'log',
   'projectId',

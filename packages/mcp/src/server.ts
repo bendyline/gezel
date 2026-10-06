@@ -4360,7 +4360,7 @@ server.tool(
 
 server.tool(
   'run_playwright_script',
-  "Run a Playwright script from the project's artifacts. **This is the main way gezels automate the browser.** The shape: call `write_artifact` to save a `.ts` file under `tests/` (test-runner mode, `*.spec.ts`) or `scripts/` (bare-script mode via Node's strip-types), then call this tool with the same path to run it. Use it for end-to-end tests, data extraction, multi-step automation, anything you'd want to re-run or tweak. The live `browser_navigate` / `browser_snapshot` tools exist too for quick interactive reads, but writing a short script and running it is usually the better shape — it leaves an artifact the team can build on.",
+  "Run a Playwright script from the project's artifacts. **This is the main way gezels automate the browser.** The shape: call `write_artifact` to save a `.ts` file under `tests/` (test-runner mode, `*.spec.ts`) or `scripts/` (bare-script mode via Node's strip-types), then call this tool with the same path to run it. Use it for end-to-end tests, data extraction, multi-step automation, anything you'd want to re-run or tweak. The live `browser_navigate` / `browser_snapshot` tools exist too for quick interactive reads, but writing a short script and running it is usually the better shape — it leaves an artifact the team can build on. SECURITY: the script runs outside the script sandbox (it drives a real browser with network access), so the user approves each new or edited script before it runs; the approval covers that exact script and the local files it imports.",
   {
     path: z
       .string()
@@ -4375,7 +4375,28 @@ server.tool(
       ),
   },
   async ({ path, mode }) => {
-    const res = await api.runPlaywrightScript(projectId, { path, ...(mode ? { mode } : {}) });
+    const res = await api.runPlaywrightScript(projectId, {
+      path,
+      ...(mode ? { mode } : {}),
+      ...(gezelId ? { gezelId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    if (res.approvalPending) {
+      const text = `Running ${path} needs user approval. Your turn ends here; a follow-up message arrives once the user answers. Don't retry in the meantime.`;
+      return okResult(
+        ExecutionToolOutputSchema,
+        {
+          summary: text,
+          state: 'approval_pending',
+          ok: false,
+          approvalPending: true,
+          ...(res.questionId ? { questionId: res.questionId } : {}),
+          output: { path, ...(mode ? { mode } : {}) },
+        },
+        { text },
+      );
+    }
+    if (res.declined) return errorResult(res.declined);
     const heading = res.ok
       ? `✓ ${path} completed successfully.`
       : `✗ ${path} failed${res.error ? ` (${res.error})` : ''}.`;
@@ -11837,7 +11858,7 @@ server.tool(
 
 server.tool(
   'run_git',
-  'Run a restricted git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Most are inspections, but `branch` arguments can create, rename, or delete local refs; use `branch` with no args for inspection, and only pass mutation args when the user explicitly requested that change. Args use a structured argv array rather than a shell and reject `-c`, `--exec`, and `--upload-pack`.',
+  'Run a restricted git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Most are inspections, but `branch` arguments can create, rename, or delete local refs; use `branch` with no args for inspection, and only pass mutation args when the user explicitly requested that change. Args use a structured argv array rather than a shell. Each subcommand accepts only its common inspection options (e.g. `--oneline`, `-n`, `--stat`, `--format=`, `--short`, `--porcelain`), spelled out in full; options that write or read files outside the repository are refused, and paths must be relative to the workspace without `..`.',
   {
     subcommand: z.enum([
       'status',

@@ -788,6 +788,12 @@ footnote drop out. Each card becomes one row: a 2rem mark, then the name,
 then a single line of description, with the "Soon" stamp in line. Wider
 dialogs keep the full cards and the always-visible field.
 
+A starting point this host cannot run (a project type above the device's
+model, or one that needs desktop-only tools) stays in the gallery, disabled,
+with its reason in place of the description and an "Unavailable" stamp. Never
+hide it: a person who saw it on the desktop should learn why it is missing
+here, not wonder whether it exists.
+
 **A gallery dialog is a two-step wizard.** Both tenants are: New Task and
 New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
 [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).

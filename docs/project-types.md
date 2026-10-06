@@ -337,6 +337,17 @@ first-party parent:
   params, and lands as a system-authored `[<Type name> page]: …` seed in the
   target's live project session — background lane, coalescable (rapid events
   merge into one turn), engagement-gated, `page.reaction.sent` in history.
+- **Standalone reactions.** A reaction whose seed carries the whole current state
+  (a board game's position and legal moves) declares `standalone: true`. Its turn
+  is answered from the gezel's instructions and the seed alone; the transcript
+  still records every turn. Two reasons, both measured on Gemini Nano on a Galaxy
+  S26+: earlier turns cost the window a 4K model needs for the state (a checkers
+  seed and its move receipt are about 1,400 tokens, so the second move did not
+  fit), and a small model handed its own earlier replies copies one ("Alright,
+  alright! That was a bold move!" verbatim, no move) instead of acting on the new
+  board. Both hosts honor it: `send(..., { standalone })` on the desktop reaches
+  the shared llama.cpp loop and MLX as `SendAndWaitOpts.standalone`; the phone
+  leaves the history out of both its loops. Checkers, chess and go declare it.
 
 Platform note: sandboxed scripts deny network egress by design, and untrusted
 scripts require an enforceable OS boundary for that deny (macOS Seatbelt; a
@@ -352,6 +363,55 @@ JS network-API neutralizer). One edited byte drops a script back to the
 fail-closed path. Net effect: bundled interactive types (Checkers, the
 dashboards' page tools) work on every platform; user-edited and model-authored
 scripts still execute only where the OS fence exists.
+
+## On phones
+
+A project type is one manifest on every platform. The phone has no catalog
+service, so the mobile build bundles the pinned catalog's project types it can
+run into a lazily loaded chunk (`virtual:gezel-portable-project-types`,
+[portable-content.ts](../packages/mobile/scripts/portable-content.ts)): every
+script must pass the phone's script runtime (which bundles
+`@bendyline/gezel-sdk/stores` beside `/checks`, so the log, roster and ledger
+helpers type scripts are built on work there), and a type that exists only to
+run craftbooks needs at least one the phone can run. The phone runtime then answers
+the same API the desktop does
+([runtime/project-type-routes.ts](../packages/core/src/runtime/project-type-routes.ts)):
+
+- `GET /api/catalog/project-type[/:id]` feeds the New Project gallery
+  (`RuntimeCapabilities.projectTypes`), and `POST /api/projects/typed` creates
+  a typed project **in one transaction**: project, hired crew, scripts (with
+  the `// @gezel-project-type:` provenance header) and seeds become visible
+  together or not at all.
+- A session's tool surface gains the type's model tools (never `pages.tools`),
+  run as project scripts with `bind` merged last; a `leanProfile` type keeps
+  only its own tools and `ask_user_question`, as on the desktop.
+- `page-invoke` / `page-read` and reactions follow the desktop's rules; a
+  reaction seed runs in the background lane in the gezel's latest project
+  conversation, hidden when the tool says `hideSeed` and without the earlier
+  turns when it says `standalone`.
+- A lean project (a game, the chat room) on a system model (Android's or
+  Apple's on-device AI) holds back 512 tokens for the reply instead of the
+  provider's 1,024 (`LEAN_PROFILE_REPLY_MAX_TOKENS`): there, every token held for
+  the reply is one the prompt cannot use.
+
+The rules both hosts must agree on — template rendering and param defaults,
+crew reuse, the model/page tool split, page-read scopes, reaction seeds and the
+script provenance header — live once in
+[core/project-types/composition.ts](../packages/core/src/project-types/composition.ts).
+
+What a phone cannot do is said, never faked:
+
+- **Schedules** are not materialized (the phone runs nothing while closed);
+  `applied.deferred.schedules` counts them and the gallery says they are run by
+  the desktop app.
+- **Toolsets** are not installed; a type that declares one is offered disabled.
+- **`capabilityFloor`** (a `ModelTier`) is the smallest model a type's sessions
+  work on. A host whose selected model sits below it lists the type with
+  `unavailableReason` and refuses to create it (`projectTypeHostGap`). System
+  models count as tiny.
+- **v0 pages** do not run in a phone's snapshot preview (see
+  [output-pane-api.md](output-pane-api.md), "Pages on phones"); the Output pane
+  says so instead of showing the page's demo data.
 
 ## Detection never triggers side effects
 
@@ -490,7 +550,10 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
    summon a gezel turn from a page action. See "Page-invoke bridge and reactions"
    above. Exemplars: Checkers (`game` rail — the board IS the dashboard) and
    Flashcards (`growth` — review page + coaching reaction).
-9. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
+9. **Phones** ✅ — bundled project types, typed creation, script tools, page bridge
+   and reactions on the phone runtime, with the composition rules shared from core.
+   See "On phones" above.
+10. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
    download/upload affordance for `.gezapp` files (the flow is fully available to the
    Meester via MCP today), and a Windows denyNet boundary so scripts (and therefore
    interactive pages) run there.

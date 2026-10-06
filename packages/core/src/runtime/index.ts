@@ -8,6 +8,11 @@ export * from './product-service.js';
 export type { PortableStoreOptions } from './repository.js';
 export type { PortableFileArea, PortableListOptions } from './project-files.js';
 export type { CreatePortableSession } from './sessions.js';
+export {
+  type PortableProjectType,
+  PortableProjectTypes,
+  projectTypePageFile,
+} from './project-types.js';
 export * from './chat-events.js';
 export * from './provider-queue.js';
 export * from './session-send-queue.js';

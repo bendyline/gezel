@@ -80,6 +80,7 @@ import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/su
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
+import { restrictedGitArgv, restrictedGitEnv } from '../../git/restricted-args.js';
 import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
 import { embedQuery } from '../../memory/embeddings.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
@@ -1381,10 +1382,10 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!project) return c.json({ error: 'project not found' }, 404);
     const baseDir = await ctx.store.projectWorkspaceDir(id);
     const body = RunGitRequestSchema.parse(await c.req.json());
-    const allowedArgs = gitArgsForSubcommand(body.subcommand, body.args ?? []);
-    if ('error' in allowedArgs) return c.json({ error: allowedArgs.error }, 400);
+    const plan = restrictedGitArgv(body.subcommand, body.args ?? []);
+    if ('error' in plan) return c.json({ error: plan.error }, 400);
     try {
-      const result = await runGit(baseDir, [body.subcommand, ...allowedArgs.args], {
+      const result = await runGit(baseDir, plan.argv, {
         timeoutMs: body.timeoutMs ?? 60_000,
       });
       const response: RunGitResponse = result;
@@ -1773,27 +1774,17 @@ function assertArchiveEntryBudget(opts: {
   }
 }
 
-function gitArgsForSubcommand(
-  subcommand: string,
-  args: string[],
-): { args: string[] } | { error: string } {
-  for (const arg of args) {
-    if (typeof arg !== 'string') return { error: 'git args must be strings' };
-    if (/[\n\r]/.test(arg)) return { error: 'git args cannot contain newlines' };
-    if (arg.startsWith('-c') || arg === '--exec' || arg === '--upload-pack') {
-      return { error: `git arg "${arg}" is not allowed` };
-    }
-  }
-  return { args };
-}
-
 async function runGit(
   cwd: string,
   args: string[],
   opts: { timeoutMs: number },
 ): Promise<RunGitResponse> {
   return new Promise((resolvePromise) => {
-    const child = spawn('git', args, { cwd, ...windowsHeadlessSpawnOptions() });
+    const child = spawn('git', args, {
+      cwd,
+      env: restrictedGitEnv(process.env),
+      ...windowsHeadlessSpawnOptions(),
+    });
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;

@@ -273,3 +273,50 @@ it('offers the existing general project workflow without unsupported host choice
     window.__GEZEL__ = bridge;
   }
 });
+
+it("offers a phone's bundled project types, and shows one the device cannot run as unavailable", async () => {
+  const bridge = window.__GEZEL__;
+  window.__GEZEL__ = {
+    token: 'test-token',
+    capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, projectTypes: true },
+  };
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'checkers',
+                  name: 'Checkers',
+                  category: 'game',
+                }),
+                {
+                  ...catalogItem({
+                    kind: 'project-type',
+                    id: 'chess',
+                    name: 'Chess',
+                    category: 'game',
+                  }),
+                  unavailableReason: 'Needs a larger model than the one this device runs.',
+                },
+              ]
+            : [],
+      }) as never,
+  );
+  try {
+    const view = render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+    expect(await screen.findByRole('radio', { name: 'Checkers' })).toBeEnabled();
+    const chess = screen.getByRole('radio', {
+      name: 'Chess (Needs a larger model than the one this device runs.)',
+    });
+    expect(chess).toBeDisabled();
+    expect(chess).toHaveTextContent('Needs a larger model');
+    view.unmount();
+  } finally {
+    window.__GEZEL__ = bridge;
+  }
+});

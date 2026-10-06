@@ -2044,8 +2044,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   // Compact (narrow / mobile) form factor: the output pane can't sit
   // beside the content, so it becomes its own tab. It's offered whenever
-  // the workspace has any previewable HTML.
-  const compactOutputAvailable = effectiveCompact && workspaceHtmlFiles.length > 0;
+  // the workspace has any previewable HTML or the project type pins a page
+  // (a checkers project's board is the whole point of it).
+  const compactOutputAvailable =
+    effectiveCompact && (workspaceHtmlFiles.length > 0 || Boolean(typePage));
   const diffpackCount = useDiffpackCount(
     runtimeCapabilities().background ? (selected?.id ?? '') : '',
   );

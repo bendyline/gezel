@@ -83,6 +83,7 @@ import {
   inferProjectForPath,
   listWellKnownFolders,
 } from '../../projects/infer-project.js';
+import { browserScriptEnv } from '../../sandbox/runner.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
@@ -95,7 +96,7 @@ import {
   requestNpmInstalls,
 } from '../../workspace/npm.js';
 import { runWorkspaceScript } from '../../workspace/runner.js';
-import { runNpx, runPackageScript } from '../../workspace/scripts.js';
+import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspace/scripts.js';
 import type { ServiceContext } from '../context.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
@@ -1319,14 +1320,25 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   // from that managed toolset rather than from the artifact file's directory.
   // Test mode propagates the hook to workers through NODE_OPTIONS. The
   // system-toolset bootstrap is a hard prereq.
+  //
+  // The script cannot run inside the script sandbox — it must start a
+  // browser and reach the network — so a gezel-initiated run needs the
+  // user's approval of the exact script, and it runs with a scrubbed
+  // environment rather than the daemon's credentials.
   app.post('/:id/run-playwright', async (c) => {
     const id = c.req.param('id');
-    const body = (await c.req.json()) as { path: string; mode?: 'test' | 'script' };
+    const body = (await c.req.json()) as {
+      path: string;
+      mode?: 'test' | 'script';
+      gezelId?: string;
+      sessionId?: string;
+    };
     if (!body.path) return c.json({ error: 'missing path' }, 400);
 
     // Defense in depth: hiding the MCP tool is not a sufficient execution
     // boundary. A stale session or direct API caller can still reach this
-    // route, and a Playwright script is arbitrary user-authored Node code.
+    // route, and a Playwright script is arbitrary user-authored Node code
+    // with an unrestricted browser — open-web egress, like fetch-url.
     const securityPolicy = resolveSecurityPolicy(await ctx.store.readConfig());
     if (!securityPolicy.allowScriptExecution) {
       return c.json(
@@ -1339,6 +1351,18 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         403,
       );
     }
+    if (!securityPolicy.allowExternalServices) {
+      return c.json(
+        {
+          ok: false,
+          log: '',
+          error:
+            'Security policy: external services are disabled, and a Playwright script reaches the open web. Raise the security level in Settings → Security & Compliance to run Playwright scripts.',
+        },
+        403,
+      );
+    }
+    const actor = mutationActor(c, body);
 
     // Anticipated business-logic failures below return HTTP 200 with
     // `{ok: false, error, log}` so the MCP tool layer can surface the
@@ -1453,6 +1477,33 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const isTest =
       body.mode === 'test' || /\.(spec|test)\.(mts|mjs|ts|js|cjs|cts)$/.test(scriptRel);
+
+    // A run a gezel asked for needs the user's consent to this exact
+    // script; a first-party caller with no gezel attribution is the user.
+    if (actor.gezelId || actor.sessionId) {
+      const gated = await checkPlaywrightApproval({
+        store: ctx.store,
+        home: ctx.home,
+        projectId: id,
+        history: ctx.history,
+        ...actor,
+        scriptPath: scriptRel,
+        scriptAbs,
+        artifactsDir: base,
+        mode: isTest ? 'test' : 'script',
+      });
+      if (gated) {
+        return c.json({
+          ok: false,
+          log: '',
+          ...(gated.error ? { error: gated.error } : {}),
+          ...(gated.approvalPending ? { approvalPending: true } : {}),
+          ...(gated.questionId ? { questionId: gated.questionId } : {}),
+          ...(gated.declined ? { declined: gated.declined } : {}),
+        });
+      }
+    }
+
     let testConfigDir: string | undefined;
     try {
       let args: string[];
@@ -1495,7 +1546,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           const child = spawnPnpm(pnpm, {
             cwd: playwright.installPath,
             env: {
-              ...process.env,
+              ...browserScriptEnv(process.env),
               GEZEL_MANAGED_TOOLSET_ROOT: playwright.installPath,
               PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
               ...(isTest

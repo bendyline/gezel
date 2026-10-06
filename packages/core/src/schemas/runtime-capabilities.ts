@@ -27,6 +27,12 @@ export interface RuntimeCapabilities {
   memories: boolean;
   background: boolean;
   catalog: boolean;
+  /**
+   * The host lists and creates catalog project types (`/api/catalog/project-type`,
+   * `POST /api/projects/typed`) even without the full catalog. Omitted means
+   * it follows `catalog`.
+   */
+  projectTypes?: boolean;
   htmlPreview: boolean;
   daemonSettings: boolean;
   /**
@@ -88,6 +94,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   memories: true,
   background: true,
   catalog: true,
+  projectTypes: true,
   htmlPreview: true,
   daemonSettings: true,
   engineStatus: true,
@@ -130,6 +137,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   memories: true,
   background: false,
   catalog: false,
+  projectTypes: false,
   htmlPreview: false,
   daemonSettings: false,
   engineStatus: true,

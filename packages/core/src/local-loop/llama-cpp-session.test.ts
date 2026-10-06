@@ -9944,3 +9944,47 @@ describe('LlamaCppSession stream events', () => {
     expect(counted.every((c) => typeof c.outputTokens === 'number')).toBe(true);
   });
 });
+
+describe('standalone turns', () => {
+  it('sends the instructions and the turn alone, and keeps the transcript whole', async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    const reply = (text: string) =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: text } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    const provider = new ExternalLlamaServer({
+      baseUrl: 'http://engine.test',
+      fetchImpl: (async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return reply(`Reply ${requests.length}.`);
+      }) as typeof fetch,
+    });
+    try {
+      const session = await provider.createSession({
+        systemMessage: 'You play checkers.',
+        model: 'fixture',
+        priorMessages: [
+          { role: 'user', content: 'Old board.' },
+          { role: 'assistant', content: 'Old reply.' },
+        ],
+      });
+      await session.sendAndWait('Board after c3-d4.', { standalone: true });
+      await session.sendAndWait('How are you?');
+      const contents = (index: number) => requests[index]!.messages.map((m) => m.content);
+      expect(contents(0)).toEqual(['You play checkers.', 'Board after c3-d4.']);
+      // An ordinary turn afterwards sees everything, the standalone turn included.
+      expect(contents(1)).toEqual([
+        'You play checkers.',
+        'Old board.',
+        'Old reply.',
+        'Board after c3-d4.',
+        'Reply 1.',
+        'How are you?',
+      ]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+});

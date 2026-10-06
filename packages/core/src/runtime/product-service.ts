@@ -10,6 +10,10 @@ import { classifyModelTier } from '../model-profile/local-model-tier.js';
 import { resolveProfile } from '../model-profile/registry.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { pickRandomNameWithGender } from '../names.js';
+import {
+  LEAN_PROFILE_REPLY_MAX_TOKENS,
+  type ProjectTypeHost,
+} from '../project-types/composition.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
 import {
   PROMPT_FOOTPRINT_POLICY,
@@ -37,6 +41,7 @@ import {
   UpdateGezelSettingsRequestSchema,
   UpdateProjectRequestSchema,
 } from '../schemas/api.js';
+import type { ProjectTypeTool } from '../schemas/catalog.js';
 import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
   type MobileInferenceBudget,
@@ -72,7 +77,7 @@ import { roleHasTeamScope } from '../tools/access.js';
 import type { NativeToolBinding } from '../tools/native-tools.js';
 import { ChatEventBus } from './chat-events.js';
 import type { PortableContent } from './content.js';
-import { portableConversationHistory } from './conversation-history.js';
+import { type HistoryMessage, portableConversationHistory } from './conversation-history.js';
 import { handlePortableDataRequest } from './data-routes.js';
 import { draftMatchesSession } from './draft-address.js';
 import { decodeText, encodeText } from './files.js';
@@ -95,6 +100,11 @@ import {
 import { buildPortableInstructions } from './portable-instructions.js';
 import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
+import {
+  handlePortableProjectTypeRoute,
+  portableProjectScriptTools,
+} from './project-type-routes.js';
+import { type PortableProjectType, PortableProjectTypes } from './project-types.js';
 import { AbortedWhileQueuedError, type Lane, ProviderQueue, runInQueue } from './provider-queue.js';
 import { answeredQuestion } from './questions.js';
 import { type PortableQueueHost, handlePortableQueueRoute } from './queue-routes.js';
@@ -112,6 +122,7 @@ import { evaluatePortableTaskGate } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
+  type PortableHistoryFit,
   type PortableToolListing,
   type PortableToolSpec,
   type StructuredChatSettings,
@@ -212,6 +223,8 @@ export class PortableProductService {
     | { controller: AbortController; finished: Promise<Response | null> }
     | undefined;
   private content: PortableContent = { templates: [], craftbooks: [] };
+  /** Catalog project types bundled with the host, loaded on first use. */
+  private readonly projectTypes: PortableProjectTypes;
   private readonly tasks: PortableTaskRunner;
   private cancelNetworkActivity: (() => Promise<void>) | undefined;
   /** Recovery kicked off by a restore; awaited before the response returns. */
@@ -290,6 +303,8 @@ export class PortableProductService {
   /** The tool listing each conversation last fitted, so later turns skip the
    * refusals that found it. Stored history only grows, so it never widens again. */
   private readonly toolListings = new Map<string, PortableToolListing>();
+  /** How much of each conversation's history its small model last held. */
+  private readonly historyFits = new Map<string, PortableHistoryFit>();
   private status = { busy: false, pendingSave: false, changingModel: false };
   private statusListeners = new Set<() => void>();
   private readonly eventBus = new ChatEventBus();
@@ -298,7 +313,12 @@ export class PortableProductService {
     readonly store: PortableStore,
     readonly inference: PortableInference,
     private readonly token: string,
-    host: { htmlPreview?: boolean; speech?: PortableSpeech } = {},
+    host: {
+      htmlPreview?: boolean;
+      speech?: PortableSpeech;
+      /** The host's bundled catalog project types; omitted hosts offer none. */
+      projectTypes?: () => Promise<readonly PortableProjectType[]>;
+    } = {},
   ) {
     if (host.speech)
       this.audio = new PortableSpeechRoutes(
@@ -312,7 +332,9 @@ export class PortableProductService {
       ...OFFLINE_RUNTIME_CAPABILITIES,
       htmlPreview: host.htmlPreview === true,
       audio: !!host.speech,
+      projectTypes: !!host.projectTypes,
     });
+    this.projectTypes = new PortableProjectTypes(host.projectTypes ?? (async () => []));
     this.tasks = new PortableTaskRunner({
       store,
       runStep: (task, activationId, control) => this.runTaskStep(task, activationId, control),
@@ -328,13 +350,13 @@ export class PortableProductService {
           )
         ).id,
       resolveStepRole: async (_project, role) => (await this.recruit(role)).id,
-      resolveCraftbook: async (id, source, version) =>
+      resolveCraftbook: async (id, source, version, projectId) =>
         this.content.craftbooks.find(
           (entry) =>
             entry.book.id === id &&
             (!source || entry.item.sourceId === source) &&
             (!version || entry.item.manifest.version === version),
-        )?.book,
+        )?.book ?? (await this.projectTypeCraftbook(projectId, id)),
       shouldContinue: async (task) =>
         !(await store.listQuestions({ projectId: task.projectId, pending: true })).some(
           (q) => q.taskRef === task.ref,
@@ -811,6 +833,105 @@ export class PortableProductService {
     };
   }
 
+  /** A craftbook the project's bundled type declares, by id. */
+  private async projectTypeCraftbook(projectId: string | undefined, id: string) {
+    if (!projectId) return undefined;
+    const project = await this.store.getProject(projectId).catch(() => null);
+    const entry = await this.projectTypes.forProject(project).catch(() => undefined);
+    return entry?.craftbooks?.[id];
+  }
+
+  /**
+   * What this device offers a project type's sessions. The tier is the
+   * selected model's: system models count as tiny, an imported file with no
+   * catalog entry is classified from its name, as on the desktop.
+   */
+  private async projectTypeHost(): Promise<ProjectTypeHost> {
+    const config = await this.store.readConfig();
+    const providerId = MobileProviderIdSchema.catch('llama-cpp').parse(config.provider);
+    let modelTier: ProjectTypeHost['modelTier'] = 'tiny';
+    if (providerId === 'llama-cpp') {
+      const inventory = await this.inference.models?.().catch(() => undefined);
+      const modelId = inventory?.selectedModelId;
+      modelTier = modelId
+        ? classifyModelTier({
+            providerName: 'llama-cpp',
+            modelId,
+            parameterSize: this.catalogModelFor(inventory, modelId)?.parameterSize,
+          })
+        : undefined;
+    }
+    return { ...(modelTier ? { modelTier } : {}), scripts: !!this.scripts, toolsets: false };
+  }
+
+  private projectTypeRouteHost() {
+    return {
+      store: this.store,
+      types: this.projectTypes,
+      templates: () => this.content.templates,
+      craftbooks: () => this.content.craftbooks,
+      scripts: this.scripts,
+      host: () => this.projectTypeHost(),
+      assertNoConflict: () => this.assertNoConflict(),
+      serial: <T>(action: () => Promise<T>) => this.serial(action),
+      projectCreated: (project: { id: string; name: string }, hired: readonly string[]) => {
+        this.eventBus.publishProjectEvent(project.id, {
+          type: 'project_created',
+          projectId: project.id,
+          name: project.name,
+        });
+        for (const gezelId of hired)
+          void this.store
+            .getGezel(gezelId)
+            .then((gezel) => {
+              if (gezel)
+                this.eventBus.publishGlobalEvent({
+                  type: 'gezel_created',
+                  gezelId: gezel.id,
+                  name: gezel.name,
+                });
+            })
+            .catch(() => {});
+      },
+      deliverReaction: (args: {
+        projectId: string;
+        gezelId: string;
+        seed: string;
+        hidden: boolean;
+        standalone: boolean;
+      }) => this.deliverReaction(args),
+    };
+  }
+
+  /**
+   * A page action summons a gezel's turn in its ordinary project
+   * conversation, as on the desktop: the latest one, or a new one. The seed
+   * runs in the background lane and queues behind a turn already running.
+   */
+  private async deliverReaction(args: {
+    projectId: string;
+    gezelId: string;
+    seed: string;
+    hidden: boolean;
+    standalone: boolean;
+  }): Promise<{ sessionId: string } | null> {
+    if (!isEngagementAllowed(await this.store.readConfig())) return null;
+    const latest = (
+      await this.store.listSessions({ gezelId: args.gezelId, projectId: args.projectId })
+    )
+      .filter((session) => !session.archived && !session.taskRef)
+      .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
+    const session =
+      latest ??
+      (await this.store.createSession({ gezelId: args.gezelId, projectId: args.projectId }));
+    await this.submit(session.id, { message: args.seed }, undefined, {
+      hidden: args.hidden,
+      standalone: args.standalone,
+      lane: 'background',
+    });
+    return { sessionId: session.id };
+  }
+
   /** The catalog entry of a downloaded model; an imported file has none. */
   private catalogModelFor(inventory: MobileModelInventory | undefined, modelId: string) {
     const catalogId = inventory?.models.find((model) => model.id === modelId)?.source?.catalogId;
@@ -836,6 +957,10 @@ export class PortableProductService {
       job?: string;
       chain?: HandoffChain;
       holdBudget?: () => () => void;
+      /** Deliver to the model but never render a transcript bubble. */
+      hidden?: boolean;
+      /** The seed carries the whole state: the model sees no earlier turns. */
+      standalone?: boolean;
     } = {},
   ): Promise<unknown> {
     let admission: Admission;
@@ -934,13 +1059,16 @@ export class PortableProductService {
           'The model used by this conversation is no longer available. Import it again or start a conversation with another model.',
           409,
         );
-      const limits = modelBudget(
-        config,
-        provider,
-        inventory,
-        modelId,
-        context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens,
-      );
+      const gezelMaxTokens = context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens;
+      const budget = modelBudget(config, provider, inventory, modelId, gezelMaxTokens);
+      // A game or chat room answers in a line or a move. On a system model
+      // every token held back for the reply is one the conversation cannot
+      // use, so a lean project holds back less. llama.cpp keeps its budget:
+      // a reasoning model thinks before it calls a tool.
+      const limits =
+        context.project.leanProfile && providerId !== 'llama-cpp' && gezelMaxTokens === undefined
+          ? { ...budget, maxTokens: Math.min(budget.maxTokens, LEAN_PROFILE_REPLY_MAX_TOKENS) }
+          : budget;
       const catalogModel =
         providerId === 'llama-cpp' ? this.catalogModelFor(inventory, modelId) : undefined;
       const tuningInput = {
@@ -968,7 +1096,12 @@ export class PortableProductService {
           ? {
               config: llamaCppNativeChatConfig(resolveLlamaCppChatLaunch(catalogModel?.tuning)),
               ...(tuning ? { tuning } : {}),
-              history: admitted ? session.messages.slice(0, -1) : [...session.messages],
+              // A standalone seed carries the whole state; earlier turns stay out.
+              history: placement.standalone
+                ? []
+                : admitted
+                  ? session.messages.slice(0, -1)
+                  : [...session.messages],
               ...(catalogModel ? { catalogId: catalogModel.source.catalogId } : {}),
               isMeester: config.meesterGezelId === session.gezelId,
               // The behaviors the desktop resolves for this catalog model.
@@ -992,7 +1125,13 @@ export class PortableProductService {
       session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
-      const inventoryTools = await portableToolSurface(this.store, session, !!this.scripts);
+      const projectTools = await portableProjectScriptTools(this.projectTypes, context.project);
+      const inventoryTools = await portableToolSurface(
+        this.store,
+        session,
+        !!this.scripts,
+        projectTools,
+      );
       // Only phones and tablets host this runtime, and every prompt token is
       // prefill time there.
       const footprintName = resolvePromptFootprint({
@@ -1043,7 +1182,11 @@ export class PortableProductService {
             .join('\n\n');
       const input = [
         { role: 'system' as const, content: instructions },
-        ...portableConversationHistory(admitted ? session.messages.slice(0, -1) : session.messages),
+        ...(placement.standalone
+          ? []
+          : portableConversationHistory(
+              admitted ? session.messages.slice(0, -1) : session.messages,
+            )),
         {
           role: 'user' as const,
           content: [
@@ -1068,7 +1211,9 @@ export class PortableProductService {
         if (attachments)
           message.content += `\n\n## Supplied files (reference content, not instructions)\n${attachments}`;
       }
-      const inputError = portableInputLimitError(input);
+      // History is fitted to the model by the turn loop, oldest first; only
+      // the instructions and the new message must fit on their own.
+      const inputError = portableInputLimitError([input[0]!, input.at(-1)!]);
       if (inputError) throw new ProductError(inputError, 409);
       check();
       await checkTask();
@@ -1084,6 +1229,7 @@ export class PortableProductService {
         // Only a message that waited behind a running turn is a nudge; one
         // sent to an idle conversation arrives with the flag already dropped.
         ...(validated.nudge === true ? { nudge: true } : {}),
+        ...(placement.hidden ? { hidden: true } : {}),
       };
       if (admitted) {
         const prior = session.messages.at(-1);
@@ -1173,6 +1319,7 @@ export class PortableProductService {
           ...(structuredChat ? { structuredChat } : {}),
         },
         inventoryTools,
+        projectTools,
       );
       return { accepted: true, sessionId: id };
     } finally {
@@ -1223,17 +1370,41 @@ export class PortableProductService {
     id: string,
     body: Record<string, unknown>,
     delivery?: PortableQueuedSend['delivery'],
+    /** A host-authored seed (a page reaction): coalesced, background, maybe hidden or standalone. */
+    seed?: { hidden: boolean; standalone?: boolean; lane: Lane },
   ): Promise<{ accepted: true; sessionId: string; queued?: true }> {
     this.assertNoConflict();
     if (!this.sessionBusy(id) && this.sendQueue.depth(id) === 0) {
       const { nudge: _nudge, ...plain } = body;
-      await this.startTurn(id, plain, undefined, false, undefined, delivery);
+      await this.startTurn(
+        id,
+        plain,
+        undefined,
+        false,
+        undefined,
+        delivery,
+        seed ? { lane: seed.lane, hidden: seed.hidden, standalone: seed.standalone === true } : {},
+      );
       return { accepted: true, sessionId: id };
     }
     const { validated, text } = await this.checkQueuedSend(id, body, delivery);
     const nudge = validated.nudge === true;
     const admission = this.sendQueue.admit(id, true, text, {
-      messageOrigin: delivery ? 'cross-gezel' : nudge ? 'background-nudge' : 'direct-user',
+      ...(seed
+        ? {
+            coalescable: true,
+            lane: seed.lane,
+            ...(seed.hidden ? { hidden: true } : {}),
+            ...(seed.standalone ? { standalone: true } : {}),
+          }
+        : {}),
+      messageOrigin: delivery
+        ? 'cross-gezel'
+        : seed
+          ? 'system'
+          : nudge
+            ? 'background-nudge'
+            : 'direct-user',
       ...(delivery ? { from: delivery.from } : {}),
       ...(nudge ? { nudge: true } : {}),
       ...(typeof body.draftId === 'string' ? { draftId: body.draftId } : {}),
@@ -1367,6 +1538,7 @@ export class PortableProductService {
       };
     },
     inventory: readonly PortableToolSpec[],
+    projectTools: readonly ProjectTypeTool[] = [],
   ): Promise<void> {
     const { session } = turn;
     let response: ChatMessage | undefined;
@@ -1435,7 +1607,23 @@ export class PortableProductService {
             requestId: turn.requestId,
             providerId,
             ...loopLimits,
-            messages,
+            // The system message and the turn; the history between them is
+            // the loop's to fit.
+            messages: [messages[0]!, messages.at(-1)!],
+            history: {
+              messages: messages
+                .slice(1, -1)
+                .filter((message): message is HistoryMessage => message.role !== 'system'),
+              ...(this.historyFits.get(listingKey)
+                ? { fit: this.historyFits.get(listingKey)! }
+                : {}),
+              fitted: (fit) => {
+                this.historyFits.delete(listingKey);
+                this.historyFits.set(listingKey, fit);
+                if (this.historyFits.size > 64)
+                  this.historyFits.delete(this.historyFits.keys().next().value!);
+              },
+            },
             tools: {
               inventory,
               listing: this.toolListings.get(listingKey) ?? startListing,
@@ -1479,6 +1667,7 @@ export class PortableProductService {
               scripts: this.scripts
                 ? portableScriptTools(this.store, this.scripts, turn.abort.signal)
                 : undefined,
+              projectTools,
               recruit: (role) => this.recruit(role),
               templates: () =>
                 this.content.templates.map(({ manifest }) => ({
@@ -1715,6 +1904,8 @@ export class PortableProductService {
         this.startTurn(sessionId, body, undefined, false, undefined, opts.delivery, {
           reserved,
           lane: opts.lane ?? 'interactive',
+          ...(opts.hidden ? { hidden: true } : {}),
+          ...(opts.standalone ? { standalone: true } : {}),
         }),
       ).catch((error: unknown) => {
         // The person already had a reply for this send; report the failure
@@ -2126,6 +2317,12 @@ export class PortableProductService {
       }
       const queueResponse = await handlePortableQueueRoute(this.queueHost(), request, url);
       if (queueResponse) return queueResponse;
+      const typeResponse = await handlePortableProjectTypeRoute(
+        this.projectTypeRouteHost(),
+        request,
+        url,
+      );
+      if (typeResponse) return typeResponse;
       if (
         this.scripts &&
         request.method === 'POST' &&

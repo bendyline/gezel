@@ -6156,6 +6156,8 @@ export class ChatManager extends LocalEngineRuntime {
     gezelId: string;
     seed: string;
     hidden?: boolean;
+    /** The seed carries the whole state; answer it without the earlier turns. */
+    standalone?: boolean;
   }): Promise<{ sessionId: string } | null> {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) return null;
     const session = await this.ensureOrCreateSession({
@@ -6179,6 +6181,7 @@ export class ChatManager extends LocalEngineRuntime {
         messageOrigin: 'system',
         ...(leanReactionCap ? { continuationMaxTokens: leanReactionCap } : {}),
         ...(args.hidden ? { hidden: true } : {}),
+        ...(args.standalone ? { standalone: true } : {}),
       }).catch((err) => {
         log.error(`[reactions] send failed for session ${session.id}:`, err);
       }),
@@ -7123,6 +7126,12 @@ export class ChatManager extends LocalEngineRuntime {
        *  SendAndWaitOpts.continuationMaxTokens. Reaction turns on lean
        *  game projects pass a tight value. */
       continuationMaxTokens?: number;
+      /**
+       * Answer this turn from the instructions and its own message alone:
+       * the seed carries the whole current state (a game reaction declared
+       * `standalone`). The transcript still records the turn.
+       */
+      standalone?: boolean;
       fileTurnIntent?: FileTurnIntent;
       /**
        * Deliver into the model's history but never render a transcript
@@ -7203,6 +7212,7 @@ export class ChatManager extends LocalEngineRuntime {
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
+      standalone?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -7320,6 +7330,7 @@ export class ChatManager extends LocalEngineRuntime {
       lane?: Lane;
       ambient?: boolean;
       continuationMaxTokens?: number;
+      standalone?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -8265,6 +8276,7 @@ export class ChatManager extends LocalEngineRuntime {
           ...(opts?.continuationMaxTokens
             ? { continuationMaxTokens: opts.continuationMaxTokens }
             : {}),
+          ...(opts?.standalone ? { standalone: true } : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
             enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),

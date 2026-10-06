@@ -116,9 +116,60 @@ describe('requestNpmInstalls — approval question publishing', () => {
     // outcome is `installed` and the runner saw the resolved spec.
     expect(result.results[0]?.kind).toBe('installed');
     expect(vi.mocked(runPnpm)).toHaveBeenCalledWith(
-      ['add', '--', 'zod@^3'],
+      ['add', '--config.registry=https://registry.npmjs.org/', '--', 'zod@^3'],
       expect.objectContaining({ cwd: expect.any(String) }),
     );
+  });
+
+  it('pins the registry read outside the workspace, so a planted .npmrc cannot redirect it', async () => {
+    const workspaceDir = await store.projectWorkspaceDir(projectId);
+    await writeFile(join(workspaceDir, '.npmrc'), 'registry=http://127.0.0.1:9/\n');
+    vi.mocked(runPnpm).mockImplementation(async (args, opts) => ({
+      ok: true,
+      code: 0,
+      stdout:
+        args[0] === 'config'
+          ? opts.cwd === workspaceDir
+            ? 'http://127.0.0.1:9/\n'
+            : 'https://mirror.corp.example/npm/\n'
+          : '',
+      stderr: '',
+      log: '',
+    }));
+
+    let result: Awaited<ReturnType<typeof requestNpmInstalls>>;
+    try {
+      result = await requestNpmInstalls({
+        store,
+        home,
+        projectId,
+        packages: [
+          { package: 'zod', version: '^3' },
+          { package: 'chalk', version: '^5' },
+        ],
+      });
+    } finally {
+      vi.mocked(runPnpm).mockImplementation(async () => ({
+        ok: true,
+        code: 0,
+        stdout: '',
+        stderr: '',
+        log: '',
+      }));
+    }
+
+    expect(result.results.map((r) => r.kind)).toEqual(['installed', 'installed']);
+    const calls = vi.mocked(runPnpm).mock.calls;
+    const lookups = calls.filter(([args]) => args[0] === 'config');
+    expect(lookups).toHaveLength(1);
+    expect(lookups[0]![1]).toMatchObject({ lifecycle: 'allow' });
+    expect(lookups[0]![1].cwd).not.toBe(workspaceDir);
+    const adds = calls.filter(([args]) => args[0] === 'add');
+    expect(adds.map(([args]) => args)).toEqual([
+      ['add', '--config.registry=https://mirror.corp.example/npm/', '--', 'zod@^3'],
+      ['add', '--config.registry=https://mirror.corp.example/npm/', '--', 'chalk@^5'],
+    ]);
+    for (const [, opts] of adds) expect(opts.cwd).toBe(workspaceDir);
   });
 
   it('uses the vetted range when a shipped package omits its version', async () => {
@@ -138,7 +189,7 @@ describe('requestNpmInstalls — approval question publishing', () => {
 
     expect(result.results[0]).toMatchObject({ kind: 'installed', package: 'tsx', version: '^4' });
     expect(vi.mocked(runPnpm)).toHaveBeenCalledWith(
-      ['add', '--', 'tsx@^4'],
+      ['add', '--config.registry=https://registry.npmjs.org/', '--', 'tsx@^4'],
       expect.objectContaining({ cwd: expect.any(String) }),
     );
     expect(events.filter((event) => event.event.type === 'question_asked')).toHaveLength(0);

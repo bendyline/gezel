@@ -3,12 +3,14 @@ import {
   bundlePreviewModules,
   isPreviewCompiledPath,
   isPreviewModulePath,
+  pageApiShimSource,
   previewImportProblem,
   resolvePreviewImport,
 } from '@bendyline/gezel';
 import { previewAssetPath, previewEntryPath } from './html-preview-path.js';
 import type { PreviewModuleCompiler } from './script-compiler.js';
 
+import type { PageApiBootstrap } from '@bendyline/gezel';
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from '../../ui/src/html-preview-host.js';
 type OfflineHtmlPreviewRequest = HostHtmlPreviewRequest;
 type OfflineHtmlPreview = HostHtmlPreview;
@@ -47,16 +49,38 @@ export function createOfflineHtmlPreview(
   compileModules?: () => PreviewModuleCompiler,
 ) {
   return async (request: OfflineHtmlPreviewRequest): Promise<OfflineHtmlPreview> => {
-    if (request.source === 'type')
-      throw new Error('Catalog project pages are not available on this device');
     const entry = previewEntryPath(request.path);
     if (!/\.html?$/i.test(entry)) throw new Error('Choose an HTML file to preview');
+    const project = `https://gezel.local/api/projects/${encodeURIComponent(request.projectId)}`;
+    const headers = { Authorization: `Bearer ${token}` };
+    let prelude: string | undefined;
+    if (request.source === 'type') {
+      // A project type's page reads its project through the parent, so it
+      // carries the same window.gezel the desktop serves it with.
+      const response = await fetcher(
+        `${project}/type/bootstrap?path=${encodeURIComponent(entry)}`,
+        { headers },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        bootstrap?: PageApiBootstrap;
+        apiV1?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !body.bootstrap)
+        throw new Error(body.error ?? `Could not open this page (${response.status})`);
+      if (!body.apiV1)
+        throw new Error(
+          'This page has not been updated to run on a phone yet. Its project still works in chat.',
+        );
+      prelude = pageApiShimSource(body.bootstrap);
+    }
+    const area = request.source === 'type' ? 'type' : request.source;
     return buildOfflineHtmlPreview(
       entry,
       async (path) => {
         const response = await fetcher(
-          `https://gezel.local/api/projects/${encodeURIComponent(request.projectId)}/${request.source}/read?raw=1&path=${encodeURIComponent(path)}`,
-          { headers: { Authorization: `Bearer ${token}` } },
+          `${project}/${area}/read?raw=1&path=${encodeURIComponent(path)}`,
+          { headers },
         );
         if (!response.ok)
           throw new Error(`Could not read preview file ${path} (${response.status})`);
@@ -84,6 +108,7 @@ export function createOfflineHtmlPreview(
       },
       publish,
       compileModules,
+      prelude,
     );
   };
 }
@@ -94,6 +119,8 @@ export async function buildOfflineHtmlPreview(
   publish: PublishHtmlPreview,
   /** Compiles TypeScript and module scripts; without it a page must use classic scripts. */
   compileModules?: () => PreviewModuleCompiler,
+  /** Host script that runs after the log shim and before any page script. */
+  prelude?: string,
 ): Promise<OfflineHtmlPreview> {
   const entry = previewEntryPath(entryPath);
   const bytes = new Map<string, Uint8Array>();
@@ -365,7 +392,10 @@ const send=(kind,detail)=>parent.postMessage({__gezelPreviewLog:true,kind,detail
   const events = handlers.length
     ? `<script src="${dataUrl(handlers.join('\n'), 'text/javascript')}"></script>`
     : '';
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${log}"></script></head><body>${template.innerHTML}${events}</body></html>`;
+  const hostScript = prelude
+    ? `<script src="${account(dataUrl(prelude, 'text/javascript'))}"></script>`
+    : '';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${log}"></script>${hostScript}</head><body>${template.innerHTML}${events}</body></html>`;
   if (new TextEncoder().encode(html).byteLength > 8 * 1024 * 1024)
     throw new Error('This preview exceeds 8 MiB after embedding its assets');
   return await publish(html);

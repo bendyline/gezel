@@ -65,6 +65,8 @@ export interface PortableTaskRunnerOptions {
     id: string,
     sourceId?: string,
     version?: string,
+    /** The project the task is for: its project type may carry its own books. */
+    projectId?: string,
   ): Promise<Craftbook | undefined>;
   onChange?(task: Task): void;
   resolveStepRole?(projectId: string, role: string): Promise<string>;
@@ -399,6 +401,7 @@ export class PortableTaskRunner {
           request.craftbookId,
           request.craftbookSourceId,
           request.craftbookVersion,
+          projectId,
         )
       : undefined;
     const entry =

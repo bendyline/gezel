@@ -48,6 +48,8 @@ export * from './names.js';
 export * from './voices.js';
 export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
+export * from './project-types/composition.js';
+export * from './project-types/page-api-shim.js';
 export * from './json-schema/validate.js';
 export * from './roles/index.js';
 export * from './deliverable.js';
