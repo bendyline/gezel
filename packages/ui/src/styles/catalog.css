@@ -900,6 +900,93 @@
   align-items: center;
 }
 
+/* A knowledge catalog's Reference Mark (KnowledgeCatalogMark): square
+   parchment artwork in a small tile, the craftbook-artwork recipe. The tile
+   holds its size while the image loads and when a catalog ships no artwork,
+   so rows never reflow and the book glyph never reads as a broken image. */
+.knowledge-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text-muted);
+}
+
+.knowledge-mark--sm {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+}
+
+.knowledge-mark--md {
+  width: 34px;
+  height: 34px;
+}
+
+.knowledge-mark--lg {
+  width: 56px;
+  height: 56px;
+}
+
+.knowledge-mark-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.knowledge-mark-glyph {
+  width: 62%;
+  height: 62%;
+}
+
+.knowledge-installed-name {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Catalog management opened from the Knowledge browser. Wide enough for the
+   two-column catalog card grid; only the manager scrolls, so Done stays put. */
+.knowledge-catalogs-dialog {
+  width: min(60rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 3rem);
+  overflow: hidden;
+}
+
+.knowledge-catalogs-dialog > :not(.knowledge-catalogs-dialog-body) {
+  flex-shrink: 0;
+}
+
+.knowledge-catalogs-dialog > h3,
+.knowledge-catalogs-dialog > p {
+  margin: 0;
+}
+
+.knowledge-catalogs-dialog-body > .ollama-model-manager > :first-child {
+  margin-top: 0;
+}
+
+.knowledge-catalogs-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.knowledge-catalogs-dialog > .gz-dialog-actions {
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
 .catalog-ollama-meta {
   flex: 1;
   min-width: 0;

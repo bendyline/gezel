@@ -33,48 +33,160 @@
   background: var(--surface);
 }
 
-/* The catalog picker (or, with one catalog, its name) shares a row with the
-   add key that opens Settings → Knowledge. */
+/* The catalog picker (or, with one catalog, its header) shares a row with the
+   add key that opens the catalogs dialog. */
 .knowledge-rail-catalog-row {
   display: flex;
   align-items: flex-start;
   gap: var(--space-xs);
 }
 
-.knowledge-rail-catalog-row > select,
-.knowledge-rail-catalog-row > .knowledge-catalog-name {
-  flex: 1;
-  min-width: 0;
+/* The picker row chooses which library the rail shows; a rule under it
+   separates that choice from the library itself. */
+.knowledge-rail-catalog-row--picker {
+  align-items: stretch;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .knowledge-rail-catalog-row > .gz-key {
   flex: none;
 }
 
-/* Beside the picker the key takes the select's height: dropping its vertical
-   padding keeps it shorter than any select, so the row is the select's own
-   height and the stretch fills it. Beside a long name that wraps, the key
-   stays on the first line. */
-.knowledge-rail-catalog-row > select + .gz-key {
-  align-self: stretch;
+/* Beside the picker the key takes the picker's height, so the row is the
+   picker's own height. Beside a long name that wraps, the key stays on the
+   first line. */
+.knowledge-catalog-picker + .gz-key {
   padding-block: 0;
-  padding-inline: 0.3rem;
+  padding-inline: 0.45rem;
+}
+
+.knowledge-catalog-picker {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.6rem 0.35rem 0.4rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.knowledge-catalog-picker > span:first-child {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-catalog-option {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.knowledge-catalog-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-catalog-picker-menu {
+  max-width: min(24rem, calc(100vw - 2rem));
+  border-radius: var(--radius-md);
+}
+
+.knowledge-catalog-picker-menu .gz-select-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 0.5rem 0.3rem 0.35rem;
+  border-radius: var(--radius-sm);
+}
+
+.knowledge-catalog-picker-menu .gz-select-item > span:first-child {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-catalog-picker-menu .gz-select-item[data-highlighted] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
+}
+
+.knowledge-catalog-picker-menu .gz-select-item[data-state="checked"] {
+  background: var(--panel);
+  font-weight: 600;
+}
+
+.knowledge-catalog-picker-menu .gz-select-item[data-state="checked"][data-highlighted] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+.knowledge-catalog-option-count {
+  flex: none;
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-catalog-header {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.knowledge-catalog-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
 }
 
 .knowledge-rail-search {
   width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
   font-size: var(--text-sm);
 }
 
 .knowledge-catalog-name {
   margin: 0;
   font-size: var(--text-xl);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
+/* Count on one line, license and version on the next: the column beside the
+   mark is too narrow for all three, and a wrap inside "CC BY-SA" reads as two
+   licenses. */
 .knowledge-catalog-meta {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   font-size: var(--text-xs);
+  line-height: 1.35;
   color: var(--text-muted);
+}
+
+.knowledge-catalog-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-catalog-meta > span:empty {
+  display: none;
 }
 
 .knowledge-topics {

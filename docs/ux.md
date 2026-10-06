@@ -1168,6 +1168,31 @@ and must remain recognizable in the 44px gallery crop. Catalog image renderers
 must replace missing or failed assets with the surface's category glyph or
 initial; never expose the browser's native broken-image placeholder.
 
+**Knowledge catalog artwork: Reference Marks.** Knowledge catalogs get the
+Workshop Marks' sibling: the same bindery material language, palette, period
+restraint, and constraints, built as a single paper-crafted emblem of the
+subject (a loaf and pitcher for Food & Drink, a ringed planet for Astronomy).
+The subject alone fills about 80% of the tile, with nothing under or behind
+it. These marks are drawn at 24 and 56 px, and an earlier version that stood
+the subject on a cloth-bound book left the subject unreadable at that size. The
+subject carries the catalog's one muted accent. No magnifier: that is the
+craftbook shelf's tool. Gilde ships
+the mark as the catalog's `logo.webp`, with an `art.json` recording the subject
+and accent; the service passes it to installed catalogs as
+`KnowledgeCatalogStatus.logoUrl`, and the bundled Handboek's mark ships with
+the UI. `KnowledgeCatalogMark` is the one rendering: a `--radius-md` tile at
+24, 34, or 56 px, with a book glyph for catalogs that have no artwork. The
+Knowledge rail shows the 56 px mark beside the catalog's name and the 24 px
+mark in each picker row, which is why that picker is the Radix `Select` and
+not a native `<select>`.
+
+**Catalog management opens over the Knowledge browser, not in Settings.** The
+rail's add key opens `KnowledgeCatalogsDialog`, which hosts the same
+`KnowledgeCatalogManager` that Settings → Knowledge shows. Changing what is on
+the shelves is part of using the library, so it should not move the person to
+another area. Installs announce themselves, and the rail picks each one up
+while the dialog is still open.
+
 **Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
 entries Gezel ships and reviews with thousands imported automatically from
 the public MCP registry, and the two must never look like more of the same.

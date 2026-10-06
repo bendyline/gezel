@@ -11,12 +11,14 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { KnowledgeCatalogMark } from '../components/KnowledgeCatalogMark.js';
+import { KnowledgeCatalogsDialog } from '../components/KnowledgeCatalogsDialog.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
 import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
-import { requestSettingsSection } from '../settings-nav.js';
+import { Select } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { inlineBundledAssets } from './handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
@@ -106,6 +108,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const [searchResults, setSearchResults] = useState<UnifiedSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [managingCatalogs, setManagingCatalogs] = useState(false);
   const searchTimer = useRef<number | null>(null);
 
   const effectiveTheme = useEffectiveTheme();
@@ -384,10 +387,9 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     writeExpandedTopics(selectedCatalogId, next);
   };
 
-  const openSettings = useCallback(() => {
-    requestSettingsSection('knowledge');
-    navigateToTab({ kind: 'area', area: 'settings' });
-  }, []);
+  const catalogsDialog = (
+    <KnowledgeCatalogsDialog open={managingCatalogs} onOpenChange={setManagingCatalogs} />
+  );
 
   if (catalogs !== null && catalogs.length === 0) {
     return (
@@ -398,10 +400,11 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
             No knowledge catalogs are installed yet. A catalog is a searchable, citable reference
             library — install one and your gezellen can look things up and cite their sources.
           </p>
-          <button type="button" onClick={openSettings}>
-            Open knowledge settings
+          <button type="button" onClick={() => setManagingCatalogs(true)}>
+            Browse knowledge catalogs
           </button>
         </div>
+        {catalogsDialog}
       </div>
     );
   }
@@ -458,7 +461,9 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
             }}
           >
             <span>{node.name}</span>
-            <span className="knowledge-topic-count">{node.totalDocumentCount}</span>
+            <span className="knowledge-topic-count">
+              {node.totalDocumentCount.toLocaleString()}
+            </span>
           </button>
         </div>
         {expanded && (
@@ -477,7 +482,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       className="gz-key gz-key--icon"
       aria-label="Add knowledge catalogs"
       title="Add knowledge catalogs"
-      onClick={openSettings}
+      onClick={() => setManagingCatalogs(true)}
       data-testid="knowledge-add-catalog"
     >
       <svg
@@ -501,44 +506,71 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     <div className={`knowledge-view knowledge-view--${mobilePane}`} data-testid="knowledge-view">
       <nav className="knowledge-rail" aria-label="Knowledge catalogs and topics">
         {hasCatalogPicker && (
-          <div className="knowledge-rail-catalog-row">
-            <select
-              aria-label="Catalog"
+          <div className="knowledge-rail-catalog-row knowledge-rail-catalog-row--picker">
+            <Select.Root
               value={selectedCatalogId ?? ''}
-              onChange={(e) => {
-                setSelectedCatalogId(e.target.value);
+              onValueChange={(next) => {
+                setSelectedCatalogId(next);
                 setSelectedDocId(null);
                 setMobilePane('topics');
               }}
             >
-              {catalogs.map((c) => (
-                <option key={c.ref.catalogId} value={c.ref.catalogId}>
-                  {c.name ?? c.ref.catalogId}
-                </option>
-              ))}
-            </select>
+              <Select.Trigger aria-label="Catalog" className="knowledge-catalog-picker">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content className="knowledge-catalog-picker-menu" align="start">
+                {catalogs.map((c) => {
+                  const name = c.name ?? c.ref.catalogId;
+                  return (
+                    <Select.Item
+                      key={c.ref.catalogId}
+                      value={c.ref.catalogId}
+                      textValue={name}
+                      trailing={
+                        c.documents !== undefined ? (
+                          <span className="knowledge-catalog-option-count">
+                            {c.documents.toLocaleString()}
+                          </span>
+                        ) : undefined
+                      }
+                    >
+                      <span className="knowledge-catalog-option">
+                        <KnowledgeCatalogMark catalog={c} size="sm" />
+                        <span className="knowledge-catalog-option-name">{name}</span>
+                      </span>
+                    </Select.Item>
+                  );
+                })}
+              </Select.Content>
+            </Select.Root>
             {addCatalogKey}
           </div>
         )}
         {selectedCatalog && (
-          <>
-            {hasCatalogPicker ? (
-              <h2 className="knowledge-catalog-name">
-                {selectedCatalog.name ?? selectedCatalogId}
-              </h2>
-            ) : (
-              <div className="knowledge-rail-catalog-row">
+          <div className="knowledge-rail-catalog-row">
+            <div className="knowledge-catalog-header">
+              <KnowledgeCatalogMark catalog={selectedCatalog} size="lg" />
+              <div className="knowledge-catalog-heading">
                 <h2 className="knowledge-catalog-name">
                   {selectedCatalog.name ?? selectedCatalogId}
                 </h2>
-                {addCatalogKey}
+                <p className="knowledge-catalog-meta">
+                  {selectedCatalog.documents !== undefined && (
+                    <span>{`${selectedCatalog.documents.toLocaleString()} documents`}</span>
+                  )}
+                  <span>
+                    {[
+                      selectedCatalog.license,
+                      selectedCatalog.ref.version ? `v${selectedCatalog.ref.version}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </p>
               </div>
-            )}
-            <p className="knowledge-catalog-meta">
-              {selectedCatalog.documents ?? '?'} documents · {selectedCatalog.license ?? ''}
-              {selectedCatalog.ref.version ? ` · v${selectedCatalog.ref.version}` : ''}
-            </p>
-          </>
+            </div>
+            {!hasCatalogPicker && addCatalogKey}
+          </div>
         )}
         <input
           type="search"
@@ -716,6 +748,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
           </div>
         )}
       </section>
+      {catalogsDialog}
     </div>
   );
 }

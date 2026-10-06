@@ -274,6 +274,12 @@ export const KnowledgeCatalogStatusSchema = z.object({
   /** A strictly newer version exists in the shipped catalog content. */
   updateAvailable: z.boolean(),
   availableVersion: z.string().optional(),
+  /**
+   * The gilde entry's Reference Mark, as a bearer-gated catalog route
+   * (`/api/catalog/knowledge-catalog/{id}/file/logo.webp`). Absent for
+   * catalogs gilde does not list or that ship no artwork.
+   */
+  logoUrl: z.string().optional(),
 });
 export type KnowledgeCatalogStatus = z.infer<typeof KnowledgeCatalogStatusSchema>;
 

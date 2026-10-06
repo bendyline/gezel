@@ -470,21 +470,33 @@ export class KnowledgeManager {
 
   // ── the gilde join ────────────────────────────────────────────────────────
 
-  /** Every gilde `knowledge-catalog` entry (newest version), keyed by publisher/id. */
-  private async gildeItems(): Promise<Map<string, KnowledgeCatalogItemManifest>> {
-    const out = new Map<string, KnowledgeCatalogItemManifest>();
+  /**
+   * Every gilde `knowledge-catalog` entry (newest version), keyed by
+   * publisher/id, with the catalog route URL of its Reference Mark artwork.
+   */
+  private async gildeEntries(): Promise<
+    Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>
+  > {
+    const out = new Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>();
     if (!this.opts.catalog) return out;
     try {
       for (const item of await this.opts.catalog.list('knowledge-catalog')) {
         if (item.manifest.kind !== 'knowledge-catalog') continue;
         out.set(
           this.keyFor({ publisherId: item.manifest.publisherId, catalogId: item.manifest.id }),
-          item.manifest,
+          { manifest: item.manifest, ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}) },
         );
       }
     } catch (err) {
       log.debug(`knowledge catalog listing unavailable: ${errorMessage(err)}`);
     }
+    return out;
+  }
+
+  /** Every gilde `knowledge-catalog` manifest (newest version), keyed by publisher/id. */
+  private async gildeItems(): Promise<Map<string, KnowledgeCatalogItemManifest>> {
+    const out = new Map<string, KnowledgeCatalogItemManifest>();
+    for (const [key, entry] of await this.gildeEntries()) out.set(key, entry.manifest);
     return out;
   }
 
@@ -509,11 +521,12 @@ export class KnowledgeManager {
   // ── listing ───────────────────────────────────────────────────────────────
 
   async list(): Promise<KnowledgeCatalogStatus[]> {
-    const gilde = await this.gildeItems();
+    const gilde = await this.gildeEntries();
     return this.registry.read().catalogs.map((entry) => {
       const key = this.keyFor(entry.ref);
       const mounted = this.mountedByKey.get(key);
-      const item = gilde.get(key);
+      const listed = gilde.get(key);
+      const item = listed?.manifest;
       const availableVersion =
         item && compareCatalogVersions(item.version, entry.ref.version) > 0
           ? item.version
@@ -540,6 +553,7 @@ export class KnowledgeManager {
         source: entry.source ?? (item ? 'gilde' : 'file'),
         updateAvailable: availableVersion !== undefined,
         ...(availableVersion ? { availableVersion } : {}),
+        ...(listed?.logoUrl ? { logoUrl: listed.logoUrl } : {}),
       };
     });
   }

@@ -93,7 +93,7 @@ beforeEach(() => {
 describe('KnowledgeView', () => {
   it('renders the catalog TOC and opens a document with provenance', async () => {
     render(<KnowledgeView />);
-    expect(await screen.findByText('Shop Notes')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shop Notes' })).toBeInTheDocument();
     expect(await screen.findByText('Joinery')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Joinery' }));
     expect(await screen.findByText('Dovetail work')).toBeInTheDocument();
@@ -199,22 +199,48 @@ describe('KnowledgeView', () => {
   it('shows the install pointer when no catalog is registered', async () => {
     vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [] });
     render(<KnowledgeView />);
-    expect(
-      await screen.findByRole('button', { name: 'Open knowledge settings' }),
-    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Browse knowledge catalogs' }));
+    expect(await screen.findByRole('dialog', { name: 'Knowledge catalogs' })).toBeInTheDocument();
+    expect(await screen.findByTestId('knowledge-catalog-manager')).toBeInTheDocument();
   });
 
-  it('offers an add key beside the catalog name that opens knowledge settings', async () => {
+  it('opens catalog management in a dialog instead of leaving for Settings', async () => {
     const { peekPendingSettingsSection, clearPendingSettingsSection } = await import(
       '../settings-nav.js'
     );
     clearPendingSettingsSection();
     render(<KnowledgeView />);
-    expect(await screen.findByText('Shop Notes')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shop Notes' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Catalog' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add knowledge catalogs' }));
-    expect(peekPendingSettingsSection()).toBe('knowledge');
-    clearPendingSettingsSection();
+    const dialog = await screen.findByRole('dialog', { name: 'Knowledge catalogs' });
+    expect(dialog).toContainElement(await screen.findByTestId('knowledge-catalog-manager'));
+    expect(peekPendingSettingsSection()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Knowledge catalogs' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('shows each catalog with its reference mark, falling back to a book glyph', async () => {
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
+      catalogs: [
+        CATALOG,
+        {
+          ...CATALOG,
+          ref: { ...CATALOG.ref, catalogId: 'garden-notes' },
+          name: 'Garden Notes',
+          logoUrl: 'data:image/webp;base64,UklGRg==',
+        },
+      ],
+    });
+    render(<KnowledgeView />);
+    const header = (await screen.findByRole('heading', { name: 'Shop Notes' })).closest(
+      '.knowledge-catalog-header',
+    );
+    expect(header?.querySelector('.knowledge-mark--lg .knowledge-mark-glyph')).not.toBeNull();
+    const picker = screen.getByRole('combobox', { name: 'Catalog' });
+    expect(picker.querySelector('.knowledge-mark--sm')).not.toBeNull();
   });
 
   it('puts the add key beside the catalog picker when there is more than one catalog', async () => {
