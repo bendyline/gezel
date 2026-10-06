@@ -13,6 +13,7 @@ import {
   projectTasksDir,
 } from '@bendyline/gezel/paths';
 import { HttpStatusError } from '@bendyline/gezel/runtime';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import { writeFileAtomic } from './atomic.js';
 import { isSyncJunkName } from './sync-junk.js';
 
@@ -258,9 +259,14 @@ export class TaskFilesStore {
   }
 
   async listProjectTasks(projectId: string): Promise<Task[]> {
-    const tasks: Task[] = [];
-    for await (const task of this.iterateProjectTasks(projectId)) tasks.push(task);
-    return tasks;
+    const end = beginPerfWork('task history: full project listing');
+    try {
+      const tasks: Task[] = [];
+      for await (const task of this.iterateProjectTasks(projectId)) tasks.push(task);
+      return tasks;
+    } finally {
+      end();
+    }
   }
 
   async *iterateAllTasks(): AsyncGenerator<Task> {
@@ -276,10 +282,15 @@ export class TaskFilesStore {
   }
 
   async listAllTasks(): Promise<Task[]> {
-    const all: Task[] = [];
-    for await (const task of this.iterateAllTasks()) all.push(task);
-    all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return all;
+    const end = beginPerfWork('task history: full global listing');
+    try {
+      const all: Task[] = [];
+      for await (const task of this.iterateAllTasks()) all.push(task);
+      all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      return all;
+    } finally {
+      end();
+    }
   }
 }
 

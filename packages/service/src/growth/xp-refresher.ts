@@ -1,3 +1,9 @@
+/**
+ * Coalesces completion-triggered XP updates and runs one refresh at a time.
+ * A large task corpus can take longer to scan than the debounce delay; keep
+ * only one follow-up per gezel instead of filling the engine's lock queue.
+ * Disposal drops queued work without interrupting an already durable refresh.
+ */
 import { createLogger } from '@bendyline/gezel';
 
 const log = createLogger('growth');
@@ -24,21 +30,42 @@ export function createXpRefresher(opts: {
 }): XpRefresher {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const delay = opts.delayMs ?? XP_REFRESH_DELAY_MS;
+  const pending = new Set<string>();
+  let running = false;
+  let disposed = false;
+  const drain = async (): Promise<void> => {
+    if (running || disposed) return;
+    running = true;
+    try {
+      while (!disposed && pending.size > 0) {
+        const gezelId = pending.values().next().value!;
+        pending.delete(gezelId);
+        try {
+          const state = await opts.refresh(gezelId);
+          if (!disposed) opts.onRefreshed(gezelId, state.xp);
+        } catch (err) {
+          log.warn(`[growth] xp refresh failed for ${gezelId}: ${String(err)}`);
+        }
+      }
+    } finally {
+      running = false;
+    }
+  };
   return {
     note(gezelId) {
-      if (!gezelId) return;
+      if (!gezelId || disposed) return;
       clearTimeout(timers.get(gezelId));
       const timer = setTimeout(() => {
         timers.delete(gezelId);
-        opts
-          .refresh(gezelId)
-          .then((state) => opts.onRefreshed(gezelId, state.xp))
-          .catch((err) => log.warn(`[growth] xp refresh failed for ${gezelId}: ${String(err)}`));
+        pending.add(gezelId);
+        void drain();
       }, delay);
       timer.unref?.();
       timers.set(gezelId, timer);
     },
     dispose() {
+      disposed = true;
+      pending.clear();
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
     },

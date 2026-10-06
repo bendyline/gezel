@@ -5,7 +5,8 @@
  * a pending (accept or skip) — never silently. XP keeps accruing while
  * a choice is pending; only one pending exists at a time.
  *
- * Ambient refreshes ride the memory compactor's daily sweep; the HTTP
+ * Completion-triggered refreshes and the memory compactor's daily sweep
+ * stream task history to keep memory bounded. The HTTP
  * refresh route calls in directly (user-initiated). Both respect
  * `config.growth.enabled`.
  */
@@ -22,6 +23,7 @@ import type { HistoryManager } from '../history/manager.js';
 import type { CompactOneShot } from '../memory/compaction.js';
 import { isMemoryKind } from '../memory/daily-markdown.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
 import { generateProposals } from './proposals.js';
 import { computeSignals, countTaskWork, ratchetSignals, totalXp } from './xp.js';
 
@@ -161,26 +163,37 @@ export class GrowthEngine {
       kind: isMemoryKind(e.kind) ? e.kind : ('fact' as const),
     }));
 
-    const [lessonsEvents, consultEvents, tasks] = await Promise.all([
-      this.history.listEvents({ gezelId, kinds: ['memory.lessons-updated'] }).catch(() => []),
-      this.history.listEvents({ gezelId, kinds: ['gezel.message.delivered'] }).catch(() => []),
-      this.store.listAllTasks().catch(() => []),
-    ]);
+    const end = beginPerfWork('growth signals');
+    try {
+      const [lessonsEvents, consultEvents] = await Promise.all([
+        this.history.listEvents({ gezelId, kinds: ['memory.lessons-updated'] }).catch(() => []),
+        this.history.listEvents({ gezelId, kinds: ['gezel.message.delivered'] }).catch(() => []),
+      ]);
 
-    const consultationsByDay = new Map<string, number>();
-    for (const e of consultEvents) {
-      const day = e.at.slice(0, 10);
-      consultationsByDay.set(day, (consultationsByDay.get(day) ?? 0) + 1);
+      const consultationsByDay = new Map<string, number>();
+      for (const e of consultEvents) {
+        const day = e.at.slice(0, 10);
+        consultationsByDay.set(day, (consultationsByDay.get(day) ?? 0) + 1);
+      }
+
+      // Completion-triggered XP refreshes must not retain every historical task.
+      let completedSteps = 0;
+      let completedTasks = 0;
+      for await (const task of this.store.iterateAllTasks()) {
+        const counts = countTaskWork([task], gezelId);
+        completedSteps += counts.completedSteps;
+        completedTasks += counts.completedTasks;
+      }
+
+      return computeSignals({
+        memoryEntries,
+        lessonsUpdates: lessonsEvents.length,
+        completedSteps,
+        completedTasks,
+        consultationsByDay,
+      });
+    } finally {
+      end();
     }
-
-    const { completedSteps, completedTasks } = countTaskWork(tasks, gezelId);
-
-    return computeSignals({
-      memoryEntries,
-      lessonsUpdates: lessonsEvents.length,
-      completedSteps,
-      completedTasks,
-      consultationsByDay,
-    });
   }
 }

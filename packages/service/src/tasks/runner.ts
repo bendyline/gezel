@@ -52,7 +52,6 @@ import {
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
   taskEffectiveStatus,
-  withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
@@ -598,6 +597,15 @@ export class TaskRunner {
     return this.wake();
   }
 
+  /** Resume can uncover dormant descendants; closing/pausing only prunes work.
+   * Waking is detached because a transition can originate inside our own tick. */
+  async reconcileStatusChange(task: Pick<Task, 'projectId' | 'status'>): Promise<void> {
+    if (task.status === 'active' || task.status === 'draft') {
+      await this.rehydrateFromStore({ projectId: task.projectId });
+    }
+    void this.wake();
+  }
+
   /**
    * Scan every `active` task and enqueue a handoff for any whose
    * current step has an effective gezel owner. Call on service boot and
@@ -623,9 +631,20 @@ export class TaskRunner {
       // pending handoffs from an inactive project auto-resuming after
       // the service restarts.
       if (!projectAllowsAmbientWork(proj)) continue;
-      const tasks = withEffectiveTaskStatuses(
-        await this.store.listProjectTasks(proj.id).catch(() => []),
-      );
+      // Status-change hooks call this for every completion, not just boot.
+      // Concurrent reconciliations must retain live work, not all history.
+      const tasks: Task[] = [];
+      try {
+        for await (const stored of this.store.iterateProjectTasks(proj.id)) {
+          if (stored.status !== 'active') continue;
+          const task = await readTaskWithEffectiveStatus(this.store, proj.id, stored.num);
+          if (task && taskEffectiveStatus(task) === 'active') tasks.push(task);
+        }
+      } catch {
+        // Match the previous best-effort listing: never dispatch a partial
+        // project graph when storage failed partway through the scan.
+        tasks.length = 0;
+      }
       for (const task of tasks) {
         if (taskEffectiveStatus(task) !== 'active') continue;
         // Cron/fanout records are schedule hosts, not worker tasks. Their

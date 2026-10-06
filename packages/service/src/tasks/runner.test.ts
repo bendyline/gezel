@@ -1294,6 +1294,7 @@ describe('TaskRunner — startup rehydration', () => {
       ]),
     );
     const runner = new TaskRunner({ store, dispatcher });
+    const bulkListing = vi.spyOn(store, 'listProjectTasks');
     const p1 = await runner.rehydrateFromStore({ projectId: 'p1' });
 
     expect(p1.taskRefs.sort()).toEqual(['p1/1', 'p1/3']);
@@ -1302,6 +1303,7 @@ describe('TaskRunner — startup rehydration', () => {
 
     const p2 = await runner.rehydrateFromStore({ projectId: 'p2' });
     expect(p2.taskRefs).toEqual(['p2/1']);
+    expect(bulkListing).not.toHaveBeenCalled();
 
     expect(runner.snapshot().pendingCount).toBe(3);
     expect(runner.snapshot().pendingByGezel).toEqual({ bea: 2, cid: 1 });
@@ -2493,4 +2495,22 @@ describe('TaskRunner — provider-busy starvation bound', () => {
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(1);
   });
+});
+
+it('only resumes rescan history; completion and pause wake the targeted pruning pass', async () => {
+  const runner = new TaskRunner({ store, dispatcher: new FakeDispatcher(new Map()) });
+  const hydrate = vi.spyOn(runner, 'rehydrateFromStore').mockResolvedValue({
+    taskRefs: [],
+    nightShiftTaskRefs: [],
+    heldTaskRefs: [],
+  });
+  const wake = vi.spyOn(runner, 'wake').mockResolvedValue();
+  for (const status of ['complete', 'paused', 'canceled'] as const) {
+    await runner.reconcileStatusChange({ projectId: 'p1', status });
+  }
+  expect(hydrate).not.toHaveBeenCalled();
+  expect(wake).toHaveBeenCalledTimes(3);
+  await runner.reconcileStatusChange({ projectId: 'p1', status: 'active' });
+  expect(hydrate).toHaveBeenCalledWith({ projectId: 'p1' });
+  expect(wake).toHaveBeenCalledTimes(4);
 });
