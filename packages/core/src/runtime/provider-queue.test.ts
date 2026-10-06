@@ -1232,3 +1232,89 @@ describe('ProviderQueue — provider tag', () => {
     (await waiting)();
   });
 });
+
+describe('ProviderQueue — engine overflow', () => {
+  // Task steps hold the interactive LANE (so chores cannot starve them) but
+  // are background work at the engine. With every slot held by them, a
+  // person's message used to wait here, invisible to an engine that would
+  // have parked the task work for it.
+  function full(engineOverflow: boolean) {
+    const q = new ProviderQueue({ concurrency: 2, interactiveConcurrency: 1, engineOverflow });
+    return q;
+  }
+
+  it('lets one interactive-priority request past caps that background engine work fills', async () => {
+    const q = full(true);
+    const task = await q.acquire({ lane: 'interactive', enginePriority: 'background' });
+    const chore = await q.acquire({ lane: 'background', enginePriority: 'background' });
+    let chatStarted = false;
+    const chat = q
+      .acquire({ lane: 'interactive', enginePriority: 'interactive' })
+      .then((release) => {
+        chatStarted = true;
+        return release;
+      });
+    await flush();
+    expect(chatStarted).toBe(true);
+    // Only one overflow at a time.
+    let second = false;
+    void q.acquire({ lane: 'interactive', enginePriority: 'interactive' }).then((release) => {
+      second = true;
+      release();
+    });
+    await flush();
+    expect(second).toBe(false);
+    (await chat)();
+    task();
+    chore();
+    await flush();
+    expect(second).toBe(true);
+  });
+
+  it('stays closed by default, for a person already being served, and for unmarked work', async () => {
+    const off = full(false);
+    const t1 = await off.acquire({ lane: 'interactive', enginePriority: 'background' });
+    await off.acquire({ lane: 'background', enginePriority: 'background' });
+    let started = false;
+    void off.acquire({ lane: 'interactive', enginePriority: 'interactive' }).then(() => {
+      started = true;
+    });
+    await flush();
+    expect(started).toBe(false);
+    t1();
+
+    const served = full(true);
+    await served.acquire({ lane: 'interactive', enginePriority: 'interactive' });
+    await served.acquire({ lane: 'background', enginePriority: 'background' });
+    let second = false;
+    void served.acquire({ lane: 'interactive', enginePriority: 'interactive' }).then(() => {
+      second = true;
+    });
+    await flush();
+    expect(second).toBe(false);
+
+    // A running item with no priority counts as a person's.
+    const legacy = full(true);
+    await legacy.acquire({ lane: 'interactive' });
+    await legacy.acquire({ lane: 'background', enginePriority: 'background' });
+    let third = false;
+    void legacy.acquire({ lane: 'interactive', enginePriority: 'interactive' }).then(() => {
+      third = true;
+    });
+    await flush();
+    expect(third).toBe(false);
+  });
+
+  it('passes enginePriority through runInQueue', async () => {
+    const q = full(true);
+    const task = await q.acquire({ lane: 'interactive', enginePriority: 'background' });
+    await q.acquire({ lane: 'background', enginePriority: 'background' });
+    const result = await runInQueue(
+      q,
+      { lane: 'interactive', enginePriority: 'interactive' },
+      async () => 'served',
+    );
+    expect(result).toBe('served');
+    task();
+  });
+});

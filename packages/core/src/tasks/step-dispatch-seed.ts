@@ -153,7 +153,7 @@ export function buildStepDispatchSeed(input: StepDispatchSeedInput): StepDispatc
     input.kind === 'retry'
       ? retrySeed
       : input.resumedExisting
-        ? `The service restarted while task ${taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
+        ? `The service restarted while task ${taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are still above (any rebuilt from saved history are marked \`[recovered from an earlier turn]\`) — treat them as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork}${progressClause}${completionClause}`
         : input.kind === 'entry'
           ? `${entryPreface}You've been assigned task ${taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure.${progressClause}${completionClause}${fixedEntryProcedure}`
           : input.selfHandoff

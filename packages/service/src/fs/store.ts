@@ -88,6 +88,8 @@ import {
   SHARED_PROJECT_MARKER,
   type SessionLink,
   type SessionParent,
+  type SessionWireTranscript,
+  SessionWireTranscriptSchema,
   type Task,
   type TaskNote,
   TaskNoteSchema,
@@ -129,6 +131,7 @@ import {
   gezelLocalDir,
   gezelPaths,
   gezelSessionFile,
+  gezelSessionWireTranscriptFile,
   gezelSessionsDir,
   gezelStorageScope,
   gezelToolsetsFile,
@@ -5630,7 +5633,55 @@ export class Store {
     } catch {
       /* already gone */
     }
+    await this.deleteSessionWireTranscript(gezelId, sessionId);
     this.notifySessionChange({ type: 'delete', gezelId, sessionId });
+  }
+
+  // ---------- stateless-session wire transcripts ----------
+  //
+  // The exact transcript a local-engine session last sent, so a restart can
+  // reseed it with the prompt the engine cached (see
+  // `SessionWireTranscriptSchema`). Derived state: losing one only costs a
+  // re-prefill, so reads treat anything unreadable as absent.
+
+  async writeSessionWireTranscript(
+    gezelId: string,
+    checkpoint: SessionWireTranscript,
+  ): Promise<void> {
+    const path = gezelSessionWireTranscriptFile(
+      this.home,
+      gezelId,
+      checkpoint.sessionId,
+      this.external,
+    );
+    await mkdir(dirname(path), { recursive: true });
+    await writeFileAtomic(path, JSON.stringify(checkpoint));
+  }
+
+  async readSessionWireTranscript(
+    gezelId: string,
+    sessionId: string,
+  ): Promise<SessionWireTranscript | null> {
+    try {
+      const raw = await readFile(
+        gezelSessionWireTranscriptFile(this.home, gezelId, sessionId, this.external),
+        'utf8',
+      );
+      const parsed = SessionWireTranscriptSchema.safeParse(JSON.parse(raw));
+      return parsed.success && parsed.data.sessionId === sessionId ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteSessionWireTranscript(gezelId: string, sessionId: string): Promise<void> {
+    try {
+      await rm(gezelSessionWireTranscriptFile(this.home, gezelId, sessionId, this.external), {
+        force: true,
+      });
+    } catch {
+      /* best-effort: an orphaned checkpoint is never read without its session */
+    }
   }
 
   async listSessions(opts?: {

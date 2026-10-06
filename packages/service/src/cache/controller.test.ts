@@ -138,6 +138,24 @@ describe('SessionCacheController — invalidation', () => {
     expect(new Set(adapter.evictCalls[0])).toEqual(new Set(['a', 'b']));
   });
 
+  it('forgetProvider clears the bookkeeping but leaves the engine caches alone', async () => {
+    // A client reset rebuilds the provider object, not the engine: an engine
+    // that outlives the reset still holds valid per-session caches, and
+    // deleting them forces a full re-prefill on every session's next turn.
+    const ctrl = new SessionCacheController({ now: fakeNow, disableReconcileTimer: true });
+    const adapter = new MockAdapter();
+    ctrl.registerAdapter(adapter);
+    ctrl.recordTurn({ providerName: 'mlx', sessionId: 'a', approxPromptTokens: 100, wasHit: true });
+    ctrl.recordTurn({ providerName: 'mlx', sessionId: 'b', approxPromptTokens: 100 });
+
+    expect(new Set(ctrl.forgetProvider('mlx'))).toEqual(new Set(['a', 'b']));
+    const stats = ctrl.getStats('mlx')!;
+    expect(stats.warmSessionCount).toBe(0);
+    expect(stats.hits).toBe(0);
+    await Promise.resolve();
+    expect(adapter.evictCalls).toEqual([]);
+  });
+
   it('invalidate is a no-op for sessions not in the cache (no spurious adapter call)', async () => {
     const ctrl = new SessionCacheController({ now: fakeNow, disableReconcileTimer: true });
     const adapter = new MockAdapter();

@@ -35,6 +35,26 @@ export interface EnginePhaseEvent {
    * Absent means "engine-wide" and keeps the broadcast.
    */
   cacheId?: string;
+  /**
+   * The engine is holding this request rather than working on it, or has just
+   * started it after a hold. Only from engines that schedule several requests
+   * themselves (the MLX sidecar's waves) and only ever tagged with `cacheId`.
+   *
+   * - `waiting`: queued behind work the engine is running (`behind` names it
+   *   by cache id; `ahead` counts queued requests in front of this one).
+   * - `paused`: this request was mid-flight and stepped aside so a waiting
+   *   chat could run; it resumes where it stopped.
+   * - `admitted`: a request that had been waiting has started.
+   *
+   * Every `waiting` / `paused` marker is printed from the engine's own worker
+   * loop between steps, so it is proof the engine is alive and busy — the
+   * receiving session treats it as liveness, not as a stall.
+   */
+  engineQueue?: {
+    state: 'waiting' | 'paused' | 'admitted';
+    behind?: string[];
+    ahead?: number;
+  };
 }
 
 /**

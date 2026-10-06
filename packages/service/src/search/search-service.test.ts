@@ -578,6 +578,28 @@ describe('SearchService.searchProject', () => {
 
     expect(embedMock).toHaveBeenCalledTimes(1);
   });
+
+  it('hands named catalogs to the knowledge arm', async () => {
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }] });
+    const knowledgeSearch = vi.fn(
+      async (_query: string, _opts: { catalogs?: readonly string[] }) => [],
+    );
+    svc.setKnowledgeSearch({ search: knowledgeSearch });
+
+    await svc.searchProject('blob indexer', {
+      projectIds: ['p1'],
+      sources: ['knowledge'],
+      catalogs: ['azure-docs-main'],
+    });
+    expect(knowledgeSearch).toHaveBeenCalledWith(
+      'blob indexer',
+      expect.objectContaining({ projectId: 'p1', catalogs: ['azure-docs-main'] }),
+    );
+
+    knowledgeSearch.mockClear();
+    await svc.searchProject('blob indexer', { projectIds: ['p1'], sources: ['knowledge'] });
+    expect(knowledgeSearch.mock.calls[0]?.[1]).not.toHaveProperty('catalogs');
+  });
 });
 
 describe('cross-corpus merge ordering (scoring tripwire)', () => {

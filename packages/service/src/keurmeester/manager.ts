@@ -209,7 +209,10 @@ interface CaseWriteCtx {
  * for 498s)`.
  */
 export function isSilentStallAbort(message: string): boolean {
-  return /no output for \d+s mid-stream/.test(message) && /received 0 chars/.test(message);
+  if (/no output for \d+s mid-stream/.test(message) && /received 0 chars/.test(message))
+    return true;
+  // The MLX provider's plain-language wording of the same abort.
+  return /went quiet for \d+ seconds before writing anything/.test(message);
 }
 
 /**

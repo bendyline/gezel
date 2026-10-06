@@ -289,6 +289,24 @@ describe('read-only catalog handle', () => {
   it('passes the embedder-free self-KNN smoke', () => {
     expect(handle.selfKnnSmoke(0)).toBe(true);
   });
+
+  it('prewarms each shard once, and semantic search reads the prewarmed bits', async () => {
+    const fresh = CatalogHandle.open(extractedDir);
+    try {
+      expect(fresh.prewarmNextShard()).toBe(true);
+      expect(fresh.prewarmNextShard()).toBe(false);
+      const chunk = fresh.searchChunksFts(DOCS[100]!.title, [0], 1)[0]!;
+      const header =
+        chunk.headingPath.length > 0
+          ? `${chunk.title}\n${chunk.headingPath.join(' > ')}\n`
+          : `${chunk.title}\n`;
+      const [vector] = await fakeEmbed([`${header}${chunk.text}`]);
+      const hits = fresh.searchSemantic(Float32Array.from(vector as number[]), { finalK: 1 });
+      expect(hits[0]?.chunkUid).toBe(chunk.chunkUid);
+    } finally {
+      fresh.close();
+    }
+  });
 });
 
 describe('validation', () => {

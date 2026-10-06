@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildPreFirstByteAbortMessage } from './runtime-diagnostics.js';
 
+// Engine vocabulary a person cannot act on. The old messages read "no first
+// byte", "prefill stalled", "54,971 / 54,987 tokens", "mlx_vlm.server".
+const JARGON = /first byte|prefill|token|mlx_vlm|server|budget|session|abort/i;
+
 // A restart resumed four sessions onto one MLX engine. One turn waited
 // 10m36s behind a neighbour's 124s prefill, got no first byte, and was told
 // the model might be loading slowly or the server might be unhealthy — the
@@ -8,33 +12,47 @@ import { buildPreFirstByteAbortMessage } from './runtime-diagnostics.js';
 // reader's next step was "restart the engine in Settings", which would have
 // killed a healthy engine and lost the neighbour's turn too.
 describe('buildPreFirstByteAbortMessage', () => {
-  it('names contention when the engine was prefilling another session', () => {
+  it('says the message was waiting behind another chat', () => {
     const message = buildPreFirstByteAbortMessage(null, {
-      detail: '24317 tokens',
-      secondsAgo: 87,
+      detail: '54,971 / 54,987 tokens',
+      secondsAgo: 194,
     });
-    expect(message).toContain("busy with another session's turn");
-    expect(message).toContain('24317 tokens');
-    expect(message).toContain('87s ago');
+    expect(message).toMatch(/another chat/);
+    expect(message).toMatch(/send the message again/i);
     // The advice that would have killed a working engine (and the
     // neighbour's turn with it).
-    expect(message).not.toMatch(/restart the engine/i);
-    expect(message).not.toMatch(/loading slowly/i);
+    expect(message).not.toMatch(/restart|reopen|loading/i);
+    expect(message).not.toContain('54,971');
+    expect(message).not.toMatch(JARGON);
   });
 
-  it('prefers this turn’s own prefill evidence over a neighbour’s', () => {
-    // Our request DID start prefilling — the stall is ours, so the
+  it('prefers this turn’s own progress over a neighbour’s', () => {
+    // Our request DID start reading — the stall is ours, so the
     // neighbour is irrelevant however recently it ran.
     const message = buildPreFirstByteAbortMessage(
       { progress: 0.42, detail: '10240/24317', at: Date.now() },
       { detail: 'someone else', secondsAgo: 2 },
     );
-    expect(message).toContain('prefill stalled at 42%');
-    expect(message).not.toContain('another session');
+    expect(message).toContain('42% done');
+    expect(message).not.toMatch(/another chat/);
+    expect(message).not.toContain('10240');
+    expect(message).not.toMatch(JARGON);
   });
 
-  it('falls back to the health guess only when nothing was observed', () => {
-    expect(buildPreFirstByteAbortMessage(null, null)).toMatch(/loading slowly|unhealthy/);
-    expect(buildPreFirstByteAbortMessage(null)).toMatch(/loading slowly|unhealthy/);
+  it('says it ran out of time while still reading when there is no percentage', () => {
+    const message = buildPreFirstByteAbortMessage({ progress: 0, detail: '61K', at: Date.now() });
+    expect(message).toMatch(/still reading/);
+    expect(message).not.toMatch(JARGON);
+  });
+
+  it('falls back to the loading guess only when nothing was observed', () => {
+    for (const message of [
+      buildPreFirstByteAbortMessage(null, null),
+      buildPreFirstByteAbortMessage(null),
+    ]) {
+      expect(message).toMatch(/didn't start answering/);
+      expect(message).toMatch(/loading/);
+      expect(message).not.toMatch(JARGON);
+    }
   });
 });

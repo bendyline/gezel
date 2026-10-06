@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import { KeurmeesterManager, parseVerdict } from './manager.js';
+import { KeurmeesterManager, isSilentStallAbort, parseVerdict } from './manager.js';
 
 const VALID_VERDICT_JSON = JSON.stringify({
   diagnosis: 'The model finished reasoning but never emitted the write_file call.',
@@ -16,6 +16,28 @@ const VALID_VERDICT_JSON = JSON.stringify({
     prompt: 'Stop reading. Call write_file for review.md now.',
   },
   confidence: 'high',
+});
+
+describe('isSilentStallAbort', () => {
+  it('recognizes a zero-output stall in both providers’ wording, and nothing else', () => {
+    expect(
+      isSilentStallAbort(
+        '[llama-cpp] no output for 120s mid-stream; aborting (received 0 chars in 543s before going silent for 498s).',
+      ),
+    ).toBe(true);
+    expect(
+      isSilentStallAbort(
+        '[Mac AI] The model went quiet for 300 seconds before writing anything, so this turn was stopped. Try again; if it keeps happening, restart the engine in Settings → On-device.',
+      ),
+    ).toBe(true);
+    // A reply that stalled after writing something is not the drowning pathology.
+    expect(
+      isSilentStallAbort(
+        '[Mac AI] The model went quiet for 300 seconds partway through its reply, so this turn was stopped.',
+      ),
+    ).toBe(false);
+    expect(isSilentStallAbort('[Mac AI] timed out after 600s')).toBe(false);
+  });
 });
 
 describe('parseVerdict', () => {

@@ -197,6 +197,68 @@ describe('NativeEngineSupervisor', () => {
     });
   });
 
+  it('runs the pre-stop hook against the live engine before signalling it', async () => {
+    // The engine's own shutdown flush gets the three-second SIGTERM→SIGKILL
+    // grace; a long session's KV cache does not fit in it. The hook runs
+    // while the engine can still answer.
+    const child = makeFakeChild(4250);
+    const order: string[] = [];
+    const originalKill = child.kill.bind(child);
+    child.kill = (sig?: string) => {
+      order.push(`kill:${sig ?? 'SIGTERM'}`);
+      return originalKill(sig);
+    };
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9998',
+      }),
+      spawn: (() => child as never) as never,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      idleTimeoutMs: 0,
+      healthIntervalMs: 10_000_000,
+      onLog: () => {},
+      psRunner: async () => [],
+      beforeStop: async ({ reason, baseUrl }) => {
+        order.push(`flush:${reason}:${baseUrl}`);
+      },
+    });
+    await sup.ensureRunning();
+    await sup.stop();
+    expect(order).toEqual(['flush:stop:http://127.0.0.1:9998', 'kill:SIGTERM']);
+  });
+
+  it('never lets a hung or failing pre-stop hook block the stop, and skips it for health restarts', async () => {
+    for (const scenario of ['hang', 'throw', 'health'] as const) {
+      const child = makeFakeChild(4251);
+      let hookCalls = 0;
+      const sup = new NativeEngineSupervisor({
+        resolveLaunch: async () => ({
+          command: 'fake-engine',
+          args: [],
+          baseUrl: 'http://127.0.0.1:9997',
+        }),
+        spawn: (() => child as never) as never,
+        fetchImpl: async () => new Response('ok', { status: 200 }),
+        idleTimeoutMs: 0,
+        healthIntervalMs: 10_000_000,
+        onLog: () => {},
+        psRunner: async () => [],
+        beforeStopTimeoutMs: 20,
+        beforeStop: () => {
+          hookCalls++;
+          if (scenario === 'throw') throw new Error('engine gone');
+          return new Promise<void>(() => {});
+        },
+      });
+      await sup.ensureRunning();
+      await sup.stop(scenario === 'health' ? 'health-restart' : 'stop');
+      expect(child.signalCode).not.toBeNull();
+      expect(hookCalls).toBe(scenario === 'health' ? 0 : 1);
+    }
+  });
+
   it('exposes the live launch snapshot and hides it once the child exits', async () => {
     const child = makeFakeChild(5150);
     const fakeSpawn = (() =>

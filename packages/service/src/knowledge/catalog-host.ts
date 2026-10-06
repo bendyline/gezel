@@ -78,6 +78,8 @@ export interface KnowledgeCatalogHost {
   mount(spec: MountSpec): Promise<void>;
   unmount(key: string): Promise<void>;
   mounted(): Promise<string[]>;
+  /** Load a mounted catalog's vector bits ahead of its first search; resolves to the shards loaded. */
+  prewarm(key: string): Promise<number>;
   /** Deep or shallow validation of an extracted catalog dir (quarantine gate). */
   validate(rootDir: string, deep: boolean): Promise<CatalogValidationReport>;
   topics(key: string): Promise<CatalogTopic[]>;
@@ -243,6 +245,19 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
       handles.delete(key);
     },
     mounted: async () => [...handles.keys()],
+    prewarm: async (key) => {
+      const handle = mustGet(handles, key);
+      let loaded = 0;
+      // Stop if the catalog is unmounted mid-warm: a closed handle would
+      // reopen its shard connections to load the next one.
+      while (handles.get(key) === handle && handle.prewarmNextShard()) {
+        loaded++;
+        // Yield between shards so searches queued behind a large catalog's
+        // warm-up are answered instead of waiting for all of it.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      return loaded;
+    },
     validate: async (rootDir, deep) => validateExtractedCatalog(rootDir, { deep }),
     topics: async (key) => mustGet(handles, key).topics(),
     documentsPage: async (key, opts) => mustGet(handles, key).documentsPage(opts),

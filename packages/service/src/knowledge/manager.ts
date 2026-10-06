@@ -326,12 +326,16 @@ export class KnowledgeManager {
     });
     for (const entry of this.registry.read().catalogs) {
       if (!entry.enabled) continue;
-      await this.mountEntry(entry).catch((err) => {
+      await this.mountEntry(entry, { deferPrewarm: true }).catch((err) => {
         const reason = errorMessage(err);
         log.warn(`catalog ${entry.ref.catalogId} failed to mount: ${reason}`);
         this.registry.quarantine(entry.ref.publisherId, entry.ref.catalogId, reason);
       });
     }
+    // After every mount, not between them: the worker runs one op at a time,
+    // and boot awaits start(), so a warm-up queued per mount would hold the
+    // next catalog's validation — and the service — behind it.
+    for (const key of this.mountedByKey.keys()) this.prewarmVectors(key);
   }
 
   private async ensureBundledHandboek(): Promise<void> {
@@ -374,7 +378,7 @@ export class KnowledgeManager {
 
   private async mountEntry(
     entry: KnowledgeRegistryEntry,
-    opts: { justVerified?: boolean } = {},
+    opts: { justVerified?: boolean; deferPrewarm?: boolean } = {},
   ): Promise<void> {
     const ref = entry.ref;
     const key = this.keyFor(ref);
@@ -431,6 +435,29 @@ export class KnowledgeManager {
     });
     log.info(
       `mounted ${ref.catalogId}@${ref.version} (${manifest.counts.documents} documents, semantic search: ${semanticSearch})`,
+    );
+    if (!opts.deferPrewarm) this.prewarmVectors(key);
+  }
+
+  /**
+   * Load a catalog's vector bits in the worker now, in the background. The
+   * first semantic search otherwise loads them itself — ~300 ms for a
+   * 200k-chunk shard — inside its 600 ms scope budget, times out, and the
+   * knowledge arm answers nothing, keyword hits included. A failure here
+   * costs only that first search.
+   */
+  private prewarmVectors(key: string): void {
+    const info = this.mountedByKey.get(key);
+    if (!info?.vectorCompatible) return;
+    const started = performance.now();
+    this.opts.host.prewarm(key).then(
+      (shards) => {
+        if (shards === 0) return;
+        log.info(
+          `prewarmed ${info.ref.catalogId} vectors: ${shards} shard(s) in ${Math.round(performance.now() - started)}ms`,
+        );
+      },
+      (err) => log.warn(`vector prewarm for ${info.ref.catalogId} failed: ${errorMessage(err)}`),
     );
   }
 
@@ -1459,7 +1486,7 @@ export class KnowledgeManager {
       maxResults: number;
       projectId?: string;
       spatial?: KnowledgeRadius;
-      catalogs?: string[];
+      catalogs?: readonly string[];
       /** Search a profile group keyword-only when its query model is not ready by then. */
       queryEmbedBudgetMs?: number;
       /** Query cached profile models only, falling back to keywords when absent. */

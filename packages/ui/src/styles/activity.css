@@ -117,6 +117,10 @@
   align-items: center;
   gap: 0.5rem;
   font-size: var(--text-lg);
+}
+/* `.gz-dialog h3 { margin: 0 }` ties this on specificity and loads later,
+   which left the heading sitting directly on the first row beneath it. */
+.activity-panel .activity-section h3 {
   margin: 0 0 0.65rem;
 }
 .activity-question,
@@ -167,23 +171,34 @@
 .activity-warning p {
   margin: 0.3rem 0 0.6rem;
 }
-.activity-details {
-  margin-top: 1rem;
-}
-.activity-details > summary {
-  cursor: pointer;
-  padding: 0.4rem 0;
-  font-size: var(--text-sm);
-}
-.activity-queue-details.queue-meter-panel {
+/* The header queue's rows, set into Working and Next. The popover chrome
+   goes; the panel is wide enough for the job line to wrap instead of
+   clipping, and touch has no hover, so the row controls stay visible. */
+.activity-queue.queue-meter-panel {
   position: static;
+  z-index: auto;
   width: 100%;
   max-width: none;
   max-height: none;
-  padding: 0.5rem 0;
+  margin: 0 0 0.75rem;
+  padding: 0;
   border: 0;
+  border-radius: 0;
   box-shadow: none;
+  background: transparent;
   overflow: visible;
+  font-size: var(--text-sm);
+}
+.activity-queue .queue-meter-panel-item {
+  min-height: 2.1rem;
+  font-size: var(--text-sm);
+}
+.activity-queue .queue-meter-panel-context {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.activity-queue .queue-meter-panel-actions {
+  opacity: 1;
 }
 .activity-all-projects {
   align-self: flex-start;
@@ -204,6 +219,10 @@
   }
   .activity-panel .btn {
     min-height: 40px;
+  }
+  .activity-queue .queue-meter-panel-action:not(.queue-meter-panel-action-stop) {
+    min-width: 32px;
+    min-height: 32px;
   }
 }
 

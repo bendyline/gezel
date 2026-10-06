@@ -86,7 +86,9 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       ├── about.md         system prompt prose
 │       ├── icon.svg         current icon
 │       ├── icons/           last 5 variants, archived by timestamp
-│       ├── sessions/        {sessionId}.json — one per chat thread
+│       ├── sessions/        {sessionId}.json — one per chat thread; .wire/{sessionId}.json —
+│       │                    a local-engine session's exact transcript, reseeded after a restart
+│       │                    so the engine's persisted KV cache still matches
 │       ├── memories/        daily/YYYY-MM-DD.md + lessons.md + index/mem.db
 │       └── resources/
 ├── projects/
@@ -752,6 +754,7 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | A drafting shard wrote into the wrong pack folder | Its step used `{{task.num}}`, which `TaskManager.create` froze to the HOST's number when it snapshotted the spawn template. Spawn steps address their own pack with `{{diffpack.dir}}` |
 | Applying a proposal 409s with `drifted` | The target file changed since the proposal was sealed (`baseHash` mismatch). The UI names the files and offers to apply anyway; a hunk that genuinely no longer fits is still refused by the patcher |
 | A timeout reports far less elapsed than the log shows | The host slept through it. Look for a silent gap in the service log followed by several unrelated timers firing within milliseconds of each other, then confirm with `pmset -g log \| grep -E "Entering Sleep state\|DarkWake"`. The budget should have been an `AwakeBudget` — see the awake-time convention above |
+| An MLX chat says "Waiting for another chat to finish", or a task turn stalls while you chat | The sidecar runs requests in waves (see `docs/kv-prompt-caching-strategy.md` §5.2). Grep the MLX log for `[batch] queued`/`waiting`/`preempt`/`resume`/`admitted`: a background wave parks for an interactive request between steps, unless a `preempt held` line says memory was at the admission threshold or the running wave already serves a person. A request's priority comes from `engineTurnPriority` in chat/manager.ts — task steps and resumes are background |
 | A resident model unloads for no reason, and the next turn cold-loads | Idle eviction charged host sleep as idle time. `NativeEngineSupervisor` keeps `lastUsedAwakeAt` for the decision and `lastUsedAt` only for display; a re-arm (not an early return) is what keeps the eviction from leaking |
 | A chat turn died at shutdown and never came back | Was it task-scoped? Those rehydrate through `TaskRunner.rehydrateFromStore`; plain sessions go through `ChatManager.resumeInterruptedTurns`, which only re-drives a turn whose `turnStartedAt` stamp survived — cleared for a user stop, an interrupt, an emergency stop, and any ordinary failure (that one keeps `lastTurnError` + Retry). It is also held whole while engagement is `off`/`reactive`, and capped per boot |
 | A JSON file is a building, or a config file is a campus of little houses | File use is path policy in [core/filemap/file-use.ts](packages/core/src/filemap/file-use.ts): data → field, config → signal tower, style → park, everything else code. The renderer resolves it in `townStyleForBlock` and every campus consumer reads `hasSymbolCampus`. Adding a config basename or pattern goes there, once, for both renderers and the service's weight cap |

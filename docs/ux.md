@@ -559,8 +559,17 @@ the person away with “Open the task to continue.” Task navigation elsewhere
 is labelled **View task details** so it describes what opening the view does.
 
 Status failures retain the last known work and label it stale. Never turn a
-failed fetch into “All quiet.” Advanced queue controls live in an expandable
-section at the bottom. Engine, quota, and activity-setting keys remain separate.
+failed fetch into “All quiet.” Engine, quota, and activity-setting keys remain separate.
+
+**Working** opens with the gezels on an engine right now, one row each with its
+figure, its task or conversation, and **Stop**. **Next** opens with the gezels
+waiting for a slot, in dispatch order, with move up, move down, and cancel.
+These are the QueueMeter's rows, grouped by engine, and each row replaces its
+activity entry so a job is listed once. Row controls stay visible here, not
+on hover only: the panel has room, and touch has no hover. Paused tasks, and
+tasks in a paused project, are not listed. They will not run until someone
+resumes them, and listing them buried live work under every paused shard.
+The Tasks view is where paused work lives.
 
 
 **Dialog vs AlertDialog.** Use `AlertDialog` only for confirmations that

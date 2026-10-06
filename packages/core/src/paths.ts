@@ -341,6 +341,22 @@ export function gezelSessionFile(
 }
 
 /**
+ * A stateless session's exact wire transcript, checkpointed before each engine
+ * request so a restart can reseed the session with the prompt the engine last
+ * cached. In a hidden subfolder because every `*.json` directly in
+ * `sessions/` is read as a session.
+ */
+export function gezelSessionWireTranscriptFile(
+  root: string,
+  gezelId: string,
+  sessionId: string,
+  external?: ExternalFolders,
+): string {
+  assertSafeEntityId(sessionId, 'session id');
+  return join(gezelSessionsDir(root, gezelId, external), '.wire', `${sessionId}.json`);
+}
+
+/**
  * Per-gezel memories directory (daily markdown + summary + vectra index).
  * Moves with the gezel when externalized.
  */

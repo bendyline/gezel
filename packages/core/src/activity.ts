@@ -54,8 +54,11 @@ export function resolveActivity(input: {
   };
 
   for (const task of tasks) {
-    const status = taskEffectiveStatus(task);
-    if (status !== 'active' && status !== 'paused') continue;
+    // A paused task, or one in a paused project, is not going to run until
+    // someone resumes it. Listing it under Next buried live work beneath
+    // every paused fanout shard; the Tasks view is where paused work lives.
+    if (taskEffectiveStatus(task) !== 'active') continue;
+    if (input.inactiveProjectIds?.has(task.projectId)) continue;
     if (task.origin?.kind === 'system-job') continue;
     // Fanout hosts coordinate their children; recurring hosts represent a
     // future run and belong under Next, never under Working by lifecycle alone.
@@ -74,9 +77,7 @@ export function resolveActivity(input: {
       ...(assignee.kind === 'gezel' ? { gezelId: assignee.gezelId } : {}),
       ...(wait ? { since: wait.since, sessionId: wait.sessionId } : {}),
     };
-    if (status === 'paused') item.detail = step ? `Paused at: ${step.name}.` : 'Paused.';
-    else if (input.inactiveProjectIds?.has(task.projectId)) item.detail = 'This project is paused.';
-    else if (task.cron) {
+    if (task.cron) {
       item.detail = task.cron.nextTickAt ? `Scheduled · ${task.cron.nextTickAt}` : 'Scheduled.';
     } else if (assignee.kind === 'user') {
       item.section = 'needs-you';
@@ -137,7 +138,10 @@ export function resolveActivity(input: {
       ...existing,
       id,
       section: waiting ? 'next' : 'working',
-      title: existing?.title ?? (turn.userText.trim().slice(0, 180) || 'Conversation'),
+      title:
+        existing?.title ??
+        (turn.taskRef ? taskByRef.get(turn.taskRef)?.title : undefined) ??
+        (turn.userText.trim().slice(0, 180) || 'Conversation'),
       detail: waiting
         ? 'Waiting for a free model slot.'
         : turn.lastProgressAgoMs !== undefined

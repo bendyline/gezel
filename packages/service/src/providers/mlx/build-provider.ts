@@ -672,6 +672,13 @@ export async function buildMlxProvider(opts: {
     onFreeze: async () => {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },
+    // A deliberate stop (quit, restart, model switch, pressure) persists
+    // the sessions' KV while the engine can still answer: the sidecar's own
+    // shutdown flush races a SIGKILL three seconds later and lost a
+    // 98k-token session that way, so the next boot re-prefilled it.
+    beforeStop: async ({ baseUrl }) => {
+      await providerHolder.current?.getCacheAdapter()?.flushAll({ baseUrl, settleMs: 5_000 });
+    },
     onLog: (line) => {
       log.info(line);
       mlxLogFile.write(line);

@@ -631,6 +631,36 @@ GPU prefill; letting it run beside a live stream would starve the stream pre-fir
 adapter's `warm`/`warmPrefix` calls wrap in the injected `runExclusive`
 (`cache-adapter.ts:199,249`).
 
+**Who goes first (2026-10-05).** The gate (`providers/mlx/engine-gate.ts`) is width-N
+(`--max-concurrency`), hands freed slots to interactive requests before background ones, and lets
+ONE interactive request past the width when every request in flight is background work. The MLX
+`ProviderQueue` in front of it has the matching `engineOverflow` option, because task turns hold
+interactive-LANE slots for their whole length and would otherwise keep a person's turn from ever
+reaching the gate. Each
+request carries `priority` (`SendAndWaitOpts.queue.enginePriority`, from
+`engineTurnPriority` in `chat/manager.ts`): a person's message or answer is interactive; task
+steps, restart resumes, gezel-to-gezel messages, nudges and cache warms are background. Distinct
+from the queue LANE — task handoffs keep the interactive lane so chores cannot starve them.
+
+Inside the sidecar the BatchEngine runs **static waves** (a wave is admitted, prefilled and decoded
+to completion before the next starts), so a request that arrives mid-wave waits for all of it.
+`python/wave_policy.py` owns the scheduling decisions:
+
+- a wave with an interactive request waiting is interactive-only (a co-admitted background
+  prompt would land inside the person's time-to-first-token);
+- a wave made only of background work **parks** between steps — a batched `next()`, a spec
+  wave's prefill chunk or committed round — while waiting interactive requests run on a spare
+  BatchGenerator, then resumes where it stopped with its KV, generator and logits-processor state
+  untouched (verified byte-identical greedy output on both paths, qwen3.8-27b + MTP). While a
+  spec wave's rounds own the drafter, the interactive wave decodes without speculation. Refused
+  when live memory is at the admission threshold.
+- every request the engine is holding gets a `[batch] waiting` (queued) or `[batch] paused`
+  (parked) marker from the worker loop every 8 s, and `[batch] admitted` when it starts. The
+  provider re-arms the request's idle watchdog on each — a turn waiting its turn is not a stall —
+  and the pill reads "Waiting for another chat to finish" / "Paused while a chat goes first".
+  Before this, a 300-token question waited behind a 55k-token re-prefill labelled "Processing
+  prompt" and was aborted at 407 s by the pre-first-byte bound without ever starting.
+
 ### 5.3 L3 — `CapacityBroker` + `ProviderPool` (admission & eviction)
 
 - **`CapacityBroker`** (`providers/native/capacity-broker.ts`) is admission control by
@@ -700,14 +730,15 @@ manages the same pool from outside and can drift between reconciles.
 
 Two controller methods do all invalidation: `invalidate(sessionId)` (one session, all providers)
 and `invalidateProvider(providerName)` (whole provider). Both call `adapter.evict(...)`
-best-effort.
+best-effort. A third, `forgetProvider(providerName)`, drops only the controller's own bookkeeping
+and leaves the engine's entries alone.
 
 | Event | Call site | Method |
 |---|---|---|
 | **Compaction** (`compactInFlight`) | `chat/manager.ts:5167` | `invalidate(record.id)` |
 | **Archive** (`archiveSession`) | `chat/manager.ts:2928` | `invalidate(sessionId)` |
 | **Delete** (`deleteSession`) | `chat/manager.ts:3146` | `invalidate(sessionId)` |
-| **Reset / credential rotation** (`resetClient`) | `chat/manager.ts:5273` | `invalidateProvider(name)` |
+| **Reset / credential rotation** (`resetClient`) | `chat/manager.ts` | `forgetProvider(name)` — bookkeeping only |
 | **Operator evict** `/api/cache/evict` | `chat/manager.ts:1187` | `invalidate(sessionId)` |
 | **Operator clear** `/api/cache/clear` | `chat/manager.ts:1196` | `invalidateProvider(...)` |
 
@@ -718,8 +749,15 @@ would be wrong; dropping it forces a clean re-prefill against the shorter list
 (`chat/manager.ts:5163-5167`). Note this invalidates the per-*session* `cache_id`, not the gezel
 *prefix* hash — compaction touches `record.messages`, never the system prefix.
 
+**Why a reset must NOT evict:** `resetClient` rebuilds the provider *object*, not the engine. An
+engine that outlives it (a live settings change, an external or machine-wide engine across a
+daemon restart) still holds valid per-session entries, checked token by token on reuse — a stale
+one costs nothing, a deleted one costs a full re-prefill. Evicting there wiped, from memory and
+disk, the entry a session was about to resume from (measured: an 8.2k-token session fell back to
+its 5k-token band after a daemon restart).
+
 **Model switch** has no dedicated invalidate at the manager level: a provider rebuild goes through
-`resetClient → invalidateProvider`, and a system-prompt change (which a tier swap can cause)
+`resetClient → forgetProvider`, and a system-prompt change (which a tier swap can cause)
 naturally rotates the prefix hash so the adapter seeds a new prefix and orphans the old — no
 explicit call needed. The disk cache is segmented by model fingerprint so stale KV can never load
 against new weights regardless.
@@ -753,7 +791,27 @@ KV state survives process death so a returning user doesn't pay cold prefill.
   `llama-server` exits, the slot-save endpoint is gone (`providers/llama-cpp/provider.ts:650`).
 - **In-engine LRU + disk pruning (MLX):** the fork evicts in-memory entries to 80% of
   `--cache-budget-mb` (never evicting the only entry), saving each to disk first; a separate
-  disk-LRU prunes to `--disk-cache-budget-mb` (default 8 GB; 0 disables).
+  disk-LRU prunes to `--disk-cache-budget-mb` (default 8 GB; 0 disables) and never prunes the
+  newest file — one 120k-token qwen3.8-27b session outgrows the default on its own.
+- **Shutdown ordering (MLX):** a deliberate stop runs the supervisor's `beforeStop` hook first —
+  `POST /admin/flush?settle_ms=5000` while the engine is still serving. The engine's own shutdown
+  flush gets only the 3 s SIGTERM→SIGKILL grace, and lost a 98k-token session that way
+  (2026-10-05): the restarted task re-prefilled 55k tokens while a person's chat waited behind it.
+  `settle_ms` lets turns the daemon just cancelled file their snapshots first. Flushes write only
+  dirty entries, so the SIGTERM-time flush that follows is a no-op.
+- **Cancelled turns keep their prompt (MLX):** a cancelled request files its end-of-prompt
+  snapshot (or, for a spec wave stopped mid-prefill, the prefix it reached) instead of dropping
+  it, so a retry — or the resume after a restart — extends it.
+- **Divergent session entries fall back to the band (MLX):** a session entry that diverges and
+  cannot be trimmed used to cost a full prefill; the seed now falls back to the request's prefix
+  entries and logs `[batch] seed fallback … ` plus the `[batch] churn` preview.
+- **Restart continuity (MLX):** the rebuild from saved history (`buildToolEvidenceReplay`) dedupes,
+  budgets and labels tool results, so it agrees with the cached prompt only up to the system head.
+  Each MLX request checkpoints the session's exact transcript
+  (`gezels/{id}/sessions/.wire/{sessionId}.json`, through `Store`), and a session rebuilt while the
+  saved history still matches the checkpoint is reseeded with it verbatim — `reseeded from its wire
+  transcript` in the daemon log, `mode=extension` in the engine's. See
+  `chat/wire-transcript-checkpoint.ts` for the accepted shapes.
 
 ---
 

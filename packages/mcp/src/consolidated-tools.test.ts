@@ -803,6 +803,26 @@ describe('consolidated MCP tools', () => {
     });
   });
 
+  it('searches only knowledge when catalogs are named and sources are not', async () => {
+    const bodies: Array<Record<string, unknown> | undefined> = [];
+    handler = (_url, _method, body) => {
+      bodies.push(body);
+      return { results: [], truncated: false, craftbooks: [] };
+    };
+
+    await client.callTool({
+      name: 'search',
+      arguments: { query: 'blob indexer', catalogs: ['azure-docs-main'] },
+    });
+    await client.callTool({
+      name: 'search',
+      arguments: { query: 'blob indexer', catalogs: ['azure-docs-main'], sources: ['shared'] },
+    });
+
+    expect(bodies[0]).toMatchObject({ catalogs: ['azure-docs-main'], sources: ['knowledge'] });
+    expect(bodies[1]).toMatchObject({ catalogs: ['azure-docs-main'], sources: ['shared'] });
+  });
+
   it('does not report a timed-out source as an empty corpus', async () => {
     handler = () => ({ results: [], truncated: true, sourcesIncomplete: true, craftbooks: [] });
 

@@ -493,3 +493,132 @@ describe('Activity human steps without a question card', () => {
     expect(api.completeTaskStep).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Activity crew rows', () => {
+  function crewSnapshot(): ActivityStatusResponse {
+    const current = snapshot([]);
+    current.queues.providers = {
+      mlx: {
+        running: 1,
+        queuedInteractive: 2,
+        queuedBackground: 0,
+        concurrency: 2,
+        maxConcurrency: 1,
+        active: [
+          {
+            sessionId: 's-run',
+            gezelId: 'maya',
+            projectId: 'shop',
+            job: 'shop/1 · write',
+            runningForMs: 12_000,
+          },
+        ],
+        pending: [
+          {
+            id: 7,
+            lane: 'interactive',
+            sessionId: 's-wait-a',
+            gezelId: 'maya',
+            projectId: 'shop',
+            waitedMs: 4_000,
+          },
+          {
+            id: 8,
+            lane: 'interactive',
+            sessionId: 's-wait-b',
+            gezelId: 'maya',
+            projectId: 'shop',
+            waitedMs: 2_000,
+          },
+        ],
+      },
+    };
+    current.items = [
+      {
+        id: 'task:shop/1',
+        section: 'working',
+        title: 'Autumn newsletter',
+        detail: 'Working on it.',
+        projectId: 'shop',
+        gezelId: 'maya',
+        taskRef: 'shop/1',
+        sessionId: 's-run',
+        questionIds: [],
+      },
+      {
+        id: 'session:s-wait-a',
+        section: 'next',
+        title: 'Draft the welcome email',
+        detail: 'Waiting for a free model slot.',
+        projectId: 'shop',
+        gezelId: 'maya',
+        sessionId: 's-wait-a',
+        questionIds: [],
+      },
+      {
+        id: 'session:s-wait-b',
+        section: 'next',
+        title: 'Summarize the reviews',
+        detail: 'Waiting for a free model slot.',
+        projectId: 'shop',
+        gezelId: 'maya',
+        sessionId: 's-wait-b',
+        questionIds: [],
+      },
+      {
+        id: 'task:shop/2',
+        section: 'next',
+        title: 'Spring catalog',
+        detail: 'Scheduled for the next Night Shift.',
+        projectId: 'shop',
+        taskRef: 'shop/2',
+        questionIds: [],
+      },
+    ];
+    return current;
+  }
+  async function openCrew() {
+    vi.mocked(api.getActivityStatus).mockResolvedValue(crewSnapshot());
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'maya', name: 'Maya', role: 'Writer' }],
+    } as never);
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: /Activity — 1 working/ }));
+    return screen.getByRole('dialog', { name: 'What’s going on' });
+  }
+
+  it('lists the running gezel under Working with Stop, once', async () => {
+    const dialog = await openCrew();
+    const working = within(dialog).getByRole('region', { name: 'Working' });
+    const stop = await within(working).findByRole('button', { name: 'Stop active chat with Maya' });
+    expect(within(working).getByText(/Autumn newsletter/)).toBeVisible();
+    expect(
+      within(working).getByRole('button', { name: 'View task details for Autumn newsletter' }),
+    ).toBeVisible();
+    // The row stands in for the activity entry instead of repeating it.
+    expect(within(working).queryByRole('button', { name: 'View task details' })).toBeNull();
+    await userEvent.click(stop);
+    expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('s-run', { stopTask: true });
+  });
+
+  it('lists waiting gezels under Next with reorder and cancel, before scheduled work', async () => {
+    const dialog = await openCrew();
+    const next = within(dialog).getByRole('region', { name: 'Next' });
+    const up = within(next).getAllByRole('button', { name: 'Move up' });
+    const down = within(next).getAllByRole('button', { name: 'Move down' });
+    expect(up).toHaveLength(2);
+    expect(up[0]).toBeDisabled();
+    expect(down[1]).toBeDisabled();
+    expect(within(next).getByText(/Draft the welcome email/)).toBeVisible();
+    expect(within(next).queryByText('Waiting for a free model slot.')).toBeNull();
+    expect(within(next).getByText('Spring catalog')).toBeVisible();
+    await userEvent.click(down[0]!);
+    expect(api.moveProviderQueueItem).toHaveBeenCalledWith('mlx', 7, 'down');
+    await userEvent.click(within(next).getAllByRole('button', { name: 'Cancel queued turn' })[1]!);
+    expect(api.cancelProviderQueueItem).toHaveBeenCalledWith('mlx', 8);
+  });
+});

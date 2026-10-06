@@ -140,6 +140,7 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
       await call('unmount', [key]);
     },
     mounted: async () => (await call('mounted', [])) as string[],
+    prewarm: async (key) => (await call('prewarm', [key])) as number,
     validate: async (rootDir, deep) =>
       // biome-ignore lint/suspicious/noExplicitAny: worker returns the structured report verbatim
       (await call('validate', [rootDir, deep])) as any,

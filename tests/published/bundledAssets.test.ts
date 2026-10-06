@@ -151,6 +151,7 @@ describe('service bundled assets', () => {
       'spec_decode.py',
       'cache_seed.py',
       'cache_persist.py',
+      'wave_policy.py',
     ]) {
       expect(existsSync(resolve(service.dist, 'providers/mlx/python', f)), f).toBe(true);
     }

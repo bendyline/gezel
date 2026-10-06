@@ -334,10 +334,15 @@ function QueueItemOpenButton({
   sessionId,
   actor,
   onClose,
+  onOpen,
+  label,
 }: {
   sessionId: string | undefined;
   actor: string;
   onClose: () => void;
+  /** Replaces opening the chat, e.g. to open the task the turn belongs to. */
+  onOpen?: (() => void) | undefined;
+  label?: string | undefined;
 }) {
   // Paired-device queue ids are namespaced for isolation and do not identify
   // a session in this app's local store.
@@ -346,9 +351,9 @@ function QueueItemOpenButton({
     <button
       type="button"
       className="queue-meter-panel-item-open"
-      aria-label={`Open chat with ${actor}`}
-      title="Open this chat"
-      onClick={() => void openQueuedChat(sessionId, onClose)}
+      aria-label={label ?? `Open chat with ${actor}`}
+      title={label ?? 'Open this chat'}
+      onClick={() => (onOpen ? onOpen() : void openQueuedChat(sessionId, onClose))}
     />
   );
 }
@@ -479,6 +484,7 @@ function QueueItemIdentity({
   gezels,
   projects,
   boringMode,
+  title,
   job,
   phase,
   extra,
@@ -489,6 +495,8 @@ function QueueItemIdentity({
   gezels: Map<string, GezelSummary>;
   projects: Map<string, Project>;
   boringMode: boolean;
+  /** The task or conversation this turn serves, when the caller knows it. */
+  title?: string | undefined;
   job?: string | undefined;
   phase?: string | undefined;
   extra?: string | undefined;
@@ -497,8 +505,9 @@ function QueueItemIdentity({
   const role = queueActorRole(actor);
   const project = queueProjectLabel(projectId, projects);
   const visibleJob = queueJobContext(job, projectId, project);
-  const context = [role, project, visibleJob, phase, extra].filter((value): value is string =>
-    Boolean(value),
+  const heading = title?.trim() && title.trim() !== visibleJob ? title.trim() : undefined;
+  const context = [heading, role, project, visibleJob, phase, extra].filter(
+    (value): value is string => Boolean(value),
   );
   return (
     <span className="queue-meter-panel-gezel" title={queueActorTooltip(actor, projectId, projects)}>
@@ -512,11 +521,20 @@ function QueueItemIdentity({
   );
 }
 
-export function QueueMeter() {
-  const [status, setStatus] = useState<QueueStatusResponse | null>(null);
-  const [open, setOpen] = useState(false);
-  const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
-  const [projects, setProjects] = useState<Map<string, Project>>(new Map());
+/**
+ * Live phase state for local-engine turns, plus the turns still waiting on
+ * an engine that has not registered its queue yet. Shared by the header
+ * meter and the Activity panel so both describe a turn the same way.
+ * Holds no connection while `enabled` is false.
+ */
+export function useQueueLiveTurns(
+  enabled: boolean,
+  status: QueueStatusResponse | null | undefined,
+): {
+  liveTurns: Map<string, LiveTurnState>;
+  preparingTurns: Array<[string, LiveTurnState]>;
+  onDeviceProvider: QueueProviderName | null;
+} {
   // Configured active provider — derived from /api/config rather than
   // `status.providers`, which only lists providers that have *finished*
   // initializing. During an on-device model load (the "Preparing"
@@ -525,6 +543,77 @@ export function QueueMeter() {
   // up. Config tells us which on-device engine is active throughout.
   // Mirrors EngineStatusPill, which stays visible across the same gap.
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
+
+  // Track the configured provider on the same 10s cadence the pill
+  // uses, so a Settings switch (or the active engine changing) is
+  // reflected without a reload.
+  useEffect(() => {
+    if (!enabled) return;
+    const refreshConfig = () => {
+      api
+        .getConfig()
+        .then((c: ConfigResponse) => setActiveProvider(c.provider ?? null))
+        .catch(() => {});
+    };
+    refreshConfig();
+    const t = setInterval(refreshConfig, 10_000);
+    return () => clearInterval(t);
+  }, [enabled]);
+
+  // Every session the provider queues already account for. The live-turn
+  // stream and `/api/queues` describe the same turns from two sides, so
+  // without this a turn can be listed twice: a ds4 ("DwarfStar") turn
+  // appeared both under its own in-flight section and, seconds apart,
+  // as a waiting row under "This Mac" because the configured engine had
+  // simply never registered a queue.
+  const queuedSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!status) return ids;
+    for (const name of PROVIDER_ORDER) {
+      const state = status.providers[name];
+      if (!state) continue;
+      for (const item of state.active) if (item.sessionId) ids.add(item.sessionId);
+      for (const item of state.pending) if (item.sessionId) ids.add(item.sessionId);
+    }
+    return ids;
+  }, [status]);
+
+  // Which on-device engine, if any, is the active provider. Drives the
+  // live-turn subscription so it stays open across the "Preparing"
+  // window (when the provider is missing from `status.providers`). A
+  // cloud-only user resolves to null and never holds a connection.
+  const onDeviceProvider: QueueProviderName | null = enabled
+    ? (LOCAL_ENGINE_PROVIDERS.find((name) => name === activeProvider) ?? null)
+    : null;
+  const liveTurns = useOnDeviceLiveTurns(onDeviceProvider !== null);
+
+  // Preparing-window turns: in-flight on-device turns that aren't yet
+  // represented in the provider queue because the engine is still
+  // loading (so `status.providers[onDeviceProvider]` is undefined).
+  // Once the provider registers, its `active`/`pending` rows take over
+  // and this list goes empty — no double-render with the busy chips.
+  const onDeviceState = onDeviceProvider ? status?.providers[onDeviceProvider] : undefined;
+  const preparingTurns: Array<[string, LiveTurnState]> =
+    onDeviceProvider && !onDeviceState
+      ? Array.from(liveTurns.entries()).filter(
+          ([sessionId, turn]) =>
+            !queuedSessionIds.has(sessionId) &&
+            // The stream carries every local engine's turns; only the one
+            // this section is named after belongs here. A turn whose engine
+            // hasn't identified itself yet (seeded by `user_message` ahead
+            // of the first phase event) is still ours to show.
+            (turn.provider === undefined || turn.provider === onDeviceProvider),
+        )
+      : [];
+
+  return { liveTurns, preparingTurns, onDeviceProvider };
+}
+
+export function QueueMeter() {
+  const [status, setStatus] = useState<QueueStatusResponse | null>(null);
+  const [open, setOpen] = useState(false);
+  const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
+  const [projects, setProjects] = useState<Map<string, Project>>(new Map());
   const rootRef = useRef<HTMLDivElement | null>(null);
   const popoverStyle = useStableHeaderPopoverPosition(rootRef, open, 8);
   const gezelRefreshSeqRef = useRef(0);
@@ -575,21 +664,6 @@ export function QueueMeter() {
       .catch(() => {});
   }, []);
 
-  // Track the configured provider on the same 10s cadence the pill
-  // uses, so a Settings switch (or the active engine changing) is
-  // reflected without a reload.
-  useEffect(() => {
-    const refreshConfig = () => {
-      api
-        .getConfig()
-        .then((c: ConfigResponse) => setActiveProvider(c.provider ?? null))
-        .catch(() => {});
-    };
-    refreshConfig();
-    const t = setInterval(refreshConfig, 10_000);
-    return () => clearInterval(t);
-  }, []);
-
   // Close the popover on outside-click. The click *inside* the root
   // is filtered in the handler so the toggle button's click isn't
   // preempted.
@@ -622,54 +696,11 @@ export function QueueMeter() {
     }).map((name) => ({ name, state: status.providers[name]! }));
   }, [status]);
 
-  // Every session the provider queues already account for. The live-turn
-  // stream and `/api/queues` describe the same turns from two sides, so
-  // without this a turn can be listed twice: a ds4 ("DwarfStar") turn
-  // appeared both under its own in-flight section and, seconds apart,
-  // as a waiting row under "This Mac" because the configured engine had
-  // simply never registered a queue.
-  const queuedSessionIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (!status) return ids;
-    for (const name of PROVIDER_ORDER) {
-      const state = status.providers[name];
-      if (!state) continue;
-      for (const item of state.active) if (item.sessionId) ids.add(item.sessionId);
-      for (const item of state.pending) if (item.sessionId) ids.add(item.sessionId);
-    }
-    return ids;
-  }, [status]);
-
-  // Which on-device engine, if any, is the active provider. Drives the
-  // live-turn subscription so it stays open across the "Preparing"
-  // window (when the provider is missing from `status.providers`). A
-  // cloud-only user resolves to null and never holds a connection.
-  const onDeviceProvider: QueueProviderName | null =
-    LOCAL_ENGINE_PROVIDERS.find((name) => name === activeProvider) ?? null;
-  const liveTurns = useOnDeviceLiveTurns(onDeviceProvider !== null);
+  const { liveTurns, preparingTurns, onDeviceProvider } = useQueueLiveTurns(true, status);
 
   // Only work waiting on the engine counts here. Night-shift handoffs are
   // excluded on purpose — see `taskHandoffSplit`.
   const taskRunnerPending = taskHandoffSplit(status?.taskRunner).dispatchable.count;
-
-  // Preparing-window turns: in-flight on-device turns that aren't yet
-  // represented in the provider queue because the engine is still
-  // loading (so `status.providers[onDeviceProvider]` is undefined).
-  // Once the provider registers, its `active`/`pending` rows take over
-  // and this list goes empty — no double-render with the busy chips.
-  const onDeviceState = onDeviceProvider ? status?.providers[onDeviceProvider] : undefined;
-  const preparingTurns: Array<[string, LiveTurnState]> =
-    onDeviceProvider && !onDeviceState
-      ? Array.from(liveTurns.entries()).filter(
-          ([sessionId, turn]) =>
-            !queuedSessionIds.has(sessionId) &&
-            // The stream carries every local engine's turns; only the one
-            // this section is named after belongs here. A turn whose engine
-            // hasn't identified itself yet (seeded by `user_message` ahead
-            // of the first phase event) is still ours to show.
-            (turn.provider === undefined || turn.provider === onDeviceProvider),
-        )
-      : [];
 
   // Nothing busy and nothing preparing → render nothing. Keeps the
   // header clean on the common idle case.
@@ -829,8 +860,388 @@ function QueueKeyIcon() {
   );
 }
 
-export function QueueMeterPanel({
-  embedded = false,
+/** Engine-level counts for one provider queue, worded the same in every queue view. */
+function providerQueueSummary(state: ProviderQueueState) {
+  const running = state.running;
+  const queued = state.queuedInteractive + state.queuedBackground;
+  const deferred = Math.min(queued, state.ambientHeld ?? 0);
+  const readyQueued = queued - deferred;
+  // The engine's real width, not `concurrency` — that carries an extra
+  // logical lane so a mid-turn one-shot can enter the queue, and using
+  // it as a denominator advertises a slot no turn can occupy.
+  // `interactiveConcurrency` is the queue's live foreground width and
+  // provides a rolling-upgrade fallback when an older broker reports a
+  // stale serial `maxConcurrency`. Never use total queue concurrency as
+  // the first fallback: local queues include one logical background
+  // lease that is not a physical engine slot.
+  const slots = Math.max(
+    1,
+    state.maxConcurrency ?? 0,
+    state.interactiveConcurrency ?? 0,
+    state.maxConcurrency === undefined && state.interactiveConcurrency === undefined
+      ? state.concurrency
+      : 0,
+  );
+  // Capacity only answers a useful question while something is waiting.
+  // When every known item is already running, prefer the plain count —
+  // besides reading more naturally, it avoids an impossible-looking
+  // `2 / 1` during a rolling-upgrade snapshot with stale capacity data.
+  const inFlightLabel =
+    queued > 0 && running <= slots ? `${running} / ${slots} in flight` : `${running} in flight`;
+  const backgroundCap = state.backgroundConcurrency;
+  const laneNote =
+    backgroundCap !== undefined && slots > 1 && backgroundCap < slots
+      ? `Chats can use all ${slots} slots. Background work takes at most ${backgroundCap}, so a chat can always start.`
+      : undefined;
+  return { queued, deferred, readyQueued, inFlightLabel, laneNote };
+}
+
+function useStopActiveChat(onItemChanged: () => void) {
+  const [stopping, setStopping] = useState<Set<string>>(() => new Set());
+  const release = useCallback((sessionId: string) => {
+    setStopping((current) => {
+      const next = new Set(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
+  const stop = useCallback(
+    async (sessionId: string) => {
+      setStopping((current) => new Set(current).add(sessionId));
+      try {
+        const result = await api.cancelChatSessionTurn(sessionId, { stopTask: true });
+        if (!result.cancelled) release(sessionId);
+        onItemChanged();
+      } catch {
+        // Keep the control retryable if the service could not be reached.
+        release(sessionId);
+      }
+    },
+    [onItemChanged, release],
+  );
+  return { stopping, stop };
+}
+
+/**
+ * What the surrounding surface knows about the work behind a session — the
+ * task's title, and where opening the row should go instead of the chat.
+ */
+export type QueueRowContext = (
+  sessionId: string,
+) => { title?: string; open?: () => void; openLabel?: string } | undefined;
+
+interface QueueRowShared {
+  gezels: Map<string, GezelSummary>;
+  projects: Map<string, Project>;
+  boringMode: boolean;
+  onClose: () => void;
+  rowContext?: QueueRowContext | undefined;
+}
+
+function QueuePreparingRow({
+  sessionId,
+  turn,
+  onItemChanged,
+  gezels,
+  projects,
+  boringMode,
+  onClose,
+  rowContext,
+}: QueueRowShared & {
+  sessionId: string;
+  turn: LiveTurnState;
+  onItemChanged: () => void;
+}) {
+  const context = rowContext?.(sessionId);
+  return (
+    <li className="queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-interactive">
+      <QueueItemOpenButton
+        sessionId={sessionId}
+        actor={describeActor(turn.gezelId, undefined, gezels, boringMode)}
+        onClose={onClose}
+        onOpen={context?.open}
+        label={context?.openLabel}
+      />
+      <QueueItemMarker
+        gezelId={turn.gezelId}
+        actorLabel={undefined}
+        gezels={gezels}
+        boringMode={boringMode}
+        kind="preparing"
+      />
+      <QueueItemIdentity
+        gezelId={turn.gezelId}
+        actorLabel={undefined}
+        projectId={turn.projectId}
+        gezels={gezels}
+        projects={projects}
+        boringMode={boringMode}
+        title={context?.title}
+        phase={queuePhaseLabel(turn)}
+      />
+      <span className="queue-meter-panel-time muted">
+        {formatMs(Math.max(0, Date.now() - turn.startedAt))}
+      </span>
+      <span className="queue-meter-panel-actions">
+        {/* No reorder while preparing — the engine hasn't
+            started dispatching, so there's no queue order to
+            nudge. Cancel is safe to call even before the turn
+            runs (see api.cancelChatSessionTurn). */}
+        <button
+          type="button"
+          className="queue-meter-panel-action queue-meter-panel-action-cancel"
+          aria-label="Cancel queued turn"
+          title="Cancel this queued turn"
+          onClick={() => {
+            void api
+              .cancelChatSessionTurn(sessionId)
+              .then(onItemChanged)
+              .catch(() => {});
+          }}
+        >
+          ×
+        </button>
+      </span>
+    </li>
+  );
+}
+
+function QueueActiveRow({
+  provider,
+  row,
+  status,
+  liveTurns,
+  stopping,
+  onStop,
+  gezels,
+  projects,
+  boringMode,
+  onClose,
+  rowContext,
+}: QueueRowShared & {
+  provider: QueueProviderName;
+  row: ProviderQueueState['active'][number];
+  status: QueueStatusResponse;
+  liveTurns: Map<string, LiveTurnState>;
+  stopping: Set<string>;
+  onStop: (sessionId: string) => void;
+}) {
+  // For local-engine turns, look up the current phase so
+  // the user can see what the engine is actually doing
+  // instead of just "gezel + 58s".
+  const phase =
+    isLocalEngineProvider(provider) && row.sessionId ? liveTurns.get(row.sessionId) : undefined;
+  // Phase 3: surface the cache-warm signal next to
+  // active turns. The session's cache entry is keyed by
+  // sessionId on whichever engine adapter the
+  // controller uses; we look it up via the per-provider
+  // cache stats in the same /api/queues poll.
+  const cacheEntry =
+    row.sessionId && status?.cache
+      ? status.cache
+          .find((c) => c.providerName === provider)
+          ?.sessions.find((s) => s.sessionId === row.sessionId)
+      : undefined;
+  const actor = describeActor(row.gezelId, row.actorLabel, gezels, boringMode);
+  const activeSessionId =
+    row.sessionId && !row.sessionId.startsWith('dev:') ? row.sessionId : undefined;
+  const connectedApp = connectedAppName(row.actorLabel);
+  const isStopping = activeSessionId ? stopping.has(activeSessionId) : false;
+  const context = row.sessionId ? rowContext?.(row.sessionId) : undefined;
+  return (
+    <li className="queue-meter-panel-item queue-meter-panel-item-active">
+      <QueueItemOpenButton
+        sessionId={row.sessionId}
+        actor={actor}
+        onClose={onClose}
+        onOpen={context?.open}
+        label={context?.openLabel}
+      />
+      <QueueItemMarker
+        gezelId={row.gezelId}
+        actorLabel={row.actorLabel}
+        gezels={gezels}
+        boringMode={boringMode}
+        kind="active"
+      />
+      <QueueItemIdentity
+        gezelId={row.gezelId}
+        actorLabel={row.actorLabel}
+        projectId={row.projectId}
+        gezels={gezels}
+        projects={projects}
+        boringMode={boringMode}
+        title={context?.title}
+        job={row.job}
+        phase={queuePhaseLabel(phase)}
+        extra={cacheEntry ? 'cached' : undefined}
+      />
+      <span
+        className="queue-meter-panel-time muted"
+        title={`Running for ${formatMs(row.runningForMs)}`}
+      >
+        {formatMs(row.runningForMs)}
+      </span>
+      {activeSessionId && (
+        <span className="queue-meter-panel-actions queue-meter-panel-actions-active">
+          <button
+            type="button"
+            className="queue-meter-panel-action queue-meter-panel-action-stop"
+            aria-label={`Stop active chat with ${actor}`}
+            title="Stop this active chat"
+            disabled={isStopping}
+            onClick={() => onStop(activeSessionId)}
+          >
+            {isStopping ? 'Stopping…' : '■ Stop'}
+          </button>
+        </span>
+      )}
+      {!activeSessionId && (
+        <span
+          className="queue-meter-panel-active-status muted"
+          title={
+            connectedApp
+              ? `${connectedApp} controls this request. Stop it from ${connectedApp}.`
+              : 'This work has no chat session to stop from this queue.'
+          }
+        >
+          {connectedApp ? `In flight via ${connectedApp}` : 'In flight'}
+        </span>
+      )}
+    </li>
+  );
+}
+
+function QueuePendingRow({
+  provider,
+  row,
+  peers,
+  deferred,
+  onItemChanged,
+  gezels,
+  projects,
+  boringMode,
+  onClose,
+  rowContext,
+}: QueueRowShared & {
+  provider: QueueProviderName;
+  row: ProviderQueueState['pending'][number];
+  /** The provider's whole pending list, in dispatch order. */
+  peers: ProviderQueueState['pending'];
+  deferred: number;
+  onItemChanged: () => void;
+}) {
+  // Reorder is constrained to same-lane neighbours
+  // (the dispatcher's lane invariant trumps any
+  // user nudge), so disable ↑/↓ when the item is at
+  // the lane edge. Compute the lane-local index from
+  // the same `pending` array the server returns.
+  const lanePeers = peers.filter((q) => q.lane === row.lane);
+  const laneIdx = lanePeers.findIndex((q) => q.id === row.id);
+  const isFirstInLane = laneIdx === 0;
+  const isLastInLane = laneIdx === lanePeers.length - 1;
+  const context = row.sessionId ? rowContext?.(row.sessionId) : undefined;
+  return (
+    <li
+      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-waiting queue-meter-panel-item-${row.lane}`}
+    >
+      <QueueItemOpenButton
+        sessionId={row.sessionId}
+        actor={describeActor(row.gezelId, row.actorLabel, gezels, boringMode)}
+        onClose={onClose}
+        onOpen={context?.open}
+        label={context?.openLabel}
+      />
+      <QueueItemMarker
+        gezelId={row.gezelId}
+        actorLabel={row.actorLabel}
+        gezels={gezels}
+        boringMode={boringMode}
+        kind={row.lane}
+      />
+      <QueueItemIdentity
+        gezelId={row.gezelId}
+        actorLabel={row.actorLabel}
+        projectId={row.projectId}
+        gezels={gezels}
+        projects={projects}
+        boringMode={boringMode}
+        title={context?.title}
+        job={row.job}
+        extra={row.ambient && deferred > 0 ? 'deferred until idle' : undefined}
+      />
+      <span
+        className="queue-meter-panel-time muted"
+        title={`Waiting ${formatMs(row.waitedMs)} for a free slot`}
+      >
+        {formatMs(row.waitedMs)}
+      </span>
+      <span className="queue-meter-panel-actions">
+        <button
+          type="button"
+          className="queue-meter-panel-action"
+          aria-label="Move up"
+          title="Move higher in queue"
+          disabled={isFirstInLane}
+          onClick={() => {
+            void api
+              .moveProviderQueueItem(provider, row.id, 'up')
+              .then(onItemChanged)
+              .catch(() => {});
+          }}
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          className="queue-meter-panel-action"
+          aria-label="Move down"
+          title="Move lower in queue"
+          disabled={isLastInLane}
+          onClick={() => {
+            void api
+              .moveProviderQueueItem(provider, row.id, 'down')
+              .then(onItemChanged)
+              .catch(() => {});
+          }}
+        >
+          ▼
+        </button>
+        <button
+          type="button"
+          className="queue-meter-panel-action queue-meter-panel-action-cancel"
+          aria-label="Cancel queued turn"
+          title="Cancel this queued turn"
+          onClick={() => {
+            void api
+              .cancelProviderQueueItem(provider, row.id)
+              .then(onItemChanged)
+              .catch(() => {});
+          }}
+        >
+          ×
+        </button>
+      </span>
+    </li>
+  );
+}
+
+function QueuePreparingHeader({
+  provider,
+  count,
+}: {
+  provider: QueueProviderName;
+  count: number;
+}) {
+  return (
+    <header className="queue-meter-panel-provider">
+      <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(provider)}</span>
+      <span className="muted small">starting engine · {count} waiting</span>
+    </header>
+  );
+}
+
+function QueueMeterPanel({
   style,
   status,
   gezels,
@@ -842,7 +1253,6 @@ export function QueueMeterPanel({
   onClose,
   onItemChanged,
 }: {
-  embedded?: boolean;
   style?: CSSProperties;
   status: QueueStatusResponse;
   gezels: Map<string, GezelSummary>;
@@ -866,7 +1276,7 @@ export function QueueMeterPanel({
    *  parent can refresh the snapshot without waiting for the 3s poll. */
   onItemChanged: () => void;
 }) {
-  const [stoppingSessionIds, setStoppingSessionIds] = useState<Set<string>>(() => new Set());
+  const { stopping, stop } = useStopActiveChat(onItemChanged);
   const providers = PROVIDER_ORDER.map((name) => ({
     name,
     state: status.providers[name],
@@ -877,51 +1287,21 @@ export function QueueMeterPanel({
   const showPreparing = onDeviceProvider !== null && preparingTurns.length > 0;
   const handoffs = taskHandoffSplit(status.taskRunner);
   const holdNote = handoffHoldNote(status.taskRunner);
-
-  const stopActiveChat = useCallback(
-    async (sessionId: string) => {
-      setStoppingSessionIds((current) => new Set(current).add(sessionId));
-      try {
-        const result = await api.cancelChatSessionTurn(sessionId, { stopTask: true });
-        if (!result.cancelled) {
-          setStoppingSessionIds((current) => {
-            const next = new Set(current);
-            next.delete(sessionId);
-            return next;
-          });
-        }
-        onItemChanged();
-      } catch {
-        // Keep the control retryable if the service could not be reached.
-        setStoppingSessionIds((current) => {
-          const next = new Set(current);
-          next.delete(sessionId);
-          return next;
-        });
-      }
-    },
-    [onItemChanged],
-  );
+  const shared: QueueRowShared = { gezels, projects, boringMode, onClose };
 
   return (
-    <div
-      className={`queue-meter-panel${embedded ? ' activity-queue-details' : ''}`}
-      style={style}
-      aria-label="AI chat queue"
-    >
-      {!embedded && (
-        <div className="queue-meter-panel-header">
-          <strong>AI chat queue</strong>
-          <button
-            type="button"
-            className="queue-meter-panel-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-      )}
+    <div className="queue-meter-panel" style={style} aria-label="AI chat queue">
+      <div className="queue-meter-panel-header">
+        <strong>AI chat queue</strong>
+        <button
+          type="button"
+          className="queue-meter-panel-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
 
       {providers.length === 0 && !showPreparing && (
         <p className="muted small">No providers initialized yet.</p>
@@ -933,63 +1313,16 @@ export function QueueMeterPanel({
           isn't meaningful until the engine starts dispatching. */}
       {showPreparing && onDeviceProvider && (
         <section className="queue-meter-panel-section">
-          <header className="queue-meter-panel-provider">
-            <span className="queue-meter-panel-provider-name">
-              {getPlatformPillLabel(onDeviceProvider)}
-            </span>
-            <span className="muted small">starting engine · {preparingTurns.length} waiting</span>
-          </header>
+          <QueuePreparingHeader provider={onDeviceProvider} count={preparingTurns.length} />
           <ul className="queue-meter-panel-list">
             {preparingTurns.map(([sessionId, turn]) => (
-              <li
+              <QueuePreparingRow
                 key={`preparing-${sessionId}`}
-                className="queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-interactive"
-              >
-                <QueueItemOpenButton
-                  sessionId={sessionId}
-                  actor={describeActor(turn.gezelId, undefined, gezels, boringMode)}
-                  onClose={onClose}
-                />
-                <QueueItemMarker
-                  gezelId={turn.gezelId}
-                  actorLabel={undefined}
-                  gezels={gezels}
-                  boringMode={boringMode}
-                  kind="preparing"
-                />
-                <QueueItemIdentity
-                  gezelId={turn.gezelId}
-                  actorLabel={undefined}
-                  projectId={turn.projectId}
-                  gezels={gezels}
-                  projects={projects}
-                  boringMode={boringMode}
-                  phase={queuePhaseLabel(turn)}
-                />
-                <span className="queue-meter-panel-time muted">
-                  {formatMs(Math.max(0, Date.now() - turn.startedAt))}
-                </span>
-                <span className="queue-meter-panel-actions">
-                  {/* No reorder while preparing — the engine hasn't
-                      started dispatching, so there's no queue order to
-                      nudge. Cancel is safe to call even before the turn
-                      runs (see api.cancelChatSessionTurn). */}
-                  <button
-                    type="button"
-                    className="queue-meter-panel-action queue-meter-panel-action-cancel"
-                    aria-label="Cancel queued turn"
-                    title="Cancel this queued turn"
-                    onClick={() => {
-                      void api
-                        .cancelChatSessionTurn(sessionId)
-                        .then(onItemChanged)
-                        .catch(() => {});
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              </li>
+                sessionId={sessionId}
+                turn={turn}
+                onItemChanged={onItemChanged}
+                {...shared}
+              />
             ))}
           </ul>
         </section>
@@ -997,39 +1330,7 @@ export function QueueMeterPanel({
 
       {providers.map(({ name, state }) => {
         if (!state) return null;
-        const running = state.running;
-        const queued = state.queuedInteractive + state.queuedBackground;
-        const deferred = Math.min(queued, state.ambientHeld ?? 0);
-        const readyQueued = queued - deferred;
-        // The engine's real width, not `concurrency` — that carries an extra
-        // logical lane so a mid-turn one-shot can enter the queue, and using
-        // it as a denominator advertises a slot no turn can occupy.
-        // `interactiveConcurrency` is the queue's live foreground width and
-        // provides a rolling-upgrade fallback when an older broker reports a
-        // stale serial `maxConcurrency`. Never use total queue concurrency as
-        // the first fallback: local queues include one logical background
-        // lease that is not a physical engine slot.
-        const slots = Math.max(
-          1,
-          state.maxConcurrency ?? 0,
-          state.interactiveConcurrency ?? 0,
-          state.maxConcurrency === undefined && state.interactiveConcurrency === undefined
-            ? state.concurrency
-            : 0,
-        );
-        // Capacity only answers a useful question while something is waiting.
-        // When every known item is already running, prefer the plain count —
-        // besides reading more naturally, it avoids an impossible-looking
-        // `2 / 1` during a rolling-upgrade snapshot with stale capacity data.
-        const inFlightLabel =
-          queued > 0 && running <= slots
-            ? `${running} / ${slots} in flight`
-            : `${running} in flight`;
-        const backgroundCap = state.backgroundConcurrency;
-        const laneNote =
-          backgroundCap !== undefined && slots > 1 && backgroundCap < slots
-            ? `Chats can use all ${slots} slots. Background work takes at most ${backgroundCap}, so a chat can always start.`
-            : undefined;
+        const summary = providerQueueSummary(state);
         // Two rows for the same gezel doing the same job read identically
         // whether one is running and the other is waiting for a slot. Name
         // the two groups whenever both exist; a list that is all one thing
@@ -1040,9 +1341,9 @@ export function QueueMeterPanel({
             <header className="queue-meter-panel-provider">
               <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
               <span className="muted small">
-                {inFlightLabel}
-                {readyQueued > 0 ? ` · ${readyQueued} queued` : ''}
-                {deferred > 0 ? ` · ${deferred} deferred until idle` : ''}
+                {summary.inFlightLabel}
+                {summary.readyQueued > 0 ? ` · ${summary.readyQueued} queued` : ''}
+                {summary.deferred > 0 ? ` · ${summary.deferred} deferred until idle` : ''}
               </span>
             </header>
             {/* The only place the lane split is named. The engine pill states
@@ -1050,194 +1351,38 @@ export function QueueMeterPanel({
                 user comes to ask who is holding them. Shown only when the cap
                 actually bites (a background lane narrower than the pool), so
                 the common single-slot engine stays quiet. */}
-            {laneNote && <p className="queue-meter-panel-note muted small">{laneNote}</p>}
-            {state.active.length === 0 && queued === 0 ? (
+            {summary.laneNote && (
+              <p className="queue-meter-panel-note muted small">{summary.laneNote}</p>
+            )}
+            {state.active.length === 0 && summary.queued === 0 ? (
               <p className="muted small queue-meter-panel-empty">Idle.</p>
             ) : (
               <ul className="queue-meter-panel-list">
                 {showLaneHeadings && <li className="queue-meter-panel-group">Running</li>}
-                {state.active.map((a, i) => {
-                  // For local-engine turns, look up the current phase so
-                  // the user can see what the engine is actually doing
-                  // instead of just "gezel + 58s".
-                  const phase =
-                    isLocalEngineProvider(name) && a.sessionId
-                      ? liveTurns.get(a.sessionId)
-                      : undefined;
-                  // Phase 3: surface the cache-warm signal next to
-                  // active turns. The session's cache entry is keyed by
-                  // sessionId on whichever engine adapter the
-                  // controller uses; we look it up via the per-provider
-                  // cache stats in the same /api/queues poll.
-                  const cacheEntry =
-                    a.sessionId && status?.cache
-                      ? status.cache
-                          .find((c) => c.providerName === name)
-                          ?.sessions.find((s) => s.sessionId === a.sessionId)
-                      : undefined;
-                  const actor = describeActor(a.gezelId, a.actorLabel, gezels, boringMode);
-                  const activeSessionId =
-                    a.sessionId && !a.sessionId.startsWith('dev:') ? a.sessionId : undefined;
-                  const connectedApp = connectedAppName(a.actorLabel);
-                  const stopping = activeSessionId
-                    ? stoppingSessionIds.has(activeSessionId)
-                    : false;
-                  return (
-                    <li
-                      key={`active-${a.sessionId ?? i}`}
-                      className="queue-meter-panel-item queue-meter-panel-item-active"
-                    >
-                      <QueueItemOpenButton
-                        sessionId={a.sessionId}
-                        actor={actor}
-                        onClose={onClose}
-                      />
-                      <QueueItemMarker
-                        gezelId={a.gezelId}
-                        actorLabel={a.actorLabel}
-                        gezels={gezels}
-                        boringMode={boringMode}
-                        kind="active"
-                      />
-                      <QueueItemIdentity
-                        gezelId={a.gezelId}
-                        actorLabel={a.actorLabel}
-                        projectId={a.projectId}
-                        gezels={gezels}
-                        projects={projects}
-                        boringMode={boringMode}
-                        job={a.job}
-                        phase={queuePhaseLabel(phase)}
-                        extra={cacheEntry ? 'cached' : undefined}
-                      />
-                      <span
-                        className="queue-meter-panel-time muted"
-                        title={`Running for ${formatMs(a.runningForMs)}`}
-                      >
-                        {formatMs(a.runningForMs)}
-                      </span>
-                      {activeSessionId && (
-                        <span className="queue-meter-panel-actions queue-meter-panel-actions-active">
-                          <button
-                            type="button"
-                            className="queue-meter-panel-action queue-meter-panel-action-stop"
-                            aria-label={`Stop active chat with ${actor}`}
-                            title="Stop this active chat"
-                            disabled={stopping}
-                            onClick={() => void stopActiveChat(activeSessionId)}
-                          >
-                            {stopping ? 'Stopping…' : '■ Stop'}
-                          </button>
-                        </span>
-                      )}
-                      {!activeSessionId && (
-                        <span
-                          className="queue-meter-panel-active-status muted"
-                          title={
-                            connectedApp
-                              ? `${connectedApp} controls this request. Stop it from ${connectedApp}.`
-                              : 'This work has no chat session to stop from this queue.'
-                          }
-                        >
-                          {connectedApp ? `In flight via ${connectedApp}` : 'In flight'}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
+                {state.active.map((row, i) => (
+                  <QueueActiveRow
+                    key={`active-${row.sessionId ?? i}`}
+                    provider={name}
+                    row={row}
+                    status={status}
+                    liveTurns={liveTurns}
+                    stopping={stopping}
+                    onStop={(sessionId) => void stop(sessionId)}
+                    {...shared}
+                  />
+                ))}
                 {showLaneHeadings && <li className="queue-meter-panel-group">Waiting</li>}
-                {state.pending.map((p) => {
-                  // Reorder is constrained to same-lane neighbours
-                  // (the dispatcher's lane invariant trumps any
-                  // user nudge), so disable ↑/↓ when the item is at
-                  // the lane edge. Compute the lane-local index from
-                  // the same `pending` array the server returns.
-                  const lanePeers = state.pending.filter((q) => q.lane === p.lane);
-                  const laneIdx = lanePeers.indexOf(p);
-                  const isFirstInLane = laneIdx === 0;
-                  const isLastInLane = laneIdx === lanePeers.length - 1;
-                  return (
-                    <li
-                      key={`pending-${p.id}`}
-                      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-waiting queue-meter-panel-item-${p.lane}`}
-                    >
-                      <QueueItemOpenButton
-                        sessionId={p.sessionId}
-                        actor={describeActor(p.gezelId, p.actorLabel, gezels, boringMode)}
-                        onClose={onClose}
-                      />
-                      <QueueItemMarker
-                        gezelId={p.gezelId}
-                        actorLabel={p.actorLabel}
-                        gezels={gezels}
-                        boringMode={boringMode}
-                        kind={p.lane}
-                      />
-                      <QueueItemIdentity
-                        gezelId={p.gezelId}
-                        actorLabel={p.actorLabel}
-                        projectId={p.projectId}
-                        gezels={gezels}
-                        projects={projects}
-                        boringMode={boringMode}
-                        job={p.job}
-                        extra={p.ambient && deferred > 0 ? 'deferred until idle' : undefined}
-                      />
-                      <span
-                        className="queue-meter-panel-time muted"
-                        title={`Waiting ${formatMs(p.waitedMs)} for a free slot`}
-                      >
-                        {formatMs(p.waitedMs)}
-                      </span>
-                      <span className="queue-meter-panel-actions">
-                        <button
-                          type="button"
-                          className="queue-meter-panel-action"
-                          aria-label="Move up"
-                          title="Move higher in queue"
-                          disabled={isFirstInLane}
-                          onClick={() => {
-                            void api
-                              .moveProviderQueueItem(name, p.id, 'up')
-                              .then(onItemChanged)
-                              .catch(() => {});
-                          }}
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          className="queue-meter-panel-action"
-                          aria-label="Move down"
-                          title="Move lower in queue"
-                          disabled={isLastInLane}
-                          onClick={() => {
-                            void api
-                              .moveProviderQueueItem(name, p.id, 'down')
-                              .then(onItemChanged)
-                              .catch(() => {});
-                          }}
-                        >
-                          ▼
-                        </button>
-                        <button
-                          type="button"
-                          className="queue-meter-panel-action queue-meter-panel-action-cancel"
-                          aria-label="Cancel queued turn"
-                          title="Cancel this queued turn"
-                          onClick={() => {
-                            void api
-                              .cancelProviderQueueItem(name, p.id)
-                              .then(onItemChanged)
-                              .catch(() => {});
-                          }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    </li>
-                  );
-                })}
+                {state.pending.map((row) => (
+                  <QueuePendingRow
+                    key={`pending-${row.id}`}
+                    provider={name}
+                    row={row}
+                    peers={state.pending}
+                    deferred={summary.deferred}
+                    onItemChanged={onItemChanged}
+                    {...shared}
+                  />
+                ))}
               </ul>
             )}
           </section>
@@ -1289,6 +1434,150 @@ export function QueueMeterPanel({
           />
         </section>
       )}
+    </div>
+  );
+}
+
+/** Which half of the queue a surface lists: running turns, or turns waiting for a slot. */
+export type QueueRowsPart = 'running' | 'waiting';
+
+export interface QueueRowSelection {
+  part: QueueRowsPart;
+  /** Turns waiting on a local engine that is still loading — shown with the running half. */
+  preparing: Array<[string, LiveTurnState]>;
+  providers: Array<{
+    name: QueueProviderName;
+    state: ProviderQueueState;
+    active: ProviderQueueState['active'];
+    pending: ProviderQueueState['pending'];
+  }>;
+  /** Sessions the rows already stand for, so a caller can skip its own copy. */
+  sessionIds: Set<string>;
+  count: number;
+}
+
+/** The provider-queue rows for one half of the queue, optionally scoped to a project. */
+export function selectQueueRows(
+  status: QueueStatusResponse,
+  part: QueueRowsPart,
+  preparingTurns: Array<[string, LiveTurnState]>,
+  projectId?: string,
+): QueueRowSelection {
+  const inScope = (row: { projectId?: string | undefined }) =>
+    !projectId || row.projectId === projectId;
+  const preparing = part === 'running' ? preparingTurns.filter(([, turn]) => inScope(turn)) : [];
+  const providers = PROVIDER_ORDER.flatMap((name) => {
+    const state = status.providers[name];
+    if (!state) return [];
+    const active = part === 'running' ? state.active.filter(inScope) : [];
+    const pending = part === 'waiting' ? state.pending.filter(inScope) : [];
+    return active.length || pending.length ? [{ name, state, active, pending }] : [];
+  });
+  const sessionIds = new Set(preparing.map(([sessionId]) => sessionId));
+  let count = preparing.length;
+  for (const { active, pending } of providers) {
+    for (const row of [...active, ...pending]) {
+      if (row.sessionId) sessionIds.add(row.sessionId);
+      count++;
+    }
+  }
+  return { part, preparing, providers, sessionIds, count };
+}
+
+/**
+ * One half of the queue as gezel rows, for Activity's Working and Next
+ * sections: who is on which engine, with Stop on a running chat and
+ * reorder/cancel on a waiting one. The header queue's rows, minus the
+ * handoff and Night Shift summaries Activity already lists task by task.
+ */
+export function QueueSessionRows({
+  selection,
+  status,
+  gezels,
+  projects,
+  liveTurns,
+  onDeviceProvider,
+  boringMode,
+  onClose,
+  onItemChanged,
+  rowContext,
+}: {
+  selection: QueueRowSelection;
+  status: QueueStatusResponse;
+  gezels: Map<string, GezelSummary>;
+  projects: Map<string, Project>;
+  liveTurns: Map<string, LiveTurnState>;
+  onDeviceProvider: QueueProviderName | null;
+  boringMode: boolean;
+  onClose: () => void;
+  onItemChanged: () => void;
+  rowContext?: QueueRowContext;
+}) {
+  const { stopping, stop } = useStopActiveChat(onItemChanged);
+  if (!selection.count) return null;
+  const shared: QueueRowShared = { gezels, projects, boringMode, onClose, rowContext };
+  return (
+    <div
+      className="queue-meter-panel activity-queue"
+      aria-label={selection.part === 'running' ? 'Gezels working now' : 'Gezels waiting their turn'}
+    >
+      {selection.preparing.length > 0 && onDeviceProvider && (
+        <section className="queue-meter-panel-section">
+          <QueuePreparingHeader provider={onDeviceProvider} count={selection.preparing.length} />
+          <ul className="queue-meter-panel-list">
+            {selection.preparing.map(([sessionId, turn]) => (
+              <QueuePreparingRow
+                key={`preparing-${sessionId}`}
+                sessionId={sessionId}
+                turn={turn}
+                onItemChanged={onItemChanged}
+                {...shared}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+      {selection.providers.map(({ name, state, active, pending }) => {
+        const summary = providerQueueSummary(state);
+        return (
+          <section key={name} className="queue-meter-panel-section">
+            <header className="queue-meter-panel-provider">
+              <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
+              <span className="muted small">
+                {selection.part === 'running' ? summary.inFlightLabel : `${pending.length} waiting`}
+              </span>
+            </header>
+            {selection.part === 'running' && summary.laneNote && (
+              <p className="queue-meter-panel-note muted small">{summary.laneNote}</p>
+            )}
+            <ul className="queue-meter-panel-list">
+              {active.map((row, i) => (
+                <QueueActiveRow
+                  key={`active-${row.sessionId ?? i}`}
+                  provider={name}
+                  row={row}
+                  status={status}
+                  liveTurns={liveTurns}
+                  stopping={stopping}
+                  onStop={(sessionId) => void stop(sessionId)}
+                  {...shared}
+                />
+              ))}
+              {pending.map((row) => (
+                <QueuePendingRow
+                  key={`pending-${row.id}`}
+                  provider={name}
+                  row={row}
+                  peers={state.pending}
+                  deferred={summary.deferred}
+                  onItemChanged={onItemChanged}
+                  {...shared}
+                />
+              ))}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }

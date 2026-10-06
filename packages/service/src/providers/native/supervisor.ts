@@ -147,6 +147,19 @@ export interface NativeEngineSupervisorOptions {
    */
   onFreeze?: () => void | Promise<void>;
   /**
+   * Called right before a deliberate stop SIGTERMs a child that reached
+   * ready, with the engine still serving. The engine's own shutdown hook
+   * gets only the SIGTERM-to-SIGKILL grace (three seconds) to persist
+   * state — not enough to write a long session's KV cache, which is what
+   * made a restart re-prefill 55k tokens. Bounded by
+   * `beforeStopTimeoutMs`; a failure or timeout never blocks the stop.
+   * Skipped for health restarts: an engine that failed its health probe
+   * cannot be trusted to answer.
+   */
+  beforeStop?: (ctx: { reason: string; baseUrl: string }) => void | Promise<void>;
+  /** Bound on {@link beforeStop}. Default 30s. */
+  beforeStopTimeoutMs?: number;
+  /**
    * Busy predicate consulted at the Stage-2 idle deadline: when it returns
    * true, the supervisor does NOT stop the engine — it reschedules the idle
    * timer for another full window. Prevents idle-unloading an engine that a
@@ -359,6 +372,8 @@ export class NativeEngineSupervisor {
   private readonly idleTimeoutMs: number;
   private readonly freezeTimeoutMs: number;
   private readonly onFreeze?: () => void | Promise<void>;
+  private readonly beforeStop?: (ctx: { reason: string; baseUrl: string }) => void | Promise<void>;
+  private readonly beforeStopTimeoutMs: number;
   private readonly isBusy?: () => boolean;
   private readonly memoryPressure?: NativeEngineSupervisorOptions['memoryPressure'];
   private readonly pressureIdleTimeoutMs: number;
@@ -463,6 +478,8 @@ export class NativeEngineSupervisor {
       this.freezeTimeoutMs = 0; // disabled by default
     }
     if (opts.onFreeze) this.onFreeze = opts.onFreeze;
+    if (opts.beforeStop) this.beforeStop = opts.beforeStop;
+    this.beforeStopTimeoutMs = opts.beforeStopTimeoutMs ?? 30_000;
     if (opts.isBusy) this.isBusy = opts.isBusy;
     if (opts.memoryPressure) this.memoryPressure = opts.memoryPressure;
     this.pressureIdleTimeoutMs = opts.pressureIdleTimeoutMs ?? 60_000;
@@ -681,10 +698,40 @@ export class NativeEngineSupervisor {
     this.clearHealthTimer();
     if (this.state.kind === 'stopped' || this.state.kind === 'restart-budget-exhausted') return;
     const { child } = this.state;
+    if (this.state.kind === 'running' && reason !== 'health-restart') {
+      await this.runBeforeStop(reason, this.state.launch.baseUrl);
+    }
     this.pressureDeadlineAt = undefined;
     this.expectedExitReason = reason;
     this.state = { kind: 'stopped' };
     await killGracefully(child);
+  }
+
+  private async runBeforeStop(reason: string, baseUrl: string): Promise<void> {
+    if (!this.beforeStop) return;
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve(this.beforeStop({ reason, baseUrl })),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            this.onLog(
+              `${this.logPrefix} pre-stop hook still running after ${this.beforeStopTimeoutMs}ms — stopping anyway`,
+            );
+            resolve();
+          }, this.beforeStopTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+      this.onLog(`${this.logPrefix} pre-stop hook done in ${Date.now() - started}ms (${reason})`);
+    } catch (err) {
+      this.onLog(
+        `${this.logPrefix} pre-stop hook failed (${reason}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async startFresh(): Promise<void> {

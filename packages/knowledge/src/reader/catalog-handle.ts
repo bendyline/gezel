@@ -271,6 +271,25 @@ export class CatalogHandle {
   }
 
   /**
+   * Load the next shard's sign bits that are not resident yet, if they fit
+   * the resident budget. False when nothing is left to load. One shard per
+   * call, so a host can keep answering queries between shards while it warms
+   * a large catalog, and never evicts a shard it loaded a moment ago.
+   */
+  prewarmNextShard(): boolean {
+    const bytesPerRow = Math.ceil(this.dimensions() / 8);
+    let resident = 0;
+    for (const index of this.bitIndexes.values()) resident += index.bits.byteLength;
+    for (const shard of this.shards) {
+      if (this.bitIndexes.has(shard.path)) continue;
+      if (resident + shard.chunkCount * bytesPerRow > BIT_INDEX_BUDGET_BYTES) return false;
+      this.shardBits(shard);
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * The stage-1 center the catalog's bits were derived with (a
    * `centered-sign` profile), or null for plain sign bits. Read from the
    * router's profile echo, never from this reader's registry: the echo is

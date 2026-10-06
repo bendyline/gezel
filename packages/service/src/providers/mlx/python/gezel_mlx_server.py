@@ -79,6 +79,7 @@ import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
 import vision_inputs  # noqa: E402
+import wave_policy  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
 from qwen4_ple import prepare_external_ple_view  # noqa: E402
@@ -1007,12 +1008,25 @@ print(
 # The cache_state holds both the KV cache list and the token_ids
 # prefix; mlx-vlm uses these together to decide what to prefill.
 class CacheEntry:
-    __slots__ = ("state", "est_bytes", "last_used_ts")
+    __slots__ = ("state", "est_bytes", "last_used_ts", "dirty")
 
-    def __init__(self, state: PromptCacheState, est_bytes: int, last_used_ts: float):
+    def __init__(
+        self,
+        state: PromptCacheState,
+        est_bytes: int,
+        last_used_ts: float,
+        dirty: bool = True,
+    ):
         self.state = state
         self.est_bytes = est_bytes
         self.last_used_ts = last_used_ts
+        # True until this exact state is on disk. A shutdown flush writes only
+        # dirty entries: rewriting a 90k-token session that was loaded from
+        # disk unchanged is seconds of I/O, and the supervisor SIGKILLs three
+        # seconds after SIGTERM — measured, the one entry that mattered was
+        # still being written when the kill landed, and the restart re-prefilled
+        # 55k tokens.
+        self.dirty = dirty
 
 
 # Module-level cache. Bounded by `--cache-budget-mb` via LRU eviction.
@@ -1196,8 +1210,8 @@ def _enforce_budget() -> None:
             continue
         # Persist before dropping. Best-effort — failure here just means
         # the next session pays the prefill cost, which is the
-        # pre-persistence behavior.
-        if _disk_enabled():
+        # pre-persistence behavior. A clean entry is already on disk.
+        if _disk_enabled() and entry.dirty:
             cache_persist.save_cache(
                 PERSIST_DIR, MODEL_FINGERPRINT, cache_id, entry.state  # type: ignore[arg-type]
             )
@@ -1229,9 +1243,18 @@ def _enforce_disk_budget() -> None:
     if total < budget_bytes:
         return
     target = int(budget_bytes * 0.8)
+    # Never prune the newest file. Same rail as the in-memory budget's "never
+    # evict the only entry": a single long session can outgrow the cap on its
+    # own (a 120k-token qwen3.8-27b snapshot is ~7.7 GB against the 8 GB
+    # default), and deleting the file a shutdown flush wrote a moment ago
+    # makes that flush — the only thing standing between a restart and a
+    # full re-prefill — pointless.
+    newest = entries[-1][0] if entries else None
     for cache_id, size, _mtime in entries:
         if total < target:
             break
+        if cache_id == newest:
+            continue
         # Skip the on-disk copy of an entry a live turn is serving — the
         # in-memory pin above keeps it resident, but a sibling turn that
         # disk-reloads the same prefix mid-flight must still find the file.
@@ -1262,7 +1285,7 @@ def _try_load_from_disk(cache_id: str) -> Optional[PromptCacheState]:
         return None
     bytes_est = _estimate_cache_bytes(state)
     _CACHE[cache_id] = CacheEntry(
-        state=state, est_bytes=bytes_est, last_used_ts=time.time()
+        state=state, est_bytes=bytes_est, last_used_ts=time.time(), dirty=False
     )
     print(
         f"[cache] disk-load cache_id={cache_id} tokens={len(state.token_ids or [])}",
@@ -1290,8 +1313,10 @@ def _try_seed_from_prefix(cache_id: str, prefix_cache_id: str) -> Optional[Promp
     if state is None:
         return None
     bytes_est = _estimate_cache_bytes(state)
+    # Clean: this is the prefix file's content, already on disk under the
+    # prefix id. Persisting a copy under the session id buys nothing.
     _CACHE[cache_id] = CacheEntry(
-        state=state, est_bytes=bytes_est, last_used_ts=time.time()
+        state=state, est_bytes=bytes_est, last_used_ts=time.time(), dirty=False
     )
     print(
         f"[cache] prefix-seed cache_id={cache_id} from prefix={prefix_cache_id} "
@@ -1487,6 +1512,10 @@ class _UnwrapLM:
 # marker would just be noise), and no more often than the interval so a
 # chunk-iterating worker loop doesn't spam the log.
 _PREFILL_LIVENESS_MIN_TOKENS = 2048
+
+# Event-loop breathing between engine steps — see BatchEngine._breathe.
+_BREATHE_EVERY_S = 0.2
+_BREATHE_FOR_S = 0.002
 _PREFILL_LIVENESS_INTERVAL_S = 4.0
 
 # Keep chunk-edge snapshots this many tokens clear of the prompt's end.
@@ -1545,6 +1574,7 @@ class _Sub:
         "band_target", "band_snapshot", "saved_cache_state",
         "prefill_started_at", "generation_started_at",
         "prompt_tps", "generation_tps", "roster_fp",
+        "priority", "queued_at",
     )
 
     def __init__(
@@ -1609,6 +1639,11 @@ class _Sub:
         self.generation_started_at = None
         self.prompt_tps = 0.0
         self.generation_tps = 0.0
+        # Who is waiting on this request: "interactive" (a person) or
+        # "background" (task steps, warms, chores). Decides wave membership
+        # and whether a running wave steps aside — see wave_policy.py.
+        self.priority = wave_policy.normalize_priority(getattr(request, "priority", None))
+        self.queued_at = time.time()
 
 
 class BatchEngine:
@@ -1647,22 +1682,34 @@ class BatchEngine:
                 eos_list.append(e)
         self._stop_ids = {int(e) for e in eos_list}
         stop_tokens = [[int(e)] for e in eos_list]
-        self._gen = BatchGenerator(
-            model,
+        self._model = model
+        self._gen_kwargs = dict(
             max_tokens=2048,
             stop_tokens=stop_tokens or None,
             completion_batch_size=self._max,
             prefill_batch_size=self._max,
             prefill_step_size=ARGS.prefill_step_size,
         )
-        # mlx_lm BatchGenerator sets the wired limit to Metal's entire
-        # recommended working set in its constructor. Restore the smaller
-        # resident-set plan and free-buffer cap selected by Gezel.
-        _apply_mlx_memory_policy("batch-init")
+        self._gen = self._make_generator("batch-init")
         self._subs = {}            # uid -> _Sub
         self._pending = []         # _Sub awaiting insert
         self._wake = asyncio.Event()
         self._worker = None
+        # Preemption state (wave_policy.py). A wave made only of background
+        # work parks while waiting interactive requests run on a second
+        # generator; the parked wave keeps its KV and resumes where it stopped.
+        self._spare_gen = None     # second BatchGenerator, built on first preemption
+        self._nested = False       # True while an interactive wave runs over a parked one
+        self._parked = []          # subs of the parked wave (paused markers)
+        self._held_background = [] # background arrivals while nested
+        self._spec_sub = None      # the sub a spec wave is serving
+        # Set while a spec wave's rounds own the drafter's per-wave state
+        # (its cache, shared kv, position); a wave run inside the pause must
+        # not draft with the same drafter.
+        self._drafter_busy = False
+        self._liveness = wave_policy.LivenessThrottle()
+        self._preempt_memory_noted = False
+        self._last_breath = 0.0
         # Windowed / state-cache models can't rewind their caches once
         # the sequence outgrows the window, so a post-generation save is
         # dead weight the moment history diverges from the raw tokens
@@ -1697,15 +1744,282 @@ class BatchEngine:
             flush=True,
         )
 
+    def _make_generator(self, phase):
+        from mlx_lm.generate import BatchGenerator  # local: only when batching
+
+        gen = BatchGenerator(self._model, **self._gen_kwargs)
+        # mlx_lm BatchGenerator sets the wired limit to Metal's entire
+        # recommended working set in its constructor. Restore the smaller
+        # resident-set plan and free-buffer cap selected by Gezel.
+        _apply_mlx_memory_policy(phase)
+        return gen
+
+    async def _breathe(self):
+        """Yield to the event loop between engine steps.
+
+        `sleep(0)` yields exactly one loop iteration, and a NEW request needs
+        several (accept, parse, route, read body, render, tokenize, submit)
+        before the engine ever sees it. Each engine step blocks the loop for
+        its whole duration — a 2048-token prefill chunk is seconds on a 27B —
+        so one-iteration yields made an arriving request pay that many steps
+        before it could even queue. Measured: 8.0 s to first token for a
+        37-token question whose engine-side wait was 0.0 s. A short real
+        sleep every ~200 ms lets the loop drain all ready I/O in one go, at
+        a cost bounded by the ratio (~1%) rather than per token."""
+        now = time.perf_counter()
+        if now - self._last_breath >= _BREATHE_EVERY_S:
+            self._last_breath = now
+            await asyncio.sleep(_BREATHE_FOR_S)
+        else:
+            await asyncio.sleep(0)
+
     def submit(self, sub):
         if self._worker is None:
             self._worker = asyncio.ensure_future(self._run())
-        self._pending.append(sub)
+        if self._nested and wave_policy.is_background(sub):
+            # An interactive wave is running over a parked one; background
+            # arrivals wait until the parked wave has resumed.
+            self._held_background.append(sub)
+        else:
+            self._pending.append(sub)
+        self._announce_queued(sub)
         self._wake.set()
 
     def is_idle(self):
         """True once no live or queued batch sub can still use scratch buffers."""
-        return not self._subs and not self._pending
+        return (
+            not self._subs
+            and not self._pending
+            and not self._held_background
+            and not self._parked
+            and self._spec_sub is None
+        )
+
+    def _running_subs(self):
+        running = list(self._subs.values())
+        if self._spec_sub is not None:
+            running.append(self._spec_sub)
+        return running
+
+    def _wave_running(self):
+        return bool(self._subs) or self._spec_sub is not None or self._nested
+
+    def _announce_queued(self, sub):
+        """One line naming a request that arrived mid-wave, plus its first
+        waiting marker right away — the TS side flips the turn from
+        "Processing prompt" to "Waiting for …" without waiting for the next
+        worker step, which on a long prefill chunk can be most of a minute."""
+        if not self._wave_running():
+            return
+        cid = getattr(sub.request, "cache_id", None)
+        behind = wave_policy.cache_ids(self._running_subs())
+        ahead = max(0, len(self._pending) + len(self._held_background) - 1)
+        print(
+            f"[batch] queued request={sub.request_id} cache={cid or '-'} "
+            f"priority={sub.priority} ahead={ahead} behind={','.join(behind) or '-'}",
+            flush=True,
+        )
+        if cid and self._liveness.due(cid):
+            print(wave_policy.waiting_line(cid, ahead, behind), flush=True)
+
+    def _emit_waiting_liveness(self):
+        """Liveness for requests the worker is NOT serving right now: queued
+        ones (`waiting`) and a parked background wave (`paused`). Printed from
+        the worker loop, between steps — so, like the prefill marker, it is
+        proof the engine is alive and busy, and a wedged worker goes quiet.
+
+        Without it a queued request's only signal was silence: the TS
+        pre-first-byte watchdog aborted a turn that was waiting its turn, and
+        a parked wave's open stream would trip the streaming-idle bound."""
+        running = self._running_subs()
+        if not running:
+            return
+        behind = wave_policy.cache_ids(running)
+        queued = [s for s in self._pending + self._held_background if wave_policy.is_live(s)]
+        for idx, sub in enumerate(queued):
+            cid = getattr(sub.request, "cache_id", None)
+            if cid and self._liveness.due(cid):
+                print(wave_policy.waiting_line(cid, idx, behind), flush=True)
+        for sub in self._parked:
+            cid = getattr(sub.request, "cache_id", None)
+            if cid and wave_policy.is_live(sub) and self._liveness.due(cid):
+                print(wave_policy.paused_line(cid, behind), flush=True)
+
+    def _announce_admitted(self, sub):
+        cid = getattr(sub.request, "cache_id", None)
+        if cid and self._liveness.seen(cid):
+            print(wave_policy.admitted_line(cid, time.time() - sub.queued_at), flush=True)
+        self._liveness.forget(cid)
+
+    def _drop_cancelled_pending(self):
+        """A request whose client left while it was queued must not be
+        admitted. Measured: a turn the watchdog had already abandoned was
+        admitted two minutes later and prefilled for nobody."""
+        live = []
+        for sub in self._pending:
+            if sub.cancelled:
+                print(
+                    f"[batch] dropped request={sub.request_id} "
+                    f"cache={getattr(sub.request, 'cache_id', None) or '-'} "
+                    f"(client left while queued)",
+                    flush=True,
+                )
+                self._liveness.forget(getattr(sub.request, "cache_id", None))
+                continue
+            live.append(sub)
+        self._pending = live
+
+    def _memory_allows_preemption(self):
+        """A parked wave keeps its KV resident while the interactive wave
+        allocates its own, so preempt only with headroom below the same
+        threshold that collapses a wave to one member."""
+        if _MEM_LIMIT_BYTES <= 0:
+            return True
+        active = _safe_active_memory()
+        if active <= 0:
+            return True
+        ok = active < _MEM_LIMIT_BYTES * _MEM_ADMIT_FRACTION
+        if not ok and not self._preempt_memory_noted:
+            self._preempt_memory_noted = True
+            print(
+                f"[batch] preempt held: active={active // (1024 * 1024)}MB is at the "
+                f"admission threshold of ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB; "
+                f"the waiting request runs after this wave",
+                flush=True,
+            )
+        return ok
+
+    def _preempt_due(self, running):
+        if self._nested:
+            return False
+        if not wave_policy.preemptors(running, self._pending):
+            return False
+        return self._memory_allows_preemption()
+
+    async def _serve_preemptors(self, parked):
+        """Run waiting interactive requests to completion while `parked` (a
+        wave of background work) holds still, then hand the engine back.
+
+        The parked wave keeps everything it owns — KV, generator, logits
+        processor state, its open SSE stream — and resumes at the step it
+        stopped on. The interactive wave runs on a second BatchGenerator so
+        the parked one's batch state is untouched; the shared per-wave fields
+        (prefill liveness, the spec sub) are saved and restored around it.
+        Nothing is cancelled, so nothing is recomputed.
+
+        Safe points only: callers park between engine steps (a batched
+        wave's `next()`, a spec wave's prefill chunk or committed round), so
+        no verification transaction or half-written cache is ever left open.
+        """
+        fg = [s for s in self._pending if wave_policy.is_live(s) and not wave_policy.is_background(s)]
+        if not fg:
+            return
+        if self._spare_gen is None:
+            try:
+                self._spare_gen = self._make_generator("batch-preempt-init")
+            except Exception as exc:  # noqa: BLE001 — never kill the worker over a preemption
+                print(f"[batch] preempt unavailable (spare generator failed): {exc}", flush=True)
+                log_contained_exception("batch")
+                return
+        held = [s for s in self._pending if s not in fg]
+        parked_ids = wave_policy.cache_ids(parked)
+        print(
+            f"[batch] preempt: parking {len(parked)} background request(s) "
+            f"[{','.join(parked_ids) or '-'}] for {len(fg)} interactive "
+            f"[{','.join(wave_policy.cache_ids(fg)) or '-'}]",
+            flush=True,
+        )
+        started = time.perf_counter()
+        saved = (
+            self._gen,
+            self._subs,
+            self._prefill_total,
+            self._prefill_done,
+            self._prefill_meta,
+            self._spec_sub,
+        )
+        self._gen = self._spare_gen
+        self._subs = {}
+        self._prefill_total = 0
+        self._prefill_done = {}
+        self._prefill_meta = {}
+        self._last_prefill_emit = 0.0
+        self._spec_sub = None
+        self._pending = fg
+        self._held_background = held
+        self._parked = list(parked)
+        self._nested = True
+        try:
+            while self._pending or self._subs:
+                await self._step_wave()
+        finally:
+            self._spare_gen = self._gen
+            (
+                self._gen,
+                self._subs,
+                self._prefill_total,
+                self._prefill_done,
+                self._prefill_meta,
+                self._spec_sub,
+            ) = saved
+            self._last_prefill_emit = 0.0
+            self._pending = self._pending + self._held_background
+            self._held_background = []
+            self._parked = []
+            self._nested = False
+            self._preempt_memory_noted = False
+            for sub in parked:
+                self._liveness.forget(getattr(sub.request, "cache_id", None))
+        print(
+            f"[batch] resume: {len(parked)} background request(s) "
+            f"[{','.join(parked_ids) or '-'}] after {time.perf_counter() - started:.1f}s",
+            flush=True,
+        )
+
+    def _save_cancelled_snapshot(self, sub, cache_layers=None, wave_tokens=None, done_tokens=None):
+        """Keep what a cancelled request already paid for.
+
+        A cancel — the user's stop, a watchdog, or the service shutting down —
+        used to drop the turn's prompt KV on the floor: the end-of-prompt
+        snapshot is filed only by `_finish`, which a cancelled wave never
+        reaches. The restart that motivated this lost a 98k-token prompt that
+        had been fully prefilled two minutes earlier, and the resumed turn
+        re-prefilled from a 14k-token prefix.
+
+        Saves the planted end-of-prompt snapshot when it was captured, or —
+        for a spec wave stopped mid-prefill — the prefix it reached, proven
+        against the prompt like any other snapshot. Only ever an improvement:
+        it must extend past what this turn was seeded with, so a retry of the
+        same turn resumes from here instead of from the seed."""
+        cid = getattr(sub.request, "cache_id", None)
+        if not cid or not self._needs_snapshot:
+            return
+        try:
+            snapshot = sub.prompt_snapshot
+            if snapshot is None and cache_layers is not None and wave_tokens and done_tokens:
+                boundary = int(sub.reused_tokens) + int(done_tokens)
+                layers = spec_decode.clone_layers(cache_layers)
+                if cache_seed.snapshot_matches_prompt(
+                    layers, list(wave_tokens)[:boundary], sub.prompt_tokens, boundary
+                ):
+                    snapshot = (layers, boundary)
+            if snapshot is None:
+                return
+            layers, count = snapshot
+            if int(count) <= int(sub.reused_tokens or 0):
+                return
+            state = PromptCacheState()
+            state.cache = layers
+            state.token_ids = list(sub.prompt_tokens[: int(count)])
+            _save_cache(cid, state)
+            _LAST_SAVE_ROSTER[cid] = sub.roster_fp
+            print(
+                f"[batch] saved cancelled cache_id={cid} tokens={int(count)} "
+                f"(was seeded with {int(sub.reused_tokens or 0)})",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort; never break the worker
+            print(f"[batch] cancelled-turn save failed cache_id={cid}: {exc}", flush=True)
 
     def _sampler_for(self, request):
         from mlx_lm.sample_utils import make_sampler
@@ -1760,6 +2074,44 @@ class BatchEngine:
                     sub.seed_state = seeded
                     break
         plan = cache_seed.seed_from_state(sub.seed_state, sub.prompt_tokens)
+        # A session entry that diverged and cannot be trimmed is worth
+        # nothing to this prompt, but the shared prefix it was born from
+        # usually still is. Without this a stale session entry was strictly
+        # WORSE than having none: a miss falls back to the prefix band
+        # (~14-17k tokens reused on qwen3.8-27b), a divergent hit re-prefilled
+        # everything. It matters most right after a restart, when the session
+        # entry the engine persisted no longer matches a rebuilt transcript.
+        if sub.request.cache_id and str(plan.mode).startswith("fresh") and plan.cached_len:
+            for pid in _request_prefix_ids(sub.request):
+                seeded = _try_seed_from_prefix(sub.request.cache_id, pid)
+                if seeded is None:
+                    continue
+                fallback = cache_seed.seed_from_state(seeded, sub.prompt_tokens)
+                if fallback.reused > plan.reused:
+                    print(
+                        f"[batch] seed fallback cache_id={sub.request.cache_id} "
+                        f"session-entry mode={plan.mode} lcp={plan.lcp} "
+                        f"cached={plan.cached_len} -> prefix={pid} reused={fallback.reused}",
+                        flush=True,
+                    )
+                    # Same divergence preview the full-prefill path prints:
+                    # what the session entry and this prompt disagree on is
+                    # the only thing that says which side to fix.
+                    try:
+                        _tk = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+                        _cached = list(getattr(sub.seed_state, "token_ids", None) or [])
+                        _lo = max(0, plan.lcp - 6)
+                        print(
+                            f"[batch] churn cache_id={sub.request.cache_id} at={plan.lcp} "
+                            f"cached={_tk.decode(_cached[_lo:plan.lcp + 24])!r} "
+                            f"prompt={_tk.decode(list(sub.prompt_tokens)[_lo:plan.lcp + 24])!r}",
+                            flush=True,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — diagnostics never break a turn
+                        print(f"[batch] churn preview unavailable: {exc}", flush=True)
+                    sub.seed_state = seeded
+                    plan = fallback
+                    break
         sub.prefill_total = len(plan.segment)
         sub.reused_tokens = plan.reused
         sub.seed_mode = plan.mode
@@ -1931,6 +2283,8 @@ class BatchEngine:
         # Evict client-disconnected sequences before stepping.
         gone = [uid for uid, s in self._subs.items() if s.cancelled]
         if gone:
+            for uid in gone:
+                self._save_cancelled_snapshot(self._subs[uid])
             try:
                 self._gen.remove(gone)
             except Exception as exc:  # noqa: BLE001
@@ -1948,24 +2302,38 @@ class BatchEngine:
         # mid-wave waits for the wave to drain — no worse than the old
         # serial path, and strictly better when turns arrive together.
         if self._pending and not self._subs:
-            admit_n = self._admit_count(len(self._pending))
-            batch = self._pending[:admit_n]
-            self._pending = self._pending[admit_n:]
+            self._drop_cancelled_pending()
+            if not self._pending:
+                return
+            # Interactive requests first, and never in a wave with background
+            # work — see wave_policy.select_wave.
+            batch, self._pending = wave_policy.select_wave(self._pending, self._admit_count)
             if self._pending:
-                # Deferred by the configured concurrency ceiling or live
-                # memory pressure. The remaining subs run in the next wave,
-                # after this one drains and frees its KV. The outer loop
-                # re-enters admission once _subs empties (it never blocks on
-                # _wake while _pending is non-empty).
+                # Deferred by the configured concurrency ceiling, live
+                # memory pressure, or because the wave is interactive-only.
+                # The remaining subs run in the next wave, after this one
+                # drains and frees its KV. The outer loop re-enters admission
+                # once _subs empties (it never blocks on _wake while _pending
+                # is non-empty).
+                held_bg = sum(1 for s in self._pending if wave_policy.is_background(s))
                 print(
                     f"[batch] admission-throttled: admitting {len(batch)}, "
                     f"deferring {len(self._pending)} to next wave "
-                    f"(max_concurrency={self._max}, "
+                    f"({held_bg} of them background, "
+                    f"max_concurrency={self._max}, "
                     f"active={_safe_active_memory() // (1024 * 1024)}MB, "
                     f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
                     flush=True,
                 )
-            if len(batch) == 1 and _SPEC is not None:
+            for sub in batch:
+                self._announce_admitted(sub)
+            if len(batch) == 1 and _SPEC is not None and self._drafter_busy:
+                print(
+                    f"[spec] off request={batch[0].request_id} reason=the drafter "
+                    f"belongs to a paused wave",
+                    flush=True,
+                )
+            elif len(batch) == 1 and _SPEC is not None:
                 spec_sub = batch[0]
                 mode, why = spec_decode.spec_mode(
                     spec_sub.request, spec_sub.grammar
@@ -2035,11 +2403,17 @@ class BatchEngine:
         # (see _capture_prompt_snapshot), gives the liveness marker
         # real per-chunk progress instead of a constant 0%, and lets
         # the event loop breathe between prefill chunks.
+        # A wave of background work steps aside, between steps, for a person
+        # who has been waiting since it started. It resumes from this exact
+        # step once they are served.
+        if self._subs and self._preempt_due(self._subs.values()):
+            await self._serve_preemptors(list(self._subs.values()))
         if self._subs:
             # Emit a prefill marker before the (potentially long, event-
             # loop-blocking) step so the watchdog sees liveness.
             # No-op once the first token lands (_prefill_total → 0).
             self._emit_prefill_liveness()
+            self._emit_waiting_liveness()
             try:
                 prompt_responses, responses = self._gen.next()
                 step_ended_at = time.perf_counter()
@@ -2115,7 +2489,7 @@ class BatchEngine:
                     self._finish(sub, r)
                     self._subs.pop(r.uid, None)
             # Yield so SSE generators flush + new requests get admitted.
-            await asyncio.sleep(0)
+            await self._breathe()
 
 
     async def _run_spec_wave(self, sub, mode="greedy"):
@@ -2128,6 +2502,7 @@ class BatchEngine:
         turn is indistinguishable downstream from a batch turn. Measured
         basis + eligibility rationale live in spec_decode.py."""
         sub.prefill_started_at = time.perf_counter()
+        self._spec_sub = sub
         try:
             # SeedPlan's third field is the tokens ALREADY IN the seeded
             # cache (the reused prefix — empty on fresh), mirroring what
@@ -2196,16 +2571,22 @@ class BatchEngine:
                         f"request={sub.request_id}",
                         flush=True,
                     )
+                    self._save_cancelled_snapshot(sub, cache_layers, full_prompt, done)
                     return
                 self._prefill_done[0] = int(done)
-                self._emit_prefill_liveness()
                 if kind == "cut":
                     self._capture_spec_snapshot(
                         sub, cache_layers, full_prompt, int(sub.reused_tokens) + int(done)
                     )
                 elif kind == "final":
                     final_out = maybe_out
-                await asyncio.sleep(0)
+                # Chunk edges are quiescent: the cache holds exactly the
+                # tokens prefilled so far, and the drafter is not in use yet.
+                if self._spec_preempt_due(sub):
+                    await self._serve_preemptors([sub])
+                self._emit_prefill_liveness()
+                self._emit_waiting_liveness()
+                await self._breathe()
 
             self._prefill_total = 0
             self._prefill_done = {}
@@ -2272,6 +2653,9 @@ class BatchEngine:
                 finish_reason = "length"
 
             if finish_reason is None:
+                # From here the drafter's per-wave state (its cache, shared
+                # kv, position) belongs to this wave until it ends.
+                self._drafter_busy = True
                 if mode == "assisted":
                     rounds = spec_decode.assisted_rounds(
                         MODEL,
@@ -2302,6 +2686,7 @@ class BatchEngine:
                             f"[spec] wave cancelled request={sub.request_id}",
                             flush=True,
                         )
+                        self._save_cancelled_snapshot(sub)
                         return
                     emit(tok)
                     if tok in self._stop_ids:
@@ -2314,7 +2699,14 @@ class BatchEngine:
                     if mem_steps >= 32:
                         mem_steps = 0
                         _reclaim_mlx_buffer_cache("spec-pressure")
-                    await asyncio.sleep(0)
+                    # Each yield follows a committed verify round (upstream
+                    # commits before emitting), so the target cache is
+                    # consistent here. A wave run inside the pause cannot
+                    # draft: _drafter_busy keeps it on the BatchGenerator.
+                    if self._spec_preempt_due(sub):
+                        await self._serve_preemptors([sub])
+                    self._emit_waiting_liveness()
+                    await self._breathe()
                 if finish_reason is None:
                     finish_reason = (
                         "length" if len(sub.token_ids) >= max_toks else "stop"
@@ -2360,6 +2752,15 @@ class BatchEngine:
             # the engine is still serving other requests.
             log_contained_exception("spec")
             sub.queue.put_nowait(("err", str(exc)))
+        finally:
+            self._drafter_busy = False
+            if self._spec_sub is sub:
+                self._spec_sub = None
+
+    def _spec_preempt_due(self, sub):
+        if self._nested or not wave_policy.is_background(sub):
+            return False
+        return self._preempt_due([sub])
 
     def _capture_spec_snapshot(self, sub, cache_layers, full_prompt, boundary):
         """Boundary snapshot for the spec wave's direct prefill. The cache
@@ -2738,13 +3139,23 @@ def _flush_all_to_disk() -> int:
     if not _disk_enabled():
         return 0
     saved = 0
+    clean = 0
+    started = time.perf_counter()
     for cache_id, entry in list(_CACHE.items()):
+        if not entry.dirty:
+            clean += 1
+            continue
         if cache_persist.save_cache(
             PERSIST_DIR, MODEL_FINGERPRINT, cache_id, entry.state  # type: ignore[arg-type]
         ):
+            entry.dirty = False
             saved += 1
-    if saved:
-        print(f"[cache] flushed {saved} entries to disk on shutdown", flush=True)
+    if saved or clean:
+        print(
+            f"[cache] flushed {saved} entries to disk ({clean} already persisted) "
+            f"in {time.perf_counter() - started:.1f}s",
+            flush=True,
+        )
     _enforce_disk_budget()
     return saved
 
@@ -2828,6 +3239,11 @@ class ChatRequest(BaseModel):
     # BatchGenerator path. This is the request-scoped equivalent of the
     # operator's GEZEL_MLX_SPEC=greedy-only A/B arm.
     disable_speculation: bool = False
+    # Who is waiting on this turn: "interactive" (a person typed it) or
+    # "background" (task steps, nudges, warms). A running wave made only of
+    # background work parks for a waiting interactive request; absent reads
+    # as interactive so an older daemon never gets its turns parked.
+    priority: Optional[str] = None
     # Per-request chat-template override (gezel extension). Swaps the
     # model's stored Jinja template for a curated one without reinstalling.
     chat_template_override: Optional[str] = None
@@ -2893,7 +3309,7 @@ async def health() -> JSONResponse:
 
 
 @app.post("/admin/flush")
-async def admin_flush() -> JSONResponse:
+async def admin_flush(settle_ms: int = 0) -> JSONResponse:
     """Persist every in-memory cache entry to disk without dropping it.
 
     Called by the gezel supervisor's Stage-1 idle freeze: the user has
@@ -2903,9 +3319,22 @@ async def admin_flush() -> JSONResponse:
     cache is still warm; if they DON'T come back and Stage 2 SIGTERMs
     the process, the freeze flush already wrote everything out so the
     next boot resumes cleanly.
+
+    Also called right before a deliberate stop, with `settle_ms`: the
+    daemon cancels its in-flight turns first, and a cancelled turn files
+    its prompt snapshot only when the worker next steps. Waiting (bounded)
+    for the engine to drain is what gets that snapshot into this flush
+    instead of losing it to the SIGKILL that follows SIGTERM.
     """
+    engine = _BATCH_ENGINE
+    settled = True
+    if settle_ms > 0 and engine is not None:
+        deadline = time.time() + min(int(settle_ms), 60_000) / 1000.0
+        while not engine.is_idle() and time.time() < deadline:
+            await asyncio.sleep(0.05)
+        settled = engine.is_idle()
     saved = _flush_all_to_disk()
-    return JSONResponse({"flushed": saved})
+    return JSONResponse({"flushed": saved, "settled": settled})
 
 
 @app.get("/v1/cache/stats")
@@ -3043,6 +3472,8 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
         cache_id=req.cache_id,
         max_tokens=1,
         temperature=0.0,
+        # Nobody reads a warm's output; it must never hold a person up.
+        priority=wave_policy.BACKGROUND,
     )
     cache_state, _, _ = _resolve_cache_state(warm_request)
     prior_tokens = len(cache_state.token_ids or [])
@@ -3132,6 +3563,9 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
             persisted = cache_persist.save_cache(
                 PERSIST_DIR, MODEL_FINGERPRINT, req.cache_id, cache_state  # type: ignore[arg-type]
             )
+            resident = _CACHE.get(req.cache_id)
+            if persisted and resident is not None and resident.state is cache_state:
+                resident.dirty = False
             _enforce_disk_budget()
         print(
             f"[cache] warmed cache_id={req.cache_id} tokens={new_tokens} "

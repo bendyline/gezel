@@ -205,12 +205,26 @@ describe('Activity reflects execution rather than task lifecycle', () => {
     });
     expect(result.items.map((item) => item.section)).toEqual(['working', 'ready']);
   });
-  it('respects inherited pauses and omits drafts and finished tasks', () => {
-    expect(resolve({ tasks: [task({ effectiveStatus: 'paused' })] }).items[0]?.detail).toContain(
-      'Paused',
-    );
+  it('omits paused, inherited-paused, draft, and finished tasks', () => {
+    expect(resolve({ tasks: [task({ status: 'paused' })] }).items).toEqual([]);
+    expect(resolve({ tasks: [task({ effectiveStatus: 'paused' })] }).items).toEqual([]);
     for (const status of ['draft', 'complete', 'canceled'] as const)
       expect(resolve({ tasks: [task({ status })] }).items).toEqual([]);
+  });
+  it('omits tasks in a paused project', () => {
+    const shelved = task();
+    expect(
+      resolve({ tasks: [shelved], inactiveProjectIds: new Set([shelved.projectId]) }).items,
+    ).toEqual([]);
+  });
+  it('keeps a paused task visible while its live turn is still running', () => {
+    expect(resolve({ tasks: [task({ status: 'paused' })], inflight: [turn] }).items).toEqual([
+      expect.objectContaining({
+        section: 'working',
+        taskRef: turn.taskRef,
+        title: 'Autumn newsletter',
+      }),
+    ]);
   });
   it('shows pending messages without counting them as extra working jobs', () => {
     const queue = queues();

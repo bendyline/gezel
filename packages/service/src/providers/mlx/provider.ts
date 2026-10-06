@@ -128,6 +128,7 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
+  WireTranscriptEntry,
 } from '../types.js';
 import {
   asyncHandoffClosing,
@@ -140,8 +141,10 @@ import {
   type ChatMessage,
   setChatTemplateKwarg,
 } from './chat-protocol.js';
-import { MlxEngineGate } from './engine-gate.js';
+import { type EngineRequestPriority, MlxEngineGate } from './engine-gate.js';
+import { EngineHold, type EngineQueueMarker, engineHoldLabelFor } from './engine-hold.js';
 import { EngineLogRouter } from './engine-log-router.js';
+import { MlxEngineStatsSampler } from './engine-stats-sampler.js';
 import {
   StreamingReasoningSplit,
   type TemplateReasoningOpen,
@@ -156,7 +159,6 @@ import {
   estimatePromptTokens,
   formatTps,
   isMidStreamConnectionDrop,
-  readProcessRssBytes,
   translateMlxHttpError,
 } from './runtime-diagnostics.js';
 import {
@@ -171,6 +173,7 @@ import {
   applyCallableToolGrammar,
   callableRequestToolNames,
   chatCompletionToolName,
+  externalToolsAsChatCompletions,
   hermesRequiredArgGrammarRequested,
   missingTopLevelRequiredToolArgs,
   toChatCompletionsTools,
@@ -180,6 +183,7 @@ import { LeakyToolCallStripper } from './tool-call-stripper.js';
 import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
 import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
 import { MlxVisionMode, unseenToolImagesNote } from './vision-mode.js';
+import { mlxWireTranscript } from './wire-transcript.js';
 
 export {
   buildMidStreamDropMessage,
@@ -328,7 +332,7 @@ export class MlxProvider implements LLMProvider {
       // A session that never gets a first byte cannot tell "the engine is
       // sick" from "the engine is busy with someone else" from inside its
       // own request — this is the only place both are visible.
-      if (phase.cacheId && phase.phase === 'prefill') {
+      if (phase.cacheId && phase.phase === 'prefill' && !phase.engineQueue) {
         this.lastTaggedPrefill = {
           cacheId: phase.cacheId,
           detail: phase.detail ?? '',
@@ -351,17 +355,16 @@ export class MlxProvider implements LLMProvider {
       // Tear the child down so the next `ensureRunning()` respawns fresh.
       void this.supervisor?.stop().catch(() => {});
     },
-    onReady: () => this.scheduleEngineStatsSample(),
+    onReady: () => {
+      if (this.supervisor) this.engineStats.schedule();
+    },
   });
-  // Replayed to sessions that register after the engine finishes
-  // loading — same pattern as llama-cpp's `lastEngineStats` — so a
-  // chat started mid-run can surface the memory footprint in the
-  // pill dropdown without restarting the engine.
-  private lastEngineStats: EngineStatsEvent | null = null;
-  // Guards against multiple RSS samples from a single "ready" line
-  // (e.g. when uvicorn logs both "Application startup complete" and
-  // "Uvicorn running" — both classify as `ready`).
-  private engineStatsPending = false;
+  private readonly engineStats = new MlxEngineStatsSampler({
+    pid: () => this.supervisor?.currentChildPid(),
+    publish: (stats) => {
+      for (const s of this.activeSessions) s.publishEngineStats(stats);
+    },
+  });
   /** Width-N gate over physical engine requests; see {@link MlxEngineGate}. */
   private readonly engineGate: MlxEngineGate;
   private readonly batchMaxConcurrency: number;
@@ -450,6 +453,10 @@ export class MlxProvider implements LLMProvider {
       // housekeeping turns wait for a quiet window so they never wedge
       // the lane right before the user's next message.
       ambientQuietMs: defaultAmbientQuietMs(),
+      // The sidecar parks background waves for a waiting person, so a
+      // person's turn may pass task steps that fill every slot — the
+      // engine gate has the matching overflow (engine-gate.ts).
+      engineOverflow: true,
     });
   }
 
@@ -529,16 +536,24 @@ export class MlxProvider implements LLMProvider {
     signal?: AbortSignal,
     onWait?: (info: { aheadOf: number }) => void,
     capacityProtected = false,
+    priority: EngineRequestPriority = 'interactive',
   ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
     if (this.supervisor?.coordinatesCapacity && !capacityProtected)
       await this.supervisor.yieldForWaitingCapacity(signal);
-    return this.engineGate.acquire(label, signal, onWait);
+    return this.engineGate.acquire(label, signal, onWait, priority);
   }
 
+  /** Cache warms through the adapter: nobody is waiting on them, so they queue as background. */
   async runExclusiveEngineRequest<T>(label: string, work: () => Promise<T>): Promise<T> {
-    const release = await this.acquireExclusiveEngineRequest(label);
+    const release = await this.acquireExclusiveEngineRequest(
+      label,
+      undefined,
+      undefined,
+      false,
+      'background',
+    );
     try {
       return await work();
     } finally {
@@ -615,6 +630,7 @@ export class MlxProvider implements LLMProvider {
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
       ...(opts.singleToolCallTurn ? { singleToolCallTurn: true } : {}),
       ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
+      ...(opts.onWireTranscript ? { onWireTranscript: opts.onWireTranscript } : {}),
     });
   }
 
@@ -633,42 +649,6 @@ export class MlxProvider implements LLMProvider {
     return this.logRouter.takeRuntimeError();
   }
 
-  /**
-   * Sample how much memory the engine is holding, a moment after it reports
-   * itself ready — mlx_lm doesn't log buffer allocations the way llama.cpp
-   * does. We delay 2s so memory-mapped weights have settled; earlier samples
-   * undercount.
-   *
-   * Physical footprint, not RSS. Metal's unified-memory allocations — KV,
-   * activation buffers, MLX's retained buffer cache — never appear in RSS, so
-   * RSS reported 30 GB for an engine whose real footprint was ~103 GB, and
-   * the pill disagreed 3.6x with the memory strip (which samples footprint)
-   * about the same process. RSS stays as the fallback for hosts where
-   * `footprint` is unavailable; it is a floor, not a lie.
-   */
-  private scheduleEngineStatsSample(): void {
-    if (this.engineStatsPending) return;
-    if (!this.supervisor) return;
-    this.engineStatsPending = true;
-    setTimeout(async () => {
-      try {
-        const pid = this.supervisor?.currentChildPid();
-        if (!pid) return;
-        const { sampleDarwinProcessFootprintBytes } = await import(
-          '../../system/gezel-process-memory.js'
-        );
-        const footprintBytes = await sampleDarwinProcessFootprintBytes({ pid });
-        const rssBytes = footprintBytes ?? (await readProcessRssBytes(pid));
-        if (rssBytes === null) return;
-        const stats: EngineStatsEvent = { provider: 'mlx', ramAllocBytes: rssBytes };
-        this.lastEngineStats = stats;
-        for (const s of this.activeSessions) s.publishEngineStats(stats);
-      } finally {
-        this.engineStatsPending = false;
-      }
-    }, 2_000).unref?.();
-  }
-
   _registerActiveSession(session: MlxSession): void {
     this.activeSessions.add(session);
     // Catch a late joiner up on the engine-wide phase only. A tagged phase
@@ -676,7 +656,8 @@ export class MlxProvider implements LLMProvider {
     // would inherit a neighbour's progress bar.
     const pending = this.logRouter.lastPhase();
     if (pending && !pending.cacheId) session.publishEnginePhase(pending);
-    if (this.lastEngineStats) session.publishEngineStats(this.lastEngineStats);
+    const stats = this.engineStats.latest;
+    if (stats) session.publishEngineStats(stats);
   }
 
   _deregisterActiveSession(session: MlxSession): void {
@@ -792,6 +773,8 @@ interface MlxSessionDeps {
   /** See {@link SessionOpts.singleToolCallTurn}. */
   singleToolCallTurn?: boolean;
   terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
+  /** See {@link SessionOpts.onWireTranscript}. */
+  onWireTranscript?: NonNullable<SessionOpts['onWireTranscript']>;
 }
 
 class MlxSession extends StreamingSessionBase implements LLMSession {
@@ -848,6 +831,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
    * is silent until the very first generated token.
    */
   private currentTurnIdleReset: (() => void) | null = null;
+
+  /**
+   * Handler owned by the in-flight request for the engine's wave-scheduling
+   * markers (`waiting` / `paused` / `admitted`). Set beside
+   * {@link currentTurnIdleReset} and cleared with it.
+   */
+  private currentTurnEngineQueue: ((queue: EngineQueueMarker) => void) | null = null;
+
+  private readonly engineHold = new EngineHold();
 
   /**
    * Last prefill phase event seen during the current turn — captured
@@ -924,6 +916,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     return [...this.capturedCalls];
   }
 
+  getWireTranscript(): WireTranscriptEntry[] | undefined {
+    return mlxWireTranscript(this.messages);
+  }
+
   get numCtx(): number {
     return this.deps.numCtx;
   }
@@ -987,16 +983,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const bridgeTools = this.deps.bridges.isEmpty()
       ? []
       : toChatCompletionsTools(this.deps.bridges);
-    const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
-      (tool) => ({
-        type: 'function' as const,
-        function: {
-          name: tool.name,
-          description: tool.description ?? '',
-          parameters: tool.parameters,
-        },
-      }),
-    );
+    const externalAsChatCompletions = externalToolsAsChatCompletions(this.deps.externalTools);
     const tools = [...bridgeTools, ...externalAsChatCompletions];
     const body: Record<string, unknown> = {
       model: this.deps.model,
@@ -1008,6 +995,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // A warm must remain a one-token prefill even when catalog tuning carries
     // a wider output cap.
     body.max_tokens = 1;
+    // Nobody reads a warm; it must never hold up a person's turn.
+    body.priority = 'background';
     if (tools.length > 0) body.tools = tools;
     if (opts?.sessionId) {
       const adapter = this.deps.provider.getCacheAdapter();
@@ -1030,6 +1019,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
       `cache-warm:${opts?.sessionId ?? 'anonymous'}`,
       requestSignal,
+      undefined,
+      false,
+      'background',
     );
     try {
       const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
@@ -1075,6 +1067,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
   }
 
   publishEnginePhase(ev: EnginePhaseEvent): void {
+    if (ev.engineQueue) {
+      // Scheduling markers are the in-flight request's business alone: they
+      // re-arm its watchdog and relabel it. Outside a request there is
+      // nothing to wait on, so they are dropped.
+      this.currentTurnEngineQueue?.(ev.engineQueue);
+      return;
+    }
     // Capture the latest prefill state so the pre-first-byte abort
     // message (when it does fire) can attribute the stall to a real
     // observed point in the prefill arc.
@@ -1216,16 +1215,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const bridgeTools = this.deps.bridges.isEmpty()
       ? []
       : toChatCompletionsTools(this.deps.bridges);
-    const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
-      (t) => ({
-        type: 'function' as const,
-        function: {
-          name: t.name,
-          description: t.description ?? '',
-          parameters: t.parameters,
-        },
-      }),
-    );
+    const externalAsChatCompletions = externalToolsAsChatCompletions(this.deps.externalTools);
     const tools =
       bridgeTools.length + externalAsChatCompletions.length > 0
         ? [...bridgeTools, ...externalAsChatCompletions]
@@ -1408,8 +1398,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // genuinely hung engine still trips the idle abort.
     let prepLabel = 'Preparing…';
     this.lastPrefillEvent = null;
+    this.engineHold.end();
     const emitPrep = (): void => {
       if (firstTokenAt !== null) return;
+      // Held by the engine behind other work: say so, and show no bar —
+      // nothing of THIS prompt is being processed.
+      const holdLabel = this.engineHold.label;
+      if (holdLabel) {
+        this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: holdLabel });
+        return;
+      }
       // Carry the last observed prefill progress forward. A phase event
       // WITHOUT `progress` tells the UI the bar is over (the timeline's
       // engine_phase handler deletes `thinkingProgress` and its detail), so
@@ -1470,6 +1468,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           max_tokens: 16_384,
         };
         applyMlxRequestShape(body, this.deps, { hasTools: Boolean(tools?.length) });
+        // Engine-side scheduling: who is waiting on this turn. Omitted reads
+        // as interactive at the sidecar, so only background is spelled out.
+        const enginePriority = opts?.queue?.enginePriority ?? 'interactive';
+        if (enginePriority === 'background') body.priority = 'background';
         // Continuation-iteration output cap — see SendAndWaitOpts.
         // Iteration 0 keeps the catalog cap so a tool call is never cut
         // off before it starts; wrap-up iterations get the tight cap.
@@ -1661,6 +1663,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // gate are one state: this turn has not started yet.
             opts?.queue?.onQueueWait,
             true,
+            enginePriority,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
@@ -1786,9 +1789,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           ctrl.abort();
         }, PRE_FIRST_BYTE_IDLE_MS);
-        const resetIdle = () => {
-          if (firstSseEventAt === null) firstSseEventAt = Date.now();
-          lastSseEventAt = Date.now();
+        const armStreamingIdle = () => {
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             idleAbortKind = 'streaming';
@@ -1798,6 +1799,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             );
             ctrl.abort();
           }, STREAMING_IDLE_MS);
+        };
+        const resetIdle = () => {
+          if (firstSseEventAt === null) firstSseEventAt = Date.now();
+          lastSseEventAt = Date.now();
+          this.engineHold.end();
+          armStreamingIdle();
         };
         // Pre-first-byte progress reset — fires on prefill events
         // (and any other engine phase) arriving via the supervisor's
@@ -1823,6 +1830,30 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         };
         this.currentTurnIdleReset = resetIdleFromPhaseEvent;
         this.lastPrefillEvent = null;
+        // Engine-side holds (see engine-hold.ts): every `waiting` / `paused`
+        // marker proves the engine is alive and busy, so it re-arms whichever
+        // idle bound is live. The turn's own deadline (`budget`) still bounds
+        // the whole wait.
+        this.engineHold.end();
+        this.currentTurnEngineQueue = (queue) => {
+          if (queue.state === 'admitted') {
+            if (this.engineHold.label === null) return;
+            this.engineHold.end();
+            if (firstSseEventAt === null) emitPrep();
+            return;
+          }
+          if (firstSseEventAt === null) resetIdleFromPhaseEvent();
+          else armStreamingIdle();
+          if (firstSseEventAt !== null) {
+            // Paused mid-reply: the stream stops until the chat ahead is
+            // served. The reply so far stays on screen; the pill says why.
+            const detail = engineHoldLabelFor(queue);
+            this.emitEnginePhase({ provider: 'mlx', phase: 'generating', detail });
+            return;
+          }
+          const detail = this.engineHold.begin(queue, opts?.queue?.onQueueWait);
+          this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail });
+        };
         // Anchored at request dispatch: only work the engine did while THIS
         // turn was already waiting can explain why it never got a first byte.
         const requestDispatchedAt = Date.now();
@@ -1840,11 +1871,22 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const cleanupTurn = () => {
           clearInterval(deadlineTicker);
           clearTimeout(idleTimer);
+          this.engineHold.end();
+          this.currentTurnEngineQueue = null;
           this.currentTurnIdleReset = null;
           releaseEngineRequestOnce();
           externalSignal?.removeEventListener('abort', onExternalAbort);
         };
 
+        // Checkpoint the exact transcript this request sends, so a restart
+        // can reseed the session with the prompt the engine is about to cache
+        // instead of a lossy rebuild that matches only its system head. Taken
+        // here, after every in-iteration edit — the immediate-write suffix
+        // lands on the user message late.
+        if (this.deps.onWireTranscript) {
+          const transcript = mlxWireTranscript(messages);
+          if (transcript) this.deps.onWireTranscript(transcript);
+        }
         if (debugOn) {
           log.debug(
             `turn#${seq}.${turn} FETCH baseUrl=${baseUrl} model=${this.deps.model} ` +
@@ -2336,8 +2378,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               const stats = sinceFirst
                 ? `received ${turnContent.length} chars in ${sinceFirst}s before going silent for ${sinceLast}s`
                 : `received ${turnContent.length} chars before stalling`;
+              // Engine facts go to the log; the person gets what happened and
+              // what to do. A stream parked for a waiting chat never lands
+              // here — its `paused` markers re-arm this bound.
+              log.warn(`turn#${seq}.${turn} streaming idle abort: ${stats}`);
+              const quietSeconds = Math.round(STREAMING_IDLE_MS / 1000);
               throw new Error(
-                `[Mac AI] no output for ${Math.round(STREAMING_IDLE_MS / 1000)}s mid-stream; aborting (${stats}). This is usually mlx_vlm.server stalling SSE — retry the turn; if it keeps happening, restart the engine in Settings → On-device.`,
+                turnContent.length === 0
+                  ? `[Mac AI] The model went quiet for ${quietSeconds} seconds before writing anything, so this turn was stopped. Try again; if it keeps happening, restart the engine in Settings → On-device.`
+                  : `[Mac AI] The model went quiet for ${quietSeconds} seconds partway through its reply, so this turn was stopped. Try again; if it keeps happening, restart the engine in Settings → On-device.`,
               );
             } else {
               throw turnTimeoutError();

@@ -28,6 +28,7 @@ export * from './task-launch.js';
 export * from './session.js';
 export * from './session-lineage.js';
 export * from './session-telemetry.js';
+export * from './session-wire-transcript.js';
 export * from './terminal.js';
 export * from './history.js';
 export * from './index-readiness.js';

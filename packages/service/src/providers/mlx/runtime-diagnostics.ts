@@ -1,3 +1,7 @@
+import { createLogger } from '@bendyline/gezel';
+
+const log = createLogger('mlx');
+
 /** Read a process's resident-set size (bytes) via `ps` for engine telemetry. */
 export async function readProcessRssBytes(pid: number): Promise<number | null> {
   const { spawn } = await import('node:child_process');
@@ -81,30 +85,40 @@ export function formatTps(rate: number): string {
   return rate.toFixed(1);
 }
 
+/**
+ * What a person reads when a turn never started answering. Written for the
+ * person, not the engineer: no "first byte", "prefill", token counts, or
+ * server names. The engine-side facts behind each case go to the service
+ * log instead, where someone diagnosing it will look.
+ */
 export function buildPreFirstByteAbortMessage(
   lastPrefill: { progress: number; detail: string; at: number } | null,
   busyElsewhere?: { detail: string; secondsAgo: number } | null,
 ): string {
   // Checked first, and only when THIS request saw no prefill of its own:
   // an engine that was demonstrably prefilling someone else's turn is
-  // neither loading nor unhealthy, and saying so sends the reader to
-  // Settings → On-device to restart a perfectly good engine. Wild-caught
-  // on a restart that resumed four sessions at once — one turn waited
-  // 10m36s behind a neighbour's 124s prefill and was told the model might
-  // be sick.
+  // neither loading nor unhealthy, and saying so sends the reader off to
+  // restart a perfectly good engine. Wild-caught on a restart that resumed
+  // four sessions at once — one turn waited 10m36s behind a neighbour's
+  // 124s prefill and was told the model might be sick.
   if (!lastPrefill && busyElsewhere) {
     const what = busyElsewhere.detail ? ` (${busyElsewhere.detail})` : '';
-    return `[Mac AI] no first byte — the engine was busy with another session's turn${what} ${busyElsewhere.secondsAgo}s ago and never got to this one. It is not stuck or unhealthy: retry, and if several gezels are working at once expect them to take turns on one engine.`;
+    log.warn(
+      `pre-first-byte abort: waited behind another session's prefill${what} last seen ${busyElsewhere.secondsAgo}s ago`,
+    );
+    return '[Mac AI] This message was waiting for the AI on your Mac to finish another chat, and it never got its turn. Nothing is wrong with the AI — send the message again. When several gezels are working at once, they take turns.';
   }
   if (lastPrefill && lastPrefill.progress > 0) {
     const pct = Math.round(lastPrefill.progress * 100);
-    const detail = lastPrefill.detail ? ` (${lastPrefill.detail})` : '';
-    return `[Mac AI] aborting — prefill stalled at ${pct}%${detail}. The prompt may be too large for this model's effective speed. Try a shorter prompt, retry, or restart the engine in Settings → On-device.`;
+    log.warn(`pre-first-byte abort: own prefill stalled at ${pct}% (${lastPrefill.detail || '-'})`);
+    return `[Mac AI] The AI on your Mac stopped partway through reading this conversation (${pct}% done). It may be too long for this model to get through in time. Try again, start a new chat, or switch to a faster model.`;
   }
   if (lastPrefill?.detail) {
-    return `[Mac AI] aborting — still prefilling ${lastPrefill.detail} when the budget ran out. The prompt is large for this model's prefill speed; retry (the cache is warm now) or pick a faster/smaller model.`;
+    log.warn(`pre-first-byte abort: still prefilling ${lastPrefill.detail} at the deadline`);
+    return '[Mac AI] The AI on your Mac was still reading this conversation when it ran out of time. Try again — the second try is quicker, because it keeps what it has already read — or switch to a faster model.';
   }
-  return '[Mac AI] no first byte from the engine; aborting (model is loading slowly or mlx_vlm.server is unhealthy). Retry the turn; if it keeps happening, restart the engine in Settings → On-device.';
+  log.warn('pre-first-byte abort: no engine activity observed for this request');
+  return "[Mac AI] The AI on your Mac didn't start answering. It may still be loading the model. Try again in a moment; if it keeps happening, quit and reopen Gezel.";
 }
 
 /** Build the user-facing message for an engine stream that died mid-turn. */

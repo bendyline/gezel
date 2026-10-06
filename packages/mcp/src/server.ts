@@ -10899,7 +10899,9 @@ server.tool(
     catalogs: z
       .array(KnowledgeIdSchema)
       .optional()
-      .describe('Restrict knowledge catalogs before retrieval.'),
+      .describe(
+        'Search only these knowledge catalogs. Implies sources: ["knowledge"] unless sources is given.',
+      ),
     sources: z
       .array(
         z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
@@ -10936,7 +10938,10 @@ server.tool(
         query,
         gezelId,
         includeShared: true,
-        ...(sources ? { sources } : spatial ? { sources: ['knowledge'] as const } : {}),
+        // Naming catalogs is asking for reference material: without this the
+        // workspace and shared library kept answering, and their rank-derived
+        // "strong" hits crowded the named catalog off the page.
+        ...(sources ? { sources } : spatial || catalogs ? { sources: ['knowledge'] as const } : {}),
         ...(spatial ? { spatial } : {}),
         ...(catalogs ? { catalogs } : {}),
         ...(maxResults ? { maxResults } : {}),

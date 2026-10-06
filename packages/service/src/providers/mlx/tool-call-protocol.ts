@@ -1,4 +1,5 @@
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
+import type { ExternalToolSpec } from '../types.js';
 
 export interface ChatCompletionTool {
   type: 'function';
@@ -159,6 +160,20 @@ export function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTo
     function: {
       name: tool.name,
       description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+/** Caller-executed tools (see `SessionOpts.externalTools`) in the same shape. */
+export function externalToolsAsChatCompletions(
+  tools: readonly ExternalToolSpec[] | undefined,
+): ChatCompletionTool[] {
+  return (tools ?? []).map((tool) => ({
+    type: 'function' as const,
+    function: {
+      name: tool.name,
+      description: tool.description ?? '',
       parameters: tool.parameters,
     },
   }));

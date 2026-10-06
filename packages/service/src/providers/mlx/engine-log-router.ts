@@ -3,6 +3,7 @@ import type { EnginePhaseEvent } from '../streaming-session.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
+  classifyMlxQueueLine,
   classifyMlxStartupLine,
 } from './stdout-parser.js';
 
@@ -77,6 +78,16 @@ export class EngineLogRouter {
     if (fatal) {
       if (this.serving) this.noteRuntimeError(fatal);
       else this.handleFatalError(fatal);
+      return;
+    }
+    // Wave-scheduling markers bypass the repeat filter and never become the
+    // replayed "last phase". A queued request's markers are identical every
+    // few seconds BY DESIGN — each one is liveness that re-arms the waiting
+    // session's watchdog — so filtering repeats is exactly what must not
+    // happen to them. They are always tagged, so delivery stays per-session.
+    const queued = classifyMlxQueueLine(line);
+    if (queued) {
+      this.deps.deliver(queued);
       return;
     }
     const phase = classifyMlxStartupLine(line);

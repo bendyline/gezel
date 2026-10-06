@@ -964,6 +964,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         ...(body.gezelId ? { gezelId: body.gezelId } : {}),
         includeShared: body.includeShared !== false,
         ...(body.sources ? { sources: body.sources } : {}),
+        ...(body.catalogs ? { catalogs: body.catalogs } : {}),
         ...(body.maxResults ? { maxResults: body.maxResults } : {}),
         ...(body.offset ? { offset: body.offset } : {}),
         ...(body.pathPrefix ? { pathPrefix: body.pathPrefix } : {}),

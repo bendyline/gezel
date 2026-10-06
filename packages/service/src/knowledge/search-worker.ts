@@ -25,6 +25,7 @@ export interface KnowledgeWorkerRequest {
     | 'mount'
     | 'unmount'
     | 'mounted'
+    | 'prewarm'
     | 'validate'
     | 'topics'
     | 'documentsPage'

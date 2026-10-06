@@ -128,3 +128,64 @@ describe('the sidecar/parser format contract', () => {
     expect(emitter).toContain('if not self._prefill_meta:');
   });
 });
+
+describe('engine wave-scheduling markers', () => {
+  it('delivers every repeat of a waiting marker to its owner alone', () => {
+    // The repeats are the point: each one is liveness that re-arms the
+    // waiting session's watchdog, so the repeat filter must not eat them.
+    const held = session('sess-held');
+    const running = session('sess-running');
+    const p = providerWith(held, running);
+    const line = '[mlx] [batch] waiting cache=sess-held ahead=0 behind=sess-running';
+    p.onStdoutLine(line);
+    p.onStdoutLine(line);
+    p.onStdoutLine(line);
+    expect(held.seen).toHaveLength(3);
+    expect(held.seen[0]?.engineQueue).toEqual({
+      state: 'waiting',
+      ahead: 0,
+      behind: ['sess-running'],
+    });
+    expect(running.seen).toHaveLength(0);
+  });
+
+  it('is never replayed to a late joiner and is not mistaken for prefill work', () => {
+    const held = session('sess-held');
+    const p = providerWith(held);
+    const since = Date.now() - 1;
+    p.onStdoutLine('[mlx] [batch] waiting cache=sess-held ahead=1 behind=sess-a,sess-b');
+    const late = session('sess-late');
+    p._registerActiveSession(late as never);
+    expect(late.seen).toHaveLength(0);
+    // "The engine was busy prefilling for someone else" must stay reserved
+    // for real prefill: a hold marker names the HELD session, not the busy one.
+    expect(p.prefillForOtherSessionSince('sess-other', since)).toBeNull();
+  });
+
+  it('parses the exact lines wave_policy.py prints', () => {
+    // Pinned on the python side by wave_policy_test.py; the two languages
+    // only agree because both suites hold the same literal lines.
+    const held = session('s1');
+    const parked = session('bg');
+    const p = providerWith(held, parked);
+    p.onStdoutLine('[batch] waiting cache=s1 ahead=2 behind=r1,r2');
+    p.onStdoutLine('[batch] waiting cache=s1 ahead=0 behind=-');
+    p.onStdoutLine('[batch] paused cache=bg for=chat');
+    p.onStdoutLine('[batch] admitted cache=s1 waited=12.3s');
+    expect(held.seen.map((e) => e.engineQueue)).toEqual([
+      { state: 'waiting', ahead: 2, behind: ['r1', 'r2'] },
+      { state: 'waiting', ahead: 0, behind: [] },
+      { state: 'admitted' },
+    ]);
+    expect(parked.seen.map((e) => e.engineQueue)).toEqual([{ state: 'paused', behind: ['chat'] }]);
+  });
+
+  it('ignores the diagnostic queued line', () => {
+    const held = session('s1');
+    const p = providerWith(held);
+    p.onStdoutLine(
+      '[batch] queued request=chatcmpl-1 cache=s1 priority=interactive ahead=0 behind=bg',
+    );
+    expect(held.seen).toHaveLength(0);
+  });
+});

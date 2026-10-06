@@ -290,13 +290,32 @@ export class SessionCacheController {
   }
 
   /**
-   * Drop everything for one provider. Fired on `resetClient` — the
-   * provider is about to be torn down and rebuilt, so any state we held
-   * is now stale by definition.
+   * Drop everything for one provider, in the engine too. For an operator's
+   * explicit clear and for a provider being removed for good.
    */
   invalidateProvider(providerName: string): void {
+    const sessionIds = this.forgetProvider(providerName);
     const state = this.providers.get(providerName);
-    if (!state) return;
+    if (state && sessionIds.length > 0) {
+      void state.adapter.evict(sessionIds).catch((err) => {
+        this.logger.warn?.(`[cache] provider-wide evict failed for ${providerName}: ${err}`);
+      });
+    }
+  }
+
+  /**
+   * Drop this controller's bookkeeping for one provider WITHOUT touching the
+   * engine's caches. Fired on `resetClient`: the provider object is rebuilt,
+   * so our view of it is stale, but the engine's entries are not — they are
+   * keyed by session and checked token by token on reuse, so a stale one
+   * costs nothing while a deleted one costs a full re-prefill. Evicting them
+   * here wiped, from memory AND disk, the cache a session was about to resume
+   * from whenever the engine outlived the reset (a live settings change, an
+   * external or machine-wide engine across a daemon restart).
+   */
+  forgetProvider(providerName: string): string[] {
+    const state = this.providers.get(providerName);
+    if (!state) return [];
     const sessionIds = Array.from(state.entries.keys());
     state.entries.clear();
     state.recentOutcomes = [];
@@ -304,11 +323,7 @@ export class SessionCacheController {
     state.misses = 0;
     state.hitsBySource = emptyHitsBySource();
     state.gezelOutcomes.clear();
-    if (sessionIds.length > 0) {
-      void state.adapter.evict(sessionIds).catch((err) => {
-        this.logger.warn?.(`[cache] provider-wide evict failed for ${providerName}: ${err}`);
-      });
-    }
+    return sessionIds;
   }
 
   /**
