@@ -72,6 +72,8 @@ export interface PlannerOffloadDecision {
   cpuMoe?: boolean;
   nCpuMoe?: number;
   nCpuFfn?: number;
+  /** Every weight fits the GPU pool (see `MoeOffloadDecision.fullGpuResidency`). */
+  fullGpuResidency?: true;
   /** Human-readable reason, for the decision log (not emitted as a flag). */
   reason?: string;
 }
@@ -143,10 +145,77 @@ export interface EngineFlagInput {
    * config/manifest `swaFull` wins regardless.
    */
   swaFullAutoFits?: boolean | undefined;
+  /**
+   * The llama-server build's backend (`cuda`, `vulkan`, `metal`, `cpu`).
+   * Only a GPU backend can receive the GPU-resident thread default.
+   */
+  backend?: string | undefined;
+  /** Logical CPUs available to the daemon; caps the GPU-resident thread default. */
+  hostCpuCount?: number | undefined;
 }
 
 /** Default `--cache-reuse` chunk when neither config nor manifest set it. */
 export const DEFAULT_CACHE_REUSE = 256;
+
+/**
+ * Upper bound on `--threads` for an engine whose every weight is on the GPU,
+ * when neither config nor manifest chose a count.
+ *
+ * Left alone, llama.cpp sizes its CPU pool to every physical core: all 20 on
+ * a DGX Spark, where nothing is held back because there is no SMT and no
+ * efficiency-core exclusion on Linux ARM. The pool spins between steps even
+ * though the GPU does the model's work, and from the bundled 0.1.48 build
+ * (upstream v0.6.0) on it spins hard enough that a pool covering every core
+ * starves the thread driving the GPU. Measured on the Spark: gemma4-e2b
+ * decoded at 72 t/s with the default 20 threads and ~120 t/s anywhere from 1
+ * to 16; 10 threads pinned to 10 cores fell to 58 t/s, so the cause is the
+ * missing spare core, not the core type. gemma4-e4b, granite-vision and
+ * qwen3.8-flash-next lost 15-41% the same way. Decode and prefill were flat
+ * across small pools while CPU time grew linearly with the thread count, so
+ * a small pool with headroom is both the fastest and the cheapest setting.
+ */
+export const GPU_RESIDENT_THREADS = 4;
+
+/** Cores left free for the server, sampling and GPU-driver threads. */
+const GPU_RESIDENT_SPARE_CORES = 2;
+
+function gpuResidentThreads(hostCpuCount: number | undefined): number {
+  const available =
+    typeof hostCpuCount === 'number' && hostCpuCount > 0
+      ? hostCpuCount - GPU_RESIDENT_SPARE_CORES
+      : GPU_RESIDENT_THREADS;
+  return Math.max(1, Math.min(GPU_RESIDENT_THREADS, available));
+}
+
+const GPU_BACKENDS = new Set(['cuda', 'vulkan', 'metal']);
+
+/**
+ * `llamaCppExtraArgs` keys that either choose a thread pool or may move
+ * weights to the CPU; any of them makes the GPU-resident default stand down.
+ */
+const EXTRA_ARGS_OWNING_THREADS = new Set([
+  'threads',
+  't',
+  'threads-batch',
+  'tb',
+  'cpu-mask',
+  'cpu-range',
+  'n-gpu-layers',
+  'gpu-layers',
+  'ngl',
+  'cpu-moe',
+  'n-cpu-moe',
+  'n-cpu-ffn',
+  'override-tensor',
+  'ot',
+]);
+
+function extraArgsOwnThreads(extraArgs: GlobalLlamaCppFlags['llamaCppExtraArgs']): boolean {
+  if (!extraArgs) return false;
+  return Object.keys(extraArgs).some((key) =>
+    EXTRA_ARGS_OWNING_THREADS.has(key.replace(/^-+/, '')),
+  );
+}
 
 /**
  * Normalize the tri-state-or-legacy-boolean flash-attn config into the
@@ -188,6 +257,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     architecture,
     modelId,
     swaFullAutoFits,
+    backend,
+    hostCpuCount,
   } = input;
   const args: string[] = [];
 
@@ -289,7 +360,23 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (swaFull) args.push('--swa-full');
 
   // ── Thread / batch overrides ──────────────────────────────────────
-  const threads = config.llamaCppThreads ?? perModel?.threads;
+  // The GPU-resident default needs positive evidence that no model compute
+  // runs on the CPU: a GPU build, a planner that measured a full fit, and no
+  // CPU placement from any layer. Anything less keeps llama.cpp's own
+  // all-cores default, because CPU-resident layers need every thread.
+  const gpuResident =
+    backend !== undefined &&
+    GPU_BACKENDS.has(backend) &&
+    planner?.fullGpuResidency === true &&
+    (nGpuLayers === undefined || nGpuLayers === -1) &&
+    !cpuMoe &&
+    !(typeof nCpuMoe === 'number' && nCpuMoe > 0) &&
+    !(typeof nCpuFfn === 'number' && nCpuFfn > 0) &&
+    !extraArgsOwnThreads(config.llamaCppExtraArgs);
+  const threads =
+    config.llamaCppThreads ??
+    perModel?.threads ??
+    (gpuResident ? gpuResidentThreads(hostCpuCount) : undefined);
   if (typeof threads === 'number') args.push('--threads', String(threads));
   const batchSize = config.llamaCppBatchSize ?? perModel?.batchSize;
   if (typeof batchSize === 'number') args.push('--batch-size', String(batchSize));

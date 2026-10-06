@@ -190,6 +190,61 @@ describe('planDenseFfnOffload — exact v0.4.0 tensor split', () => {
   });
 });
 
+describe('fullGpuResidency — set only for a measured full fit', () => {
+  // The engine-flag builder caps llama.cpp's CPU thread pool on this signal,
+  // so a decision that leaves placement to the engine must never carry it.
+  const moeSplit = {
+    nonExpertBytes: 2 * GiB,
+    expertBytesByLayer: Array.from({ length: 40 }, () => 0.5 * GiB),
+  };
+  const moe = { isMoE: true, residentBytes: 22 * GiB, split: moeSplit, blockCount: 40 };
+  const denseSplit = {
+    nonFfnBytes: 4 * GiB,
+    ffnBytesByLayer: Array.from({ length: 32 }, () => 0.5 * GiB),
+  };
+  const dense = {
+    isMoE: false,
+    split: denseSplit,
+    blockCount: 32,
+    kvReserveBytes: 1 * GiB,
+    marginBytes: 1 * GiB,
+    ramBudgetBytes: 20 * GiB,
+    freeSystemRamBytes: 20 * GiB,
+  };
+
+  it('marks MoE and dense models that fit', () => {
+    expect(planMoeOffload({ ...moe, vramBytes: 64 * GiB }).fullGpuResidency).toBe(true);
+    expect(
+      planMoeOffload({ isMoE: true, residentBytes: 8 * GiB, vramBytes: 24 * GiB }).fullGpuResidency,
+    ).toBe(true);
+    expect(planDenseFfnOffload({ ...dense, vramBytes: 24 * GiB }).fullGpuResidency).toBe(true);
+  });
+
+  it('leaves it off every split, CPU placement and engine-owned fit', () => {
+    const decisions = [
+      planMoeOffload({ ...moe, vramBytes: 12 * GiB }),
+      planMoeOffload({ ...moe, vramBytes: 3 * GiB }),
+      planMoeOffload({ isMoE: true, residentBytes: 24 * GiB, vramBytes: 12 * GiB }),
+      planMoeOffload({ isMoE: true, residentBytes: 24 * GiB, vramBytes: 0 }),
+      planMoeOffload({ isMoE: false, residentBytes: 4 * GiB, vramBytes: 24 * GiB }),
+      planDenseFfnOffload({ ...dense, vramBytes: 12 * GiB }),
+      planDenseFfnOffload({ ...dense, vramBytes: 6 * GiB }),
+      planDenseFfnOffload({ ...dense, vramBytes: 0 }),
+      planDenseFfnOffload({ ...dense, vramBytes: 12 * GiB, ramBudgetBytes: 8 * GiB }),
+    ];
+    for (const d of decisions) expect(d.fullGpuResidency).toBeUndefined();
+  });
+
+  it('is dropped by the OOM ladder', () => {
+    expect(
+      degradeMoeOffloadDecision({ nGpuLayers: -1, nCpuMoe: 8 })?.fullGpuResidency,
+    ).toBeUndefined();
+    expect(
+      degradeDenseFfnOffloadDecision({ nGpuLayers: -1, nCpuFfn: 21 }, 32)?.fullGpuResidency,
+    ).toBeUndefined();
+  });
+});
+
 describe('degradeDenseFfnOffloadDecision — the OOM ladder', () => {
   it('moves every dense FFN layer to RAM, then releases the GPU-layer pin', () => {
     const allCpu = degradeDenseFfnOffloadDecision({ nGpuLayers: -1, nCpuFfn: 21 }, 32);
