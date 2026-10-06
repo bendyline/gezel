@@ -264,6 +264,12 @@ jobs:
         run: pnpm build
       - name: Typecheck release-stamped workspace
         run: pnpm typecheck
+      - name: Release-contract tests on the stamped workspace
+        # The Electron release runs the whole suite after stamping. These are
+        # the tests that read repository source and workflows, so they are the
+        # ones a stamp can break: prepare-package.test.mjs asserted the 0.0.0
+        # baseline and failed only at release time (run 37451680238).
+        run: pnpm --filter @bendyline/gezel-app run test
       - name: Build and import the packaged service bundle
         run: pnpm build:bundle
       - name: Generate release-stamped SBOM
