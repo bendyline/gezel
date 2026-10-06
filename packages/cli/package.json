@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-cli",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "The `gezel` command-line tool.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
