@@ -187,6 +187,16 @@ describe('PersistentShell (POSIX)', () => {
     await shell.whenExited();
   });
 
+  itPosix('kill() escalates to SIGKILL when the shell survives SIGHUP', async () => {
+    const shell = await PersistentShell.start({ cwd: tmpdir() });
+    // A DEBUG trap makes bash swallow SIGHUP only intermittently; ignoring
+    // it outright reproduces the same survivor every time.
+    await shell.run("trap '' HUP");
+    shell.kill();
+    await shell.whenExited();
+    expect(shell.isAlive()).toBe(false);
+  });
+
   itPosix('streams output chunks via onChunk before the final result resolves', async () => {
     const shell = await PersistentShell.start({ cwd: tmpdir() });
     try {
