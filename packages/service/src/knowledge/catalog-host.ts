@@ -45,6 +45,12 @@ export interface GlobalSearchRequest {
   query: string;
   /** Global shard budget across every mounted catalog (S). */
   shardBudget: number;
+  /**
+   * Extra shards, beyond S and across every catalog, holding a page the
+   * query names by title (`CatalogHandle.titleRouteShards`), most specific
+   * name first. Default 0.
+   */
+  titleRouteShards?: number;
   finalK: number;
   /** Chunk-body FTS over routed shards (explicit search only). */
   includeChunkFts: boolean;
@@ -160,6 +166,26 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
         const list = routed.get(pick.key) ?? [];
         list.push(pick.shardId);
         routed.set(pick.key, list);
+      }
+      // Title-assisted routing: centroid scores alone can leave out the
+      // shard holding the very page the question names, so scan it too.
+      const extra = request.spatial ? 0 : (request.titleRouteShards ?? 0);
+      if (extra > 0) {
+        const named: Array<{ key: string; shardId: number; score: number }> = [];
+        for (const { key, handle } of active) {
+          for (const s of handle.titleRouteShards(request.query, extra)) named.push({ key, ...s });
+        }
+        // Exact-title matches score Infinity, so compare rather than subtract.
+        named.sort((a, b) => (a.score === b.score ? 0 : a.score < b.score ? 1 : -1));
+        let added = 0;
+        for (const pick of named) {
+          if (added >= extra) break;
+          const list = routed.get(pick.key) ?? [];
+          if (list.includes(pick.shardId)) continue;
+          list.push(pick.shardId);
+          routed.set(pick.key, list);
+          added++;
+        }
       }
       for (const { key, handle } of active) {
         const shardIds = routed.get(key);

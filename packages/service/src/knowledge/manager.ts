@@ -106,6 +106,13 @@ const log = createLogger('knowledge');
 
 /** Explicit-search shard budget (S) across every active catalog (§3.4). */
 const ROUTE_BUDGET_EXPLICIT = 6;
+/**
+ * Shards added beyond that budget for pages the query names by title (the
+ * catalog host's title-assisted routing): the centroids alone left the ABBA
+ * article unscanned for "Who were the members of ABBA?". Two, not one per
+ * catalog, so twenty mounted catalogs cannot add twenty scans.
+ */
+const TITLE_ROUTE_EXPLICIT = 2;
 const FINAL_K = 24;
 /** Same cadence as the catalog download's own progress (download-with-retry). */
 const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
@@ -1504,6 +1511,7 @@ export class KnowledgeManager {
         query,
         ...(group.vector ? { vector: group.vector } : {}),
         shardBudget: ROUTE_BUDGET_EXPLICIT,
+        titleRouteShards: TITLE_ROUTE_EXPLICIT,
         finalK: FINAL_K,
         includeChunkFts: true,
         catalogKeys: group.keys,

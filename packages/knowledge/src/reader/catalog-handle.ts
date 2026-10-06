@@ -42,7 +42,12 @@ import {
 } from '../format/constants.js';
 import { centerVector, rerankScore } from '../format/quantize.js';
 import { type ShardBitIndex, asymmetricTopK, hammingTopK } from './bit-scan.js';
-import { documentFtsTopIds, selectiveFtsQuery } from './fts-query.js';
+import {
+  compareScores,
+  documentFtsTopIds,
+  namedTitleMatches,
+  selectiveFtsQuery,
+} from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
 import { DocumentSpatialIndex, type SpatialMatch } from './spatial-index.js';
 
@@ -119,6 +124,11 @@ interface ShardInfo {
 const BIT_INDEX_BUDGET_BYTES = 256 * 1024 * 1024;
 /** Chunk-FTS term row counts cached per handle before the cache is reset. */
 const CHUNK_TERM_ROWS_CACHE_MAX = 50_000;
+/**
+ * Shards a single-catalog search adds for the pages its query names by
+ * title (`titleRouteShards`), on top of the centroid-routed budget.
+ */
+export const TITLE_ROUTE_SHARDS = 1;
 
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
@@ -824,13 +834,58 @@ export class CatalogHandle {
     return [...best.entries()].map(([shardId, score]) => ({ shardId, score }));
   }
 
-  /** Top-S shard ids within THIS catalog (single-catalog callers, tests). */
-  routeShards(queryVector: Float32Array, shardBudget: number): number[] {
+  /**
+   * Top-S shard ids within THIS catalog (single-catalog callers, tests).
+   * With the raw `query`, also the shard of the page it names by title
+   * (`titleRouteShards`), so the result can exceed S by `TITLE_ROUTE_SHARDS`.
+   */
+  routeShards(queryVector: Float32Array, shardBudget: number, query?: string): number[] {
     if (this.shards.length <= shardBudget) return this.shards.map((s) => s.id);
-    return this.scoreShards(queryVector)
+    const routed = this.scoreShards(queryVector)
       .sort((a, b) => b.score - a.score)
       .slice(0, shardBudget)
       .map((s) => s.shardId);
+    if (query) {
+      for (const named of this.titleRouteShards(query, TITLE_ROUTE_SHARDS)) {
+        if (!routed.includes(named.shardId)) routed.push(named.shardId);
+      }
+    }
+    return routed;
+  }
+
+  /**
+   * Title-assisted routing: the shards holding the pages `query` names by
+   * title (`namedTitleMatches`), most specific name first, at most `limit`
+   * distinct shards. Centroid routing compares a question with averages of
+   * whole shards, and e5 scores those in a band a few hundredths wide, so
+   * the shard holding the very page a question names can rank 8th of 10:
+   * "Who were the members of ABBA?" never reached the ABBA article in the
+   * Wikipedia music catalog. Its title does — the vector arm scans that
+   * shard too. Measured on the 10-shard music and film-tv catalogs, one such
+   * shard lifted end-to-end recall@8 on "What is <title>?" questions from
+   * 86% to 92% and 84% to 91%, at about 0.15 extra shard scans per query.
+   *
+   * `score` is the named match's specificity (fts-query.ts), comparable
+   * across catalogs closely enough for the daemon to choose which catalogs'
+   * shards to add when several name a page. Empty on any FTS error.
+   */
+  titleRouteShards(query: string, limit: number): Array<{ shardId: number; score: number }> {
+    if (limit <= 0) return [];
+    try {
+      const shardOf = this.router.db.prepare('SELECT shard_id FROM documents WHERE id = ?');
+      const out: Array<{ shardId: number; score: number }> = [];
+      for (const named of namedTitleMatches(this.router.db, query, limit * 4)) {
+        const row = shardOf.get(named.documentId) as { shard_id: number | bigint } | undefined;
+        if (!row) continue;
+        const shardId = Number(row.shard_id);
+        if (out.some((o) => o.shardId === shardId)) continue;
+        out.push({ shardId, score: named.score });
+        if (out.length >= limit) break;
+      }
+      return out.sort((a, b) => compareScores(b.score, a.score));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -839,11 +894,17 @@ export class CatalogHandle {
    */
   searchSemantic(
     queryVector: Float32Array,
-    opts: { shardBudget?: number; finalK?: number; allowedDocumentIds?: ReadonlySet<string> } = {},
+    opts: {
+      shardBudget?: number;
+      finalK?: number;
+      allowedDocumentIds?: ReadonlySet<string>;
+      /** The raw query text: adds the shard of the page it names (`routeShards`). */
+      query?: string;
+    } = {},
   ): CatalogChunkHit[] {
     const shardIds = opts.allowedDocumentIds
       ? this.shardsForDocuments(opts.allowedDocumentIds)
-      : this.routeShards(queryVector, opts.shardBudget ?? ROUTE_SHARDS_EXPLICIT);
+      : this.routeShards(queryVector, opts.shardBudget ?? ROUTE_SHARDS_EXPLICIT, opts.query);
     return this.searchShards(
       queryVector,
       shardIds,

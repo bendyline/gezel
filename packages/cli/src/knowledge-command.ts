@@ -440,7 +440,7 @@ export async function runKnowledgeSearch(
         try {
           const vector = await embedder.embedQuery(query);
           chunkHits = [
-            ...handle.searchSemantic(vector, { finalK: limit, allowedDocumentIds: allowed }),
+            ...handle.searchSemantic(vector, { finalK: limit, allowedDocumentIds: allowed, query }),
             ...chunkHits,
           ];
         } finally {

@@ -528,6 +528,18 @@ from 82.6% to 85.7% at S = 6 and from 52.1% to 63.9% at S = 3 over 10 shards;
 recut to 37 shards, from 36.0% to 55.5% at S = 6. It helps; it does not make a
 catalog of dozens of shards routable at S = 6 — split those by subject.
 
+A question that names a page by title gets that page's shard as well
+(title-assisted routing, `CatalogHandle.titleRouteShards`). Centroid scores sit
+in a band a few hundredths wide, so even with semantic fill "Who were the
+members of ABBA?" ranked the ABBA article's shard 8th of 10. The named-title
+tier of the document index knows which page the question names, and the vector
+arm scans its shard on top of S: one shard for a single-catalog search, at most
+two across all catalogs for the daemon's explicit search (`titleRouteShards` on
+the host request), most specific name first. On the 10-shard music and film-tv
+catalogs this lifted end-to-end recall@8 on "What is <title>?" questions from
+86% to 92% and 84% to 91%, at about 0.15 extra shard scans per query. A
+question naming nothing adds nothing.
+
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest
 keywords and compiler-emitted topic centroids, to select a bounded set. Explicit
