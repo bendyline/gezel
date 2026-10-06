@@ -38,15 +38,17 @@ describe('waitForKnowledgeInstall', () => {
   it('cancels and throws when the install never becomes terminal', async () => {
     const cancel = vi.fn(async () => ({ cancelled: true }));
     const log = vi.fn();
-    const client = clientWith(
-      async () => ({
+    const client = clientWith(async () => {
+      // Each poll outlasts the log interval, so the first one logs: a 1 ms
+      // sleep is ~15 ms on Windows and would exhaust the timeout before a second poll.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
         id: 'job-2',
         startedAt: new Date().toISOString(),
         finished: false,
         events: [{ type: 'progress' }],
-      }),
-      cancel,
-    );
+      };
+    }, cancel);
 
     await expect(
       waitForKnowledgeInstall(client, 'job-2', {
