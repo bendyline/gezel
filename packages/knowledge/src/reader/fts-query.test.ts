@@ -8,7 +8,12 @@
 import { describe, expect, it } from 'vitest';
 import { ROUTER_DDL } from '../format/ddl.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
-import { documentFtsTopIds, documentSmokeQueryMisses, sanitizeFtsQuery } from './fts-query.js';
+import {
+  contentFtsQuery,
+  documentFtsTopIds,
+  documentSmokeQueryMisses,
+  selectiveFtsQuery,
+} from './fts-query.js';
 
 function routerWith(
   rows: Array<{ id: string; title: string; summary?: string; aliases?: string }>,
@@ -23,9 +28,7 @@ function routerWith(
 }
 
 function top(db: DatabaseSync, query: string, limit = 5): string[] {
-  const match = sanitizeFtsQuery(query);
-  if (!match) return [];
-  return documentFtsTopIds(db, match, limit, query);
+  return documentFtsTopIds(db, query, limit);
 }
 
 describe('documentFtsTopIds', () => {
@@ -58,9 +61,9 @@ describe('documentFtsTopIds', () => {
         aliases: '1944 Republican Party vice presidential candidate selection',
       },
     ]);
-    // The column weights alone (no exact-title boost) must rank it first.
-    const query = '1944 Republican Party vice presidential candidate selection';
-    expect(documentFtsTopIds(db, sanitizeFtsQuery(query) as string, 5)[0]).toBe('vp-1944');
+    // The column weights alone must rank it first: without "Party" the query
+    // neither spells nor names the title, so tiers 1 and 2 cannot decide.
+    expect(top(db, '1944 Republican vice presidential candidate selection')[0]).toBe('vp-1944');
     db.close();
   });
 
@@ -84,6 +87,22 @@ describe('documentFtsTopIds', () => {
     db.close();
   });
 
+  it('never ranks a title on request filler alone', () => {
+    const db = routerWith([
+      ...Array.from({ length: 300 }, (_, i) => ({
+        id: `f${i}`,
+        title: `Unrelated article ${i}`,
+        summary: 'a document on something else entirely',
+      })),
+      { id: 'faq', title: 'What can you tell me about it' },
+      { id: 'blob', title: 'Blob lifecycle', summary: 'Storage tiers for blobs' },
+    ]);
+    const ids = top(db, 'Can you tell me about blob storage?');
+    expect(ids[0]).toBe('blob');
+    expect(ids).not.toContain('faq');
+    db.close();
+  });
+
   it('keeps the smoke check in lockstep with search', () => {
     const db = routerWith([
       { id: 'a', title: 'Abbey', summary: 'monastery' },
@@ -97,5 +116,54 @@ describe('documentFtsTopIds', () => {
       [],
     );
     db.close();
+  });
+});
+
+describe('selectiveFtsQuery', () => {
+  // Row counts from a real 199,984-chunk Azure-docs shard.
+  const rows = 199_984;
+  const counts: Record<string, number> = {
+    '"azure"': 164_766,
+    '"to"': 144_238,
+    '"with"': 83_634,
+    '"you"': 84_854,
+    '"tell"': 4_211,
+    '"integrate"': 3_124,
+    '"search"': 5_560,
+    '"blob"': 7_408,
+    '"storage"': 19_779,
+    '"services"': 120_512,
+  };
+  const rowsMatching = (phrase: string) => counts[phrase.toLowerCase()] ?? 0;
+
+  it('drops request filler and terms in more than half the rows', () => {
+    expect(
+      selectiveFtsQuery(
+        'Can you tell me how to integrate Azure search with blob storage?',
+        rows,
+        rowsMatching,
+      ),
+    ).toBe('"integrate" OR "search" OR "blob" OR "storage"');
+  });
+
+  it('keeps the rarest term when every term is that common', () => {
+    expect(selectiveFtsQuery('Azure services', rows, rowsMatching)).toBe('"services"');
+    expect(selectiveFtsQuery('Azure', rows, rowsMatching)).toBe('"Azure"');
+  });
+
+  it('keeps a query made only of function words', () => {
+    expect(selectiveFtsQuery('how can you', rows, () => 10)).toBe('"how" OR "can" OR "you"');
+  });
+
+  it('answers null when there is nothing to match', () => {
+    expect(selectiveFtsQuery('?!', rows, rowsMatching)).toBeNull();
+  });
+});
+
+describe('contentFtsQuery', () => {
+  it('drops request filler but keeps a query made only of it', () => {
+    expect(contentFtsQuery('Please tell me about Shellac')).toBe('"Shellac"');
+    expect(contentFtsQuery('how to')).toBe('"how" OR "to"');
+    expect(contentFtsQuery('?!')).toBeNull();
   });
 });

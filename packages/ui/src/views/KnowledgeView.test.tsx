@@ -204,6 +204,36 @@ describe('KnowledgeView', () => {
     ).toBeInTheDocument();
   });
 
+  it('offers an add key beside the catalog name that opens knowledge settings', async () => {
+    const { peekPendingSettingsSection, clearPendingSettingsSection } = await import(
+      '../settings-nav.js'
+    );
+    clearPendingSettingsSection();
+    render(<KnowledgeView />);
+    expect(await screen.findByText('Shop Notes')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Catalog' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge catalogs' }));
+    expect(peekPendingSettingsSection()).toBe('knowledge');
+    clearPendingSettingsSection();
+  });
+
+  it('puts the add key beside the catalog picker when there is more than one catalog', async () => {
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
+      catalogs: [
+        CATALOG,
+        {
+          ...CATALOG,
+          ref: { ...CATALOG.ref, catalogId: 'garden-notes' },
+          name: 'Garden Notes',
+        },
+      ],
+    });
+    render(<KnowledgeView />);
+    const picker = await screen.findByRole('combobox', { name: 'Catalog' });
+    const addKey = screen.getByRole('button', { name: 'Add knowledge catalogs' });
+    expect(addKey.parentElement).toBe(picker.parentElement);
+  });
+
   it('opens the bundled welcome article after a stale catalog selection and allows returning to the list', async () => {
     window.localStorage.setItem('gezel:knowledge:catalog', 'removed-catalog');
     window.localStorage.setItem('gezel:knowledge:document', 'removed-document');

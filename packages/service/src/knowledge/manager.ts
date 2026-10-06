@@ -143,8 +143,16 @@ function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSem
  */
 const RRF_K = 60;
 const ARM_WEIGHTS = { vector: 1, docFts: 1, chunkFts: 0.5 } as const;
-/** Fused documents per catalog: keeps one catalog from monopolizing the merged list. */
+/**
+ * Fused documents per catalog when several are in scope: keeps one catalog
+ * from monopolizing the merged list. A search scoped to one catalog has
+ * nothing to share the list with, and the cap cut the Knowledge browser's
+ * search for "blob" in an Azure-docs catalog — 348 matching titles — to six.
+ */
 const PER_CATALOG_CAP = 6;
+/** Lexical candidates fetched per arm before fusion, at the least. */
+const DOC_FTS_MIN = 6;
+const CHUNK_FTS_MIN = 8;
 
 /** Rank-anchored relevance for a fused knowledge result: the best hit is a strong 1.0, decaying RRF-style. */
 function fusedRankRelevance(rank: number): number {
@@ -1499,7 +1507,10 @@ export class KnowledgeManager {
         finalK: FINAL_K,
         includeChunkFts: true,
         catalogKeys: group.keys,
-        docFtsLimit: 6,
+        // A pool no deeper than the page asked for: six title hits could
+        // never fill a twenty-result browse search.
+        docFtsLimit: Math.max(DOC_FTS_MIN, opts.maxResults),
+        chunkFtsLimit: Math.max(CHUNK_FTS_MIN, opts.maxResults),
         spatial: opts.spatial,
       });
       response.chunks.push(...part.chunks);
@@ -1590,11 +1601,12 @@ export class KnowledgeManager {
     const seenSpatial = new Set<string>();
     const out: UnifiedSearchResult[] = [];
     const perCatalogCount = new Map<string, number>();
+    const capPerCatalog = !opts.spatial && active.length > 1;
     for (const entry of ordered) {
       const info = this.mountedByKey.get(entry.catalogKey);
       if (!info) continue;
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
-      if (!opts.spatial && count >= PER_CATALOG_CAP) continue;
+      if (capPerCatalog && count >= PER_CATALOG_CAP) continue;
       const spatialIdentity = regionalDocumentIdentity(
         info.ref.publisherId,
         info.ref.catalogId,

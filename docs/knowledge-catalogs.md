@@ -506,6 +506,17 @@ Republican Party vice presidential candidate selection" fell out of its own
 top 5. The same query backs the compiler's smoke verification and the
 validator, so seal-time and install-time checks agree with search.
 
+Both the BM25 tier and the chunk-body FTS arm match the query's content words
+only: request filler (`QUERY_STOP_WORDS`, the list the project index uses) is
+dropped unless nothing else is left. On a 13,547-document Azure-docs catalog,
+"Can you tell me how to integrate Azure search with blob storage?" otherwise
+ranked an Azure AD B2C page about "eID-**Me**" first. Chunk FTS also drops any
+term found in more than half a shard's chunks — BM25 weighs it at ~0, yet an OR
+still ranks every row it matches. Together these took that question's chunk scan
+from ~550 ms to ~40 ms, inside the chat turn's 600 ms knowledge budget. Exact and
+named titles read the raw query, so a recorded smoke query (a document's own
+title) ranks as before.
+
 Shard routing only reaches what its budget covers (S = 6 explicit, 3 proactive),
 so a catalog with more shards than S loses the neighbours that live in unrouted
 shards. The spec's topic-order fill (gezk §8.1) puts an artist, their albums

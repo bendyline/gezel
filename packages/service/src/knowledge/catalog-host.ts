@@ -51,6 +51,8 @@ export interface GlobalSearchRequest {
   /** Restrict to these catalog keys (default: all mounted). */
   catalogKeys?: string[];
   docFtsLimit?: number;
+  /** Chunk-body FTS hits per shard (default 8). */
+  chunkFtsLimit?: number;
   spatial?: KnowledgeRadius;
 }
 
@@ -180,7 +182,12 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     if (request.includeChunkFts) {
       for (const { key, handle } of active) {
         const shardIds = routed.get(key) ?? handle.shards.map((s) => s.id);
-        for (const hit of handle.searchChunksFts(request.query, shardIds, 8, allowed(key))) {
+        for (const hit of handle.searchChunksFts(
+          request.query,
+          shardIds,
+          request.chunkFtsLimit ?? 8,
+          allowed(key),
+        )) {
           chunks.push({
             ...hit,
             catalogKey: key,

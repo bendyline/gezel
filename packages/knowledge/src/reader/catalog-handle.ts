@@ -42,7 +42,7 @@ import {
 } from '../format/constants.js';
 import { centerVector, rerankScore } from '../format/quantize.js';
 import { type ShardBitIndex, asymmetricTopK, hammingTopK } from './bit-scan.js';
-import { documentFtsTopIds, sanitizeFtsQuery } from './fts-query.js';
+import { documentFtsTopIds, selectiveFtsQuery } from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
 import { DocumentSpatialIndex, type SpatialMatch } from './spatial-index.js';
 
@@ -117,10 +117,14 @@ interface ShardInfo {
 
 /** Resident sign-bit budget across mounted shards before the oldest is dropped. */
 const BIT_INDEX_BUDGET_BYTES = 256 * 1024 * 1024;
+/** Chunk-FTS term row counts cached per handle before the cache is reset. */
+const CHUNK_TERM_ROWS_CACHE_MAX = 50_000;
 
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
   private readonly bitIndexes = new Map<string, ShardBitIndex>();
+  /** `shard path \0 phrase` → rows the phrase matches in that shard's `fts_chunks`. */
+  private readonly chunkTermRows = new Map<string, number>();
   private readonly spatial: DocumentSpatialIndex;
   private assetsByPath: Map<string, CatalogAssetInfo> | null = null;
   /** Lazily parsed from the profile echo; `undefined` until first needed. */
@@ -763,10 +767,8 @@ export class CatalogHandle {
     limit = 10,
     allowedDocumentIds?: ReadonlySet<string>,
   ): Array<{ documentId: string; rank: number }> {
-    const match = ftsQuery(query);
-    if (!match) return [];
     try {
-      return documentFtsTopIds(this.router.db, match, limit, query, allowedDocumentIds).map(
+      return documentFtsTopIds(this.router.db, query, limit, allowedDocumentIds).map(
         (documentId, i) => ({
           documentId,
           rank: i,
@@ -929,14 +931,16 @@ export class CatalogHandle {
     limitPerShard = 12,
     allowedDocumentIds?: ReadonlySet<string>,
   ): CatalogChunkHit[] {
-    const match = ftsQuery(query);
-    if (!match) return [];
     const hits: CatalogChunkHit[] = [];
     for (const shardId of shardIds) {
       const shard = this.shards.find((s) => s.id === shardId);
       if (!shard) continue;
       const db = this.shardDb(shard);
       try {
+        const match = selectiveFtsQuery(query, shard.chunkCount, (phrase) =>
+          this.chunkFtsRows(shard, db, phrase),
+        );
+        if (!match) return hits;
         const rows = db
           .prepare(
             `SELECT c.chunk_uid, c.document_id, c.title, c.heading_path, c.line_start, c.line_end, c.text
@@ -966,6 +970,21 @@ export class CatalogHandle {
       }
     }
     return hits;
+  }
+
+  /** Rows of one shard's `fts_chunks` an FTS5 phrase matches — what `selectiveFtsQuery` prunes on. */
+  private chunkFtsRows(shard: ShardInfo, db: DatabaseSync, phrase: string): number {
+    const key = `${shard.path}\u0000${phrase}`;
+    let rows = this.chunkTermRows.get(key);
+    if (rows === undefined) {
+      if (this.chunkTermRows.size >= CHUNK_TERM_ROWS_CACHE_MAX) this.chunkTermRows.clear();
+      const row = db
+        .prepare('SELECT COUNT(*) AS c FROM fts_chunks WHERE fts_chunks MATCH ?')
+        .get(phrase) as { c: number | bigint };
+      rows = Number(row.c);
+      this.chunkTermRows.set(key, rows);
+    }
+    return rows;
   }
 
   /**
@@ -1026,7 +1045,3 @@ function parseHeadingPath(raw: string): string[] {
     return [];
   }
 }
-
-// Shared with the compiler's seal-time smoke verification — semantics must
-// never drift between "what the build proved" and "what the install checks".
-const ftsQuery = sanitizeFtsQuery;

@@ -101,6 +101,36 @@ describe('KnowledgeManager', () => {
     }
   });
 
+  it('fills a search scoped to one catalog past the per-catalog cap', async () => {
+    const path = join(dir, 'variants.gezk');
+    await buildTestCatalog({
+      outputPath: path,
+      workDir: join(dir, 'variants-work'),
+      id: 'variants',
+      dovetailVariants: 12,
+    });
+    const local = new KnowledgeManager({
+      home: join(dir, 'variants-home'),
+      host: await createInProcessCatalogHost(),
+    });
+    await local.start();
+    try {
+      const events = await runInstall(local, path);
+      expect(
+        events.some((e) => e.type === 'done'),
+        JSON.stringify(events),
+      ).toBe(true);
+      const results = await local.searchUnified('dovetail', {
+        vector: null,
+        maxResults: 20,
+        catalogs: ['variants'],
+      });
+      expect(results.length).toBe(13);
+    } finally {
+      await local.stop();
+    }
+  });
+
   it('answers explicit search with cited knowledge results', async () => {
     const results = await manager.searchUnified('dovetail corner joint', {
       vector: null,

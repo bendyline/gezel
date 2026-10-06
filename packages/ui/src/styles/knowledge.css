@@ -33,6 +33,34 @@
   background: var(--surface);
 }
 
+/* The catalog picker (or, with one catalog, its name) shares a row with the
+   add key that opens Settings → Knowledge. */
+.knowledge-rail-catalog-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+.knowledge-rail-catalog-row > select,
+.knowledge-rail-catalog-row > .knowledge-catalog-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-rail-catalog-row > .gz-key {
+  flex: none;
+}
+
+/* Beside the picker the key takes the select's height: dropping its vertical
+   padding keeps it shorter than any select, so the row is the select's own
+   height and the stretch fills it. Beside a long name that wraps, the key
+   stays on the first line. */
+.knowledge-rail-catalog-row > select + .gz-key {
+  align-self: stretch;
+  padding-block: 0;
+  padding-inline: 0.3rem;
+}
+
 .knowledge-rail-search {
   width: 100%;
   font-size: var(--text-sm);

@@ -20,6 +20,7 @@ export * from './reader/open.js';
 export * from './reader/catalog-handle.js';
 export * from './reader/validate.js';
 export * from './reader/bit-scan.js';
+export * from './query-stopwords.js';
 export * from './toolchain.js';
 export * from './export/duckdb.js';
 export * from './export/parquet.js';

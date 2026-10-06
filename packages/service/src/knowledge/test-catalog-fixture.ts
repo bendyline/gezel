@@ -64,6 +64,8 @@ export async function buildTestCatalog(opts: {
   /** List the existing dovetail article under Finishing too. */
   withSharedToc?: boolean;
   withLocations?: boolean;
+  /** Add this many more joinery documents titled "Dovetail Variant N". */
+  dovetailVariants?: number;
 }): Promise<void> {
   const extras = opts.withExtras ?? false;
   await compileKnowledgeCatalog({
@@ -124,6 +126,17 @@ export async function buildTestCatalog(opts: {
           topicPath: ['joinery', 'joinery-variants'],
           markdown: '# Half-blind Dovetails\n\nThe tails stop short of the show face.\n',
           ordinal: 1,
+        };
+      }
+      for (let i = 1; i <= (opts.dovetailVariants ?? 0); i++) {
+        yield {
+          id: `dovetail-variant-${i}`,
+          title: `Dovetail Variant ${i}`,
+          slug: `dovetail-variant-${i}`,
+          summary: `Dovetail layout number ${i}.`,
+          language: 'en',
+          topicPath: ['joinery'],
+          markdown: `# Dovetail Variant ${i}\n\nA dovetail laid out with spacing pattern ${i}.\n`,
         };
       }
       yield {
