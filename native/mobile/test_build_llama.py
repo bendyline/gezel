@@ -41,6 +41,16 @@ class BuildValidationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build.verify_elf_alignment(invalid)
 
+    def test_android_requires_stripped_libraries(self):
+        header = "  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al\n"
+        stripped = header + "  [ 0]                   NULL            0 0 0 00 0 0 0\n  [ 1] .dynsym DYNSYM 0 0 0 18 A 7 1 8\n"
+        build.verify_stripped(stripped)
+        for leftover in (".debug_info", ".symtab", ".strtab"):
+            with self.assertRaisesRegex(ValueError, f"not stripped: {leftover}"):
+                build.verify_stripped(stripped + f"  [ 2] {leftover} PROGBITS 0 0 0 00 0 0 1\n")
+        with self.assertRaisesRegex(ValueError, "Could not read"):
+            build.verify_stripped(header)
+
     def test_android_rejects_unbundled_or_versioned_shared_libraries(self):
         build.verify_elf_dependencies("0x1 (NEEDED) Shared library: [libc.so]\n0x1 (NEEDED) Shared library: [libggml.so]", ["libggml.so"])
         for name in ("libomp.so", "libggml.so.0", "libc++_shared.so"):

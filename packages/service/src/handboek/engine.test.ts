@@ -213,9 +213,15 @@ describe('handboek engine', () => {
     // The list is generated, so a broken wiring shows up as an index with
     // no releases in it rather than as a failure anywhere near the macro.
     const index = await engine.article('whats-new-index', { mode: 'app' });
-    for (const release of releases) {
+    // "Recent releases" shows the newest 12 (the macro's default limit);
+    // older articles stay reachable through the table of contents.
+    const recent = releases.slice(0, 12);
+    for (const release of recent) {
       expect(index!.markdown).toContain(`[${release.title}](${release.id})`);
       expect(index!.markdown).toContain(release.summary!);
+    }
+    for (const release of releases.slice(12)) {
+      expect(index!.markdown).not.toContain(`](${release.id})`);
     }
   });
 });

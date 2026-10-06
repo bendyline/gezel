@@ -236,7 +236,9 @@ and vector math adapted from **Arm Optimized Routines** (MIT OR Apache-2.0 WITH
 LLVM-exception, © Arm Limited). CUDA builds of llama.cpp and
 stable-diffusion.cpp also compile NVIDIA's **CUB** (BSD-3-Clause, © Duane
 Merrill and NVIDIA) from the CUDA toolkit, and Vulkan builds compile the
-Khronos **Vulkan-Headers** (Apache-2.0 OR MIT). The license texts these notices
+Khronos **Vulkan-Headers** (Apache-2.0 OR MIT). The bundled Vulkan loader
+compiles in **cJSON** (MIT, © 2009 Dave Gamble, with Khronos, Valve and LunarG
+notices on the loader's copy). The license texts these notices
 require ship in `native/licenses/` with every native artifact. `uv` is used only to bootstrap the managed Python venv for
 the MLX provider — the MLX framework and `mlx-vlm` are installed into
 that venv at runtime (Apache-2.0/MIT) and are not bundled. The `duckdb` CLI —

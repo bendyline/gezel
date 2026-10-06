@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -97,6 +98,22 @@ class StageSdkTest(unittest.TestCase):
             manifest['toolchains']['ndk'] = '29.0.0'
             with self.assertRaisesRegex(ValueError, 'exact NDK'):
                 sdk.android_settings(manifest, ndk)
+
+    def test_r8_rules_keep_every_callback_the_jni_resolves_by_name(self):
+        # Event.onEvent shipped without a rule: minified apps lost native chat.
+        jni = (sdk.HERE / 'android/llama_jni.cpp').read_text()
+        java = (sdk.HERE / 'android/java' / f'{sdk.JAVA_CLASS}.java').read_text()
+        rules = (sdk.HERE / 'android/consumer-rules.pro').read_text()
+        callbacks = re.findall(r'GetMethodID\(callbackType, "(\w+)", "\(\[B\)Z"\)', jni)
+        self.assertEqual(['onDelta', 'onEvent'], sorted(callbacks))
+        for method in callbacks:
+            with self.subTest(method=method):
+                interface = re.search(rf'interface (\w+) \{{ boolean {method}\(byte\[\] \w+\); \}}', java)
+                self.assertIsNotNone(interface)
+                qualified = rf'com\.bendyline\.gezel\.llama\.LlamaRuntime\${interface[1]}'
+                self.assertRegex(rules, rf'-keep interface {qualified} \{{ \*; \}}')
+                self.assertRegex(rules, rf'-keepclassmembers class \* implements {qualified} \{{\s*'
+                                        rf'public boolean {method}\(byte\[\]\);\s*\}}')
 
     def test_archives_have_stable_content_and_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -105,7 +105,7 @@ def prerequisites(args):
         info["ndk"] = revision[0].split("=", 1)[1].strip()
         args.ndk_tools = args.ndk / "toolchains/llvm/prebuilt" / (
             "darwin-x86_64" if platform.system() == "Darwin" else "linux-x86_64")
-        if not (args.ndk_tools / "bin/llvm-readelf").is_file():
+        if not all((args.ndk_tools / "bin" / tool).is_file() for tool in ("llvm-readelf", "llvm-strip")):
             raise ValueError("Android NDK host tools are missing; supported hosts are macOS and Linux x64")
     return info
 
@@ -177,6 +177,15 @@ def verify_elf_alignment(text):
         raise ValueError("Android shared library does not have 16 KB aligned LOAD segments")
 
 
+def verify_stripped(text):
+    names = re.findall(r"^\s*\[\s*\d+\]\s+(\S+)", text, re.MULTILINE)
+    if not names:
+        raise ValueError("Could not read Android shared library sections")
+    leftover = sorted(name for name in names if name.startswith(".debug") or name in (".symtab", ".strtab"))
+    if leftover:
+        raise ValueError("Android shared library is not stripped: " + ", ".join(leftover))
+
+
 def verify_elf_dependencies(text, packaged):
     needed = set(re.findall(r"\(NEEDED\).*\[([^\]]+)\]", text))
     system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"}
@@ -208,11 +217,17 @@ def build_android(args, source, output, pin):
         for name in ("gezel-llama", "llama", "ggml", "ggml-base", *cpu):
             shutil.copy2(build / "bin" / f"lib{name}.so", libs)
         shutil.copy2(args.ndk_tools / "sysroot/usr/lib" / triples[abi] / "libc++_shared.so", libs)
+        # AGP strips only when its own default NDK is installed, and SDK consumers
+        # need no NDK: unstripped, these were 130 MB of an app. The unstripped
+        # originals stay in build/<abi>/bin for symbolication by build ID.
+        for library in libs.glob("*.so"):
+            run([args.ndk_tools / "bin/llvm-strip", "--strip-unneeded", library])
         for library in libs.glob("*.so"):
             result = run([args.ndk_tools / "bin/llvm-readelf", "-lW", library], capture=True)
             verify_elf_alignment(result)
             dynamic = run([args.ndk_tools / "bin/llvm-readelf", "-dW", library], capture=True)
             verify_elf_dependencies(dynamic, [path.name for path in libs.glob("*.so")])
+            verify_stripped(run([args.ndk_tools / "bin/llvm-readelf", "-SW", library], capture=True))
         compiler = args.ndk_tools / "bin" / f"{triples[abi]}{args.android_api}-clang++"
         run([compiler, "-std=c++17", "-I", output / "include", HERE / "link-smoke.cpp",
              "-L", libs, "-Wl,-rpath-link," + str(libs), "-lgezel-llama", "-lllama", "-lggml", "-lggml-base",

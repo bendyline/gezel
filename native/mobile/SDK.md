@@ -98,7 +98,10 @@ Import `com.bendyline.gezel.llama.LlamaRuntime`. The AAR includes `classes.jar`,
 consumer R8 rules, the JNI library, llama/ggml libraries and `libc++_shared.so` for
 every ABI listed in the build manifest. The current default is arm64-v8a/API 28.
 JNI and all transitive ELF libraries are checked for 16 KB LOAD alignment and
-missing dependencies during staging. Final APK/AAB alignment remains a consumer
+missing dependencies during staging. They ship stripped (`llvm-strip
+--strip-unneeded`), so a consumer needs no NDK for AGP to strip them. The
+unstripped originals stay in the build's `build/<abi>/bin/` for symbolicating
+crashes by GNU build ID. Final APK/AAB alignment remains a consumer
 release check. If another native dependency supplies `libc++_shared.so`, establish
 a compatible runtime version; do not hide the conflict with arbitrary `pickFirst`.
 

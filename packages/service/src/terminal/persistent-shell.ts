@@ -10,6 +10,16 @@ const log = createLogger('terminal/persistent-shell');
 const OUTPUT_CAP_BYTES = 200_000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000;
 /**
+ * How long a POSIX shell gets to die from `kill()`'s SIGHUP before it
+ * is sent SIGKILL. bash with a DEBUG trap set can swallow a SIGHUP that
+ * lands as it returns to its prompt: it defers the signal, then blocks
+ * reading input and never acts on it. Measured at ~1 in 200 kills on
+ * macOS bash 3.2; on CI under V8 coverage it hung the resize-diagnostics
+ * test for its full 60 s, twice. Stays under the pool's
+ * `SHUTDOWN_EXIT_GRACE_MS` so shutdown still sees the real exit.
+ */
+const KILL_ESCALATION_MS = 1_000;
+/**
  * Idle window before we check whether the shell is waiting on
  * stdin. Long enough that small inter-output pauses (a slow
  * `git clone` pulling refs, a few-ms disk flush) don't false-fire;
@@ -541,6 +551,24 @@ export class PersistentShell {
     } catch (err) {
       log.warn(`pty.kill() threw: ${err instanceof Error ? err.message : String(err)}`);
     }
+    // ConPTY's kill terminates the process outright, and node-pty's
+    // Windows terminal throws on any explicit signal.
+    if (this.platform === 'posix') this.escalateKillIfAlive();
+  }
+
+  private escalateKillIfAlive(): void {
+    if (this.nativeExited) return;
+    const timer = setTimeout(() => {
+      if (this.nativeExited) return;
+      log.warn(`shell survived SIGHUP for ${KILL_ESCALATION_MS}ms; sending SIGKILL`);
+      try {
+        this.pty.kill('SIGKILL');
+      } catch (err) {
+        log.warn(`pty.kill(SIGKILL) threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, KILL_ESCALATION_MS);
+    timer.unref?.();
+    void this.exitBarrier.then(() => clearTimeout(timer));
   }
 
   private async runInternal(

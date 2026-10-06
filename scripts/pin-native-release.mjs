@@ -8,7 +8,7 @@
  *
  *   NATIVE_ENGINE_RELEASE  the version the engine resolver downloads
  *   SHA256SUMS_DIGEST      sha256 of that release's SHA256SUMS asset
- *   NATIVE_ENGINE_ARCHIVE_SHA256  every archive hash in SHA256SUMS
+ *   NATIVE_ENGINE_ARCHIVE_SHA256  every engine archive hash in SHA256SUMS
  *   NATIVE_ENGINE_MACOS_NOTARIZED whether standalone macOS artifacts
  *                                  were notarized by the native workflow
  *
@@ -138,7 +138,20 @@ for (const filename of archiveHashes.keys()) {
     throw new Error(`SHA256SUMS lists '${filename}', but the release has no matching asset`);
   }
 }
-const archiveBlock = renderArchiveHashes(version, archiveHashes);
+// Since native-v0.1.47, SHA256SUMS also covers the coordinated mobile SDKs.
+// Only engine archives are baked: embedding hosts stage every name in the map
+// as an engine. SHA256SUMS_DIGEST still covers the whole file.
+const engineHashes = new Map();
+for (const [filename, hash] of archiveHashes) {
+  if (filename.startsWith(`gezel-native-${version}-`)) {
+    engineHashes.set(filename, hash);
+  } else if (!filename.startsWith(`gezel-mobile-${version}-`)) {
+    throw new Error(
+      `SHA256SUMS lists '${filename}', which is neither an engine nor a mobile SDK archive of ${release.tag_name}`,
+    );
+  }
+}
+const archiveBlock = renderArchiveHashes(version, engineHashes);
 const nativeFilesResponse = await fetch(nativeFilesAsset.url, {
   headers: headers('application/octet-stream'),
   redirect: 'follow',
@@ -155,6 +168,20 @@ try {
     `NATIVE_FILE_MANIFESTS.json is invalid: ${error instanceof Error ? error.message : String(error)}`,
   );
 }
+const platformKeys = Object.keys(nativeFiles.platforms);
+for (const key of platformKeys) {
+  const archives = ['tar.gz', 'zip'].filter((ext) =>
+    engineHashes.has(`gezel-native-${version}-${key}.${ext}`),
+  );
+  if (archives.length !== 1) {
+    throw new Error(`expected exactly one engine archive for platform key ${key} in SHA256SUMS`);
+  }
+}
+if (engineHashes.size !== platformKeys.length) {
+  throw new Error(
+    `SHA256SUMS has ${engineHashes.size} engine archives for ${platformKeys.length} platform keys`,
+  );
+}
 
 if (printOnly) {
   console.log(`NATIVE_ENGINE_RELEASE = ${version}`);
@@ -162,7 +189,7 @@ if (printOnly) {
   console.log(`NATIVE_ENGINE_MACOS_NOTARIZED = ${macosNotarized}`);
   console.log(archiveBlock);
   console.log(`NATIVE_FILE_MANIFESTS = ${Object.keys(nativeFiles.platforms).length} platform keys`);
-  console.log(`(${archiveHashes.size} archive hashes)`);
+  console.log(`(${engineHashes.size} engine archive hashes)`);
   process.exit(0);
 }
 
@@ -180,7 +207,7 @@ next = next.replace(
 
 if (next === source) {
   console.log(
-    `already pinned to native-v${version} (${digest.slice(0, 12)}…, ${archiveHashes.size} archive hashes)`,
+    `already pinned to native-v${version} (${digest.slice(0, 12)}…, ${engineHashes.size} engine archive hashes)`,
   );
   process.exit(0);
 }
@@ -201,7 +228,7 @@ console.log(`pinned ${pinFile}`);
 console.log(`pinned ${nativeFilesPinFile}`);
 console.log(`  NATIVE_ENGINE_RELEASE → ${version}`);
 console.log(`  SHA256SUMS_DIGEST     → ${digest}`);
-console.log(`  ARCHIVE_SHA256        → ${archiveHashes.size} exact archive hashes`);
+console.log(`  ARCHIVE_SHA256        → ${engineHashes.size} exact engine archive hashes`);
 console.log(`  MACOS_NOTARIZED       → ${macosNotarized}`);
 
 function parseSha256sums(text) {
@@ -229,7 +256,7 @@ function parseSha256sums(text) {
 function renderArchiveHashes(version, hashes) {
   const lines = [
     '// BEGIN PINNED NATIVE ARCHIVE HASHES',
-    `/** Exact SHA256 values for every archive published by native-v${version}. */`,
+    `/** Exact SHA256 values for every engine archive published by native-v${version}. */`,
     'export const NATIVE_ENGINE_ARCHIVE_SHA256: Readonly<Record<string, string>> = Object.freeze({',
   ];
   for (const [filename, hash] of hashes) {
