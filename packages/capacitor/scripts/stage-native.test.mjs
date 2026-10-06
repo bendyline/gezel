@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -48,4 +48,31 @@ test('refuses to repack stale native wrapper sources', async (t) => {
   await verifyProducerSources(manifest, f.root);
   await writeFile(path.join(f.root, 'runtime.bin'), 'edited');
   await assert.rejects(verifyProducerSources(manifest, f.root), /Restage/);
+});
+
+test('warns instead of failing when only the license inventory changed', async (t) => {
+  const f = await fixture(t);
+  const licenses = path.join(f.root, 'native/licenses');
+  await mkdir(licenses, { recursive: true });
+  await writeFile(path.join(licenses, 'manifest.json'), 'edited');
+  const manifest = {
+    packageVersion: '0.1.0-local.1',
+    sources: {
+      'runtime.bin': sha('verified'),
+      'native/licenses/manifest.json': sha('original'),
+      'native/licenses/LICENSE-removed.txt': sha('removed'),
+    },
+  };
+  const warnings = [];
+  const stale = await verifyProducerSources(manifest, f.root, (message) => warnings.push(message));
+  assert.deepEqual(stale, ['native/licenses/manifest.json', 'native/licenses/LICENSE-removed.txt']);
+  assert.match(
+    warnings.join('\n'),
+    /0\.1\.0-local\.1 predates changes to native\/licenses\/manifest\.json/,
+  );
+  manifest.sources['../outside/native/licenses/manifest.json'] = sha('x');
+  await assert.rejects(
+    verifyProducerSources(manifest, f.root, () => {}),
+    /Restage/,
+  );
 });

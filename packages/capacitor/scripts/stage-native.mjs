@@ -43,18 +43,32 @@ export async function verifyRuntime(root, target) {
   return manifest;
 }
 
-export async function verifyProducerSources(manifest, repo) {
+// The license inventory is shared with every desktop engine and changes no code
+// in the staged runtime; a notice edit there must not block packing. The next
+// native build refreshes the runtime's notices.
+const LICENSE_INPUTS = 'native/licenses/';
+
+export async function verifyProducerSources(manifest, repo, warn = console.warn) {
+  const staleNotices = [];
   for (const [name, sha] of Object.entries(manifest.sources ?? {})) {
     const file = path.resolve(repo, name);
-    if (
-      !file.startsWith(`${path.resolve(repo)}${path.sep}`) ||
-      createHash('sha256')
-        .update(await readFile(file))
-        .digest('hex') !== sha
-    ) {
+    if (!file.startsWith(`${path.resolve(repo)}${path.sep}`))
       throw new Error(`Restage the native runtime after changing ${name}`);
-    }
+    const current = await readFile(file).then(
+      (bytes) => createHash('sha256').update(bytes).digest('hex'),
+      () => null,
+    );
+    if (current === sha) continue;
+    const relative = path.relative(path.resolve(repo), file).split(path.sep).join('/');
+    if (!relative.startsWith(LICENSE_INPUTS))
+      throw new Error(`Restage the native runtime after changing ${name}`);
+    staleNotices.push(name);
   }
+  if (staleNotices.length)
+    warn(
+      `Native runtime ${manifest.packageVersion} predates changes to ${staleNotices.join(', ')}; its license notices refresh with the next native build.`,
+    );
+  return staleNotices;
 }
 
 export async function stageNative(

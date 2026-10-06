@@ -54,6 +54,7 @@
       "packages/mobile/android/app/src/main/assets/capacitor.config.json",
       "packages/mobile/android/app/src/main/assets/capacitor.plugins.json",
       "packages/capacitor/native/**",
+      "packages/capacitor/embedding-manifest.json",
       "packages/capacitor/android/build/**",
       "packages/capacitor/android/.gradle/**",
       "native/runtime/**/build/**",

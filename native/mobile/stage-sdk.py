@@ -142,7 +142,8 @@ def stage_android(build, output, manifest, version, ndk, javac, work):
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)
     host = "darwin-x86_64" if platform.system() == "Darwin" else "linux-x86_64"
-    readelf = ndk / "toolchains/llvm/prebuilt" / host / "bin/llvm-readelf"
+    tools = ndk / "toolchains/llvm/prebuilt" / host / "bin"
+    readelf = tools / "llvm-readelf"
     for abi in abis:
         cpu = [f"ggml-cpu-{variant}" for variant in driver.ANDROID_CPU_VARIANTS] if abi == "arm64-v8a" else ["ggml-cpu"]
         required = {f"lib{name}.so" for name in ("gezel-llama", "llama", "ggml", "ggml-base", "c++_shared", *cpu)}
@@ -157,9 +158,12 @@ def stage_android(build, output, manifest, version, ndk, javac, work):
              f"-DGEZEL_JNI_LIBS={build / 'jniLibs'}", f"-DGEZEL_LLAMA_INCLUDE={build / 'include'}"])
         run(["cmake", "--build", binary, "--parallel", "2"])
         libraries["libgezel_llama_jni.so"] = binary / "libgezel_llama_jni.so"
+        run([tools / "llvm-strip", "--strip-unneeded", libraries["libgezel_llama_jni.so"]])
         for name, file in libraries.items():
             driver.verify_elf_alignment(run([readelf, "-lW", file], capture_output=True, text=True).stdout)
             driver.verify_elf_dependencies(run([readelf, "-dW", file], capture_output=True, text=True).stdout, libraries)
+            # The engine libraries are stripped at build time; an older build is rejected here.
+            driver.verify_stripped(run([readelf, "-SW", file], capture_output=True, text=True).stdout)
             files[f"jni/{abi}/{name}"] = file
     for name in LICENSES:
         files[f"META-INF/{name}"] = build / name

@@ -23,7 +23,8 @@
         "LICENSE-llama-cpp-openvino-APACHE.txt",
         "LICENSE-nvidia-cub-BSD-3-Clause.txt",
         "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
-        "LICENSE-vulkan-loader-APACHE.txt"
+        "LICENSE-vulkan-loader-APACHE.txt",
+        "LICENSE-vulkan-loader-cjson-MIT.txt"
       ]
     },
     "sd-cpp": {
@@ -52,7 +53,8 @@
         "LICENSE-stable-diffusion-cpp-sageattention-APACHE.txt",
         "LICENSE-nvidia-cub-BSD-3-Clause.txt",
         "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
-        "LICENSE-vulkan-loader-APACHE.txt"
+        "LICENSE-vulkan-loader-APACHE.txt",
+        "LICENSE-vulkan-loader-cjson-MIT.txt"
       ]
     },
     "uv": {

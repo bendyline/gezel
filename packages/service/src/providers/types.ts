@@ -4,14 +4,8 @@ import type {
   CompactionRequester,
   ExternalToolCall,
   ExternalToolSpec,
-  ImageAttachment,
   LLMSession,
-  ProviderSessionState,
-  QuotaBucket,
-  SendAndWaitOpts,
   TerminalToolPolicy,
-  ToolArgsDeltaMeta,
-  TurnUsage,
   WireTranscriptEntry,
 } from '@bendyline/gezel/local-loop';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
@@ -24,15 +18,17 @@ export type {
   CompactionRequester,
   ExternalToolCall,
   ExternalToolSpec,
-  ImageAttachment,
   LLMSession,
-  ProviderSessionState,
-  SendAndWaitOpts,
   TerminalToolPolicy,
-  ToolArgsDeltaMeta,
-  TurnUsage,
   WireTranscriptEntry,
 };
+export type {
+  ImageAttachment,
+  ProviderSessionState,
+  SendAndWaitOpts,
+  ToolArgsDeltaMeta,
+  TurnUsage,
+} from '@bendyline/gezel/local-loop';
 
 export type { ProviderName };
 
