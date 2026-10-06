@@ -108,6 +108,8 @@ overrides:
   # the matching adm-zip override closes its transitive advisory.
   "onnxruntime-node": "1.24.3"
   "protobufjs": "7.6.5"
+  # express 5 still locks 2.0.7; 2.0.8 fixes GHSA-jqcg-44mw-7w3h.
+  "proxy-addr": "2.0.8"
   "qs": "6.15.2"
   "react-router": "7.18.1"
   # kokoro-js pulls in phonemizer, which embeds GPL-3 eSpeak NG. Gezel
