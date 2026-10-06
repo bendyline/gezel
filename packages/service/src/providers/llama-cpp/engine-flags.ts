@@ -43,6 +43,7 @@ export interface GlobalLlamaCppFlags {
   llamaCppSpecType?: string;
   llamaCppDraftModelPath?: string;
   llamaCppSpecDraftNMax?: number;
+  llamaCppSpecDraftSampling?: 'greedy' | 'probabilistic';
   llamaCppExtraArgs?: Record<string, string | number | boolean>;
 }
 
@@ -321,6 +322,14 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     }
     const nMax = config.llamaCppSpecDraftNMax ?? perModel?.spec?.nMax;
     if (typeof nMax === 'number') args.push('--spec-draft-n-max', String(nMax));
+    // v0.6.0 supports probabilistic selection only for MTP/simple drafts.
+    // Leave the upstream greedy default untouched unless explicitly set.
+    if (
+      (safeSpecType === 'draft-mtp' || safeSpecType === 'draft-simple') &&
+      config.llamaCppSpecDraftSampling
+    ) {
+      args.push('--spec-draft-sampling', config.llamaCppSpecDraftSampling);
+    }
   }
 
   // ── Server-side output parsing (`--reasoning-format`) ─────────────

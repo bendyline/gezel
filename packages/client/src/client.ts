@@ -930,6 +930,8 @@ export interface ConfigResponse {
     | 'ngram-map-k'
     | 'ngram-map-k4v'
     | 'ngram-cache';
+  /** Draft selection for MTP/simple drafts. Undefined retains greedy. */
+  llamaCppSpecDraftSampling?: 'greedy' | 'probabilistic';
   /**
    * First-run bootstrap bookkeeping — set once the on-device default-
    * provider bootstrap has evaluated (success or failure). Prevents

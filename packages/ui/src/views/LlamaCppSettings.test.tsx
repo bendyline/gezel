@@ -343,6 +343,54 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/using external engine/)).toBeInTheDocument();
     });
   });
+  it('defaults draft sampling to greedy and explains the experimental alternative', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+    await openAdvanced();
+    expect(screen.getByRole('combobox', { name: 'Draft sampling' })).toHaveValue('greedy');
+    expect(screen.getByText(/Probabilistic mode can improve speed/)).toBeInTheDocument();
+  });
+
+  it('persists probabilistic draft sampling', async () => {
+    const onConfigChanged = vi.fn();
+    render(
+      <LlamaCppSettings
+        config={BASE_CONFIG}
+        onConfigChanged={onConfigChanged}
+        health={BASE_HEALTH}
+      />,
+    );
+    await openAdvanced();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Draft sampling' }), {
+      target: { value: 'probabilistic' },
+    });
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSpecDraftSampling: 'probabilistic' });
+      expect(onConfigChanged).toHaveBeenCalledWith(
+        expect.objectContaining({ llamaCppSpecDraftSampling: 'probabilistic' }),
+      );
+    });
+  });
+
+  it('clears the draft-sampling override when returning to greedy', async () => {
+    render(
+      <LlamaCppSettings
+        config={{ ...BASE_CONFIG, llamaCppSpecDraftSampling: 'probabilistic' }}
+        onConfigChanged={vi.fn()}
+        health={BASE_HEALTH}
+      />,
+    );
+    await openAdvanced();
+    expect(screen.getByRole('combobox', { name: 'Draft sampling' })).toHaveValue('probabilistic');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Draft sampling' }), {
+      target: { value: 'greedy' },
+    });
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSpecDraftSampling: null });
+    });
+  });
+
   // The SWA cache control is a tri-state select (Auto / On / Off). Auto keeps
   // the memory-efficient cache unless weights + full KV fit in fast memory.
   const findSwaSelect = () =>

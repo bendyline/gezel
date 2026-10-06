@@ -1626,6 +1626,13 @@ export const GezelConfigSchema = z.object({
    */
   llamaCppSpecDraftNMax: z.number().int().positive().optional(),
   /**
+   * Draft-token selection (`--spec-draft-sampling`) for compatible MTP
+   * heads and simple draft models. Probabilistic mode is an opt-in
+   * experiment; speed varies by model and workload. Unset retains the
+   * upstream greedy default. Requires llama.cpp v0.6.0 or later.
+   */
+  llamaCppSpecDraftSampling: z.enum(['greedy', 'probabilistic']).optional(),
+  /**
    * Escape hatch for any llama-server flag not first-classed above.
    * Keys are flag names (with or without leading `--`); values become
    * the flag's argument. A `true` value emits a bare flag (`--foo`);
@@ -2951,6 +2958,7 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
     .nullable()
     .optional(),
   llamaCppCpuMoe: z.boolean().nullable().optional(),
+  llamaCppSpecDraftSampling: z.enum(['greedy', 'probabilistic']).nullable().optional(),
   ...LlamaCppV4ConfigResetSchema.shape,
   llamaCppSwaFull: z.boolean().nullable().optional(),
   // MLX Advanced overrides the Settings UI can reset to their default —
