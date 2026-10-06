@@ -21,6 +21,7 @@ import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
 import { MarkdownField } from '../components/MarkdownField.js';
+import { looksBinary } from '../components/file-browser/index.js';
 import { monacoLanguageForIndexedLanguage } from '../components/monaco-language.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { DropdownChevron } from '../primitives/index.js';
@@ -38,21 +39,6 @@ const noop = () => undefined;
 export function reviewIssueLabel(issue: FileReviewIssue): string {
   const location = issue.line != null ? ` (Line ${issue.line})` : '';
   return `[${issue.severity}] ${issue.category} — ${issue.message}${location}`;
-}
-
-/**
- * Decoding a binary blob as UTF-8 yields a sea of U+FFFD replacement chars and
- * stray control bytes; sample the head so we don't feed one to the editor.
- */
-function looksBinary(content: string): boolean {
-  const sample = content.slice(0, 4096);
-  if (!sample) return false;
-  let suspicious = 0;
-  for (let i = 0; i < sample.length; i++) {
-    const code = sample.charCodeAt(i);
-    if (code === 0xfffd || code < 9 || (code > 13 && code < 32)) suspicious++;
-  }
-  return suspicious / sample.length > 0.1;
 }
 
 type FileState =
@@ -172,7 +158,7 @@ export function FileMapView({
       .then((res) => {
         if (cancelled) return;
         setFile(
-          looksBinary(res.content)
+          looksBinary(res.content, selectedId)
             ? { path: selectedId, kind: 'binary' }
             : { path: selectedId, kind: 'ready', content: res.content },
         );

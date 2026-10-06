@@ -14,9 +14,11 @@ import {
   expandToolsetGroups,
   extractDeliverableTargetPath,
   gezelMcpToolsToAllow,
+  isPureDelegationRole,
   isRoleDelegationTool,
   permitsBrowserAutomation,
   projectTypeIsBrowserFacing,
+  roleHasTeamScope,
   rolePermitsBrowserAutomation,
   roleToolAllowlist,
   roleToolsetGroups,
@@ -28,6 +30,59 @@ import {
 } from './role-tool-filter.js';
 
 describe('roleToolsetGroups', () => {
+  it.each([false, true])(
+    'keeps conversation compact with advisers and craftbooks (role tools: %s)',
+    (rolesAsTools) => {
+      const tools = computeToolAllowlist({
+        role: 'Conversationalist',
+        mode: 'always',
+        provider: 'llama-cpp',
+        modelId: 'gemma4-31b-q4',
+        rolesAsTools,
+      })!;
+      for (const name of [
+        'search',
+        'read_document',
+        'save_memory',
+        'ask_specialist',
+        'ask_gezel',
+        'list_gezels',
+        'invoke_craftbook',
+        'suggest_craftbook',
+        'fetch_url',
+      ]) {
+        expect(tools.has(name), name).toBe(true);
+      }
+      for (const name of [
+        'write_file',
+        'create_task',
+        'advance_task_step',
+        'ensure_gezel',
+        'write_document',
+        'delete_document',
+        'delegate_voorman',
+        'craftbook_write',
+      ]) {
+        expect(tools.has(name), name).toBe(false);
+      }
+      expect(tools.size).toBeLessThan(30);
+      expect(roleHasTeamScope('Conversationalist', 'crew')).toBe(true);
+      expect(roleHasTeamScope('Conversationalist', 'solo')).toBe(false);
+      expect(isPureDelegationRole('Conversationalist')).toBe(false);
+    },
+  );
+
+  it('prevents an adviser from recursively asking more advisers', () => {
+    const tools = computeToolAllowlist({
+      role: 'Conversationalist',
+      mode: 'always',
+      provider: 'llama-cpp',
+      consultationMode: true,
+    })!;
+    expect(tools.has('ask_specialist')).toBe(false);
+    expect(tools.has('ask_gezel')).toBe(false);
+  });
+
   it('returns the meester default groups', () => {
     const groups = roleToolsetGroups('meester');
     expect(groups).toContain('team-management');
@@ -234,7 +289,9 @@ describe('permitsBrowserAutomation (role ∨ browser-facing project)', () => {
 describe('expandToolsetGroups', () => {
   it('expands a group id to its tool names', () => {
     const tools = expandToolsetGroups(['memory']);
-    expect(tools).toEqual(new Set(['search', 'search_memory', 'save_memory', 'list_memories']));
+    expect(tools).toEqual(
+      new Set(['search', 'knowledge_nearby', 'search_memory', 'save_memory', 'list_memories']),
+    );
   });
 
   it('unions tools across multiple groups', () => {
@@ -2014,10 +2071,12 @@ describe('BUILTIN_TOOLSETS coverage', () => {
     // Meester gets `tasks-readonly` + `task-oversight` instead of `tasks`).
     // `task-oversight` also carries `manage_task`, which only coordinators
     // need. Every other pair must be disjoint.
-    const SUBSET_OF: Record<string, string> = {
-      'tasks-readonly': 'tasks',
-      'craftbook-launch': 'tasks',
-      'task-oversight': 'tasks',
+    const SUBSET_OF: Record<string, readonly string[]> = {
+      'tasks-readonly': ['tasks'],
+      'craftbook-launch': ['tasks'],
+      'task-oversight': ['tasks'],
+      'documents-readonly': ['documents'],
+      advisers: ['interaction', 'team-management'],
     };
     const seen = new Map<string, string>();
     for (const g of BUILTIN_TOOLSETS) {
@@ -2028,7 +2087,7 @@ describe('BUILTIN_TOOLSETS coverage', () => {
           continue;
         }
         // Allow declared subset relationships in either order.
-        const allowedSubset = SUBSET_OF[g.id] === prior || SUBSET_OF[prior] === g.id;
+        const allowedSubset = SUBSET_OF[g.id]?.includes(prior) || SUBSET_OF[prior]?.includes(g.id);
         if (allowedSubset) continue;
         expect(
           undefined,

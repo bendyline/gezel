@@ -50,6 +50,8 @@ export function resolveAsk(
   input: AskQuestionRequest,
   identity: QuestionIdentity,
 ): { question: Question; deduped: boolean } {
+  if (input.permissionRequest)
+    throw new Error('Permission requests require the desktop permission handler.');
   const outstanding = outstandingSessionQuestion(existing, input.sessionId);
   if (outstanding) return { question: outstanding, deduped: true };
   const question = newQuestion(input, identity);

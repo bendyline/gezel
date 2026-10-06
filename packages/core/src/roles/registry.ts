@@ -24,23 +24,23 @@ import { tierAtLeast } from './tier.js';
  * gallery); everything mechanical lives here. `chat/role-tool-filter` and
  * the tuning resolver read from this registry rather than re-declaring.
  *
- * IMPORTANT — behavior parity: the canonical role ids below are exactly
- * the 10 toolset-kit keys that `role-tool-filter` shipped, and
- * {@link resolveRoleId} reproduces the old `canonicalRoleKey` exactly
+ * {@link resolveRoleId} preserves the old `canonicalRoleKey` lookup
  * (exact-match a canonical id, else substring-match the alias table, else
  * null → DEFAULT_TOOLSET_GROUPS). Adding a brand-new canonical id would
  * change tool filtering AND the delegation/implementer classification that
- * keys off the canonical string, so keep this set stable; template-only
+ * keys off the canonical string; template-only
  * roles (builder → developer, boekwachter → default) continue to resolve
- * via the alias/fallback paths. The one deliberate addition since is
+ * via the alias/fallback paths. Later additions include
  * `generalist` (generalist mode v2): a task pinned to a single owner needs
  * a kit that is the union of what its steps' specialists would carry, and
  * its implementer classification is spelled out explicitly in
  * `role-tool-filter` (`DIRECT_IMPLEMENTER_ROLES`) and `session-tool-surface`
- * (`isImplementationRole`).
+ * (`isImplementationRole`). `conversationalist` carries a small research
+ * and adviser kit without being classified as a delegation-only role.
  */
 
 export type RoleId =
+  | 'conversationalist'
   | 'meester'
   | 'voorman'
   | 'reviewer'
@@ -75,6 +75,8 @@ export interface RoleDefinition {
    * is worse than a couple extras; user toolsets add/remove from here.
    */
   toolsetGroups: readonly string[];
+  /** Allow adviser consultation and craftbook launch without the team-management toolset. */
+  teamScope?: boolean;
   /**
    * Soft tuning-profile default (a `KNOWN_PROFILE_IDS` value). The
    * per-gezel pick and install default always win; this is the role's
@@ -102,6 +104,27 @@ function std(name: string, inputs?: Record<string, unknown>): GateScriptRef {
 }
 
 export const ROLES: Record<RoleId, RoleDefinition> = {
+  conversationalist: {
+    id: 'conversationalist',
+    label: 'Conversationalist',
+    summary:
+      'Talks, researches, and writes in conversation; brings in advisers or craftbooks when useful.',
+    toolsetGroups: [
+      'memory',
+      'documents-readonly',
+      'web',
+      'interaction',
+      'advisers',
+      'craftbook-launch',
+      'tasks-readonly',
+      'handboek',
+    ],
+    teamScope: true,
+    suggestedTuningProfile: 'thinking-general',
+    gateAffinity: [],
+    defaultBooks: [],
+    capabilityFloor: 'tiny',
+  },
   // Meester surface, post-trim: `tasks-readonly` plus the narrow
   // `craftbook-launch` front door, and `task-oversight` to pause, resume,
   // cancel, reassign and annotate what it launched — Default has no voorman,

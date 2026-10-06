@@ -111,6 +111,7 @@ import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
+import { v1KnowledgeRoutes } from './routes/v1-knowledge.js';
 
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
@@ -640,6 +641,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // inside declare their own auth (some unauth, some root-only, some
   // per-app); see `routes/v1-apps.ts` for the per-endpoint matrix.
   app.route('/v1/apps', v1AppsRoutes(ctx));
+  app.use('/v1/knowledge/*', openaiEndpointsGate);
+  app.use('/v1/knowledge/*', bearerAuth(ctx.tokenStore));
+  app.use('/v1/knowledge/*', denyRemoteInferenceScope());
+  app.use('/v1/knowledge/*', requireScope('knowledge'));
+  app.route('/v1/knowledge', v1KnowledgeRoutes(ctx));
 
   // `/v1/openapi.json` describes the public contract — served unauth
   // so app authors browsing the schema don't need a token first.

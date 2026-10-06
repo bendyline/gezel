@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type TaskAssignee, UserTaskInstructionsSchema } from '../schemas/assignee.js';
 import { coerceJsonObject } from './coerce.js';
 
 /*
@@ -24,18 +25,23 @@ import { coerceJsonObject } from './coerce.js';
 const AssigneeObjectSchema = z.object({
   kind: z.enum(['gezel', 'user']),
   gezelId: z.string().optional(),
+  instructions: UserTaskInstructionsSchema.optional(),
 });
 
 export type AssigneeArg = string | z.infer<typeof AssigneeObjectSchema>;
 
 /** A gezel reference that still needs resolving to a canonical id. */
-export type NormalizedAssignee = { kind: 'user' } | { kind: 'gezel'; ref: string };
+export type NormalizedAssignee =
+  | Extract<TaskAssignee, { kind: 'user' }>
+  | { kind: 'gezel'; ref: string };
 
 export const ASSIGNEE_ARG_DESCRIPTION =
   'Who owns this — a gezel id, display name, or role name ("wren", "Rina", "developer"), or the ' +
   'literal "user" for the human. OMIT it when you have no specific gezel in mind: the owner then ' +
   'mirrors whichever gezel the entry step\'s role resolves to. "gezel" is not a value — it is the ' +
-  'default, and passing it as a placeholder is the same as omitting the argument.';
+  'default, and passing it as a placeholder is the same as omitting the argument. ' +
+  'For a human handoff, use {kind:"user", instructions:"..."} and explain the specific action ' +
+  'you need from them and how to confirm they are ready (reply, add a note, edit the description, or change status).';
 
 export function assigneeArg() {
   return coerceJsonObject(z.union([z.string(), AssigneeObjectSchema])).describe(
@@ -75,7 +81,10 @@ export function normalizeAssigneeArg(
   const trimmed = ref.trim();
   if (!trimmed) return null;
   const lc = trimmed.toLowerCase();
-  if (USER_WORDS.has(lc)) return { kind: 'user' };
+  if (USER_WORDS.has(lc)) {
+    const instructions = typeof raw === 'object' ? raw.instructions?.trim() : undefined;
+    return { kind: 'user', ...(instructions ? { instructions } : {}) };
+  }
   if (UNSPECIFIED_WORDS.has(lc)) return null;
   return { kind: 'gezel', ref: trimmed };
 }

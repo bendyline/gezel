@@ -1422,6 +1422,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     if (!profile || !providerName) return '';
     const behaviorToolNames = new Set((availableTools ?? []).map((tool) => tool.name));
     const promptCtx: PromptCtx = {
+      role,
       catalogId: profile.catalogId,
       tier: profile.tier,
       family: profile.style.family,

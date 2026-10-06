@@ -28,6 +28,23 @@ async function fixture() {
 }
 
 describe('portable tool authority and durable effects', () => {
+  it('refuses permission changes on a host without the grant handler', async () => {
+    const { store, session } = await fixture();
+    const askQuestion = vi.fn();
+    await expect(
+      executePortableTool(
+        store,
+        session,
+        'ask_user_question',
+        {
+          question: 'May I save this?',
+          permissionRequest: 'workspace-write',
+        },
+        { ...actions, askQuestion },
+      ),
+    ).rejects.toThrow('desktop app');
+    expect(askQuestion).not.toHaveBeenCalled();
+  });
   it('applies the same exact authored step ceiling before advertising and executing', async () => {
     const { store, gezel } = await fixture();
     const task = await store.createTask('default', {
@@ -289,7 +306,8 @@ describe('portable tool authority and durable effects', () => {
       steps: [{ id: 'plan', name: 'Plan', suggestedRole: 'Generalist' }],
       ...(assignee === undefined ? {} : { assignee }),
     });
-    for (const assignee of ['Noor', 'noor', gezel.id, 'user', 'gezel'])
+    const humanHandoff = { kind: 'user', instructions: 'Choose the repair date and reply here.' };
+    for (const assignee of ['Noor', 'noor', gezel.id, 'user', 'gezel', humanHandoff])
       await executePortableTool(store, session, 'create_task', task(assignee), recording);
     expect(created.map((input) => (input as { assignee?: unknown }).assignee)).toEqual([
       { kind: 'gezel', gezelId: gezel.id },
@@ -297,6 +315,7 @@ describe('portable tool authority and durable effects', () => {
       { kind: 'gezel', gezelId: gezel.id },
       { kind: 'user' },
       undefined,
+      humanHandoff,
     ]);
     await expect(
       executePortableTool(store, session, 'create_task', task('Zed'), recording),

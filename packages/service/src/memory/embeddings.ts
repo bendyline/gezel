@@ -111,6 +111,7 @@ interface Pending {
   reject: (err: unknown) => void;
   /** Set for knowledge-profile requests: their failures stay per profile. */
   profileId?: string;
+  localFilesOnly?: boolean;
   onDownloadProgress?: (progress: ModelDownloadProgress) => void;
 }
 
@@ -178,7 +179,7 @@ function onMessage(msg: WorkerReply): void {
   pending.delete(msg.id);
   if (msg.error) {
     if (p.profileId) {
-      if (msg.fatal || msg.retryable)
+      if (!p.localFilesOnly && (msg.fatal || msg.retryable))
         markProfileUnavailable(p.profileId, msg.error, msg.fatal ?? false);
       p.reject(
         msg.fatal || msg.retryable
@@ -224,10 +225,12 @@ function sendToWorker(
   texts: string[],
   profile?: KnowledgeEmbeddingProfile,
   onDownloadProgress?: (progress: ModelDownloadProgress) => void,
+  localFilesOnly = false,
 ): Promise<number[][]> {
   const id = nextId++;
   return new Promise<number[][]>((resolve, reject) => {
     pending.set(id, {
+      localFilesOnly,
       resolve,
       reject,
       ...(profile ? { profileId: profile.id } : {}),
@@ -235,7 +238,13 @@ function sendToWorker(
     });
     w.postMessage(
       profile
-        ? { id, texts, profile, ...(onDownloadProgress ? { reportProgress: true } : {}) }
+        ? {
+            id,
+            texts,
+            profile,
+            localFilesOnly,
+            ...(onDownloadProgress ? { reportProgress: true } : {}),
+          }
         : { id, texts },
     );
   });
@@ -379,10 +388,14 @@ export function sharesDaemonEmbedder(profile: KnowledgeEmbeddingProfile): boolea
 export async function embedKnowledgeQuery(
   text: string,
   profile: KnowledgeEmbeddingProfile,
-  opts: { onDownloadProgress?: (progress: ModelDownloadProgress) => void } = {},
+  opts: {
+    onDownloadProgress?: (progress: ModelDownloadProgress) => void;
+    localFilesOnly?: boolean;
+  } = {},
 ): Promise<number[]> {
-  const { onDownloadProgress } = opts;
-  if (sharesDaemonEmbedder(profile)) {
+  const { onDownloadProgress, localFilesOnly = false } = opts;
+  // The default daemon pipeline may fetch weights on a cold load.
+  if (!localFilesOnly && sharesDaemonEmbedder(profile)) {
     const vector = await embedQuery(text);
     if (await daemonEmbedderVerified()) return vector;
     // The daemon's copy of the model is not provably the profile's bytes;
@@ -394,7 +407,7 @@ export async function embedKnowledgeQuery(
   const w = ensureWorker();
   if (w) {
     try {
-      const [vector] = await sendToWorker(w, [text], profile, onDownloadProgress);
+      const [vector] = await sendToWorker(w, [text], profile, onDownloadProgress, localFilesOnly);
       return vector ?? [];
     } catch (err) {
       if (err instanceof EmbeddingsUnavailableError) throw err;
@@ -402,11 +415,16 @@ export async function embedKnowledgeQuery(
     }
   }
   try {
-    const [vector] = await runProfileQueryEmbed([text], profile, onDownloadProgress);
+    const [vector] = await runProfileQueryEmbed(
+      [text],
+      profile,
+      onDownloadProgress,
+      localFilesOnly,
+    );
     return vector ?? [];
   } catch (err) {
     if (err instanceof PipelineLoadError) {
-      markProfileUnavailable(profile.id, err.message, !err.retryable);
+      if (!localFilesOnly) markProfileUnavailable(profile.id, err.message, !err.retryable);
       throw new EmbeddingsUnavailableError(`profile ${profile.id}: ${firstLine(err.message)}`);
     }
     throw err;

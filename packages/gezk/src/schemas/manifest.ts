@@ -4,6 +4,7 @@ import {
   GEZK_SUPPORTED_FORMAT_VERSIONS,
   GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS,
 } from '../format/constants.js';
+import { KnowledgeSpatialManifestSchema } from '../spatial.js';
 import {
   KnowledgeDocumentIdSchema,
   KnowledgeIdSchema,
@@ -104,6 +105,7 @@ export const KnowledgeCatalogManifestSchema = z
       assets: z.number().int().nonnegative().optional(),
     }),
     files: z.array(KnowledgeManifestFileSchema).min(1),
+    spatial: KnowledgeSpatialManifestSchema.optional(),
     /** What a reader must implement to open this catalog. */
     requires: z.object({
       formatVersion: z.enum(GEZK_SUPPORTED_FORMAT_VERSIONS),
@@ -132,6 +134,24 @@ export const KnowledgeCatalogManifestSchema = z
     signature: KnowledgeSignatureSchema.optional(),
   })
   .superRefine((manifest, ctx) => {
+    if (manifest.formatVersion === '0.7' && !manifest.spatial) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['spatial'],
+        message: '0.7 requires a spatial summary, including catalogs with zero locations',
+      });
+    }
+    if (
+      manifest.spatial &&
+      (manifest.formatVersion !== '0.7' ||
+        manifest.spatial.locatedDocuments > manifest.counts.documents)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['spatial'],
+        message: 'spatial requires 0.7 and valid document counts',
+      });
+    }
     if (GEZK_FORMAT_GENERATIONS[manifest.formatVersion] !== manifest.indexSchemaVersion) {
       ctx.addIssue({
         code: 'custom',

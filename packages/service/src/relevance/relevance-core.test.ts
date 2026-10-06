@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PipelineLoadError } from '../memory/embed-core.js';
 import {
   type RelevanceTransformers,
@@ -18,7 +18,9 @@ const words = (text: string) => text.toLowerCase().match(/[a-z]+/g) ?? [];
  * A fake cross-encoder: one logit = word overlap between query and passage.
  * Enough to pass the load-time self-check, and to count batches.
  */
-function fakeTransformers(opts: { constant?: boolean; noSegments?: boolean } = {}) {
+function fakeTransformers(
+  opts: { constant?: boolean; noSegments?: boolean; onModelCall?: () => void } = {},
+) {
   const calls: number[] = [];
   const vocab = new Map<string, number>();
   const id = (word: string) => {
@@ -48,12 +50,15 @@ function fakeTransformers(opts: { constant?: boolean; noSegments?: boolean } = {
     },
   );
   const model = Object.assign(
-    async (inputs: Record<string, { data: number[]; dims: number[] }>) => ({
-      logits: {
-        data: inputs.input_ids!.data.map((overlap) => (opts.constant ? 0 : overlap * 2 - 1)),
-        dims: [inputs.input_ids!.dims[0]!, 1],
-      },
-    }),
+    async (inputs: Record<string, { data: number[]; dims: number[] }>) => {
+      opts.onModelCall?.();
+      return {
+        logits: {
+          data: inputs.input_ids!.data.map((overlap) => (opts.constant ? 0 : overlap * 2 - 1)),
+          dims: [inputs.input_ids!.dims[0]!, 1],
+        },
+      };
+    },
     { sessions: { model: { inputNames: ['input_ids', 'attention_mask', 'token_type_ids'] } } },
   );
   const transformers = {
@@ -85,6 +90,7 @@ describe('relevance core', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     disposeRelevanceModels();
     await rm(dir, { recursive: true, force: true });
   });
@@ -112,6 +118,28 @@ describe('relevance core', () => {
     const out = await scoreRelevancePairs(model, 'q', ['a', 'b'], Date.now() - 1, transformers);
     expect(out.partial).toBe(true);
     expect(out.scores).toEqual([null, null]);
+  });
+
+  it('does not start a batch it cannot finish before the deadline', async () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const { transformers } = fakeTransformers({
+      onModelCall: () => {
+        clock += 50;
+      },
+    });
+    await scoreRelevancePairs(model, 'q', ['warm'], undefined, transformers);
+
+    // Each batch takes 50 ms. Two fit in 120 ms; a third would end at 150,
+    // after the caller has stopped waiting and would discard all 24 scores.
+    const deadlineAt = clock + 120;
+    const passages = Array.from({ length: 24 }, () => 'filler');
+    const out = await scoreRelevancePairs(model, 'q', passages, deadlineAt, transformers);
+    expect(out.partial).toBe(true);
+    expect(out.scores.slice(0, 16).every((score) => score !== null)).toBe(true);
+    expect(out.scores.slice(16)).toEqual(Array(8).fill(null));
+    expect(clock).toBeLessThanOrEqual(deadlineAt);
   });
 
   it('refuses a model that cannot tell an answer from a non-answer', async () => {

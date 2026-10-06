@@ -367,6 +367,11 @@ export async function executePortableTool(
       throw new Error('The destination project does not accept changes');
   }
   if (name === 'ask_user_question') {
+    if (args.permissionRequest) {
+      throw new Error(
+        'Permission changes require the desktop app; a plain answer does not grant access.',
+      );
+    }
     if (!actions.askQuestion) throw new Error('Questions are unavailable on this host');
     const { question, prompt, description, ...rest } = args;
     const text = [question, prompt, description].find(
@@ -449,7 +454,7 @@ export async function executePortableTool(
     const { project: _project, assignee: rawAssignee, dispatch, ...request } = args;
     const named = normalizeAssigneeArg(rawAssignee as AssigneeArg | undefined);
     let assignee: CreateTaskRequest['assignee'];
-    if (named?.kind === 'user') assignee = { kind: 'user' };
+    if (named?.kind === 'user') assignee = named;
     else if (named) {
       const roster = await store.listGezels();
       const member = findGezelInRoster(roster, named.ref);

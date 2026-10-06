@@ -54,34 +54,36 @@ export function resolveActivity(input: {
   };
 
   for (const task of tasks) {
-    const status = taskEffectiveStatus(task);
-    if (status !== 'active' && status !== 'paused') continue;
+    // A paused task, or one in a paused project, is not going to run until
+    // someone resumes it. Listing it under Next buried live work beneath
+    // every paused fanout shard; the Tasks view is where paused work lives.
+    if (taskEffectiveStatus(task) !== 'active') continue;
+    if (input.inactiveProjectIds?.has(task.projectId)) continue;
     if (task.origin?.kind === 'system-job') continue;
     // Fanout hosts coordinate their children; recurring hosts represent a
     // future run and belong under Next, never under Working by lifecycle alone.
     if (task.spawnsCraftbook && task.fanout && !task.cron) continue;
     const wait = waits.get(task.ref);
     const assignee = taskActiveAssignee(task);
+    const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
     const item: ActivityItem = {
       id: `task:${task.ref}`,
       section: 'next',
       title: task.title,
-      detail: 'Not running. Open the task to check its next step.',
+      detail: step ? `Not running. Current step: ${step.name}.` : 'Not running.',
       projectId: task.projectId,
       taskRef: task.ref,
       questionIds: [],
       ...(assignee.kind === 'gezel' ? { gezelId: assignee.gezelId } : {}),
       ...(wait ? { since: wait.since, sessionId: wait.sessionId } : {}),
     };
-    if (status === 'paused') item.detail = 'Paused. Resume from the task when you are ready.';
-    else if (input.inactiveProjectIds?.has(task.projectId)) item.detail = 'This project is paused.';
-    else if (task.cron) {
-      item.detail = task.cron.nextTickAt
-        ? `Scheduled · ${task.cron.nextTickAt}`
-        : 'Scheduled. Open the task for its schedule.';
+    if (task.cron) {
+      item.detail = task.cron.nextTickAt ? `Scheduled · ${task.cron.nextTickAt}` : 'Scheduled.';
     } else if (assignee.kind === 'user') {
       item.section = 'needs-you';
-      item.detail = 'Your step is ready. Open the task to continue.';
+      item.detail = step
+        ? `Current step: ${step.name}. Waiting for your direction.`
+        : 'Waiting for your direction.';
     } else if (wait) {
       switch (wait.reason) {
         case 'dispatching':
@@ -136,7 +138,10 @@ export function resolveActivity(input: {
       ...existing,
       id,
       section: waiting ? 'next' : 'working',
-      title: existing?.title ?? (turn.userText.trim().slice(0, 180) || 'Conversation'),
+      title:
+        existing?.title ??
+        (turn.taskRef ? taskByRef.get(turn.taskRef)?.title : undefined) ??
+        (turn.userText.trim().slice(0, 180) || 'Conversation'),
       detail: waiting
         ? 'Waiting for a free model slot.'
         : turn.lastProgressAgoMs !== undefined

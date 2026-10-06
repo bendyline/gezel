@@ -101,6 +101,36 @@ describe('KnowledgeManager', () => {
     }
   });
 
+  it('fills a search scoped to one catalog past the per-catalog cap', async () => {
+    const path = join(dir, 'variants.gezk');
+    await buildTestCatalog({
+      outputPath: path,
+      workDir: join(dir, 'variants-work'),
+      id: 'variants',
+      dovetailVariants: 12,
+    });
+    const local = new KnowledgeManager({
+      home: join(dir, 'variants-home'),
+      host: await createInProcessCatalogHost(),
+    });
+    await local.start();
+    try {
+      const events = await runInstall(local, path);
+      expect(
+        events.some((e) => e.type === 'done'),
+        JSON.stringify(events),
+      ).toBe(true);
+      const results = await local.searchUnified('dovetail', {
+        vector: null,
+        maxResults: 20,
+        catalogs: ['variants'],
+      });
+      expect(results.length).toBe(13);
+    } finally {
+      await local.stop();
+    }
+  });
+
   it('answers explicit search with cited knowledge results', async () => {
     const results = await manager.searchUnified('dovetail corner joint', {
       vector: null,
@@ -263,7 +293,8 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     profileManager = new KnowledgeManager({
       home: profileHome,
       host: await createInProcessCatalogHost(),
-      embedQueryForProfile: async (text, profile) => {
+      embedQueryForProfile: async (text, profile, opts) => {
+        if (opts?.localFilesOnly) embedded.push(`cached:${text}`);
         embedded.push(`${profile.id}:${text}`);
         if (embedGate) await embedGate;
         return embedOverride ? embedOverride(text) : testHashVector(text);
@@ -311,6 +342,15 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     const dovetails = results.find((r) => r.documentId === 'dovetails');
     expect(dovetails).toBeDefined();
     expect(dovetails?.relevance).toBe(1);
+  });
+
+  it('propagates the app retrieval policy to catalog embedding models', async () => {
+    await profileManager.searchUnified('dovetail', {
+      vector: null,
+      maxResults: 5,
+      localModelsOnly: true,
+    });
+    expect(embedded).toContain('cached:dovetail');
   });
 
   it('fuses the arms: two lexical arms naming a document outrank a lone vector hit', async () => {
@@ -588,5 +628,76 @@ describe('KnowledgeManager asset access', () => {
   it('reports no assets for a catalog that ships none', async () => {
     expect(await manager.assets('test-notes')).toEqual([]);
     expect(await manager.readAsset('test-notes', 'assets/mark.png')).toBeNull();
+  });
+});
+
+describe('radius discovery and project scope', () => {
+  it('deduplicates regional copies before pagination, binds cursors, and filters before search', async () => {
+    let mode: 'inherit' | 'off' = 'inherit';
+    const local = new KnowledgeManager({
+      home: join(dir, 'spatial-home'),
+      host: await createInProcessCatalogHost(),
+      projectPolicy: async () => ({ mode }),
+      bundledHandboekArchive: null,
+    });
+    await local.start();
+    try {
+      for (const id of ['qualla-region-a', 'qualla-region-b']) {
+        const path = join(dir, `${id}.gezk`);
+        await buildTestCatalog({
+          id,
+          outputPath: path,
+          workDir: join(dir, `${id}-work`),
+          withLocations: true,
+        });
+        expect((await runInstall(local, path)).some((e) => e.type === 'done')).toBe(true);
+      }
+      const request = {
+        spatial: { latitude: 47.6062, longitude: -122.3321, radiusMeters: 50_000 },
+        limit: 1,
+      };
+      const first = await local.nearby(request, 'project');
+      expect(first.total).toBe(2);
+      expect(first.documents[0]?.id).toBe('qualla-wikipedia-1');
+      const second = await local.nearby({ ...request, cursor: first.nextCursor }, 'project');
+      expect(second.documents[0]?.id).toBe('qualla-wikipedia-2');
+      expect(second.nextCursor).toBeUndefined();
+      await expect(
+        local.nearby(
+          {
+            ...request,
+            spatial: { ...request.spatial, radiusMeters: 1 },
+            cursor: first.nextCursor,
+          },
+          'project',
+        ),
+      ).rejects.toThrow('stale');
+      expect(
+        (
+          await local.searchUnified('corner joint', {
+            vector: null,
+            maxResults: 10,
+            spatial: request.spatial,
+            catalogs: ['qualla-region-b'],
+          })
+        ).every((hit) => hit.catalogId === 'qualla-region-b' && hit.distanceMeters !== undefined),
+      ).toBe(true);
+      expect((await local.nearby({ ...request, catalogs: [] }, 'project')).total).toBe(0);
+      mode = 'off';
+      expect((await local.nearby(request, 'project')).total).toBe(0);
+      await expect(
+        local.nearby({ ...request, cursor: first.nextCursor }, 'project'),
+      ).rejects.toThrow('stale');
+      expect(
+        await local.searchUnified('corner joint', {
+          vector: null,
+          maxResults: 10,
+          spatial: request.spatial,
+          projectId: 'project',
+        }),
+      ).toEqual([]);
+    } finally {
+      await local.stop();
+    }
   });
 });

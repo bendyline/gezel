@@ -404,11 +404,23 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
    * Stage 1 (freeze) and Stage 2 (full SIGTERM). The wrapped server
    * handles the actual save loop via `/admin/flush`.
    */
-  async flushAll(): Promise<void> {
-    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+  async flushAll(opts?: {
+    /** Engine to flush; defaults to the live one. A stopping engine passes its own. */
+    baseUrl?: string;
+    /**
+     * Wait up to this long for the engine to finish winding down cancelled
+     * turns first. A turn cancelled just before a stop files its prompt
+     * snapshot on the worker's next step, and only then is it flushable.
+     */
+    settleMs?: number;
+  }): Promise<void> {
+    const baseUrl = opts?.baseUrl ?? (await this.resolveBaseUrl().catch(() => null));
     if (!baseUrl) return;
+    const query =
+      opts?.settleMs && opts.settleMs > 0 ? `?settle_ms=${Math.round(opts.settleMs)}` : '';
     try {
-      await this.fetchImpl(`${baseUrl}/admin/flush`, { method: 'POST' });
+      const res = await this.fetchImpl(`${baseUrl}/admin/flush${query}`, { method: 'POST' });
+      await res.text().catch(() => '');
     } catch {
       // Best-effort. The server's own SIGTERM handler is the
       // belt-and-braces fallback even if this round-trip fails.

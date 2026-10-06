@@ -41,6 +41,7 @@ import { normalizeScriptRefs } from '../schemas/script.js';
  */
 export const RESEARCH_STEP_TOOLS: readonly string[] = [
   'search',
+  'knowledge_nearby',
   'read_document',
   'web_search',
   'wikipedia_search',

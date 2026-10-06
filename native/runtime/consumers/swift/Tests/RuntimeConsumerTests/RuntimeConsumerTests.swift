@@ -5,6 +5,20 @@ import GezelRuntime
 import RuntimeConsumer
 
 final class RuntimeConsumerTests: XCTestCase {
+    @MainActor func testSharedRuntimeRejectsLinkedRootBeforeAdmission() throws {
+        let fm = FileManager.default
+        let parent = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outside = parent.appendingPathComponent("outside")
+        try fm.createDirectory(at: outside.appendingPathComponent("models"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: parent) }
+        let sentinel = outside.appendingPathComponent("models/keep.partial")
+        try Data([1, 2, 3]).write(to: sentinel)
+        let linked = parent.appendingPathComponent("gezel")
+        try fm.createSymbolicLink(at: linked, withDestinationURL: outside)
+        XCTAssertThrowsError(try GezelNativeRuntime.shared(root: linked))
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data([1, 2, 3]))
+    }
+
     @MainActor func testPackagedEngineImportsStreamsAndReleases() async throws {
         guard let fixture = Bundle.module.url(forResource: "ios-fixture", withExtension: "gguf", subdirectory: "Fixtures") else {
             throw XCTSkip("Provide the pinned native contract fixture to run inference")

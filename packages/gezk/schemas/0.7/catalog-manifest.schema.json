@@ -499,6 +499,78 @@
         ]
       }
     },
+    "spatial": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "document-points@1"
+        },
+        "crs": {
+          "type": "string",
+          "const": "EPSG:4326"
+        },
+        "distanceModel": {
+          "type": "string",
+          "const": "sphere-6371000"
+        },
+        "locationCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "locatedDocuments": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "coverage": {
+          "maxItems": 2,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "west": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              },
+              "south": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "east": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              },
+              "north": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              }
+            },
+            "required": [
+              "west",
+              "south",
+              "east",
+              "north"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "crs",
+        "distanceModel",
+        "locationCount",
+        "locatedDocuments",
+        "coverage"
+      ],
+      "additionalProperties": false
+    },
     "requires": {
       "type": "object",
       "properties": {
@@ -624,5 +696,24 @@
     "counts",
     "files",
     "requires"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "formatVersion": {
+            "const": "0.7"
+          }
+        },
+        "required": [
+          "formatVersion"
+        ]
+      },
+      "then": {
+        "required": [
+          "spatial"
+        ]
+      }
+    }
   ]
 }

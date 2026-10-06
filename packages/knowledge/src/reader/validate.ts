@@ -17,6 +17,7 @@ import {
   MAX_KNOWLEDGE_ASSET_COUNT,
   assetExtension,
   assetKindForExtension,
+  canonicalizeJson,
   isKnowledgeAssetPath,
   sniffAssetType,
   svgInertnessProblem,
@@ -135,6 +136,24 @@ export async function validateExtractedCatalog(
     );
 
     // counts
+    if (manifest.formatVersion === '0.7') {
+      try {
+        const spatial = handle.spatialIntegrity();
+        check('document-locations-table', spatial.hasTable);
+        check(
+          'document-locations-summary',
+          Boolean(manifest.spatial) &&
+            canonicalizeJson(spatial.manifest) === canonicalizeJson(manifest.spatial),
+          'spatial counts and coverage must match router points',
+        );
+      } catch (error) {
+        check(
+          'document-locations-integrity',
+          false,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
     const topics = handle.topics();
     check('toc-present', topics.length >= 1, `${topics.length} topics`);
     check('topics-tree', ...topicTreeProblem(topics));

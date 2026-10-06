@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskAssigneeSchema } from '../../schemas/assignee.js';
 
 /** A tool that takes no arguments. Strict: a stray key is a mistake worth naming. */
 export const EmptyInputSchema = z.object({}).strict();
@@ -25,6 +26,7 @@ export const StepBlueprintSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   prompt: z.string().optional(),
+  assignee: TaskAssigneeSchema.optional(),
   suggestedGezelId: z.string().optional(),
   suggestedRole: z
     .string()

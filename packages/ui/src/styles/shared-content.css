@@ -1044,6 +1044,10 @@
   font-size: var(--text-sm);
 }
 
+.deliverable-card-action-icon {
+  display: none;
+}
+
 .deliverable-card-open {
   font-weight: 600;
 }

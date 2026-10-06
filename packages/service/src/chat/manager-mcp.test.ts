@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question, Task } from '@bendyline/gezel';
+import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -208,6 +209,66 @@ afterEach(async () => {
 });
 
 describe('ChatManager turn intent routing', () => {
+  it('resumes a permission request with newly enabled write tools', async () => {
+    const originalChat = svc.context.chat;
+    svc.context.chat = manager;
+    try {
+      await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+      const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+      mock.scriptToolCalls([
+        {
+          name: 'ask_user_question',
+          arguments: {
+            question: 'Allow project file edits so I can save the deck?',
+            permissionRequest: 'workspace-write',
+          },
+        },
+      ]);
+      mock.script('Waiting for permission.');
+      await manager.send(session.id, 'Save a deck outline to deck.md.');
+      await manager.drainBackground();
+      const question = (await store.listProjectQuestions('default')).find(
+        (q) => q.intent?.kind === 'workspace-write-permission',
+      );
+      expect(question).toBeDefined();
+      expect((await store.assertWorkspaceWritable('default', { initiatedByGezel: true })).ok).toBe(
+        false,
+      );
+      mock.scriptToolCalls([
+        {
+          name: 'write_file',
+          arguments: { path: 'deck.md', content: '# Deck\nOverview and next steps.' },
+        },
+      ]);
+      mock.script('Saved the deck outline.');
+      const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+      const response = await httpFetch(
+        `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}/api/questions/${question!.id}/answer`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${svc.context.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ selectedChoices: [0] }),
+        },
+      );
+      expect(response.status).toBe(200);
+      await expect
+        .poll(() => store.readProjectWorkspaceFile('default', 'deck.md'), { timeout: 15_000 })
+        .toBe('# Deck\nOverview and next steps.');
+      await expect.poll(() => manager.isSessionTurnPending(session.id)).toBe(false);
+      expect((await manager.history(session.id)).at(-1)?.content).toBe('Saved the deck outline.');
+      expect(
+        mock.calls.filter((call) => call.kind === 'create' || call.kind === 'resume').at(-1)?.opts
+          ?.systemMessage,
+      ).not.toContain('Built-in file tools are read-only');
+    } finally {
+      await manager.drainBackground();
+      svc.context.chat = originalChat;
+    }
+  }, 30_000);
+
   it('injects the exact-format route and retries one false capability denial', async () => {
     const meester = await store.createGezel({ name: 'Mila', role: 'Meester' });
     await store.writeConfig({
@@ -798,7 +859,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     // a distinctive phrase from CLOSING_SUMMARY_NUDGE. Match a stable
     // substring so minor wording changes don't break the test.
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeDefined();
 
     // And critically: the persisted session has both bubbles — the
@@ -815,6 +878,29 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(toolOnlyMsg!.toolCalls![0]!.name).toBe('write_document');
     const wrapUpMsg = assistantMsgs.find((m) => m.content === 'Wrote silent-tool/note.md.');
     expect(wrapUpMsg).toBeDefined();
+  }, 30_000);
+
+  it('recovers a search-only conversation with a substantive prose answer', async () => {
+    const companion = await store.createGezel({ name: 'Mira', role: 'Conversationalist' });
+    const session = await manager.createSession({ gezelId: companion.id });
+    mock.scriptToolCalls([{ name: 'search', arguments: { query: 'Margherita pizza' } }]);
+    const answer =
+      'Margherita pizza uses tomato, mozzarella, and basil.\n\nIts familiar naming story associates it with Queen Margherita, although similar toppings predate that story.';
+    mock.script('', answer);
+
+    await manager.send(session.id, 'Can you tell me more about Margherita pizza?');
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    const recovery = sends.find((call) =>
+      /read-only tool returned useful context/i.test(call.prompt ?? ''),
+    );
+    expect(recovery?.prompt).toContain("answer the user's original question in prose");
+    expect(recovery?.prompt).not.toMatch(/one sentence|No more tools|appropriate action tool/i);
+    expect(mock.toolCallOutputs.map((output) => output.name)).toEqual(['search']);
+    const disk = await store.getSession(companion.id, session.id);
+    expect(disk?.messages.filter((message) => message.role === 'assistant').at(-1)?.content).toBe(
+      answer,
+    );
   }, 30_000);
 
   it('continues a task after a read-only tool instead of summarizing and stopping', async () => {
@@ -857,7 +943,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(
       sends.some((call) => /read-only tool returned useful context/i.test(call.prompt ?? '')),
     ).toBe(true);
-    expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
+    expect(
+      sends.some((call) => /Do not repeat actions that already succeeded/i.test(call.prompt ?? '')),
+    ).toBe(false);
     await expect(store.readProjectWorkspaceFile('default', 'src/game.js')).resolves.toBe(
       'export const speed = 2;\n',
     );
@@ -920,7 +1008,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
     expect(progressNudge).toBeDefined();
     expect(progressNudge?.prompt).toContain('If the lookup result named a next tool call');
-    expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
+    expect(
+      sends.some((call) => /Do not repeat actions that already succeeded/i.test(call.prompt ?? '')),
+    ).toBe(false);
     expect(mock.toolCallOutputs.map((output) => output.name)).toEqual([
       'suggest_craftbook',
       'invoke_craftbook',
@@ -1621,7 +1711,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
 
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeUndefined();
     expect(sends).toHaveLength(1);
 
@@ -1660,7 +1752,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     }
 
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeUndefined();
     for (const prompt of prompts) {
       expect(sends.filter((call) => call.prompt === prompt)).toHaveLength(1);
@@ -1692,7 +1786,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
 
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeUndefined();
     expect(sends).toHaveLength(1);
 
@@ -1723,7 +1819,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     await manager.send(session.id, 'write the note');
 
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeDefined();
   }, 30_000);
 
@@ -1745,7 +1843,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     await manager.send(session.id, 'write the note');
 
     const sends = mock.calls.filter((c) => c.kind === 'send');
-    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const nudgeSend = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(nudgeSend).toBeUndefined();
   }, 30_000);
 
@@ -1769,7 +1869,9 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
     expect(continuation).toBeDefined();
     // And the closing-summary wording must NOT have been used here.
-    const closingSummary = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    const closingSummary = sends.find((c) =>
+      /Do not repeat actions that already succeeded/i.test(c.prompt ?? ''),
+    );
     expect(closingSummary).toBeUndefined();
   }, 30_000);
 });

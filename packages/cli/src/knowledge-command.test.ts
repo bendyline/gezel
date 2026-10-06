@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
 import type { ProfileEmbedder } from '@bendyline/gezel-knowledge';
 import {
+  CatalogHandle,
+  extractGezkVerified,
   generateKnowledgeSigningKeyPair,
   readGezkManifest,
   verifyManifestSignature,
@@ -15,6 +17,7 @@ import {
   runKnowledgeBuild,
   runKnowledgeInit,
   runKnowledgeInspect,
+  runKnowledgeNearby,
   runKnowledgeSearch,
   runKnowledgeValidate,
 } from './knowledge-command.js';
@@ -75,7 +78,7 @@ beforeAll(async () => {
   await mkdir(join(catalogDir, 'content', 'Joinery'), { recursive: true });
   await writeFile(
     join(catalogDir, 'content', 'Joinery', 'dovetails.md'),
-    '# Dovetail Joints\n\nTails and pins interlock for a mechanically strong corner.\n',
+    '---\nlocations:\n  - id: seattle\n    latitude: 47.6062\n    longitude: -122.3321\n    role: subject\n---\n# Dovetail Joints\n\nTails and pins interlock for a mechanically strong corner.\n',
   );
   await runKnowledgeBuild(catalogDir, {}, deps);
   archivePath = join(catalogDir, 'field-notes-1.0.0.gezk');
@@ -113,6 +116,118 @@ describe('gezel knowledge (offline)', () => {
     expect(manifest.counts.documents).toBe(2);
     expect(manifest.topics.length).toBeGreaterThanOrEqual(2);
     expect(manifest.signature).toBeUndefined();
+  });
+
+  it.each([true, false])(
+    'build warns and skips mislabeled images (valid image retained: %s)',
+    async (keepValidImage) => {
+      const root = join(dir, `bad-assets-${keepValidImage}`);
+      await runKnowledgeInit(root);
+      await writeFile(join(root, 'content', 'f5-logo.png'), Buffer.from([0xff, 0xd8, 0xff]));
+      if (keepValidImage) {
+        await writeFile(
+          join(root, 'content', 'good.png'),
+          Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+            'base64',
+          ),
+        );
+      }
+      const markdown = `# Photos\n\nText before the image. ![F5 logo](f5-logo.png) Text after the image.\n${keepValidImage ? '\n![Good image](good.png)\n' : ''}`;
+      await writeFile(join(root, 'content', 'photos.md'), markdown);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const outputPath = join(root, 'output.gezk');
+      await runKnowledgeBuild(root, { out: outputPath }, deps);
+      expect(warn).toHaveBeenCalledWith(
+        'warning: asset assets/f5-logo.png: the leading bytes say jpeg, the extension says png; skipped (references replaced with their text)',
+      );
+      const manifest = await readGezkManifest(outputPath);
+      expect(manifest.counts.assets).toBe(keepValidImage ? 1 : 0);
+      expect(manifest.files.some((file) => file.path === 'assets/f5-logo.png')).toBe(false);
+      const extracted = join(root, 'extracted');
+      await extractGezkVerified(outputPath, extracted);
+      const handle = CatalogHandle.open(extracted);
+      try {
+        const body = handle.getDocument('photos')?.markdown;
+        expect(body).toContain('Text before the image. F5 logo Text after the image.');
+        expect(body).not.toContain('assets/f5-logo.png');
+        if (keepValidImage) expect(body).toContain('![Good image](assets/good.png)');
+        expect(handle.searchDocumentsFts('photos', 5).map((hit) => hit.documentId)).toContain(
+          'photos',
+        );
+      } finally {
+        handle.close();
+      }
+      await expect(runKnowledgeValidate(outputPath, { deep: true })).resolves.toBeUndefined();
+      expect(await readFile(join(root, 'content', 'photos.md'), 'utf8')).toBe(markdown);
+    },
+  );
+
+  it('build warns and skips an oversized GIF while preserving its document', async () => {
+    const root = join(dir, 'oversized-image');
+    const imagePath = 'articles/cyclecloud/images/node-detail-error-flow.gif';
+    await runKnowledgeInit(root);
+    await mkdir(join(root, 'content', 'articles', 'cyclecloud', 'images'), { recursive: true });
+    const image = Buffer.alloc(12_218_702);
+    image.write('GIF89a', 'ascii');
+    await writeFile(join(root, 'content', imagePath), image);
+    const markdown = `# Error Flow\n\nBefore ![Error flow](${imagePath}) after.\n`;
+    await writeFile(join(root, 'content', 'flow.md'), markdown);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const outputPath = join(root, 'output.gezk');
+    await runKnowledgeBuild(root, { out: outputPath }, deps);
+    expect(warn).toHaveBeenCalledWith(
+      `warning: asset assets/${imagePath} is 12218702 bytes; the limit is 8388608; skipped (references replaced with their text)`,
+    );
+    const manifest = await readGezkManifest(outputPath);
+    expect(manifest.counts.assets).toBe(0);
+    expect(manifest.files.some((file) => file.path.startsWith('assets/'))).toBe(false);
+    const extracted = join(root, 'extracted');
+    await extractGezkVerified(outputPath, extracted);
+    const handle = CatalogHandle.open(extracted);
+    try {
+      expect(handle.getDocument('flow')?.markdown).toContain('Before Error flow after.');
+      expect(handle.searchDocumentsFts('Error Flow', 5).map((hit) => hit.documentId)).toContain(
+        'flow',
+      );
+    } finally {
+      handle.close();
+    }
+    await expect(runKnowledgeValidate(outputPath, { deep: true })).resolves.toBeUndefined();
+    expect(await readFile(join(root, 'content', 'flow.md'), 'utf8')).toBe(markdown);
+    expect((await stat(join(root, 'content', imagePath))).size).toBe(image.byteLength);
+  });
+
+  it('build --skip-images produces a searchable text-only catalog without reading images', async () => {
+    const root = join(dir, 'skip-images');
+    await runKnowledgeInit(root);
+    const markdown = '# Pictures\n\nBefore ![F5 logo](logo.png) after. ![Missing](missing.png)\n';
+    await writeFile(join(root, 'content', 'pictures.md'), markdown);
+    await mkdir(join(root, 'content', 'logo.png'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const outputPath = join(root, 'output.gezk');
+    await runKnowledgeBuild(root, { out: outputPath, skipImages: true }, deps);
+    expect(warn).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat().join('\n')).toContain('0 assets');
+    const manifest = await readGezkManifest(outputPath);
+    expect(manifest.counts.assets).toBe(0);
+    expect(manifest.files.some((file) => file.path.startsWith('assets/'))).toBe(false);
+    const extracted = join(root, 'extracted');
+    await extractGezkVerified(outputPath, extracted);
+    const handle = CatalogHandle.open(extracted);
+    try {
+      expect(handle.getDocument('pictures')?.markdown).toContain('Before F5 logo after. Missing');
+      expect(handle.searchDocumentsFts('pictures', 5).map((hit) => hit.documentId)).toContain(
+        'pictures',
+      );
+    } finally {
+      handle.close();
+    }
+    await expect(runKnowledgeValidate(outputPath, { deep: true })).resolves.toBeUndefined();
+    expect(await readFile(join(root, 'content', 'pictures.md'), 'utf8')).toBe(markdown);
   });
 
   it('validate --deep passes on the built archive', async () => {
@@ -155,6 +270,31 @@ describe('gezel knowledge (offline)', () => {
     const output = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(output).toContain('semantic');
     expect(output).toContain('#chunk=');
+  });
+
+  it('discovers authored locations offline and applies radius filters to text search', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const radius = { latitude: 47.6062, longitude: -122.3321, radiusMeters: 50_000 };
+    await runKnowledgeNearby(archivePath, radius, { json: true, limit: 1 });
+    const page = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(page.total).toBe(1);
+    expect(page.documents[0]?.title).toBe('Dovetail Joints');
+    expect(page.documents[0]?.distanceMeters).toBe(0);
+    expect(page.documents[0]?.matchedLocation.id).toBe('seattle');
+    log.mockClear();
+    await runKnowledgeSearch(archivePath, 'dovetail', radius, deps);
+    expect(log.mock.calls.flat().join('\n')).toContain('Dovetail Joints');
+    log.mockClear();
+    await runKnowledgeSearch(
+      archivePath,
+      'dovetail',
+      { ...radius, latitude: 0, longitude: 0 },
+      deps,
+    );
+    expect(log.mock.calls.flat().join('\n')).not.toContain('Dovetail Joints');
+    await expect(
+      runKnowledgeSearch(archivePath, 'dovetail', { latitude: 47.6 }, deps),
+    ).rejects.toThrow(/together/);
   });
 
   it('build --sign-key produces a verifiable signed manifest', async () => {

@@ -181,6 +181,22 @@ describe('createProfileEmbedder', () => {
     expect(runtime.disposed).toBe(1);
   });
 
+  it('prohibits remote loads for both the graph and tokenizer when using cached models', async () => {
+    const runtime = fakeTransformers();
+    const profile = profileWith({
+      onnxDigest: sha(ONNX_BYTES),
+      tokenizerDigest: sha(TOKENIZER_BYTES),
+    });
+    const embedder = await createProfileEmbedder(profile, {
+      cacheDir,
+      transformers: runtime.module,
+      localFilesOnly: true,
+    });
+    expect(runtime.pipelineCalls[0]?.options).toMatchObject({ local_files_only: true });
+    expect(runtime.tokenizerCalls[0]?.options).toMatchObject({ local_files_only: true });
+    await embedder.dispose();
+  });
+
   it('refuses a graph whose bytes differ from the pin and releases the session', async () => {
     const runtime = fakeTransformers();
     const profile = profileWith({ onnxDigest: `sha256:${'0'.repeat(64)}` });

@@ -8,7 +8,14 @@ import {
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Dialog } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
-import { QueueMeterPanel, openQueuedChat } from './QueueMeter.js';
+import {
+  type QueueRowContext,
+  type QueueRowSelection,
+  QueueSessionRows,
+  openQueuedChat,
+  selectQueueRows,
+  useQueueLiveTurns,
+} from './QueueMeter.js';
 import { useActivity } from './activity-context.js';
 import { useHeaderDensity } from './header-density.js';
 import { OPEN_UPDATES_EVENT, navigateToTab } from './nav-actions.js';
@@ -19,6 +26,10 @@ import '../styles/activity.css';
 
 const PendingQuestionCard = lazy(() =>
   import('./PendingQuestionCard.js').then((module) => ({ default: module.PendingQuestionCard })),
+);
+
+const ActivityTaskStep = lazy(() =>
+  import('./ActivityTaskStep.js').then((module) => ({ default: module.ActivityTaskStep })),
 );
 
 const SECTIONS: { id: ActivitySection; label: string; empty: string }[] = [
@@ -38,7 +49,6 @@ export function ActivityControl() {
   const activity = useActivity();
   const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | undefined>();
-  const [details, setDetails] = useState(false);
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const density = useHeaderDensity();
   const boringMode = useRoleBasedNameOnlyMode();
@@ -50,6 +60,7 @@ export function ActivityControl() {
   }, [open, clearReceipts]);
   const snapshot = activity?.snapshot;
   const allItems = snapshot?.items ?? [];
+  const { liveTurns, preparingTurns, onDeviceProvider } = useQueueLiveTurns(open, snapshot?.queues);
   const needs = countSection(allItems, 'needs-you');
   const working = countSection(allItems, 'working');
   const next = countSection(allItems, 'next');
@@ -134,6 +145,36 @@ export function ActivityControl() {
         setNavigationError('Could not open this conversation. Please try again.');
       }
     }
+  };
+  // The gezels on an engine right now, and the ones waiting for a slot, as
+  // the same rows (Stop, reorder, cancel) the header queue used to show.
+  // Each row stands in for its activity entry, so the work appears once.
+  const queueRows: Partial<Record<ActivitySection, QueueRowSelection>> = snapshot
+    ? {
+        working: selectQueueRows(snapshot.queues, 'running', preparingTurns, projectId),
+        next: selectQueueRows(snapshot.queues, 'waiting', preparingTurns, projectId),
+      }
+    : {};
+  const representedByQueue = (item: ActivityItem) => {
+    const rows = queueRows[item.section];
+    if (!rows) return false;
+    // Sessionless engine work is listed row by row, so its summary goes.
+    if (item.id.startsWith('background:')) return true;
+    return item.sessionId !== undefined && rows.sessionIds.has(item.sessionId);
+  };
+  const itemBySession = new Map(
+    allItems.flatMap((item) => (item.sessionId ? [[item.sessionId, item] as const] : [])),
+  );
+  const rowContext: QueueRowContext = (sessionId) => {
+    const item = itemBySession.get(sessionId);
+    if (!item) return undefined;
+    return item.taskRef
+      ? {
+          title: item.title,
+          open: () => void openItem(item),
+          openLabel: `View task details for ${item.title}`,
+        }
+      : { title: item.title };
   };
   const answer = (question: Question) => {
     activity.answered(question);
@@ -237,8 +278,10 @@ export function ActivityControl() {
               {snapshot &&
                 SECTIONS.map(({ id, label, empty }) => {
                   const rows = sortedItems.filter(
-                    (item) => item.section === id && !item.questionIds.length,
+                    (item) =>
+                      item.section === id && !item.questionIds.length && !representedByQueue(item),
                   );
+                  const crew = queueRows[id];
                   const cards = sortedQuestions.filter(
                     (q) => id === (isReadyQuestion(q) ? 'ready' : 'needs-you'),
                   );
@@ -273,18 +316,43 @@ export function ActivityControl() {
                           </Suspense>
                         </div>
                       ))}
+                      {crew && (
+                        <QueueSessionRows
+                          selection={crew}
+                          status={snapshot.queues}
+                          gezels={gezels}
+                          projects={projects}
+                          liveTurns={liveTurns}
+                          onDeviceProvider={onDeviceProvider}
+                          boringMode={boringMode}
+                          onClose={() => setOpen(false)}
+                          onItemChanged={activity.refresh}
+                          rowContext={rowContext}
+                        />
+                      )}
                       {rows.map((item) => (
                         <article className="activity-work" key={item.id}>
                           <p className="activity-context">{contextLabel(item)}</p>
                           <strong>{item.title}</strong>
-                          <p>{formatDetail(item.detail)}</p>
-                          {item.taskRef || item.sessionId ? (
+                          {item.section === 'needs-you' && item.taskRef ? (
+                            <Suspense fallback={<p>Loading the current step…</p>}>
+                              <ActivityTaskStep
+                                taskRef={item.taskRef}
+                                snapshotAt={snapshot.at}
+                                onContinued={activity.refresh}
+                              />
+                            </Suspense>
+                          ) : (
+                            <p>{formatDetail(item.detail)}</p>
+                          )}
+                          {(item.section !== 'needs-you' || !item.taskRef) &&
+                          (item.taskRef || item.sessionId) ? (
                             <button
                               type="button"
                               className="btn secondary"
                               onClick={() => void openItem(item)}
                             >
-                              {item.taskRef ? 'Open task' : 'Open chat'}
+                              {item.taskRef ? 'View task details' : 'Open chat'}
                             </button>
                           ) : null}
                           {item.heldByActivity && (
@@ -302,33 +370,12 @@ export function ActivityControl() {
                           )}
                         </article>
                       ))}
-                      {!rows.length && !cards.length && <p className="activity-empty">{empty}</p>}
+                      {!rows.length && !cards.length && !crew?.count && (
+                        <p className="activity-empty">{empty}</p>
+                      )}
                     </section>
                   );
                 })}
-              {snapshot && (
-                <details
-                  className="activity-details"
-                  open={details}
-                  onToggle={(event) => setDetails(event.currentTarget.open)}
-                >
-                  <summary>Queue details and controls</summary>
-                  {details && (
-                    <QueueMeterPanel
-                      embedded
-                      status={snapshot.queues}
-                      gezels={gezels}
-                      projects={projects}
-                      liveTurns={new Map()}
-                      preparingTurns={[]}
-                      onDeviceProvider={null}
-                      boringMode={boringMode}
-                      onClose={() => setOpen(false)}
-                      onItemChanged={activity.refresh}
-                    />
-                  )}
-                </details>
-              )}
             </div>
           </Dialog.Content>
         </Dialog.Portal>

@@ -6,9 +6,13 @@ import {
   CreateTaskInputSchema,
   EmptyInputSchema,
   EnsureGezelInputSchema,
+  FindFilesRequestSchema,
   GEZEL_TOOL_DESCRIPTIONS,
   GetScriptRunInputSchema,
   GetTaskInputSchema,
+  KnowledgeIdSchema,
+  KnowledgeNearbyRequestSchema,
+  KnowledgeRadiusSchema,
   ListArtifactsInputSchema,
   ListDirectoryInputSchema,
   ListDocumentsInputSchema,
@@ -6995,6 +6999,7 @@ server.tool(
   AskUserQuestionInputSchema.shape,
   async ({
     question,
+    permissionRequest,
     prompt,
     description,
     choices,
@@ -7031,6 +7036,7 @@ server.tool(
         gezelId,
         sessionId,
         prompt: body,
+        ...(permissionRequest ? { permissionRequest } : {}),
         ...(choices ? { choices } : {}),
         ...(allowWriteIn !== undefined ? { allowWriteIn } : {}),
         ...(multiSelect !== undefined ? { multiSelect } : {}),
@@ -8361,10 +8367,12 @@ server.tool(
  */
 async function resolveAssigneeArg(
   raw: AssigneeArg | undefined,
-): Promise<{ kind: 'gezel'; gezelId: string } | { kind: 'user' } | undefined> {
+): Promise<
+  { kind: 'gezel'; gezelId: string } | { kind: 'user'; instructions?: string } | undefined
+> {
   const normalized = normalizeAssigneeArg(raw);
   if (!normalized) return undefined;
-  if (normalized.kind === 'user') return { kind: 'user' as const };
+  if (normalized.kind === 'user') return normalized;
   return { kind: 'gezel' as const, gezelId: await resolveGezelId(normalized.ref) };
 }
 
@@ -8484,6 +8492,7 @@ function blueprintToStep(s: z.infer<typeof stepBlueprintSchema>): NewCraftbookSt
   const d = coerceBlueprintDeliverable(s.deliverable);
   return {
     name: s.name,
+    ...(s.assignee ? { assignee: s.assignee } : {}),
     ...(s.description ? { description: s.description } : {}),
     ...(s.prompt ? { prompt: s.prompt } : {}),
     ...(s.suggestedGezelId ? { suggestedGezelId: s.suggestedGezelId } : {}),
@@ -9182,6 +9191,7 @@ server.tool(
     name: z.string().min(1),
     description: z.string().optional(),
     prompt: z.string().optional(),
+    assignee: StepBlueprintSchema.shape.assignee,
     suggestedGezelId: z.string().optional(),
     suggestedRole: z.string().optional().describe('Role hint, e.g. "developer", "reviewer".'),
     deliverable: deliverableArg,
@@ -9194,6 +9204,7 @@ server.tool(
     name,
     description,
     prompt,
+    assignee,
     suggestedGezelId,
     suggestedRole,
     deliverable,
@@ -9213,6 +9224,7 @@ server.tool(
         name,
         ...(description ? { description } : {}),
         ...(prompt ? { prompt } : {}),
+        ...(assignee ? { assignee } : {}),
         ...(suggestedGezelId ? { suggestedGezelId } : {}),
         ...(suggestedRole ? { suggestedRole } : {}),
         ...(d ? { deliverable: d } : {}),
@@ -10495,12 +10507,7 @@ server.tool(
 server.tool(
   'find_files',
   'Find files in the project workspace by glob (e.g. `**/*.spec.ts`). Complement to `grep_files`, which searches contents. Skips `node_modules` and `.git`.',
-  {
-    glob: z.string().min(1),
-    path: z.string().optional(),
-    caseInsensitive: z.boolean().optional(),
-    maxResults: z.number().int().positive().optional(),
-  },
+  FindFilesRequestSchema.shape,
   async (args) => {
     try {
       const res = await api.toolFindFiles(projectId, args);
@@ -10840,11 +10847,61 @@ server.tool(
   },
 );
 
+server.tool(
+  'knowledge_nearby',
+  GEZEL_TOOL_DESCRIPTIONS.knowledge_nearby,
+  KnowledgeNearbyRequestSchema.shape,
+  async (body) => {
+    try {
+      const found = await api.toolKnowledgeNearby(projectId, body);
+      const result = {
+        ...found,
+        documents: found.documents.map((document) => ({
+          documentId: document.id,
+          title: document.title,
+          summary: document.summary,
+          distanceMeters: document.distanceMeters,
+          matchedLocation: {
+            id: document.matchedLocation.id,
+            latitude: document.matchedLocation.latitude,
+            longitude: document.matchedLocation.longitude,
+            role: document.matchedLocation.role,
+          },
+          uri: document.uri,
+          publisherId: document.publisherId,
+          catalogId: document.catalogId,
+          catalogVersion: document.catalogVersion,
+        })),
+      };
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: 'text' as const, text: `knowledge_nearby failed: ${unwrapApiError(error)}` },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 /** Per-hit snippet cap in the rendered `search` text (structuredContent keeps the full snippet). */
 server.tool(
   'search',
   GEZEL_TOOL_DESCRIPTIONS.search,
   SearchInputSchema.extend({
+    spatial: KnowledgeRadiusSchema.optional().describe(
+      'Restrict knowledge to subject locations within this radius, in meters.',
+    ),
+    catalogs: z
+      .array(KnowledgeIdSchema)
+      .optional()
+      .describe(
+        'Search only these knowledge catalogs. Implies sources: ["knowledge"] unless sources is given.',
+      ),
     sources: z
       .array(
         z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
@@ -10875,13 +10932,18 @@ server.tool(
         'Only results under this path prefix (e.g. "src/engine/" or "../<project-id>/docs/"). Narrowing only.',
       ),
   }).shape,
-  async ({ query, sources, maxResults, cursor, pathPrefix }) => {
+  async ({ query, sources, maxResults, cursor, pathPrefix, spatial, catalogs }) => {
     try {
       const res = await api.toolSearch(projectId, {
         query,
         gezelId,
         includeShared: true,
-        ...(sources ? { sources } : {}),
+        // Naming catalogs is asking for reference material: without this the
+        // workspace and shared library kept answering, and their rank-derived
+        // "strong" hits crowded the named catalog off the page.
+        ...(sources ? { sources } : spatial || catalogs ? { sources: ['knowledge'] as const } : {}),
+        ...(spatial ? { spatial } : {}),
+        ...(catalogs ? { catalogs } : {}),
         ...(maxResults ? { maxResults } : {}),
         ...(cursor ? { offset: cursor } : {}),
         ...(pathPrefix ? { pathPrefix } : {}),

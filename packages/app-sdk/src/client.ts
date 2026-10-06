@@ -4,6 +4,7 @@ import {
   AppModelListSchema,
 } from '@bendyline/gezel-client/app-models';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import { KnowledgeClient } from './knowledge-client.js';
 import { readSseDataChunks } from './sse.js';
 import type {
   ChatCompletionChunk,
@@ -40,6 +41,7 @@ export interface GezelAppOptions<F extends ChatResponseFormat = 'openai'> {
  * Only an SDK-owned transport is closed; an injected fetch remains caller-owned.
  */
 export class GezelApp<F extends ChatResponseFormat = 'openai'> {
+  readonly knowledge: KnowledgeClient;
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchFn: typeof fetch;
@@ -51,6 +53,7 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
     this.token = opts.token;
     this.fetchFn = opts.fetch;
     this.closeTransport = opts.close;
+    this.knowledge = new KnowledgeClient(this.baseUrl, this.token, this.fetchFn);
   }
 
   close(): Promise<void> {

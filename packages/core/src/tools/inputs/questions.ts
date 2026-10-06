@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RequestedPermissionSchema } from '../../schemas/question.js';
 import { TaskRefSchema } from '../../schemas/task.js';
 import { coerceJsonArray } from '../coerce.js';
 
@@ -6,6 +7,9 @@ import { coerceJsonArray } from '../coerce.js';
 export const AskUserQuestionInputSchema = z
   .object({
     question: z.string().optional().describe('The question to pose to the user. Markdown ok.'),
+    permissionRequest: RequestedPermissionSchema.optional().describe(
+      'Desktop permission request: workspace-write allows built-in tools, scripts and background work to create, edit, rename and delete files throughout this project until revoked. Explain why in question; omit choices. The app supplies the exact scope and Grant/Deny controls. Plain answers never grant permissions. OS, shell and external tool permissions are unchanged.',
+    ),
     // Common slip-ups some models reach for when they see an
     // "ask-a-question" tool — accept them so a naming mistake doesn't
     // surface as "technical error" to the user.

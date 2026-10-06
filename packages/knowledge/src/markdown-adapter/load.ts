@@ -27,6 +27,7 @@ import type { CatalogDocument } from '@bendyline/gezk';
 import {
   CatalogDocumentSchema,
   KnowledgeDocumentIdSchema,
+  KnowledgeLocationsSchema,
   KnowledgeOrdinalSchema,
   MAX_KNOWLEDGE_TOPIC_DEPTH,
   assetExtension,
@@ -98,6 +99,8 @@ export interface LoadMarkdownCatalogOptions {
   uri?: { publisherId: string; catalogId: string };
   /** What to do with an image link whose file is missing (default `error`; `warn` for docfx). */
   missingAssets?: 'error' | 'warn';
+  /** Keep image alt text without resolving or bundling image files. */
+  skipImages?: boolean;
   onWarning?: (message: string) => void;
 }
 
@@ -122,6 +125,7 @@ interface Subcategory {
 }
 
 interface FrontMatter {
+  locations?: CatalogDocument['locations'];
   title?: string;
   summary?: string;
   aliases?: string[];
@@ -138,7 +142,15 @@ interface FrontMatter {
   body: string;
 }
 
-const RESERVED_KEYS = new Set(['title', 'summary', 'aliases', 'id', 'order', 'subcategory']);
+const RESERVED_KEYS = new Set([
+  'title',
+  'summary',
+  'aliases',
+  'id',
+  'order',
+  'subcategory',
+  'locations',
+]);
 
 function readFrontMatter(
   raw: string,
@@ -164,6 +176,12 @@ function readFrontMatter(
       throw new Error(`${file}: front matter '${key}' must be a string`);
     return value.trim() || undefined;
   };
+  if (data.locations !== undefined) {
+    const locations = KnowledgeLocationsSchema.safeParse(data.locations);
+    if (!locations.success)
+      throw new Error(`${file}: invalid front matter locations: ${locations.error.message}`);
+    out.locations = locations.data;
+  }
   out.title = str('title');
   out.summary = str('summary');
   out.id = str('id');
@@ -524,6 +542,7 @@ interface LinkRewriteContext {
   uri: LoadMarkdownCatalogOptions['uri'];
   assets: Map<string, CompileAsset>;
   missingAssets: 'error' | 'warn';
+  skipImages: boolean;
   /** docfx: a target starting `~/` is relative to the docset root, not the page. */
   tildeIsRoot: boolean;
   warn: (message: string) => void;
@@ -616,6 +635,7 @@ function rewriteLinks(ctx: LinkRewriteContext, markdown: string): string {
       return line.replace(
         INLINE_LINK,
         (whole, bang: string, text: string, target: string, title: string) => {
+          if (bang === '!' && ctx.skipImages) return text;
           const rewritten = rewriteTarget(ctx, bang === '!', target);
           return rewritten === null ? whole : `${bang}[${text}](${rewritten}${title})`;
         },
@@ -869,6 +889,7 @@ export async function loadMarkdownCatalog(
         language: opts.language,
         topicPath,
         ...(tocReferences.length ? { tocReferences } : {}),
+        ...(fm.locations ? { locations: fm.locations } : {}),
         markdown: fm.body,
         ...(fm.aliases && fm.aliases.length > 0 ? { aliases: fm.aliases } : {}),
         ...(ordinal !== undefined ? { ordinal } : {}),
@@ -944,6 +965,7 @@ export async function loadMarkdownCatalog(
       // A docfx docset draws on dependent repositories (`~/reusable-content`)
       // that a checkout never holds, so a missing image is expected there.
       missingAssets: opts.missingAssets ?? (docfx ? 'warn' : 'error'),
+      skipImages: opts.skipImages ?? false,
       tildeIsRoot: docfx,
       warn: (message) => linkWarnings.push(message),
     };

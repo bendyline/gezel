@@ -72,11 +72,17 @@ python3 native/runtime/stage-sdk.py android \
 
 Choose a new output path for each staging run. The input SDK inventory is
 verified before use. Outputs record engine provenance, wrapper source hashes
-and artifact hashes. Android compiles the Java host and publishes
+and artifact hashes. Android compiles the Java host, runs its filesystem
+regression tests with `testReleaseUnitTest`, and publishes
 `com.bendyline.gezel:gezel-runtime:<version>` plus its prebuilt `gezel-llama`
 dependency into the output's `maven/` folder. It does not build llama.cpp.
 `--offline` uses already-cached Gradle/ML Kit dependencies. The generated POM
 declares ML Kit; consumers still resolve ordinary Android dependencies.
+
+Both runtimes reject symbolic links at the storage root and `models/` boundary
+before creating directories or recovering interrupted imports. OS aliases in
+the parent app-container path remain supported. The coordinated native workflow
+runs Android's host tests, Swift storage tests, and external SDK consumer tests.
 
 The iOS output itself is a Swift package exporting `GezelRuntime` and
 `GezelModelStorage`, backed by `GezelLlama.xcframework`. It has no checkout paths

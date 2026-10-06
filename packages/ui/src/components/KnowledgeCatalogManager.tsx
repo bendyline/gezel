@@ -44,6 +44,8 @@ interface ActiveInstall {
   phase: 'download' | 'verifying' | 'extract' | 'embedder' | 'retrying';
   bytesDone: number;
   bytesTotal: number;
+  /** Set once the archive is unpacked, so the second `verifying` reads as the catalog check. */
+  unpacked?: boolean;
   retrying?: { attempt: number; maxAttempts: number; delayMs: number; reason: string };
   error?: string;
   /**
@@ -71,6 +73,26 @@ function formatReleased(iso: string): string | null {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
 }
 
+/** The last path segment of a local path (either separator) or a URL. */
+function sourceFileName(source: InstallSource): string {
+  if (source.kind === 'file') {
+    return source.path.split(/[\\/]/).filter(Boolean).pop() ?? source.path;
+  }
+  if (source.kind === 'catalog') return source.id;
+  try {
+    const url = new URL(source.url);
+    return decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? '') || url.hostname;
+  } catch {
+    return source.url;
+  }
+}
+
+function installTitle(inst: ActiveInstall): string {
+  if (inst.catalogId) return inst.catalogId;
+  if (inst.source) return sourceFileName(inst.source);
+  return inst.jobId;
+}
+
 function progressLabel(inst: ActiveInstall): string {
   if (inst.error) return inst.error;
   if (inst.retrying) {
@@ -87,7 +109,8 @@ function progressLabel(inst: ActiveInstall): string {
     case 'retrying':
       return 'Connection dropped — retrying…';
     case 'verifying':
-      return 'Checking download…';
+      if (inst.unpacked) return 'Verifying the catalog…';
+      return inst.source?.kind === 'file' ? 'Checking the file…' : 'Checking download…';
     case 'extract':
       return 'Unpacking and verifying the catalog…';
     case 'embedder':
@@ -215,6 +238,7 @@ export function KnowledgeCatalogManager() {
             next.set(remote.jobId, {
               jobId: remote.jobId,
               ...(remote.catalogId ? { catalogId: remote.catalogId } : {}),
+              ...(existing?.unpacked || remote.phase === 'extract' ? { unpacked: true } : {}),
               phase: remote.phase,
               bytesDone: remote.bytesDone,
               bytesTotal: remote.bytesTotal,
@@ -253,6 +277,7 @@ export function KnowledgeCatalogManager() {
         const { retrying: _retrying, error: _error, ...rest } = cur;
         next.set(jobId, {
           ...rest,
+          ...(ev.phase === 'extract' ? { unpacked: true } : {}),
           phase: ev.phase,
           bytesDone: ev.bytesDone,
           bytesTotal: ev.bytesTotal || (ev.phase === cur.phase ? cur.bytesTotal : 0),
@@ -547,12 +572,16 @@ export function KnowledgeCatalogManager() {
     <div className="ollama-model-manager" data-testid="knowledge-catalog-manager">
       {installs.size > 0 && (
         <div className="ollama-section">
-          <h4>Downloading…</h4>
+          <h4>
+            {[...installs.values()].every((i) => i.source?.kind === 'file')
+              ? 'Installing…'
+              : 'Downloading…'}
+          </h4>
           <div className="ollama-pull-list">
             {Array.from(installs.values()).map((inst) => (
               <InstallProgressRow
                 key={inst.jobId}
-                title={<code>{inst.catalogId ?? inst.source?.kind ?? inst.jobId}</code>}
+                title={<code>{installTitle(inst)}</code>}
                 status={progressLabel(inst)}
                 percent={progressPercent(inst)}
                 tone={inst.error ? 'error' : inst.retrying ? 'warning' : 'normal'}

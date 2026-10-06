@@ -7,8 +7,8 @@
       "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
-      "tag": "v0.4.1",
-      "commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
+      "tag": "v0.6.0",
+      "commit": "d81235049384534c167caea52b85a694f6103d14",
       "files": [
         "LICENSE-ggml-MIT.txt",
         "LICENSE-yarn-MIT.txt",
@@ -22,7 +22,8 @@
         "LICENSE-llama-cpp-unicode-data-Unicode-3.0.txt",
         "LICENSE-llama-cpp-openvino-APACHE.txt",
         "LICENSE-nvidia-cub-BSD-3-Clause.txt",
-        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt"
+        "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
+        "LICENSE-vulkan-loader-APACHE.txt"
       ]
     },
     "sd-cpp": {

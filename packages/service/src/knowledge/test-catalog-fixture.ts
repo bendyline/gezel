@@ -63,6 +63,9 @@ export async function buildTestCatalog(opts: {
   withExtras?: boolean;
   /** List the existing dovetail article under Finishing too. */
   withSharedToc?: boolean;
+  withLocations?: boolean;
+  /** Add this many more joinery documents titled "Dovetail Variant N". */
+  dovetailVariants?: number;
 }): Promise<void> {
   const extras = opts.withExtras ?? false;
   await compileKnowledgeCatalog({
@@ -85,7 +88,22 @@ export async function buildTestCatalog(opts: {
     ],
     documents: (async function* () {
       yield {
-        id: 'dovetails',
+        id:
+          opts.withLocations && opts.id?.startsWith('qualla-region-')
+            ? 'qualla-wikipedia-1'
+            : 'dovetails',
+        ...(opts.withLocations
+          ? {
+              locations: [
+                {
+                  id: 'seattle',
+                  latitude: 47.6062,
+                  longitude: -122.3321,
+                  role: 'subject' as const,
+                },
+              ],
+            }
+          : {}),
         title: 'Dovetail Joints',
         slug: 'dovetails',
         summary: 'Interlocking corner joinery.',
@@ -110,8 +128,34 @@ export async function buildTestCatalog(opts: {
           ordinal: 1,
         };
       }
+      for (let i = 1; i <= (opts.dovetailVariants ?? 0); i++) {
+        yield {
+          id: `dovetail-variant-${i}`,
+          title: `Dovetail Variant ${i}`,
+          slug: `dovetail-variant-${i}`,
+          summary: `Dovetail layout number ${i}.`,
+          language: 'en',
+          topicPath: ['joinery'],
+          markdown: `# Dovetail Variant ${i}\n\nA dovetail laid out with spacing pattern ${i}.\n`,
+        };
+      }
       yield {
-        id: 'shellac',
+        id:
+          opts.withLocations && opts.id?.startsWith('qualla-region-')
+            ? 'qualla-wikipedia-2'
+            : 'shellac',
+        ...(opts.withLocations
+          ? {
+              locations: [
+                {
+                  id: 'near-seattle',
+                  latitude: 47.6162,
+                  longitude: -122.3321,
+                  role: 'subject' as const,
+                },
+              ],
+            }
+          : {}),
         title: 'Shellac',
         slug: 'shellac',
         summary: 'A natural resin finish.',

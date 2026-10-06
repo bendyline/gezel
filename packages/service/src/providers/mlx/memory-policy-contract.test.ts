@@ -34,11 +34,17 @@ describe('MLX sidecar memory policy', () => {
   });
 
   it('reapplies Gezel policy after BatchGenerator construction', () => {
+    // Every generator — the engine's own and the spare a preemption runs
+    // interactive waves on — is built through one factory that restores the
+    // policy right after the constructor overwrote it.
     const batch = sliceBlock(SERVER_SRC, 'class BatchEngine:');
-    const constructorAt = batch.indexOf('self._gen = BatchGenerator(');
-    const policyAt = batch.indexOf('_apply_mlx_memory_policy("batch-init")');
+    const factory = batch.slice(batch.indexOf('def _make_generator('));
+    const constructorAt = factory.indexOf('gen = BatchGenerator(');
+    const policyAt = factory.indexOf('_apply_mlx_memory_policy(phase)');
     expect(constructorAt).toBeGreaterThan(-1);
     expect(policyAt).toBeGreaterThan(constructorAt);
+    expect(batch).toContain('self._gen = self._make_generator("batch-init")');
+    expect(batch).not.toMatch(/self\._(?:gen|spare_gen) = BatchGenerator\(/);
   });
 
   it('checks pressure during long batched turns', () => {
@@ -54,9 +60,18 @@ describe('MLX sidecar memory policy', () => {
     expect(admit).toMatch(/return 1 if active >= threshold else capped/);
     expect(admit).not.toMatch(/return 1 if active >= threshold else pending/);
 
+    // Admission picks the wave through wave_policy (interactive first), with
+    // the admission count as the cap; everything not chosen stays queued.
     const run = sliceBlock(SERVER_SRC, 'async def _run(');
-    expect(run).toMatch(/admit_n = self\._admit_count\(len\(self\._pending\)\)/);
-    expect(run).toMatch(/self\._pending = self\._pending\[admit_n:\]/);
+    expect(run).toMatch(
+      /batch, self\._pending = wave_policy\.select_wave\(self\._pending, self\._admit_count\)/,
+    );
+    const policy = readFileSync(
+      fileURLToPath(new URL('./python/wave_policy.py', import.meta.url)),
+      'utf8',
+    );
+    expect(policy).toMatch(/batch = candidates\[: max\(0, min\(len\(candidates\), n\)\)\]/);
+    expect(policy).toMatch(/rest = \[s for s in pending if id\(s\) not in chosen\]/);
   });
 
   it('reclaims and logs at batched stream and warm boundaries', () => {

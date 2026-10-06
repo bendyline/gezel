@@ -111,6 +111,17 @@ describe('authenticated mutation authority', () => {
     await diffpacks.seal(projectId, '1');
   }
 
+  it.each([{ managedWorkspaceWritePolicy: 'allow' }, { allowGezelWrites: true }])(
+    'prevents coordinators from bypassing the user permission decision: %j',
+    async (patch) => {
+      for (const actor of ['worker', 'coordinator']) {
+        const response = await request('', actor, 'PUT', patch);
+        expect(response.status).toBe(403);
+      }
+      expect((await store.getProject(projectId))?.managedWorkspaceWritePolicy).toBe('deny');
+    },
+  );
+
   // One actor table exercises the same sequence through the production guards
   // and routes. Filesystem assertions also catch a denial returned after a write.
   it.each([

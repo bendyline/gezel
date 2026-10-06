@@ -1,5 +1,7 @@
 # The `.gezk` format in gezel
 
+For the reader-facing technical overview, see [How knowledge works in Gezel](handboek/technical/how-knowledge-works.md). [Working with knowledge catalogs](handboek/technical/knowledge-command-line.md) covers the CLI authoring and management commands.
+
 The `.gezk` knowledge-catalog format is an **open format** specified outside
 this repository: [bendyline/gezk](https://github.com/bendyline/gezk) holds
 the draft specification (`spec/gezk-0.7.md`, CC BY 4.0; the 0.5 and 0.6

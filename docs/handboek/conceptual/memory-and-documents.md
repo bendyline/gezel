@@ -22,10 +22,16 @@ Memories are per-gezel and per-project: your reviewer's notes about code style d
 
 Gezels can read and (where you allow it) write documents themselves, so the library grows as your crew works.
 
+## Reference catalogs
+
+You can also install **knowledge catalogs**: portable `.gezk` files containing reference documents and prepared search indexes. Your crew can search and cite them alongside project files and memories. The built-in Handboek uses this same format. Installing a catalog adds reference material; it does not train your chat model.
+
+For the technical details, see [How knowledge works in Gezel](../technical/how-knowledge-works.md). To make or install one, see [Working with knowledge catalogs](../technical/knowledge-command-line.md).
+
 ## The history log
 
 Gezel keeps an **audit log** of meaningful events: who created which gezel, when a project's mission changed, which tools ran. The History tab lets you filter and search it — and your gezellen can search it too, which means "did anyone change the mission this week?" is a question they can answer truthfully rather than guess at.
 
 ## Everything is a file
 
-Memories are markdown files. Documents are files. The history log is a file. If you ever want to see exactly what gezel knows, open the gezel home folder and read it — nothing is hidden inside a database you can't inspect. The [Where files live](../technical/where-files-live.md) article maps it all.
+Memories are Markdown files, your library keeps its original documents, and the history log is a file. Reference catalogs carry their documents and indexes in portable `.gezk` archives built from SQLite and other open formats. If you want to inspect what Gezel knows, the [Where files live](../technical/where-files-live.md) and [How knowledge works](../technical/how-knowledge-works.md) articles map the source files and search databases.

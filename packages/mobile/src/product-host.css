@@ -43,22 +43,13 @@ html #root {
 /* Until the shell mounts, the band also covers the header's row. The
    portable service starts before React renders anything, so the status bar's
    sage stood alone for a few seconds and the header's arrived after it.
-   Landscape hides the header, and a boot failure shows only its message. */
+   A boot failure shows only its message. */
 html #root:not(:has(.app-header)):not(:has(> [role="alert"])) {
   background: linear-gradient(
     to bottom,
     var(--titlebar, #667f62) 0 calc(var(--app-safe-top) + var(--app-compact-header-height, 52px)),
     transparent calc(var(--app-safe-top) + var(--app-compact-header-height, 52px))
   );
-}
-@media (max-height: 500px) and (pointer: coarse) {
-  html #root:not(:has(.app-header)):not(:has(> [role="alert"])) {
-    background: linear-gradient(
-      to bottom,
-      var(--titlebar, #667f62) 0 var(--app-safe-top),
-      transparent var(--app-safe-top)
-    );
-  }
 }
 /* While the app starts, the empty ground shows the bench in outline, faint
    and slowly breathing. It is CSS in the stylesheet the page loads first, so
@@ -77,11 +68,6 @@ html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {
   pointer-events: none;
   animation: gezel-boot-in 700ms ease-out 400ms both, gezel-boot-breathe 2.8s ease-in-out 1.1s
     infinite;
-}
-@media (max-height: 500px) and (pointer: coarse) {
-  html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {
-    inset-block-start: var(--app-safe-top);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   html #root:not(:has(.app-header)):not(:has(> [role="alert"]))::before {

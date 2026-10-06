@@ -22,6 +22,37 @@
 
 import type { EnginePhaseEvent } from '../streaming-session.js';
 
+/**
+ * The sidecar's wave-scheduling markers (see python/wave_policy.py):
+ *
+ *   [batch] waiting cache=<id> ahead=<n> behind=<id,id|->
+ *   [batch] paused cache=<id> for=<id,id|->
+ *   [batch] admitted cache=<id> waited=<seconds>s
+ *
+ * Each names exactly one request, so it is always delivered to that session
+ * alone. The `[batch] queued …` line the sidecar prints beside the first
+ * `waiting` marker is diagnostic only and deliberately does not match.
+ */
+export function classifyMlxQueueLine(line: string): EnginePhaseEvent | null {
+  const m = line.match(
+    /\[batch\] (waiting|paused|admitted) cache=(\S+)(?: ahead=(\d+))?(?: (?:behind|for)=(\S+))?/,
+  );
+  if (!m) return null;
+  const state = m[1] as 'waiting' | 'paused' | 'admitted';
+  const cacheId = m[2]!;
+  const ids = m[4] && m[4] !== '-' ? m[4].split(',').filter(Boolean) : [];
+  return {
+    provider: 'mlx',
+    phase: 'prefill',
+    cacheId,
+    engineQueue: {
+      state,
+      ...(state === 'admitted' ? {} : { behind: ids }),
+      ...(m[3] !== undefined ? { ahead: Number.parseInt(m[3], 10) } : {}),
+    },
+  };
+}
+
 export function classifyMlxStartupLine(line: string): EnginePhaseEvent | null {
   if (line.includes('memory-admission:'))
     return { provider: 'mlx', phase: 'starting', detail: 'Waiting for available memory' };

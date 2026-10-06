@@ -88,7 +88,7 @@ let package = Package(
             copy_inventory(sdk, staged, manifest, 'maven/', 'maven/')
             command = [str(gradle.resolve()), '-p', str(HERE / 'android'), '--no-daemon',
                        f'-PgezelMavenRepository={staged / "maven"}',
-                       f'-PgezelVersion={manifest["packageVersion"]}', 'assembleRelease', 'publish']
+                       f'-PgezelVersion={manifest["packageVersion"]}', 'testReleaseUnitTest', 'assembleRelease', 'publish']
             if offline:
                 command.append('--offline')
             subprocess.run(command, check=True)

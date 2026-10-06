@@ -87,6 +87,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     llamaCppKvCacheType: config.llamaCppKvCacheType,
     llamaCppFlashAttn: config.llamaCppFlashAttn,
     llamaCppSpecType: config.llamaCppSpecType,
+    llamaCppSpecDraftSampling: config.llamaCppSpecDraftSampling,
     llamaCppCpuMoe: config.llamaCppCpuMoe,
     llamaCppNCpuFfn: config.llamaCppNCpuFfn,
     llamaCppMlock: config.llamaCppMlock,

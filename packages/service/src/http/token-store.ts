@@ -7,6 +7,8 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
  * The scope vocabulary the daemon recognizes.
  *   - `root`   — the daemon's own per-launch token; full `/api/*` + `/v1/*`.
  *   - `openai` — the public app scope: the OpenAI-compatible `/v1/*` surface.
+ *   - `knowledge` — catalog inventory, curated downloads, removal and reranked
+ *                 reference retrieval at `/v1/knowledge/*`; no project access.
  *   - `product` — a user-approved external application credential with product
  *                 API access, but no authority to administer other app grants.
  *   - `cli`    — the Gezel CLI's product-access credential. Retained as a
@@ -37,6 +39,7 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 export const KNOWN_SCOPES = [
   'root',
   'openai',
+  'knowledge',
   'product',
   'cli',
   'ui',
@@ -54,7 +57,13 @@ export type GezelScope = (typeof KNOWN_SCOPES)[number];
  * requester-side verification code, while `root` and `ui` remain reserved
  * daemon-owned credentials.
  */
-export const APP_GRANTABLE_SCOPES = ['openai', 'remote-inference', 'product', 'cli'] as const;
+export const APP_GRANTABLE_SCOPES = [
+  'openai',
+  'knowledge',
+  'remote-inference',
+  'product',
+  'cli',
+] as const;
 
 /**
  * App id owned by the Settings-managed Codex bridge. TokenStore.issue()

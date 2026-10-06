@@ -7,6 +7,7 @@ import {
 } from '@bendyline/gezel';
 import { Poppetje } from '../poppetje/index.js';
 import { type StepMeta, type StepStatus, StepTracker } from './StepTracker.js';
+import { TaskAssigneePicker } from './TaskAssigneePicker.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowPoppetjes } from './useShowPoppetjes.js';
 
@@ -59,9 +60,9 @@ const STATUS_WORD: Record<StepStatus, string> = {
  * {@link StepTracker}. Supplies lifecycle status (done/active/pending) plus
  * per-step decoration: who's holding each step (its assignee, inherited
  * from the task when the step sets none), a status word, and — for the
- * active step — the assignee's carved poppetje standing on the rail.
+ * active step — the assignee's portrait inside its ringed stop.
  *
- * The craftbook editor uses the same bench in design mode (plain pegs, no
+ * The craftbook editor uses the same bench in design mode (outlined stops, no
  * lifecycle status, with drag-reorder). Activating/completing a task step is
  * the per-step panel's responsibility.
  */
@@ -129,8 +130,8 @@ export function TaskStepTracker({
       status === 'active' && showFigures && gezel?.poppetje ? (
         <Poppetje
           poppetje={gezel.poppetje}
-          variant="full"
-          size={26}
+          variant="headshot"
+          size={32}
           svgId={`track-${step.id}`}
           {...(name ? { title: name } : {})}
         />
@@ -143,40 +144,20 @@ export function TaskStepTracker({
     // Inline assignee picker. Its value is the step's OWN setting (a concrete
     // gezel / "you" / inherit) — distinct from the resolved `name` above,
     // which may come from the inherited default.
-    const explicit = step.assignee;
-    const value =
-      explicit?.kind === 'user'
-        ? '__user'
-        : explicit?.kind === 'gezel'
-          ? explicit.gezelId
-          : '__inherit';
     const inheritedName = inheritedNameFor(step);
     const assigneeControl = onAssign ? (
-      <select
+      <TaskAssigneePicker
         className="bench-step-select"
-        value={value}
+        gezels={gezels}
+        value={step.assignee ?? null}
+        inheritedAssignee={
+          step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : taskAssignee
+        }
+        inheritLabel={inheritedName ? `${inheritedName} (default)` : 'Default'}
         disabled={busy}
-        aria-label={`Assignee for ${step.name}`}
-        title={`Assignee for ${step.name}`}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === '__inherit') onAssign(step.id, null);
-          else if (v === '__user') onAssign(step.id, { kind: 'user' });
-          else onAssign(step.id, { kind: 'gezel', gezelId: v });
-        }}
-      >
-        <option value="__inherit">
-          {inheritedName ? `${inheritedName} (default)` : 'Default'}
-        </option>
-        <option value="__user">you</option>
-        {gezels.map((g) => (
-          <option key={g.id} value={g.id}>
-            {!roleBasedNameOnlyMode && g.role
-              ? `${g.name} · ${g.role}`
-              : displayName(g, roleBasedNameOnlyMode)}
-          </option>
-        ))}
-      </select>
+        ariaLabel={`Assignee for ${step.name}`}
+        onValueChange={(assignee) => onAssign(step.id, assignee)}
+      />
     ) : undefined;
 
     return {
@@ -193,6 +174,9 @@ export function TaskStepTracker({
       variant="bench"
       steps={steps}
       selectedStepId={selectedStepId}
+      centerStepId={
+        terminal ? [...steps].reverse().find((step) => step.completedAt)?.id : activeStepId
+      }
       onSelect={onSelect}
       statusOf={(s) => taskStepStatus(s, activeStepId, terminal)}
       stepOf={stepOf}

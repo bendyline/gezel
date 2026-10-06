@@ -315,8 +315,8 @@ test('the release config normalizes package state before committing without crea
   );
 });
 
-test('the real core source carries the declarations the script rewrites', async () => {
+test('the real core source keeps release stamps at the development baseline', async () => {
   const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'browser.ts'), 'utf8');
-  assert.match(source, /export const GEZEL_VERSION = '[^']*';/);
-  assert.match(source, /export const GEZEL_CONTENT_COMPAT = '[^']*';/);
+  assert.match(source, /export const GEZEL_VERSION = '0\.0\.0';/);
+  assert.match(source, /export const GEZEL_CONTENT_COMPAT = '0\.0\.0';/);
 });

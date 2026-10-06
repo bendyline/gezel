@@ -304,6 +304,51 @@ describe('buildLlamaCppEngineArgs — precedence (global > perModel > planner)',
 });
 
 describe('buildLlamaCppEngineArgs — speculative decoding', () => {
+  it('keeps upstream greedy sampling by default for automatic MTP', () => {
+    const args = buildLlamaCppEngineArgs({ config: {}, ggufHasMtp: true });
+    expect(argValue(args, '--spec-type')).toBe('draft-mtp');
+    expect(has(args, '--spec-draft-sampling')).toBe(false);
+  });
+
+  it.each(['draft-mtp', 'draft-simple'])('can opt into probabilistic sampling for %s', (type) => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: type, llamaCppSpecDraftSampling: 'probabilistic' },
+      ggufHasMtp: true,
+    });
+    expect(argValue(args, '--spec-draft-sampling')).toBe('probabilistic');
+  });
+
+  it.each(['none', 'ngram-mod', 'draft-eagle3', 'draft-dflash'])(
+    'does not apply draft sampling to %s',
+    (type) => {
+      const args = buildLlamaCppEngineArgs({
+        config: { llamaCppSpecType: type, llamaCppSpecDraftSampling: 'probabilistic' },
+        ggufHasMtp: true,
+      });
+      expect(has(args, '--spec-draft-sampling')).toBe(false);
+    },
+  );
+
+  it('does not emit draft sampling when the MTP capability gate rejects the mode', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: 'draft-mtp', llamaCppSpecDraftSampling: 'probabilistic' },
+      ggufHasMtp: false,
+    });
+    expect(has(args, '--spec-draft-sampling')).toBe(false);
+  });
+
+  it('lets the extra-args escape hatch override draft sampling last', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: {
+        llamaCppSpecDraftSampling: 'probabilistic',
+        llamaCppExtraArgs: { 'spec-draft-sampling': 'greedy' },
+      },
+      ggufHasMtp: true,
+    });
+    expect(args.filter((arg) => arg === '--spec-draft-sampling')).toHaveLength(2);
+    expect(args.slice(-2)).toEqual(['--spec-draft-sampling', 'greedy']);
+  });
+
   it('emits --spec-type for ngram modes with no draft model', () => {
     const args = buildLlamaCppEngineArgs({ config: { llamaCppSpecType: 'ngram-mod' } });
     expect(argValue(args, '--spec-type')).toBe('ngram-mod');

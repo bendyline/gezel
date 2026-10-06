@@ -31,6 +31,7 @@ import {
   canonicalizeJson,
   formatKnowledgeUri,
   l2Normalize,
+  locationDistanceMeters,
   parseKnowledgeUri,
   quantizeBinary,
   quantizeInt8,
@@ -66,6 +67,24 @@ MCowBQYDK2VwAyEAjEGBSH8XNNyYVwtWJ8NaHPkmQ0tlJdpl8BwgtIlxsc4=
 
 const FIXTURE_NAME = `conformance-${GEZK_FORMAT_VERSION}.gezk`;
 const DOCS = generateFixtureCorpus(40, 7);
+DOCS[0]!.locations = [
+  {
+    id: 'seattle',
+    latitude: 47.6062,
+    longitude: -122.3321,
+    role: 'subject',
+    provenance: { source: 'synthetic' },
+  },
+];
+DOCS[1]!.locations = [
+  { id: 'date-line', latitude: 0, longitude: 180, role: 'subject' },
+  { id: 'neighbor', latitude: 0, longitude: 179.9, role: 'subject' },
+];
+DOCS[2]!.locations = [{ id: 'pole', latitude: 90, longitude: 0, role: 'subject' }];
+DOCS[3]!.locations = [
+  { id: 'mentioned-seattle', latitude: 47.6062, longitude: -122.3321, role: 'associated' },
+];
+DOCS[4]!.locations = [{ id: 'decimal', latitude: 30.1, longitude: 50.2, role: 'subject' }];
 const SHARED_DOCUMENT_ID = 'doc-0000';
 const sharedDocument = DOCS.find((doc) => doc.id === SHARED_DOCUMENT_ID);
 if (!sharedDocument) throw new Error('Missing shared fixture document');
@@ -178,6 +197,31 @@ async function main(): Promise<void> {
 
     const vectors = {
       formatVersion: GEZK_FORMAT_VERSION,
+      spatial: {
+        distance: [
+          { from: { latitude: 0, longitude: 0 }, to: { latitude: 0, longitude: 1 } },
+          { from: { latitude: 90, longitude: 0 }, to: { latitude: 90, longitude: 180 } },
+          { from: { latitude: 0, longitude: 180 }, to: { latitude: 0, longitude: -180 } },
+        ].map((v) => ({ ...v, expectedMeters: locationDistanceMeters(v.from, v.to) })),
+        nearby: [
+          {
+            radius: { latitude: 47.6062, longitude: -122.3321, radiusMeters: 50_000 },
+            expectedDocumentIds: ['doc-0000'],
+          },
+          {
+            radius: { latitude: 0, longitude: -180, radiusMeters: 50_000 },
+            expectedDocumentIds: ['doc-0001'],
+          },
+          {
+            radius: { latitude: 90, longitude: 170, radiusMeters: 0 },
+            expectedDocumentIds: ['doc-0002'],
+          },
+          {
+            radius: { latitude: 30.1, longitude: 50.2, radiusMeters: 0 },
+            expectedDocumentIds: ['doc-0004'],
+          },
+        ],
+      },
       hashEmbedder: {
         id: FIXTURE_EMBEDDING_PROFILE.id,
         description:
@@ -347,7 +391,7 @@ edit by hand. An implementation conforms when it reproduces every entry in
   round trip, a two-stage semantic probe embedded with the documented hash
   embedder, and (0.6) the nested topic's rollup, an ordinal-first listing,
   a metadata sample, and the shipped asset; (0.7) shared TOC placements without\n  duplicated canonical documents.
-- \`legacy\` — the same fixture facts for every earlier generation whose
+- \`spatial\` — spherical-distance probes and radius results for multiple subject\n  anchors, associated places, date-line and pole coordinates.\n- \`legacy\` — the same fixture facts for every earlier generation whose
   archive still ships under \`fixtures/\`; a reader for this version reads
   those too.
 

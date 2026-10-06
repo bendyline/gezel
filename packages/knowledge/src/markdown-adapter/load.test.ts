@@ -72,6 +72,42 @@ describe('loadMarkdownCatalog', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
+  it('skips image files and missing-image warnings while keeping alt text and document links', async () => {
+    const root = join(dir, 'skip-images');
+    await mkdir(root);
+    await writeFile(
+      join(root, 'page.md'),
+      [
+        '# Page',
+        '',
+        'Before ![Logo](logo.png) after.',
+        '![Missing](missing.png) ![Remote](https://example.test/image.png)',
+        '[Other](other.md)',
+        '',
+        '~~~md',
+        '![Example](missing.png)',
+        '~~~',
+      ].join('\n'),
+    );
+    await writeFile(join(root, 'other.md'), '# Other\n');
+    // A directory at the image path proves the adapter never tries to read it.
+    await mkdir(join(root, 'logo.png'));
+    const warnings: string[] = [];
+    const source = await loadMarkdownCatalog(root, {
+      language: 'en',
+      skipImages: true,
+      uri: { publisherId: 'gezel-tests', catalogId: 'skip-images' },
+      onWarning: (message) => warnings.push(message),
+    });
+    expect(source.assets).toEqual([]);
+    expect(warnings).toEqual([]);
+    const body = source.documents.find((doc) => doc.id === 'page')?.markdown;
+    expect(body).toContain('Before Logo after.');
+    expect(body).toContain('Missing Remote');
+    expect(body).toContain('[Other](knowledge://gezel-tests/skip-images/other)');
+    expect(body).toContain('![Example](missing.png)');
+  });
+
   it('rejects an empty tree', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'gezk-mdadapter-empty-'));
     try {

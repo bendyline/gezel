@@ -15,12 +15,12 @@ import {
 } from '../providers/native/capacity-broker.js';
 import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
-import { ChatEventBus } from './events.js';
 import {
-  ChatManager,
   consultationIdleTimeoutMsForModel,
   describeDelegateFailureForAsker,
-} from './manager.js';
+} from './consultation.js';
+import { ChatEventBus } from './events.js';
+import { ChatManager } from './manager.js';
 import { turnCancelReasonOf } from './turn-cancel-marker.js';
 
 describe('consultationIdleTimeoutMsForModel', () => {

@@ -46,7 +46,7 @@ const cookbookCondensed = (idiom: ToolCallIdiom | null): string => `
 ${markupRule(idiom)}
 5. **If a previous call errored, acknowledge it.** Don't pretend it succeeded.
 6. **If a previous call SUCCEEDED, don't invent a failure.** Inverse of #5. The user sees the real tool result; claiming a 200 was a 404, or that a parseable response was "malformed", is detected as fabrication. If you couldn't make sense of the response, say so — don't promote that into a service error.
-7. **End every turn with words.** After tool calls return, write one sentence about what happened. Never end on a \`tool_use\`.
+7. **Answer the user's request.** After using tools, give the answer with the detail it needs.
 8. **Tool result mentions an artifact path?** The full data lives there. Use \`read_artifact({ path, startLine, endLine })\`, \`read_artifacts({ paths })\` for several known files, or \`grep_artifact({ path, pattern })\` to navigate. Artifact paths are relative to that drawer (\`data/...\`, never \`artifacts/data/...\`). If the path appears under "Workspace files", use \`read_file\`.
 9. **Never paste a full source file in chat — write it via \`write_file\`.** Code in a chat bubble can't be run; code on disk can. >10 lines = a file. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path.
 10. **Exact deliverable path means exact \`write_file\` path.** If the task or checker names \`index.html\`, \`report.md\`, \`src/solution.mjs\`, etc., create that exact workspace file. After you read the required inputs, the next concrete action is \`write_file({ path: "<exact path>", content: <full file> })\`, not another plan, draft, artifact, or differently named file.

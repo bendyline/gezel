@@ -155,6 +155,8 @@ export interface KnowledgeSearchProvider {
       maxResults: number;
       /** The session project (scoped search) — resolves the project policy. */
       projectId?: string;
+      /** Only these catalog ids, within what the project policy allows. */
+      catalogs?: readonly string[];
       /**
        * How long to wait for a catalog's own query embedder before searching
        * it keyword-only. Omitted → wait for the model however long it takes.
@@ -311,6 +313,8 @@ export class SearchService {
       gezelId?: string;
       includeShared?: boolean;
       sources?: readonly RetrievalSource[];
+      /** Restrict the knowledge arm to these catalog ids. */
+      catalogs?: readonly string[];
       maxResults?: number;
       /** Skip this many merged results — the tool cursor. */
       offset?: number;
@@ -346,6 +350,7 @@ export class SearchService {
       ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
       includeShared: opts.includeShared !== false,
       ...(opts.sources ? { sources: new Set(opts.sources) } : {}),
+      ...(opts.catalogs ? { catalogs: opts.catalogs } : {}),
       ...(opts.projectIds[0] ? { primaryProjectId: opts.projectIds[0] } : {}),
       ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
       // Scale per-source fetch with paging depth so page 2 has material to
@@ -662,6 +667,8 @@ export class SearchService {
       gezelId?: string;
       includeShared: boolean;
       sources?: ReadonlySet<RetrievalSource>;
+      /** Knowledge catalog ids the caller named; absent → every active catalog. */
+      catalogs?: readonly string[];
       /** Per-source fetch cap override — paging scales it with depth. */
       perSourceResults?: number;
       /** The session project — resolves the knowledge-catalog policy. */
@@ -1038,6 +1045,7 @@ export class SearchService {
                 vector,
                 maxResults: Math.max(10, perSource * 2),
                 ...(scope?.primaryProjectId ? { projectId: scope.primaryProjectId } : {}),
+                ...(scope?.catalogs ? { catalogs: scope.catalogs } : {}),
                 queryEmbedBudgetMs: KNOWLEDGE_QUERY_EMBED_BUDGET_MS,
               }),
           );

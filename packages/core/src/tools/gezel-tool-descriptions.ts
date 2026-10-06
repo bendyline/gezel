@@ -6,6 +6,7 @@
  */
 export const GEZEL_TOOL_DESCRIPTIONS = {
   ask_user_question:
+    'For project write access on desktop, set permissionRequest: "workspace-write" and explain why in question; omit choices. The app shows the exact scope, grants access only on user approval, then resumes you. An ordinary answer never changes permissions. ' +
     'Ask the user a question and end your turn. Call this whenever you\'d otherwise stall waiting on the user — a design choice, a scope confirmation, an approval on something you drafted, a missing asset. The user sees a structured card in chat AND on the Home "Needs your input" panel AND as a count badge on the Home nav, so they WILL see it. Their answer arrives in your next turn as a new user message starting with `[Answer to: …]`. When the answer is bounded (colors, yes/no, pick one of these three), always pass concrete `choices`; the user can still write a free-text note alongside unless `allowWriteIn: false`. For approvals where you\'ve drafted a task or a document, attach `taskRef` (`projectId/num`) or `documentPath` so the user can review the artifact inline without leaving the card.',
   list_gilde:
     'List the gezel templates ("gilde" — the guild roster) bundled with Gezel. Each template has a canonical role and curated about.md. For normal recruitment call ensure_gezel with the role; to force a separate new gezel from an exact template, call create_gezel with templateId.',
@@ -53,6 +54,8 @@ export const GEZEL_TOOL_DESCRIPTIONS = {
     'Read one document from the shared library by path, or a knowledge-catalog article by its knowledge:// URI (from a `search` result with the knowledge source). Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
   write_document:
     'Create or update a document in the shared documents library (markdown preferred). Use for durable cross-project knowledge — guidelines, policies, style rules. For knowledge specific to one project, use a folder named after that project (e.g. "acme-site/decisions.md"). Deliverables for the current job belong in the workspace or artifacts, not here.',
+  knowledge_nearby:
+    'Find reference articles whose subject locations lie within a radius. Uses this project’s enabled knowledge catalogs, deduplicates regional copies, returns distances and citations. Continue with nextCursor using the same radius and filters.',
   search:
     "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
   search_memory:

@@ -1,6 +1,32 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { BINARY_FILE, MEDIA_IMAGE, NonTextFilePreview } from './FilePreview.js';
+import { BINARY_FILE, MEDIA_IMAGE, NonTextFilePreview, looksBinary } from './FilePreview.js';
+
+describe('looksBinary', () => {
+  it('rejects stored ZIP/Office content even when almost all bytes are readable XML', () => {
+    expect(looksBinary(`PK\u0003\u0004${'<slide>Readable text</slide>'.repeat(500)}`)).toBe(true);
+  });
+
+  it('rejects a NUL after the sampled prefix', () => {
+    expect(looksBinary(`${'text'.repeat(2000)}\0`)).toBe(true);
+  });
+
+  it('rejects known binary extensions even when their content appears textual', () => {
+    expect(looksBinary('printable data', 'files/DECK.PPTX')).toBe(true);
+    expect(looksBinary('printable data', 'archive.zip')).toBe(true);
+    expect(looksBinary('%PDF-1.7\nReadable text')).toBe(true);
+  });
+
+  it.each([
+    '',
+    '# Notes\n\nTab\there.\r\n',
+    'Crème brûlée — 日本語',
+    'PK is a prefix',
+    '<xml>text</xml>',
+  ])('keeps ordinary Unicode text editable: %s', (content) =>
+    expect(looksBinary(content, 'notes.md')).toBe(false),
+  );
+});
 
 /**
  * A file we refuse to preview leaves the pane with nothing to say about it.

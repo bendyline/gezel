@@ -17,7 +17,7 @@ function task(overrides: Partial<Task> = {}): Task {
     craftbook: {
       id: 'newsletter',
       title: 'Newsletter',
-      steps: [{ id: 'write', title: 'Write', createdAt: at }],
+      steps: [{ id: 'write', name: 'Write', createdAt: at }],
     },
     createdAt: at,
     updatedAt: at,
@@ -182,7 +182,15 @@ describe('Activity reflects execution rather than task lifecycle', () => {
   it('uses the current step owner rather than the task entry owner', () => {
     const owned = task();
     owned.craftbook.steps[0]!.assignee = { kind: 'user' };
-    expect(resolve({ tasks: [owned] }).items[0]?.section).toBe('needs-you');
+    expect(resolve({ tasks: [owned] }).items[0]).toMatchObject({
+      section: 'needs-you',
+      detail: 'Current step: Write. Waiting for your direction.',
+    });
+    owned.assignee = { kind: 'user' };
+    delete owned.craftbook.steps[0]!.assignee;
+    expect(resolve({ tasks: [owned] }).items[0]?.detail).toBe(
+      'Current step: Write. Waiting for your direction.',
+    );
   });
   it('separates finished work from questions and keeps an unrelated live turn visible', () => {
     const ready: Question = {
@@ -197,12 +205,26 @@ describe('Activity reflects execution rather than task lifecycle', () => {
     });
     expect(result.items.map((item) => item.section)).toEqual(['working', 'ready']);
   });
-  it('respects inherited pauses and omits drafts and finished tasks', () => {
-    expect(resolve({ tasks: [task({ effectiveStatus: 'paused' })] }).items[0]?.detail).toContain(
-      'Paused',
-    );
+  it('omits paused, inherited-paused, draft, and finished tasks', () => {
+    expect(resolve({ tasks: [task({ status: 'paused' })] }).items).toEqual([]);
+    expect(resolve({ tasks: [task({ effectiveStatus: 'paused' })] }).items).toEqual([]);
     for (const status of ['draft', 'complete', 'canceled'] as const)
       expect(resolve({ tasks: [task({ status })] }).items).toEqual([]);
+  });
+  it('omits tasks in a paused project', () => {
+    const shelved = task();
+    expect(
+      resolve({ tasks: [shelved], inactiveProjectIds: new Set([shelved.projectId]) }).items,
+    ).toEqual([]);
+  });
+  it('keeps a paused task visible while its live turn is still running', () => {
+    expect(resolve({ tasks: [task({ status: 'paused' })], inflight: [turn] }).items).toEqual([
+      expect.objectContaining({
+        section: 'working',
+        taskRef: turn.taskRef,
+        title: 'Autumn newsletter',
+      }),
+    ]);
   });
   it('shows pending messages without counting them as extra working jobs', () => {
     const queue = queues();

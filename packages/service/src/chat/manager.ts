@@ -20,6 +20,7 @@ import type {
   QueuedMessage,
   RetrievalDecisionTrace,
   SendToSessionRequest,
+  SessionWireTranscript,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
   TurnMessageOrigin,
@@ -226,6 +227,7 @@ import {
   type SessionOpts,
   SessionResumeError,
   type TurnUsage,
+  type WireTranscriptEntry,
 } from '../providers/types.js';
 import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
@@ -321,6 +323,15 @@ import {
   detectChatCodedFileWithoutWrite,
   detectProseDeliverableWithoutWrite,
 } from './chat-drafted-deliverable.js';
+import {
+  type AskGezelArgs,
+  type AskGezelOutcome,
+  DEFAULT_ASK_MAX_DEPTH,
+  MAX_ASK_TIMEOUT_MS,
+  consultationFlightKey,
+  consultationIdleTimeoutMsForModel,
+  describeDelegateFailureForAsker,
+} from './consultation.js';
 import {
   CONTEXT_COMPACT_RATIO,
   type CompactSessionNowResult,
@@ -458,6 +469,11 @@ import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-fi
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { nativeVisionEnabledFor } from './vision-capability.js';
+import {
+  buildWireTranscriptCheckpoint,
+  restoreFromWireTranscript,
+  wireTranscriptIsPaired,
+} from './wire-transcript-checkpoint.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 import { roleGetsWorkspaceOrientation } from './workspace-prompt-listing.js';
 
@@ -618,6 +634,26 @@ function resolveTurnMessageOrigin(
   if (opts?.from) return 'cross-gezel';
   if (opts?.ambient || opts?.nudge || opts?.lane === 'background') return 'background-nudge';
   return 'direct-user';
+}
+
+/**
+ * Who is waiting on a turn, for engines that schedule several requests
+ * themselves (the MLX sidecar parks background waves for interactive ones).
+ *
+ * A person is waiting when they typed the turn or answered the question that
+ * resumes it, and when the turn is the target of a synchronous consultation
+ * (the asker is parked mid-turn on this reply). Everything else — task steps,
+ * restart resumes, gezel-to-gezel messages, nudges — is work nobody reads
+ * token by token, however important. Distinct from the queue lane on
+ * purpose: task handoffs keep the interactive LANE so chores cannot starve
+ * them, yet must still step aside at the engine for a person's message.
+ */
+function engineTurnPriority(
+  origin: TurnMessageOrigin,
+  isAskTarget: boolean,
+): 'interactive' | 'background' {
+  if (isAskTarget) return 'interactive';
+  return origin === 'direct-user' || origin === 'question-answer' ? 'interactive' : 'background';
 }
 
 function buildUserTurnMessage(
@@ -1284,6 +1320,13 @@ export class ChatManager extends LocalEngineRuntime {
    * provider layer purely to flip a status bit.
    */
   private readonly queueWaitingSince = new Map<string, number>();
+  /** Latest unwritten wire-transcript checkpoint per session; see `noteWireTranscript`. */
+  private readonly wireCheckpointPending = new Map<
+    string,
+    { gezelId: string; checkpoint: SessionWireTranscript }
+  >();
+  /** Sessions with a checkpoint write in flight. */
+  private readonly wireCheckpointWriting = new Set<string>();
   /**
    * Per-session FIFO queue of messages that arrived while the session
    * was already mid-turn. Before this existed, `send()` threw
@@ -6125,9 +6168,8 @@ export class ChatManager extends LocalEngineRuntime {
     // "one line of table talk" iteration is where a verbose medium
     // model re-runs its whole analysis (wild-caught: gemma4-12b,
     // ~1,000 tokens at 12 t/s where one sentence belonged). 300 tokens
-    // fits any real table-talk line several times over; the
-    // post-action rumination fold turns a truncated remainder into
-    // collapsed reasoning instead of a visible wall.
+    // fits any real table-talk line several times over. This cap is
+    // specific to game reactions; ordinary chat keeps its full budget.
     const reactionProject = await this.store.getProject(args.projectId).catch(() => null);
     const leanReactionCap = reactionProject?.leanProfile ? 300 : undefined;
     this.trackBackground(
@@ -8225,6 +8267,7 @@ export class ChatManager extends LocalEngineRuntime {
             : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
+            enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),
             ...(opts?.ambient ? { ambient: true } : {}),
             sessionId,
             gezelId: state.record.gezelId,
@@ -8527,6 +8570,9 @@ export class ChatManager extends LocalEngineRuntime {
         state.record.lastActivityAt = nowIso();
         // Capture provider-state (sessionId / previous_response_id) for resume.
         state.record.providerState = liveSession.providerState();
+        // Stateless sessions: checkpoint the transcript the next turn will
+        // extend, against the record that now includes this reply.
+        this.noteWireTranscript(sessionId, liveSession.getWireTranscript?.(), false);
         // Tell the cache controller that this session just ran. The
         // controller updates its LRU position, recomputes byte usage,
         // and may trigger eviction if budget is exceeded. Approx token
@@ -10317,6 +10363,52 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Checkpoint a stateless session's exact transcript against its live record
+   * (see wire-transcript-checkpoint.ts). `inTurn` checkpoints are what the
+   * engine is about to be sent, so they are renderable by construction; an
+   * end-of-turn one has not been sent yet and must pair every tool call with
+   * its result. Writes are coalesced per session — latest wins.
+   */
+  private noteWireTranscript(
+    sessionId: string,
+    transcript: WireTranscriptEntry[] | undefined,
+    inTurn: boolean,
+  ): void {
+    const record = this.states.get(sessionId)?.record;
+    if (!record || !transcript) return;
+    if (!inTurn && !wireTranscriptIsPaired(transcript)) return;
+    const checkpoint = buildWireTranscriptCheckpoint({
+      sessionId,
+      providerName: record.providerName,
+      inTurn,
+      messages: record.messages,
+      transcript,
+      savedAt: nowIso(),
+    });
+    this.wireCheckpointPending.set(sessionId, { gezelId: record.gezelId, checkpoint });
+    if (this.wireCheckpointWriting.has(sessionId)) return;
+    this.wireCheckpointWriting.add(sessionId);
+    void (async () => {
+      try {
+        for (;;) {
+          const next = this.wireCheckpointPending.get(sessionId);
+          if (!next) break;
+          this.wireCheckpointPending.delete(sessionId);
+          await this.store
+            .writeSessionWireTranscript(next.gezelId, next.checkpoint)
+            .catch((err) =>
+              log.debug(
+                `wire transcript checkpoint failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            );
+        }
+      } finally {
+        this.wireCheckpointWriting.delete(sessionId);
+      }
+    })();
+  }
+
+  /**
    * Build a brand-new live session for an existing record, ignoring any
    * stored `providerState` (use when the stored one is known dead). Used by
    * the mid-conversation "session gone" recovery path in `send`.
@@ -10760,14 +10852,23 @@ export class ChatManager extends LocalEngineRuntime {
    * Rebuild only the sessions and terminal bridge belonging to one project.
    * Used by the workspace watcher when a canonical MCP config changes.
    */
-  async resetProjectToolsets(projectId: string): Promise<void> {
+  async resetProjectToolsets(projectId: string, waitForSessionId?: string): Promise<void> {
     const resets: Promise<void>[] = [];
     for (const [sessionId, state] of this.states) {
       if (state.record.projectId !== projectId) continue;
-      if (this.inflight.has(sessionId)) {
+      if (this.inflight.has(sessionId) && sessionId !== waitForSessionId) {
         this.runAfterSessionIdle(sessionId, () => {
           void this.reset(sessionId);
         });
+      } else if (this.inflight.has(sessionId)) {
+        // A quick permission answer must wait for the asking turn AND bridge teardown.
+        resets.push(
+          new Promise<void>((resolve, reject) => {
+            this.runAfterSessionIdle(sessionId, () => {
+              void this.reset(sessionId).then(resolve, reject);
+            });
+          }),
+        );
       } else {
         resets.push(this.reset(sessionId));
       }
@@ -11066,10 +11167,12 @@ export class ChatManager extends LocalEngineRuntime {
         /* ignore */
       }
       // Cache controller's view of this provider's warm sessions is
-      // now stale — the engine is going away (or being rebuilt with
-      // potentially different model state). Wipe it so the next
-      // ensureProvider's adapter registration starts from zero.
-      this.cacheController?.invalidateProvider(name);
+      // now stale — the provider object is being rebuilt. Forget it so the
+      // next ensureProvider's adapter registration starts from zero, but
+      // leave the ENGINE's entries alone: an engine that outlives this reset
+      // still holds valid per-session caches, and the next turn reuses them
+      // only if they are still there.
+      this.cacheController?.forgetProvider(name);
     }
     this.providers.clear();
     if (restoreSeededProviders) {
@@ -11585,6 +11688,11 @@ export class ChatManager extends LocalEngineRuntime {
           timeoutMs: Math.max(1, budget.remainingMs()),
           queue: {
             lane: opts.lane ?? 'background',
+            // A one-shot a turn is awaiting (an explicit interactive-lane
+            // utility) keeps that turn's place at the engine; the rest are
+            // chores and step aside for a person.
+            enginePriority:
+              (opts.lane ?? 'background') === 'interactive' ? 'interactive' : 'background',
             signal: oneShotSignal,
             ...(opts.ambient ? { ambient: true } : {}),
             ...(gezelId ? { gezelId } : {}),
@@ -15467,7 +15575,32 @@ export class ChatManager extends LocalEngineRuntime {
       isLocalProvider(record.providerName) ||
       record.providerName === 'remote' ||
       record.providerName === 'anthropic';
-    if (providerIsStateless && record.messages.length > 0) {
+    if (isLocalProvider(record.providerName)) {
+      opts.onWireTranscript = (transcript) => this.noteWireTranscript(record.id, transcript, true);
+    }
+    // A local engine's persisted cache only helps a prompt that starts with
+    // the same tokens; the session's checkpointed transcript reproduces them
+    // where the rebuild from saved history cannot. See
+    // wire-transcript-checkpoint.ts.
+    const wireRestore =
+      isLocalProvider(record.providerName) && record.messages.length > 0
+        ? restoreFromWireTranscript(
+            await this.store.readSessionWireTranscript(record.gezelId, record.id).catch(() => null),
+            record,
+            { omitLastUser: runtime?.omitLastUserFromPriorMessages === true },
+          )
+        : null;
+    if (wireRestore?.ok) {
+      opts.priorMessages = wireRestore.entries;
+      log.info(
+        `session ${record.id}: reseeded from its wire transcript (${wireRestore.entries.length} messages, ${wireRestore.note})`,
+      );
+    } else if (providerIsStateless && record.messages.length > 0) {
+      if (wireRestore && wireRestore.reason !== 'no checkpoint') {
+        log.info(
+          `session ${record.id}: wire transcript not used (${wireRestore.reason}); rebuilding from saved history`,
+        );
+      }
       const replayMessages = runtime?.omitLastUserFromPriorMessages
         ? record.messages.slice(0, -1)
         : record.messages;
@@ -16861,83 +16994,6 @@ const HOOK_ASK_TIMEOUT_MS = 5 * 60 * 1000;
 const HOOK_ASK_POLL_MS = 500;
 
 /**
- * Maximum chain depth for sync `ask_gezel` calls. A chain like A→B→C is
- * depth 2; the cap defaults to 5 — enough for legitimate consultation
- * trees (Meester asks Builder, Builder asks Reviewer) without letting
- * runaway recursion pile up workers.
- */
-const DEFAULT_ASK_MAX_DEPTH = 5;
-
-/**
- * Default and bounds for `askGezelAndWait`'s per-call timeout. This is
- * an **idle** budget — the max time the consulted gezel may go *silent*
- * (no tokens / tool calls) before the asker gives up — not a wall-clock
- * cap on the whole reply. See `waitForNextTurnComplete`. The ordinary
- * default is 5 min; DS4/frontier-size local targets get a 15 min floor so
- * measured load/prefill latency is not mistaken for a dead specialist.
- * `MAX_ASK_TIMEOUT_MS` is the separate absolute ceiling regardless of
- * activity.
- */
-const DEFAULT_ASK_TIMEOUT_MS = 5 * 60 * 1000;
-const MIN_ASK_TIMEOUT_MS = 10 * 1000;
-const MAX_ASK_TIMEOUT_MS = 30 * 60 * 1000;
-function clampAskTimeout(ms: number): number {
-  if (ms < MIN_ASK_TIMEOUT_MS) return MIN_ASK_TIMEOUT_MS;
-  if (ms > MAX_ASK_TIMEOUT_MS) return MAX_ASK_TIMEOUT_MS;
-  return ms;
-}
-
-/**
- * Translate a DOWNSTREAM delegate's failure into a message addressed to
- * the ASKER who delegated to them.
- *
- * The raw string a provider throws when a delegate's turn aborts is
- * written in the SECOND PERSON for the delegate who is mid-turn — e.g.
- * "Stop planning. Your next message MUST start with a single tool call.
- * If `write_file` is in your tool list, call it NOW with the full file
- * contents." Forwarded verbatim into the asker's `message_gezel` /
- * `ask_gezel` tool result (as it was before this helper existed), that
- * remediation is actively misleading: it reads as "YOU called this
- * wrong," so the orchestrator either thrashes its own (usually correct)
- * tool arguments chasing a phantom arg bug, or — worse — obeys the
- * coaching and fabricates a tool it doesn't even have.
- *
- * Wild-caught (Space Shooter Arcade): a voorman (Laxmi)
- * delegated `index.html` to a builder (Adam) whose turn ramble-aborted.
- * She received Adam's second-person abort verbatim, mutated her valid
- * `message_gezel` args (dropped the required `gezel`, added `project`)
- * hunting a non-existent argument error, then hallucinated a `write_file`
- * call she had no tool for and dumped the whole HTML as phantom markup —
- * exactly the anti-pattern the abort copy was trying to prevent in Adam.
- *
- * This returns an asker-facing line that attributes the failure to the
- * target and points at the orchestrator's real options, never echoing
- * delegate-facing "call write_file NOW" remediation back to a caller who
- * merely delegated.
- */
-export function describeDelegateFailureForAsker(
-  targetName: string,
-  raw: string,
-  targetGender?: GezelGender,
-): string {
-  const text = (raw ?? '').trim();
-  // Ramble / planning-budget abort family. Every local provider emits
-  // "aborting — the gezel emitted N characters of prose this turn
-  // without calling any action tool. Stop planning. …" (see
-  // ramble-detector.ts + the mlx / llama-cpp / ollama providers). Match
-  // on the stable lead clause rather than the full second-person tail.
-  if (/emitted\s+\d+\s+characters of prose this turn|\bStop planning\b/i.test(text)) {
-    const pronouns = pronounFormsForGender(targetGender);
-    return `${targetName} couldn't complete the request — ${pronouns.subject} spent ${pronouns.possessiveAdjective} whole turn planning without producing the deliverable. This is ${targetName}'s failure, not a problem with your call (it was delivered fine), so don't change your own tool arguments. Retry with a smaller, more concrete ask, reassign to a different gezel, or surface the blocker to the user.`;
-  }
-  // Generic downstream failure: preserve the underlying cause but make
-  // ownership explicit so the asker doesn't read it as its own arg error.
-  return text
-    ? `${targetName} hit an error and couldn't reply: ${text}`
-    : `${targetName} hit an error and couldn't reply.`;
-}
-
-/**
  * Retain a compact, non-secret proof that a successful tool call was aimed at
  * source acquisition. Full arguments already live on the session turn; the
  * history event only needs enough to distinguish an external lookup from a
@@ -17017,96 +17073,6 @@ function extractExplicitGenerateImageCall(text: string): { prompt?: string; save
     ...(prompt ? { prompt } : {}),
     ...(saveAs ? { saveAs } : {}),
   };
-}
-
-export interface AskGezelArgs {
-  fromGezelId: string;
-  fromSessionId: string;
-  toGezelIdOrName: string;
-  projectId?: string;
-  text: string;
-  timeoutMs?: number;
-  maxDepth?: number;
-  /** Optional task to scope the consultation. Inherited from the asker's session when unset. */
-  taskRef?: string;
-  /** Optional step within `taskRef`. */
-  stepId?: string;
-  /**
-   * Shape-of-deliverable hint persisted on the fresh consultation session.
-   * File-shaped asks instruct the target to write the deliverable instead of
-   * returning a long source/report body through chat.
-   */
-  expectedDeliverable?: ExpectedDeliverable;
-}
-
-/**
- * Discriminated outcome of `ChatManager.askGezelAndWait`. Mirrors the
- * `RequestAskResponse` API shape but kept internal — the route handler
- * narrows it before serializing.
- */
-export type AskGezelOutcome =
-  | {
-      outcome: 'reply';
-      text: string;
-      toGezelId: string;
-      toGezelName: string;
-      sessionId: string;
-    }
-  | {
-      outcome: 'error';
-      reason:
-        | 'cycle'
-        | 'depth'
-        | 'self'
-        | 'not-found'
-        | 'engagement-off'
-        | 'timeout'
-        | 'target-error'
-        | 'target-deleted'
-        | 'delivery-failed';
-      message: string;
-    };
-
-const SLOW_LOCAL_CONSULTATION_IDLE_MS = 15 * 60 * 1000;
-
-/**
- * Model-aware idle floor for synchronous consultations. An explicit caller
- * value may lengthen the budget but cannot undercut the measured first-action
- * envelope of DS4/frontier local models. Cloud and smaller local models retain
- * the historical configurable 5-minute default.
- */
-export function consultationIdleTimeoutMsForModel(opts: {
-  providerName: ProviderName;
-  modelTier?: ModelTier;
-  requestedTimeoutMs?: number;
-}): number {
-  const requested = clampAskTimeout(opts.requestedTimeoutMs ?? DEFAULT_ASK_TIMEOUT_MS);
-  const slowLocal =
-    opts.providerName === 'ds4' ||
-    (isLocalProvider(opts.providerName) && opts.modelTier === 'large');
-  return slowLocal ? Math.max(requested, SLOW_LOCAL_CONSULTATION_IDLE_MS) : requested;
-}
-
-/** Stable one-flight key for semantically identical consultation calls. */
-function consultationFlightKey(args: AskGezelArgs): string {
-  const normalize = (value: string | undefined): string =>
-    (value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-  // When project is omitted, inheritance is session-specific; keep those
-  // calls scoped to the asker session to avoid coalescing equal questions
-  // from two different projects. Explicit project calls can safely coalesce
-  // across stale/recovery sessions belonging to the same gezel.
-  const projectScope = args.projectId
-    ? `project:${normalize(args.projectId)}`
-    : `session:${args.fromSessionId}`;
-  return JSON.stringify([
-    args.fromGezelId,
-    projectScope,
-    normalize(args.toGezelIdOrName),
-    normalize(args.text),
-    normalize(args.taskRef),
-    normalize(args.stepId),
-    args.expectedDeliverable ?? null,
-  ]);
 }
 
 /**
@@ -17441,34 +17407,24 @@ export function buildFailedToolRecoveryNudge(calls: ReadonlyArray<ToolOutcome>):
 }
 
 /**
- * Nudge specific to "ran an action tool, then went silent" — small models
- * often emit a `tool_use` block as their entire turn output and stop, leaving
- * the user staring at an expanded tool-call card with no closing
- * narrative. The tier-keyed system-prompt rules already ask the model
- * to wrap up after tools (see {@link tinyTierPromptHints} +
- * {@link SMALL_TIER_PROMPT_HINTS}); this is the deterministic backstop
- * for when the model didn't follow that.
- *
- * Distinct from CONTINUATION_NUDGE on purpose: this case is "the requested
- * action ran, just say what happened" — telling the model to execute it again
- * (the CONTINUATION_NUDGE wording) would be misleading since the tool
- * already succeeded.
+ * Recover a tool-only turn without repeating successful actions or limiting
+ * the answer to a status sentence. Tool results may still need synthesis,
+ * and a completed call does not imply that the user's request is complete.
  */
 const CLOSING_SUMMARY_NUDGE =
   "Your tool call(s) returned but you didn't finish with a reply. " +
-  'In one sentence, tell the user what happened. No more tools — just words.';
+  "Use the results to answer the user's original request with the detail it needs. " +
+  'Do not repeat actions that already succeeded. If work remains, continue it with the tools available.';
 
 /**
- * A read-only call is an intermediate observation, not the deliverable.
- * Keep the model moving toward the first mutating/action tool instead of
- * applying the terminal closing-summary nudge. This wording covers both
- * task-scoped work and untasked coordinator lookups.
+ * A lookup may lead to a prose answer or further work. Do not require a
+ * mutation after research or mistake gathering information for answering.
  */
 const READ_ONLY_PROGRESS_NUDGE =
-  "The read-only tool returned useful context, but it did not complete the user's request. " +
-  'Continue now with the next concrete action using the appropriate action tool. ' +
-  'If the lookup result named a next tool call, make that call now. ' +
-  'Do not stop merely to summarize what you read, inspected, retrieved, or were advised to invoke.';
+  'The read-only tool returned useful context. ' +
+  "Use it to answer the user's original question in prose, or continue the work they requested. " +
+  'If the lookup result named a next tool call needed to fulfill that request, make it now. ' +
+  'Give the substantive answer or deliverable, not just a status update about gathering information.';
 
 /**
  * Nudge specific to the voorman-idle case: the project's voorman just
@@ -17616,6 +17572,7 @@ const VOORMAN_NOT_DONE_NUDGE =
  * search_*) that `isReadOnlyToolName` falls back on for forward compat.
  */
 const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
+  'search',
   'search_memory',
   'list_memories',
   'list_dir',

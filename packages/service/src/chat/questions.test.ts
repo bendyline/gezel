@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -297,6 +297,59 @@ describe('Store — question persistence', () => {
 });
 
 describe('ChatManager.deliverQuestionAnswer', () => {
+  it('waits for an in-flight permission requester and its bridge teardown before continuing', async () => {
+    const session = await manager.createSession({ gezelId: 'leo' });
+    const stalled = mock.scriptStreamThenStall('Waiting for permission.');
+    // MCP startup can exceed expect.poll's one-second default on CI.
+    // Synchronize on the provider call instead of a wall-clock polling budget.
+    let markSendStarted = () => {};
+    const sendStarted = new Promise<void>((resolve) => {
+      markSendStarted = resolve;
+    });
+    const recordCall = mock.recordCall.bind(mock);
+    vi.spyOn(mock, 'recordCall').mockImplementation((call) => {
+      recordCall(call);
+      if (call.kind === 'send') markSendStarted();
+    });
+    const sending = manager.send(session.id, 'Prepare a presentation.');
+    const settledSending = sending.catch(() => {});
+    let refresh: Promise<void> | undefined;
+    let refreshed = false;
+    let finishDisconnect = () => {};
+    const disconnectGate = new Promise<void>((resolve) => {
+      finishDisconnect = resolve;
+    });
+    try {
+      await Promise.race([sendStarted, sending]);
+      expect(mock.calls.some((call) => call.kind === 'send')).toBe(true);
+      const live = mock.sessions[0]!;
+      const originalDisconnect = live.disconnect.bind(live);
+      let markDisconnectStarted = () => {};
+      const disconnectStarted = new Promise<void>((resolve) => {
+        markDisconnectStarted = resolve;
+      });
+      const disconnect = vi.spyOn(live, 'disconnect').mockImplementation(async () => {
+        markDisconnectStarted();
+        await disconnectGate;
+        await originalDisconnect();
+      });
+      refresh = manager.resetProjectToolsets('default', session.id).then(() => {
+        refreshed = true;
+      });
+      expect(refreshed).toBe(false);
+      stalled.release();
+      await sending;
+      await disconnectStarted;
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(refreshed).toBe(false);
+    } finally {
+      stalled.release();
+      finishDisconnect();
+      await Promise.all([settledSending, refresh]);
+    }
+    expect(refreshed).toBe(true);
+  });
+
   it('injects the formatted answer as a synthetic user message + triggers next turn', async () => {
     const session = await manager.createSession({ gezelId: 'leo' });
     mock.script('Roger, will draft something.', 'NONE'); // initial assistant + extractor placeholder

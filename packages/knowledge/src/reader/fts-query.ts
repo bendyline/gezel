@@ -3,7 +3,8 @@
  * and the validator's install-time smoke check MUST agree on semantics
  * (same MATCH, same ranking, same limit interpretation) — the arts-pilot
  * incident was a smoke query that had never been executed until a user's
- * install ran it. Sharing the query is what keeps the two in lockstep.
+ * install ran it. Sharing the query is what keeps the two in lockstep:
+ * `documentFtsTopIds` takes the raw query and builds its own MATCH.
  *
  * Ranking is NAME-first, because this index is search's exact-name arm
  * (the service fuses it as `docFts` next to the vector and chunk-body arms,
@@ -30,10 +31,14 @@
  *      in Literature". Measured on six Wikipedia catalogs (2,000 sampled
  *      titles each), title lookup top-1 went from 91–95% to 96–98% and
  *      top-5 from 97.8–99.6% to 98.8–100%; 3/1/2 and 5/1/3 helped less.
+ *      This tier matches the query's content words only: request filler
+ *      (`QUERY_STOP_WORDS`) ranked a title like "What can you do with X" on
+ *      "can", "you" and "with" alone.
  *
  * Reader-side, so it applies to every catalog already published — the index
  * itself is unchanged. A recorded smoke query is a document's own title, so
- * tier 1 keeps it first under every tier added since.
+ * tier 1 keeps it first under every tier added since: tiers 1 and 2 read the
+ * raw query, and that title holds every word tier 3 matches.
  *
  * The named tier also drives title-assisted routing
  * (`CatalogHandle.titleRouteShards`): the shard holding a page the question
@@ -44,14 +49,59 @@
  */
 
 import type { DatabaseSync } from '../format/node-sqlite.js';
+import { QUERY_STOP_WORDS } from '../query-stopwords.js';
 
-/** Injection-safe FTS5 query: quoted OR'd tokens, capped. */
-export function sanitizeFtsQuery(query: string): string | null {
+/**
+ * The query's words worth matching, deduped and capped: request filler
+ * (`QUERY_STOP_WORDS`) dropped, unless nothing else is left — a bare "how
+ * to" still searches for what was typed.
+ */
+function contentTokens(query: string): string[] {
   const tokens = [
     ...new Set((query.normalize('NFKC').match(/[\p{L}\p{N}_]+/gu) ?? []).slice(0, 16)),
   ];
+  const content = tokens.filter((t) => !QUERY_STOP_WORDS.has(t.toLowerCase()));
+  return content.length > 0 ? content : tokens;
+}
+
+/** Injection-safe FTS5 query over the content words: quoted, OR'd, capped. */
+export function contentFtsQuery(query: string): string | null {
+  const tokens = contentTokens(query);
+  return tokens.length > 0 ? tokens.map(quoteToken).join(' OR ') : null;
+}
+
+/**
+ * The chunk-body FTS expression: the content words minus the ones that cost
+ * a scan nearly everything and cannot change its order.
+ *
+ * FTS5's bm25 clamps the IDF of a term found in more than half the rows to
+ * 1e-6, yet an OR still ranks every row that term matches. In a 200k-chunk
+ * Azure-docs shard "azure" is in 82% of rows, and "Can you tell me how to
+ * integrate Azure search with blob storage?" spent ~240 ms per shard ranking
+ * it and the function words around it. Next to the vector arm that blew the
+ * chat turn's 600 ms knowledge budget, so the catalog answered nothing.
+ * Without those terms the same scan takes ~20 ms.
+ *
+ * Request filler goes first (`contentTokens`), then any term in more than
+ * half of `rows`. Neither empties the query: a query of only filler keeps it,
+ * and one whose every term is that common keeps its rarest. The title index
+ * skips the second step: one row per document is cheap to rank.
+ */
+export function selectiveFtsQuery(
+  query: string,
+  rows: number,
+  rowsMatching: (phrase: string) => number,
+): string | null {
+  const tokens = contentTokens(query);
   if (tokens.length === 0) return null;
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' OR ');
+  const counted = tokens.map((token) => {
+    const phrase = quoteToken(token);
+    return { phrase, hits: rowsMatching(phrase) };
+  });
+  const kept = counted.filter((c) => c.hits * 2 <= rows);
+  const chosen =
+    kept.length > 0 ? kept : [counted.reduce((rarest, c) => (c.hits < rarest.hits ? c : rarest))];
+  return chosen.map((c) => c.phrase).join(' OR ');
 }
 
 /** bm25() column weights, in `fts_documents` column order: title, summary, aliases. */
@@ -60,24 +110,31 @@ export const DOCUMENT_FTS_WEIGHTS = { title: 10, summary: 1, aliases: 5 } as con
 const DOCUMENT_FTS_ORDER = `bm25(fts_documents, ${DOCUMENT_FTS_WEIGHTS.title}.0, ${DOCUMENT_FTS_WEIGHTS.summary}.0, ${DOCUMENT_FTS_WEIGHTS.aliases}.0)`;
 
 /**
- * Top document ids for a sanitized MATCH expression. Pass the user's raw
- * query as `exactTitle` so a document titled exactly that ranks first and
- * the titles it names come next.
+ * Top document ids for the user's raw query: a document titled exactly that
+ * first, the titles it names next, then BM25 over its content words.
  */
 export function documentFtsTopIds(
   db: DatabaseSync,
-  match: string,
+  query: string,
   limit: number,
-  exactTitle?: string,
+  allowedDocumentIds?: ReadonlySet<string>,
 ): string[] {
-  const title = exactTitle?.normalize('NFKC').trim() ?? '';
-  const ids = exactTitle ? namedTitleMatches(db, exactTitle, limit).map((m) => m.documentId) : [];
+  const match = contentFtsQuery(query);
+  if (!match || allowedDocumentIds?.size === 0) return [];
+  const scope = allowedDocumentIds ? JSON.stringify([...allowedDocumentIds]) : null;
+  const title = query.normalize('NFKC').trim();
+  const ids = namedTitleMatches(db, query, limit, allowedDocumentIds).map((m) => m.documentId);
   const rest = db
     .prepare(
       `SELECT document_id FROM fts_documents WHERE fts_documents MATCH ?
+       ${scope === null ? '' : 'AND document_id IN (SELECT value FROM json_each(?))'}
        ORDER BY (title = ? COLLATE NOCASE) DESC, ${DOCUMENT_FTS_ORDER} LIMIT ?`,
     )
-    .all(match, title, limit + ids.length) as Array<{ document_id: string }>;
+    .all(
+      ...(scope === null
+        ? [match, title, limit + ids.length]
+        : [match, scope, title, limit + ids.length]),
+    ) as Array<{ document_id: string }>;
   for (const row of rest) {
     if (ids.length >= limit) break;
     if (!ids.includes(row.document_id)) ids.push(row.document_id);
@@ -90,7 +147,9 @@ export function documentFtsTopIds(
  * "The Who" is not what "Who wrote it?" asks for), and they add nothing to
  * how specifically a query names a title. English, like the published
  * catalogs; in other languages the IDF weighting does the same job, less
- * sharply.
+ * sharply. Narrower than `QUERY_STOP_WORDS` on purpose: that list drops
+ * request words such as "help", "good" and "night" from a search, but each
+ * can be a whole title ("Help!", "Night") that a question names.
  */
 const NAME_STOPWORDS: ReadonlySet<string> = new Set(
   (
@@ -188,7 +247,9 @@ export function namedTitleMatches(
   db: DatabaseSync,
   query: string,
   limit: number,
+  allowedDocumentIds?: ReadonlySet<string>,
 ): NamedTitleMatch[] {
+  if (allowedDocumentIds?.size === 0) return [];
   const raw = query.normalize('NFKC').trim();
   const words = [...new Set(nameWords(raw))].slice(0, 16);
   const content = words.filter((w) => !NAME_STOPWORDS.has(w));
@@ -201,9 +262,14 @@ export function namedTitleMatches(
   );
   const queryWords = nameWords(raw).join(' ');
   const stats = titleStats(db);
-  const rows = stats.candidates.all(
-    `title : (${content.map(quoteToken).join(' OR ')})`,
-    NAMED_TITLE_CANDIDATES,
+  const expression = `title : (${content.map(quoteToken).join(' OR ')})`;
+  const rows = (
+    allowedDocumentIds
+      ? db
+          .prepare(`SELECT document_id, title FROM fts_documents WHERE fts_documents MATCH ?
+        AND document_id IN (SELECT value FROM json_each(?)) ORDER BY ${DOCUMENT_FTS_ORDER} LIMIT ?`)
+          .all(expression, JSON.stringify([...allowedDocumentIds]), NAMED_TITLE_CANDIDATES)
+      : stats.candidates.all(expression, NAMED_TITLE_CANDIDATES)
   ) as Array<{ document_id: string; title: string }>;
   const named: Array<NamedTitleMatch & { order: number }> = [];
   for (const row of rows) {
@@ -238,16 +304,14 @@ export function compareScores(a: number, b: number): number {
 export const SMOKE_QUERY_TOP_N = 10;
 
 /**
- * Run one recorded smoke query the way the validator will: sanitized, then
- * top-N in `documentFtsTopIds` order. Returns the ids the index failed to
- * surface (empty = pass).
+ * Run one recorded smoke query the way the validator will: top-N in
+ * `documentFtsTopIds` order. Returns the ids the index failed to surface
+ * (empty = pass).
  */
 export function documentSmokeQueryMisses(
   db: DatabaseSync,
   smoke: { query: string; expectedDocumentIds: string[] },
 ): string[] {
-  const match = sanitizeFtsQuery(smoke.query);
-  if (!match) return [...smoke.expectedDocumentIds];
-  const top = documentFtsTopIds(db, match, SMOKE_QUERY_TOP_N, smoke.query);
+  const top = documentFtsTopIds(db, smoke.query, SMOKE_QUERY_TOP_N);
   return smoke.expectedDocumentIds.filter((id) => !top.includes(id));
 }

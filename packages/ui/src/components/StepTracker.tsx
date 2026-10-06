@@ -9,16 +9,15 @@ export interface StepTrackerStep {
 }
 
 /**
- * Per-step decoration for the `bench` variant — the workshop "bench
- * rail" look where each step is a peg (or a carved poppetje figure for the
- * active one) standing on a wooden rail, captioned with who's holding it.
+ * Per-step decoration for the `bench` variant — connected circular stops,
+ * captioned with who's holding each step.
  * Supplied by the task wrapper via {@link StepTrackerProps.stepOf};
- * design mode leaves it undefined and the bench falls back to plain pegs.
+ * design mode leaves it undefined and shows unfilled stops.
  */
 export interface StepMeta {
-  /** Marker to stand on the rail (e.g. a `<Poppetje>` for the active step). Omit → a CSS peg. */
+  /** Optional portrait inside the active stop. */
   figure?: ReactNode;
-  /** Who's on this step — name shown above the peg. */
+  /** Who's on this step — name shown above the stop. */
   assigneeName?: string;
   /** Their role / relationship to the step, shown small under the name. */
   assigneeRole?: string;
@@ -54,7 +53,7 @@ interface StepTrackerProps<T extends StepTrackerStep> {
   /**
    * `compact` (default) is the original chain-of-circles tracker. `bench`
    * is the workshop rail used by tasks and craftbook design: numbered steps
-   * with pegs/figures standing on a wooden beam, assignee captions above
+   * with circular stops on a route, assignee captions above
    * and status words below. Pair with {@link stepOf} when those decorations
    * are available.
    */
@@ -90,7 +89,7 @@ interface StepTrackerProps<T extends StepTrackerStep> {
 
 /**
  * Horizontal-scroll scaffold shared by the bench and the scrolling compact
- * tracker. The viewport scrolls natively (so trackpad/wheel work) with its
+ * tracker. The viewport supports horizontal wheel, trackpad, and drag scrolling with its
  * native scrollbar hidden, and a synthetic thumb is mirrored ABOVE the
  * track — a bottom scrollbar would sever the selected step's connection to
  * the panel docked below it.
@@ -106,8 +105,11 @@ function TrackerScroll({
   /** Step to keep in the middle of the viewport. */
   centerStepId?: string | null;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [panning, setPanning] = useState(false);
   const [box, setBox] = useState({ left: 0, client: 0, scroll: 0 });
+  const centeredLayout = useRef<string | null>(null);
   const max = Math.max(0, box.scroll - box.client);
   const overflowing = max > 1;
   const thumbFrac = box.scroll > 0 ? Math.min(1, box.client / box.scroll) : 1;
@@ -116,8 +118,47 @@ function TrackerScroll({
   const measure = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
+    let leading = 0;
+    let trailing = 0;
+    const track = vp.firstElementChild;
+    const stops = track?.querySelectorAll<HTMLElement>('[data-step-id]');
+    if (centerStepId && track && stops?.length) {
+      const rect = track.getBoundingClientRect();
+      const style = getComputedStyle(track);
+      const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
+      const rightPadding = Number.parseFloat(style.paddingRight) || 0;
+      if (rect.width - leftPadding - rightPadding > vp.clientWidth) {
+        const first = stops[0]!.getBoundingClientRect();
+        const last = stops[stops.length - 1]!.getBoundingClientRect();
+        leading = Math.max(
+          0,
+          Math.round(vp.clientWidth / 2 - (first.left + first.width / 2 - rect.left - leftPadding)),
+        );
+        trailing = Math.max(
+          0,
+          Math.round(vp.clientWidth / 2 - (rect.right - rightPadding - last.left - last.width / 2)),
+        );
+      }
+    }
+    // Apply end spacing before measuring the target: a second React layout
+    // pass can otherwise leave a reopened route at its unpadded offset.
+    vp.style.setProperty('--tracker-leading-space', `${leading}px`);
+    vp.style.setProperty('--tracker-trailing-space', `${trailing}px`);
+    const target = Array.from(stops ?? []).find((stop) => stop.dataset.stepId === centerStepId);
+    if (target) {
+      const vpRect = vp.getBoundingClientRect();
+      const rect = target.getBoundingClientRect();
+      const offset = rect.left + rect.width / 2 - vpRect.left + vp.scrollLeft;
+      const layout = [centerStepId, vp.clientWidth, vp.scrollWidth, Math.round(offset)].join(':');
+      if (layout !== centeredLayout.current) {
+        vp.scrollLeft = offset - vp.clientWidth / 2;
+        centeredLayout.current = layout;
+      }
+    } else {
+      centeredLayout.current = null;
+    }
     setBox({ left: vp.scrollLeft, client: vp.clientWidth, scroll: vp.scrollWidth });
-  }, []);
+  }, [centerStepId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(remeasureKey): a step-count change alters scrollWidth without resizing the viewport box, so the ResizeObserver never fires for it — the extra dep IS the re-measure trigger.
   useLayoutEffect(() => {
@@ -126,30 +167,100 @@ function TrackerScroll({
     if (!vp || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(vp);
+    // End spacing changes the border box without changing the content box.
+    if (vp.firstElementChild) ro.observe(vp.firstElementChild, { box: 'border-box' });
     return () => ro.disconnect();
   }, [measure, remeasureKey]);
 
-  // Re-centre when the step changes, when the content grows, or when the
-  // viewport is resized — box.client is the resize signal. Matched against
-  // the data attribute rather than a selector so a step id needs no escaping.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: neither the step count nor the viewport width is read here, but both change where the centred step sits — they ARE the re-centre triggers.
   useLayoutEffect(() => {
-    if (!centerStepId) return;
+    const scroll = scrollRef.current;
     const vp = viewportRef.current;
-    if (!vp) return;
-    const el = Array.from(vp.querySelectorAll<HTMLElement>('[data-step-id]')).find(
-      (candidate) => candidate.dataset.stepId === centerStepId,
-    );
-    if (!el) return;
-    const vpRect = vp.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const delta = elRect.left + elRect.width / 2 - (vpRect.left + vpRect.width / 2);
-    if (Math.abs(delta) > 1) vp.scrollLeft += delta;
-  }, [centerStepId, remeasureKey, box.client]);
+    if (!scroll || !vp) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? Number.parseFloat(getComputedStyle(vp).lineHeight) || 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? vp.clientWidth
+            : 1;
+      const left = Math.max(
+        0,
+        Math.min(vp.scrollWidth - vp.clientWidth, vp.scrollLeft + delta * unit),
+      );
+      if (Math.abs(left - vp.scrollLeft) < 0.5) return;
+      event.preventDefault();
+      event.stopPropagation();
+      vp.scrollLeft = left;
+    };
+    // React's delegated wheel listener is passive; this listener must be able
+    // to stop the surrounding page from scrolling when the route consumes it.
+    scroll.addEventListener('wheel', onWheel, { passive: false });
+    return () => scroll.removeEventListener('wheel', onWheel);
+  }, []);
 
-  const drag = useRef<{ x: number; left: number } | null>(null);
+  const pan = useRef<{ x: number; left: number; pointerId: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const onPanDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    suppressClick.current = false;
+    // Touch retains the browser's native swipe, momentum, and pinch zoom.
+    if (event.button !== 0 || event.pointerType === 'touch') return;
+    const target = event.target as Element;
+    if (
+      target.closest(
+        'select, input, textarea, a, [role="combobox"], [role="listbox"], [contenteditable="true"], [draggable="true"]',
+      )
+    )
+      return;
+    const vp = event.currentTarget;
+    if (vp.scrollWidth <= vp.clientWidth) return;
+    pan.current = {
+      x: event.clientX,
+      left: vp.scrollLeft,
+      pointerId: event.pointerId,
+      moved: false,
+    };
+  };
+  const onPanMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = pan.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      onPanEnd(event);
+      return;
+    }
+    const delta = event.clientX - current.x;
+    if (!current.moved) {
+      if (Math.abs(delta) < 6) return;
+      current.moved = true;
+      suppressClick.current = true;
+      setPanning(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+    event.currentTarget.scrollLeft = current.left - delta;
+  };
+  const onPanEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pan.current?.pointerId !== event.pointerId) return;
+    pan.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const drag = useRef<{ x: number; left: number; ratio: number } | null>(null);
   const onThumbDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    drag.current = { x: e.clientX, left: box.left };
+    const vp = viewportRef.current;
+    const track = e.currentTarget.parentElement;
+    if (e.button !== 0 || !vp || !track) return;
+    const usable = track.clientWidth - e.currentTarget.offsetWidth;
+    if (usable <= 0) return;
+    drag.current = {
+      x: e.clientX,
+      left: vp.scrollLeft,
+      ratio: (vp.scrollWidth - vp.clientWidth) / usable,
+    };
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
@@ -157,44 +268,78 @@ function TrackerScroll({
     const d = drag.current;
     const vp = viewportRef.current;
     if (!d || !vp) return;
-    const usable = box.client * (1 - thumbFrac);
-    if (usable <= 0) return;
-    vp.scrollLeft = d.left + ((e.clientX - d.x) / usable) * max;
+    vp.scrollLeft = d.left + (e.clientX - d.x) * d.ratio;
   };
-  const onThumbUp = () => {
+  const onThumbUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   return (
-    <div className="bench-scroll">
+    <div className="bench-scroll" ref={scrollRef}>
       {overflowing && (
         <div className="bench-scrollbar" aria-hidden="true">
           <div
             className="bench-scrollbar-thumb"
             style={{
               width: `${thumbFrac * 100}%`,
-              left: `${thumbLeftFrac * (1 - thumbFrac) * 100}%`,
+              left: `calc((100% - max(28px, ${thumbFrac * 100}%)) * ${thumbLeftFrac})`,
             }}
             onPointerDown={onThumbDown}
             onPointerMove={onThumbMove}
             onPointerUp={onThumbUp}
             onPointerCancel={onThumbUp}
+            onLostPointerCapture={onThumbUp}
           />
         </div>
       )}
-      <div className="bench-viewport" ref={viewportRef} onScroll={measure}>
+      <div
+        className={`bench-viewport${panning ? ' is-panning' : ''}`}
+        ref={viewportRef}
+        onPointerDown={onPanDown}
+        onPointerMove={onPanMove}
+        onPointerUp={onPanEnd}
+        onPointerCancel={onPanEnd}
+        onLostPointerCapture={onPanEnd}
+        onClickCapture={(event) => {
+          if (!suppressClick.current) return;
+          suppressClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onScroll={(event) => {
+          const left = event.currentTarget.scrollLeft;
+          setBox((current) => ({ ...current, left }));
+        }}
+      >
         {children}
       </div>
     </div>
   );
 }
 
-function statusGlyph(status: StepStatus): string {
+function statusGlyph(status: StepStatus): ReactNode {
   switch (status) {
     case 'done':
-      return '✓';
+      return (
+        <svg viewBox="0 0 24 24" fill="none" className="step-stop-glyph" aria-hidden="true">
+          <path
+            d="m6 12 4 4 8-8"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
     case 'active':
-      return '▶';
+      return (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="step-stop-glyph" aria-hidden="true">
+          <path d="M9 5.5a1 1 0 0 1 1.5-.86l9 5.5a1 1 0 0 1 0 1.72l-9 5.5A1 1 0 0 1 9 16.5Z" />
+        </svg>
+      );
     case 'pending':
       return '';
   }
@@ -278,11 +423,22 @@ export function StepTracker<T extends StepTrackerStep>({
       status === 'active' ? ' (active)' : status === 'done' ? ' (completed)' : ''
     }${onReorder ? ' — drag or Alt+Arrow to reorder' : ''}`;
 
+  const connectors = (idx: number) => ({
+    'data-incoming': idx > 0 ? (statusOf?.(steps[idx - 1]!, idx - 1) ?? 'pending') : undefined,
+    'data-outgoing':
+      idx < steps.length - 1 || onAddStep || terminal
+        ? (statusOf?.(steps[idx]!, idx) ?? 'pending')
+        : undefined,
+  });
+  const lastStatus =
+    steps.length > 0
+      ? (statusOf?.(steps[steps.length - 1]!, steps.length - 1) ?? 'pending')
+      : undefined;
+
   if (variant === 'bench') {
     return (
       <TrackerScroll remeasureKey={steps.length} centerStepId={centerStepId}>
         <nav className="step-tracker step-bench" aria-label={ariaLabel} role="tablist">
-          <span className="step-rail" aria-hidden="true" />
           {steps.length === 0 && (
             <span className="step-tracker-empty muted small">No steps yet —</span>
           )}
@@ -313,7 +469,7 @@ export function StepTracker<T extends StepTrackerStep>({
                       </>
                     ))}
                 </span>
-                <span className="bench-step-stage">
+                <span className="bench-step-stage step-stop-stage" {...connectors(idx)}>
                   <button
                     type="button"
                     className="bench-step-marker"
@@ -322,14 +478,17 @@ export function StepTracker<T extends StepTrackerStep>({
                     disabled={busy}
                     role="tab"
                     aria-selected={selected}
+                    aria-current={status === 'active' ? 'step' : undefined}
+                    aria-label={stepTitle(step, status, isEntry)}
                     {...dndProps(step.id)}
                     title={stepTitle(step, status, isEntry)}
                   >
-                    {meta.figure ?? (
-                      <span className="bench-peg" aria-hidden="true">
-                        {status === 'done' ? '✓' : isEntry && status === 'pending' ? '▸' : ''}
-                      </span>
-                    )}
+                    <span
+                      className={`bench-peg step-stop${meta.figure ? ' step-stop-portrait' : ''}`}
+                      aria-hidden="true"
+                    >
+                      {meta.figure ?? (isEntry && status === 'pending' ? '▸' : statusGlyph(status))}
+                    </span>
                   </button>
                 </span>
                 <button
@@ -350,7 +509,11 @@ export function StepTracker<T extends StepTrackerStep>({
           {onAddStep && (
             <div className="bench-step bench-step-add">
               <span className="bench-step-assignee" />
-              <span className="bench-step-stage">
+              <span
+                className="bench-step-stage step-stop-stage"
+                data-incoming={lastStatus}
+                data-outgoing={terminal ? 'pending' : undefined}
+              >
                 <button
                   type="button"
                   className="bench-step-marker"
@@ -359,7 +522,7 @@ export function StepTracker<T extends StepTrackerStep>({
                   title="Add a step"
                   aria-label="Add a step"
                 >
-                  <span className="bench-peg is-add" aria-hidden="true">
+                  <span className="bench-peg step-stop is-add" aria-hidden="true">
                     +
                   </span>
                 </button>
@@ -373,9 +536,12 @@ export function StepTracker<T extends StepTrackerStep>({
           {terminal && (
             <div className={`bench-step bench-step-terminal terminal-${terminal.tone}`}>
               <span className="bench-step-assignee" />
-              <span className="bench-step-stage">
-                <span className="bench-peg bench-peg-terminal" aria-hidden="true">
-                  {terminal.tone === 'complete' ? '✓' : '✕'}
+              <span
+                className="bench-step-stage step-stop-stage"
+                data-incoming={onAddStep ? 'pending' : lastStatus}
+              >
+                <span className="bench-peg step-stop bench-peg-terminal" aria-hidden="true">
+                  {terminal.tone === 'complete' ? statusGlyph('done') : '✕'}
                 </span>
               </span>
               <span className="bench-step-foot">
@@ -419,28 +585,24 @@ export function StepTracker<T extends StepTrackerStep>({
               onClick={() => onSelect(step.id)}
               onKeyDown={(e) => handleKey(e, idx)}
               disabled={busy}
-              {...(asTabs
-                ? { role: 'tab' as const, 'aria-selected': selected }
-                : { 'aria-current': selected ? ('step' as const) : undefined })}
+              {...(asTabs ? { role: 'tab' as const, 'aria-selected': selected } : {})}
+              aria-current={status === 'active' ? 'step' : undefined}
               {...dndProps(step.id)}
               title={stepTitle(step, status, isEntry)}
             >
-              <span className="step-dot-badge" aria-hidden="true">
-                {isEntry && status === 'pending' ? '▸' : statusGlyph(status)}
+              <span className="step-stop-stage" {...connectors(idx)}>
+                <span className="step-dot-badge step-stop" aria-hidden="true">
+                  {isEntry && status === 'pending' ? '▸' : statusGlyph(status)}
+                </span>
               </span>
               <span className="step-dot-label">{step.name}</span>
+              {status === 'active' && <span className="step-dot-status">Active</span>}
             </button>
-            {idx < steps.length - 1 && (
-              <span className={`step-dot-connector status-${status}`} aria-hidden="true" />
-            )}
           </span>
         );
       })}
       {onAddStep && (
-        <>
-          {steps.length > 0 && (
-            <span className="step-dot-connector status-pending" aria-hidden="true" />
-          )}
+        <span className="step-dot-wrap">
           <button
             type="button"
             className="step-dot step-dot-add"
@@ -449,12 +611,14 @@ export function StepTracker<T extends StepTrackerStep>({
             title="Add a step"
             aria-label="Add a step"
           >
-            <span className="step-dot-badge" aria-hidden="true">
-              +
+            <span className="step-stop-stage" data-incoming={lastStatus}>
+              <span className="step-dot-badge step-stop is-add" aria-hidden="true">
+                +
+              </span>
             </span>
             <span className="step-dot-label muted small">{addLabel}</span>
           </button>
-        </>
+        </span>
       )}
     </nav>
   );

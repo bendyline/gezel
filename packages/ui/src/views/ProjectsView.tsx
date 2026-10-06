@@ -55,8 +55,6 @@ import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.j
 import { type ProjectSectionTab, ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
-  type OutsideInLayout,
-  chooseOutsideInSource,
   createArtifactsContentContainer,
   createDataReferenceContainer,
   createDocumentLinkProvider,
@@ -65,9 +63,7 @@ import {
   createVersionCompatibleContentContainer,
   deriveContainerScope,
   documentVersionBasename,
-  importOutsideInDocument,
   isOutsideInInternalPath,
-  isOutsideInMarkdownEditingEnabled,
   relativePath,
   renderOutsideInDocument,
   resolveOutsideInLayout,
@@ -87,14 +83,11 @@ import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.j
 import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { useDiffpackCount } from '../components/diffpacks/useDiffpacks.js';
 import {
-  BINARY_FILE,
   type FileBrowserCustomList,
   FileBrowserPane,
   MEDIA_IMAGE,
   NON_TEXT_CONTENT,
   NonTextFilePreview,
-  looksBinary,
-  mediaSentinel,
   projectFileSource,
   useFileMutations,
 } from '../components/file-browser/index.js';
@@ -135,6 +128,11 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
+import {
+  type OutsideInOpenFile,
+  loadProjectFile,
+  prepareProjectOutsideInDocument,
+} from './projects/project-file-opening.js';
 import { formatPreviewComplaint, formatPreviewLog } from './projects/project-preview-log.js';
 
 const loadProjectChatModule = () => import('../components/ProjectChat.js');
@@ -217,14 +215,6 @@ interface WorkspaceSourceRevealRequest {
   path: string;
   line: number;
   requestId: number;
-}
-interface OutsideInOpenFile {
-  layout: OutsideInLayout;
-  sourcePath: string;
-  editingEnabled: boolean;
-}
-interface PreparedOutsideInDocument extends OutsideInOpenFile {
-  content: string;
 }
 type ProjectTab =
   | 'settings'
@@ -834,6 +824,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [showWorkspaceHidden, showArtifactsHidden],
   );
+  // Keep focusFile stable: the cross-project intent effect must not rerun
+  // when a file-tree preference changes.
+  const refreshFilesRef = useRef(refreshFiles);
+  useEffect(() => {
+    refreshFilesRef.current = refreshFiles;
+  }, [refreshFiles]);
 
   // Saving a reply to the artifacts drawer happens in the chat timeline, which
   // has no way to reach this view's listing. It announces the write instead,
@@ -1064,9 +1060,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // viewer — otherwise the user would see a workspace file after
   // jumping to Artifacts and get confused about what source it came
   // from. (Previously handled by the inner Tabs.Root's onValueChange.)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fileTab is the reset trigger.
   useEffect(() => {
-    setOpenFile(null);
+    // A navigation request may have already loaded the destination file by
+    // the time this effect runs. Keep it if it belongs to the new panel.
+    setOpenFile((current) => (current?.source === fileTab ? current : null));
   }, [fileTab]);
 
   // Refresh the workspace-writes journal when the user lands on the
@@ -1214,18 +1211,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     ) => {
       setTab(source);
       setQuestionReturnPath(fromQuestion ? path : null);
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      const media = mediaSentinel(name);
-      if (media) {
-        setOpenFile({ path, content: media, source });
+      try {
+        const file = await loadProjectFile(projectId, path, source);
+        setOpenFile(file);
+        setError(null);
+        if (file.outsideIn) await refreshFilesRef.current(projectId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not open this file.');
         return;
       }
-      const res =
-        source === 'workspace'
-          ? await api.readProjectWorkspaceFile(projectId, path)
-          : await api.readProjectArtifact(projectId, path);
-      const content = looksBinary(res.content) ? BINARY_FILE : res.content;
-      setOpenFile({ ...res, content, source });
       // Land on the match, not the top of the file: a search hit carries its
       // line, and the editor-side reveal bridge centers it once mounted.
       if (line) {
@@ -1519,127 +1513,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
-  const prepareOutsideInDocument = useCallback(
-    async (entry: FileEntry, source: FileTab): Promise<PreparedOutsideInDocument> => {
-      if (!selected) throw new Error('Open a project before viewing this document.');
-      const layout = resolveOutsideInLayout(entry.path);
-      if (!layout) throw new Error('This file does not support a Markdown companion.');
-      const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
-      let sourcePath = chooseOutsideInSource(
-        layout,
-        entries.filter((candidate) => !candidate.isDirectory).map((candidate) => candidate.path),
-      );
-      let content: string;
-      if (sourcePath) {
-        const response =
-          source === 'workspace'
-            ? await api.readProjectWorkspaceFile(selected.id, sourcePath)
-            : await api.readProjectArtifact(selected.id, sourcePath);
-        content = response.content;
-      } else {
-        if (!canWriteProjectFiles(source)) {
-          throw new Error(
-            'Enable workspace writes for this external project before importing its Markdown companion.',
-          );
-        }
-        const blob =
-          source === 'workspace'
-            ? await api.fetchProjectWorkspaceBlob(selected.id, entry.path)
-            : await api.fetchProjectArtifactBlob(selected.id, entry.path);
-        const imported = await importOutsideInDocument(await blob.arrayBuffer(), layout);
-        const container = createProjectContentContainer({
-          projectId: selected.id,
-          root: layout.companionDirectory,
-          client: api,
-          primaryDocumentFilename: layout.markdownFilename,
-          source,
-        });
-        for (const importedEntry of await imported.container.listFiles()) {
-          if (/\.md$/i.test(importedEntry.path)) continue;
-          const data = await imported.container.readFile(importedEntry.path);
-          if (!data) continue;
-          await container.writeFile(importedEntry.path, data, importedEntry.mimeType);
-        }
-        await container.writeDocument(imported.markdown, layout.markdownFilename);
-        sourcePath = layout.markdownPath;
-        content = imported.markdown;
-        await refreshFiles(selected.id);
-      }
-      const linkedContent = withOutsideInMetadata(content, layout);
-      if (linkedContent !== content && canWriteProjectFiles(source)) {
-        if (source === 'workspace') {
-          await api.writeProjectWorkspaceFile(selected.id, {
-            path: sourcePath,
-            content: linkedContent,
-          });
-        } else {
-          await api.writeProjectArtifact(selected.id, sourcePath, linkedContent);
-        }
-      }
-      return {
-        layout: { ...layout, markdownPath: sourcePath },
-        sourcePath,
-        content: linkedContent,
-        editingEnabled:
-          supportsOutsideInMarkdownEditing(layout.format) &&
-          isOutsideInMarkdownEditingEnabled(linkedContent),
-      };
-    },
-    [selected, workspaceFiles, artifactFiles, canWriteProjectFiles, refreshFiles],
-  );
-
   const openFileEntry = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
-      const layout = resolveOutsideInLayout(entry.path);
-      const entries = source === 'workspace' ? workspaceFiles : artifactFiles;
-      // Authored HTML remains runnable unless its companion records document-editing intent.
-      const openCompanion =
-        layout &&
-        (layout.format !== 'html' ||
-          chooseOutsideInSource(
-            layout,
-            entries
-              .filter((candidate) => !candidate.isDirectory)
-              .map((candidate) => candidate.path),
-          ));
-      if (openCompanion) {
-        try {
-          const prepared = await prepareOutsideInDocument(entry, source);
-          setOpenFile({
-            path: entry.path,
-            content: prepared.content,
-            source,
-            outsideIn: {
-              layout: prepared.layout,
-              sourcePath: prepared.sourcePath,
-              editingEnabled: prepared.editingEnabled,
-            },
-          });
-          setError(null);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Could not open this rendered document.');
-        }
-        return;
-      }
-      // Media is rendered from a binary blob, never read as text. Reading an
-      // MP4/MP3/etc. through the text API and feeding it to EditorShell paints
-      // the raw bytes as garbled characters.
-      const media = mediaSentinel(entry.name);
-      if (media) {
-        setOpenFile({ path: entry.path, content: media, source });
-      } else {
-        const res =
-          source === 'workspace'
-            ? await api.readProjectWorkspaceFile(selected.id, entry.path)
-            : await api.readProjectArtifact(selected.id, entry.path);
-        // Backstop for binary types we don't recognize by extension: keep raw
-        // bytes out of the text editor.
-        const content = looksBinary(res.content) ? BINARY_FILE : res.content;
-        setOpenFile({ ...res, content, source });
-      }
+      await focusFile(selected.id, entry.path, source);
     },
-    [selected, workspaceFiles, artifactFiles, prepareOutsideInDocument],
+    [selected, focusFile],
   );
 
   const allowOutsideInMarkdownEditing = useCallback(
@@ -1655,7 +1534,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         return;
       }
       try {
-        const prepared = await prepareOutsideInDocument(entry, source);
+        const prepared = await prepareProjectOutsideInDocument(selected.id, entry.path, source);
         const original =
           source === 'workspace'
             ? await api.fetchProjectWorkspaceBlob(selected.id, prepared.layout.targetPath)
@@ -1706,7 +1585,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setError(err instanceof Error ? err.message : 'Could not enable Markdown editing.');
       }
     },
-    [selected, canWriteProjectFiles, prepareOutsideInDocument, refreshFiles],
+    [selected, canWriteProjectFiles, refreshFiles],
   );
 
   // Stable identity + functional setState. Inline arrow + stale closure here
@@ -2377,6 +2256,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
+            {error && (detailOnly || sidebarIsCollapsed) && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
             {/* The row exists for the back button. In a single-project tab it
                 would hold only the name, and a phone can't spare the height. */}
             {effectiveCompact && !detailOnly && (

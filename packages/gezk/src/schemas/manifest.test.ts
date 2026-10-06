@@ -64,6 +64,18 @@ function manifestFor(formatVersion: '0.5' | '0.6' | '0.7', patch: Record<string,
     counts: { documents: 1, chunks: 1, shards: 1 },
     files: [{ path: 'index/router.db', sizeBytes: 1, sha256: SHA }],
     requires: { formatVersion, features: [] },
+    ...(formatVersion === '0.7'
+      ? {
+          spatial: {
+            schema: 'document-points@1',
+            crs: 'EPSG:4326',
+            distanceModel: 'sphere-6371000',
+            locationCount: 0,
+            locatedDocuments: 0,
+            coverage: [],
+          },
+        }
+      : {}),
     ...patch,
   };
 }
@@ -90,6 +102,22 @@ describe('format generations', () => {
 });
 
 describe('KnowledgeCatalogManifestSchema across generations', () => {
+  it('requires the 0.7 spatial summary and refuses it in published older formats', () => {
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.7', { spatial: undefined })).success,
+    ).toBe(false);
+    const spatial = {
+      schema: 'document-points@1',
+      crs: 'EPSG:4326',
+      distanceModel: 'sphere-6371000',
+      locationCount: 1,
+      locatedDocuments: 1,
+      coverage: [],
+    };
+    expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.6', { spatial })).success).toBe(
+      false,
+    );
+  });
   it('parses 0.5, 0.6 and 0.7 manifests', () => {
     expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.5')).success).toBe(true);
     expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.6')).success).toBe(true);

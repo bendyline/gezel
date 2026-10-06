@@ -144,6 +144,21 @@ describe('worker sessions are not offered coordinator-only tools', () => {
 });
 
 describe('coordinator sessions keep the orchestration tools', () => {
+  it('keeps advisers and craftbook launch callable for a Conversationalist', async () => {
+    const allow = (await surface({ role: 'Conversationalist', rolesAsTools: true }))!;
+    for (const name of [
+      'search',
+      'read_document',
+      'ask_specialist',
+      'ask_gezel',
+      'invoke_craftbook',
+    ]) {
+      expect(allow.has(name), name).toBe(true);
+    }
+    expect(allow.has('create_task')).toBe(false);
+    expect(allow.has('ensure_gezel')).toBe(false);
+    expect(allow.has('write_file')).toBe(false);
+  });
   it('a crew Voorman keeps every coordinator-only tool its kit grants', async () => {
     const allow = (await surface({ role: 'Voorman' }))!;
     for (const name of [

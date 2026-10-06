@@ -12,6 +12,7 @@ import type {
   TerminalToolPolicy,
   ToolArgsDeltaMeta,
   TurnUsage,
+  WireTranscriptEntry,
 } from '@bendyline/gezel/local-loop';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import type { CodexReasoningEffort } from './codex-cli/reasoning.js';
@@ -30,6 +31,7 @@ export type {
   TerminalToolPolicy,
   ToolArgsDeltaMeta,
   TurnUsage,
+  WireTranscriptEntry,
 };
 
 export type { ProviderName };
@@ -223,6 +225,15 @@ export interface SessionOpts {
       }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
+  /**
+   * Called with the session's exact transcript (see
+   * `LLMSession.getWireTranscript`) right before each engine request, so the
+   * caller can checkpoint it. After a restart, a session reseeded from that
+   * checkpoint renders the same prompt the engine last cached — while one
+   * rebuilt from saved history re-prefills everything past the system prompt.
+   * Synchronous and cheap by contract: the caller copies and persists later.
+   */
+  onWireTranscript?: (transcript: WireTranscriptEntry[]) => void;
   /**
    * Caller-provided tool definitions in OpenAI's `function` shape.
    *

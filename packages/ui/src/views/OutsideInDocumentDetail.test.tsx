@@ -153,6 +153,31 @@ describe('OutsideInDocumentDetail', () => {
     vi.useRealTimers();
   });
 
+  it('opens a PPTX companion in slideshow preview', async () => {
+    render(
+      <OutsideInDocumentDetail
+        path="brief.pptx"
+        layout={{ ...LAYOUT, format: 'pptx', targetPath: 'brief.pptx' }}
+      />,
+    );
+    expect(await screen.findByTestId('editor-shell')).toHaveAttribute(
+      'data-initial-view',
+      'preview',
+    );
+    expect(api.fetchDocumentBlob).not.toHaveBeenCalled();
+  });
+
+  it('refuses a binary Markdown companion without mounting the editor or rewriting it', async () => {
+    vi.mocked(api.readDocument).mockResolvedValue({
+      path: LAYOUT.markdownPath,
+      content: `PK\u0003\u0004${'readable XML'.repeat(500)}`,
+    } as never);
+    render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
+    expect(await screen.findByText(/Markdown preview contains binary data/)).toBeInTheDocument();
+    expect(screen.queryByTestId('editor-shell')).toBeNull();
+    expect(api.writeDocument).not.toHaveBeenCalled();
+  });
+
   it('edits the Markdown companion and regenerates the visible DOCX on autosave', async () => {
     render(<OutsideInDocumentDetail path="brief.docx" layout={LAYOUT} />);
     const editor = await screen.findByTestId('editor-shell');

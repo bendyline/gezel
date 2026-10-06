@@ -140,6 +140,7 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
       await call('unmount', [key]);
     },
     mounted: async () => (await call('mounted', [])) as string[],
+    prewarm: async (key) => (await call('prewarm', [key])) as number,
     validate: async (rootDir, deep) =>
       // biome-ignore lint/suspicious/noExplicitAny: worker returns the structured report verbatim
       (await call('validate', [rootDir, deep])) as any,
@@ -149,6 +150,10 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
     documentsPage: async (key, opts) =>
       // biome-ignore lint/suspicious/noExplicitAny: structured-clone round trip preserves the shape
       (await call('documentsPage', [key, opts])) as any,
+    nearbyDocuments: async (key, radius, opts) =>
+      (await call('nearbyDocuments', [key, radius, opts])) as Awaited<
+        ReturnType<KnowledgeCatalogHost['nearbyDocuments']>
+      >,
     getDocument: async (key, documentId) =>
       // biome-ignore lint/suspicious/noExplicitAny: structured-clone round trip preserves the shape
       (await call('getDocument', [key, documentId])) as any,

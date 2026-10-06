@@ -198,6 +198,25 @@ describe('ensureProjectVoorman', () => {
     expect(detail?.voormanGezelId).toBeUndefined();
   });
 
+  it('does not recruit or promote a voorman in a Just chat project', async () => {
+    const project = await store.createProject({ name: 'Conversation' });
+    await store.updateProject(project.id, {
+      projectType: {
+        id: 'just-chat',
+        version: '1.0.2',
+        source: 'bundled',
+        appliedAt: '2026-10-05T00:00:00Z',
+      },
+    });
+    await ensureProjectVoorman(deps(), project.id);
+    expect(await store.listGezels()).toHaveLength(0);
+    const companion = await store.createGezel({ name: 'Mira', role: 'Conversationalist' });
+    await store.addGezelToProject(project.id, companion.id);
+    await ensureProjectVoorman(deps(), project.id);
+    expect((await store.getProject(project.id))?.voormanGezelId).toBeUndefined();
+    expect((await store.getProject(project.id))?.gezelIds).toContain(companion.id);
+  });
+
   it('still promotes an existing roster member for a solo project', async () => {
     const project = await store.createProject({ name: 'Checkers', mode: 'solo' });
     const damspeler = await store.createGezel({ name: 'Ezekiel', role: 'Damspeler' });

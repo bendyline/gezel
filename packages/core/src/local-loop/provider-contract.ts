@@ -117,13 +117,27 @@ export interface SendAndWaitOpts {
    * supposed to wrap up, not re-analyze). The first iteration keeps
    * the catalog `tuning.sampling.maxTokens` so a tool call is never
    * cut off before it starts. Game reaction turns pass a tight value
-   * (~300) so a verbose medium model's post-move analysis wall gets
-   * physically bounded; the post-action rumination fold turns the
-   * truncated remainder into collapsed reasoning.
+   * (~300) to bound post-move table talk. Ordinary research and chat
+   * replies keep the model's normal output budget.
    */
   continuationMaxTokens?: number;
   queue?: {
     lane: 'interactive' | 'background';
+    /**
+     * Who is waiting on this turn, for engines that schedule several
+     * requests themselves (the MLX sidecar). `interactive`: a person sent it
+     * and is watching. `background`: task steps, nudges, chores — work
+     * nobody is reading token by token. A running engine wave made only of
+     * background work steps aside for a waiting interactive request, and
+     * resumes afterwards.
+     *
+     * Distinct from `lane`, which only orders this process's queue: task
+     * step handoffs take the interactive LANE so they are not starved by
+     * chores, yet a person typing must still go ahead of them at the
+     * engine. Omitted means interactive — the direction that never parks a
+     * turn somebody is waiting on.
+     */
+    enginePriority?: 'interactive' | 'background';
     /**
      * Truly-deferrable housekeeping (nudges, extraction, icon/about
      * generation). On local engine queues with ambient admission
@@ -209,6 +223,17 @@ export interface LLMSession {
    * including system bands, prior messages, and tool schemas.
    */
   estimatePromptChars?(): number;
+  /**
+   * The exact transcript this session would send after its system bands,
+   * verbatim — real tool arguments, untruncated tool results, mid-turn steers.
+   * Seeding a new session's `priorMessages` with it reproduces the same
+   * prompt tokens, which is what lets an engine's persisted KV cache be
+   * reused after a restart; the rebuild from saved history cannot do that,
+   * because it dedupes, budgets, and labels tool results by design.
+   * `undefined` when the transcript cannot round-trip (images, mid-transcript
+   * system messages).
+   */
+  getWireTranscript?(): WireTranscriptEntry[] | undefined;
   /**
    * Best-effort prompt-cache prefill for the session's current exact prompt.
    * Remote sessions use this to send their A-owned prompt/transcript/tool
@@ -409,6 +434,16 @@ export interface ExternalToolCall {
   name: string;
   arguments: string;
 }
+
+/**
+ * One message of a stateless session's live transcript — everything after its
+ * system bands — in exactly the shape `SessionOpts.priorMessages` takes back.
+ * See {@link LLMSession.getWireTranscript}.
+ */
+export type WireTranscriptEntry =
+  | { role: 'user' | 'assistant'; content: string }
+  | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
+  | { role: 'tool'; content: string; toolCallId: string };
 
 /** Identity attached to a live structured tool-argument fragment. */
 export interface ToolArgsDeltaMeta {

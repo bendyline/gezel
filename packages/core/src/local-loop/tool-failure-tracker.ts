@@ -264,7 +264,12 @@ export class ToolFailureTracker {
         count: fails,
       };
     }
-    return { output, shouldAbort: false, count: fails };
+    return {
+      output,
+      shouldAbort: false,
+      count: fails,
+      ...(sourceFailureKind ? { sourceFailureKind } : {}),
+    };
   }
 
   /**

@@ -32,7 +32,9 @@ Its shape follows from what it must never do:
 
 - **Never hold a turn.** A cold model answers `cold` and warms in the
   background; results pass through untouched. Budgets per surface (250 / 700
-  / 400 ms) bound the scoring, with a deadline between batches.
+  / 400 ms) bound the scoring, with a deadline between batches. A batch
+  that would not finish by the deadline is not started, because the caller
+  discards a late reply whole, scores already computed included.
 - **Never drop on an unmeasured score.** Thresholds come from the retrieval
   bench and map the model's activated scores onto fixed relevance anchors
   (drop 0.1, keep 0.3, strong 0.6), so `strong` keeps meaning what the tier

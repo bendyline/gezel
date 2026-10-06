@@ -10,6 +10,9 @@ describe('loadBuiltinToolContractsForLint', () => {
     const byName = new Map(contracts.map((tool) => [tool.name, tool]));
 
     expect(byName.has('write_file')).toBe(true);
+    expect(byName.has('knowledge_nearby')).toBe(true);
+    expect(byName.get('knowledge_nearby')?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get('knowledge_nearby')?.inputSchema.required).toContain('spatial');
     expect(byName.has('draft_email')).toBe(true);
     expect(byName.has('draft_post')).toBe(true);
     expect(byName.has('publish_post')).toBe(true);

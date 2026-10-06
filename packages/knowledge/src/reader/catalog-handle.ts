@@ -25,6 +25,8 @@ import { brotliDecompressSync } from 'node:zlib';
 import {
   type GezkIndexSchemaVersion,
   KnowledgeEmbeddingProfileSchema,
+  type KnowledgeLocation,
+  type KnowledgeRadius,
   MAX_KNOWLEDGE_ASSET_BYTES,
   assetContentType,
   embeddingProfileCenter,
@@ -40,8 +42,14 @@ import {
 } from '../format/constants.js';
 import { centerVector, rerankScore } from '../format/quantize.js';
 import { type ShardBitIndex, asymmetricTopK, hammingTopK } from './bit-scan.js';
-import { documentFtsTopIds, sanitizeFtsQuery } from './fts-query.js';
+import {
+  compareScores,
+  documentFtsTopIds,
+  namedTitleMatches,
+  selectiveFtsQuery,
+} from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
+import { DocumentSpatialIndex, type SpatialMatch } from './spatial-index.js';
 
 export interface CatalogTopic {
   id: string;
@@ -71,6 +79,7 @@ export interface CatalogDocumentMeta {
   attribution: Record<string, string> | null;
   /** Producer-defined metadata (`meta_json`), opaque to the reader. */
   meta: Record<string, unknown> | null;
+  locations?: KnowledgeLocation[];
 }
 
 export interface CatalogAssetInfo {
@@ -113,10 +122,20 @@ interface ShardInfo {
 
 /** Resident sign-bit budget across mounted shards before the oldest is dropped. */
 const BIT_INDEX_BUDGET_BYTES = 256 * 1024 * 1024;
+/** Chunk-FTS term row counts cached per handle before the cache is reset. */
+const CHUNK_TERM_ROWS_CACHE_MAX = 50_000;
+/**
+ * Shards a single-catalog search adds for the pages its query names by
+ * title (`titleRouteShards`), on top of the centroid-routed budget.
+ */
+export const TITLE_ROUTE_SHARDS = 1;
 
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
   private readonly bitIndexes = new Map<string, ShardBitIndex>();
+  /** `shard path \0 phrase` → rows the phrase matches in that shard's `fts_chunks`. */
+  private readonly chunkTermRows = new Map<string, number>();
+  private readonly spatial: DocumentSpatialIndex;
   private assetsByPath: Map<string, CatalogAssetInfo> | null = null;
   /** Lazily parsed from the profile echo; `undefined` until first needed. */
   private binaryCenterCache: Float32Array | null | undefined;
@@ -130,6 +149,7 @@ export class CatalogHandle {
     private readonly router: CatalogDb,
   ) {
     this.schemaVersion = router.schemaVersion;
+    this.spatial = new DocumentSpatialIndex(router.db, router.schemaVersion === 3);
     this.meta = {};
     for (const row of router.db.prepare('SELECT key, value FROM meta').all() as Array<{
       key: string;
@@ -248,6 +268,25 @@ export class CatalogHandle {
     }
     this.bitIndexes.set(shard.path, index);
     return index;
+  }
+
+  /**
+   * Load the next shard's sign bits that are not resident yet, if they fit
+   * the resident budget. False when nothing is left to load. One shard per
+   * call, so a host can keep answering queries between shards while it warms
+   * a large catalog, and never evicts a shard it loaded a moment ago.
+   */
+  prewarmNextShard(): boolean {
+    const bytesPerRow = Math.ceil(this.dimensions() / 8);
+    let resident = 0;
+    for (const index of this.bitIndexes.values()) resident += index.bits.byteLength;
+    for (const shard of this.shards) {
+      if (this.bitIndexes.has(shard.path)) continue;
+      if (resident + shard.chunkCount * bytesPerRow > BIT_INDEX_BUDGET_BYTES) return false;
+      this.shardBits(shard);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -419,7 +458,7 @@ export class CatalogHandle {
            FROM documents ${where} ${this.documentOrder()} LIMIT ? OFFSET ?`,
         )
         .all(...(params as []), limit, offset) as Array<Record<string, unknown>>
-    ).map(rowToDocumentMeta);
+    ).map((row) => this.documentMeta(row));
     return { documents, total };
   }
 
@@ -460,7 +499,7 @@ export class CatalogHandle {
         ORDER BY (p.ordinal IS NULL), p.ordinal, d.slug, d.id LIMIT ? OFFSET ?`,
         )
         .all(topicId, limit, offset) as Array<Record<string, unknown>>
-    ).map(rowToDocumentMeta);
+    ).map((row) => this.documentMeta(row));
     return { documents, total };
   }
 
@@ -515,7 +554,7 @@ export class CatalogHandle {
       )
       .get(id) as Record<string, unknown> | undefined;
     if (!row) return null;
-    return { ...rowToDocumentMeta(row), markdown: this.decodeBody(id, row) };
+    return { ...this.documentMeta(row), markdown: this.decodeBody(id, row) };
   }
 
   /**
@@ -692,20 +731,78 @@ export class CatalogHandle {
     return { ...info, bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) };
   }
 
+  private documentMeta(row: Record<string, unknown>): CatalogDocumentMeta {
+    const document = rowToDocumentMeta(row);
+    const locations = this.spatial.locations(document.id);
+    return locations.length ? { ...document, locations } : document;
+  }
+
+  documentLocations(documentId: string): KnowledgeLocation[] {
+    return this.spatial.locations(documentId);
+  }
+  documentLocationRows() {
+    return this.spatial.rows();
+  }
+  spatialIntegrity() {
+    return this.spatial.integrity();
+  }
+  spatialMatches(radius: KnowledgeRadius): Map<string, SpatialMatch> {
+    return this.spatial.matches(radius);
+  }
+
+  nearbyDocuments(
+    radius: KnowledgeRadius,
+    opts: { offset?: number; limit?: number } = {},
+  ): {
+    documents: Array<CatalogDocumentMeta & SpatialMatch>;
+    total: number;
+  } {
+    const offset = Math.max(0, Math.trunc(opts.offset ?? 0));
+    const limit = Math.max(1, Math.min(500, Math.trunc(opts.limit ?? 50)));
+    const ordered = [...this.spatialMatches(radius)].sort(
+      (a, b) =>
+        a[1].distanceMeters - b[1].distanceMeters || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
+    );
+    const get = this.router.db.prepare(
+      `SELECT ${this.documentColumns()} FROM documents d WHERE d.id = ?`,
+    );
+    return {
+      total: ordered.length,
+      documents: ordered.slice(offset, offset + limit).map(([id, match]) => ({
+        ...this.documentMeta(get.get(id) as Record<string, unknown>),
+        ...match,
+      })),
+    };
+  }
+
+  shardsForDocuments(ids: ReadonlySet<string>): number[] {
+    if (!ids.size) return [];
+    return this.router.db
+      .prepare(
+        'SELECT DISTINCT shard_id FROM documents WHERE id IN (SELECT value FROM json_each(?)) ORDER BY shard_id',
+      )
+      .all(JSON.stringify([...ids]))
+      .map((row) => Number(row.shard_id));
+  }
+
   // ── search ────────────────────────────────────────────────────────────────
 
   /**
    * Catalog-wide title/summary/alias FTS — always runs regardless of routing.
    * Name-first: an exact title, then title-weighted BM25 (see fts-query.ts).
    */
-  searchDocumentsFts(query: string, limit = 10): Array<{ documentId: string; rank: number }> {
-    const match = ftsQuery(query);
-    if (!match) return [];
+  searchDocumentsFts(
+    query: string,
+    limit = 10,
+    allowedDocumentIds?: ReadonlySet<string>,
+  ): Array<{ documentId: string; rank: number }> {
     try {
-      return documentFtsTopIds(this.router.db, match, limit, query).map((documentId, i) => ({
-        documentId,
-        rank: i,
-      }));
+      return documentFtsTopIds(this.router.db, query, limit, allowedDocumentIds).map(
+        (documentId, i) => ({
+          documentId,
+          rank: i,
+        }),
+      );
     } catch {
       return [];
     }
@@ -756,13 +853,58 @@ export class CatalogHandle {
     return [...best.entries()].map(([shardId, score]) => ({ shardId, score }));
   }
 
-  /** Top-S shard ids within THIS catalog (single-catalog callers, tests). */
-  routeShards(queryVector: Float32Array, shardBudget: number): number[] {
+  /**
+   * Top-S shard ids within THIS catalog (single-catalog callers, tests).
+   * With the raw `query`, also the shard of the page it names by title
+   * (`titleRouteShards`), so the result can exceed S by `TITLE_ROUTE_SHARDS`.
+   */
+  routeShards(queryVector: Float32Array, shardBudget: number, query?: string): number[] {
     if (this.shards.length <= shardBudget) return this.shards.map((s) => s.id);
-    return this.scoreShards(queryVector)
+    const routed = this.scoreShards(queryVector)
       .sort((a, b) => b.score - a.score)
       .slice(0, shardBudget)
       .map((s) => s.shardId);
+    if (query) {
+      for (const named of this.titleRouteShards(query, TITLE_ROUTE_SHARDS)) {
+        if (!routed.includes(named.shardId)) routed.push(named.shardId);
+      }
+    }
+    return routed;
+  }
+
+  /**
+   * Title-assisted routing: the shards holding the pages `query` names by
+   * title (`namedTitleMatches`), most specific name first, at most `limit`
+   * distinct shards. Centroid routing compares a question with averages of
+   * whole shards, and e5 scores those in a band a few hundredths wide, so
+   * the shard holding the very page a question names can rank 8th of 10:
+   * "Who were the members of ABBA?" never reached the ABBA article in the
+   * Wikipedia music catalog. Its title does — the vector arm scans that
+   * shard too. Measured on the 10-shard music and film-tv catalogs, one such
+   * shard lifted end-to-end recall@8 on "What is <title>?" questions from
+   * 86% to 92% and 84% to 91%, at about 0.15 extra shard scans per query.
+   *
+   * `score` is the named match's specificity (fts-query.ts), comparable
+   * across catalogs closely enough for the daemon to choose which catalogs'
+   * shards to add when several name a page. Empty on any FTS error.
+   */
+  titleRouteShards(query: string, limit: number): Array<{ shardId: number; score: number }> {
+    if (limit <= 0) return [];
+    try {
+      const shardOf = this.router.db.prepare('SELECT shard_id FROM documents WHERE id = ?');
+      const out: Array<{ shardId: number; score: number }> = [];
+      for (const named of namedTitleMatches(this.router.db, query, limit * 4)) {
+        const row = shardOf.get(named.documentId) as { shard_id: number | bigint } | undefined;
+        if (!row) continue;
+        const shardId = Number(row.shard_id);
+        if (out.some((o) => o.shardId === shardId)) continue;
+        out.push({ shardId, score: named.score });
+        if (out.length >= limit) break;
+      }
+      return out.sort((a, b) => compareScores(b.score, a.score));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -771,17 +913,35 @@ export class CatalogHandle {
    */
   searchSemantic(
     queryVector: Float32Array,
-    opts: { shardBudget?: number; finalK?: number } = {},
+    opts: {
+      shardBudget?: number;
+      finalK?: number;
+      allowedDocumentIds?: ReadonlySet<string>;
+      /** The raw query text: adds the shard of the page it names (`routeShards`). */
+      query?: string;
+    } = {},
   ): CatalogChunkHit[] {
-    const shardIds = this.routeShards(queryVector, opts.shardBudget ?? ROUTE_SHARDS_EXPLICIT);
-    return this.searchShards(queryVector, shardIds, opts.finalK ?? RERANK_FINAL_K);
+    const shardIds = opts.allowedDocumentIds
+      ? this.shardsForDocuments(opts.allowedDocumentIds)
+      : this.routeShards(queryVector, opts.shardBudget ?? ROUTE_SHARDS_EXPLICIT, opts.query);
+    return this.searchShards(
+      queryVector,
+      shardIds,
+      opts.finalK ?? RERANK_FINAL_K,
+      opts.allowedDocumentIds,
+    );
   }
 
   /**
    * The scan stage against an EXPLICIT shard list — what the daemon calls
    * after global cross-catalog routing has already spent the S budget.
    */
-  searchShards(queryVector: Float32Array, shardIds: number[], finalK: number): CatalogChunkHit[] {
+  searchShards(
+    queryVector: Float32Array,
+    shardIds: number[],
+    finalK: number,
+    allowedDocumentIds?: ReadonlySet<string>,
+  ): CatalogChunkHit[] {
     // Centered bits need a centered query; the int8 rerank below always
     // uses the raw unit query, since int8 vectors are never centered.
     const center = this.binaryCenter();
@@ -791,10 +951,22 @@ export class CatalogHandle {
       const shard = this.shards.find((s) => s.id === shardId);
       if (!shard) continue;
       const db = this.shardDb(shard);
-      const k = rerankK(finalK, shard.chunkCount);
-      const candidates = asymmetricTopK(this.shardBits(shard), scanQuery, k).map((hit) => ({
-        chunk_id: hit.chunkId,
-      }));
+      const eligible = allowedDocumentIds
+        ? new Set(
+            db
+              .prepare(
+                'SELECT id FROM chunks WHERE document_id IN (SELECT value FROM json_each(?))',
+              )
+              .all(JSON.stringify([...allowedDocumentIds]))
+              .map((row) => Number(row.id)),
+          )
+        : undefined;
+      const k = rerankK(finalK, eligible?.size ?? shard.chunkCount);
+      const candidates = asymmetricTopK(this.shardBits(shard), scanQuery, k, eligible).map(
+        (hit) => ({
+          chunk_id: hit.chunkId,
+        }),
+      );
       if (candidates.length === 0) continue;
       const getInt8 = db.prepare('SELECT v FROM chunk_vectors_int8 WHERE chunk_id = ?');
       const reranked = candidates
@@ -833,22 +1005,33 @@ export class CatalogHandle {
   }
 
   /** Chunk-body FTS over the routed shards (explicit search only). */
-  searchChunksFts(query: string, shardIds: number[], limitPerShard = 12): CatalogChunkHit[] {
-    const match = ftsQuery(query);
-    if (!match) return [];
+  searchChunksFts(
+    query: string,
+    shardIds: number[],
+    limitPerShard = 12,
+    allowedDocumentIds?: ReadonlySet<string>,
+  ): CatalogChunkHit[] {
     const hits: CatalogChunkHit[] = [];
     for (const shardId of shardIds) {
       const shard = this.shards.find((s) => s.id === shardId);
       if (!shard) continue;
       const db = this.shardDb(shard);
       try {
+        const match = selectiveFtsQuery(query, shard.chunkCount, (phrase) =>
+          this.chunkFtsRows(shard, db, phrase),
+        );
+        if (!match) return hits;
         const rows = db
           .prepare(
             `SELECT c.chunk_uid, c.document_id, c.title, c.heading_path, c.line_start, c.line_end, c.text
              FROM fts_chunks f JOIN chunks c ON c.id = f.rowid
-             WHERE fts_chunks MATCH ? ORDER BY f.rank LIMIT ?`,
+             WHERE fts_chunks MATCH ? ${allowedDocumentIds ? 'AND c.document_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY f.rank LIMIT ?`,
           )
-          .all(match, limitPerShard) as Array<Record<string, unknown>>;
+          .all(
+            ...(allowedDocumentIds
+              ? [match, JSON.stringify([...allowedDocumentIds]), limitPerShard]
+              : [match, limitPerShard]),
+          ) as Array<Record<string, unknown>>;
         for (const row of rows) {
           hits.push({
             chunkUid: row.chunk_uid as string,
@@ -867,6 +1050,21 @@ export class CatalogHandle {
       }
     }
     return hits;
+  }
+
+  /** Rows of one shard's `fts_chunks` an FTS5 phrase matches — what `selectiveFtsQuery` prunes on. */
+  private chunkFtsRows(shard: ShardInfo, db: DatabaseSync, phrase: string): number {
+    const key = `${shard.path}\u0000${phrase}`;
+    let rows = this.chunkTermRows.get(key);
+    if (rows === undefined) {
+      if (this.chunkTermRows.size >= CHUNK_TERM_ROWS_CACHE_MAX) this.chunkTermRows.clear();
+      const row = db
+        .prepare('SELECT COUNT(*) AS c FROM fts_chunks WHERE fts_chunks MATCH ?')
+        .get(phrase) as { c: number | bigint };
+      rows = Number(row.c);
+      this.chunkTermRows.set(key, rows);
+    }
+    return rows;
   }
 
   /**
@@ -927,7 +1125,3 @@ function parseHeadingPath(raw: string): string[] {
     return [];
   }
 }
-
-// Shared with the compiler's seal-time smoke verification — semantics must
-// never drift between "what the build proved" and "what the install checks".
-const ftsQuery = sanitizeFtsQuery;

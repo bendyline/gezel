@@ -174,6 +174,21 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     expect(typeof health.version).toBe('string');
   });
 
+  it('rejects dangerous globs through the built daemon and still handles ordinary searches', async () => {
+    for (const glob of [
+      `${'{'.repeat(4999)}x${'}'.repeat(4999)}`,
+      '{a,b}'.repeat(30),
+      '{1..1000000000}',
+    ]) {
+      await expect(client.toolFindFiles('default', { glob })).rejects.toMatchObject({
+        status: 422,
+      });
+    }
+    const result = await client.toolFindFiles('default', { glob: '**/*.{ts,tsx}', maxResults: 2 });
+    expect(Array.isArray(result.files)).toBe(true);
+    await expect(client.health()).resolves.toMatchObject({ ok: true });
+  });
+
   it('sets, lists, and removes write-only provider credentials through the built CLI', async () => {
     const value = 'integration-only-credential-value';
     const saved = await execFileAsync(

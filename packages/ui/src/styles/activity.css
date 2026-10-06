@@ -2,40 +2,41 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  min-height: 30px;
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--border);
+  padding: 0.2rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
   border-radius: var(--radius-md);
-  background: var(--panel);
-  color: var(--text);
+  background: color-mix(in srgb, var(--titlebar-ink) 5%, var(--titlebar));
+  color: var(--titlebar-ink);
   font: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
   -webkit-app-region: no-drag;
 }
 .activity-control:hover,
 .activity-control[data-state="open"] {
-  background: var(--surface);
-}
-.activity-control.needs-attention {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--titlebar-ink) 10%, var(--titlebar));
 }
 .activity-control-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--muted);
+  color: color-mix(in srgb, var(--titlebar-ink) 35%, transparent);
+  background: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
   flex-shrink: 0;
 }
 .needs-attention .activity-control-dot {
-  background: var(--accent);
+  background: var(--warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 18%, transparent);
 }
 .activity-control-label {
-  font-weight: 650;
+  font-weight: 600;
 }
 .activity-control-summary {
-  color: var(--muted);
+  color: inherit;
 }
 .activity-control-count {
   display: none;
@@ -116,6 +117,10 @@
   align-items: center;
   gap: 0.5rem;
   font-size: var(--text-lg);
+}
+/* `.gz-dialog h3 { margin: 0 }` ties this on specificity and loads later,
+   which left the heading sitting directly on the first row beneath it. */
+.activity-panel .activity-section h3 {
   margin: 0 0 0.65rem;
 }
 .activity-question,
@@ -166,23 +171,34 @@
 .activity-warning p {
   margin: 0.3rem 0 0.6rem;
 }
-.activity-details {
-  margin-top: 1rem;
-}
-.activity-details > summary {
-  cursor: pointer;
-  padding: 0.4rem 0;
-  font-size: var(--text-sm);
-}
-.activity-queue-details.queue-meter-panel {
+/* The header queue's rows, set into Working and Next. The popover chrome
+   goes; the panel is wide enough for the job line to wrap instead of
+   clipping, and touch has no hover, so the row controls stay visible. */
+.activity-queue.queue-meter-panel {
   position: static;
+  z-index: auto;
   width: 100%;
   max-width: none;
   max-height: none;
-  padding: 0.5rem 0;
+  margin: 0 0 0.75rem;
+  padding: 0;
   border: 0;
+  border-radius: 0;
   box-shadow: none;
+  background: transparent;
   overflow: visible;
+  font-size: var(--text-sm);
+}
+.activity-queue .queue-meter-panel-item {
+  min-height: 2.1rem;
+  font-size: var(--text-sm);
+}
+.activity-queue .queue-meter-panel-context {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.activity-queue .queue-meter-panel-actions {
+  opacity: 1;
 }
 .activity-all-projects {
   align-self: flex-start;
@@ -204,4 +220,56 @@
   .activity-panel .btn {
     min-height: 40px;
   }
+  .activity-queue .queue-meter-panel-action:not(.queue-meter-panel-action-stop) {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
+.activity-task-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+}
+.activity-task-step p {
+  margin: 0;
+}
+.activity-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.25rem;
+}
+.activity-task-step textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  font: inherit;
+}
+.activity-step-instructions {
+  max-height: min(32vh, 20rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Embedded instructions use the panel's reading surface. Squisq sets these
+   page defaults inline, so the embedded overrides must take precedence. */
+.activity-step-instructions .squisq-linear,
+.activity-step-instructions .squisq-page {
+  background: transparent !important;
+}
+.activity-step-instructions .squisq-linear-content {
+  font-size: var(--text-sm) !important;
+  font-family: var(--font-ui) !important;
+  color: var(--text) !important;
+}
+.activity-step-instructions .squisq-page-prose {
+  font-size: 1em;
+}
+.activity-step-instructions .squisq-page--thin .squisq-page-section {
+  padding-block: 0;
+}
+.activity-step-instructions .squisq-page-section-inner {
+  margin-inline: 0 !important;
 }

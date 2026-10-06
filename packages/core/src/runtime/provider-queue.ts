@@ -122,6 +122,12 @@ export interface EnqueueRequest {
    * are. No semantic meaning to the scheduler.
    */
   job?: string;
+  /**
+   * Who is waiting on this work at the engine — see
+   * `SendAndWaitOpts.queue.enginePriority`. Only a queue built with
+   * {@link ProviderQueueOptions.engineOverflow} reads it.
+   */
+  enginePriority?: 'interactive' | 'background';
 }
 
 export interface QueueSnapshot {
@@ -152,6 +158,8 @@ interface PendingEntry {
   affinity?: boolean;
   /** See {@link EnqueueRequest.job}. */
   job?: string;
+  /** See {@link EnqueueRequest.enginePriority}. */
+  enginePriority?: 'interactive' | 'background';
 }
 
 interface RecentRun {
@@ -176,6 +184,10 @@ interface RecentRun {
    *  ambient gate can tell "a real turn is running" from "our own
    *  ambient work is running". */
   ambient?: boolean;
+  /** See {@link EnqueueRequest.enginePriority}. Set on running contexts. */
+  enginePriority?: 'interactive' | 'background';
+  /** Dispatched through the engine overflow slot. */
+  overflow?: boolean;
 }
 
 export interface ProviderQueueOptions {
@@ -250,6 +262,17 @@ export interface ProviderQueueOptions {
    * variable override it); cloud queues leave it off.
    */
   ambientQuietMs?: number;
+  /**
+   * Let ONE request a person is waiting on (`enginePriority:
+   * 'interactive'`) dispatch past the caps when everything running is
+   * background work at the engine. Only for engines that park background
+   * work for a waiting request (the MLX sidecar's waves): without the
+   * overflow, task steps holding every slot kept a person's message here,
+   * where the engine could not see it, until a whole task turn finished.
+   * An engine that cannot park work would just run one more generation, so
+   * the default is off.
+   */
+  engineOverflow?: boolean;
   /** Injectable clock for tests. Default `Date.now`. */
   now?: () => number;
 }
@@ -320,6 +343,8 @@ export class ProviderQueue {
   private runningInteractive = 0;
   /** Count of currently-running background items. Decremented on release. */
   private runningBackground = 0;
+  /** See {@link ProviderQueueOptions.engineOverflow}. */
+  private readonly engineOverflow: boolean;
   private readonly now: () => number;
 
   private running = 0;
@@ -350,6 +375,7 @@ export class ProviderQueue {
     this.affinityWindowMs = opts.affinityWindowMs ?? 30_000;
     this.maxWaitMs = opts.maxWaitMs ?? 60_000;
     this.ambientQuietMs = Math.max(0, opts.ambientQuietMs ?? 0);
+    this.engineOverflow = opts.engineOverflow === true;
     this.now = opts.now ?? Date.now;
     this.lastNonAmbientActivityAt = this.now();
   }
@@ -383,6 +409,7 @@ export class ProviderQueue {
         ...(req.signal !== undefined ? { signal: req.signal } : {}),
         ...(req.affinity === false ? { affinity: false } : {}),
         ...(req.job !== undefined ? { job: req.job } : {}),
+        ...(req.enginePriority !== undefined ? { enginePriority: req.enginePriority } : {}),
       };
       if (req.signal) {
         entry.onAbort = () => this.removePending(entry);
@@ -559,8 +586,13 @@ export class ProviderQueue {
   }
 
   private drain(): void {
-    while (!this.paused && this.running < this.concurrency) {
-      const next = this.pickNext();
+    while (!this.paused) {
+      let next = this.running < this.concurrency ? this.pickNext() : null;
+      let overflow = false;
+      if (!next) {
+        next = this.pickOverflow();
+        overflow = next !== null;
+      }
       if (!next) break;
       this.detachSignal(next);
       this.running++;
@@ -577,6 +609,8 @@ export class ProviderQueue {
       if (next.provider !== undefined) ctx.provider = next.provider;
       if (next.actorLabel !== undefined) ctx.actorLabel = next.actorLabel;
       if (next.job !== undefined) ctx.job = next.job;
+      if (next.enginePriority !== undefined) ctx.enginePriority = next.enginePriority;
+      if (overflow) ctx.overflow = true;
       this.runningContexts.set(next.id, ctx);
       const released = { done: false };
       const release = () => {
@@ -641,6 +675,24 @@ export class ProviderQueue {
     for (const ctx of this.runningContexts.values()) if (!ctx.ambient) return false;
     for (const p of this.pending) if (!p.ambient) return false;
     return now - this.lastNonAmbientActivityAt >= this.ambientQuietMs;
+  }
+
+  /**
+   * The oldest pending request a person is waiting on, when the engine
+   * overflow slot is open: configured, not already taken, and everything
+   * running is background work at the engine (absent priority counts as a
+   * person's, so legacy callers never open it).
+   */
+  private pickOverflow(): PendingEntry | null {
+    if (!this.engineOverflow || this.runningContexts.size === 0) return null;
+    for (const ctx of this.runningContexts.values()) {
+      if (ctx.overflow || ctx.enginePriority !== 'background') return null;
+    }
+    return (
+      this.pending
+        .filter((p) => p.lane === 'interactive' && p.enginePriority === 'interactive')
+        .sort((a, b) => a.enqueuedAt - b.enqueuedAt)[0] ?? null
+    );
   }
 
   /**
@@ -764,6 +816,8 @@ export interface QueueWaitOpts {
   affinity?: boolean;
   /** See {@link EnqueueRequest.job}. */
   job?: string;
+  /** See {@link EnqueueRequest.enginePriority}. */
+  enginePriority?: 'interactive' | 'background';
   /**
    * Fired if the request ends up waiting longer than ~200ms, and then
    * re-fired every {@link QUEUE_WAIT_NOTICE_REPEAT_MS} for as long as the
@@ -842,6 +896,7 @@ export async function runInQueue<T>(
   if (opts.signal !== undefined) acquireOpts.signal = opts.signal;
   if (opts.affinity === false) acquireOpts.affinity = false;
   if (opts.job !== undefined) acquireOpts.job = opts.job;
+  if (opts.enginePriority !== undefined) acquireOpts.enginePriority = opts.enginePriority;
 
   let release: () => void;
   try {

@@ -1,3 +1,4 @@
+import { KnowledgeLocationSchema } from '@bendyline/gezk';
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
@@ -114,6 +115,7 @@ import { CraftbookSuggestionSchema } from './craftbook.js';
 import { DiffpackSummarySchema } from './diffpack.js';
 import { Ds4ConfigSchema } from './ds4-config.js';
 import { EntityIdSchema } from './entity-id.js';
+import { FileGlobSchema } from './file-glob.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import {
@@ -146,7 +148,11 @@ import {
   ProjectTypeProvenanceSchema,
 } from './project.js';
 import { PromptDraftConfigSchema } from './prompt-draft.js';
-import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
+import {
+  NpmInstallApprovalDecisionSchema,
+  QuestionSchema,
+  RequestedPermissionSchema,
+} from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
 import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
@@ -1620,6 +1626,13 @@ export const GezelConfigSchema = z.object({
    */
   llamaCppSpecDraftNMax: z.number().int().positive().optional(),
   /**
+   * Draft-token selection (`--spec-draft-sampling`) for compatible MTP
+   * heads and simple draft models. Probabilistic mode is an opt-in
+   * experiment; speed varies by model and workload. Unset retains the
+   * upstream greedy default. Requires llama.cpp v0.6.0 or later.
+   */
+  llamaCppSpecDraftSampling: z.enum(['greedy', 'probabilistic']).optional(),
+  /**
    * Escape hatch for any llama-server flag not first-classed above.
    * Keys are flag names (with or without leading `--`); values become
    * the flag's argument. A `true` value emits a bare flag (`--foo`);
@@ -2945,6 +2958,7 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
     .nullable()
     .optional(),
   llamaCppCpuMoe: z.boolean().nullable().optional(),
+  llamaCppSpecDraftSampling: z.enum(['greedy', 'probabilistic']).nullable().optional(),
   ...LlamaCppV4ConfigResetSchema.shape,
   llamaCppSwaFull: z.boolean().nullable().optional(),
   // MLX Advanced overrides the Settings UI can reset to their default —
@@ -3474,6 +3488,7 @@ export const AskQuestionRequestSchema = z.object({
   gezelId: z.string(),
   sessionId: z.string(),
   prompt: z.string().min(1),
+  permissionRequest: RequestedPermissionSchema.optional(),
   choices: z.array(z.string()).max(20).optional(),
   allowWriteIn: z.boolean().optional(),
   multiSelect: z.boolean().optional(),
@@ -3485,12 +3500,9 @@ export type AskQuestionRequest = z.infer<typeof AskQuestionRequestSchema>;
 export const AskQuestionResponseSchema = z.object({
   questionId: z.string(),
   /**
-   * True when the runtime suppressed this call because the session
-   * already has an unanswered, intent-less question card — i.e. the
-   * gezel re-asked before the user answered the previous one. No new
-   * card is created; `questionId` points at the existing one. The MCP
-   * tool turns this into a "stop re-asking, end your turn" corrective so
-   * a looping model doesn't keep stacking near-duplicate cards.
+   * Reuses an outstanding plain question or matching permission request
+   * in this chat. The MCP tool tells the model to wait for that card's
+   * answer rather than stack duplicates.
    */
   deduped: z.boolean().optional(),
 });
@@ -4993,7 +5005,7 @@ export const QueryTableResponseSchema = z.object({
 export type QueryTableResponse = z.infer<typeof QueryTableResponseSchema>;
 
 export const FindFilesRequestSchema = z.object({
-  glob: z.string().min(1),
+  glob: FileGlobSchema,
   path: z.string().optional(),
   caseInsensitive: z.boolean().optional(),
   maxResults: z.number().int().positive().max(5000).optional(),
@@ -5653,6 +5665,8 @@ export const UnifiedSearchResultSchema = z.object({
   /** Catalog the hit came from, plus the exact installed version. */
   catalogId: z.string().optional(),
   catalogVersion: z.string().optional(),
+  distanceMeters: z.number().finite().nonnegative().optional(),
+  matchedLocation: KnowledgeLocationSchema.optional(),
   documentId: z.string().optional(),
   /** Root→leaf topic names for display ("Physics › Mechanics"). */
   topicPath: z.array(z.string()).optional(),
@@ -5694,28 +5708,8 @@ export const MemorySearchRequestSchema = z.object({
 });
 export type MemorySearchRequest = z.infer<typeof MemorySearchRequestSchema>;
 
-/** Project-bound form used by the model-facing generic `search` tool. */
-export const ProjectSearchRequestSchema = z.object({
-  query: z.string().min(1).max(400),
-  maxResults: z.number().int().positive().max(100).optional(),
-  /**
-   * Skip this many merged results before returning `maxResults` — the tool
-   * cursor. Narrowing only; the project scope stays server-derived.
-   */
-  offset: z.number().int().nonnegative().max(10_000).optional(),
-  /**
-   * Keep only results whose path starts with this prefix (forward-slashed,
-   * relative). Pathless results (memories, area overviews) are excluded when
-   * set — a path filter asks for files. Narrowing only.
-   */
-  pathPrefix: z.string().min(1).max(500).optional(),
-  /** Current gezel id enables its private-memory arm. */
-  gezelId: z.string().min(1).optional(),
-  /** Shared documents are included by default. */
-  includeShared: z.boolean().optional(),
-  sources: z.array(RetrievalSourceSchema).min(1).optional(),
-});
-export type ProjectSearchRequest = z.infer<typeof ProjectSearchRequestSchema>;
+export { ProjectSearchRequestSchema } from './project-search.js';
+export type { ProjectSearchRequest } from './project-search.js';
 export const ProjectSearchCraftbookSuggestionSchema = CraftbookSuggestionSchema.pick({
   id: true,
   name: true,

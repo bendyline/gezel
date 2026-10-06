@@ -949,6 +949,169 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(messages.at(-1)?.content).toContain('[Local-model rescue:');
   });
 
+  it.each([false, true])(
+    'allows required research after an immediate write is refused for missing evidence (explicit intent=%s)',
+    async (explicitIntent) => {
+      const bodies: Array<{ tools?: Array<{ function: { name: string } }> }> = [];
+      const calls: string[] = [];
+      globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        const index = bodies.length - 1;
+        if (index === 1) {
+          expect(bodies[index]?.tools?.map((tool) => tool.function.name)).toEqual(['search']);
+        }
+        if (index === 2) {
+          expect(bodies[index]?.tools?.map((tool) => tool.function.name)).toContain(
+            'read_document',
+          );
+        }
+        if (index >= 3) {
+          return sseResponse([
+            { choices: [{ index: 0, delta: { content: 'Saved from the source evidence.' } }] },
+            { choices: [{ index: 0, finish_reason: 'stop' }] },
+            '[DONE]',
+          ]);
+        }
+        const name = index === 1 ? 'search' : 'write_file';
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${index}`,
+                      type: 'function',
+                      function: {
+                        name,
+                        arguments: JSON.stringify(
+                          name === 'search'
+                            ? { query: 'source facts' }
+                            : { path: 'report.md', content: 'A source-backed report.' },
+                        ),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+          '[DONE]',
+        ]);
+      }) as typeof fetch;
+      const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+      const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+      const internal = session as unknown as {
+        deps: {
+          bridges: {
+            isEmpty: () => boolean;
+            getOpenAITools: () => Array<{
+              name: string;
+              description: string;
+              parameters: Record<string, unknown>;
+            }>;
+            hasTool: (name: string) => boolean;
+            callTool: (name: string) => Promise<string>;
+          };
+        };
+      };
+      internal.deps.bridges = {
+        isEmpty: () => false,
+        getOpenAITools: () =>
+          ['write_file', 'search', 'read_document'].map((name) => ({
+            name,
+            description: name,
+            parameters: { type: 'object' },
+          })),
+        hasTool: (name) => ['write_file', 'search', 'read_document'].includes(name),
+        callTool: async (name) => {
+          calls.push(name);
+          if (calls.length === 1)
+            return 'ERROR: Not saved: no source evidence has been collected. Your next tool call must be `search`.';
+          return name === 'search' ? 'Source evidence collected.' : 'Wrote report.md';
+        },
+      };
+      await session.sendAndWait(
+        'First move: create the workspace deliverable at workspace/report.md',
+        explicitIntent ? { fileTurnIntent: { kind: 'create-file', path: 'report.md' } } : undefined,
+      );
+      expect(bodies[0]?.tools?.map((tool) => tool.function.name)).toEqual(['write_file']);
+      expect(calls).toEqual(['write_file', 'search', 'write_file']);
+    },
+  );
+
+  it.each([false, true])(
+    'keeps the grounding refusal enforced when the model repeats writes (lookup available=%s)',
+    async (lookupAvailable) => {
+      const bodies: Array<{ tools?: Array<{ function: { name: string } }> }> = [];
+      let writes = 0;
+      globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${bodies.length}`,
+                      type: 'function',
+                      function: {
+                        name: 'write_file',
+                        arguments: '{"path":"report.md","content":"Unsupported factual claim."}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+          '[DONE]',
+        ]);
+      }) as typeof fetch;
+      const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+      const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+      const names = lookupAvailable ? ['write_file', 'search'] : ['write_file'];
+      const internal = session as unknown as {
+        deps: {
+          bridges: {
+            isEmpty: () => boolean;
+            getOpenAITools: () => Array<{
+              name: string;
+              description: string;
+              parameters: Record<string, unknown>;
+            }>;
+            hasTool: (name: string) => boolean;
+            callTool: (name: string) => Promise<string>;
+          };
+        };
+      };
+      internal.deps.bridges = {
+        isEmpty: () => false,
+        getOpenAITools: () =>
+          names.map((name) => ({ name, description: name, parameters: { type: 'object' } })),
+        hasTool: (name) => names.includes(name),
+        callTool: async () => {
+          writes += 1;
+          return 'ERROR: Not saved: no source evidence has been collected. Your next tool call must be `search`.';
+        },
+      };
+      await expect(
+        session.sendAndWait('First move: create the workspace deliverable at workspace/report.md'),
+      ).rejects.toThrow('blocked 3 times because no source evidence had been collected');
+      expect(writes).toBe(3);
+      expect(bodies[1]?.tools?.map((tool) => tool.function.name)).toEqual(
+        lookupAvailable ? ['search'] : ['write_file'],
+      );
+    },
+  );
+
   it('continues a capped invalid DS4 first draft instead of fabricating write success', async () => {
     const bodies: Array<{
       max_tokens?: number;

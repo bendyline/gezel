@@ -37,6 +37,11 @@ import type {
 } from '@bendyline/gezel';
 import {
   KnowledgeMachineInventorySchema,
+  type KnowledgeNearbyDocument,
+  type KnowledgeNearbyRequest,
+  KnowledgeNearbyRequestSchema,
+  type KnowledgeNearbyResponse,
+  type KnowledgeRadius,
   createLogger,
   formatKnowledgeUri,
   parseKnowledgeUri,
@@ -85,6 +90,12 @@ import {
 } from './install.js';
 import { KnowledgeRegistry, type KnowledgeRegistryEntry } from './registry.js';
 import type { SharedEnsureResult, SharedKnowledgeInstaller } from './shared-install.js';
+import {
+  KnowledgeSpatialCursorError,
+  encodeNearbyCursor,
+  nearbyCursorOffset,
+  regionalDocumentIdentity,
+} from './spatial-query.js';
 import { type KnowledgeVectorFloors, resolveKnowledgeVectorFloors } from './vector-floors.js';
 
 type GlobalSearchDocumentHit = GlobalSearchResponse['documents'][number];
@@ -95,6 +106,13 @@ const log = createLogger('knowledge');
 
 /** Explicit-search shard budget (S) across every active catalog (§3.4). */
 const ROUTE_BUDGET_EXPLICIT = 6;
+/**
+ * Shards added beyond that budget for pages the query names by title (the
+ * catalog host's title-assisted routing): the centroids alone left the ABBA
+ * article unscanned for "Who were the members of ABBA?". Two, not one per
+ * catalog, so twenty mounted catalogs cannot add twenty scans.
+ */
+const TITLE_ROUTE_EXPLICIT = 2;
 const FINAL_K = 24;
 /** Same cadence as the catalog download's own progress (download-with-retry). */
 const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
@@ -132,8 +150,16 @@ function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSem
  */
 const RRF_K = 60;
 const ARM_WEIGHTS = { vector: 1, docFts: 1, chunkFts: 0.5 } as const;
-/** Fused documents per catalog: keeps one catalog from monopolizing the merged list. */
+/**
+ * Fused documents per catalog when several are in scope: keeps one catalog
+ * from monopolizing the merged list. A search scoped to one catalog has
+ * nothing to share the list with, and the cap cut the Knowledge browser's
+ * search for "blob" in an Azure-docs catalog — 348 matching titles — to six.
+ */
 const PER_CATALOG_CAP = 6;
+/** Lexical candidates fetched per arm before fusion, at the least. */
+const DOC_FTS_MIN = 6;
+const CHUNK_FTS_MIN = 8;
 
 /** Rank-anchored relevance for a fused knowledge result: the best hit is a strong 1.0, decaying RRF-style. */
 function fusedRankRelevance(rank: number): number {
@@ -219,7 +245,10 @@ export interface KnowledgeManagerOptions {
   embedQueryForProfile?: (
     text: string,
     profile: KnowledgeEmbeddingProfile,
-    opts?: { onDownloadProgress?: (progress: ModelDownloadProgress) => void },
+    opts?: {
+      onDownloadProgress?: (progress: ModelDownloadProgress) => void;
+      localFilesOnly?: boolean;
+    },
   ) => Promise<number[]>;
   /** Optional profile-model prewarm ceiling; keyword search remains usable on timeout. */
   profilePrewarmTimeoutMs?: number;
@@ -297,12 +326,16 @@ export class KnowledgeManager {
     });
     for (const entry of this.registry.read().catalogs) {
       if (!entry.enabled) continue;
-      await this.mountEntry(entry).catch((err) => {
+      await this.mountEntry(entry, { deferPrewarm: true }).catch((err) => {
         const reason = errorMessage(err);
         log.warn(`catalog ${entry.ref.catalogId} failed to mount: ${reason}`);
         this.registry.quarantine(entry.ref.publisherId, entry.ref.catalogId, reason);
       });
     }
+    // After every mount, not between them: the worker runs one op at a time,
+    // and boot awaits start(), so a warm-up queued per mount would hold the
+    // next catalog's validation — and the service — behind it.
+    for (const key of this.mountedByKey.keys()) this.prewarmVectors(key);
   }
 
   private async ensureBundledHandboek(): Promise<void> {
@@ -345,7 +378,7 @@ export class KnowledgeManager {
 
   private async mountEntry(
     entry: KnowledgeRegistryEntry,
-    opts: { justVerified?: boolean } = {},
+    opts: { justVerified?: boolean; deferPrewarm?: boolean } = {},
   ): Promise<void> {
     const ref = entry.ref;
     const key = this.keyFor(ref);
@@ -402,6 +435,29 @@ export class KnowledgeManager {
     });
     log.info(
       `mounted ${ref.catalogId}@${ref.version} (${manifest.counts.documents} documents, semantic search: ${semanticSearch})`,
+    );
+    if (!opts.deferPrewarm) this.prewarmVectors(key);
+  }
+
+  /**
+   * Load a catalog's vector bits in the worker now, in the background. The
+   * first semantic search otherwise loads them itself — ~300 ms for a
+   * 200k-chunk shard — inside its 600 ms scope budget, times out, and the
+   * knowledge arm answers nothing, keyword hits included. A failure here
+   * costs only that first search.
+   */
+  private prewarmVectors(key: string): void {
+    const info = this.mountedByKey.get(key);
+    if (!info?.vectorCompatible) return;
+    const started = performance.now();
+    this.opts.host.prewarm(key).then(
+      (shards) => {
+        if (shards === 0) return;
+        log.info(
+          `prewarmed ${info.ref.catalogId} vectors: ${shards} shard(s) in ${Math.round(performance.now() - started)}ms`,
+        );
+      },
+      (err) => log.warn(`vector prewarm for ${info.ref.catalogId} failed: ${errorMessage(err)}`),
     );
   }
 
@@ -1324,12 +1380,104 @@ export class KnowledgeManager {
   // ── the SearchService knowledge arm ───────────────────────────────────────
 
   /**
-   * Explicit search across active catalogs. Catalogs are grouped by how their
-   * queries are embedded — the daemon's own vector for profiles it shares,
-   * one profile-embedded vector per foreign profile, none for keyword-only —
-   * and each group searches with its own vector, so every catalog is
-   * searched in the space it was built in. Results come back FINISHED —
-   * provenance, topic names, scoring.
+   * Discover subject articles under the active catalog policy. Source replicas
+   * deduplicate before counts and cursor pages, and scope is checked again
+   * before returning the response if catalogs changed during worker scans.
+   */
+  async nearby(
+    request: KnowledgeNearbyRequest,
+    projectId?: string,
+  ): Promise<KnowledgeNearbyResponse> {
+    const body = KnowledgeNearbyRequestSchema.parse(request);
+    const keys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          !body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+      )
+      .sort();
+    const snapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: keys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    const offset = nearbyCursorOffset(body.cursor, snapshot);
+    const unique = new Map<string, KnowledgeNearbyDocument>();
+    for (const key of keys) {
+      const info = this.mountedByKey.get(key)!;
+      let start = 0;
+      for (;;) {
+        const page = await this.opts.host.nearbyDocuments(key, body.spatial, {
+          offset: start,
+          limit: 500,
+        });
+        for (const document of page.documents) {
+          const result: KnowledgeNearbyDocument = {
+            ...document,
+            publisherId: info.ref.publisherId,
+            catalogId: info.ref.catalogId,
+            catalogVersion: info.ref.version,
+            uri: formatKnowledgeUri({
+              publisherId: info.ref.publisherId,
+              catalogId: info.ref.catalogId,
+              documentId: document.id,
+            }),
+          };
+          const identity = regionalDocumentIdentity(
+            info.ref.publisherId,
+            info.ref.catalogId,
+            document.id,
+          );
+          const previous = unique.get(identity);
+          if (!previous || result.distanceMeters < previous.distanceMeters)
+            unique.set(identity, result);
+        }
+        start += page.documents.length;
+        if (start >= page.total || !page.documents.length) break;
+      }
+    }
+    const ordered = [...unique.values()].sort(
+      (a, b) =>
+        a.distanceMeters - b.distanceMeters ||
+        a.publisherId.localeCompare(b.publisherId) ||
+        a.catalogId.localeCompare(b.catalogId) ||
+        a.id.localeCompare(b.id),
+    );
+    const currentKeys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          this.mountedByKey.has(key) &&
+          (!body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId)),
+      )
+      .sort();
+    const currentSnapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: currentKeys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    if (currentSnapshot !== snapshot)
+      throw new KnowledgeSpatialCursorError(
+        'Catalog scope changed during nearby query; restart the query.',
+      );
+    const documents = ordered.slice(offset, offset + body.limit);
+    const next = offset + documents.length;
+    return {
+      documents,
+      total: ordered.length,
+      ...(next < ordered.length ? { nextCursor: encodeNearbyCursor(snapshot, next) } : {}),
+    };
+  }
+
+  /**
+   * Search each catalog in its embedding space and fuse lexical/vector ranks.
+   * Spatial eligibility applies inside workers before candidate selection.
    */
   async searchUnified(
     query: string,
@@ -1337,11 +1485,17 @@ export class KnowledgeManager {
       vector: number[] | null;
       maxResults: number;
       projectId?: string;
+      spatial?: KnowledgeRadius;
+      catalogs?: readonly string[];
       /** Search a profile group keyword-only when its query model is not ready by then. */
       queryEmbedBudgetMs?: number;
+      /** Query cached profile models only, falling back to keywords when absent. */
+      localModelsOnly?: boolean;
     },
   ): Promise<UnifiedSearchResult[]> {
-    const active = await this.activeCatalogKeys(opts.projectId);
+    const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
+      (key) => !opts.catalogs || opts.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+    );
     if (active.length === 0) return [];
 
     const groups: Array<{ keys: string[]; vector?: Float32Array }> = [];
@@ -1351,8 +1505,8 @@ export class KnowledgeManager {
     for (const key of active) {
       const info = this.mountedByKey.get(key);
       if (!info) continue;
-      if (info.semanticSearch === 'shared') shared.push(key);
-      else if (info.semanticSearch === 'profile') {
+      if (info.semanticSearch === 'shared' && !opts.localModelsOnly) shared.push(key);
+      else if (info.semanticSearch === 'profile' || info.semanticSearch === 'shared') {
         const group = byProfile.get(info.embedding.id) ?? { profile: info.embedding, keys: [] };
         group.keys.push(key);
         byProfile.set(info.embedding.id, group);
@@ -1365,7 +1519,12 @@ export class KnowledgeManager {
       });
     }
     for (const group of byProfile.values()) {
-      const vector = await this.embedForProfile(query, group.profile, opts.queryEmbedBudgetMs);
+      const vector = await this.embedForProfile(
+        query,
+        group.profile,
+        opts.queryEmbedBudgetMs,
+        opts.localModelsOnly,
+      );
       groups.push({ keys: group.keys, ...(vector ? { vector } : {}) });
     }
     if (keyword.length > 0) groups.push({ keys: keyword });
@@ -1379,10 +1538,15 @@ export class KnowledgeManager {
         query,
         ...(group.vector ? { vector: group.vector } : {}),
         shardBudget: ROUTE_BUDGET_EXPLICIT,
+        titleRouteShards: TITLE_ROUTE_EXPLICIT,
         finalK: FINAL_K,
         includeChunkFts: true,
         catalogKeys: group.keys,
-        docFtsLimit: 6,
+        // A pool no deeper than the page asked for: six title hits could
+        // never fill a twenty-result browse search.
+        docFtsLimit: Math.max(DOC_FTS_MIN, opts.maxResults),
+        chunkFtsLimit: Math.max(CHUNK_FTS_MIN, opts.maxResults),
+        spatial: opts.spatial,
       });
       response.chunks.push(...part.chunks);
       response.documents.push(...part.documents);
@@ -1461,13 +1625,29 @@ export class KnowledgeManager {
         (b.chunk?.cosine ?? -1) - (a.chunk?.cosine ?? -1) ||
         a.documentId.localeCompare(b.documentId),
     );
+    const matches = new Map(
+      [...response.documents, ...response.chunks]
+        .filter((hit) => hit.matchedLocation)
+        .map((hit) => [
+          `${hit.catalogKey}\u0000${hit.documentId}`,
+          { distanceMeters: hit.distanceMeters!, matchedLocation: hit.matchedLocation! },
+        ]),
+    );
+    const seenSpatial = new Set<string>();
     const out: UnifiedSearchResult[] = [];
     const perCatalogCount = new Map<string, number>();
+    const capPerCatalog = !opts.spatial && active.length > 1;
     for (const entry of ordered) {
       const info = this.mountedByKey.get(entry.catalogKey);
       if (!info) continue;
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
-      if (count >= PER_CATALOG_CAP) continue;
+      if (capPerCatalog && count >= PER_CATALOG_CAP) continue;
+      const spatialIdentity = regionalDocumentIdentity(
+        info.ref.publisherId,
+        info.ref.catalogId,
+        entry.documentId,
+      );
+      if (opts.spatial && seenSpatial.has(spatialIdentity)) continue;
       const relevance = fusedRankRelevance(out.length);
       // `vector` only when the hit cleared a measured floor; everything else
       // is lexical evidence, which proactive injection asks to be grounded.
@@ -1480,7 +1660,8 @@ export class KnowledgeManager {
         : await this.toDocumentResult(info, entry.documentId, relevance, evidence);
       if (!result) continue;
       perCatalogCount.set(entry.catalogKey, count + 1);
-      out.push(result);
+      seenSpatial.add(spatialIdentity);
+      out.push({ ...result, ...matches.get(`${entry.catalogKey}\u0000${entry.documentId}`) });
       if (out.length >= Math.max(10, opts.maxResults)) break;
     }
     return out;
@@ -1548,8 +1729,11 @@ export class KnowledgeManager {
     query: string,
     profile: KnowledgeEmbeddingProfile,
     budgetMs?: number,
+    localFilesOnly = false,
   ): Promise<Float32Array | undefined> {
-    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile);
+    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile, {
+      localFilesOnly,
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const vector =
@@ -1609,10 +1793,12 @@ export class KnowledgeManager {
   }
 
   /** Enabled+mounted catalogs, intersected with the project policy. */
-  private async activeCatalogKeys(projectId?: string): Promise<string[]> {
+  private async activeCatalogKeys(projectId?: string, failClosed = false): Promise<string[]> {
     const mounted = [...this.mountedByKey.values()];
     if (!projectId || !this.opts.projectPolicy) return mounted.map((m) => m.key);
-    const policy = await this.opts.projectPolicy(projectId).catch(() => null);
+    const policy = await this.opts
+      .projectPolicy(projectId)
+      .catch(() => (failClosed ? { mode: 'off' as const } : null));
     if (!policy || policy.mode === 'inherit') return mounted.map((m) => m.key);
     if (policy.mode === 'off') return [];
     const selected = new Set((policy.refs ?? []).map((r) => `${r.publisherId}/${r.catalogId}`));

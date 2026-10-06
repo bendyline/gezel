@@ -114,4 +114,31 @@ describe('project search links', () => {
       ],
     });
   });
+
+  it('passes named knowledge catalogs through to the search', async () => {
+    const search = vi
+      .spyOn(svc.context.search, 'searchProject')
+      .mockResolvedValue({ results: [], truncated: false });
+    search.mockClear();
+    craftbookMocks.suggestCraftbooks.mockResolvedValue([]);
+
+    const response = await httpFetch(`${baseUrl}/api/projects/default/tools/search`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${svc.context.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'blob indexer',
+        sources: ['knowledge'],
+        catalogs: ['azure-docs-main'],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(search).toHaveBeenCalledWith(
+      'blob indexer',
+      expect.objectContaining({ sources: ['knowledge'], catalogs: ['azure-docs-main'] }),
+    );
+  });
 });

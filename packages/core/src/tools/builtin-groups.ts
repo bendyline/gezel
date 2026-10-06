@@ -36,7 +36,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     name: 'Memory',
     description:
       'Search indexed project knowledge through one unified surface, plus persistent notes a gezel can recall and write back. The generic search spans workspace content, artifacts, project/gezel memory, and shared documents.',
-    tools: ['search', 'search_memory', 'save_memory', 'list_memories'],
+    tools: ['search', 'knowledge_nearby', 'search_memory', 'save_memory', 'list_memories'],
   },
   {
     id: 'workspace-fs-read',
@@ -130,6 +130,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     name: 'Archive Tools',
     description: 'List and extract zip / tar archives in the workspace.',
     tools: ['list_archive', 'extract_archive'],
+  },
+  {
+    id: 'documents-readonly',
+    name: 'Reference Reading',
+    description:
+      'Read and search shared documents and knowledge sources without changing the library.',
+    tools: ['list_documents', 'read_document', 'search_documents'],
   },
   {
     id: 'documents',
@@ -357,6 +364,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     description:
       "Consult gezel's built-in documentation for meta questions about gezel itself — roles, craftbooks, projects, memory, models, setup. In every role's kit so a gezel answers 'how does gezel work?' from the real docs instead of guessing.",
     tools: ['how_do_i'],
+  },
+  {
+    id: 'advisers',
+    name: 'Advisers',
+    description:
+      'Ask an existing gezel or a specialist for advice to bring back into the conversation.',
+    tools: ['list_gezels', 'ask_gezel', 'ask_specialist'],
   },
   {
     id: 'interaction',

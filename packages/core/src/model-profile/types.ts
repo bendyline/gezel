@@ -84,6 +84,8 @@ export interface ModelCtx {
  * (cookbook, anti-fabrication rules, family hints).
  */
 export interface PromptCtx extends ModelCtx {
+  /** The gezel's role; conversation can use a compact tool-use brief. */
+  role?: string;
   /** Whether `@playwright/mcp` is registered for this session. */
   hasPlaywright: boolean;
   /** True when the active gezel is the configured Meester. */

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AnswerQuestionRequestSchema,
   AskQuestionRequestSchema,
+  KeyedLock,
   type Question,
   answeredQuestion,
   createLogger,
@@ -17,6 +18,11 @@ import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js
 import { answerOwnerStep } from '../../tasks/owner-step.js';
 import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 import { applyNpmInstallApprovals, intentPackages } from '../../workspace/npm.js';
+import {
+  requestWorkspaceWritePermission,
+  workspacePermissionAnswerSeed,
+  workspacePermissionDecision,
+} from '../../workspace/permission-question.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -46,6 +52,8 @@ async function askingStepId(
  */
 export function questionRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  const answerLocks = new KeyedLock();
+  app.use('/:id/answer', (c, next) => answerLocks.run(c.req.param('id'), next));
 
   app.post('/', async (c) => {
     const body = AskQuestionRequestSchema.parse(await c.req.json());
@@ -57,16 +65,17 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // up as "Question 7 of 7" in the Needs-your-input panel) would
     // otherwise mint a fresh Question record each time. The provider
     // per-turn dedup only collapses repeats within a single turn; this
-    // is the across-turns guard. Only plain `ask_user_question` calls
-    // reach this route — approval cards carry an `intent` and are written
-    // via other paths — so `outstandingSessionQuestion`'s intent-less
-    // filter never touches them.
+    // is the across-turns guard. Permission requests use their own scoped
+    // dedup; the plain-question filter never substitutes a text answer for
+    // a permission decision.
     let resolved: ReturnType<typeof resolveAsk>;
     try {
-      resolved = resolveAsk(await ctx.store.listProjectQuestions(body.projectId), body, {
-        id: randomUUID(),
-        at: nowIso(),
-      });
+      resolved = body.permissionRequest
+        ? await requestWorkspaceWritePermission(ctx.store, body)
+        : resolveAsk(await ctx.store.listProjectQuestions(body.projectId), body, {
+            id: randomUUID(),
+            at: nowIso(),
+          });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
@@ -159,6 +168,12 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       }
     }
     if (!question) return c.json({ error: 'question not found' }, 404);
+    if (question.intent?.kind === 'workspace-write-permission') {
+      const scopes = c.get('auth')?.scopes ?? [];
+      if (!scopes.includes('root') && !scopes.includes('ui')) {
+        return c.json({ error: 'Permission decisions require the first-party app.' }, 403);
+      }
+    }
     if (question.answer) {
       // Already answered — return the existing record idempotently
       // rather than re-injecting into the session.
@@ -170,6 +185,17 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // answer shapes are those flows' own.
     try {
       question = answeredQuestion(question, body, nowIso(), { validate: !question.intent });
+      if (question.intent?.kind === 'workspace-write-permission') {
+        const decision = workspacePermissionDecision(question.answer!);
+        if (decision === 'grant') {
+          await ctx.store.grantProjectWorkspaceWrites(
+            question.projectId,
+            question.intent.workspaceDir,
+            question.intent.realWorkspaceDir,
+          );
+          await ctx.chat.resetProjectToolsets(question.projectId, question.sessionId);
+        }
+      }
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
@@ -188,12 +214,19 @@ export function questionRoutes(ctx: ServiceContext): Hono {
         kind: 'user.question.answered',
         projectId: question.projectId,
         gezelId: question.gezelId,
-        summary: question.answer?.silentSkip
-          ? `Question skipped: ${truncate(question.prompt, 80)}`
-          : question.answer?.declined
-            ? `Question dismissed (proceed with defaults): ${truncate(question.prompt, 80)}`
-            : `Question answered: ${truncate(question.prompt, 80)}`,
-        details: { questionId: question.id, sessionId: question.sessionId },
+        summary:
+          question.intent?.kind === 'workspace-write-permission'
+            ? `Project file permission ${workspacePermissionDecision(question.answer!) === 'grant' ? 'granted' : 'unchanged'}: ${question.intent.workspaceDir}`
+            : question.answer?.silentSkip
+              ? `Question skipped: ${truncate(question.prompt, 80)}`
+              : question.answer?.declined
+                ? `Question dismissed (proceed with defaults): ${truncate(question.prompt, 80)}`
+                : `Question answered: ${truncate(question.prompt, 80)}`,
+        details: {
+          questionId: question.id,
+          sessionId: question.sessionId,
+          intent: question.intent,
+        },
       })
       .catch((err) => {
         log.warn('[questions] history log failed:', err);
@@ -370,7 +403,9 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // actual install (or decline record), and the follow-up text is
     // about the install result rather than the raw answer.
     let seed: string;
-    if (question.intent?.kind === 'npm-install-approval') {
+    if (question.intent?.kind === 'workspace-write-permission') {
+      seed = workspacePermissionAnswerSeed(question);
+    } else if (question.intent?.kind === 'npm-install-approval') {
       const decisions = resolveNpmInstallDecisions(question);
       seed = await applyNpmInstallApprovals(ctx.store, ctx.home, question.projectId, decisions);
     } else if (question.intent?.kind === 'command-approval') {

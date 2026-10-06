@@ -126,7 +126,7 @@ describe('handboek engine', () => {
     // Every built-in role has a curated lead, and curated always shadows
     // the generated fallback — exactly one entry per role.
     const roleEntries = roles.entries.filter((e) => e.id.startsWith('role/'));
-    expect(roleEntries).toHaveLength(12);
+    expect(roleEntries).toHaveLength(13);
     expect(roleEntries.every((e) => !e.generated)).toBe(true);
     const craftbooks = toc.areas.find((a) => a.area === 'craftbooks')!;
     expect(craftbooks.entries.map((e) => e.id)).toEqual([
@@ -147,8 +147,10 @@ describe('handboek engine', () => {
       ['tools-and-toolsets', 'How Gezel works'],
       ['security-model', 'How Gezel works'],
       ['verifying-your-download', 'How Gezel works'],
+      ['how-knowledge-works', 'How Gezel works'],
       ['cli-reference', 'The Gezel Command Line'],
       ['npm-packages', 'The Gezel Command Line'],
+      ['knowledge-command-line', 'The Gezel Command Line'],
       ['writing-scripts-with-gezel-sdk', 'Developer'],
       ['building-connected-apps-with-gezel-app-sdk', 'Developer'],
       ['building-ai-apps-inside-gezel', 'Developer'],

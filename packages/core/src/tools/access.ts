@@ -1,4 +1,4 @@
-import { toolsetGroupsForRole } from '../roles/index.js';
+import { ROLES, resolveRoleId, toolsetGroupsForRole } from '../roles/index.js';
 import { BUILTIN_TOOLSETS } from './builtin-groups.js';
 
 const groups = new Map(BUILTIN_TOOLSETS.map((group) => [group.id, group.tools]));
@@ -10,8 +10,17 @@ export function expandToolsetGroups(ids: readonly string[]): Set<string> {
       for (const name of groups.get(group) ?? []) names.add(name);
   return names;
 }
+/**
+ * Coordinators and adviser-capable roles need the scoped MCP team credential.
+ * Solo projects suppress it; the role allowlist still limits advertised tools.
+ */
 export function roleHasTeamScope(role: string | undefined, projectMode?: 'crew' | 'solo'): boolean {
-  return projectMode !== 'solo' && toolsetGroupsForRole(role).includes('team-management');
+  const roleId = resolveRoleId(role);
+  return (
+    projectMode !== 'solo' &&
+    (toolsetGroupsForRole(role).includes('team-management') ||
+      (roleId !== null && ROLES[roleId].teamScope === true))
+  );
 }
 export function roleToolNames(
   role: string | undefined,

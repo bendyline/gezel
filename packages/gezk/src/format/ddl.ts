@@ -28,6 +28,18 @@ CREATE TABLE documents(
 CREATE INDEX documents_topic ON documents(topic_id, ordinal, slug);
 CREATE INDEX documents_shard ON documents(shard_id);
 
+CREATE TABLE document_locations(
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  location_id TEXT NOT NULL,
+  latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+  longitude REAL NOT NULL CHECK (longitude >= -180 AND longitude < 180),
+  role TEXT NOT NULL CHECK (role IN ('subject','associated')),
+  provenance_json TEXT,
+  PRIMARY KEY (document_id, location_id)
+) WITHOUT ROWID;
+CREATE INDEX document_locations_latitude ON document_locations(latitude, longitude, document_id);
+CREATE INDEX document_locations_longitude ON document_locations(longitude, latitude, document_id);
+
 -- Includes the primary placement in documents.topic_id/ordinal as well as
 -- shared TOC references. Bodies, chunks and vectors remain keyed by document id.
 CREATE TABLE topic_documents(

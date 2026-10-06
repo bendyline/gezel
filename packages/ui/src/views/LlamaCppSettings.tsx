@@ -26,6 +26,7 @@ type BackendOverride = NonNullable<ConfigResponse['llamaCppBackendOverride']>;
 type ConcreteBackend = Exclude<BackendOverride, 'auto'>;
 type KvCacheType = NonNullable<ConfigResponse['llamaCppKvCacheType']>;
 type SpecType = NonNullable<ConfigResponse['llamaCppSpecType']>;
+type DraftSampling = NonNullable<ConfigResponse['llamaCppSpecDraftSampling']>;
 type FlashAttnMode = 'auto' | 'on' | 'off';
 type TriState = 'auto' | 'on' | 'off';
 type LoadMode = NonNullable<ConfigResponse['llamaCppLoadMode']>;
@@ -459,6 +460,23 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     [onConfigChanged, showSavedState, showSavingState],
   );
 
+  const saveDraftSampling = useCallback(
+    async (value: DraftSampling) => {
+      showSavingState('saving');
+      try {
+        const next = await api.updateConfig({
+          llamaCppSpecDraftSampling: value === 'greedy' ? null : value,
+        });
+        if (!mounted.current) return;
+        onConfigChanged(next);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [onConfigChanged, showSavedState, showSavingState],
+  );
+
   const saveDefaultModel = useCallback(
     async (value: string | undefined) => {
       showSavingState('saving');
@@ -706,6 +724,35 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           enables MTP only when the installed weights confirm a compatible prediction head;
           otherwise speculative decoding stays off. <em>N-gram</em> needs no extra model and helps
           most on repetitive or structured output. Takes effect the next time the engine starts.
+        </p>
+
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label
+            htmlFor="llama-cpp-spec-draft-sampling"
+            className="muted"
+            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
+          >
+            Draft sampling
+          </label>
+          <select
+            id="llama-cpp-spec-draft-sampling"
+            aria-describedby="llama-cpp-spec-draft-sampling-hint"
+            value={config?.llamaCppSpecDraftSampling ?? 'greedy'}
+            onChange={(e) => void saveDraftSampling(e.target.value as DraftSampling)}
+            style={{ flex: 1, maxWidth: '20rem' }}
+          >
+            <option value="greedy">Greedy (default)</option>
+            <option value="probabilistic">Probabilistic (experimental)</option>
+          </select>
+        </div>
+        <p
+          id="llama-cpp-spec-draft-sampling-hint"
+          className="muted small"
+          style={{ marginTop: '0.25rem', marginLeft: '10rem' }}
+        >
+          Used with compatible model prediction heads or separate draft models. Probabilistic mode
+          can improve speed depending on the model and task; greedy remains the default. Takes
+          effect the next time the engine starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

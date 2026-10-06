@@ -156,7 +156,7 @@ describe('TaskDetail', () => {
     expect(screen.getByRole('heading', { level: 3, name: 'Bake bread' })).toBeInTheDocument();
   });
 
-  it('features the deliverable under the tracker and opens it in the project files', async () => {
+  it('features the task deliverable and opens it in the project files', async () => {
     vi.mocked(api.getTaskOutputs).mockResolvedValue({
       deliverable: { kind: 'workspace', path: 'bread/recipe.pdf' },
       outputs: [{ kind: 'workspace', path: 'bread/recipe.pdf' }],

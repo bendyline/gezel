@@ -1,4 +1,5 @@
 import { toolErrorText } from '@bendyline/gezel';
+import { KnowledgeLocationSchema } from '@bendyline/gezel';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { type CanonicalToolName, TOOL_REGISTRY, canonicalToolName } from './tool-inventory.js';
@@ -221,6 +222,23 @@ const TOOL_OUTPUT_SCHEMAS = {
   list_tables: ListToolOutputSchema,
   describe_table: TableDescribeToolOutputSchema,
   query_table: TableQueryToolOutputSchema,
+  knowledge_nearby: z.object({
+    documents: z.array(
+      z.object({
+        documentId: z.string(),
+        title: z.string(),
+        summary: z.string().nullable(),
+        distanceMeters: z.number().nonnegative(),
+        matchedLocation: KnowledgeLocationSchema,
+        uri: z.string(),
+        publisherId: z.string(),
+        catalogId: z.string(),
+        catalogVersion: z.string(),
+      }),
+    ),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().optional(),
+  }),
   search: SearchToolOutputSchema,
   search_memory: SearchToolOutputSchema,
   save_memory: MemorySaveToolOutputSchema,
@@ -349,6 +367,7 @@ const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
   'describe_table',
   'query_table',
   'search',
+  'knowledge_nearby',
   'search_memory',
   'list_memories',
   'list_dir',

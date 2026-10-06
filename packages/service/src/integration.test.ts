@@ -280,6 +280,7 @@ describe('operational API surface', () => {
       llamaCppKvCacheType: 'f16',
       llamaCppFlashAttn: 'on',
       llamaCppSpecType: 'ngram-simple',
+      llamaCppSpecDraftSampling: 'probabilistic',
       llamaCppCpuMoe: true,
       llamaCppNCpuFfn: 12,
       llamaCppMlock: true,
@@ -302,6 +303,7 @@ describe('operational API surface', () => {
       llamaCppKvCacheType: null,
       llamaCppFlashAttn: null,
       llamaCppSpecType: null,
+      llamaCppSpecDraftSampling: null,
       llamaCppCpuMoe: null,
       llamaCppNCpuFfn: null,
       llamaCppMlock: null,
@@ -315,6 +317,7 @@ describe('operational API surface', () => {
     expect(clearedBody.llamaCppKvCacheType).toBeUndefined();
     expect(clearedBody.llamaCppFlashAttn).toBeUndefined();
     expect(clearedBody.llamaCppSpecType).toBeUndefined();
+    expect(clearedBody.llamaCppSpecDraftSampling).toBeUndefined();
     expect(clearedBody.llamaCppCpuMoe).toBeUndefined();
     expect(clearedBody.llamaCppNCpuFfn).toBeUndefined();
     expect(clearedBody.llamaCppMlock).toBeUndefined();

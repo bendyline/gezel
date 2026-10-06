@@ -15,6 +15,7 @@
 
 import { decorativeMarkupShapes, realCallSentence, toolCallIdiomFor } from '../tool-call-idiom.js';
 import type { Behavior, PromptCtx } from '../types.js';
+import { PromptToolCookbookCondensed } from './prompt-tool-cookbook-condensed.js';
 
 export const PromptToolCookbookFull: Behavior = {
   id: 'prompt.tool-cookbook-full',
@@ -22,6 +23,9 @@ export const PromptToolCookbookFull: Behavior = {
     'Full tool-use cookbook (~500 tokens) appended to the system prompt. For tier:tiny models and verbose-family medium-tier models that need imperative table-driven guidance.',
 
   promptAppend(ctx: PromptCtx): string | null {
+    if (ctx.role?.trim().toLowerCase() === 'conversationalist') {
+      return PromptToolCookbookCondensed.promptAppend!(ctx, undefined);
+    }
     // A model with a known call format is never told its own call block is
     // decoration — on a local engine that block IS the call.
     const idiom = toolCallIdiomFor(ctx);
@@ -99,8 +103,8 @@ Acknowledge it ("the previous \`browser_navigate\` returned an error") and eithe
 
 The inverse of the rule above and just as load-bearing. If a tool returned successfully, work with its actual result — never claim it 404'd, returned an error, or gave malformed data unless the response text actually says so. The user sees the real tool result alongside your reply; manufacturing a failure to explain why you're abandoning a line of work (\`"the API returned a 404, let me try a different one"\` when the call returned 200) is detected as fabrication and shown as a warning. If the response was simply harder to parse than expected, say that — don't promote "I had trouble understanding the response" into "the service errored".
 
-### Always end the turn with words
+### Answer the user's request
 
-After tool calls return, write one sentence about what happened. Never end on a \`tool_use\`.`;
+After using tools, answer the user's request with the detail it needs.`;
   },
 };

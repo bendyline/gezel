@@ -248,3 +248,28 @@ describe('loadMarkdownCatalog with a documentation tree', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });
+
+describe('location front matter', () => {
+  it('preserves typed locations outside opaque metadata and rejects invalid coordinates', async () => {
+    const tree = await mkdtemp(join(tmpdir(), 'gezk-location-md-'));
+    try {
+      const file = join(tree, 'museum.md');
+      await writeFile(
+        file,
+        '---\nlocations:\n  - id: subject\n    latitude: 47.6062\n    longitude: -122.3321\n    role: subject\n---\n# Museum\n\nHistory.',
+      );
+      const catalog = await loadMarkdownCatalog(tree, { language: 'en' });
+      expect(catalog.documents[0]?.locations?.[0]?.latitude).toBe(47.6062);
+      expect(catalog.documents[0]?.meta?.locations).toBeUndefined();
+      await writeFile(
+        file,
+        '---\nlocations:\n  - id: bad\n    latitude: 95\n    longitude: 0\n    role: subject\n---\n# Bad',
+      );
+      await expect(loadMarkdownCatalog(tree, { language: 'en' })).rejects.toThrow(
+        'invalid front matter locations',
+      );
+    } finally {
+      await rm(tree, { recursive: true, force: true });
+    }
+  });
+});

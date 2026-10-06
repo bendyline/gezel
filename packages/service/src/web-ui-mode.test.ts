@@ -67,7 +67,7 @@ describe('web-UI token', () => {
     const onDisk = (await readFile(gezelPaths(home).runtime.token, 'utf8')).trim();
     expect(onDisk).toBe(svc.clientToken);
     expect(onDisk).not.toBe(svc.context.token);
-    expect(svc.context.tokenStore.lookup(onDisk)?.scopes).toEqual(['ui', 'openai']);
+    expect(svc.context.tokenStore.lookup(onDisk)?.scopes).toEqual(['ui', 'openai', 'knowledge']);
   });
 
   it('mints a dedicated per-launch token, distinct from root', () => {

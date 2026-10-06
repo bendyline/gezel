@@ -55,6 +55,20 @@ describe('ownerStepQuestion', () => {
     expect(q.documentPath).toBeUndefined();
   });
 
+  it('puts the assigned action before review choices and inherits it from the task', () => {
+    const instructions = 'Check the event date and choose Approve when it is correct.';
+    for (const step of [review, { ...review, assignee: undefined }]) {
+      const q = ownerStepQuestion({
+        task: task({ assignee: { kind: 'user', instructions } }),
+        step: { ...step, ...(step.assignee ? { assignee: { kind: 'user', instructions } } : {}) },
+        returnTo: draft,
+        askerGezelId: 'kylian',
+      });
+      expect(q.prompt).toContain(`waiting for you.\n\n${instructions}`);
+      expect(q.prompt.indexOf(instructions)).toBeLessThan(q.prompt.indexOf('Choose Approve'));
+    }
+  });
+
   // The normalized owner step no longer runs the book's review procedure, so
   // the card is the only thing that puts the work in front of the owner.
   it('lists the work under review, the gated deliverable first', () => {

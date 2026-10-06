@@ -470,29 +470,70 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     );
   };
 
+  const hasCatalogPicker = catalogs !== null && catalogs.length > 1;
+  const addCatalogKey = (
+    <button
+      type="button"
+      className="gz-key gz-key--icon"
+      aria-label="Add knowledge catalogs"
+      title="Add knowledge catalogs"
+      onClick={openSettings}
+      data-testid="knowledge-add-catalog"
+    >
+      <svg
+        width={14}
+        height={14}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        focusable="false"
+        aria-hidden="true"
+      >
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+  );
+
   return (
     <div className={`knowledge-view knowledge-view--${mobilePane}`} data-testid="knowledge-view">
       <nav className="knowledge-rail" aria-label="Knowledge catalogs and topics">
-        {catalogs && catalogs.length > 1 && (
-          <select
-            aria-label="Catalog"
-            value={selectedCatalogId ?? ''}
-            onChange={(e) => {
-              setSelectedCatalogId(e.target.value);
-              setSelectedDocId(null);
-              setMobilePane('topics');
-            }}
-          >
-            {catalogs.map((c) => (
-              <option key={c.ref.catalogId} value={c.ref.catalogId}>
-                {c.name ?? c.ref.catalogId}
-              </option>
-            ))}
-          </select>
+        {hasCatalogPicker && (
+          <div className="knowledge-rail-catalog-row">
+            <select
+              aria-label="Catalog"
+              value={selectedCatalogId ?? ''}
+              onChange={(e) => {
+                setSelectedCatalogId(e.target.value);
+                setSelectedDocId(null);
+                setMobilePane('topics');
+              }}
+            >
+              {catalogs.map((c) => (
+                <option key={c.ref.catalogId} value={c.ref.catalogId}>
+                  {c.name ?? c.ref.catalogId}
+                </option>
+              ))}
+            </select>
+            {addCatalogKey}
+          </div>
         )}
         {selectedCatalog && (
           <>
-            <h2 className="knowledge-catalog-name">{selectedCatalog.name ?? selectedCatalogId}</h2>
+            {hasCatalogPicker ? (
+              <h2 className="knowledge-catalog-name">
+                {selectedCatalog.name ?? selectedCatalogId}
+              </h2>
+            ) : (
+              <div className="knowledge-rail-catalog-row">
+                <h2 className="knowledge-catalog-name">
+                  {selectedCatalog.name ?? selectedCatalogId}
+                </h2>
+                {addCatalogKey}
+              </div>
+            )}
             <p className="knowledge-catalog-meta">
               {selectedCatalog.documents ?? '?'} documents · {selectedCatalog.license ?? ''}
               {selectedCatalog.ref.version ? ` · v${selectedCatalog.ref.version}` : ''}

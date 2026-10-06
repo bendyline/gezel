@@ -221,11 +221,17 @@ export async function scoreRelevancePairs(
   const trimmedQuery = trimToTokens(ready.tokenizer, query, model.queryMaxTokens);
   const queryTokens = ready.tokenizer.encode(trimmedQuery, { add_special_tokens: false }).length;
   const passageBudget = Math.max(16, model.maxTokens - queryTokens - ready.pairOverhead - 2);
+  let slowestBatchMs = 0;
   for (let start = 0; start < passages.length; start += BATCH) {
-    if (deadlineAt !== undefined && Date.now() > deadlineAt) {
+    // The caller stops waiting shortly after the deadline and then discards
+    // the whole reply, so a batch that cannot finish in time costs every batch
+    // already scored. On a contended CPU the last batch started just inside
+    // the deadline and overran it, and the search kept its unjudged order.
+    if (deadlineAt !== undefined && Date.now() + slowestBatchMs > deadlineAt) {
       partial = true;
       break;
     }
+    const batchStarted = performance.now();
     const batch = passages.slice(start, start + BATCH).map((passage) => {
       const trimmed = trimToTokens(ready.tokenizer, passage, passageBudget);
       if (trimmed !== passage) truncatedPassages++;
@@ -235,6 +241,7 @@ export async function scoreRelevancePairs(
     batchScores.forEach((score, i) => {
       scores[start + i] = score;
     });
+    slowestBatchMs = Math.max(slowestBatchMs, performance.now() - batchStarted);
   }
   return { scores, partial, truncatedPassages, inferMs: Math.round(performance.now() - started) };
 }

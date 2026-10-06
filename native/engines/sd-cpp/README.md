@@ -75,10 +75,11 @@ explicitly. So the loader's presence is the single hard requirement.
 | Platform | Provided by | Risk |
 | --- | --- | --- |
 | `win32-x64` | Every GPU driver installs `vulkan-1.dll` into `System32` | Low |
-| `linux-x64` | The `libvulkan1` package (Debian/Ubuntu) or `vulkan-loader` (Fedora) | Present on mainstream desktop installs; **absent** on minimal/server images, some containers, and WSL without a GPU stack |
+| `linux-x64` | Bundled `libvulkan.so.1` from the build SDK or system package | The archive supplies the loader; GPU drivers and Vulkan ICDs remain host requirements |
 
-CI cannot catch a missing loader: the `ldd` smoke check runs on a runner
-where the Vulkan SDK was just installed, so it always resolves there.
+The build and CI verify that the executable resolves the bundled loader with
+`LD_LIBRARY_PATH` cleared. A generic `ldd` smoke check alone could miss an
+omission because the runner also has the Vulkan SDK installed.
 
 ## Build locally
 

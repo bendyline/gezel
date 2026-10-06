@@ -422,6 +422,17 @@ async function isSessionRouteAllowed(
       if ((rest === '' || rest === '/') && method === 'DELETE') {
         return sessionDeny('deleting a project requires a first-party client');
       }
+      if ((rest === '' || rest === '/') && method === 'PUT') {
+        const body = await readJsonSafe(c);
+        if (
+          body?.managedWorkspaceWritePolicy !== undefined ||
+          body?.allowGezelWrites !== undefined
+        ) {
+          return sessionDeny(
+            'workspace permission changes require a user decision; request permission with ask_user_question and permissionRequest: workspace-write',
+          );
+        }
+      }
       return auth.team ? SESSION_ALLOW : sessionDeny('route requires a coordinator session');
     }
     return SESSION_ALLOW;

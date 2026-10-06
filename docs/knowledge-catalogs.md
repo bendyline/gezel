@@ -506,6 +506,17 @@ Republican Party vice presidential candidate selection" fell out of its own
 top 5. The same query backs the compiler's smoke verification and the
 validator, so seal-time and install-time checks agree with search.
 
+Both the BM25 tier and the chunk-body FTS arm match the query's content words
+only: request filler (`QUERY_STOP_WORDS`, the list the project index uses) is
+dropped unless nothing else is left. On a 13,547-document Azure-docs catalog,
+"Can you tell me how to integrate Azure search with blob storage?" otherwise
+ranked an Azure AD B2C page about "eID-**Me**" first. Chunk FTS also drops any
+term found in more than half a shard's chunks — BM25 weighs it at ~0, yet an OR
+still ranks every row it matches. Together these took that question's chunk scan
+from ~550 ms to ~40 ms, inside the chat turn's 600 ms knowledge budget. Exact and
+named titles read the raw query, so a recorded smoke query (a document's own
+title) ranks as before.
+
 Shard routing only reaches what its budget covers (S = 6 explicit, 3 proactive),
 so a catalog with more shards than S loses the neighbours that live in unrouted
 shards. The spec's topic-order fill (gezk §8.1) puts an artist, their albums
@@ -516,6 +527,18 @@ once. Measured on a 1.85M-chunk Wikipedia music catalog, routed recall@8 went
 from 82.6% to 85.7% at S = 6 and from 52.1% to 63.9% at S = 3 over 10 shards;
 recut to 37 shards, from 36.0% to 55.5% at S = 6. It helps; it does not make a
 catalog of dozens of shards routable at S = 6 — split those by subject.
+
+A question that names a page by title gets that page's shard as well
+(title-assisted routing, `CatalogHandle.titleRouteShards`). Centroid scores sit
+in a band a few hundredths wide, so even with semantic fill "Who were the
+members of ABBA?" ranked the ABBA article's shard 8th of 10. The named-title
+tier of the document index knows which page the question names, and the vector
+arm scans its shard on top of S: one shard for a single-catalog search, at most
+two across all catalogs for the daemon's explicit search (`titleRouteShards` on
+the host request), most specific name first. On the 10-shard music and film-tv
+catalogs this lifted end-to-end recall@8 on "What is <title>?" questions from
+86% to 92% and 84% to 91%, at about 0.15 extra shard scans per query. A
+question naming nothing adds nothing.
 
 Small installations (up to roughly eight active catalogs) may query every catalog.
 Larger installations use `~/.gezel/knowledge/router.db`, built from manifest
@@ -1076,3 +1099,9 @@ installed catalogs or requiring a Gezel release.
 These defaults keep the first version understandable and local-first while leaving
 clean seams for larger corpora, additional publishers, and alternate embedding
 profiles.
+
+
+Location discovery and radius-constrained retrieval are documented in
+[knowledge-spatial.md](knowledge-spatial.md). The 0.7 draft includes document
+point locations; existing Qualla regional 0.6 catalogs remain queryable through
+an explicit metadata adapter.
