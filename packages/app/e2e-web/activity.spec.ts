@@ -119,8 +119,16 @@ test('Activity answers inline, retains drafts, and explains held work', async ({
       area: 'activity',
       description: 'A failed status refresh preserves known work and labels it stale',
     });
-    await page.unroute('**/api/activity');
+    // Click Try again only while the route still fails. Once it is lifted, the
+    // 5 s poll or an event-driven refresh can recover first and take the button
+    // with the banner, leaving the click waiting out the test timeout.
+    const retried = page.waitForResponse(
+      (res) => new URL(res.url()).pathname === '/api/activity' && res.status() === 503,
+    );
     await panel.getByRole('button', { name: 'Try again' }).click();
+    await retried;
+    await expect(panel.getByText('Status could not be refreshed.')).toBeVisible();
+    await page.unroute('**/api/activity');
     await expect(panel.getByText('Status could not be refreshed.')).toBeHidden();
   } finally {
     await client.answerQuestion(secondQuestion.questionId, { silentSkip: true });
