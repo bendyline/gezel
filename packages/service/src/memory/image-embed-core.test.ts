@@ -1,8 +1,8 @@
 /**
  * Real-model image-embed coverage, self-skipping like content-enrich.test's
- * realEmbed(): when the CLIP model can't load in this environment (offline,
- * no transformers peer), the tests return early instead of failing. First run
- * downloads the q8 vision tower (~88 MB) into the shared test HF cache.
+ * realEmbed(): when the media-search model (EmbeddingGemma 2's vision path)
+ * is not installed or media search is gated off — the default in tests, since
+ * the lane loads local files only — the tests return early instead of failing.
  */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';

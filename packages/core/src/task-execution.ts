@@ -25,14 +25,16 @@ export function pinCraftbookOwner(steps: TaskCraftbookStep[], ownerGezelId: stri
 /**
  * The prompt did not fit the model's context. Covers the desktop engines and
  * every on-device provider: the native llama.cpp bridge, Apple's system model
- * (`CONTEXT_LIMIT`), and Android's ML Kit model, which reports by message only.
+ * (`CONTEXT_LIMIT`), and Android's ML Kit model, which reports by message only:
+ * our bridge's own check, and ML Kit's when its token count disagrees with
+ * ours ("Input text length exceeds the limit", Galaxy S26+, 2026-10-06).
  */
 export function isContextOverflowError(err: unknown): boolean {
   if (!err) return false;
   const code = (err as { code?: string }).code;
   if (code === 'context-overflow' || code === 'CONTEXT_LIMIT') return true;
   const msg = err instanceof Error ? err.message : String(err);
-  return /ran out of working memory|exceeds the available context size|prompt plus requested output exceeds the context|exceeds apple on-device ai's context budget|too long for (?:apple|android's) on-device ai/i.test(
+  return /ran out of working memory|exceeds the available context size|prompt plus requested output exceeds the context|exceeds apple on-device ai's context budget|too long for (?:apple|android's) on-device ai|input text length exceeds the limit/i.test(
     msg,
   );
 }

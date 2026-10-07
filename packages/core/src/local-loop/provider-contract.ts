@@ -128,6 +128,13 @@ export interface SendAndWaitOpts {
    * still records the turn.
    */
   standalone?: boolean;
+  /**
+   * The turn's first request must call this tool: it is the only tool that
+   * request offers, and the engine is asked to require a call where it can.
+   * Later requests in the turn see the full surface. A page reaction whose
+   * whole job is one move sets it (`ProjectTypeToolReaction.turn`).
+   */
+  requiredTool?: string;
   queue?: {
     lane: 'interactive' | 'background';
     /**
@@ -476,6 +483,8 @@ export type CompactionRequester = (params: {
 export interface TerminalToolPolicy {
   toolNames: string[];
   closingArg?: string;
+  /** Per-tool `closingArg`, for a policy over tools whose replies sit in different arguments. */
+  closingArgByTool?: Record<string, string>;
   fallbackText: string;
   maxClosingChars?: number;
   /**

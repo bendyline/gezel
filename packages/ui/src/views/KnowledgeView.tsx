@@ -1,11 +1,12 @@
-import type { UnifiedSearchResult } from '@bendyline/gezel';
-import { formatKnowledgeUri, parseKnowledgeUri } from '@bendyline/gezel';
+import type { SearchMedia, UnifiedSearchResult } from '@bendyline/gezel';
+import { formatKnowledgeUri, mediaSpanLabel, parseKnowledgeUri } from '@bendyline/gezel';
 import type {
   KnowledgeCatalogStatus,
   KnowledgeDocumentRead,
   KnowledgeDocumentSummary,
   KnowledgeTopicNode,
 } from '@bendyline/gezel-client';
+import type { MediaProvider } from '@bendyline/squisq';
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
@@ -15,6 +16,7 @@ import { KnowledgeCatalogMark } from '../components/KnowledgeCatalogMark.js';
 import { KnowledgeCatalogsDialog } from '../components/KnowledgeCatalogsDialog.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
 import { queueComposerPrefill } from '../components/composer-prefill.js';
+import { AuthedMediaPreview } from '../components/file-browser/FilePreview.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
@@ -107,6 +109,9 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UnifiedSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  // The media hit that opened the current document: shown above the article,
+  // a clip or recording starting at the matched moment.
+  const [playing, setPlaying] = useState<{ documentId: string; media: SearchMedia } | null>(null);
   const [copied, setCopied] = useState(false);
   const [managingCatalogs, setManagingCatalogs] = useState(false);
   const searchTimer = useRef<number | null>(null);
@@ -122,6 +127,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       setSelectedCatalogId(intent.catalogId);
       if (intent.documentId) {
         setSelectedDocId(intent.documentId);
+        setPlaying(intent.media ? { documentId: intent.documentId, media: intent.media } : null);
         setMobilePane('reader');
       }
     }
@@ -143,11 +149,14 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     };
     window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onInventoryChanged);
     const onOpenDocument = (e: Event) => {
-      const detail = (e as CustomEvent<{ catalogId?: string; documentId?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{ catalogId?: string; documentId?: string; media?: SearchMedia }>
+      ).detail;
       if (!detail?.catalogId) return;
       setSelectedCatalogId(detail.catalogId);
       if (detail.documentId) {
         setSelectedDocId(detail.documentId);
+        setPlaying(detail.media ? { documentId: detail.documentId, media: detail.media } : null);
         setMobilePane('reader');
       }
     };
@@ -306,6 +315,15 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
             ...(selectedCatalog?.ref.version ? { version: selectedCatalog.ref.version } : {}),
           })
         : null,
+    [selectedCatalogId, selectedCatalog?.ref.version],
+  );
+  const fetchAsset = useCallback(
+    (path: string) =>
+      api.fetchKnowledgeAsset(
+        selectedCatalogId ?? '',
+        path,
+        selectedCatalog?.ref.version ? { version: selectedCatalog.ref.version } : {},
+      ),
     [selectedCatalogId, selectedCatalog?.ref.version],
   );
   const providerRef = useRef(mediaProvider);
@@ -625,17 +643,26 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                 <li key={r.id}>
                   <button
                     type="button"
-                    className="knowledge-doc-row"
+                    className={`knowledge-doc-row${r.media ? ' knowledge-doc-row--media' : ''}`}
                     aria-current={r.documentId === selectedDocId ? 'true' : undefined}
                     onClick={() => {
                       if (r.documentId) {
                         setSelectedDocId(r.documentId);
+                        setPlaying(r.media ? { documentId: r.documentId, media: r.media } : null);
                         setMobilePane('reader');
                       }
                     }}
                   >
-                    <span className="knowledge-doc-title">{r.title}</span>
-                    {r.snippet && <span className="knowledge-doc-summary">{r.snippet}</span>}
+                    {r.media?.modality === 'image' && mediaProvider && (
+                      <KnowledgeMediaThumb provider={mediaProvider} path={r.media.assetPath} />
+                    )}
+                    <span className="knowledge-doc-text">
+                      <span className="knowledge-doc-title">{r.title}</span>
+                      {r.media && (
+                        <span className="knowledge-doc-media">{mediaSpanLabel(r.media)}</span>
+                      )}
+                      {r.snippet && <span className="knowledge-doc-summary">{r.snippet}</span>}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -655,6 +682,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                     aria-current={d.id === selectedDocId ? 'true' : undefined}
                     onClick={() => {
                       setSelectedDocId(d.id);
+                      setPlaying(null);
                       setMobilePane('reader');
                     }}
                   >
@@ -701,6 +729,22 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                 {doc.sourceUpdatedAt ? ` · snapshot ${doc.sourceUpdatedAt.slice(0, 10)}` : ''}
               </p>
             </header>
+            {playing && playing.documentId === doc.id && selectedCatalogId && (
+              <figure className="knowledge-reader-media">
+                <AuthedMediaPreview
+                  kind={playing.media.modality}
+                  path={playing.media.assetPath}
+                  fetchBlob={fetchAsset}
+                  {...(playing.media.startMs === undefined
+                    ? {}
+                    : { startMs: playing.media.startMs })}
+                />
+                <figcaption className="muted small">
+                  {mediaSpanLabel(playing.media)}
+                  {attributionText(playing.media.attribution)}
+                </figcaption>
+              </figure>
+            )}
             <div className="knowledge-reader-body" onClickCapture={onBodyClickCapture}>
               {renderedDoc && mediaProvider ? (
                 <MediaContext.Provider value={mediaProvider}>
@@ -751,4 +795,28 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       {catalogsDialog}
     </div>
   );
+}
+
+/** A photo hit's thumbnail, resolved through the catalog's media provider (bearer-authed). */
+function KnowledgeMediaThumb({ provider, path }: { provider: MediaProvider; path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void provider.resolveUrl(path).then((resolved) => {
+      if (alive && resolved.startsWith('blob:')) setUrl(resolved);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [provider, path]);
+  return url ? <img className="knowledge-doc-thumb" src={url} alt="" /> : null;
+}
+
+/** ` · CC BY 4.0, Jane Doe` from a media row's attribution, or nothing. */
+function attributionText(attribution: Record<string, unknown> | undefined): string {
+  if (!attribution) return '';
+  const parts = ['license', 'author', 'credit']
+    .map((key) => attribution[key])
+    .filter((value): value is string => typeof value === 'string' && value.trim() !== '');
+  return parts.length ? ` · ${parts.join(', ')}` : '';
 }

@@ -155,7 +155,10 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   audio: false,
   audioModelManagement: false,
   mediaExport: false,
-  chatAttachments: false,
+  // Photos and files land in the prompt draft's message_files/ like the
+  // desktop's. The send path inlines text files and tells the model when it
+  // cannot see an image (no on-device provider takes images yet).
+  chatAttachments: true,
   queuedChat: true,
   textTransforms: true,
 });

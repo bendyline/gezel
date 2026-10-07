@@ -36,6 +36,7 @@ export const MAS_REVIEWED_ENTITLEMENTS = new Map([
   ['com.apple.security.cs.allow-jit', true],
   ['com.apple.security.files.user-selected.read-write', true],
   ['com.apple.security.device.audio-input', true],
+  ['com.apple.security.device.camera', true],
   ['com.apple.security.application-groups', [GEZEL_APP_GROUP]],
 ]);
 

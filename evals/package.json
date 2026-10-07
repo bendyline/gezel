@@ -23,6 +23,7 @@
     "embed-calibration": "tsx src/bin/embed-calibration.ts",
     "retrieval-bench": "tsx src/bin/retrieval-bench.ts",
     "knowledge-calibration": "tsx src/bin/knowledge-calibration.ts",
+    "media-bench": "tsx src/bin/media-bench.ts",
     "factuality": "tsx src/bin/factuality.ts",
     "ab-retrieval": "tsx src/bin/ab-retrieval.ts",
     "preflight": "tsx src/bin/preflight.ts",

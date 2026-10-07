@@ -126,12 +126,16 @@ export interface AsymmetricHit {
  * For a `centered-sign` profile the caller passes `query − center`; for a
  * plain `sign` profile the unit query. The bits are whatever the catalog
  * stored; this function does not know or care which.
+ *
+ * `excludedChunkIds` drops rows outright — media rows, which the text lane
+ * leaves to its own exact scan rather than letting them take candidate slots.
  */
 export function asymmetricTopK(
   index: ShardBitIndex,
   query: ArrayLike<number>,
   k: number,
   eligibleChunkIds?: ReadonlySet<number>,
+  excludedChunkIds?: ReadonlySet<number>,
 ): AsymmetricHit[] {
   const { bits, bytesPerRow, rows } = index;
   if (Math.ceil(query.length / 8) !== bytesPerRow) {
@@ -197,7 +201,7 @@ export function asymmetricTopK(
 
   let offset = 0;
   for (let r = 0; r < rows; r++) {
-    if (eligibleChunkIds && !eligibleChunkIds.has(r + 1)) {
+    if ((eligibleChunkIds && !eligibleChunkIds.has(r + 1)) || excludedChunkIds?.has(r + 1)) {
       offset += bytesPerRow;
       continue;
     }

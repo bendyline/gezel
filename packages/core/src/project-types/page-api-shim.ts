@@ -13,7 +13,10 @@ import type { PageApiBootstrap } from '../schemas/page-bridge.js';
  *
  * A phone has no preview server: its snapshot builder embeds
  * `pageApiShimSource` as a `data:` script in the same position, and the
- * parent relay answers it exactly as the desktop Output pane does.
+ * parent relay answers it exactly as the desktop Output pane does. With no
+ * capability to build a URL from, `data.url()` there returns a blank image
+ * that the shim replaces with the file's bytes, read over the relay, in every
+ * attribute that still holds it.
  *
  * Modes:
  *  - `embedded` (Output pane iframe): every call relays over the v1
@@ -54,6 +57,27 @@ const DEFAULTS = {
   maxInflight: 4,
   maxQueued: 16,
   watchIntervalMs: 2_500,
+};
+
+/** What a relayed file is served as, by extension: the media a snapshot can show. */
+const MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  vtt: 'text/vtt',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
 };
 
 /** The shim's JavaScript, for hosts that embed scripts by URL rather than inline. */
@@ -236,6 +260,65 @@ function browserRead(op,source,path,as){
   });
 }
 
+// Relayed media (a snapshot page, which has no capability): data.url() is
+// synchronous, so it answers a blank GIF tagged with the file, and the bytes
+// replace the tag in src/poster/href/style once the relay returns them. A
+// snapshot's CSP admits only data: media, so a data URL is the one shape
+// that can work.
+var BLANK='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+var MEDIA_ATTRS=['src','poster','href','style'];
+var MEDIA_TYPES=${JSON.stringify(MEDIA_TYPES)};
+var relayed={};var mediaObserver=null;
+function mediaType(path){
+  var m=/\\.([a-z0-9]+)$/i.exec(String(path));
+  return (m&&MEDIA_TYPES[m[1].toLowerCase()])||'application/octet-stream';
+}
+function swapMedia(el){
+  if(!el||el.nodeType!==1)return;
+  for(var i=0;i<MEDIA_ATTRS.length;i++){
+    var value=el.getAttribute(MEDIA_ATTRS[i]);
+    if(!value||value.indexOf('#gezel-data=')<0)continue;
+    var next=value;
+    for(var tag in relayed)if(relayed[tag]&&next.indexOf(tag)>=0)next=next.split(tag).join(relayed[tag]);
+    if(next!==value)el.setAttribute(MEDIA_ATTRS[i],next);
+  }
+}
+function swapTree(root){
+  swapMedia(root);
+  if(!root||!root.querySelectorAll)return;
+  var found=root.querySelectorAll('[src*="gezel-data="],[poster*="gezel-data="],[href*="gezel-data="],[style*="gezel-data="]');
+  for(var i=0;i<found.length;i++)swapMedia(found[i]);
+}
+function observeMedia(){
+  if(mediaObserver||typeof MutationObserver!=='function'||typeof document==='undefined')return;
+  mediaObserver=new MutationObserver(function(records){
+    for(var i=0;i<records.length;i++){
+      var r=records[i];
+      if(r.type==='attributes')swapMedia(r.target);
+      else for(var j=0;j<r.addedNodes.length;j++)swapTree(r.addedNodes[j]);
+    }
+  });
+  mediaObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:MEDIA_ATTRS});
+}
+function relayedUrl(source,path){
+  // The closing ';' never occurs in an encoded path, so no file's tag is a
+  // prefix of another's (a.png beside a.png2).
+  var tag=BLANK+'#gezel-data='+encodeURIComponent(source+':'+path)+';';
+  if(relayed[tag])return relayed[tag];
+  if(!(tag in relayed)){
+    relayed[tag]=null;
+    observeMedia();
+    readOp('read',path,{source:source,as:'bytes'}).then(function(d){
+      relayed[tag]='data:'+mediaType(path)+';base64,'+(d.content||'');
+      if(typeof document!=='undefined')swapTree(document.documentElement);
+    },function(e){
+      delete relayed[tag];
+      if(typeof console!=='undefined')console.error('gezel: could not load '+path+' ('+((e&&e.message)||e)+')');
+    });
+  }
+  return tag;
+}
+
 function readOp(op,path,opts){
   opts=opts||{};
   var source=opts.source||'workspace';
@@ -304,8 +387,9 @@ var api={
         return S.dataBase+'/'+source+'/'+enc;
       }
       var u=capabilityUrl(source,String(path));
-      if(!u)throw err('unavailable','gezel: no capability in document URL');
-      return u;
+      if(u)return u;
+      if(embedded)return relayedUrl(source,String(path));
+      throw err('unavailable','gezel: no capability in document URL');
     },
   },
   ui:{

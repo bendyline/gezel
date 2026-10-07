@@ -951,6 +951,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         projectId: id,
         spatial: body.spatial,
         catalogs: body.catalogs,
+        media: true,
       });
       return c.json({
         results: results.slice(0, limit),
@@ -972,6 +973,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         // A weak lead is still a lead to a model that asked: reorder, and
         // drop only what a calibrated model calls plainly off-topic.
         relevance: { surface: 'search', mode: 'reorder' },
+        media: true,
       }),
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
@@ -1179,7 +1181,11 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = SearchImagesRequestSchema.parse(await c.req.json());
-    return c.json(await ctx.contentIndex.searchImages(id, body.query, body.maxResults));
+    return c.json(
+      await ctx.contentIndex.searchImages(id, body.query, body.maxResults, {
+        ...(body.kinds ? { kinds: body.kinds } : {}),
+      }),
+    );
   });
 
   app.post('/:id/tools/find-similar-images', async (c) => {

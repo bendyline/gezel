@@ -124,8 +124,11 @@ python3 -m unittest discover -s native/mobile -p 'test_*.py'
 ```
 
 The initial build excludes `llama-common`, server chat templates/tool parsing,
-multimodal tools, and the desktop Muse compatibility patch (which modifies
-common/server behavior). The bridge supports only the built-in templates that
+the multimodal CLI tools, and the desktop Muse compatibility patch (which
+modifies common/server behavior). The mtmd library itself is linked statically
+into `gezel-llama` for `gezel_llama_describe_image` (`gezel_vision.cpp`), the
+phone's fallback photo describer ([ADR 0020](../../docs/decisions/0020-phone-photo-reading.md));
+video stays off, since it needs an ffmpeg process a phone does not have. The bridge supports only the built-in templates that
 `llama_chat_apply_template` recognizes. A missing or unsupported model template
 fails explicitly; there is no silent fallback to another chat format. Tool-call
 parity, richer template rendering, device admission, and real-device tests remain.

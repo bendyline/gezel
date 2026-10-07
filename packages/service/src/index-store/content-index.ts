@@ -66,6 +66,9 @@ import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
+import { resolveKnowledgeVectorFloors } from '../knowledge/vector-floors.js';
+import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
+import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
   FaceModelPaths,
@@ -106,6 +109,7 @@ import { ensureIndexGitignore } from './gitignore.js';
 import {
   type FileReviewRow,
   IndexStore,
+  type MediaVectorModality,
   type SecurityFindingRow,
   type SecuritySeverity,
   type SymbolHit,
@@ -1347,7 +1351,7 @@ export class ContentIndex {
 
   /**
    * Run one batch of the always-on IMAGE-embed tier (lane A of image search):
-   * CLIP vectors into the hash-keyed image_vectors table, no LLM involved.
+   * media-search vectors into the hash-keyed media_vectors table, no LLM involved.
    * Same pre-Boekwachter placement discipline as {@link embedOnly}; unlike it,
    * this does NOT require sqlite-vec — image vectors are plain BLOBs. Per-image
    * outcomes consume the gate (ok / terminal unsupported / capped attempt); a
@@ -1411,6 +1415,88 @@ export class ContentIndex {
       return { files, embedded, unavailable: false };
     } finally {
       index.close();
+    }
+  }
+
+  /**
+   * The media tier for audio and video: each file cut into windows by the
+   * system ffmpeg and embedded window by window, in the same space as images
+   * and text queries. Same gate and capped retries as images; a file ffmpeg
+   * cannot decode is terminal for its hash.
+   */
+  async embedAudioVideo(
+    projectId: string,
+    limit = 2,
+    embed?: (jobs: MediaEmbedJob[]) => Promise<MediaEmbedOutcome[]>,
+  ): Promise<{ files: number; embedded: number; unavailable: boolean } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir } = opened;
+    try {
+      let files = 0;
+      let embedded = 0;
+      const jobs: Array<MediaEmbedJob & { relPath: string }> = [];
+      for (const f of index.filesNeedingImageEmbed(limit, ['audio', 'video'])) {
+        if (!f.hash) continue;
+        const abs = safeJoin(workspaceDir, f.path);
+        if (!abs) {
+          index.markImageEmbedUnsupported(f.hash, f.path);
+          files++;
+          continue;
+        }
+        jobs.push({
+          path: abs,
+          hash: f.hash,
+          modality: f.modality === 'video' ? 'video' : 'audio',
+          relPath: f.path,
+        });
+      }
+      if (jobs.length === 0) return { files, embedded, unavailable: false };
+      const embedFn = embed ?? (await import('../memory/image-embeddings.js')).embedMediaFiles;
+      let outcomes: MediaEmbedOutcome[];
+      try {
+        outcomes = await embedFn(
+          jobs.map(({ path, hash, modality }) => ({ path, hash, modality })),
+        );
+      } catch {
+        const first = jobs[0]!;
+        index.markImageEmbedAttempt(first.hash, first.relPath);
+        return { files, embedded, unavailable: true };
+      }
+      const byHash = new Map(jobs.map((j) => [j.hash, j]));
+      for (const outcome of outcomes) {
+        const job = byHash.get(outcome.hash);
+        if (!job) continue;
+        files++;
+        if ('windows' in outcome) {
+          index.putMediaVectors(
+            job.hash,
+            job.relPath,
+            job.modality,
+            outcome.windows.map((w) => ({ startMs: w.startMs, endMs: w.endMs, vec: w.vector })),
+          );
+          index.markImageEmbedOk(job.hash, job.relPath);
+          embedded++;
+        } else if ('skip' in outcome) {
+          index.markImageEmbedUnsupported(job.hash, job.relPath);
+        } else {
+          index.markImageEmbedAttempt(job.hash, job.relPath);
+        }
+      }
+      return { files, embedded, unavailable: false };
+    } finally {
+      index.close();
+    }
+  }
+
+  /** Audio and video files the media tier still owes windows (for the drain's gate). */
+  async countAudioVideoPending(projectId: string): Promise<number> {
+    const opened = await this.open(projectId);
+    if (!opened) return 0;
+    try {
+      return opened.index.countNeedingImageEmbed(['audio', 'video']);
+    } finally {
+      opened.index.close();
     }
   }
 
@@ -2251,36 +2337,112 @@ export class ContentIndex {
 
   // ── image-intel ──────────────────────────────────────────────────────────
 
+  /**
+   * Find workspace media by meaning and by name. The vector arm embeds the
+   * query with the media-search profile's text model (local files only; no
+   * model → keyword search alone) and scores every stored image, or audio and
+   * video window, exactly; a hit counts only above its modality's measured
+   * floor. The FTS arm matches filenames and captions/transcripts. The two
+   * fuse by reciprocal rank, keyed per file and window.
+   */
   async searchImages(
     projectId: string,
     query: string,
     maxResults = 20,
+    opts: {
+      kinds?: readonly MediaVectorModality[];
+      vector?: number[] | null;
+      /** Meaning only: unified search already matches filenames in its file arm. */
+      vectorOnly?: boolean;
+    } = {},
   ): Promise<SearchImagesResponse> {
+    const kinds = opts.kinds?.length ? opts.kinds : (['image'] as const);
     const opened = await this.open(projectId);
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      if (!index.ftsAvailable) return { results: [], engine: 'unavailable', truncated: false };
-      // Over-fetch from the shared doc FTS, then keep only image-modality hits.
-      const hits = index.searchDocs(query, maxResults * 4);
-      const results: SearchImagesResponse['results'] = [];
-      for (const h of hits) {
-        const f = index.getFile(h.filePath);
-        if (f?.modality !== 'image') continue;
-        const md = index.getMetadata(h.filePath);
-        const summary = f.hash ? index.getSummary(f.hash) : undefined;
-        results.push({
-          path: h.filePath,
+      type Hit = SearchImagesResponse['results'][number];
+      const fused = new Map<string, { hit: Hit; score: number }>();
+      const add = (key: string, hit: Hit, weight: number, rank: number): void => {
+        const entry = fused.get(key) ?? { hit, score: 0 };
+        entry.score += weight / (MEDIA_RRF_K + rank);
+        if (hit.score > entry.hit.score) entry.hit = { ...entry.hit, ...hit };
+        fused.set(key, entry);
+      };
+      const describe = (path: string, kind: MediaVectorModality): Hit => {
+        const f = index.getFile(path);
+        const md = index.getMetadata(path);
+        const summary = f?.hash ? index.getSummary(f.hash) : undefined;
+        return {
+          path,
+          ...(kind !== 'image' ? { kind } : {}),
           ...(md.width ? { width: Number(md.width) } : {}),
           ...(md.height ? { height: Number(md.height) } : {}),
           ...(md.format ? { format: md.format } : {}),
           ...(summary ? { caption: summary } : {}),
           score: 0.5,
+        };
+      };
+
+      let vectorHits = 0;
+      const vector = opts.vector === undefined ? await mediaQueryVector(query) : opts.vector;
+      if (vector) {
+        const floors = resolveKnowledgeVectorFloors();
+        const query32 = Float32Array.from(vector);
+        const scored = index
+          .allMediaVectors(kinds)
+          .filter((row) => row.vec.length === vector.length)
+          .map((row) => ({ row, cosine: cosine(query32, row.vec) }))
+          .filter(({ row, cosine: c }) => {
+            const floor = floors.floorFor({
+              catalogKey: 'workspace',
+              profileId: MEDIA_SEARCH_PROFILE.id,
+              modality: row.modality,
+            });
+            return floor !== null && c >= floor;
+          })
+          .sort((a, b) => b.cosine - a.cosine);
+        scored.slice(0, maxResults * 2).forEach(({ row, cosine: c }, rank) => {
+          const windowed = row.modality !== 'image';
+          add(
+            `${row.filePath}\u0000${windowed ? row.startMs : ''}`,
+            {
+              ...describe(row.filePath, row.modality),
+              score: c,
+              ...(windowed ? { startMs: row.startMs } : {}),
+              ...(windowed && row.endMs !== null ? { endMs: row.endMs } : {}),
+            },
+            1,
+            rank,
+          );
+          vectorHits++;
         });
-        if (results.length >= maxResults + 1) break;
       }
-      const truncated = results.length > maxResults;
-      return { results: results.slice(0, maxResults), engine: 'fts', truncated };
+
+      let ftsHits = 0;
+      if (index.ftsAvailable && !opts.vectorOnly) {
+        // Over-fetch from the shared doc FTS, then keep only the asked-for media.
+        let rank = 0;
+        for (const h of index.searchDocs(query, maxResults * 4)) {
+          const f = index.getFile(h.filePath);
+          const kind = f?.modality as MediaVectorModality | undefined;
+          if (!kind || !kinds.includes(kind)) continue;
+          add(`${h.filePath}\u0000`, describe(h.filePath, kind), 0.5, rank++);
+          ftsHits++;
+          if (rank > maxResults * 2) break;
+        }
+      }
+      if (vectorHits === 0 && ftsHits === 0) {
+        const engine = vector || index.ftsAvailable ? (vector ? 'vector' : 'fts') : 'unavailable';
+        return { results: [], engine, truncated: false };
+      }
+      const ordered = [...fused.values()].sort((a, b) => b.score - a.score).map((e) => e.hit);
+      const engine = vectorHits > 0 ? (ftsHits > 0 ? 'hybrid' : 'vector') : 'fts';
+      return {
+        results: ordered.slice(0, maxResults),
+        engine,
+        truncated: ordered.length > maxResults,
+      };
     } finally {
       index.close();
     }
@@ -2742,6 +2904,22 @@ function parseRegionJson(raw: string | null): ImageRegion | null {
     /* stored by us, but stay tolerant of hand-edited dbs */
   }
   return null;
+}
+
+/** Reciprocal-rank constant for the media search arms (the knowledge arm uses the same). */
+const MEDIA_RRF_K = 60;
+
+/**
+ * The media-search profile's query vector, or null when its model is not
+ * installed (local files only — a search never starts a download) or fails.
+ */
+async function mediaQueryVector(query: string): Promise<number[] | null> {
+  try {
+    const { embedKnowledgeQuery } = await import('../memory/embeddings.js');
+    return await embedKnowledgeQuery(query, MEDIA_SEARCH_PROFILE, { localFilesOnly: true });
+  } catch {
+    return null;
+  }
 }
 
 function cosine(a: Float32Array, b: Float32Array): number {

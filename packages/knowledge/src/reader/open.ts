@@ -26,6 +26,22 @@ export class CatalogOpenError extends Error {
   }
 }
 
+/**
+ * A query the catalog cannot answer as asked. `dimension`: the query vector's
+ * width differs from the catalog's stored width — an embedder that ignored
+ * the profile's truncation, or a model the catalog was not built with.
+ * Callers treat it as an embedding failure and fall back to keyword search.
+ */
+export class CatalogQueryError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'dimension',
+  ) {
+    super(message);
+    this.name = 'CatalogQueryError';
+  }
+}
+
 export interface CatalogDb {
   db: DatabaseSync;
   /** The `PRAGMA user_version` generation the file was written with. */

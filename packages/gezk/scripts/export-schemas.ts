@@ -71,9 +71,17 @@ export function renderSchema(filename: string, schema: z.ZodType): string {
   if (filename === 'catalog-manifest.schema.json') {
     withId.allOf = [
       {
-        if: { properties: { formatVersion: { const: '0.7' } }, required: ['formatVersion'] },
+        if: {
+          properties: { formatVersion: { enum: ['0.7', '0.8'] } },
+          required: ['formatVersion'],
+        },
         // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditionals require the then keyword.
         then: { required: ['spatial'] },
+      },
+      {
+        if: { properties: { formatVersion: { const: '0.8' } }, required: ['formatVersion'] },
+        // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditionals require the then keyword.
+        then: { properties: { counts: { required: ['media'] } } },
       },
     ];
   }

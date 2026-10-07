@@ -19,7 +19,13 @@ import {
   KnowledgeRadiusSchema,
   formatKnowledgeUri,
 } from '@bendyline/gezel';
-import type { ProfileEmbedder, TableOfContentsFormat } from '@bendyline/gezel-knowledge';
+import type {
+  CompileAsset,
+  KnowledgeEmbeddingProfile,
+  MediaEmbedder,
+  ProfileEmbedder,
+  TableOfContentsFormat,
+} from '@bendyline/gezel-knowledge';
 import {
   CatalogHandle,
   EmbedderUnavailableError,
@@ -58,11 +64,53 @@ interface CatalogConfig {
   ignore?: string[];
   /** Where the table of contents comes from; detected from the tree when absent. */
   toc?: { format: TableOfContentsFormat; path?: string };
+  /**
+   * Per-asset attribution (license, author, source URL, …), keyed by the
+   * archive path (`assets/…`) or the content-relative path. Shipped photos,
+   * video and audio usually carry their own terms; readers show these beside
+   * the media row.
+   */
+  assets?: Record<string, Record<string, string>>;
 }
 
 /** Test seam: build/search accept an injected embedder factory. */
 export interface KnowledgeCommandDeps {
   createEmbedder?: (profileId: string) => Promise<ProfileEmbedder>;
+  /** Test seam: the media embedder for profiles that describe media encoders. */
+  createMediaEmbedder?: (profile: KnowledgeEmbeddingProfile) => Promise<CatalogMediaEmbedder>;
+}
+
+interface CatalogMediaEmbedder {
+  embedMedia: MediaEmbedder;
+  dispose(): Promise<void>;
+}
+
+async function defaultCreateMediaEmbedder(
+  profile: KnowledgeEmbeddingProfile,
+): Promise<CatalogMediaEmbedder> {
+  const { createCatalogMediaEmbedder } = await import('@bendyline/gezel-service/media');
+  return createCatalogMediaEmbedder(profile, {
+    cacheDir: hfCacheDir(),
+    onWarning: (message) => console.warn(`warning: ${message}`),
+  });
+}
+
+/** Attach catalog.json's per-asset attribution to the assets the adapter found. */
+function withAssetAttribution(
+  assets: CompileAsset[],
+  attribution: CatalogConfig['assets'],
+): CompileAsset[] {
+  if (!attribution) return assets;
+  const known = new Set(assets.map((a) => a.path));
+  for (const key of Object.keys(attribution)) {
+    const path = key.startsWith('assets/') ? key : `assets/${key}`;
+    if (!known.has(path))
+      console.warn(`warning: catalog.json assets: '${key}' is not an asset of this catalog`);
+  }
+  return assets.map((asset) => {
+    const entry = attribution[asset.path] ?? attribution[asset.path.replace(/^assets\//, '')];
+    return entry ? { ...asset, attribution: entry } : asset;
+  });
 }
 
 function hfCacheDir(): string {
@@ -266,6 +314,9 @@ export async function runKnowledgeBuild(
   );
   console.log('Loading the embedding model (first run downloads it)…');
   const embedder = await (deps.createEmbedder ?? defaultCreateEmbedder)(profileId);
+  const media = profile.media
+    ? await (deps.createMediaEmbedder ?? defaultCreateMediaEmbedder)(profile)
+    : null;
 
   const signKeyPem = opts.signKey ? await readFile(resolve(opts.signKey), 'utf8') : null;
   const outputPath = resolve(opts.out ?? join(root, `${config.id}-${config.version}.gezk`));
@@ -293,7 +344,8 @@ export async function runKnowledgeBuild(
       embed: (texts) => embedder.embed(texts),
       countTokens: (text) => embedder.countTokens(text),
       workDir,
-      assets: source.assets,
+      assets: withAssetAttribution(source.assets, config.assets),
+      ...(media ? { embedMedia: media.embedMedia } : {}),
       invalidAssets: 'warn',
       onWarning: (message) => console.warn(`warning: ${message}`),
       ...(signKeyPem ? { finalizeManifest: (manifest) => signManifest(manifest, signKeyPem) } : {}),
@@ -307,13 +359,16 @@ export async function runKnowledgeBuild(
       },
     });
     if (process.stderr.isTTY && lastPct >= 0) process.stderr.write('\n');
+    const mediaRows = report.media.image + report.media.video + report.media.audio;
     console.log(
       `Wrote ${outputPath} — ${report.documents} documents, ${report.chunks} chunks, ` +
+        `${mediaRows > 0 ? `${mediaRows} media rows, ` : ''}` +
         `${report.shards} shard${report.shards === 1 ? '' : 's'}, ${formatBytes(report.archiveBytes)}` +
         `${report.manifest.signature ? `, signed (key ${report.manifest.signature.keyId})` : ''}`,
     );
   } finally {
     await embedder.dispose().catch(() => {});
+    await media?.dispose().catch(() => {});
     await rm(workDir, { recursive: true, force: true });
   }
 }

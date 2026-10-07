@@ -39,7 +39,7 @@ import { pinCraftbookOwner } from '../task-execution.js';
 import { applyGateRejection } from '../tasks/gate-accounting.js';
 import { gateHandoffNoteText, stampGateHandoff } from '../tasks/gate-handoff.js';
 import { bumpStepActivation } from '../tasks/step-activation.js';
-import { resolveNextStep } from '../tasks/step-routing.js';
+import { explicitStepJump, resolveNextStep, unknownTaskStepText } from '../tasks/step-routing.js';
 import { slugifyEntityName } from './entities.js';
 import { encodeText } from './files.js';
 import { requireGezel } from './gezels.js';
@@ -534,7 +534,12 @@ export async function completeTaskStep(
     ...(gate?.onApprove !== undefined ? { gateOnApprove: gate.onApprove } : {}),
     ...(step.advanceWhen?.goto !== undefined ? { advanceWhenGoto: step.advanceWhen.goto } : {}),
   });
-  if (route.kind === 'invalid') throw new Error('This task does not declare that next step');
+  if (route.kind === 'invalid')
+    throw new Error(
+      route.to === explicitStepJump(options.next)
+        ? unknownTaskStepText('next', route.to, task.craftbook.steps)
+        : 'This task does not declare that next step',
+    );
   const next = route.kind === 'advance' ? route.to : undefined;
   step.completedAt = repo.now();
   if (next) {

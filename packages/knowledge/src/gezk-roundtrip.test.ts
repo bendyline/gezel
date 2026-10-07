@@ -124,8 +124,11 @@ describe('archive + manifest', () => {
     const manifest = await readGezkManifest(archivePath);
     expect(manifest.id).toBe('fixture-en');
     expect(manifest.kind).toBe('gezk-catalog');
-    expect(manifest.formatVersion).toBe(GEZK_FORMAT_VERSION);
-    expect(manifest.indexSchemaVersion).toBe(GEZK_INDEX_SCHEMA_VERSION);
+    // Nothing here needs 0.8 vocabulary, so the writer keeps the 0.7 generation.
+    expect(manifest.formatVersion).toBe('0.7');
+    expect(manifest.indexSchemaVersion).toBe(4);
+    expect(GEZK_FORMAT_VERSION).toBe('0.8');
+    expect(GEZK_INDEX_SCHEMA_VERSION).toBe(5);
     expect(manifest.embedding.id).toBe(FIXTURE_EMBEDDING_PROFILE.id);
     expect(manifest.topics.length).toBeGreaterThanOrEqual(1);
     expect(manifest.license.noticePath).toBe('LICENSES/catalog.txt');
@@ -379,7 +382,7 @@ describe('signed build', () => {
 
 describe('gezk 0.6: leaf filing, ordering, metadata, assets', () => {
   it('files documents at the leaf and rolls descendants up at read time', () => {
-    expect(handle.schemaVersion).toBe(GEZK_INDEX_SCHEMA_VERSION);
+    expect(handle.schemaVersion).toBe(4);
     const topics = handle.topics();
     const craft = topics.find((t) => t.id === 'craft');
     const metals = topics.find((t) => t.id === 'metals');

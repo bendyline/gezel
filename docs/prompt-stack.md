@@ -96,7 +96,7 @@ Tier-default prompt text:
 
 | Tier | promptAppend behaviors | Other defaults |
 |---|---|---|
-| tiny | `prompt.tool-cookbook-full` (~2.3K tok — tool-use rules table + "what NOT to do") | schema relaxation, missing-field defaulting, fabrication detector, continuation budget 4 |
+| tiny | `prompt.tool-cookbook-full` (~2.3K tok with a full roster — tool-use rules table + "what NOT to do"; rows, the file-editing section and examples follow the turn's roster, so a lean game's turn carries ~850) | schema relaxation, missing-field defaulting, fabrication detector, continuation budget 4 |
 | small | `prompt.tool-cookbook-condensed` (~690 tok — 10 anti-fabrication rules) | fabrication detector |
 | medium | **none** | fabrication detector |
 | large | **none** | fabrication detector |
@@ -165,6 +165,20 @@ Across the mobile prompt-budget audit's cases
 ([evals/src/mobile/prompt-budget.ts](../evals/src/mobile/prompt-budget.ts)), the phone
 system message fell from 12.6–18.9 KB to 3.8–6.2 KB, most of it the tool listing
 (9.7–13.8 KB of JSON down to 2.4–3.4 KB of signatures).
+
+The audit's `--project-types` mode measures the activities the same way, on both phone
+loops (the shared llama.cpp loop's OpenAI-shaped request and a system model's text
+loop) at 4K and 8K, and fails a case whose system prompt plus tools take more than half
+the window. Three roster rules brought every case under that line (2026-10-07): the full
+cookbook names only tools the turn has; `### Where work belongs` is left out of a lean
+session with no drawers; and `## Fresh project — skip the survey` needs a tool to survey
+with. A lean checkers turn at 8K went from ~3,350 tokens of standing prompt to ~2,290,
+and the language tutor, made lean in its catalog type, from ~6,480 to ~2,220.
+
+```
+GEZEL_GILDE_DATA_DIR=../gilde/data node --import ./evals/node_modules/tsx/dist/esm/index.mjs \
+  evals/src/mobile/prompt-budget.ts --project-types /tmp/typed-budget.json
+```
 
 A phone's window is the device's to size. The native runtime measures what each window
 would take with llama.cpp's own dry-run accounting (`gezel_llama_estimate_memory`) and

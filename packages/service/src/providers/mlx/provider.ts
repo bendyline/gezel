@@ -197,8 +197,10 @@ import {
   FILE_REPAIR_MUTATION_TOOLS,
   FILE_REPAIR_READ_TOOLS,
   applyConstrainedTurnShape,
+  disableTemplateThinking,
   fileRepairTargetPath,
   isSourceFileRepairPrompt,
+  requiredToolOnly,
   writeFileOnlyTools,
 } from '../constrained-turn.js';
 import { hasExplicitFullFileRewriteWording } from '../direct-file-work-prompt.js';
@@ -1492,6 +1494,18 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Tool surface actually sent this turn. Defaults to the full roster;
         // constrained turns narrow it below.
         let requestTools = tools;
+        // A turn whose whole job is one call (a game reaction's move): the
+        // first request offers that tool alone, without thinking, as on
+        // llama-cpp. The sidecar has no forced tool choice; one tool on offer
+        // leaves nothing else to reach for.
+        if (turn === 0 && opts?.requiredTool) {
+          const required = requiredToolOnly(tools, opts.requiredTool);
+          if (required.length > 0) {
+            requestTools = required;
+            disableTemplateThinking(body);
+            log.debug(`turn#${seq}.${turn} required-call turn: ${opts.requiredTool} only`);
+          }
+        }
         const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
         const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
         const immediateFileWriteTurn =

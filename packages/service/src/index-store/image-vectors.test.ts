@@ -1,8 +1,7 @@
 /**
- * v12 image-vector storage: content-hash keying, the image-embed gate, the
- * model-swap wipe, and the chunk_id→content_hash table migration. The face
- * tables ride the same schema bump; their behavior is covered by the face
- * lane's own tests.
+ * Media-vector storage (v14): content-hash keying, audio/video windows, the
+ * media-embed gate, the identity-change wipe, and the CLIP-table drop. The
+ * face tables have their own tests.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -13,14 +12,14 @@ import { IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
 import { openIndexDatabase } from './sqlite-driver.js';
 
 let dir: string;
-const priorModel = process.env.GEZEL_IMAGE_EMBED_MODEL;
+const priorBudget = process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-imgvec-'));
 });
 afterEach(async () => {
-  if (priorModel === undefined) delete process.env.GEZEL_IMAGE_EMBED_MODEL;
-  else process.env.GEZEL_IMAGE_EMBED_MODEL = priorModel;
+  if (priorBudget === undefined) delete process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET;
+  else process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET = priorBudget;
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -104,8 +103,8 @@ describe('image vectors (v12, hash-keyed)', () => {
     s.close();
   });
 
-  it('wipes vectors + gate on an image-model swap, leaving text state alone', async () => {
-    process.env.GEZEL_IMAGE_EMBED_MODEL = 'test/image-model-A';
+  it('wipes vectors + gate when the media embedder identity changes, leaving text state alone', async () => {
+    process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET = '280';
     const s1 = (await open())!;
     s1.upsertFile(imageFile('a.png', 'ha'));
     s1.putImageVector('ha', 'a.png', unitVec(512, 2));
@@ -114,12 +113,13 @@ describe('image vectors (v12, hash-keyed)', () => {
     expect(s1.countNeedingImageEmbed()).toBe(0);
     s1.close();
 
-    // Same model → untouched.
+    // Same identity → untouched.
     const same = (await open())!;
     expect(same.imageVectorByHash('ha')).not.toBeNull();
     same.close();
 
-    process.env.GEZEL_IMAGE_EMBED_MODEL = 'test/image-model-B';
+    // A vision token budget change moves every image vector.
+    process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET = '70';
     const migrated = (await open())!;
     expect(migrated.imageVectorByHash('ha')).toBeNull();
     expect(migrated.countNeedingImageEmbed()).toBe(1); // gate cleared → re-queued
@@ -127,26 +127,48 @@ describe('image vectors (v12, hash-keyed)', () => {
     migrated.close();
   });
 
-  it('drops the legacy chunk_id-keyed table on open (v11 → v12)', async () => {
+  it('drops the CLIP-era image_vectors table on open (v13 → v14)', async () => {
     const s1 = (await open())!;
     s1.close();
 
-    // Simulate a pre-v12 db: recreate the old shape through a raw handle.
     const raw = (await openIndexDatabase(join(dir, 'index.db')))!;
-    raw.exec('DROP TABLE image_vectors');
     raw.exec(`CREATE TABLE image_vectors (
-      chunk_id INTEGER PRIMARY KEY,
-      collection_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      vec BLOB
+      content_hash TEXT PRIMARY KEY, collection_id TEXT NOT NULL, file_path TEXT NOT NULL,
+      model TEXT, dim INTEGER, vec BLOB, created_at TEXT
     )`);
     raw.close();
 
-    const reopened = (await open())!;
-    reopened.upsertFile(imageFile('a.png', 'ha'));
-    reopened.putImageVector('ha', 'a.png', unitVec(512, 3));
-    expect(reopened.imageVectorByHash('ha')?.filePath).toBe('a.png');
-    reopened.close();
+    const s2 = (await open())!;
+    s2.close();
+    const check = (await openIndexDatabase(join(dir, 'index.db')))!;
+    const tables = check
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%_vectors'`)
+      .all<{ name: string }>()
+      .map((t) => t.name);
+    check.close();
+    expect(tables).toContain('media_vectors');
+    expect(tables).not.toContain('image_vectors');
+  });
+
+  it('stores audio and video windows per start time and lists them by kind', async () => {
+    const s = (await open())!;
+    s.upsertFile({ ...imageFile('talk.mp3', 'hm'), kind: 'audio', modality: 'audio' as never });
+    s.putMediaVectors('hm', 'talk.mp3', 'audio', [
+      { startMs: 0, endMs: 30_000, vec: unitVec(512, 3) },
+      { startMs: 30_000, endMs: 52_000, vec: unitVec(512, 4) },
+    ]);
+    const rows = s.allMediaVectors(['audio']);
+    expect(rows.map((r) => [r.startMs, r.endMs])).toEqual([
+      [0, 30_000],
+      [30_000, 52_000],
+    ]);
+    expect(s.allImageVectors()).toEqual([]);
+    // Re-embedding a file replaces its windows rather than accumulating.
+    s.putMediaVectors('hm', 'talk.mp3', 'audio', [
+      { startMs: 0, endMs: 10_000, vec: unitVec(512, 5) },
+    ]);
+    expect(s.allMediaVectors(['audio'])).toHaveLength(1);
+    s.close();
   });
 });
 

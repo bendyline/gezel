@@ -1,13 +1,20 @@
 import { z } from 'zod';
 
 /**
- * Image-intel wire shapes: caption search, CLIP nearest neighbours, and a
- * folder-level summary over a project's indexed images.
+ * Image-intel wire shapes: search by meaning (on-device multimodal
+ * embeddings) fused with filename/caption search, visual nearest neighbours,
+ * and a folder-level summary over a project's indexed images. Search also
+ * reaches audio and video, by window, when asked.
  */
+
+export const MediaSearchKindSchema = z.enum(['image', 'audio', 'video']);
+export type MediaSearchKind = z.infer<typeof MediaSearchKindSchema>;
 
 export const SearchImagesRequestSchema = z.object({
   query: z.string().min(1),
   maxResults: z.number().int().positive().max(100).optional(),
+  /** Which media to search; default images only. */
+  kinds: z.array(MediaSearchKindSchema).min(1).optional(),
 });
 export type SearchImagesRequest = z.infer<typeof SearchImagesRequestSchema>;
 
@@ -20,9 +27,15 @@ export const SearchImagesResponseSchema = z.object({
       format: z.string().optional(),
       caption: z.string().optional(),
       score: z.number(),
+      /** Absent means image (results before audio/video search). */
+      kind: MediaSearchKindSchema.optional(),
+      /** The matching window of an audio or video file. */
+      startMs: z.number().int().nonnegative().optional(),
+      endMs: z.number().int().nonnegative().optional(),
     }),
   ),
-  engine: z.enum(['fts', 'unavailable']),
+  /** vector/hybrid = matched by meaning (with or without filename/caption hits). */
+  engine: z.enum(['fts', 'vector', 'hybrid', 'unavailable']),
   truncated: z.boolean(),
 });
 export type SearchImagesResponse = z.infer<typeof SearchImagesResponseSchema>;
@@ -35,7 +48,7 @@ export type FindSimilarImagesRequest = z.infer<typeof FindSimilarImagesRequestSc
 
 export const FindSimilarImagesResponseSchema = z.object({
   results: z.array(z.object({ path: z.string(), score: z.number() })),
-  /** vector = CLIP neighbours; unavailable = no image embeddings yet. */
+  /** vector = visual neighbours; unavailable = no image embeddings yet. */
   engine: z.enum(['vector', 'unavailable']),
   truncated: z.boolean(),
 });

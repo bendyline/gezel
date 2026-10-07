@@ -5,6 +5,7 @@ import {
   createLogger,
   flattenRunOutput,
   projectAllowsAmbientWork,
+  reactionRequiredTool,
   renderProjectTypeReactionSeed,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
@@ -20,6 +21,8 @@ export interface ReactionChatPort {
     seed: string;
     hidden?: boolean;
     standalone?: boolean;
+    /** The turn's first request must call this tool (the reaction's `turn`). */
+    requiredTool?: string;
   }): Promise<{ sessionId: string } | null>;
 }
 
@@ -46,6 +49,8 @@ export async function dispatchToolReaction(
     params?: Record<string, unknown>;
     tool: ProjectTypeTool;
     run: ScriptRun;
+    /** The type's model tools, which a reaction's `turn` names its call among. */
+    modelTools?: readonly ProjectTypeTool[];
   },
 ): Promise<ReactionDispatchResult> {
   const reaction = args.tool.reaction;
@@ -80,6 +85,12 @@ export async function dispatchToolReaction(
     output: args.run.output,
   });
 
+  const requiredTool = reactionRequiredTool(
+    reaction,
+    args.run.output,
+    args.modelTools ?? [],
+    args.project,
+  );
   try {
     const delivered = await deps.chat.deliverReaction({
       projectId: args.project.id,
@@ -87,6 +98,7 @@ export async function dispatchToolReaction(
       seed,
       ...(reaction.hideSeed ? { hidden: true } : {}),
       ...(reaction.standalone ? { standalone: true } : {}),
+      ...(requiredTool ? { requiredTool } : {}),
     });
     if (!delivered) return { delivered: false, gezelId: targetGezelId, reason: 'engagement-off' };
 

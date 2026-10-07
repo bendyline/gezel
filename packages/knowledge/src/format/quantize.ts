@@ -1,6 +1,7 @@
 export {
   centerVector,
   l2Normalize,
+  profileUnitVector,
   quantizeBinary,
   quantizeBinaryForProfile,
   quantizeInt8,

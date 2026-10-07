@@ -75,7 +75,7 @@ describe('tolerant asset preparation', () => {
       (_, i) => ({ path: `assets/image-${i}.png`, content: image }),
     );
     expect(() => prepareAssets(assets, {}, { invalidAssets: 'warn' })).toThrow(
-      /assets exceed .* bytes in total/,
+      /image assets total .* bytes, over the .*-byte limit/,
     );
     expect(() =>
       prepareAssets(

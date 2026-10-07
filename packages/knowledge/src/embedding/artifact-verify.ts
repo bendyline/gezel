@@ -15,7 +15,11 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type KnowledgeEmbeddingProfile, embeddingProfileArtifacts } from '@bendyline/gezk';
 
-export type ArtifactRole = 'onnx' | 'tokenizer';
+/**
+ * `file`: one of the profile's further pinned files (weight sidecars,
+ * configs); `media`: a media encoder's graph or one of its files.
+ */
+export type ArtifactRole = 'onnx' | 'tokenizer' | 'file' | 'media';
 
 export interface ArtifactCheck {
   role: ArtifactRole;
@@ -109,6 +113,62 @@ async function fileDigest(path: string): Promise<string | null> {
   return digest;
 }
 
+/** The pinned files of a profile's media encoders for the given modalities (video reuses image). */
+export function mediaEncoderPins(
+  profile: KnowledgeEmbeddingProfile,
+  modalities: ReadonlyArray<'image' | 'video' | 'audio'>,
+): Array<{ file: string; expected: string }> {
+  const encoders = new Set<
+    NonNullable<NonNullable<KnowledgeEmbeddingProfile['media']>['image']>['encoder']
+  >();
+  const media = profile.media;
+  for (const modality of modalities) {
+    const encoder = modality === 'audio' ? media?.audio?.encoder : media?.image?.encoder;
+    if (encoder) encoders.add(encoder);
+  }
+  const pins: Array<{ file: string; expected: string }> = [];
+  const seen = new Set<string>();
+  for (const encoder of encoders) {
+    const files = [
+      { path: encoder.onnxFile, digest: encoder.onnxDigest },
+      ...(encoder.files ?? []),
+    ];
+    for (const { path, digest } of files) {
+      if (!digest || seen.has(path)) continue;
+      seen.add(path);
+      pins.push({ file: path, expected: digest });
+    }
+  }
+  return pins;
+}
+
+/**
+ * Hash a profile's media encoder files in a transformers.js cache and
+ * compare, with the same contract as {@link verifyProfileArtifacts}: a media
+ * vector is only as trustworthy as the bytes that produced it.
+ */
+export async function verifyMediaArtifacts(
+  profile: KnowledgeEmbeddingProfile,
+  modalities: ReadonlyArray<'image' | 'video' | 'audio'>,
+  opts: { cacheDir: string; revision?: string },
+): Promise<VerifiedArtifacts> {
+  const pins = mediaEncoderPins(profile, modalities);
+  if (pins.length === 0) return { status: 'unpinned', checks: [] };
+  const revision = opts.revision ?? profile.model.revision;
+  const checks: ArtifactCheck[] = [];
+  for (const { file, expected } of pins) {
+    const path = transformersCachePath(opts.cacheDir, profile.model.repo, revision, file);
+    checks.push({ role: 'media', file, path, expected, actual: await fileDigest(path) });
+  }
+  if (checks.some((c) => c.actual === null)) {
+    throw new EmbedderArtifactError('missing', profile.id, checks);
+  }
+  if (checks.some((c) => c.actual !== c.expected)) {
+    throw new EmbedderArtifactError('mismatch', profile.id, checks);
+  }
+  return { status: 'verified', checks };
+}
+
 /**
  * Hash the profile's pinned files in a transformers.js cache and compare.
  * `revision` names the cache key the files were fetched under; it defaults
@@ -131,6 +191,9 @@ export async function verifyProfileArtifacts(
       file: artifacts.tokenizerFile,
       expected: artifacts.tokenizerDigest,
     });
+  }
+  for (const extra of artifacts.files) {
+    if (extra.digest) pinned.push({ role: 'file', file: extra.path, expected: extra.digest });
   }
   if (pinned.length === 0) return { status: 'unpinned', checks: [] };
 

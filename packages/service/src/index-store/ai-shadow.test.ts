@@ -56,8 +56,10 @@ describe('classifyFile audio modality', () => {
       trivial: false,
     });
     expect(classifyFile('song.mp3', 1000).modality).toBe('audio');
-    // Video stays trivial binary — no shadow producer exists for it.
-    expect(classifyFile('clip.mp4', 1000).trivial).toBe(true);
+    // Video is its own modality — media search embeds its windows — but no
+    // shadow producer exists for it, so the AI-shadow pass (image/audio only)
+    // never selects it.
+    expect(classifyFile('clip.mp4', 1000)).toMatchObject({ modality: 'video', trivial: false });
   });
 });
 

@@ -91,6 +91,40 @@ static int32_t collect(const char * bytes, size_t length, void * data) {
     static_cast<std::string *>(data)->append(bytes, length);
     return 0;
 }
+
+// The image call's contract without a vision model: argument checks, a
+// missing or non-projector file, and an engine left usable after a refusal.
+static void image_contract_tests(gezel_llama_engine * engine, const char * model_path, bool loaded) {
+    gezel_llama_error error{};
+    gezel_llama_result result{};
+    std::string text;
+    const std::vector<uint8_t> rgb(4 * 4 * 3, 128);
+    auto options = gezel_llama_default_image_options();
+    options.request_id = 900;
+    auto describe = [&](const char * projector, uint32_t width, const char * user) {
+        return gezel_llama_describe_image(engine, projector, rgb.data(), width, 4, nullptr, user, &options, collect, &text,
+                                          &result, &error);
+    };
+    if (!loaded) {
+        CHECK(describe(model_path, 4, "Describe it.") == GEZEL_LLAMA_NOT_LOADED);
+        return;
+    }
+    CHECK(describe(model_path, 0, "Describe it.") == GEZEL_LLAMA_INVALID_ARGUMENT);
+    CHECK(describe(model_path, 4, "Look: <__media__>") == GEZEL_LLAMA_INVALID_ARGUMENT);
+    options.struct_size = 1;
+    CHECK(describe(model_path, 4, "Describe it.") == GEZEL_LLAMA_INVALID_ARGUMENT);
+    options = gezel_llama_default_image_options();
+    options.request_id = 901;
+    CHECK(describe("/does/not/exist.gguf", 4, "Describe it.") == GEZEL_LLAMA_LOAD_FAILED);
+    options.max_projector_bytes = 1;
+    CHECK(describe(model_path, 4, "Describe it.") == GEZEL_LLAMA_RESOURCE_LIMIT);
+    options = gezel_llama_default_image_options();
+    options.request_id = 902;
+    // A text model is not a projector; mtmd must refuse it, not crash.
+    CHECK(describe(model_path, 4, "Describe it.") == GEZEL_LLAMA_LOAD_FAILED);
+    CHECK(result.status == GEZEL_LLAMA_LOAD_FAILED && result.finish_reason == GEZEL_LLAMA_FINISH_ERROR);
+    CHECK(text.empty());
+}
 static int32_t callback(const char * bytes, size_t length, void * data) {
     return (*static_cast<std::function<int32_t(const char *, size_t)> *>(data))(bytes, length);
 }
@@ -166,7 +200,9 @@ static void bridge_tests(const char * path) {
     write_fixture(path);
     estimate_tests(engine.get(), path, load);
     CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_NOT_LOADED);
+    image_contract_tests(engine.get(), path, false);
     CHECK(gezel_llama_load(engine.get(), path, &load, &error) == GEZEL_LLAMA_OK);
+    image_contract_tests(engine.get(), path, true);
     CHECK(gezel_llama_generate(engine.get(), message, 2, &generation, collect, &text, &result, &error) == GEZEL_LLAMA_OK);
     CHECK(text == "aaaaaaaa");
     CHECK(result.generated_tokens == 8 && result.output_bytes == 8);

@@ -1,74 +1,52 @@
 /**
- * Whole-image embedding core (lane A of image search). Sibling of
- * embed-core.ts: same lazy transformers.js loading, same HF cache pin, but a
- * CLIP vision tower instead of a text feature-extraction pipeline, and pure-JS
- * decode/preprocess (image-pixels.ts) instead of sharp — which gezel
- * deliberately stubs out (packages/sharp-compat), making transformers' own
- * RawImage/AutoProcessor path unusable. Runs in the image-embed worker thread
- * or the in-process fallback (image-embeddings.ts).
+ * Whole-image embedding core (lane A of image search): EmbeddingGemma 2's
+ * vision path through the media-search profile, so a workspace image lands in
+ * the same space as text queries (search by meaning) and as the media rows of
+ * knowledge catalogs. Runs in the image-embed worker thread or the in-process
+ * fallback (image-embeddings.ts).
  *
- * Two deliberate deviations from the `pipeline('image-feature-extraction')`
- * convenience API, both load-bearing:
- *   - The model is loaded via its concrete vision class and read through
- *     `.image_embeds` — the pipeline's default output selection prefers
- *     `last_hidden_state`, which for a CLIP export silently returns the
- *     UNPOOLED patch grid instead of the 512-d projection.
- *   - Vectors are L2-normalized HERE: transformers does not normalize
- *     `image_embeds`, and every stored-vector consumer (cosine helper,
- *     brute-force ranking) assumes unit vectors.
+ * The model loads from local files only: the media-search installer
+ * (media-search/install.ts) is the one place that downloads, gated on the
+ * security policy, so an index pass can never start a 500 MB fetch.
  */
 
 import { createLogger } from '@bendyline/gezel';
-import {
-  HF_CACHE_DIR_ENV,
-  TRANSFORMERS_MODULE,
-  isMissingModule,
-  pinTransformersCacheDir,
-} from '../transformers-cache.js';
+import { profileUnitVector } from '@bendyline/gezel-knowledge';
+import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
+import { HF_CACHE_DIR_ENV, TRANSFORMERS_MODULE, isMissingModule } from '../transformers-cache.js';
 import { PipelineLoadError, isRetryablePipelineLoadFailure } from './embed-core.js';
-import {
-  CLIP_MEAN,
-  CLIP_STD,
-  ImageDecodeError,
-  centerCrop,
-  decodeImage,
-  normalizeToCHW,
-  readBoundedImageFile,
-  resizeBilinear,
-  resizeShortestSide,
-  rgbaToRgb,
-} from './image-pixels.js';
+import { ImageDecodeError, decodeImage, readBoundedImageFile, rgbaToRgb } from './image-pixels.js';
+import { type MediaEncoder, type MediaModality, loadMediaEncoder } from './media-embed-core.js';
 
 const log = createLogger('memory');
 
-const DEFAULT_IMAGE_EMBED_MODEL = 'Xenova/clip-vit-base-patch32';
+/** The vision token budgets the Gemma 4 image processor supports. */
+export const IMAGE_TOKEN_BUDGETS = [70, 140, 280, 560, 1120] as const;
 
-export function imageEmbedModelId(): string {
-  return process.env.GEZEL_IMAGE_EMBED_MODEL || DEFAULT_IMAGE_EMBED_MODEL;
+/**
+ * Vision tokens per workspace image: `GEZEL_MEDIA_IMAGE_TOKEN_BUDGET` (set
+ * from `config.mediaSearch.imageTokenBudget`), else the profile's 280 — the
+ * same fidelity catalogs embed at, so the two sets of vectors compare.
+ */
+export function imageTokenBudget(): number {
+  const raw = Number(process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET);
+  return (IMAGE_TOKEN_BUDGETS as readonly number[]).includes(raw)
+    ? raw
+    : (MEDIA_SEARCH_PROFILE.media?.image?.tokenBudget ?? 280);
 }
 
 /**
- * Output dimension of the image embedder (CLIP ViT-B/32 projection = 512).
- * `GEZEL_IMAGE_EMBED_DIM` must accompany a non-default model with a different
- * projection width. Stored vectors carry their dim, so a mismatch is detected
- * at query time rather than producing garbage cosine.
+ * The identity stored vectors are keyed on: profile, modality and budget. A
+ * budget change moves every image vector, so it must invalidate them like a
+ * model change does (index-store's reconcileImageEmbedModel).
  */
+export function imageEmbedModelId(budget = imageTokenBudget()): string {
+  return `${MEDIA_SEARCH_PROFILE.id}#image@${budget}`;
+}
+
+/** Stored width: the profile's truncated dimension. */
 export function imageEmbedDim(): number {
-  return Number(process.env.GEZEL_IMAGE_EMBED_DIM) || 512;
-}
-
-/** Model input edge (224 for every ViT-B CLIP checkpoint). */
-function imageEmbedSize(): number {
-  return Number(process.env.GEZEL_IMAGE_EMBED_SIZE) || 224;
-}
-
-/**
- * Weight precision. q8 cuts the default model's download from ~350 MB to
- * ~88 MB with negligible effect on nearest-neighbor ranking. An override
- * model without quantized weights needs `GEZEL_IMAGE_EMBED_DTYPE=fp32`.
- */
-function imageEmbedDtype(): string {
-  return process.env.GEZEL_IMAGE_EMBED_DTYPE || 'q8';
+  return MEDIA_SEARCH_PROFILE.dimensions;
 }
 
 /** One image handed to the embedder: absolute path + its content hash. */
@@ -88,116 +66,162 @@ export type ImageEmbedOutcome =
   | { hash: string; skip: 'unsupported' | 'too-large' | 'decode-failed'; detail?: string }
   | { hash: string; error: string };
 
-type VisionModel = (inputs: { pixel_values: unknown }) => Promise<{
-  image_embeds?: { data: Float32Array | number[] };
-  pooler_output?: { data: Float32Array | number[] };
-}>;
+const encoders = new Map<string, Promise<MediaEncoder>>();
 
-interface LoadedVision {
-  model: VisionModel;
-  makeTensor: (data: Float32Array, dims: number[]) => unknown;
-}
-
-let visionPromise: Promise<LoadedVision> | null = null;
-
-/** Lazily load the vision model; cached for the process (same discipline as loadPipeline). */
-async function loadVisionModel(): Promise<LoadedVision> {
-  if (!visionPromise) {
-    visionPromise = (async () => {
+/** Lazily load the media encoder for these modalities and budget; cached for the process. */
+export async function loadWorkspaceMediaEncoder(
+  modalities: readonly MediaModality[],
+  budget = imageTokenBudget(),
+): Promise<MediaEncoder> {
+  const key = `${[...modalities].sort().join('+')}@${budget}`;
+  let pending = encoders.get(key);
+  if (!pending) {
+    pending = (async () => {
       try {
-        const cacheDir = process.env[HF_CACHE_DIR_ENV];
-        if (cacheDir) await pinTransformersCacheDir(cacheDir);
-        const transformers = await import('@huggingface/transformers');
-        const modelId = imageEmbedModelId();
-        if (modelId !== DEFAULT_IMAGE_EMBED_MODEL) log.info(`[image-embed] using model ${modelId}`);
-        // AutoModelForImageFeatureExtraction maps clip → the vision tower +
-        // projection (no text tower download), siglip → SiglipVisionModel.
-        const auto = (
-          transformers as unknown as {
-            AutoModelForImageFeatureExtraction: {
-              from_pretrained: (id: string, opts: { dtype: string }) => Promise<VisionModel>;
-            };
-          }
-        ).AutoModelForImageFeatureExtraction;
-        const model = await auto.from_pretrained(modelId, { dtype: imageEmbedDtype() });
-        const TensorCtor = (
-          transformers as unknown as {
-            Tensor: new (type: string, data: Float32Array, dims: number[]) => unknown;
-          }
-        ).Tensor;
-        return {
-          model,
-          makeTensor: (data, dims) => new TensorCtor('float32', data, dims),
-        };
+        const encoder = await loadMediaEncoder(MEDIA_SEARCH_PROFILE, {
+          modalities,
+          localFilesOnly: true,
+          imageTokenBudget: budget,
+          ...(process.env[HF_CACHE_DIR_ENV] ? { cacheDir: process.env[HF_CACHE_DIR_ENV] } : {}),
+        });
+        log.info(`[media-embed] loaded ${MEDIA_SEARCH_PROFILE.id} (${key})`);
+        return encoder;
       } catch (err) {
         const missing = isMissingModule(err, TRANSFORMERS_MODULE);
         const message = missing
-          ? 'Local image embeddings are an optional npm feature. Install @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).'
+          ? 'Local media embeddings are an optional npm feature. Install @huggingface/transformers@^4.3.1 alongside @bendyline/gezel-service (see the service README).'
           : err instanceof Error
             ? err.message
             : String(err);
+        // Not installed yet is the common case: retry after the cooldown, once
+        // the installer has had a chance to finish.
         throw new PipelineLoadError(
           message,
           missing,
-          !missing && isRetryablePipelineLoadFailure(err),
+          !missing || isRetryablePipelineLoadFailure(err),
         );
       }
     })();
-    visionPromise.catch(() => {
-      visionPromise = null;
-    });
+    pending.catch(() => encoders.delete(key));
+    encoders.set(key, pending);
   }
-  return visionPromise;
+  return pending;
+}
+
+/** Drop loaded encoders (the model was removed or reinstalled). */
+export async function disposeWorkspaceMediaEncoders(): Promise<void> {
+  const loaded = [...encoders.values()];
+  encoders.clear();
+  for (const pending of loaded) await pending.then((e) => e.dispose()).catch(() => {});
 }
 
 /**
- * Preprocess one decoded buffer for the current model. CLIP reference geometry
- * (shortest-side resize + center-crop, CLIP mean/std); SigLIP overrides get
- * their convention (squash to square, mean/std 0.5) keyed off the model id.
+ * Embed a batch of image files into unit vectors — SERIAL, one image per
+ * forward, so peak ONNX allocation is one image.
  */
-function preprocess(buf: Buffer, size: number): Float32Array {
-  const rgb = rgbaToRgb(decodeImage(buf));
-  if (/siglip/i.test(imageEmbedModelId())) {
-    const HALF = [0.5, 0.5, 0.5];
-    return normalizeToCHW(resizeBilinear(rgb, size, size), HALF, HALF);
-  }
-  return normalizeToCHW(centerCrop(resizeShortestSide(rgb, size), size, size));
-}
-
-function l2Normalize(data: Float32Array | number[]): number[] {
-  let sum = 0;
-  for (const v of data) sum += v * v;
-  const norm = Math.sqrt(sum);
-  if (!Number.isFinite(norm) || norm === 0) throw new Error('degenerate embedding (zero norm)');
-  const out = new Array<number>(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = data[i]! / norm;
-  return out;
-}
-
-/**
- * Embed a batch of image files into unit vectors — SERIAL, one fixed-size
- * [1, 3, size, size] forward at a time, so peak ONNX allocation is one image
- * (the vision-tower analogue of embed-core's MAX_BATCH discipline).
- */
-export async function runImageEmbed(jobs: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
+export async function runImageEmbed(
+  jobs: ImageEmbedJob[],
+  budget = imageTokenBudget(),
+): Promise<ImageEmbedOutcome[]> {
   if (jobs.length === 0) return [];
-  const { model, makeTensor } = await loadVisionModel();
-  const size = imageEmbedSize();
+  const encoder = await loadWorkspaceMediaEncoder(['image'], budget);
   const out: ImageEmbedOutcome[] = [];
   for (const job of jobs) {
     try {
-      const buf = await readBoundedImageFile(job.path);
-      const chw = preprocess(buf, size);
-      const result = await model({ pixel_values: makeTensor(chw, [1, 3, size, size]) });
-      const embeds = result.image_embeds ?? result.pooler_output;
-      if (!embeds) throw new Error('model returned neither image_embeds nor pooler_output');
-      out.push({ hash: job.hash, vector: l2Normalize(embeds.data) });
+      const rgb = rgbaToRgb(decodeImage(await readBoundedImageFile(job.path)));
+      const raw = await encoder.embedImage(rgb);
+      out.push({
+        hash: job.hash,
+        vector: Array.from(profileUnitVector(MEDIA_SEARCH_PROFILE, raw)),
+      });
     } catch (err) {
       if (err instanceof ImageDecodeError) {
         out.push({ hash: job.hash, skip: err.reason, detail: err.message });
       } else {
         out.push({ hash: job.hash, error: err instanceof Error ? err.message : String(err) });
       }
+    }
+  }
+  return out;
+}
+
+/** One audio or video file for the media tier: absolute path, content hash, kind. */
+export interface MediaEmbedJob {
+  path: string;
+  hash: string;
+  modality: 'audio' | 'video';
+}
+
+/** Per-file outcome: every window's unit vector, or the same skip/error split as images. */
+export type MediaEmbedOutcome =
+  | { hash: string; windows: Array<{ startMs: number; endMs: number; vector: number[] }> }
+  | { hash: string; skip: 'unsupported' | 'decode-failed'; detail?: string }
+  | { hash: string; error: string };
+
+/**
+ * Embed audio and video files window by window: ffmpeg cuts them (media/
+ * segment.ts) and each window becomes one unit vector. Serial, one window
+ * per forward.
+ */
+export async function runMediaEmbed(
+  jobs: MediaEmbedJob[],
+  budget = imageTokenBudget(),
+): Promise<MediaEmbedOutcome[]> {
+  if (jobs.length === 0) return [];
+  const { locateFfmpeg } = await import('../media/ffmpeg.js');
+  const { decodeAudioWindows, decodeVideoWindows } = await import('../media/segment.js');
+  const ffmpeg = await locateFfmpeg();
+  if (!ffmpeg) {
+    throw new PipelineLoadError('no ffmpeg found for video and audio indexing', false, true);
+  }
+  const out: MediaEmbedOutcome[] = [];
+  for (const job of jobs) {
+    try {
+      const windows: Array<{ startMs: number; endMs: number; vector: number[] }> = [];
+      if (job.modality === 'audio') {
+        const decoded = await decodeAudioWindows(ffmpeg.path, job.path, MEDIA_SEARCH_PROFILE);
+        if (decoded.length > 0) {
+          const encoder = await loadWorkspaceMediaEncoder(['audio'], budget);
+          for (const w of decoded) {
+            const raw = await encoder.embedAudio(w.data);
+            windows.push({
+              startMs: w.startMs,
+              endMs: w.endMs,
+              vector: Array.from(profileUnitVector(MEDIA_SEARCH_PROFILE, raw)),
+            });
+          }
+        }
+      } else {
+        const decoded = await decodeVideoWindows(ffmpeg.path, job.path, MEDIA_SEARCH_PROFILE);
+        if (decoded.length > 0) {
+          const encoder = await loadWorkspaceMediaEncoder(['video'], budget);
+          for (const w of decoded) {
+            const raw = await encoder.embedVideo(w.data, (w.endMs - w.startMs) / 1000);
+            windows.push({
+              startMs: w.startMs,
+              endMs: w.endMs,
+              vector: Array.from(profileUnitVector(MEDIA_SEARCH_PROFILE, raw)),
+            });
+          }
+        }
+      }
+      out.push(
+        windows.length > 0
+          ? { hash: job.hash, windows }
+          : {
+              hash: job.hash,
+              skip: 'unsupported',
+              detail: 'no audio or frames long enough to embed',
+            },
+      );
+    } catch (err) {
+      if (err instanceof PipelineLoadError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      out.push(
+        /ffmpeg exited|no video stream/.test(message)
+          ? { hash: job.hash, skip: 'decode-failed', detail: message }
+          : { hash: job.hash, error: message },
+      );
     }
   }
   return out;

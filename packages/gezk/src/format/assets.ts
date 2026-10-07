@@ -1,5 +1,6 @@
 /**
- * Assets: images a catalog ships under `assets/` for its document bodies.
+ * Assets: files a catalog ships under `assets/` for its document bodies —
+ * images since 0.6, and since 0.8 the audio and video its media rows embed.
  * A document references one by its archive path (`![alt](assets/x.png)`),
  * and a reader resolves that against the catalog, never the network. The
  * rules here are the format's: which files may be assets, how large, and
@@ -19,21 +20,58 @@ export const KNOWLEDGE_ASSET_TYPES = {
   webp: 'image/webp',
   svg: 'image/svg+xml',
 } as const;
-export type KnowledgeAssetExtension = keyof typeof KNOWLEDGE_ASSET_TYPES;
-export type KnowledgeAssetKind = 'png' | 'jpeg' | 'gif' | 'webp' | 'svg';
+
+/**
+ * Audio and video assets (0.8). A reader hands these bytes to the platform's
+ * own media element and never parses them itself; only a catalog builder
+ * decodes them, to embed their windows.
+ */
+export const KNOWLEDGE_MEDIA_ASSET_TYPES = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
+} as const;
+
+export type KnowledgeImageAssetExtension = keyof typeof KNOWLEDGE_ASSET_TYPES;
+export type KnowledgeMediaAssetExtension = keyof typeof KNOWLEDGE_MEDIA_ASSET_TYPES;
+export type KnowledgeAssetExtension = KnowledgeImageAssetExtension | KnowledgeMediaAssetExtension;
+/** What the leading bytes can prove; ISO BMFF covers both mp4 and m4a. */
+export type KnowledgeAssetKind =
+  | 'png'
+  | 'jpeg'
+  | 'gif'
+  | 'webp'
+  | 'svg'
+  | 'isobmff'
+  | 'webm'
+  | 'mp3'
+  | 'ogg'
+  | 'wav'
+  | 'flac';
+export type KnowledgeAssetModality = 'image' | 'video' | 'audio';
 
 export const MAX_KNOWLEDGE_ASSET_BYTES = 8 * 1024 * 1024;
 export const MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES = 256 * 1024 * 1024;
+/** Per-file limit for an audio or video asset (0.8). */
+export const MAX_KNOWLEDGE_MEDIA_ASSET_BYTES = 512 * 1024 * 1024;
+/** Combined limit for every audio and video asset in one catalog (0.8). */
+export const MAX_KNOWLEDGE_MEDIA_ASSETS_TOTAL_BYTES = 8 * 1024 * 1024 * 1024;
 export const MAX_KNOWLEDGE_ASSET_COUNT = 8_192;
 export const MAX_KNOWLEDGE_ASSET_PATH_LENGTH = 512;
 
 /**
  * `assets/(<dir>/)*<name>.<ext>` — up to 15 directory segments, each
  * segment `[A-Za-z0-9._-]` and never starting with a dot (so `.`, `..` and
- * hidden files are impossible by construction), extension from the table.
+ * hidden files are impossible by construction), extension from the image
+ * table (every generation since 0.6) or the media table (0.8).
  */
 export const KNOWLEDGE_ASSET_PATH_PATTERN =
-  /^assets\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\/){0,15}[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\.(?:png|jpe?g|gif|webp|svg)$/i;
+  /^assets\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\/){0,15}[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}\.(?:png|jpe?g|gif|webp|svg|mp4|webm|mp3|m4a|ogg|opus|wav|flac)$/i;
 
 export const KnowledgeAssetPathSchema = z
   .string()
@@ -48,18 +86,83 @@ export function assetExtension(path: string): KnowledgeAssetExtension | null {
   const dot = path.lastIndexOf('.');
   if (dot < 0) return null;
   const ext = path.slice(dot + 1).toLowerCase();
-  return Object.hasOwn(KNOWLEDGE_ASSET_TYPES, ext) ? (ext as KnowledgeAssetExtension) : null;
+  if (Object.hasOwn(KNOWLEDGE_ASSET_TYPES, ext)) return ext as KnowledgeImageAssetExtension;
+  if (Object.hasOwn(KNOWLEDGE_MEDIA_ASSET_TYPES, ext)) return ext as KnowledgeMediaAssetExtension;
+  return null;
 }
 
 /** The media type an asset path implies, from its extension. */
 export function assetContentType(path: string): string | null {
   const ext = assetExtension(path);
-  return ext ? KNOWLEDGE_ASSET_TYPES[ext] : null;
+  if (!ext) return null;
+  return ext in KNOWLEDGE_ASSET_TYPES
+    ? KNOWLEDGE_ASSET_TYPES[ext as KnowledgeImageAssetExtension]
+    : KNOWLEDGE_MEDIA_ASSET_TYPES[ext as KnowledgeMediaAssetExtension];
 }
 
-/** The kind an extension declares, normalized (`jpg` and `jpeg` are one kind). */
+/** Whether an asset path is audio or video, which only 0.8 catalogs may ship. */
+export function isKnowledgeMediaAssetPath(path: string): boolean {
+  const ext = assetExtension(path);
+  return ext !== null && Object.hasOwn(KNOWLEDGE_MEDIA_ASSET_TYPES, ext);
+}
+
+/** What kind of media row an asset can back, from its extension. */
+export function assetModality(path: string): KnowledgeAssetModality | null {
+  const ext = assetExtension(path);
+  if (!ext) return null;
+  if (ext === 'mp4' || ext === 'webm') return 'video';
+  return Object.hasOwn(KNOWLEDGE_MEDIA_ASSET_TYPES, ext) ? 'audio' : 'image';
+}
+
+/** The per-file size limit for an asset path. */
+export function maxKnowledgeAssetBytes(path: string): number {
+  return isKnowledgeMediaAssetPath(path)
+    ? MAX_KNOWLEDGE_MEDIA_ASSET_BYTES
+    : MAX_KNOWLEDGE_ASSET_BYTES;
+}
+
+/**
+ * Why a set of asset files breaks the format's size and count limits, or
+ * null. Images and media have separate per-file and total budgets; the
+ * count limit covers both.
+ */
+export function knowledgeAssetLimitsProblem(
+  files: ReadonlyArray<{ path: string; sizeBytes: number }>,
+): string | null {
+  if (files.length > MAX_KNOWLEDGE_ASSET_COUNT) {
+    return `${files.length} assets exceed the ${MAX_KNOWLEDGE_ASSET_COUNT}-file limit`;
+  }
+  let imageBytes = 0;
+  let mediaBytes = 0;
+  for (const file of files) {
+    if (file.sizeBytes > maxKnowledgeAssetBytes(file.path)) {
+      return `${file.path} is ${file.sizeBytes} bytes, over its ${maxKnowledgeAssetBytes(file.path)}-byte limit`;
+    }
+    if (isKnowledgeMediaAssetPath(file.path)) mediaBytes += file.sizeBytes;
+    else imageBytes += file.sizeBytes;
+  }
+  if (imageBytes > MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES) {
+    return `image assets total ${imageBytes} bytes, over the ${MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES}-byte limit`;
+  }
+  if (mediaBytes > MAX_KNOWLEDGE_MEDIA_ASSETS_TOTAL_BYTES) {
+    return `audio and video assets total ${mediaBytes} bytes, over the ${MAX_KNOWLEDGE_MEDIA_ASSETS_TOTAL_BYTES}-byte limit`;
+  }
+  return null;
+}
+
+/** The kind an extension declares, normalized (`jpg`/`jpeg`, `mp4`/`m4a`, `ogg`/`opus`). */
 export function assetKindForExtension(ext: KnowledgeAssetExtension): KnowledgeAssetKind {
-  return ext === 'jpg' ? 'jpeg' : ext;
+  switch (ext) {
+    case 'jpg':
+      return 'jpeg';
+    case 'mp4':
+    case 'm4a':
+      return 'isobmff';
+    case 'opus':
+      return 'ogg';
+    default:
+      return ext;
+  }
 }
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -68,6 +171,12 @@ const GIF87 = [0x47, 0x49, 0x46, 0x38, 0x37, 0x61];
 const GIF89 = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
 const RIFF = [0x52, 0x49, 0x46, 0x46];
 const WEBP = [0x57, 0x45, 0x42, 0x50];
+const WAVE = [0x57, 0x41, 0x56, 0x45];
+const FTYP = [0x66, 0x74, 0x79, 0x70];
+const EBML = [0x1a, 0x45, 0xdf, 0xa3];
+const OGGS = [0x4f, 0x67, 0x67, 0x53];
+const FLAC = [0x66, 0x4c, 0x61, 0x43];
+const ID3 = [0x49, 0x44, 0x33];
 
 function startsWith(bytes: Uint8Array, magic: number[], offset = 0): boolean {
   if (bytes.length < offset + magic.length) return false;
@@ -78,16 +187,31 @@ function startsWith(bytes: Uint8Array, magic: number[], offset = 0): boolean {
 }
 
 /**
- * What the leading bytes say the file is. Rasters are recognized by their
- * magic numbers; an SVG is UTF-8 text whose first element, after any BOM,
- * whitespace, XML declaration, comments and DOCTYPE, is `<svg`.
+ * What the leading bytes say the file is. Rasters and audio/video containers
+ * are recognized by their magic numbers; an SVG is UTF-8 text whose first
+ * element, after any BOM, whitespace, XML declaration, comments and DOCTYPE,
+ * is `<svg`.
  */
 export function sniffAssetType(bytes: Uint8Array): KnowledgeAssetKind | null {
   if (startsWith(bytes, PNG_MAGIC)) return 'png';
   if (startsWith(bytes, JPEG_MAGIC)) return 'jpeg';
   if (startsWith(bytes, GIF87) || startsWith(bytes, GIF89)) return 'gif';
   if (startsWith(bytes, RIFF) && startsWith(bytes, WEBP, 8)) return 'webp';
+  if (startsWith(bytes, RIFF) && startsWith(bytes, WAVE, 8)) return 'wav';
+  if (startsWith(bytes, FTYP, 4)) return 'isobmff';
+  if (startsWith(bytes, EBML)) return 'webm';
+  if (startsWith(bytes, OGGS)) return 'ogg';
+  if (startsWith(bytes, FLAC)) return 'flac';
+  if (startsWith(bytes, ID3) || isMpegAudioFrame(bytes)) return 'mp3';
   return looksLikeSvg(decodeText(bytes)) ? 'svg' : null;
+}
+
+/** An MPEG audio frame header: 11 sync bits, then a layer that is not "reserved". */
+function isMpegAudioFrame(bytes: Uint8Array): boolean {
+  if (bytes.length < 2) return false;
+  const b0 = bytes[0] as number;
+  const b1 = bytes[1] as number;
+  return b0 === 0xff && (b1 & 0xe0) === 0xe0 && (b1 & 0x06) !== 0;
 }
 
 function decodeText(bytes: Uint8Array): string {

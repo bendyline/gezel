@@ -176,6 +176,7 @@ test('the MAS child entitlements inherit rather than restate capabilities', () =
     'com.apple.security.network.client',
     'com.apple.security.network.server',
     'com.apple.security.device.audio-input',
+    'com.apple.security.device.camera',
     'com.apple.security.application-groups',
     'com.apple.security.files.user-selected.read-write',
   ]) {

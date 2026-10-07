@@ -4,15 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // transformers.js (and so we can assert it's called exactly once).
 const embedMock = vi.fn(async (_text: string) => [0.1, 0.2, 0.3]);
 const embeddingStatusMock = vi.fn(() => 'ready' as 'cold' | 'warming' | 'ready');
+const mediaEmbedMock = vi.fn(async (_text: string) => [0.5, 0.5] as number[] | null);
 vi.mock('../memory/embeddings.js', () => ({
   embed: (text: string) => embedMock(text),
   embedQuery: (text: string) => embedMock(text),
+  embedKnowledgeQuery: (text: string) => mediaEmbedMock(text),
   embeddingPipelineStatus: () => embeddingStatusMock(),
 }));
 
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex, SessionSearchHit } from '../index-store/global-index.js';
+import { setMediaSearchGate } from '../memory/image-embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import { MERGE_WEIGHTS, SearchService, fuzzyScore } from './search-service.js';
@@ -42,6 +45,7 @@ function makeService(
     /** Vector-memory rows returned for every scope the fan-out asks about. */
     memoryHits?: Array<{ text: string; score: number; day: string }>;
     memorySearch?: MemoryManager['searchVector'];
+    searchImages?: ContentIndex['searchImages'];
   } = {},
 ) {
   const store = {
@@ -78,6 +82,9 @@ function makeService(
       results: opts.libraryHits ?? [],
       engine: 'hybrid' as const,
     })),
+    searchImages:
+      opts.searchImages ??
+      vi.fn(async () => ({ results: [], engine: 'unavailable' as const, truncated: false })),
   } as unknown as ContentIndex;
 
   const memory = {
@@ -106,7 +113,9 @@ function makeService(
 
 beforeEach(() => {
   embedMock.mockClear();
+  mediaEmbedMock.mockClear();
   embeddingStatusMock.mockReturnValue('ready');
+  setMediaSearchGate('media search is off in Settings');
 });
 
 describe('fuzzyScore', () => {
@@ -425,6 +434,76 @@ describe('SearchService.search (full)', () => {
       projectId: 'p1',
       path: record,
     });
+  });
+});
+
+describe('SearchService.search — workspace media', () => {
+  it('lists photos and video moments by meaning, one query embedding for every project', async () => {
+    setMediaSearchGate(null);
+    const searchImages = vi.fn(async (projectId: string) => ({
+      results:
+        projectId === 'p1'
+          ? [
+              { path: 'photos/whiteboard.png', width: 1600, height: 1200, score: 0.78 },
+              {
+                path: 'clips/standup.mp4',
+                kind: 'video' as const,
+                startMs: 30_000,
+                endMs: 60_000,
+                score: 0.71,
+              },
+            ]
+          : [],
+      engine: 'vector' as const,
+      truncated: false,
+    }));
+    const svc = makeService({
+      projects: [
+        { id: 'p1', name: 'Alpha' },
+        { id: 'p2', name: 'Beta' },
+      ],
+      searchImages: searchImages as unknown as ContentIndex['searchImages'],
+    });
+    const res = await svc.search('sketch of the login flow', { mode: 'full' });
+    expect(mediaEmbedMock).toHaveBeenCalledTimes(1);
+    expect(searchImages).toHaveBeenCalledWith(
+      'p1',
+      'sketch of the login flow',
+      expect.any(Number),
+      expect.objectContaining({ vector: [0.5, 0.5], vectorOnly: true }),
+    );
+    const photo = res.results.find((r) => r.id === 'file:p1:photos/whiteboard.png');
+    expect(photo).toMatchObject({
+      kind: 'file',
+      path: 'photos/whiteboard.png',
+      arm: 'vector',
+      media: { modality: 'image', assetPath: 'photos/whiteboard.png', width: 1600 },
+    });
+    const moment = res.results.find((r) => r.id === 'file:p1:clips/standup.mp4#30000');
+    expect(moment?.media).toEqual({
+      modality: 'video',
+      assetPath: 'clips/standup.mp4',
+      startMs: 30_000,
+      endMs: 60_000,
+    });
+  });
+
+  it('skips the media arm while media search is off or its model cannot embed', async () => {
+    const searchImages = vi.fn(async () => ({
+      results: [],
+      engine: 'vector' as const,
+      truncated: false,
+    }));
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Alpha' }],
+      searchImages: searchImages as unknown as ContentIndex['searchImages'],
+    });
+    await svc.search('anything', { mode: 'full' });
+    expect(mediaEmbedMock).not.toHaveBeenCalled();
+    setMediaSearchGate(null);
+    mediaEmbedMock.mockResolvedValueOnce(null);
+    await svc.search('anything else', { mode: 'full' });
+    expect(searchImages).not.toHaveBeenCalled();
   });
 });
 

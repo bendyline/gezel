@@ -142,6 +142,7 @@ import {
   officeStaticRoutes,
 } from '../office-host/static-routes.js';
 import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
+import { mediaSearchRoutes } from './routes/media-search.js';
 import { relevanceModelRoutes } from './routes/relevance-model.js';
 import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
@@ -615,6 +616,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/relevance-model', relevanceModelRoutes(ctx));
+  app.route('/api/media-search', mediaSearchRoutes(ctx));
   app.route('/api/ai-apps', aiAppRoutes(ctx));
   app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));

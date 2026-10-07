@@ -1,4 +1,4 @@
-import type { UnifiedSearchResult } from '@bendyline/gezel';
+import { type UnifiedSearchResult, mediaSpanLabel } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
@@ -129,7 +129,11 @@ export function SearchResultsOverlay() {
                           {highlightTokens(item.title, query)}
                         </span>
                         {item.subtitle && (
-                          <span className="search-results-subtitle muted">{item.subtitle}</span>
+                          <span className="search-results-subtitle muted">
+                            {item.media
+                              ? `${mediaSpanLabel(item.media)} · ${item.subtitle}`
+                              : item.subtitle}
+                          </span>
                         )}
                         {item.snippet && (
                           <span className="search-results-snippet">

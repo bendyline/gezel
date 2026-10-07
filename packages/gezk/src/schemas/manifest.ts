@@ -3,6 +3,7 @@ import {
   GEZK_FORMAT_GENERATIONS,
   GEZK_SUPPORTED_FORMAT_VERSIONS,
   GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS,
+  formatAtLeast,
 } from '../format/constants.js';
 import { KnowledgeSpatialManifestSchema } from '../spatial.js';
 import {
@@ -11,7 +12,11 @@ import {
   KnowledgeVersionSchema,
   Sha256HexSchema,
 } from './ids.js';
-import { KnowledgeChunkingProfileSchema, KnowledgeEmbeddingProfileSchema } from './profiles.js';
+import {
+  KnowledgeChunkingProfileSchema,
+  KnowledgeEmbeddingProfileSchema,
+  embeddingProfileMinimumFormat,
+} from './profiles.js';
 
 /**
  * `manifest.json` — the container's self-description. `formatVersion`
@@ -41,7 +46,7 @@ export const KnowledgeCatalogManifestSchema = z
   .object({
     kind: z.literal(GEZK_MANIFEST_KIND),
     formatVersion: z.enum(GEZK_SUPPORTED_FORMAT_VERSIONS),
-    indexSchemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+    indexSchemaVersion: z.literal(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS),
     id: KnowledgeIdSchema,
     version: KnowledgeVersionSchema,
     name: z.string().min(1),
@@ -103,6 +108,17 @@ export const KnowledgeCatalogManifestSchema = z
       shards: z.number().int().positive(),
       /** Files under `assets/` (0.6+). */
       assets: z.number().int().nonnegative().optional(),
+      /**
+       * Media rows by modality (0.8, required there). They are counted in
+       * `chunks` too: every row of the shard `chunks` table is a chunk.
+       */
+      media: z
+        .object({
+          image: z.number().int().nonnegative(),
+          video: z.number().int().nonnegative(),
+          audio: z.number().int().nonnegative(),
+        })
+        .optional(),
     }),
     files: z.array(KnowledgeManifestFileSchema).min(1),
     spatial: KnowledgeSpatialManifestSchema.optional(),
@@ -134,22 +150,64 @@ export const KnowledgeCatalogManifestSchema = z
     signature: KnowledgeSignatureSchema.optional(),
   })
   .superRefine((manifest, ctx) => {
-    if (manifest.formatVersion === '0.7' && !manifest.spatial) {
+    const spatialEra = formatAtLeast(manifest.formatVersion, '0.7');
+    if (spatialEra && !manifest.spatial) {
       ctx.addIssue({
         code: 'custom',
         path: ['spatial'],
-        message: '0.7 requires a spatial summary, including catalogs with zero locations',
+        message: '0.7+ requires a spatial summary, including catalogs with zero locations',
       });
     }
     if (
       manifest.spatial &&
-      (manifest.formatVersion !== '0.7' ||
-        manifest.spatial.locatedDocuments > manifest.counts.documents)
+      (!spatialEra || manifest.spatial.locatedDocuments > manifest.counts.documents)
     ) {
       ctx.addIssue({
         code: 'custom',
         path: ['spatial'],
-        message: 'spatial requires 0.7 and valid document counts',
+        message: 'spatial requires 0.7+ and valid document counts',
+      });
+    }
+    const mediaEra = formatAtLeast(manifest.formatVersion, '0.8');
+    const media = manifest.counts.media;
+    if (mediaEra && !media) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['counts', 'media'],
+        message: '0.8 requires counts.media, including catalogs with no media rows',
+      });
+    }
+    if (media && !mediaEra) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['counts', 'media'],
+        message: 'counts.media is a 0.8 field',
+      });
+    }
+    if (media && media.image + media.video + media.audio > manifest.counts.chunks) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['counts', 'media'],
+        message: 'media rows are chunks, so counts.media cannot exceed counts.chunks',
+      });
+    }
+    if (media) {
+      for (const modality of ['image', 'video', 'audio'] as const) {
+        if (media[modality] > 0 && !manifest.embedding.media?.[modality]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['embedding', 'media', modality],
+            message: `${media[modality]} ${modality} rows need embedding.media.${modality}`,
+          });
+        }
+      }
+    }
+    const profileFormat = embeddingProfileMinimumFormat(manifest.embedding);
+    if (!formatAtLeast(manifest.formatVersion, profileFormat)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['embedding'],
+        message: `embedding profile ${manifest.embedding.id} uses ${profileFormat} vocabulary (truncation, model.files or media), which ${manifest.formatVersion} cannot carry`,
       });
     }
     if (GEZK_FORMAT_GENERATIONS[manifest.formatVersion] !== manifest.indexSchemaVersion) {

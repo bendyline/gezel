@@ -3,6 +3,7 @@ import type { PortableCatalogModel, PortableProductService } from '@bendyline/ge
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ModelBudgetSettings } from './ModelBudgetSettings.js';
 import { ModelChooser } from './ModelChooser.js';
+import { PhotoReadingSettings } from './PhotoReadingSettings.js';
 import type { MobileHost, ModelInventory } from './native.js';
 
 /** Native model acquisition is a host control inside the ordinary Settings view. */
@@ -110,6 +111,14 @@ export function ProductModelSettings({
           fittedContext={inventory.models.find(({ id }) => id === modelId)?.contextTokens}
           disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
           refresh={refresh}
+          onError={onError}
+        />
+      )}
+      {host.native && !setup && (
+        <PhotoReadingSettings
+          host={host}
+          service={service}
+          disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
           onError={onError}
         />
       )}

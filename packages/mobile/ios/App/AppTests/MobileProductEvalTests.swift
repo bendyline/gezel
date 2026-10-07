@@ -6,6 +6,52 @@ import GezelModelStorage
 
 /// Runs only when explicitly selected. The suite is a test-bundle resource, not an app hook.
 final class MobileProductEvalTests: XCTestCase {
+    /// Runs one script (base64 in GEZEL_DEVICE_PROBE) in the installed product
+    /// and prints its JSON result: a quick check on a real device without the
+    /// eval's product isolation, so the script owns its own cleanup. Opt-in.
+    @MainActor
+    func testDeviceProbe() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let encoded = env["GEZEL_DEVICE_PROBE"], let data = Data(base64Encoded: encoded),
+              let source = String(data: data, encoding: .utf8) else {
+            throw XCTSkip("Device probes are opt-in")
+        }
+        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        addTeardownBlock { @MainActor in UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled }
+        var candidate: WKWebView?
+        for _ in 0..<100 {
+            candidate = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows).compactMap { $0.rootViewController as? MainViewController }.first?.webView
+            if candidate != nil { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let view = try XCTUnwrap(candidate)
+        var ready = false
+        for _ in 0..<600 {
+            if (try? await view.evaluateJavaScript("Boolean(window.__GEZEL__?.fetch && document.querySelector('[data-testid=\"app-sidebar\"]'))")) as? Bool == true { ready = true; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertTrue(ready, "Packaged product did not initialize")
+        _ = try await view.evaluateJavaScript("window.__gezelProbe=null;window.__gezelProbeProgress='';(async()=>{\(source)})().then(value=>window.__gezelProbe={value:JSON.stringify(value)},error=>window.__gezelProbe={error:String(error.message||error)+'\\n'+String(error.stack||'')});true")
+        let seconds = TimeInterval(env["GEZEL_DEVICE_PROBE_SECONDS"] ?? "3600") ?? 3600
+        let deadline = Date().addingTimeInterval(seconds)
+        var progress = ""
+        while Date() < deadline {
+            if let line = try await view.evaluateJavaScript("window.__gezelProbeProgress||''") as? String, line != progress {
+                progress = line
+                print("DEVICE_PROBE_PROGRESS \(line)")
+            }
+            if let result = try await view.evaluateJavaScript("window.__gezelProbe||null") as? [String: Any] {
+                if let error = result["error"] as? String { XCTFail("DEVICE_PROBE_ERROR \(error)") }
+                print("DEVICE_PROBE_RESULT \(result["value"] as? String ?? "null")")
+                return
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        XCTFail("DEVICE_PROBE_TIMEOUT after \(seconds) seconds")
+    }
+
     @MainActor
     func testRealProviderProductEvals() async throws {
         let env = ProcessInfo.processInfo.environment

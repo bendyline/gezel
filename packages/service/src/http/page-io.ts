@@ -17,6 +17,7 @@ import {
   createLogger,
   formatJsonSchemaViolations,
   pageReadIsDeclared,
+  projectTypeModelTools,
   validateJsonSchema,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -147,6 +148,9 @@ export async function invokePageTool(
   let reaction: Awaited<ReturnType<typeof dispatchToolReaction>> | undefined;
   if (run.status === 'ok' && tool.reaction) {
     if (args.allowReaction) {
+      const manifest = tool.reaction.turn
+        ? await resolveProjectTypeManifest(deps.catalog, project)
+        : undefined;
       reaction = await dispatchToolReaction(
         { store: deps.store, chat: deps.chat, history: deps.history },
         {
@@ -155,6 +159,7 @@ export async function invokePageTool(
           ...(pageTools.params ? { params: pageTools.params } : {}),
           tool,
           run,
+          ...(manifest ? { modelTools: projectTypeModelTools(manifest) } : {}),
         },
       );
     } else {

@@ -10,7 +10,11 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import { embeddingsDisabledReason } from '../memory/embeddings.js';
-import { faceEmbedAvailability, imageEmbedAvailability } from '../memory/image-embeddings.js';
+import {
+  audioVideoEmbedAvailability,
+  faceEmbedAvailability,
+  imageEmbedAvailability,
+} from '../memory/image-embeddings.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
@@ -53,6 +57,9 @@ const EMBED_ONLY_BATCH = 10;
 // Image-embed tier batches (lane A). Smaller than the text tier: each image
 // costs a decode (100+ ms on a big photo) plus a vision-tower forward.
 const IMAGE_EMBED_BATCH = 5;
+/** Audio/video files per media-tier pass: one file can be dozens of windows. */
+const AUDIO_VIDEO_BATCH = 1;
+const AUDIO_VIDEO_NIGHT_BATCH = 4;
 const IMAGE_EMBED_NIGHT_BATCH = 20;
 // Face tier batch (lane B): a detector pass plus one ArcFace forward per
 // detected face — the heaviest of the local image tiers.
@@ -106,6 +113,12 @@ export interface IndexEnrichmentManagerOptions {
    * absent (tests), the drive falls back to `contentIndex.refresh` directly.
    */
   refreshStatic?: (projectId: string) => Promise<unknown>;
+  /**
+   * Ask the media-search manager for what video and audio need (the audio
+   * encoder; an ffmpeg must already be there). Called when audio/video files
+   * are waiting and their lane is still closed. Absent in tests.
+   */
+  ensureAudioVideo?: () => Promise<boolean>;
 }
 
 /**
@@ -148,6 +161,7 @@ export class IndexEnrichmentManager {
   private readonly shadowProducers: AiShadowProducers | undefined;
   private readonly history: IndexEnrichmentManagerOptions['history'];
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
+  private readonly ensureAudioVideo: (() => Promise<boolean>) | undefined;
   /**
    * Shared across projects and across deps rebuilds: the summarizer target is
    * one engine, so a streak of timeouts on project A is evidence about project
@@ -211,6 +225,7 @@ export class IndexEnrichmentManager {
     this.shadowProducers = opts.shadowProducers;
     this.history = opts.history;
     this.refreshStatic = opts.refreshStatic;
+    this.ensureAudioVideo = opts.ensureAudioVideo;
   }
 
   start(): void {
@@ -528,7 +543,36 @@ export class IndexEnrichmentManager {
         }
       }
     }
+    const avBatch = opts.night ? AUDIO_VIDEO_NIGHT_BATCH : AUDIO_VIDEO_BATCH;
+    if (await this.audioVideoReady(projectId)) {
+      for (;;) {
+        if (opts.abort?.aborted) return 'paused';
+        if (await this.driveHalted(projectId)) return 'paused';
+        if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
+        const r = await this.contentIndex.embedAudioVideo(projectId, avBatch).catch(() => null);
+        if (!r || r.files === 0 || r.unavailable) break;
+        if (r.embedded > 0) {
+          log.info(
+            `[enrich] ${projectId}: ${r.embedded} audio/video files embedded (media search)`,
+          );
+        }
+      }
+    }
     return 'done';
+  }
+
+  /**
+   * Whether the audio/video lane can run for this project now. When files
+   * are waiting and the lane is closed, ask for what it lacks (the audio
+   * encoder) — a no-op without an ffmpeg or with media search off.
+   */
+  private async audioVideoReady(projectId: string): Promise<boolean> {
+    if (audioVideoEmbedAvailability().ok) return true;
+    if (!this.ensureAudioVideo) return false;
+    const pending = await this.contentIndex.countAudioVideoPending(projectId).catch(() => 0);
+    if (pending === 0) return false;
+    await this.ensureAudioVideo().catch(() => false);
+    return audioVideoEmbedAvailability().ok;
   }
 
   /** Face tier gate: the explicit biometric opt-in AND a healthy face stack. */
@@ -893,6 +937,18 @@ export class IndexEnrichmentManager {
               projectId: p.id,
               detail: `${imgs.embedded} images embedded for visual similarity`,
             });
+          }
+        }
+        if (this.stopping) return;
+        // Audio/video windows (media search): heavier per file, so a small
+        // batch per tick; the lane opens once the audio encoder and ffmpeg are there.
+        if (await this.audioVideoReady(p.id)) {
+          const av = await this.contentIndex
+            .embedAudioVideo(p.id, night ? AUDIO_VIDEO_NIGHT_BATCH : AUDIO_VIDEO_BATCH)
+            .catch(() => null);
+          if (av && av.embedded > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${av.embedded} audio/video files embedded (media search)`);
           }
         }
         if (this.stopping) return;

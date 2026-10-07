@@ -43,6 +43,7 @@ export * from './app-tools.js';
 export * from './file-review.js';
 export * from './file-glob.js';
 export * from './api.js';
+export * from './media-search.js';
 export * from './image-intel.js';
 export * from './village-file.js';
 export * from './catalog.js';

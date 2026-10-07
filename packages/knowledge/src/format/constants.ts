@@ -21,6 +21,7 @@ export {
   ROUTER_DB_PATH,
   SOURCE_NOTICES_PATH,
   ZIP_FIXED_MTIME,
+  formatAtLeast,
   isSupportedFormatVersion,
   isSupportedIndexSchemaVersion,
 } from '@bendyline/gezk';

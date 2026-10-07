@@ -79,10 +79,25 @@ function requestDecision(
 }
 
 describe('renderer permission handler wiring', () => {
-  it('allows only audio and sanitized clipboard writes from the trusted main frame', () => {
+  it('allows single-kind capture and sanitized clipboard writes from the trusted main frame', () => {
     const { trusted, check, request } = harness();
 
     expect(check(trusted, 'media', ORIGIN, checkDetails({ mediaType: 'audio' }))).toBe(true);
+    expect(check(trusted, 'media', ORIGIN, checkDetails({ mediaType: 'video' }))).toBe(true);
+    expect(
+      requestDecision(request, trusted, 'media', {
+        requestingUrl: `${ORIGIN}/`,
+        isMainFrame: true,
+        mediaTypes: ['video'],
+      }),
+    ).toBe(true);
+    expect(
+      requestDecision(request, trusted, 'media', {
+        requestingUrl: `${ORIGIN}/`,
+        isMainFrame: true,
+        mediaTypes: ['audio', 'video'],
+      }),
+    ).toBe(false);
     expect(check(trusted, 'clipboard-sanitized-write', ORIGIN, checkDetails())).toBe(true);
     expect(
       requestDecision(request, trusted, 'media', {
@@ -114,7 +129,7 @@ describe('renderer permission handler wiring', () => {
     }
   });
 
-  it('denies previews, other WebContents, wrong origins, and camera capture', () => {
+  it('denies previews, other WebContents, and wrong origins', () => {
     const { trusted, other, check, request } = harness();
     const preview = `${ORIGIN}/preview/cap/workspace/default/site/index.html`;
 
@@ -138,7 +153,14 @@ describe('renderer permission handler wiring', () => {
         checkDetails({ requestingUrl: undefined }),
       ),
     ).toBe(false);
-    expect(check(trusted, 'media', ORIGIN, checkDetails({ mediaType: 'video' }))).toBe(false);
+    expect(check(other, 'media', ORIGIN, checkDetails({ mediaType: 'video' }))).toBe(false);
+    expect(
+      requestDecision(request, trusted, 'media', {
+        requestingUrl: preview,
+        isMainFrame: false,
+        mediaTypes: ['video'],
+      }),
+    ).toBe(false);
     expect(
       requestDecision(request, trusted, 'clipboard-sanitized-write', {
         requestingUrl: preview,

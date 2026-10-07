@@ -9,6 +9,7 @@ import {
 import type { Task, TaskCraftbookStep } from '../schemas/task.js';
 import {
   type GateWorkspaceReader,
+  SHARED_GATE_CHECK_KINDS,
   evaluateDeclarativeCheck,
   formatGateVerdict,
   isSharedGateCheck,
@@ -17,6 +18,34 @@ import {
 import { evaluateGateScripts } from '../tasks/gate-scripts.js';
 import type { PortableStore } from './store.js';
 import type { PortableTaskGateResult } from './tasks.js';
+
+/**
+ * The declarative checks this host runs. The regex kinds run in the bounded
+ * standard `checkContains` script, never on the UI thread, where a
+ * pathological pattern could freeze the app.
+ */
+export const PORTABLE_GATE_CHECK_KINDS: readonly string[] = [
+  ...SHARED_GATE_CHECK_KINDS,
+  'contains',
+  'notContains',
+];
+
+/** A regex check as the standard script that evaluates it, with the desktop's flags. */
+export function patternCheckScript(check: GateCheck): GateScriptRef | undefined {
+  if (check.kind !== 'contains' && check.kind !== 'notContains') return undefined;
+  return {
+    scope: 'standard',
+    name: 'checkContains',
+    inputs: {
+      file: check.file,
+      pattern: check.pattern,
+      flags: check.flags ?? '',
+      ...(check.label ? { label: check.label } : {}),
+      ...(check.artifact ? { artifact: true } : {}),
+      ...(check.kind === 'notContains' ? { absent: true } : {}),
+    },
+  };
+}
 
 export type PortableGateScript = (
   ref: GateScriptRef,
@@ -88,8 +117,23 @@ export async function evaluatePortableTaskGate(
     // missing file reads as "0 bytes" to one check and "not found" to the next.
     const failures: string[] = [];
     for (const item of checks) {
-      // Regex and executable syntax checks belong in bounded QuickJS, not the
-      // UI thread. Unsupported declarative checks fail closed here.
+      const script = patternCheckScript(item);
+      if (script) {
+        if (!runScript) throw new Error(`The ${item.kind} gate requires the script executor`);
+        const run = await runScript(script, task, step);
+        if (run.status !== 'ok')
+          throw new Error(`The ${item.kind} gate could not run: ${run.error ?? 'unknown error'}`);
+        const verdict = run.output as { decision?: unknown; message?: unknown } | undefined;
+        if (verdict?.decision !== 'approve')
+          failures.push(
+            typeof verdict?.message === 'string'
+              ? verdict.message
+              : `${String(script.inputs?.file)} did not pass`,
+          );
+        continue;
+      }
+      // Executable syntax checks belong in bounded QuickJS, not the UI
+      // thread. Unsupported declarative checks fail closed here.
       if (!isSharedGateCheck(item))
         throw new Error(`The ${item.kind} gate requires a supported script or desktop execution`);
       const result = await evaluateDeclarativeCheck(item, ws);

@@ -124,7 +124,7 @@ gezel knowledge install <source>
 gezel knowledge list        what is installed
 ```
 
-Building, checking, and searching a catalog file work without the service; installing and listing use the running gezel. Building a catalog and `search --semantic` also need the embedding runtime, which the desktop app includes. After an npm install, add it with `npm install -g @huggingface/transformers@^3.8.1` (without `-g` if gezel is installed in a project).
+Building, checking, and searching a catalog file work without the service; installing and listing use the running gezel. Building a catalog and `search --semantic` also need the embedding runtime, which the desktop app includes. After an npm install, add it with `npm install -g @huggingface/transformers@^4.3.1` (without `-g` if gezel is installed in a project).
 
 ## Keys and security settings
 

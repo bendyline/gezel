@@ -18,7 +18,15 @@ import { createLogger } from '@bendyline/gezel';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { PipelineLoadError } from './embed-core.js';
 import { type FaceDetectOutcome, type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
-import { type ImageEmbedJob, type ImageEmbedOutcome, runImageEmbed } from './image-embed-core.js';
+import {
+  type ImageEmbedJob,
+  type ImageEmbedOutcome,
+  type MediaEmbedJob,
+  type MediaEmbedOutcome,
+  imageTokenBudget,
+  runImageEmbed,
+  runMediaEmbed,
+} from './image-embed-core.js';
 
 export type { ImageEmbedJob, ImageEmbedOutcome } from './image-embed-core.js';
 export type { DetectedFaceResult, FaceDetectOutcome, FaceModelPaths } from './face-embed-core.js';
@@ -71,12 +79,48 @@ export function imageEmbeddingsDisabledReason(): string | null {
 }
 
 /**
+ * Why the media-search manager keeps the media tier closed (setting off,
+ * model not installed), or null. Null by default, so a daemon or test that
+ * never constructs the manager behaves as before.
+ */
+let mediaSearchGateReason: string | null = null;
+
+export function setMediaSearchGate(reason: string | null): void {
+  mediaSearchGateReason = reason;
+}
+
+/**
  * Cheap per-batch gate for the enrichment tier: flags only, no model load.
  * The first real embed classifies a missing peer / unloadable model and makes
  * this report it from then on.
  */
 export function imageEmbedAvailability(): { ok: boolean; reason?: string } {
-  const reason = imageEmbeddingsDisabledReason();
+  const reason = mediaSearchGateReason ?? imageEmbeddingsDisabledReason();
+  return reason ? { ok: false, reason } : { ok: true };
+}
+
+/**
+ * Video and audio (the media tier's windows) need more than images do: the
+ * audio encoder on disk and a system ffmpeg. Closed until the media-search
+ * manager has checked both; failures here never close the image lane.
+ */
+let audioVideoGateReason: string | null = 'video and audio indexing has not been checked yet';
+let audioVideoUnavailableReason: string | null = null;
+let audioVideoUnavailableUntil = 0;
+
+export function setAudioVideoGate(reason: string | null): void {
+  audioVideoGateReason = reason;
+}
+
+export function audioVideoEmbedAvailability(): { ok: boolean; reason?: string } {
+  if (audioVideoUnavailableReason && Date.now() >= audioVideoUnavailableUntil) {
+    audioVideoUnavailableReason = null;
+  }
+  const reason =
+    audioVideoGateReason ??
+    mediaSearchGateReason ??
+    imageEmbeddingsDisabledReason() ??
+    audioVideoUnavailableReason;
   return reason ? { ok: false, reason } : { ok: true };
 }
 
@@ -88,10 +132,10 @@ export function faceEmbedAvailability(): { ok: boolean; reason?: string } {
 
 // ── worker plumbing (mirror of embeddings.ts) ─────────────────────────────
 
-type AnyOutcomes = ImageEmbedOutcome[] | FaceDetectOutcome[];
+type AnyOutcomes = ImageEmbedOutcome[] | FaceDetectOutcome[] | MediaEmbedOutcome[];
 
 interface Pending {
-  kind: 'clip' | 'faces';
+  kind: 'image' | 'faces' | 'media';
   resolve: (results: AnyOutcomes) => void;
   reject: (err: unknown) => void;
 }
@@ -152,6 +196,18 @@ function onMessage(msg: WorkerReply): void {
   if (!p) return;
   pending.delete(msg.id);
   if (msg.error) {
+    if (p.kind === 'media') {
+      // Video/audio failures (no ffmpeg, a missing audio encoder) cool down
+      // their own lane; the image lane keeps working.
+      if (msg.retryable || msg.fatal) {
+        audioVideoUnavailableReason = firstLine(msg.error);
+        audioVideoUnavailableUntil = Date.now() + RETRY_COOLDOWN_MS;
+        p.reject(new ImageEmbeddingsUnavailableError(audioVideoUnavailableReason));
+      } else {
+        p.reject(new Error(msg.error));
+      }
+      return;
+    }
     if (p.kind === 'faces') {
       // Attribute the failure to the face lane only.
       if (msg.fatal) markFaceDisabled(msg.error, msg.optionalPeerMissing ?? false);
@@ -195,9 +251,37 @@ function onWorkerDown(reason: string): void {
 function sendToWorker(w: Worker, images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   const id = nextId++;
   return new Promise<AnyOutcomes>((resolve, reject) => {
-    pending.set(id, { kind: 'clip', resolve, reject });
-    w.postMessage({ id, kind: 'clip', images });
+    pending.set(id, { kind: 'image', resolve, reject });
+    w.postMessage({ id, kind: 'image', images, budget: imageTokenBudget() });
   }) as Promise<ImageEmbedOutcome[]>;
+}
+
+function sendMediaToWorker(w: Worker, media: MediaEmbedJob[]): Promise<MediaEmbedOutcome[]> {
+  const id = nextId++;
+  return new Promise<AnyOutcomes>((resolve, reject) => {
+    pending.set(id, { kind: 'media', resolve, reject });
+    w.postMessage({ id, kind: 'media', media, budget: imageTokenBudget() });
+  }) as Promise<MediaEmbedOutcome[]>;
+}
+
+/**
+ * Embed audio and video files window by window (the media tier). Same
+ * worker as images; the direct path is test-only.
+ */
+export async function embedMediaFiles(media: MediaEmbedJob[]): Promise<MediaEmbedOutcome[]> {
+  if (media.length === 0) return [];
+  const availability = audioVideoEmbedAvailability();
+  if (!availability.ok) {
+    throw new ImageEmbeddingsUnavailableError(availability.reason ?? 'unavailable');
+  }
+  const w = ensureWorker();
+  if (w) return sendMediaToWorker(w, media);
+  if (!allowTestFallback) {
+    throw new ImageEmbeddingsUnavailableError(
+      workerFailureReason ?? 'image-embedding worker is unavailable',
+    );
+  }
+  return runMediaEmbed(media);
 }
 
 function sendFacesToWorker(

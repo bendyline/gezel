@@ -1064,7 +1064,10 @@ ${artifactsLine}
 
 - **Workspace writes** (\`write_file\`) — create the source or deliverable file named by the task directly in the project workspace. Put the complete contents in the tool call; do not paste the file into chat or save it as an artifact.
 - **Workspace reads are not available this turn.** Use the task context and any exact paths already supplied${workspaceListingRendered ? ', plus the role-scoped workspace listing below' : ''}. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
-    } else {
+    } else if (!leanProfile || hasArtifactTools) {
+      // A lean session (a game, the chat room) with no drawers has nothing to
+      // place, and this section spent ~500 tokens of a phone's window telling
+      // it so.
       const listedArtifactWarning = workspaceListingRendered
         ? `; do not treat a path shown in \`### Workspace files\` as an artifact${hasListArtifacts ? ' unless `list_artifacts` returned it too' : ''}`
         : '';
@@ -1663,9 +1666,23 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const fileEditsDisabledNote = fileEditsDisabled
     ? `\n\n---\n\n## ⚠️ Built-in file tools are read-only for this session\n\nThis project does not currently allow Gezel-managed workspace writes. **This session cannot create or edit workspace files** — \`write_file\`, \`replace_in_file\`, \`append_to_file\`, \`generate_image\`, and the other managed write tools are not on your roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a workspace file** — you can't, and the runtime flags the false claim.\n- **Do not call unavailable workspace-write tools.** Reading, reviewing, analysis, and planning still work.\n- If the request needs a file change, **say so plainly**: this session's built-in tools are read-only, and the user can enable them via **"${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings**.\n- **Do not generalize this to every gezel.** Provider-native sessions such as Codex may have separate project access.`
     : '';
-  const freshProjectAddendum = isFreshProject
-    ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
-    : '';
+  // Only a session that could survey the drawers needs telling not to.
+  const canSurvey =
+    availableTools === undefined ||
+    toolsFrom([
+      'list_artifacts',
+      'list_memories',
+      'list_packages',
+      'list_scripts',
+      'list_craftbooks',
+      'list_tasks',
+      'list_dir',
+      'read_file',
+    ]).length > 0;
+  const freshProjectAddendum =
+    isFreshProject && canSurvey
+      ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
+      : '';
 
   const operationalGuidance = [actDontNarrate, decisionGuidance, browsingForRole.trim()]
     .filter(Boolean)

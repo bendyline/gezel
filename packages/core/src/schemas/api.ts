@@ -2171,6 +2171,22 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Search photos, video and audio by meaning: an on-device multimodal
+   * embedding model (EmbeddingGemma 2) indexes workspace media in the idle
+   * tier, and text queries reach them. Absent means on. Enabling downloads
+   * the model (~510 MB; ~340 MB more on the first audio or video) when app
+   * network access is allowed. `imageTokenBudget` trades indexing time for
+   * fidelity (70–1120 vision tokens per image, default 280).
+   */
+  mediaSearch: z
+    .object({
+      enabled: z.boolean().optional(),
+      imageTokenBudget: z
+        .union([z.literal(70), z.literal(140), z.literal(280), z.literal(560), z.literal(1120)])
+        .optional(),
+    })
+    .optional(),
+  /**
    * Knowledge catalogs (.gezk) — user-global defaults. The authoritative
    * per-catalog state (exact refs, enablement) lives in
    * `~/.gezel/knowledge/registry.json`; this holds only the preferences the
@@ -5607,6 +5623,19 @@ export const UNIFIED_SEARCH_RESULT_KINDS = [
 export const UnifiedSearchResultKindSchema = z.enum(UNIFIED_SEARCH_RESULT_KINDS);
 export type UnifiedSearchResultKind = z.infer<typeof UnifiedSearchResultKindSchema>;
 
+export const SearchMediaSchema = z.object({
+  modality: z.enum(['image', 'video', 'audio']),
+  assetPath: z.string(),
+  mimeType: z.string().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  startMs: z.number().int().nonnegative().optional(),
+  endMs: z.number().int().nonnegative().optional(),
+  thumbnailAssetPath: z.string().optional(),
+  attribution: z.record(z.string(), z.unknown()).optional(),
+});
+export type SearchMedia = z.infer<typeof SearchMediaSchema>;
+
 export const UnifiedSearchResultSchema = z.object({
   kind: UnifiedSearchResultKindSchema,
   /** Stable identity for React keys + dedup (kind-scoped). */
@@ -5674,6 +5703,13 @@ export const UnifiedSearchResultSchema = z.object({
   uri: z.string().optional(),
   sourceUrl: z.string().optional(),
   attribution: z.string().optional(),
+  /**
+   * A media hit — an image, or a window of audio or video — from a knowledge
+   * catalog's media rows or a project's media index. `assetPath` is the
+   * catalog asset (`assets/…`) or the workspace path; `startMs`/`endMs`
+   * place a window in its file.
+   */
+  media: SearchMediaSchema.optional(),
 });
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 

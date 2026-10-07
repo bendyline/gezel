@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from '../../client/src/client.js';
+import { craftbookTemplateManifestFromRuntime } from '../src/craftbook-doc.js';
 import { projectTypeScriptProvenance } from '../src/project-types/composition.js';
 import { portableToolResultText } from '../src/runtime/portable-tool-results.js';
 import { type PortableInference, PortableProductService } from '../src/runtime/product-service.js';
@@ -9,6 +10,7 @@ import { type PortableProjectType, PortableProjectTypes } from '../src/runtime/p
 import type { PortableScripts } from '../src/runtime/script-host.js';
 import { portableFixture } from '../src/runtime/test-files.js';
 import type { CatalogItemDetail } from '../src/schemas/catalog.js';
+import type { Craftbook } from '../src/schemas/craftbook.js';
 import type { ScriptRun } from '../src/schemas/script.js';
 
 const GAME_STORE = `import { defineScript, gezel } from '@bendyline/gezel-sdk';
@@ -247,6 +249,53 @@ describe('catalog project types on the portable host', () => {
       expect.objectContaining({ id: opponent!.id, reused: true }),
     ]);
     expect(second.project.about).toBe('A zen opponent across the board.');
+  });
+
+  it("suggests the type's own craftbooks, carried or bundled, under the type's name", async () => {
+    const book = (id: string, name: string) =>
+      ({
+        id,
+        name,
+        description: `${name} for this project.`,
+        version: '1.0.0',
+        entryStepId: 'write',
+        steps: [{ id: 'write', name: 'Write it', prompt: 'Write the report.', terminal: true }],
+        createdAt: '2026-08-12T00:00:00Z',
+        updatedAt: '2026-08-12T00:00:00Z',
+      }) as unknown as Craftbook;
+    const type = checkersType({ craftbooks: ['season-recap', 'weekly-review', 'month-close'] });
+    type.craftbooks = { 'season-recap': book('season-recap', 'Season recap') };
+    const { client, service } = await setup(type);
+    const review = book('weekly-review', 'Weekly review');
+    const other = book('trip-notes', 'Trip notes');
+    service.setContent({
+      templates: [template],
+      craftbooks: [review, other].map((entry) => ({
+        book: entry,
+        item: {
+          sourceId: 'bundled',
+          kind: 'craftbook-template',
+          manifest: craftbookTemplateManifestFromRuntime(entry)!,
+        } as CatalogItemDetail,
+      })),
+    });
+    const { project } = await client.createTypedProject({
+      name: 'League night',
+      projectType: { typeId: 'checkers' },
+    });
+    const offer = await client.listProjectCraftbooks(project.id);
+    expect(offer.items.map((item) => `${item.sourceId}:${item.manifest.id}`)).toEqual([
+      'project:season-recap',
+      'bundled:weekly-review',
+      'bundled:trip-notes',
+    ]);
+    // month-close is declared but no phone can run it, so it is not offered.
+    expect(offer.suggestedIds).toEqual(['season-recap', 'weekly-review']);
+    expect(offer.projectType).toEqual({ id: 'checkers', label: 'Checkers' });
+
+    const plain = await client.listProjectCraftbooks('default');
+    expect(plain.suggestedIds).toEqual([]);
+    expect(plain.projectType).toBeNull();
   });
 
   it('refuses a version this device does not carry', async () => {
@@ -670,5 +719,145 @@ describe('a standalone game reaction on a small system model', () => {
     expect(requests.every((request) => request.count === 2)).toBe(true);
     expect(requests.some((request) => request.system.includes('Earlier turns'))).toBe(false);
     expect(requests).toHaveLength(30);
+  });
+});
+
+describe('a person talking to a game gezel on the phone', () => {
+  it('answers from the board as it stands, and the move ends the turn', async () => {
+    const type = checkersType();
+    const manifest = type.item.manifest as { tools: Array<Record<string, unknown>> };
+    manifest.tools.unshift({
+      name: 'get_board',
+      description: 'See the position and legal moves.',
+      script: 'game-store',
+      inputs: { type: 'object', properties: {} },
+      bind: { action: 'board' },
+    });
+    const { client, store, service, runs } = await setup(type);
+    const requests: Parameters<PortableInference['generate']>[0][] = [];
+    (service.inference as { generate: PortableInference['generate'] }).generate = async (
+      request,
+    ) => {
+      requests.push(request);
+      return {
+        text: JSON.stringify({
+          name: 'make_move',
+          arguments: { from: 'b6', to: 'a5', moveThought: 'A little hop!' },
+        }),
+        stopReason: 'stop',
+      };
+    };
+    const { project, applied } = await client.createTypedProject({
+      name: 'Game',
+      projectType: { typeId: 'checkers' },
+    });
+    const opponent = applied.gezelsCreated[0]!.id;
+    const session = await client.createChatSession({ gezelId: opponent, projectId: project.id });
+    await client.sendToChatSession(session.id, { message: 'It is your move.' });
+    await vi.waitFor(() => expect(service.busy).toBe(false));
+
+    // The board was read for this turn and handed to the model with the words.
+    expect(runs.map((run) => run.inputs)).toContainEqual({ action: 'board' });
+    expect(requests).toHaveLength(1);
+    const sent = requests[0]!.messages.at(-1)!.content;
+    expect(sent).toContain('[Latest state — read from `get_board`');
+    expect(sent.endsWith('It is your move.')).toBe(true);
+    // The transcript keeps the person's words; the move ended the turn.
+    const saved = await store.getSession(opponent, session.id);
+    expect(saved!.messages.find((m) => m.role === 'user')!.content).toBe('It is your move.');
+    const reply = saved!.messages.find((m) => m.role === 'assistant')!;
+    expect(reply.content).toBe('A little hop!');
+    expect(reply.toolCalls?.map((call) => call.name)).toEqual(['make_move']);
+  });
+});
+
+describe('a reaction whose turn is one move', () => {
+  it('offers only the move while one is due, and every tool once the game is over', async () => {
+    const fixture = portableFixture();
+    const type = checkersType();
+    const manifest = type.item.manifest as {
+      tools: Array<{ name: string; turn?: object; reaction?: object }>;
+    };
+    manifest.tools[0]!.turn = { say: 'moveThought' };
+    manifest.tools[1]!.reaction = {
+      ...manifest.tools[1]!.reaction,
+      turn: { tool: 'make_move', when: { op: 'equals', field: 'status', value: 'playing' } },
+    };
+    const prompts: string[] = [];
+    const service = new PortableProductService(
+      fixture.store,
+      {
+        providers: async () => [
+          {
+            id: 'android-mlkit',
+            name: 'Android on-device AI',
+            locality: 'on-device',
+            availability: 'available',
+            contextTokens: 4096,
+            maxOutputTokens: 1024,
+            capabilities: {
+              text: true,
+              tools: false,
+              structuredOutput: false,
+              images: false,
+              foregroundOnly: true,
+            },
+          },
+        ],
+        generate: async (request) => {
+          prompts.push(request.messages.map((message) => message.content).join('\n'));
+          return { text: 'Good game.', stopReason: 'stop' };
+        },
+        cancel: async () => {},
+      },
+      'secret',
+      { projectTypes: async () => [type] },
+    );
+    service.setContent({ templates: [template], craftbooks: [] });
+    const statuses = ['playing', 'won'];
+    service.setScripts({
+      list: () => [],
+      source: async () => {
+        throw new Error('No standard scripts');
+      },
+      initialize: async () => {},
+      isBusy: () => false,
+      cancel: async () => {},
+      run: async (options) => ({
+        id: crypto.randomUUID(),
+        projectId: options.projectId,
+        scriptName: options.scriptName,
+        startedAt: '2026-10-06T00:00:00Z',
+        status: 'ok',
+        trigger: options.trigger,
+        inputs: options.inputs ?? {},
+        output: { lastMove: 'c3-d4', status: statuses.shift() ?? 'won' },
+        calls: [],
+        logs: '',
+      }),
+    });
+    await service.initialize();
+    await fixture.store.writeConfig({ provider: 'android-mlkit' });
+    const client = new GezelClient({
+      baseUrl: 'https://gezel.local',
+      token: 'secret',
+      fetch: service.fetch,
+    });
+    const { project } = await client.createTypedProject({
+      name: 'Short game',
+      projectType: { typeId: 'checkers' },
+    });
+    for (let move = 0; move < 2; move++) {
+      await client.invokeProjectPageTool(project.id, {
+        tool: 'user_move',
+        input: { from: 'c3', to: 'd4' },
+      });
+      await vi.waitFor(() => expect(service.busy).toBe(false));
+    }
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain('make_move');
+    expect(prompts[0]).not.toContain('ask_user_question');
+    expect(prompts[1]).toContain('make_move');
+    expect(prompts[1]).toContain('ask_user_question');
   });
 });

@@ -14,6 +14,7 @@ export * from './format/ids.js';
 export * from './format/quantize.js';
 export * from './chunking/markdown-chunker.js';
 export * from './compiler/compile.js';
+export * from './compiler/media-rows.js';
 export * from './archive/write.js';
 export * from './archive/read.js';
 export * from './reader/open.js';

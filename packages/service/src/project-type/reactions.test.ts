@@ -157,6 +157,43 @@ describe('dispatchToolReaction', () => {
     );
   });
 
+  it('requires the declared move while one is due, and not once the game is over', async () => {
+    const project = await store.createProject({ name: 'Required Move' });
+    const player = await store.createGezel({
+      name: 'Speler',
+      role: 'Damspeler',
+      templateId: 'checkers-player',
+      templateVersion: '1.0.0',
+    });
+    await store.addGezelToProject(project.id, player.id);
+    const tool = reactionTool({
+      turn: { tool: 'make_move', when: { op: 'equals', field: 'status', value: 'playing' } },
+    });
+    const modelTools: ProjectTypeTool[] = [
+      { name: 'make_move', description: 'x', script: 'game-store', turn: { say: 'moveThought' } },
+    ];
+    const deliverReaction = vi.fn(async (_args: { requiredTool?: string }) => ({
+      sessionId: 's1',
+    }));
+    const dispatch = async (status: string) =>
+      dispatchToolReaction(
+        { store, chat: { deliverReaction } },
+        {
+          project: (await store.getProject(project.id))!,
+          typeName: 'Checkers',
+          tool,
+          run: fakeRun({ lastMove: 'c3-d4', status }),
+          modelTools,
+        },
+      );
+    await dispatch('playing');
+    await dispatch('won');
+    expect(deliverReaction.mock.calls.map(([args]) => args.requiredTool)).toEqual([
+      'make_move',
+      undefined,
+    ]);
+  });
+
   it('falls back to the voorman, and reports no-target when neither exists', async () => {
     const project = await store.createProject({ name: 'Fallback' });
     const voorman = await store.createGezel({ name: 'Voor', role: 'Voorman' });

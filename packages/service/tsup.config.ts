@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { build, defineConfig } from 'tsup';
 import { ensureHandboekGezk } from '../../scripts/handboek-gezk-lock.mjs';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
@@ -126,6 +127,9 @@ export default defineConfig({
     // native engine release as data, for hosts that ship engines beside the
     // daemon. A leaf — importing it loads no daemon code.
     'native-release': 'src/native-release-entry.ts',
+    // Standalone subpath (`@bendyline/gezel-service/media`): multimodal
+    // embedding for catalog builds and the media bench, without the daemon.
+    media: 'src/media-entry.ts',
   },
   format: ['esm'],
   // Only the package's two public import surfaces need bundled declarations.
@@ -140,6 +144,7 @@ export default defineConfig({
       gezapp: 'src/gezapp-entry.ts',
       handboek: 'src/handboek/engine.ts',
       'native-release': 'src/native-release-entry.ts',
+      media: 'src/media-entry.ts',
     },
   },
   sourcemap: true,
@@ -292,10 +297,19 @@ export default defineConfig({
       );
     }
     // npm publishes this dist/ui copy independently of Electron's staged
-    // resources/licenses tree. Keep the notice and every font's canonical
-    // legal text beside it so that distribution channel is self-contained.
+    // resources/licenses tree. Keep the notice, every font's canonical legal
+    // text, and the texts of every package compiled into the UI and Office
+    // bundles beside it so that distribution channel is self-contained.
     await buildEvalHarness();
     await stageServiceFontLegalBundle();
+    // Loaded by Node, not inlined into this config: the license scripts are
+    // also CLIs that start with a shebang, and the config bundler prepends
+    // code to every file it inlines, which turns the shebang into a syntax error.
+    const licenses = pathToFileURL(
+      resolve(__dirname, '../../scripts/service-bundled-licenses.mjs'),
+    );
+    const { stageServiceBundledLicenses } = await import(licenses.href);
+    await stageServiceBundledLicenses();
     await stripSourcemapCommentsFromBuild();
   },
 });

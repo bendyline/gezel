@@ -1048,6 +1048,8 @@ function craftbookManifestFromDoc(
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
     ...(doc.commands ? { commands: doc.commands } : {}),
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
+    ...(doc.models ? { models: doc.models } : {}),
+    ...(doc.services ? { services: doc.services } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
     ...(doc.diffpackCapable ? { diffpackCapable: true } : {}),
@@ -1214,6 +1216,8 @@ function mergeIdentityAndVersion(
       ...(version.runModes ? { runModes: version.runModes } : {}),
       ...(version.toolsets ? { toolsets: version.toolsets } : {}),
       ...(version.connectors ? { connectors: version.connectors } : {}),
+      ...(version.models ? { models: version.models } : {}),
+      ...(version.services ? { services: version.services } : {}),
       availableVersions,
     };
   }

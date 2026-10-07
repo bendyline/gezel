@@ -129,6 +129,9 @@ Version manifest (composition payload):
     { "name": "advance_level", "description": "…", "script": "progress-store", "inputs": { },
       "bind": { "action": "advance" },                 // static args merged over the caller's input
       "reaction": { "gezel": "…", "prompt": "…" } },   // page-invoke only: summon a gezel turn
+    { "name": "make_move", "…": "…",
+      "turn": { "say": "moveThought" } },              // a successful call ends the turn; `say` is the reply
+    { "name": "get_board", "…": "…", "state": true },   // a person's message is answered from its output
   ],
   "pages": { "entry": "dashboard/index.html",         // pinned Output page (new primitive)
              "reads": [ { "source": "workspace", "path": "…" } ],
@@ -348,6 +351,25 @@ first-party parent:
   board. Both hosts honor it: `send(..., { standalone })` on the desktop reaches
   the shared llama.cpp loop and MLX as `SendAndWaitOpts.standalone`; the phone
   leaves the history out of both its loops. Checkers, chess and go declare it.
+- **Turn tools.** A tool whose successful call is a turn's whole job (a game's
+  move, a tutor's reply) declares `turn: { say, fallback }`: the call ends the
+  turn, and its `say` argument is the reply (`fallback` when it was left empty).
+  A tool that reads the activity's state declares `state: true`: a message a
+  person sends is answered from its output, read just before the turn and put
+  ahead of their words for the model only. A reaction may then require its turn
+  to be that call: `turn: { tool, when }` makes the summoned turn's first request
+  offer only `tool` and, where the engine can, require the call (llama.cpp
+  `tool_choice: required`, thinking off like every constrained turn; MLX and the
+  phone's system models get the narrowed surface). `when` is a script-output
+  predicate over the reacting tool's output, so a move is required only while
+  one is due (checkers, chess and go: `status` is `playing`); otherwise the turn
+  is an ordinary one, free to say something instead. The rules live once in core
+  (`projectTypeTurnRules`, `reactionRequiredTool`), and `projectTypeTurnProblems`
+  (checked over every bundled version by a catalog contract test) catches a
+  reaction naming a tool that is missing, page-only, or not a turn tool. Board
+  games published before these declarations get the same rules from their tool
+  names (`get_board`, `make_move`), a fallback to drop once the pin moves past
+  them.
 
 Platform note: sandboxed scripts deny network egress by design, and untrusted
 scripts require an enforceable OS boundary for that deny (macOS Seatbelt; a
@@ -383,12 +405,30 @@ the same API the desktop does
   the `// @gezel-project-type:` provenance header) and seeds become visible
   together or not at all.
 - A session's tool surface gains the type's model tools (never `pages.tools`),
-  run as project scripts with `bind` merged last; a `leanProfile` type keeps
-  only its own tools and `ask_user_question`, as on the desktop.
+  run as project scripts with `bind` merged last; a `leanProfile` type's
+  conversations keep only its own tools and `ask_user_question`, as on the
+  desktop. A task step in a lean project keeps the kit its step needs
+  (`leanSession` in core): narrowed to the type's own tools, a craftbook's
+  steps could not write what they owe. That is what lets an activity with a
+  craftbook (the fitness coach's weekly review) be lean.
+- `GET /api/projects/:id/craftbooks` offers the type's craftbooks the phone
+  can run as suggested, under the type's name, as the desktop does with the
+  books it copied in. A book the type embeds in `craftbooks/<id>.json` is
+  compiled into the bundle and listed first; a declared catalog book comes
+  from the bundled catalog. A gate's `contains` / `notContains` checks run in
+  the bounded `checkContains` standard script rather than on the UI thread,
+  so books gated on a heading or a verdict run on phones too.
 - `page-invoke` / `page-read` and reactions follow the desktop's rules; a
   reaction seed runs in the background lane in the gezel's latest project
   conversation, hidden when the tool says `hideSeed` and without the earlier
   turns when it says `standalone`.
+- Turn tools run by one rule on both hosts (see **Turn tools** above). Ending
+  the turn on the call stops a small model writing it again after acting
+  (Gemini Nano did on six of twelve checkers moves, escaped, shown raw); reading
+  the state before a person's message lets "It is your move" resume a game whose
+  last seed failed, since a chat message carries no board. Seeds, crew handoffs
+  and nudges never get the state (`turnStateWanted`); they carry their own or
+  need none.
 - A lean project (a game, the chat room) on a system model (Android's or
   Apple's on-device AI) holds back 512 tokens for the reply instead of the
   provider's 1,024 (`LEAN_PROFILE_REPLY_MAX_TOKENS`): there, every token held for

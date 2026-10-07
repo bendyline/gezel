@@ -1,4 +1,4 @@
-import type { UnifiedSearchResult } from '@bendyline/gezel';
+import { type UnifiedSearchResult, mediaSpanLabel } from '@bendyline/gezel';
 import { useEffect, useRef } from 'react';
 import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdownSnippet.js';
 import { highlightTokens } from './highlight-tokens.js';
@@ -124,7 +124,11 @@ export function SearchPalette({
               >
                 <span className="search-option-title">{highlightTokens(item.title, query)}</span>
                 {item.subtitle ? (
-                  <span className="search-option-subtitle">{item.subtitle}</span>
+                  <span className="search-option-subtitle">
+                    {item.media
+                      ? `${mediaSpanLabel(item.media)} · ${item.subtitle}`
+                      : item.subtitle}
+                  </span>
                 ) : null}
                 {item.snippet ? (
                   <span className="search-option-snippet">

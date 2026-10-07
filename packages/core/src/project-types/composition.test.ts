@@ -9,6 +9,9 @@ import {
   projectTypePageUsesApiV1,
   projectTypeScriptHeader,
   projectTypeScriptProvenance,
+  projectTypeTurnProblems,
+  projectTypeTurnRules,
+  reactionRequiredTool,
   renderProjectTypeReactionSeed,
 } from './composition.js';
 
@@ -110,5 +113,75 @@ describe('project type composition rules', () => {
       'core',
     );
     expect(specs.map((spec) => spec.name)).toEqual(['ask_user_question', 'make_move']);
+  });
+});
+
+describe('turn rules a type declares', () => {
+  const board = { ...tool('get_board'), state: true };
+  const move = { ...tool('make_move'), turn: { say: 'moveThought' } };
+  const reply = { ...tool('reply'), turn: { say: 'say', fallback: 'Your turn to answer.' } };
+
+  it('reads the state tool and the turn tools from the declarations', () => {
+    expect(projectTypeTurnRules([board, move, reply, tool('new_game')])).toEqual({
+      stateTool: 'get_board',
+      terminal: {
+        toolNames: ['make_move', 'reply'],
+        closingArgByTool: { make_move: 'moveThought', reply: 'say' },
+        fallbackText: 'Your turn to answer.',
+        maxClosingChars: 600,
+      },
+    });
+    expect(projectTypeTurnRules([tool('log_workout')])).toBeUndefined();
+  });
+
+  it('gives a board game published before the declarations the same rules', () => {
+    const legacy = [tool('get_board'), tool('make_move'), tool('new_game')];
+    expect(projectTypeTurnRules(legacy, { leanProfile: true })).toMatchObject({
+      stateTool: 'get_board',
+      terminal: {
+        toolNames: ['make_move'],
+        closingArgByTool: { make_move: 'moveThought' },
+        fallbackText: 'Move made — your turn.',
+      },
+    });
+    expect(projectTypeTurnRules(legacy, { leanProfile: false })).toBeUndefined();
+  });
+
+  it('requires a reaction’s move only while its condition holds', () => {
+    const reaction = {
+      turn: {
+        tool: 'make_move',
+        when: { op: 'equals' as const, field: 'status', value: 'playing' },
+      },
+    };
+    const tools = [board, move];
+    expect(reactionRequiredTool(reaction, { status: 'playing' }, tools)).toBe('make_move');
+    expect(reactionRequiredTool(reaction, { status: 'won' }, tools)).toBeUndefined();
+    expect(reactionRequiredTool({ turn: { tool: 'get_board' } }, {}, tools)).toBeUndefined();
+    expect(reactionRequiredTool({}, { status: 'playing' }, tools)).toBeUndefined();
+  });
+
+  it('names what is wrong with the declarations', () => {
+    expect(
+      projectTypeTurnProblems({
+        tools: [
+          { ...board },
+          { ...tool('peek'), state: true },
+          { ...tool('make_move') },
+          {
+            ...tool('user_move'),
+            turn: {},
+            reaction: { gezel: 'p', prompt: 'x', turn: { tool: 'make_move' } },
+          },
+          { ...tool('new_game'), reaction: { gezel: 'p', prompt: 'x', turn: { tool: 'missing' } } },
+        ],
+        pages: { entry: 'board/index.html', tools: ['user_move', 'new_game'] },
+      }),
+    ).toEqual([
+      'user_move is a page tool; turn and state apply to tools the model calls',
+      'user_move: reaction.turn names make_move, which does not declare turn',
+      'new_game: reaction.turn names missing, which is not a tool of this type',
+      'more than one tool declares state; a message is answered from one',
+    ]);
   });
 });

@@ -7,11 +7,15 @@ import {
   findAskCycleOrDepth,
   inferTargetProject,
   isOwnerStep,
+  leanSession,
+  projectTypeTurnRules,
   renderCurrentDateTimeLine,
+  renderTurnStatePrelude,
   resolveFactualWriting,
   resolvePromptFootprint,
   stepOwnerGezelId,
   taskTranscriptCompatible,
+  turnStateWanted,
   withCurrentDateTimeLine,
 } from '@bendyline/gezel';
 import type {
@@ -1722,14 +1726,15 @@ export class ChatManager extends LocalEngineRuntime {
   private async refreshLeanGameState(
     record: ChatSession,
     userText: string,
+    origin: TurnMessageOrigin,
   ): Promise<string | null> {
     const runner = this.scriptRunnerForHooks;
-    const boardTool = record.scriptTools?.find((tool) => tool.name === 'get_board');
-    const hasMoveTool = record.scriptTools?.some((tool) => tool.name === 'make_move') ?? false;
-    if (!runner || !boardTool || !hasMoveTool || !shouldRefreshLeanGameState(userText)) return null;
-
+    if (!runner || !record.scriptTools?.length || !turnStateWanted(userText, origin)) return null;
     const project = await this.store.getProject(record.projectId).catch(() => null);
-    if (!project?.leanProfile) return null;
+    const rules = projectTypeTurnRules(record.scriptTools, project);
+    const boardTool =
+      rules?.stateTool && record.scriptTools.find((tool) => tool.name === rules.stateTool);
+    if (!boardTool) return null;
     try {
       const run = await runner.run({
         projectId: record.projectId,
@@ -1739,15 +1744,15 @@ export class ChatManager extends LocalEngineRuntime {
       });
       if (run.status !== 'ok' || run.output === undefined) {
         log.warn(
-          `session ${record.id.slice(0, 8)}: pre-turn get_board failed (${run.error ?? run.status}); leaving the model to call the tool`,
+          `session ${record.id.slice(0, 8)}: pre-turn ${boardTool.name} failed (${run.error ?? run.status}); leaving the model to call the tool`,
         );
         return null;
       }
-      log.info(`session ${record.id.slice(0, 8)}: authoritative game state refreshed before turn`);
-      return `[Latest game state — fetched from \`get_board\` immediately before this turn. This overrides every older board position in the transcript. Choose only from the legal moves below.]\n${JSON.stringify(run.output, null, 2)}`;
+      log.info(`session ${record.id.slice(0, 8)}: authoritative state refreshed before turn`);
+      return renderTurnStatePrelude(boardTool.name, run.output);
     } catch (err) {
       log.warn(
-        `session ${record.id.slice(0, 8)}: pre-turn get_board threw; leaving the model to call the tool: ${
+        `session ${record.id.slice(0, 8)}: pre-turn ${boardTool.name} threw; leaving the model to call the tool: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -6158,6 +6163,8 @@ export class ChatManager extends LocalEngineRuntime {
     hidden?: boolean;
     /** The seed carries the whole state; answer it without the earlier turns. */
     standalone?: boolean;
+    /** The turn's first request must call this tool (the reaction's `turn`). */
+    requiredTool?: string;
   }): Promise<{ sessionId: string } | null> {
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) return null;
     const session = await this.ensureOrCreateSession({
@@ -6182,6 +6189,7 @@ export class ChatManager extends LocalEngineRuntime {
         ...(leanReactionCap ? { continuationMaxTokens: leanReactionCap } : {}),
         ...(args.hidden ? { hidden: true } : {}),
         ...(args.standalone ? { standalone: true } : {}),
+        ...(args.requiredTool ? { requiredTool: args.requiredTool } : {}),
       }).catch((err) => {
         log.error(`[reactions] send failed for session ${session.id}:`, err);
       }),
@@ -7132,6 +7140,11 @@ export class ChatManager extends LocalEngineRuntime {
        * `standalone`). The transcript still records the turn.
        */
       standalone?: boolean;
+      /**
+       * The turn's first request must call this tool: a page reaction whose
+       * whole job is one move (`ProjectTypeToolReaction.turn`).
+       */
+      requiredTool?: string;
       fileTurnIntent?: FileTurnIntent;
       /**
        * Deliver into the model's history but never render a transcript
@@ -7213,6 +7226,7 @@ export class ChatManager extends LocalEngineRuntime {
       ambient?: boolean;
       continuationMaxTokens?: number;
       standalone?: boolean;
+      requiredTool?: string;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -7331,6 +7345,7 @@ export class ChatManager extends LocalEngineRuntime {
       ambient?: boolean;
       continuationMaxTokens?: number;
       standalone?: boolean;
+      requiredTool?: string;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -7909,7 +7924,11 @@ export class ChatManager extends LocalEngineRuntime {
         }
         return safe;
       };
-      const freshGameState = await this.refreshLeanGameState(state.record, userText);
+      const freshGameState = await this.refreshLeanGameState(
+        state.record,
+        userText,
+        resolveTurnMessageOrigin(opts),
+      );
       if (freshGameState) {
         promptForTurn = `${freshGameState}\n\n${promptForTurn}`;
       }
@@ -8277,6 +8296,7 @@ export class ChatManager extends LocalEngineRuntime {
             ? { continuationMaxTokens: opts.continuationMaxTokens }
             : {}),
           ...(opts?.standalone ? { standalone: true } : {}),
+          ...(continuations === 0 && opts?.requiredTool ? { requiredTool: opts.requiredTool } : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
             enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),
@@ -14922,7 +14942,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(parameterSizeForTier !== undefined ? { parameterSize: parameterSizeForTier } : {}),
       toolsetsGroupOverride,
       ...(project?.mode ? { projectMode: project.mode } : {}),
-      ...(project?.leanProfile ? { leanProfile: true } : {}),
+      ...(leanSession(project, record) ? { leanProfile: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
@@ -15108,7 +15128,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(minimalContextActive ? { minimalContext: true } : {}),
       ...(nativeToolsMinimal ? { minimalContextNativeTools: true } : {}),
       ...(taskContext?.step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
-      ...(project?.leanProfile ? { leanProfile: true } : {}),
+      ...(leanSession(project, record) ? { leanProfile: true } : {}),
       ...(workspaceGestalt ? { workspaceGestalt } : {}),
       ...(retrievalFirstActive ? { retrievalFirstHint: true } : {}),
       workspaceWritable,
@@ -15975,19 +15995,8 @@ export class ChatManager extends LocalEngineRuntime {
             ),
           );
       }
-      const scriptToolNames = new Set(scriptToolPlan.effective.map((tool) => tool.name));
-      if (
-        project?.leanProfile &&
-        scriptToolNames.has('get_board') &&
-        scriptToolNames.has('make_move')
-      ) {
-        opts.terminalToolPolicy = {
-          toolNames: ['make_move'],
-          closingArg: 'moveThought',
-          fallbackText: 'Move made — your turn.',
-          maxClosingChars: 180,
-        };
-      }
+      const turnRules = projectTypeTurnRules(scriptToolPlan.effective, project);
+      if (turnRules?.terminal) opts.terminalToolPolicy = turnRules.terminal;
       // MCP registration is fixed for the life of the provider session, so
       // inspect the whole embedded graph rather than only the current step.
       // The per-turn surface below remains narrower and advertises the large
@@ -16591,7 +16600,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(parameterSizeForTier !== undefined ? { parameterSize: parameterSizeForTier } : {}),
       toolsetsGroupOverride,
       ...(project?.mode ? { projectMode: project.mode } : {}),
-      ...(project?.leanProfile ? { leanProfile: true } : {}),
+      ...(leanSession(project, record) ? { leanProfile: true } : {}),
       ...(record.consultationMode ? { consultationMode: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
@@ -17384,15 +17393,6 @@ function isValidationRepairMutationTurn(
  * Game-page reactions already carry a freshly rendered board. Short manual
  * follow-ups do not, so refresh them from the script store before inference.
  */
-export function shouldRefreshLeanGameState(userText: string): boolean {
-  const text = userText.trim();
-  if (!text || /\b(?:board now|legal moves)\s*:/i.test(text)) return false;
-  return (
-    /\b(?:take|play|make)\b.{0,28}\b(?:turn|move)\b/i.test(text) ||
-    /\b(?:your|ai|black)(?:'s)?\s+turn\b/i.test(text) ||
-    /\b(?:try|go)\s+again\b/i.test(text)
-  );
-}
 
 type ToolOutcome = Pick<ChatMessageToolCall, 'name' | 'success' | 'errorMessage'>;
 

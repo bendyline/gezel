@@ -3,7 +3,7 @@ import {
   PREVIEW_FRAME_INDETERMINATE,
   type PreviewFrameLike,
   daemonEntrypointArgument,
-  isAllowedMicrophoneCapture,
+  isAllowedMediaCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedRendererPermission,
@@ -55,24 +55,27 @@ describe('daemon-entrypoint launch guard', () => {
 });
 
 describe('Electron boundary policies', () => {
-  it('allows only an audio-only microphone request from the top-level daemon UI', () => {
+  it('allows only a single-kind capture request from the top-level daemon UI', () => {
     const origin = 'https://127.0.0.1:4312';
-    expect(isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['audio'])).toBe(true);
-    expect(isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['video'])).toBe(false);
-    expect(
-      isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['audio', 'video']),
-    ).toBe(false);
-    expect(
-      isAllowedMicrophoneCapture('media', `${origin}/preview/cap/x`, origin, false, ['audio']),
-    ).toBe(false);
-    expect(
-      isAllowedMicrophoneCapture('media', 'https://127.0.0.1.evil.test:4312/', origin, true, [
-        'audio',
-      ]),
-    ).toBe(false);
-    expect(isAllowedMicrophoneCapture('notifications', `${origin}/`, origin, true, ['audio'])).toBe(
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, ['audio'])).toBe(true);
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, ['video'])).toBe(true);
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, ['audio', 'video'])).toBe(
       false,
     );
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, [])).toBe(false);
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, undefined)).toBe(false);
+    expect(isAllowedMediaCapture('media', `${origin}/`, origin, true, ['screen'])).toBe(false);
+    for (const kind of ['audio', 'video']) {
+      expect(isAllowedMediaCapture('media', `${origin}/preview/cap/x`, origin, false, [kind])).toBe(
+        false,
+      );
+      expect(
+        isAllowedMediaCapture('media', 'https://127.0.0.1.evil.test:4312/', origin, true, [kind]),
+      ).toBe(false);
+      expect(isAllowedMediaCapture('notifications', `${origin}/`, origin, true, [kind])).toBe(
+        false,
+      );
+    }
   });
 
   it('allows only the renderer capabilities Gezel uses', () => {
@@ -89,6 +92,13 @@ describe('Electron boundary policies', () => {
         ...trustedMainFrame,
         permission: 'media',
         mediaTypes: ['audio'],
+      }),
+    ).toBe(true);
+    expect(
+      isAllowedRendererPermission({
+        ...trustedMainFrame,
+        permission: 'media',
+        mediaTypes: ['video'],
       }),
     ).toBe(true);
     expect(
@@ -133,6 +143,7 @@ describe('Electron boundary policies', () => {
 
     for (const request of [
       { permission: 'media', mediaTypes: ['audio'] },
+      { permission: 'media', mediaTypes: ['video'] },
       { permission: 'clipboard-sanitized-write' },
     ]) {
       expect(

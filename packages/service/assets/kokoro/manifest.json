@@ -4,6 +4,10 @@
     "sha256": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
     "file": "kokoro-model.tar.bz2"
   },
+  "license": {
+    "file": "LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
   "files": {
     "lexicon-us-en.txt.gz": {
       "sha256": "67407cb21f2d323f25474bdd1f16c852028b171e154b4e34ddb4352c18cb58ce",

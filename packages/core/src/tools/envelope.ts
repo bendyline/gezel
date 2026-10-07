@@ -105,9 +105,29 @@ function dropBareKeys(text: string): string | null {
   return changed ? out : null;
 }
 
+/**
+ * A whole reply that is a call with its quotes escaped one level too many,
+ * `{\"name\":\"make_move\", …}`. Gemini Nano wrote its calls this way on
+ * a Galaxy S26+ (2026-10-06), and the reply reached the person as raw JSON.
+ * Decoding the one extra level gives the call it meant; anything else stays
+ * unparsed.
+ */
+function unescapeOnce(text: string): string | null {
+  const trimmed = text.trim();
+  if (!/^\{\s*\\"/.test(trimmed)) return null;
+  try {
+    const decoded: unknown = JSON.parse(`"${trimmed.replace(/\r?\n/g, '\\n')}"`);
+    return typeof decoded === 'string' ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseWholeEnvelope(text: string): ToolEnvelope | null {
   const exact = parseExactToolEnvelope(text);
   if (exact) return exact;
+  const unescaped = unescapeOnce(text);
+  if (unescaped !== null) return parseWholeEnvelope(unescaped);
   const closed = closeUnbalanced(text.trim());
   const keyed = dropBareKeys(closed ?? text.trim());
   return (
@@ -130,4 +150,34 @@ export function parseToolEnvelopeReply(text: string): ToolEnvelope | null {
   if (bare) return bare;
   const fenced = WHOLE_REPLY_FENCE.exec(text.trim());
   return fenced ? parseWholeEnvelope(fenced[1]!) : null;
+}
+
+/** A call's opening, whether its quotes are plain or escaped one level more. */
+const CALL_OPENING = /\{\s*\\?"name\\?"\s*:/g;
+
+/**
+ * Where a reply's trailing tool call starts when prose comes before it, or -1.
+ * Such a call never runs (JSON inside prose may be an example); the loop asks
+ * for the call alone instead, and the person never sees the JSON.
+ */
+export function trailingToolCallStart(text: string): number {
+  const trimmed = text.trimEnd();
+  if (!trimmed.endsWith('}')) return -1;
+  for (const match of trimmed.matchAll(CALL_OPENING)) {
+    if (match.index === 0 || !trimmed.slice(0, match.index).trim()) continue;
+    if (parseToolEnvelopeReply(trimmed.slice(match.index))) return match.index;
+  }
+  return -1;
+}
+
+/**
+ * A reply as a person should read it: without a tool call written into it.
+ * A reply that is nothing but a call, or prose followed by one, keeps only
+ * its prose; a call that did not run is not something to show. Only text that
+ * parses as a call goes: a reply that is JSON about a person named Alice stays.
+ */
+export function withoutToolCallText(text: string): string {
+  if (parseToolEnvelopeReply(text)) return '';
+  const start = trailingToolCallStart(text);
+  return start > 0 ? text.trimEnd().slice(0, start).trimEnd() : text;
 }

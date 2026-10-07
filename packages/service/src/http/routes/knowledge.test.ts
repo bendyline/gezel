@@ -442,6 +442,18 @@ describe('knowledge 0.6 browse surface', () => {
       headers: { ...headers, 'If-None-Match': first.headers.get('etag') ?? '' },
     });
     expect(again.status).toBe(304);
+    expect(first.headers.get('accept-ranges')).toBe('bytes');
+    const partial = await httpFetch(`${assetUrl}?v=1.0.0`, {
+      headers: { ...headers, Range: 'bytes=0-7' },
+    });
+    expect(partial.status).toBe(206);
+    expect(partial.headers.get('content-range')).toBe(`bytes 0-7/${TEST_PNG.byteLength}`);
+    expect(Buffer.from(await partial.arrayBuffer())).toEqual(Buffer.from(TEST_PNG).subarray(0, 8));
+    const pastEnd = await httpFetch(`${assetUrl}?v=1.0.0`, {
+      headers: { ...headers, Range: `bytes=${TEST_PNG.byteLength}-` },
+    });
+    expect(pastEnd.status).toBe(416);
+    expect(pastEnd.headers.get('content-range')).toBe(`bytes */${TEST_PNG.byteLength}`);
     const unpinned = await httpFetch(assetUrl, { headers });
     expect(unpinned.status).toBe(200);
     expect(unpinned.headers.get('cache-control')).toContain('no-cache');

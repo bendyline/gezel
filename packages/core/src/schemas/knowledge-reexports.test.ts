@@ -10,12 +10,16 @@ import * as core from './knowledge.js';
 const TOOLCHAIN_ONLY = new Set([
   'ROUTER_DDL',
   'SHARD_DDL',
+  'SHARD_DDL_V4',
+  'SHARD_DDL_V5',
+  'shardDdlFor',
   'quantizeInt8',
   'quantizeBinary',
   'quantizeBinaryForProfile',
   'centerVector',
   'rerankScore',
   'l2Normalize',
+  'profileUnitVector',
   'canonicalizeJson',
   'documentSlug',
   'BODY_CODEC_MIN_BYTES',
@@ -25,6 +29,8 @@ const TOOLCHAIN_ONLY = new Set([
   'MAX_KNOWLEDGE_ASSET_BYTES',
   'MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES',
   'MAX_KNOWLEDGE_ASSET_COUNT',
+  'MAX_KNOWLEDGE_MEDIA_ASSET_BYTES',
+  'MAX_KNOWLEDGE_MEDIA_ASSETS_TOTAL_BYTES',
   'MAX_KNOWLEDGE_ASSET_PATH_LENGTH',
   'sniffAssetType',
   'svgInertnessProblem',
@@ -42,6 +48,6 @@ describe('core forwards the gezk format surface', () => {
   it('forwards live bindings, not undefined placeholders', () => {
     expect(typeof core.parseKnowledgeUri).toBe('function');
     expect(typeof core.KnowledgeCatalogManifestSchema.safeParse).toBe('function');
-    expect(core.GEZK_FORMAT_VERSION).toBe('0.7');
+    expect(core.GEZK_FORMAT_VERSION).toBe('0.8');
   });
 });

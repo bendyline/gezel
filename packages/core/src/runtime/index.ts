@@ -45,6 +45,7 @@ export * from './transform.js';
 export * from './speech.js';
 export * from './speech-bytes.js';
 export * from './speech-pcm.js';
+export * from './vision.js';
 
 export * from './http/json.js';
 export * from './http/errors.js';

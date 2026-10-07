@@ -298,9 +298,10 @@ Two overrides in that complete distribution are worth knowing by name:
   platform without one falls back to building libvips. **The Electron app must
   stay on the stub**; the packaging guard that verifies it is deliberate.
 - **`onnxruntime-node`,** pinned to the reviewed runtime used by the single
-  Transformers.js 3.x line. Embeddings and Kokoro intentionally share that
-  installation; two `onnxruntime-node` copies in a complete bundle are a
-  packaging regression.
+  Transformers.js 4.x line. Embeddings, image embeddings and Kokoro
+  intentionally share that installation; two `onnxruntime-node` copies in a
+  complete bundle are a packaging regression. `kokoro-js` 1.2.1 still declares
+  Transformers.js `^3.5.1`, so a workspace override points it at the 4.x copy.
 
 The `app-builder-lib` patch is electron-builder only and never reaches a
 consumer at all.

@@ -71,6 +71,7 @@ const loadAmbientDashboardModule = () => import('../components/AmbientDashboardC
 const loadConnectedAppsModule = () => import('../components/ConnectedAppsPanel.js');
 const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCard.js');
 const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
+const loadMediaSearchModule = () => import('../components/MediaSearchCard.js');
 const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
 const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
 const loadRemoteServersModule = () => import('../components/RemoteServersPanel.js');
@@ -100,6 +101,9 @@ const ConnectedAppsPanel = lazy(() =>
 );
 const RelevanceModelCard = lazy(() =>
   loadRelevanceModelModule().then(({ RelevanceModelCard }) => ({ default: RelevanceModelCard })),
+);
+const MediaSearchCard = lazy(() =>
+  loadMediaSearchModule().then(({ MediaSearchCard }) => ({ default: MediaSearchCard })),
 );
 const FaceRecognitionCard = lazy(() =>
   loadFaceRecognitionModule().then(({ FaceRecognitionCard }) => ({ default: FaceRecognitionCard })),
@@ -250,7 +254,11 @@ function preloadSettingsSection(section: SectionId): void {
       loading = loadVideoEngineSettingsModule();
       break;
     case 'imageRecognition':
-      loading = Promise.all([loadImageRecognitionSettingsModule(), loadFaceRecognitionModule()]);
+      loading = Promise.all([
+        loadImageRecognitionSettingsModule(),
+        loadMediaSearchModule(),
+        loadFaceRecognitionModule(),
+      ]);
       break;
     case 'audio':
       loading = loadAudioEngineSettingsModule();
@@ -4066,6 +4074,7 @@ function DaemonSettingsView() {
               <section>
                 <ImageRecognitionSettings />
               </section>
+              <MediaSearchCard />
               <FaceRecognitionCard />
             </>
           )}

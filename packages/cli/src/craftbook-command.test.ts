@@ -2,7 +2,8 @@ import type { Task } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  parseCraftbookParams,
+  craftbookDoLaunch,
+  parseCraftbookArguments,
   resolveCraftbookInvocation,
   waitForTask,
 } from './craftbook-command.js';
@@ -31,24 +32,108 @@ describe('shell craftbook arguments', () => {
     expect(resolveCraftbookInvocation(books, ['review', 'c23n']).args).toEqual(['c23n']);
   });
   it('sends explicit parameters and leaves runtime defaults to the service', () => {
-    expect(parseCraftbookParams(book, ['c23n', 'limit=2', 'dryRun=true'])).toEqual({
-      region: 'c23n',
-      limit: '2',
-      dryRun: 'true',
+    expect(parseCraftbookArguments(book, ['c23n', 'limit=2', 'dryRun=true'])).toEqual({
+      params: { region: 'c23n', limit: '2', dryRun: 'true' },
     });
-    expect(parseCraftbookParams(book, ['c23'])).toEqual({ region: 'c23' });
+    expect(parseCraftbookArguments(book, ['c23'])).toEqual({ params: { region: 'c23' } });
+    expect(parseCraftbookArguments(book, ['c23'], ['limit=4', 'workPath=shared-run'])).toEqual({
+      params: { region: 'c23', limit: '4', workPath: 'shared-run' },
+    });
   });
   it.each([
-    ['c23n', 'region=c2'],
-    ['c23n', 'unknown=1'],
-    ['c23n', 'limit=0'],
-    ['c23n', 'limit=NaN'],
-    ['c23n', 'limit=1.5'],
-    ['c23n', 'dryRun=yes'],
-    ['invalid'],
-    [],
-  ])('rejects invalid input %j', (...args) => {
-    expect(() => parseCraftbookParams(book, args)).toThrow();
+    [['c23n', 'region=c2']],
+    [['c23n', 'unknown=1']],
+    [['c23n', 'limit=0']],
+    [['c23n', 'limit=NaN']],
+    [['c23n', 'limit=1.5']],
+    [['c23n', 'dryRun=yes']],
+    [['invalid']],
+    [[]],
+    [['c23n'], ['limit']],
+  ])('rejects invalid input %j %j', (args, named?: string[]) => {
+    expect(() => parseCraftbookArguments(book, args, named)).toThrow();
+  });
+});
+
+describe('the request a person types after a craftbook', () => {
+  const summarize = {
+    name: 'Summarize a Long Document',
+    paramSchema: {
+      type: 'object',
+      properties: { workPath: { type: 'string', default: '{{task.dir}}' } },
+    },
+  };
+  const deck = {
+    name: 'PowerPoint Deck',
+    paramSchema: {
+      type: 'object',
+      properties: {
+        workPath: { type: 'string', default: '{{task.dir}}' },
+        outputDir: { type: 'string', default: 'decks' },
+        topic: { type: 'string' },
+        audience: { type: 'string' },
+      },
+    },
+  };
+
+  it('never lands in the runtime-owned working folder', () => {
+    // 257 of 296 bundled books declare workPath first; this sentence used to
+    // become the artifacts folder and the gate waited for "<sentence>/scope.md".
+    const parsed = parseCraftbookArguments(summarize, ['Summarize notes.txt in this folder']);
+    expect(parsed).toEqual({ params: {}, request: 'Summarize notes.txt in this folder' });
+    expect(craftbookDoLaunch(summarize, parsed)).toEqual({
+      description:
+        'Summarize notes.txt in this folder\n\nRun the "Summarize a Long Document" craftbook end to end for this request.',
+      craftbookParams: {},
+    });
+  });
+
+  it('joins unquoted words and keeps optional parameters for key=value', () => {
+    expect(
+      parseCraftbookArguments(deck, ['A', 'deck', 'about', 'Delft', 'audience=investors']),
+    ).toEqual({
+      params: { audience: 'investors' },
+      request: 'A deck about Delft',
+    });
+  });
+
+  it('fills the main content parameter and the description from one request', () => {
+    const request = 'A twelve-slide deck about Delft pottery for the museum board, with a timeline';
+    expect(craftbookDoLaunch(deck, parseCraftbookArguments(deck, [request]))).toEqual({
+      description: request,
+      craftbookParams: { topic: request },
+    });
+    expect(
+      craftbookDoLaunch(deck, parseCraftbookArguments(deck, ['Delft pottery', 'topic=Delft'])),
+      'a topic the person named stays theirs',
+    ).toMatchObject({ craftbookParams: { topic: 'Delft' } });
+  });
+
+  it('fills required values first, and only ones a person is asked for', () => {
+    expect(parseCraftbookArguments(book, ['c23n', 'Make', 'three', 'stories'])).toEqual({
+      params: { region: 'c23n' },
+      request: 'Make three stories',
+    });
+    const review = {
+      paramSchema: {
+        type: 'object',
+        required: ['reviewId'],
+        properties: { reviewId: { type: 'string', askUser: false } },
+      },
+    };
+    expect(() => parseCraftbookArguments(review, ['Check the diff'])).toThrow(
+      'missing required craftbook parameter: reviewId',
+    );
+    expect(parseCraftbookArguments(review, ['Check the diff', 'reviewId=r-7'])).toEqual({
+      params: { reviewId: 'r-7' },
+      request: 'Check the diff',
+    });
+  });
+
+  it('starts a book with no words at all from its own description', () => {
+    expect(craftbookDoLaunch(summarize, parseCraftbookArguments(summarize, []))).toEqual({
+      craftbookParams: {},
+    });
   });
 });
 

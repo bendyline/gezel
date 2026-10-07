@@ -779,3 +779,84 @@ describe('fitting the conversation history to a small model', () => {
     expect(generate.mock.calls.at(-1)![0].messages.length).toBeLessThanOrEqual(128);
   });
 });
+
+describe('calls around the reply', () => {
+  async function loop(
+    generate: PortableInference['generate'],
+    extra: Partial<Parameters<typeof runPortableToolLoop>[0]> = {},
+  ) {
+    const { store, session, inventory } = await fixture();
+    const tools: string[] = [];
+    const result = await runPortableToolLoop({
+      store,
+      session,
+      inference: { providers: async () => [], generate, cancel: async () => {} },
+      requestId: 'req',
+      providerId: 'android-mlkit',
+      modelId: 'android-mlkit',
+      contextSize: 32_768,
+      maxTokens: 256,
+      messages: [
+        { role: 'system', content: 'Play.' },
+        { role: 'user', content: 'Your move.' },
+      ],
+      tools: { inventory },
+      actions,
+      cancelled: () => false,
+      checkpoint: async () => {},
+      tool: (call) => tools.push(call.name),
+      delta: () => {},
+      ...extra,
+    });
+    return { result, tools };
+  }
+
+  it('ends the turn on a terminal tool, its closing line the reply, before the model can echo it', async () => {
+    const generate = vi
+      .fn<PortableInference['generate']>()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ name: 'list_dir', arguments: { path: '.' } }),
+        stopReason: 'stop',
+      })
+      .mockResolvedValue({
+        text: '{\\"name\\":\\"list_dir\\",\\"arguments\\":{}}',
+        stopReason: 'stop',
+      });
+    const { result, tools } = await loop(generate, {
+      terminalToolPolicy: { toolNames: ['list_dir'], closingArg: 'path', fallbackText: 'Listed.' },
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(tools).toEqual(['list_dir']);
+    expect(result).toMatchObject({ text: '.', stopReason: 'stop' });
+  });
+
+  it('asks once for the call alone when prose comes before it', async () => {
+    const generate = vi
+      .fn<PortableInference['generate']>()
+      .mockResolvedValueOnce({
+        text: 'Let me look.\n\n{"name":"list_dir","arguments":{"path":"."}}',
+        stopReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: '{"name":"list_dir","arguments":{"path":"."}}',
+        stopReason: 'stop',
+      })
+      .mockResolvedValue({ text: 'Nothing there yet.', stopReason: 'stop' });
+    const { result, tools } = await loop(generate);
+    expect(tools).toEqual(['list_dir']);
+    expect(generate.mock.calls[1]![0].messages.at(-1)!.content).toContain(
+      'put a tool call after some text',
+    );
+    expect(result.text).toBe('Nothing there yet.');
+  });
+
+  it('never shows a call that did not run as the reply', async () => {
+    const generate = vi.fn<PortableInference['generate']>(async () => ({
+      text: 'Alright!\n\n{\\"name\\":\\"list_dir\\",\\"arguments\\":{\\"path\\":\\".\\"}}',
+      stopReason: 'stop',
+    }));
+    const { result, tools } = await loop(generate);
+    expect(tools).toEqual([]);
+    expect(result.text).toBe('Alright!');
+  });
+});

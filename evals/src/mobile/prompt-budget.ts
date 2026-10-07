@@ -248,7 +248,202 @@ export async function auditMobilePromptBudgets() {
   };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+interface TypedCase {
+  id: string;
+  typeId: string;
+  params?: Record<string, unknown>;
+  prompt: string;
+}
+
+/**
+ * Project-type sessions (the activities) as a phone assembles them, on both
+ * of its loops: the shared llama.cpp loop, recorded from the OpenAI-shaped
+ * request it hands the engine, and a system model's text loop. The pass line
+ * is the engagement plan's: the system prompt and the tools a turn carries
+ * take at most half the window, leaving the rest for the conversation and the
+ * reply. Recording only, like the audit above.
+ */
+export async function auditProjectTypePromptBudgets(windows: readonly number[] = [4096, 8192]) {
+  const testFilesUrl = pathToFileURL(resolve(root, 'packages/core/src/runtime/test-files.ts')).href;
+  const { MemoryFiles } = (await import(testFilesUrl)) as {
+    MemoryFiles: new () => PortableFileSystem;
+  };
+  const contentUrl = pathToFileURL(
+    resolve(root, 'packages/mobile/scripts/portable-content.ts'),
+  ).href;
+  const plugin = (
+    (await import(contentUrl)) as { portableContentPlugin(): { load(id: string): Promise<string> } }
+  ).portableContentPlugin();
+  const parse = (serialized: string) =>
+    JSON.parse(serialized.replace(/^export default /, '').replace(/;$/, ''));
+  const content = parse(await plugin.load('\0virtual:gezel-portable-content')) as PortableContent;
+  const types = parse(await plugin.load('\0virtual:gezel-portable-project-types')) as unknown[];
+  const cases: TypedCase[] = [
+    { id: 'checkers', typeId: 'checkers', prompt: 'It is your move.' },
+    { id: 'language-trainer', typeId: 'language-trainer', prompt: 'Hola, quiero practicar hoy.' },
+    { id: 'fitness-coach', typeId: 'fitness-coach', prompt: 'I ran 5 km in 28 minutes today.' },
+    { id: 'just-chat', typeId: 'just-chat', prompt: 'Hi! Long day today.' },
+  ];
+  const providers = [
+    { id: 'llama-cpp' as const, structuredChat: true },
+    { id: 'android-mlkit' as const, structuredChat: false },
+  ];
+  const results = [];
+  for (const provider of providers)
+    for (const window of windows)
+      for (const entry of cases) {
+        let id = 0;
+        const store = new PortableStore({
+          files: new MemoryFiles(),
+          createId: () => `typed-${++id}`,
+        });
+        const recorded: Array<{ system: string; tools: string; user: string }> = [];
+        const record = (messages: Array<{ role: string; content: unknown }>, tools: unknown) => {
+          const text = (role: string) =>
+            messages
+              .filter((message) => message.role === role)
+              .map((message) =>
+                typeof message.content === 'string'
+                  ? message.content
+                  : JSON.stringify(message.content),
+              )
+              .join('\n');
+          recorded.push({
+            system: text('system'),
+            tools: tools ? JSON.stringify(tools) : '',
+            user: messages.at(-1)?.role === 'user' ? (text('user').split('\n').at(-1) ?? '') : '',
+          });
+        };
+        const inference: PortableInference = {
+          providers: async () => [
+            {
+              id: provider.id,
+              name: 'Recording-only port',
+              locality: 'on-device',
+              availability: 'available',
+              contextTokens: window,
+              maxOutputTokens: 1024,
+              capabilities: {
+                text: true,
+                tools: false,
+                structuredOutput: false,
+                images: false,
+                foregroundOnly: true,
+                ...(provider.structuredChat ? { structuredChat: true } : {}),
+              },
+            },
+          ],
+          generate: async (request) => {
+            record(request.messages, undefined);
+            throw new Error(marker);
+          },
+          ...(provider.structuredChat
+            ? {
+                chat: async (request: { body: Record<string, unknown> }) => {
+                  record(
+                    request.body.messages as Array<{ role: string; content: unknown }>,
+                    request.body.tools,
+                  );
+                  throw new Error(marker);
+                },
+              }
+            : {}),
+          cancel: async () => {},
+        } as PortableInference;
+        const scripts: PortableScripts = {
+          list: () => [],
+          source: async () => {
+            throw new Error(marker);
+          },
+          run: async () => {
+            throw new Error(marker);
+          },
+          initialize: async () => {},
+          isBusy: () => false,
+          cancel: async () => {},
+        };
+        const service = new PortableProductService(store, inference, 'budget-audit', {
+          projectTypes: async () => types as never,
+        });
+        service.setScripts(scripts);
+        service.setContent(content);
+        await service.initialize();
+        await store.writeConfig({
+          provider: provider.id,
+          modelContextOverrides: { [`${provider.id}:${provider.id}`]: window },
+        });
+        const call = async (path: string, body?: unknown) => {
+          const response = await service.fetch(`https://gezel.local/api/${path}`, {
+            method: body === undefined ? 'GET' : 'POST',
+            headers: { authorization: 'Bearer budget-audit', 'content-type': 'application/json' },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          });
+          return (await response.json()) as Record<string, unknown>;
+        };
+        const created = (await call('projects/typed', {
+          name: `Audit ${entry.id}`,
+          projectType: { typeId: entry.typeId, ...(entry.params ? { params: entry.params } : {}) },
+        })) as { project?: { id: string; voormanGezelId?: string; gezelIds?: string[] } };
+        const project = created.project;
+        if (!project)
+          throw new Error(`${entry.id}: the type did not apply (${JSON.stringify(created)})`);
+        const gezelId = project.voormanGezelId ?? project.gezelIds?.[0];
+        const session = await store.createSession({
+          gezelId: gezelId!,
+          projectId: project.id,
+          providerName: provider.id,
+        });
+        await call(`sessions/${session.id}/send`, { message: entry.prompt });
+        for (let index = 0; index < 2000 && service.busy; index++)
+          await new Promise((done) => setTimeout(done, 1));
+        await service.suspend();
+        const first = recorded[0];
+        const tokens = (value: string) => Math.ceil(value.length / 4);
+        const systemTokens = first ? tokens(first.system) : null;
+        const toolTokens = first ? tokens(first.tools) : null;
+        const standing = (systemTokens ?? 0) + (toolTokens ?? 0);
+        results.push({
+          id: `${provider.id}:${window}:${entry.id}`,
+          reachedInferencePort: recorded.length > 0,
+          systemTokens,
+          toolTokens,
+          standingTokens: first ? standing : null,
+          userTokens: first ? tokens(first.user) : null,
+          budgetTokens: window / 2,
+          withinBudget: !!first && standing <= window / 2,
+          exactSystem: first?.system ?? '',
+        });
+      }
+  return {
+    kind: 'project-type-prompt-budget-audit',
+    recordingOnly: true,
+    at: new Date().toISOString(),
+    note: 'Tokens are estimated at four characters each; no tokenizer ran.',
+    results,
+  };
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url) &&
+  process.argv.includes('--project-types')
+) {
+  const output = resolve(
+    process.argv.find((arg) => arg.endsWith('.json')) ??
+      '/tmp/gezel-project-type-prompt-budget.json',
+  );
+  const report = await auditProjectTypePromptBudgets();
+  await mkdir(dirname(output), { recursive: true });
+  await writeFile(output, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(
+    JSON.stringify(
+      report.results.map(({ exactSystem, ...summary }) => summary),
+      null,
+      2,
+    ),
+  );
+  process.exitCode = report.results.every((result) => result.withinBudget) ? 0 : 1;
+} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const output = resolve(process.argv[2] ?? '/tmp/gezel-mobile-prompt-budget.json');
   const report = await auditMobilePromptBudgets();
   await mkdir(dirname(output), { recursive: true });

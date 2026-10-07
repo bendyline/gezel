@@ -14,6 +14,8 @@ import {
 export interface StartCraftbook extends CraftbookSummary {
   /** Catalog source carried into task creation for deterministic resolution. */
   sourceId: string;
+  /** The token that runs it from a terminal (`gezel <command>`); defaults to the id. */
+  command: string;
   /** Catalog tags retained for wordwheel/search metadata. */
   tags: string[];
   /** Project-lifecycle shelf supplied by the catalog. */
@@ -49,6 +51,7 @@ export function normalizeCraftbooks(
       ...(manifest.description ? { description: manifest.description } : {}),
       version: manifest.version,
       sourceId: item.sourceId,
+      command: manifest.command ?? manifest.id,
       source:
         item.sourceId === 'project' ? 'project' : item.sourceId === 'local' ? 'local' : 'bundled',
       stepCount: manifest.steps.length,
@@ -148,7 +151,12 @@ export function findCraftbook(
   value: string,
 ): StartCraftbook | undefined {
   const query = value.trim().toLowerCase();
-  return books.find((book) => book.id.toLowerCase() === query || book.name.toLowerCase() === query);
+  return books.find(
+    (book) =>
+      book.id.toLowerCase() === query ||
+      book.command?.toLowerCase() === query ||
+      book.name.toLowerCase() === query,
+  );
 }
 
 /** Build the one-shot, immediately-dispatched task behind `/do`. */

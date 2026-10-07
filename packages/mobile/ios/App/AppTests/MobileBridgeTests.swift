@@ -44,6 +44,104 @@ final class MobileBridgeTests: XCTestCase {
         }
     }
 
+    /// Vision's labels and text on this device, plus Foundation Models where it
+    /// can see. A photo staged at Library/Caches/vision-probe.jpg is read too.
+    @MainActor
+    func testVisionReadsPhotos() async throws {
+        let plugin = GezelVisionPlugin()
+        func invoke(_ method: String, _ options: JSObject) async throws -> PluginCallResultData {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<PluginCallResultData, Error>) in
+                let call = CAPPluginCall(callbackId: UUID().uuidString, methodName: method, options: options,
+                    success: { result, _ in continuation.resume(returning: result?.data ?? [:]) },
+                    error: { failure in continuation.resume(throwing: NSError(domain: "Vision", code: 1, userInfo: [NSLocalizedDescriptionKey: failure?.message ?? "Vision failed"])) })!
+                if method == "read" { plugin.read(call) } else { plugin.status(call) }
+            }
+        }
+        func report(_ name: String, _ value: Any) {
+            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+            print("GEZEL_VISION \(name) \(data.flatMap { String(data: $0, encoding: .utf8) } ?? "")")
+        }
+        report("status", try await invoke("status", [:]))
+        let sign = UIGraphicsImageRenderer(size: CGSize(width: 900, height: 500)).jpegData(withCompressionQuality: 0.9) { context in
+            UIColor(red: 0.78, green: 0.16, blue: 0.16, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 900, height: 500))
+            let big: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: 120), .foregroundColor: UIColor.white]
+            let small: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: 60), .foregroundColor: UIColor.white]
+            ("STOP" as NSString).draw(at: CGPoint(x: 300, y: 110), withAttributes: big)
+            ("Trail closed for repairs" as NSString).draw(at: CGPoint(x: 90, y: 320), withAttributes: small)
+        }
+        let started = Date()
+        let read = try await invoke("read", ["requestId": UUID().uuidString, "image": sign.base64EncodedString(), "mimeType": "image/jpeg", "describe": true])
+        report("sign", read.merging(["ms": Int(Date().timeIntervalSince(started) * 1000)]) { $1 })
+        XCTAssertTrue((read["text"] as? String ?? "").contains("STOP"), read["text"] as? String ?? "")
+        let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        if let photo = try? Data(contentsOf: caches.appendingPathComponent("vision-probe.jpg")) {
+            let begun = Date()
+            let result = try await invoke("read", ["requestId": UUID().uuidString, "image": photo.base64EncodedString(), "mimeType": "image/jpeg", "describe": true])
+            report("photo", result.merging(["ms": Int(Date().timeIntervalSince(begun) * 1000)]) { $1 })
+            XCTAssertFalse((result["labels"] as? [Any] ?? []).isEmpty)
+        }
+    }
+
+    /// The fallback describer on this device: downloads Qwen 3.5 0.8B and its
+    /// projector into the model library if missing, then describes the photo
+    /// staged at Library/Caches/vision-probe.jpg through the native runtime.
+    func testVisionModelDescribesPhoto() async throws {
+        let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        let photo = try XCTUnwrap(try? Data(contentsOf: caches.appendingPathComponent("vision-probe.jpg")), "Stage a photo first")
+        let runtime = try GezelNativeRuntime.shared()
+        func invoke(_ method: @escaping (GezelNativeRuntime) -> (NativeCall) -> Void, _ options: [String: Any] = [:]) async throws -> [String: Any] {
+            try await withCheckedThrowingContinuation { continuation in
+                method(runtime)(NativeCall(options, resolve: { continuation.resume(returning: $0) },
+                    reject: { message, code in continuation.resume(throwing: NSError(domain: "Vision", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(code ?? "error"): \(message)"])) }))
+            }
+        }
+        func report(_ name: String, _ value: Any) {
+            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+            print("GEZEL_VISION \(name) \(data.flatMap { String(data: $0, encoding: .utf8) } ?? "")")
+        }
+        let base: [String: Any] = ["catalogVersion": "1.0.0", "sourceId": "bundled", "huggingfaceRepo": "unsloth/Qwen3.5-0.8B-MTP-GGUF", "revision": "cf8a611f6ed2c2060046219a19f12cd3d5ecd67c"]
+        let parts: [([String: Any], String)] = [
+            (base.merging(["catalogId": "qwen3.5-0.8b-q4", "filename": "Qwen3.5-0.8B-Q4_K_M.gguf", "sha256": "ac7c9d7a1b3e3695bb3bd50f8ceaa97f9c93e99ccc3d3d1a620301b6dd6d3d86"]) { $1 }, "Qwen 3.5 (0.8B, Q4)"),
+            (base.merging(["catalogId": "qwen3.5-0.8b-q4:projector", "filename": "mmproj-F16.gguf", "sha256": "ea8519d0c6240e465a0265d6912f73d750a17ca7d42150281b778b8b59f05798"]) { $1 }, "Qwen 3.5 vision projector")
+        ]
+        func installed(_ sha: String) async throws -> String? {
+            let models = try await invoke({ $0.listModels })["models"] as? [[String: Any]] ?? []
+            return models.first { (($0["source"] as? [String: Any])?["sha256"] as? String) == sha }?["id"] as? String
+        }
+        var ids: [String] = []
+        for (identity, name) in parts {
+            let sha = identity["sha256"] as! String
+            if let id = try await installed(sha) { ids.append(id); continue }
+            let resolved = try await invoke({ $0.resolveModelSource }, ["source": identity])
+            let started = try await invoke({ $0.startModelDownload }, ["source": resolved["source"]!, "name": name])
+            let downloadId = try XCTUnwrap((started["download"] as? [String: Any])?["id"] as? String)
+            let began = Date()
+            while true {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let downloads = try await invoke({ $0.listModelDownloads })["downloads"] as? [[String: Any]] ?? []
+                guard let download = downloads.first(where: { $0["id"] as? String == downloadId }) else { break }
+                let state = download["state"] as? String
+                if state == "complete" { _ = try? await invoke({ $0.removeModelDownload }, ["id": downloadId]); break }
+                if state == "failed" || state == "paused" { XCTFail("\(name) download \(state ?? ""): \(download["error"] ?? "")"); return }
+                XCTAssertLessThan(Date().timeIntervalSince(began), 900, "\(name) download is too slow")
+            }
+            report("downloaded", ["name": name, "seconds": Int(Date().timeIntervalSince(began))])
+            let id = try await installed(sha)
+            ids.append(try XCTUnwrap(id))
+        }
+        let system = "You describe images accurately and concisely for someone who cannot see them. Answer with the content only. No preamble, no \"This image shows\", no offers to help further."
+        let user = "Describe this image in two or three sentences. Name the subject, the setting, and anything a reader would need in order to reason about it. If there is legible text, quote the important parts."
+        for attempt in 1...2 {
+            let started = Date()
+            let result = try await invoke({ $0.describeImage }, ["requestId": UUID().uuidString, "modelId": ids[0], "projectorId": ids[1],
+                "image": photo.base64EncodedString(), "system": system, "user": user, "maxTokens": 400])
+            report("describe\(attempt)", result.merging(["ms": Int(Date().timeIntervalSince(started) * 1000)]) { $1 })
+            XCTAssertEqual(result["status"] as? String, "ok")
+            XCTAssertFalse((result["description"] as? String ?? "").isEmpty)
+        }
+    }
+
     func testUnavailableSystemModelIsRejectedBeforeInference() throws {
         // Invoke the real plugin before loading a provider, independently of
         // other smoke tests that deliberately unload the product WebView.

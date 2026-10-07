@@ -19,6 +19,8 @@ export interface OpenFileIntent {
   /** 1-based line to reveal after opening — a search hit's match location. */
   line?: number;
   lineEnd?: number;
+  /** For a video or sound hit: the matched moment, where the player starts. */
+  startMs?: number;
   /** Opened from a pending question's document; the viewer offers the way back. */
   fromQuestion?: boolean;
 }

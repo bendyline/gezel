@@ -113,6 +113,12 @@ export const ImageRecognitionSchema = z.object({
   meta: ImageStaticMetaSchema,
   modes: z.array(RecognitionModeSchema).min(1),
   description: z.string().optional(),
+  /**
+   * Scene labels from an on-device classifier (the phone OS's own image
+   * labeler), most confident first. A classifier names what is in a picture
+   * without describing it, so it rides beside `description` rather than in it.
+   */
+  labels: z.array(z.string()).optional(),
   ocrText: z.string().optional(),
   structured: z
     .object({
@@ -120,7 +126,9 @@ export const ImageRecognitionSchema = z.object({
       data: z.unknown(),
     })
     .optional(),
-  engine: z.enum(['llama-cpp', 'mlx', 'mock', 'none']),
+  // `system`: the phone OS's own recognizers (Apple Vision, ML Kit); the
+  // model id names which.
+  engine: z.enum(['llama-cpp', 'mlx', 'mock', 'none', 'system']),
   modelId: z.string(),
   status: z.enum(['ok', 'partial', 'failed', 'static-only']),
   failureReason: z.string().optional(),

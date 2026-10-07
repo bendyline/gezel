@@ -54,10 +54,9 @@ export function terminalToolClosingText(
       return null;
     }
   }
+  const closingArg = policy.closingArgByTool?.[toolName] ?? policy.closingArg;
   const fromArg =
-    policy.closingArg && typeof args[policy.closingArg] === 'string'
-      ? (args[policy.closingArg] as string)
-      : '';
+    closingArg && typeof args[closingArg] === 'string' ? (args[closingArg] as string) : '';
   return compactClosing(fromArg, policy.fallbackText.trim(), policy.maxClosingChars ?? 180);
 }
 

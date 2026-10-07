@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, relative, sep } from 'node:path';
 import type { Plugin } from 'vite';
 import { BundledSource } from '../../catalog/src/source.js';
-import { craftbookFromDoc, parseCraftbookDoc } from '../../core/src/browser.js';
+import { type Craftbook, craftbookFromDoc, parseCraftbookDoc } from '../../core/src/browser.js';
 import { portableCatalogModels } from '../../core/src/runtime/portable-catalog.js';
 import { portableToolNames } from '../../core/src/runtime/product-tools.js';
 import { supportsPortableContent } from './portable-content-support.js';
@@ -82,6 +82,33 @@ export function portableContentPlugin(): Plugin {
   };
 }
 
+/**
+ * The craftbooks a type carries in its own `craftbooks/<id>.json` that a phone
+ * can run. Like the desktop's install, an embedded book wins over a catalog
+ * book of the same id.
+ */
+function embeddedCraftbooks(
+  type: { id: string; craftbooks: readonly string[]; releasedAt: string },
+  files: Record<string, string>,
+): Record<string, Craftbook> {
+  const books: Record<string, Craftbook> = {};
+  for (const id of type.craftbooks) {
+    const text = files[`craftbooks/${id}.json`];
+    if (text === undefined) continue;
+    const parsed = parseCraftbookDoc(text, 'json');
+    const compiled = parsed.ok
+      ? craftbookFromDoc(parsed.doc, { id, now: type.releasedAt })
+      : undefined;
+    if (!compiled?.ok) {
+      console.warn(`[portable-content] project type ${type.id}: craftbooks/${id}.json is invalid`);
+      continue;
+    }
+    const book = { ...compiled.craftbook, version: compiled.craftbook.version ?? '1.0.0' };
+    if (supportsPortableContent(book, portableToolNames())) books[id] = book;
+  }
+  return books;
+}
+
 /** Every file of a type version except its manifest, as text or base64. */
 async function versionFiles(versionDir: string) {
   const files: Record<string, string> = {};
@@ -141,15 +168,6 @@ async function portableProjectTypes(source: BundledSource, dataDir: string) {
       );
       continue;
     }
-    // A type that exists to run craftbooks (a software project) has nothing to
-    // offer here when none of them can run on a phone.
-    if (
-      manifest.craftbooks.length > 0 &&
-      !manifest.tools.length &&
-      !manifest.pages &&
-      !manifest.craftbooks.some((id) => runnable.has(id))
-    )
-      continue;
     const versionDir = join(
       dataDir,
       'project-types',
@@ -158,7 +176,22 @@ async function portableProjectTypes(source: BundledSource, dataDir: string) {
       'versions',
       manifest.version,
     );
-    types.push({ item: { ...detail, logoUrl: undefined }, ...(await versionFiles(versionDir)) });
+    const files = await versionFiles(versionDir);
+    const craftbooks = embeddedCraftbooks(manifest, files.files);
+    // A type that exists to run craftbooks (a software project) has nothing to
+    // offer here when none of them can run on a phone.
+    if (
+      manifest.craftbooks.length > 0 &&
+      !manifest.tools.length &&
+      !manifest.pages &&
+      !manifest.craftbooks.some((id) => runnable.has(id) || craftbooks[id])
+    )
+      continue;
+    types.push({
+      item: { ...detail, logoUrl: undefined },
+      ...files,
+      ...(Object.keys(craftbooks).length ? { craftbooks } : {}),
+    });
   }
   return types;
 }

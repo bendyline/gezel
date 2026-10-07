@@ -86,15 +86,19 @@ test('the manifest texts are the recorded bytes and DirectML is marked proprieta
 
 test('every rule-matched binary in the installed ONNX Runtime packages is covered', async () => {
   const supplemental = await loadSupplementalLicenses();
-  const packages = ['onnxruntime-node', '@huggingface/transformers', 'onnxruntime-web'].map(
-    (name) => [name, installedPackageDir(name)],
-  );
+  const packages = ['onnxruntime-node', 'onnxruntime-web'].map((name) => [
+    name,
+    installedPackageDir(name),
+  ]);
   for (const [name, packagePath] of packages) {
     const { version } = JSON.parse(await readFile(join(packagePath, 'package.json'), 'utf8'));
     const coverage = await packageLicenseCoverage({ name, version, packagePath }, supplemental);
     assert.deepEqual(coverage.problems, [], `${name}@${version}`);
     assert.ok(coverage.texts.length > 0, `${name}@${version} gets supplemental texts`);
   }
+  // Transformers.js 4.x loads the WebAssembly builds from onnxruntime-web and
+  // copies none into its own dist, so it must carry no licensed binary.
+  assert.deepEqual(await findLicensedBinaries(installedPackageDir('@huggingface/transformers')), []);
   const node = await findLicensedBinaries(packages[0][1]);
   assert.ok(
     node.some((binary) => binary.path.endsWith('win32/x64/DirectML.dll')),

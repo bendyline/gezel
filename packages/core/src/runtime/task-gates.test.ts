@@ -172,6 +172,58 @@ describe('portable shared gate-script contract', () => {
     });
   });
 
+  it('runs regex checks in the bounded checkContains script, with the desktop’s flags and wording', async () => {
+    const { store, task, step } = await fixture();
+    step.gate = {
+      at: 'completion',
+      checks: [
+        {
+          kind: 'contains',
+          file: 'tasks/1/report.md',
+          pattern: '(?:^|\\n)#{1,3}\\s+\\S',
+          flags: 'i',
+          label: 'at least one markdown heading',
+          artifact: true,
+        },
+        { kind: 'notContains', file: 'notes.md', pattern: 'TODO' },
+      ],
+    };
+    const script = vi
+      .fn<PortableGateScript>()
+      .mockResolvedValueOnce({
+        status: 'ok',
+        output: { decision: 'reject', message: 'tasks/1/report.md is missing required content' },
+      })
+      .mockResolvedValueOnce({ status: 'ok', output: { decision: 'approve', message: 'ok' } });
+    const verdict = await evaluatePortableTaskGate(store, task, step, script);
+    expect(script.mock.calls.map(([called]) => called)).toEqual([
+      {
+        scope: 'standard',
+        name: 'checkContains',
+        inputs: {
+          file: 'tasks/1/report.md',
+          pattern: '(?:^|\\n)#{1,3}\\s+\\S',
+          flags: 'i',
+          label: 'at least one markdown heading',
+          artifact: true,
+        },
+      },
+      {
+        scope: 'standard',
+        name: 'checkContains',
+        inputs: { file: 'notes.md', pattern: 'TODO', flags: '', absent: true },
+      },
+    ]);
+    expect(verdict).toMatchObject({ approved: false });
+    expect(verdict.infrastructureError).toBeUndefined();
+    expect(verdict.message).toContain('tasks/1/report.md is missing required content');
+    expect(await evaluatePortableTaskGate(store, task, step)).toMatchObject({
+      approved: false,
+      infrastructureError: true,
+      message: expect.stringContaining('script executor'),
+    });
+  });
+
   it('rejects unresolved launch tokens before reading a file or executing a script', async () => {
     const { store, task, step } = await fixture();
     step.gate = {

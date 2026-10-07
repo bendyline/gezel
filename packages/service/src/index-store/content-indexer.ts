@@ -15,7 +15,7 @@ import {
 } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { ensureIndexGitignore } from './gitignore.js';
-import { sha256 } from './hash.js';
+import { sha256, sha256File } from './hash.js';
 import { readImageStaticMeta } from './image-meta.js';
 import { IndexStore } from './index-store.js';
 import {
@@ -157,7 +157,7 @@ export async function indexWorkspaceContent(
     if (cls.modality === 'image') {
       // Deterministic image tier (Phase 5): hash, read dimensions, and index a
       // filename-derived chunk so images are searchable by name immediately.
-      // Captions + CLIP vectors are added later by the boekwachter when idle.
+      // Captions and media-search vectors are added later, when idle.
       let bytes: Buffer;
       try {
         bytes = await readFile(file.abs);
@@ -255,6 +255,46 @@ export async function indexWorkspaceContent(
         .join(' ');
       store.putChunks(file.path, hash, [
         { kind: 'audio', lineStart: 1, lineEnd: 1, text: `${nameWords} audio recording` },
+      ]);
+      continue;
+    }
+
+    if (cls.modality === 'video') {
+      // Video: hash by stream (a recording can be gigabytes) and index a
+      // filename-derived chunk so it is findable by name at once. The media
+      // tier embeds its windows later, when the model and ffmpeg are there.
+      let hash: string;
+      try {
+        hash = await sha256File(file.abs);
+      } catch {
+        stats.skipped++;
+        continue;
+      }
+      const record = {
+        path: file.path,
+        hash,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        lang: cls.lang,
+        kind: cls.kind,
+        modality: cls.modality,
+        trivial: cls.trivial,
+        indexedAt,
+        loc: null,
+      };
+      if (existing && existing.hash === hash) {
+        store.upsertFile(record);
+        continue;
+      }
+      stats.changed++;
+      store.upsertFile(record);
+      const nameWords = file.path
+        .replace(/\.[^.]+$/, '')
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .join(' ');
+      store.putChunks(file.path, hash, [
+        { kind: 'video', lineStart: 1, lineEnd: 1, text: `${nameWords} video recording` },
       ]);
       continue;
     }

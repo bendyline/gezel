@@ -170,12 +170,16 @@ export function isAllowedPreviewResourceRequest(
 }
 
 /**
- * Allow microphone capture only from Gezel's trusted, top-level daemon UI.
+ * Allow device capture only from Gezel's trusted, top-level daemon UI.
  * Preview documents are model-authored subframes on the same origin, so the
- * main-frame check is as important as the exact-origin comparison. A request
- * that also asks for video is rejected; the narrate control needs audio only.
+ * main-frame check is as important as the exact-origin comparison.
+ *
+ * Each request names exactly one device kind: audio for the composer's
+ * Narrate action, video for its Take photo viewfinder. Neither surface
+ * records both at once, so a combined request — the shape of a recording or
+ * a call, not a still photo or a dictation — is refused.
  */
-export function isAllowedMicrophoneCapture(
+export function isAllowedMediaCapture(
   permission: string,
   requestingUrl: string,
   allowedOrigin: string | null,
@@ -183,7 +187,9 @@ export function isAllowedMicrophoneCapture(
   mediaTypes: readonly string[] | undefined,
 ): boolean {
   if (permission !== 'media' || !allowedOrigin || !isMainFrame) return false;
-  if (mediaTypes?.length !== 1 || mediaTypes[0] !== 'audio') return false;
+  if (mediaTypes?.length !== 1 || (mediaTypes[0] !== 'audio' && mediaTypes[0] !== 'video')) {
+    return false;
+  }
   try {
     return new URL(requestingUrl).origin === new URL(allowedOrigin).origin;
   } catch {
@@ -204,8 +210,9 @@ export interface RendererPermissionContext {
 /**
  * The complete renderer permission allowlist.
  *
- * Gezel needs audio-only media access for narration and sanitized clipboard
- * writes for its explicit Copy buttons. Every other browser permission is
+ * Gezel needs single-kind media access — audio for narration, video for the
+ * composer's camera — and sanitized clipboard writes for its explicit Copy
+ * buttons. Every other browser permission is
  * denied, including unknown permission names introduced by future Electron
  * releases. Preview documents are model-authored same-origin subframes, so an
  * exact WebContents match alone is insufficient: every allowed request must
@@ -217,7 +224,7 @@ export function isAllowedRendererPermission(context: RendererPermissionContext):
   }
 
   if (context.permission === 'media') {
-    return isAllowedMicrophoneCapture(
+    return isAllowedMediaCapture(
       context.permission,
       context.requestingUrl,
       context.allowedOrigin,

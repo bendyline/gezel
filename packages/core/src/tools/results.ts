@@ -1,3 +1,4 @@
+import { formatMediaClock } from '../media-label.js';
 import { normalizeArtifactPath } from '../path-rules.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
 /**
@@ -878,6 +879,27 @@ export interface SearchResultRow {
   source?: string;
   retrievalSource?: string;
   tier?: string;
+  /** A media hit: an image, or a window of audio or video. */
+  media?: {
+    modality: 'image' | 'video' | 'audio';
+    assetPath: string;
+    width?: number;
+    height?: number;
+    startMs?: number;
+    endMs?: number;
+  };
+}
+
+/** How a media hit reads in a result line: its kind, span and file. */
+function mediaLabel(media: NonNullable<SearchResultRow['media']>): { kind: string; file: string } {
+  const span =
+    media.startMs !== undefined && media.endMs !== undefined
+      ? ` ${formatMediaClock(media.startMs)}–${formatMediaClock(media.endMs)}`
+      : '';
+  const size = media.width && media.height ? ` ${media.width}×${media.height}` : '';
+  const kind =
+    media.modality === 'image' ? 'Image' : media.modality === 'video' ? 'Video' : 'Audio';
+  return { kind: `${kind}${span}`, file: `${media.assetPath}${size}` };
 }
 
 export interface SearchCraftbookSuggestion {
@@ -917,6 +939,11 @@ export function searchResultText(input: {
     // handle the model passes to read_document.
     const where = r.path ? `${r.path}${lineSpan}` : (r.uri ?? r.title);
     const title = !r.path && r.uri ? ` ${r.title}` : '';
+    if (r.media) {
+      const { kind, file } = mediaLabel(r.media);
+      const caption = r.snippet ? ` ${clampSearchSnippet(r.snippet)}` : '';
+      return `[${provenance} ${r.media.modality}${projectScope}${confidence}] ${where}${title} — ${kind}:${caption} (${file})`;
+    }
     const preview = r.snippet ? ` — ${clampSearchSnippet(r.snippet)}` : '';
     return `[${provenance}${projectScope}${confidence}] ${where}${title}${preview}`;
   });

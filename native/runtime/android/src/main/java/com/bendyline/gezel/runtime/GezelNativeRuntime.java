@@ -8,6 +8,9 @@ import android.os.Build;
 import android.os.PowerManager;
 import android.content.ComponentCallbacks2;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.ImageDecoder;
+import android.util.Base64;
 import com.google.mlkit.genai.common.FeatureStatus;
 import android.net.Uri;
 import java.nio.charset.StandardCharsets;
@@ -94,6 +97,13 @@ public final class GezelNativeRuntime {
     /** Room a larger window must leave beyond Android's low-memory threshold,
      * so the chosen window is not the one that barely fits. */
     private static final long LADDER_SPARE_BYTES = 256L * 1024 * 1024;
+    /** A description needs the picture's tokens and a few hundred more. */
+    private static final int DESCRIBE_CONTEXT = 4096;
+    /** The projector's encoder graph and image batch beside the weights; desktop
+     * budgets the same flat amount (core model-fit.ts). */
+    private static final long VISION_COMPUTE_BYTES = 384L * 1024 * 1024;
+    /** Long edge of the pixels handed to the projector, which sizes them again. */
+    private static final int DESCRIBE_MAX_EDGE = 768;
 
     /** Loading a model is itself what pushes a 6 GB phone into memory pressure:
      * lmkd kills background apps and every process hears RUNNING_CRITICAL.
@@ -740,6 +750,118 @@ public final class GezelNativeRuntime {
         String outcome = status == LlamaRuntime.STATUS_OK ? "ok" : isCancelled(requestId) || status == LlamaRuntime.STATUS_CANCELLED
             ? "cancelled" : status == LlamaRuntime.STATUS_TIMEOUT ? "timeout" : "error";
         return new NativeObject().put("status", outcome);
+    }
+
+    /**
+     * Describes one photo with a small vision model: an installed llama.cpp model
+     * and its projector, downloaded beside it as a second library entry. The
+     * phone's describer for a device whose OS has none. The photo arrives as
+     * base64 and is decoded, turned upright, and sized here.
+     */
+    public void describeImage(NativeCall call) {
+        String requestId = call.getString("requestId");
+        String modelId = call.getString("modelId");
+        String projectorId = call.getString("projectorId");
+        String encoded = call.getString("image");
+        String system = call.getString("system");
+        String user = call.getString("user");
+        if (call.contains("maxTokens") && call.getInt("maxTokens") == null) { call.reject("Invalid description settings", "INVALID_REQUEST"); return; }
+        int maxTokens = call.getInt("maxTokens", 400);
+        try {
+            if (engine == 0) throw new IllegalStateException(initializationError == null ? "Native engine unavailable" : initializationError);
+            if (requestId == null || requestId.isEmpty() || requestId.getBytes(StandardCharsets.UTF_8).length > 128 || modelId == null || modelId.isEmpty()
+                || projectorId == null || projectorId.isEmpty() || projectorId.equals(modelId) || encoded == null || encoded.isEmpty()
+                || encoded.length() > 22_400_000 || user == null || user.isEmpty() || user.getBytes(StandardCharsets.UTF_8).length > 16 * 1024
+                || (system != null && system.getBytes(StandardCharsets.UTF_8).length > 16 * 1024) || maxTokens < 1 || maxTokens > 1024)
+                throw new IllegalArgumentException("A vision model, its projector, a photo and an instruction are required");
+            byte[] image = Base64.decode(encoded, Base64.NO_WRAP);
+            synchronized (this) {
+                if (destroyed || backgrounded) { call.reject("Reopen the app to read photos", "BACKGROUND"); return; }
+                if (activeId != null || modelMutation || releaseRequested) { call.reject("Another conversation or memory cleanup is running", "BUSY"); return; }
+                activeId = requestId; activeProvider = "llama-cpp"; cancelled = false;
+                inferenceQueue.execute(() -> runDescribe(call, requestId, modelId, projectorId, image, system, user, maxTokens));
+            }
+        } catch (Exception error) { call.reject(failureMessage(error), "INVALID_REQUEST"); }
+    }
+
+    private void runDescribe(NativeCall call, String requestId, String modelId, String projectorId, byte[] image, String system, String user, int maxTokens) {
+        ScheduledFuture<?> cancelTimer = null;
+        NativeObject result = null;
+        Throwable failure = null;
+        List<NativeCall> waiting;
+        try {
+            cancelTimer = cancellationQueue.scheduleAtFixedRate(() -> {
+                if (isCancelled(requestId)) cancelActive(requestId);
+            }, 50, 50, TimeUnit.MILLISECONDS);
+            result = performDescribe(requestId, modelId, projectorId, image, system, user, maxTokens);
+        }
+        catch (Exception | LinkageError | OutOfMemoryError error) {
+            if (!(error instanceof OutOfMemoryError) && isCancelled(requestId)) result = new NativeObject().put("status", "cancelled");
+            else failure = error;
+        }
+        finally {
+            if (cancelTimer != null) cancelTimer.cancel(false);
+            try {
+                boolean release;
+                synchronized (this) { release = releaseRequested || backgrounded || destroyed; }
+                if (release) unloadLlama();
+            } catch (Exception | LinkageError | OutOfMemoryError error) { if (failure == null) failure = error; }
+            synchronized (this) {
+                activeId = null; activeProvider = null; nativeId = 0;
+                waiting = new ArrayList<>(cancelWaiters); cancelWaiters.clear();
+            }
+        }
+        if (failure == null) call.resolve(result);
+        else call.reject(failureMessage(failure));
+        for (NativeCall waiter : waiting) waiter.resolve();
+    }
+
+    private NativeObject performDescribe(String requestId, String modelId, String projectorId, byte[] image, String system, String user, int maxTokens) throws Exception {
+        if (isCancelled(requestId)) return new NativeObject().put("status", "cancelled");
+        if (store == null) throw new IllegalStateException("Model storage is unavailable");
+        String[] model = store.model(modelId);
+        String[] projector = store.model(projectorId);
+        Bitmap bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(image)), (decoder, info, source) -> {
+            decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+            int width = info.getSize().getWidth(), height = info.getSize().getHeight(), longest = Math.max(width, height);
+            if (longest > DESCRIBE_MAX_EDGE) {
+                float scale = DESCRIBE_MAX_EDGE / (float) longest;
+                decoder.setTargetSize(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+            }
+        });
+        int width = bitmap.getWidth(), height = bitmap.getHeight();
+        int[] argb = new int[width * height];
+        bitmap.getPixels(argb, 0, width, 0, 0, width, height);
+        bitmap.recycle();
+        byte[] rgb = new byte[width * height * 3];
+        for (int pixel = 0; pixel < argb.length; pixel++) {
+            rgb[pixel * 3] = (byte) (argb[pixel] >> 16);
+            rgb[pixel * 3 + 1] = (byte) (argb[pixel] >> 8);
+            rgb[pixel * 3 + 2] = (byte) argb[pixel];
+        }
+        long visionBytes = new java.io.File(projector[1]).length() + VISION_COMPUTE_BYTES;
+        if (!model[0].equals(loadedId)) {
+            unloadLlama();
+            appliedChatConfig = null;
+            if (!awaitCooling(requestId)) return new NativeObject().put("status", "cancelled");
+            checkResources(requiredBytes(model[1], DESCRIBE_CONTEXT) + visionBytes);
+            long operation = nextOperation(requestId);
+            if (operation == 0) return new NativeObject().put("status", "cancelled");
+            emitPhase(requestId, "loading_model");
+            synchronized (sizing) {
+                LlamaRuntime.load(engine, model[1], operation, DESCRIBE_CONTEXT);
+                loadedId = model[0]; loadedPath = model[1]; loadedContext = DESCRIBE_CONTEXT;
+            }
+        } else {
+            if (!awaitCooling(requestId)) return new NativeObject().put("status", "cancelled");
+            checkResources(visionBytes);
+        }
+        long operation = nextOperation(requestId);
+        if (operation == 0) return new NativeObject().put("status", "cancelled");
+        emitPhase(requestId, "prefill");
+        byte[] description = LlamaRuntime.describeImage(engine, projector[1], rgb, width, height, system, user, operation, maxTokens, 180_000);
+        if (description == null || isCancelled(requestId)) return new NativeObject().put("status", "cancelled");
+        return new NativeObject().put("status", "ok").put("description", new String(description, StandardCharsets.UTF_8));
     }
 
     /**

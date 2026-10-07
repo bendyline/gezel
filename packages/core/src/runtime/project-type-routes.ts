@@ -8,6 +8,7 @@ import {
   projectTypePageReads,
   projectTypePageTools,
   projectTypePageUsesApiV1,
+  reactionRequiredTool,
   renderProjectTypeReactionSeed,
 } from '../project-types/composition.js';
 import type { CatalogItemDetail, ProjectTypeTool } from '../schemas/catalog.js';
@@ -55,6 +56,8 @@ export interface PortableProjectTypeRouteHost {
     seed: string;
     hidden: boolean;
     standalone: boolean;
+    /** The turn must call this tool (the reaction's `turn`, while it applies). */
+    requiredTool?: string;
   }): Promise<{ sessionId: string } | null>;
 }
 
@@ -362,6 +365,14 @@ async function dispatchPortableReaction(
     ...(args.params ? { params: args.params } : {}),
     output: args.run.output,
   });
+  const requiredTool = reaction.turn
+    ? reactionRequiredTool(
+        reaction,
+        args.run.output,
+        await portableProjectScriptTools(host.types, args.project),
+        args.project,
+      )
+    : undefined;
   try {
     const delivered = await host.deliverReaction({
       projectId: args.project.id,
@@ -369,6 +380,7 @@ async function dispatchPortableReaction(
       seed,
       hidden: reaction.hideSeed === true,
       standalone: reaction.standalone === true,
+      ...(requiredTool ? { requiredTool } : {}),
     });
     return delivered
       ? { delivered: true, gezelId: targetGezelId }

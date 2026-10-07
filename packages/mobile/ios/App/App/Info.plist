@@ -24,6 +24,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo to add to your message in Gezel.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record your voice to write messages in Gezel.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

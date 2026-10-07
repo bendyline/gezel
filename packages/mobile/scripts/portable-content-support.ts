@@ -4,20 +4,11 @@ import {
   normalizeScriptRefs,
   normalizeStepGate,
 } from '../../core/src/browser.js';
+import { PORTABLE_GATE_CHECK_KINDS } from '../../core/src/runtime/task-gates.js';
 import { assertPortableCraftbookSupported } from '../../core/src/runtime/tasks.js';
 import { supportsPortableScriptSource } from './portable-script-support.js';
 
-const checks = new Set([
-  'minBytes',
-  'totalMinBytes',
-  'fileCount',
-  'cssMinBytes',
-  'sniff',
-  'jsonPathEquals',
-  'csvShape',
-  'tableShape',
-  'recordSchema',
-]);
+const checks = new Set(PORTABLE_GATE_CHECK_KINDS);
 const scripts = new Set([
   'checkFileExists',
   'checkJsonValid',

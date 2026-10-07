@@ -87,8 +87,11 @@ The current registered profiles are:
 | `bge-small-en-v1.5@1` | English; default for local catalog builds and the Handboek | BGE query instruction / no passage prefix | Raw sign bits |
 | `multilingual-e5-small@2` | Multilingual reference catalogs | `query: ` / `passage: ` | Centered sign bits |
 | `multilingual-e5-small@1` | Existing catalogs using the earlier E5 profile | `query: ` / `passage: ` | Raw sign bits |
+| `embeddinggemma-2-512@1` | Catalogs with searchable photos, video and audio | `task: search result \| query: ` / `title: none \| text: ` | Centered sign bits |
 
-All three currently use 384 dimensions, a 512-token model window, and `bit+int8` storage. E5 revisions 1 and 2 share the underlying float vector space and int8 rerank representation; revision 2 changes the binary prefilter. The reader takes the centering vector from the catalog's own profile.
+The BGE and E5 profiles use 384 dimensions, a 512-token model window, and `bit+int8` storage. E5 revisions 1 and 2 share the underlying float vector space and int8 rerank representation; revision 2 changes the binary prefilter. The reader takes the centering vector from the catalog's own profile.
+
+`embeddinggemma-2-512@1` is Google's EmbeddingGemma 2 at 8-bit precision. The model produces 768 values; the profile keeps the first 512 and re-normalizes them (Matryoshka truncation), which the profile records so every reader truncates the same way. Its vision and audio encoders put photos, video frames and sound into the same space as text, so a catalog built with it can carry **media rows**: one per photo and one per 30-second window of a clip or recording. A text question finds them directly. Media rows are searched in their own exact lane, because a photo sits further from its description than a passage does and would rarely survive the text shortlist, and at most four reach a search's results, one per document. A media kind with no measured cosine floor contributes no vector evidence. Catalogs using this profile need format 0.8.
 
 Gezel reuses the daemon query embedder for a catalog only when the declared vector space matches and the cached model and tokenizer bytes pass the profile's pinned hash checks. A different supported profile gets its own pinned query embedder. An unknown or unavailable profile leaves browsing and keyword search usable; Gezel does not substitute a same-sized vector from another model.
 
@@ -100,7 +103,7 @@ New vector tables declare cosine distance. For those tables, similarity is `1 âˆ
 
 Content search combines the vector neighbors with FTS results over symbols, summaries, and document chunks. It uses rank fusion to combine independently ranked lists, deduplicates overlapping source locations, and limits how many results one path can contribute. This allows an exact symbol name and a semantically related explanation to support the same result without comparing a BM25 keyword score directly with a cosine score.
 
-Image embeddings have their own storage path: content indexes keep them in a plain BLOB table keyed by image content hash and search them with cosine scoring. They are independent of the text `vec_text` table and its dimensions. The portable catalog vectors described next also use plain BLOBs, but follow the `.gezk` format's separate encoding rules.
+Media embeddings have their own storage path: content indexes keep them in a plain `media_vectors` BLOB table keyed by content hash and, for video and audio, the start of each 30-second window, and search them with exact cosine scoring. They come from the same EmbeddingGemma 2 model and 512-dimension space as `embeddinggemma-2-512@1` catalogs, so a workspace photo and a catalog photo answer the same text query. They are independent of the text `vec_text` table and its dimensions. Turning media search on downloads the model once (about 510 MB for photos; the audio encoder, about 340 MB more, arrives the first time a video or recording is indexed). Video and audio also need a system `ffmpeg` (`GEZEL_FFMPEG`, `SQUISQ_FFMPEG`, or on `PATH`); without one, those files are found by name only. The portable catalog vectors described next also use plain BLOBs, but follow the `.gezk` format's separate encoding rules.
 
 ## What a `.gezk` file contains
 

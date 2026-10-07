@@ -22,6 +22,7 @@ import {
   craftbookFromDoc,
   createLogger,
   docFromCraftbook,
+  explicitStepJump,
   formatCraftbookDocErrors,
   isOwnerStep,
   nowIso,
@@ -291,13 +292,14 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     // surface as an unhandled 500. A model reaching for a step it read about
     // elsewhere (a fanout child naming its host's `collect`) gets the step
     // list back instead, so its next call can be right.
-    if (body.next && body.next !== 'next') {
+    const jump = explicitStepJump(body.next);
+    if (jump) {
       const current = await ctx.tasks.get(projectId, num);
       const stepId = c.req.param('stepId');
-      if (current && !current.craftbook.steps.some((s) => s.id === body.next)) {
+      if (current && !current.craftbook.steps.some((s) => s.id === jump)) {
         return c.json(
           {
-            error: `task ${current.ref}: no step "${body.next}" to activate. This task's steps: ${current.craftbook.steps.map((s) => s.id).join(', ')}. Omit \`next\` to follow the craftbook's own order.`,
+            error: `task ${current.ref}: no step "${jump}" to activate. This task's steps: ${current.craftbook.steps.map((s) => s.id).join(', ')}. Omit \`next\` to follow the craftbook's own order.`,
           },
           400,
         );
@@ -307,7 +309,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
       // (2026-09-18), turning "done" into a self-loop the stall sweep had to
       // break nine minutes later. The same goes for any `next` on a final
       // step — completing it closes the task.
-      if (current && body.next === stepId) {
+      if (current && jump === stepId) {
         return c.json(
           {
             error: `task ${current.ref}: step "${stepId}" cannot name itself as \`next\`. Omit \`next\` to complete it and let the craftbook's own order decide what follows.`,

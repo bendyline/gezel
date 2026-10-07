@@ -38,6 +38,7 @@ import {
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
+  explicitStepJump,
   gateHandoffNoteText,
   isEngagementAllowed,
   nightShiftDayKey,
@@ -2611,7 +2612,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
         branchOutput: exitRun?.output,
       });
-      if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
+      if (route.kind === 'invalid' && explicitStepJump(nextArg) !== undefined)
         throw new Error(`task ${current.ref}: no step "${nextArg}" to activate`);
       const terminating = route.kind === 'terminate';
       const newActive = route.kind === 'terminate' ? undefined : route.to;

@@ -9,9 +9,13 @@ each production package to the exact text shipped for it.
 
 Links to files in this document are relative to the root of the
 [Gezel repository](https://github.com/bendyline/gezel). In the
-`@bendyline/gezel-service` npm package this file is `dist/NOTICE.md`, the
-font license texts are in `dist/licenses/fonts/`, and harper.js's license is
-in `dist/ui/harper/`.
+`@bendyline/gezel-service` npm package this file is `dist/NOTICE.md`. The
+license and notice texts for every package compiled into its browser UI and
+Office pane are in `dist/licenses/npm/`, where `manifest.json` maps each
+package to its texts (see **Code compiled into the browser bundles**). The
+font license texts are in `dist/licenses/fonts/`, harper.js's license is in
+`dist/ui/harper/`, and the Kokoro pronunciation dictionaries' license is
+`dist/kokoro-lexicon/LICENSE`.
 
 ---
 
@@ -122,8 +126,12 @@ repository and linked into the workspace. Their license matches Squisq's
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
 - `@bendyline/squisq-video` — MIT
-- `@bendyline/squisq-video-react` — MIT (Gezel's editor consumes only its
-  cover-image entry; the browser encoder and FFmpeg runtime are not shipped)
+- `@bendyline/squisq-video-react` — MIT. Gezel's editors use its
+  cover-image, dashboard-image, and media-edit entries. The media-edit worker
+  carries Mediabunny (MPL-2.0), which squisq bundles into its own dist; see
+  **Code compiled into the browser bundles**. The FFmpeg WebAssembly runtime
+  (`@ffmpeg/core`, GPL-2.0-or-later) is not shipped. Only the MIT
+  `@ffmpeg/ffmpeg` worker wrapper is emitted, and nothing loads it.
 
 ---
 
@@ -145,6 +153,48 @@ Attribution notice, as CC BY 4.0 requires: Font Awesome Free is by
 [Fonticons, Inc.](https://fontawesome.com/); the Visual Studio Code icons are
 by [Microsoft Corporation](https://github.com/microsoft/vscode-codicons).
 Both are used unmodified.
+
+---
+
+## Code compiled into the browser bundles
+
+The web UI and the Office pane compile about 300 third-party packages into
+minified JavaScript, which drops their license comments. The service build
+reads the bundles' source maps, collects each package's license and notice
+files, and stages them in `dist/licenses/npm/` of the
+`@bendyline/gezel-service` npm package. Its `manifest.json` uses the same
+layout as the installer's `resources/licenses/npm/`. Notice files a package
+publishes for code it bundled itself are carried too, such as squisq's
+`THIRD_PARTY_LICENSES.txt`.
+
+Some dependencies inline other packages into their published dist without
+shipping those packages' licenses. For example, `@mermaid-js/parser` inlines
+chevrotain (Apache-2.0). Their texts are kept, verbatim from each package's
+npm tarball, in [`legal/embedded-licenses/`](legal/embedded-licenses/),
+reviewed for each carrier's exact version.
+
+### Weak-copyleft components
+
+These are distributed unmodified, in executable form. Their Source Code Form
+is available at the links below.
+
+| Component | Version | License | Carried by | Source Code Form |
+|---|---|---|---|---|
+| **Mediabunny** (`mediabunny`) | 1.57.0 | MPL-2.0 | `@bendyline/squisq-video-react` (media-edit worker), which bundles it into its own dist | [npm tarball, includes `src/`](https://registry.npmjs.org/mediabunny/-/mediabunny-1.57.0.tgz); [Vanilagy/mediabunny at v1.57.0](https://github.com/Vanilagy/mediabunny/tree/v1.57.0) |
+
+The complete MPL-2.0 text ships with it, in squisq-video-react's
+`THIRD_PARTY_LICENSES.txt`.
+
+### License elections
+
+For these dual-licensed packages, Gezel distributes under the license named
+in the last column.
+
+| Package | Upstream license | Gezel elects |
+|---|---|---|
+| `dompurify` | MPL-2.0 OR Apache-2.0 | Apache-2.0 |
+| `jszip` | MIT OR GPL-3.0-or-later | MIT |
+| `@ironcalc/wasm` | MIT OR Apache-2.0 | MIT |
 
 ---
 
@@ -330,9 +380,9 @@ entry.
 
 | Binary | Carried by | Version | License |
 |---|---|---|---|
-| **ONNX Runtime** (`onnxruntime.dll`, `libonnxruntime.*`) | `onnxruntime-node` | `1.24.3` | MIT, with ONNX Runtime's third-party notices |
-| **ONNX Runtime CUDA and TensorRT execution providers** (`libonnxruntime_providers_*.so`, Linux x64 only; fetched by `onnxruntime-node`'s install script) | `onnxruntime-node` | `1.24.3` | MIT, with ONNX Runtime's third-party notices |
-| **ONNX Runtime Web** (`ort-wasm-simd-threaded*.wasm`) | `onnxruntime-web`, `@huggingface/transformers` | commit `89f8206b` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime** (`onnxruntime.dll`, `libonnxruntime.*`) | `onnxruntime-node` | `1.30.0` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime CUDA and TensorRT execution providers** (`libonnxruntime_providers_*.so`, Linux x64 only; fetched by `onnxruntime-node`'s install script) | `onnxruntime-node` | `1.30.0` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime Web** (`ort-wasm-simd-threaded*.wasm`) | `onnxruntime-web` | commit `8d85527a` | MIT, with ONNX Runtime's third-party notices |
 | **DirectML** (`DirectML.dll`, Windows only) | `onnxruntime-node` | `1.15.4` | **Proprietary** — Microsoft DirectML license terms |
 | **DirectX Shader Compiler** (`dxcompiler.dll`, `dxil.dll`, Windows only) | `onnxruntime-node` | `1.8.2502` | NCSA |
 | **Elevate** (`resources/elevate.exe`, Windows installer only) | electron-builder's NSIS toolset | `1.0.0.2894` | MIT |
@@ -395,8 +445,9 @@ Unlike the desktop models below, these ship inside the mobile app bundle.
 The voice pack is published on the sherpa-onnx release page but is data, not
 sherpa-onnx code, and it is still used now that the library is gone. The two
 English dictionaries are **also redistributed with the desktop daemon**, gzipped,
-under `packages/service/assets/kokoro/`, so both hosts pronounce a sentence the
-same way; `scripts/build-kokoro-lexicon.mjs` stages them from the pinned pack.
+under `packages/service/assets/kokoro/` beside the voice pack's Apache-2.0
+`LICENSE`, so both hosts pronounce a sentence the same way;
+`scripts/build-kokoro-lexicon.mjs` stages them from the pinned pack.
 
 Upstream describes the dictionaries as Apache-2.0. For the record, misaki's
 author states that roughly half the English entries were generated by running
@@ -418,7 +469,7 @@ weights are third-party and carry their own licenses.
 | **Kokoro-82M** (ONNX) | text-to-speech (kokoro-js provider) | Apache-2.0 | [onnx-community/Kokoro-82M-v1.0-ONNX](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) |
 | **all-MiniLM-L6-v2** | semantic memory embeddings (`@huggingface/transformers`) | Apache-2.0 | [Xenova/all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) |
 | **bge-small-en-v1.5** | default text-search embeddings (`@huggingface/transformers`) | MIT | [Xenova/bge-small-en-v1.5](https://huggingface.co/Xenova/bge-small-en-v1.5) |
-| **CLIP ViT-B/32** (ONNX, vision tower) | visual image similarity (`@huggingface/transformers`) | MIT (model card; OpenAI CLIP weights) | [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32) |
+| **EmbeddingGemma 2** (ONNX q8: text model, vision and audio encoders; sha256-pinned) | searching photos, video and sound by meaning, and the `embeddinggemma-2-512@1` knowledge-catalog profile (`@huggingface/transformers`) | Apache-2.0, with the [Gemma Prohibited Use Policy](https://ai.google.dev/gemma/prohibited_use_policy) | [onnx-community/embeddinggemma-2-ONNX](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX) (from [google/embeddinggemma-2](https://huggingface.co/google/embeddinggemma-2)) |
 | **YuNet 2023mar** (ONNX) | face detection (face-recognition opt-in; sha256-pinned) | MIT | [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) |
 | **AuraFace-v1** (`glintr100.onnx`) | face embeddings (face-recognition opt-in; sha256-pinned) | Apache-2.0 | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) |
 
@@ -672,6 +723,19 @@ inventory is the built `packages/service/dist/ui/assets/` tree. `pnpm
 check:notice` reconciles every built WOFF/WOFF2/TTF/OTF file — including Font
 Awesome and codicon from dependencies — with the notice rows and verifies the
 19 legal files staged into the service's npm payload byte-for-byte.
+
+The **Code compiled into the browser bundles** inventory is generated, not
+hand-maintained. The service build stages `dist/licenses/npm/` from the UI and
+Office source maps (`scripts/service-bundled-licenses.mjs`). `pnpm check:notice`
+recomputes it from the built maps and fails on a stale manifest. It also fails
+on a dependency that inlines packages missing from `legal/embedded-licenses/`
+for its exact version. Copyleft licenses fail it too: a bundled package under
+a weak-copyleft license needs a **Weak-copyleft components** row, whose
+version and npm tarball link must match what the carrier declares. A
+dual-licensed package with a copyleft option needs a **License elections**
+row, and a package under a strong-copyleft license alone is refused.
+`node scripts/service-bundled-licenses.mjs --embedded` lists what each
+dependency inlines.
 
 The **Bundled application runtimes** table is checked against Electron's exact
 installed package version and the Node.js/pnpm pins compiled into the desktop

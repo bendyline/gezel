@@ -165,6 +165,7 @@ import { InputStagingManager } from './tasks/inputs/staging.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { MediaSearchManager } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
@@ -1803,6 +1804,9 @@ export async function startProductService(
   // never waits for its load, so construction is free.
   const relevance = new RelevanceModelManager({ home, readConfig: () => store.readConfig() });
   search.setRelevanceProvider(relevance);
+  // Media search (EmbeddingGemma 2): the gate the media embed tier reads and
+  // the model download, which waits for the deferred boot step below.
+  const mediaSearch = new MediaSearchManager({ home, readConfig: () => store.readConfig() });
   if (knowledge) {
     await knowledge.start();
     search.setKnowledgeSearch({
@@ -1834,6 +1838,7 @@ export async function startProductService(
     events: chatEvents,
     history,
     refreshStatic: (projectId) => workspaceIndex.refreshAndWait(projectId),
+    ensureAudioVideo: () => mediaSearch.ensureAudio(),
     // AI-shadow producers: availability is probed per call (cheap health
     // checks; a missing vision/STT model degrades to null, and the shadow
     // gate's attempt cap stops per-file retries).
@@ -2497,6 +2502,7 @@ export async function startProductService(
     indexingJob,
     search,
     relevance,
+    mediaSearch,
     systemIdle,
     terminals,
     terminalEvents,
@@ -2985,6 +2991,7 @@ export async function startProductService(
         if (warmed) log.debug('[memory] embedding pipeline warmed');
       });
       void relevance.bootWarm().catch(() => {});
+      void mediaSearch.bootWarm().catch(() => {});
     }, 20_000).unref();
   }
 

@@ -26,6 +26,7 @@ import {
   isFileRepairPrompt as isScenarioFileRepairPrompt,
   isSourceFileRepairPrompt as isSourceFileScenarioRepairPrompt,
   readFileOnlyTools,
+  requiredToolOnly,
   fileRepairTargetPath as scenarioRepairTargetPath,
   writeFileOnlyTools,
 } from './constrained-turn.js';
@@ -2596,6 +2597,22 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           this.messages.push({ role: 'user', content: nudge });
         };
         let requestTools = tools;
+        // A turn whose whole job is one call (a game reaction's move): the
+        // first request offers that tool alone and requires it, terse like
+        // every other constrained turn here.
+        if (turn === 0 && opts?.requiredTool) {
+          const required = requiredToolOnly(tools, opts.requiredTool);
+          if (required.length) {
+            requestTools = required;
+            this.forceToolChoice(body);
+            disableThinkingForConstrainedTurn(
+              body,
+              this.deps.disableThinkingRequestShape,
+              this.deps.model,
+            );
+            log.debug(`[llama-cpp] required-call turn: ${opts.requiredTool} only`);
+          }
+        }
         if (immediateFileWriteTurn) {
           if (
             typeof userMsg.content === 'string' &&

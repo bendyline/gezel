@@ -5,9 +5,11 @@ import type {
   CraftbookDoc,
   CraftbookDocError,
   CraftbookDocFormat,
+  CraftbookTemplateManifest,
 } from './schemas/index.js';
 import {
   CraftbookDocSchema,
+  CraftbookTemplateManifestSchema,
   nearestMatch,
   parseTolerant,
   slugifyStepId,
@@ -345,6 +347,8 @@ export function craftbookFromDoc(
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
     ...(doc.commands ? { commands: doc.commands } : {}),
+    ...(doc.models ? { models: doc.models } : {}),
+    ...(doc.services ? { services: doc.services } : {}),
     ...(doc.paramSchema ? { paramSchema: doc.paramSchema } : {}),
     ...(doc.cliWorkflow ? { cliWorkflow: doc.cliWorkflow } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
@@ -500,6 +504,8 @@ export function docFromCraftbook(book: Craftbook): CraftbookDoc {
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
     ...(book.connectors ? { connectors: book.connectors } : {}),
     ...(book.commands ? { commands: book.commands } : {}),
+    ...(book.models ? { models: book.models } : {}),
+    ...(book.services ? { services: book.services } : {}),
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     ...(book.cliWorkflow ? { cliWorkflow: book.cliWorkflow } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
@@ -554,4 +560,46 @@ function augmentGraphProblem(problem: string, stepIds: string[]): CraftbookDocEr
     };
   }
   return { where: 'steps', message: `${problem}.` };
+}
+
+/**
+ * Present a runtime craftbook that lives with a project (a project-local copy,
+ * or a book a project type carries) in the catalog-summary shape the launcher
+ * rail renders. Null when the book cannot satisfy the template-manifest schema
+ * (e.g. an id outside the catalog id grammar); such books stay invocable by
+ * id, they just do not join the rail.
+ */
+export function craftbookTemplateManifestFromRuntime(
+  book: Craftbook,
+): CraftbookTemplateManifest | null {
+  const parsed = CraftbookTemplateManifestSchema.safeParse({
+    schemaVersion: 1,
+    kind: 'craftbook-template',
+    id: book.id,
+    name: book.name,
+    description: book.description ?? '',
+    tags: [],
+    maintainer: { name: 'project' },
+    version: book.version ?? '1.0.0',
+    releasedAt: book.updatedAt,
+    about: book.description ?? book.name,
+    steps: book.steps,
+    entryStepId: book.entryStepId,
+    ...(book.basedOn ? { basedOn: book.basedOn } : {}),
+    ...(book.plan ? { plan: book.plan } : {}),
+    ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
+    ...(book.triggers ? { triggers: book.triggers } : {}),
+    ...(book.hooks ? { hooks: book.hooks } : {}),
+    ...(book.scripts ? { scripts: book.scripts } : {}),
+    ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
+    ...(book.command ? { command: book.command } : {}),
+    ...(book.requirements ? { requirements: book.requirements } : {}),
+    ...(book.recommends ? { recommends: book.recommends } : {}),
+    ...(book.runModes ? { runModes: book.runModes } : {}),
+    ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    ...(book.connectors ? { connectors: book.connectors } : {}),
+    ...(book.models ? { models: book.models } : {}),
+    ...(book.services ? { services: book.services } : {}),
+  });
+  return parsed.success ? parsed.data : null;
 }

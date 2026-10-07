@@ -173,9 +173,15 @@ What this means for authors:
   preview URL, which a snapshot does not have; WebKit refuses the URL rewrite
   that could fake one. The phone says the page has not been updated rather
   than showing its demo data as if it were the project's.
-- **`data.url()` is unavailable on phones** (there is no capability URL). Read
-  media with `data.read(path, { as: 'bytes' })` and build a `data:` URL when
-  an image matters; the snapshot CSP allows `data:` images.
+- **`data.url()` works, a moment late.** There is no capability URL, and the
+  snapshot CSP allows only `data:` media, so on a phone the call returns a
+  blank image tagged with the file. The shim reads the bytes over the relay
+  and swaps a `data:` URL in wherever the tag sits in a `src`, `poster`,
+  `href` or `style` attribute, and later calls for the same file return the
+  `data:` URL directly. An element never attached to the document (a bare
+  `new Image()`) is not swapped, and a file over the relay's read cap (2 MiB)
+  stays blank and logs an error. Use `data.read(path, { as: 'bytes' })` when
+  the page needs the bytes themselves.
 - **Design for 320px.** The phone viewport is 320–400 CSS px wide. A page must
   not scroll sideways, and controls should be at least 44px tall.
   `pnpm mobile:test:pages` opens every type's page at 320px and 390px in

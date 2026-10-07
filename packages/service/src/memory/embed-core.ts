@@ -283,7 +283,7 @@ export async function loadPipeline(): Promise<Pipeline> {
       } catch (err) {
         const missing = isMissingModule(err, TRANSFORMERS_MODULE);
         const message = missing
-          ? 'Local memory embeddings are an optional npm feature. Install @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).'
+          ? 'Local memory embeddings are an optional npm feature. Install @huggingface/transformers@^4.3.1 alongside @bendyline/gezel-service (see the service README).'
           : err instanceof Error
             ? err.message
             : String(err);
@@ -360,7 +360,8 @@ async function verifyDaemonPipeline(): Promise<boolean> {
 
 async function defaultTransformersCacheDir(): Promise<string> {
   const { env } = await import('@huggingface/transformers');
-  return env.cacheDir;
+  // 4.x types it nullable: null only where there is no filesystem cache.
+  return env.cacheDir ?? '';
 }
 
 // ── knowledge-catalog profiles ─────────────────────────────────────────────

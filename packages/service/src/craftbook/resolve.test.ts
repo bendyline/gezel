@@ -33,6 +33,8 @@ const FULL: CraftbookTemplateManifest = CraftbookTemplateManifestSchema.parse({
   recommends: [{ kind: 'external-services', reason: 'verifies sources with live web search' }],
   runModes: { scheduled: 'supported' },
   commands: [{ scope: 'script', name: 'test' }],
+  models: [{ id: 'qwen3.8-27b-q4', reason: 'reviews the diff' }],
+  services: [{ kind: 'web-search' }],
   diffpackCapable: true,
   capabilityFloor: 'small',
   spawn: {

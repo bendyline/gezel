@@ -1,8 +1,41 @@
 /** Explicit CLI settings needed by unattended project workflows. */
-import { resolveSecurityPolicy } from '@bendyline/gezel';
+import {
+  type SecurityLevel,
+  type SecurityPolicy,
+  classifySecurityLevel,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { Command } from 'commander';
 import { CliError } from './connection.js';
+
+/** The names Settings → Security & Compliance shows for each level. */
+export const SECURITY_LEVEL_LABELS: Record<SecurityLevel, string> = {
+  'super-lockdown': 'Super Lockdown',
+  lockdown: 'Lockdown',
+  free: 'Unrestricted',
+  custom: 'Custom',
+};
+
+/**
+ * The stored policy with External services switched, labelled with the
+ * preset it now matches — Lockdown plus External services IS Unrestricted,
+ * and the person should be told so rather than see "Custom".
+ */
+export function policyWithExternalServices(
+  config: Parameters<typeof resolveSecurityPolicy>[0],
+  enabled: boolean,
+): SecurityPolicy {
+  const current = resolveSecurityPolicy(config);
+  const caps = {
+    allowFileEdits: current.allowFileEdits,
+    allowExternalChat: current.allowExternalChat,
+    allowExternalServices: enabled,
+    allowScriptExecution: current.allowScriptExecution,
+    allowAppNetwork: current.allowAppNetwork,
+  };
+  return { level: classifySecurityLevel(caps), ...caps };
+}
 
 function enabledValue(state: string | undefined): boolean | undefined {
   if (state === undefined) return undefined;
@@ -24,11 +57,10 @@ export function registerSecurityCommands(
     .action(async (state: string | undefined, options: { json?: boolean }) => {
       const enabled = enabledValue(state);
       const client = await connect();
-      const policy = resolveSecurityPolicy(await client.getConfig());
+      const config = await client.getConfig();
+      const policy = resolveSecurityPolicy(config);
       if (enabled !== undefined) {
-        await client.updateConfig({
-          securityPolicy: { ...policy, level: 'custom', allowExternalServices: enabled },
-        });
+        await client.updateConfig({ securityPolicy: policyWithExternalServices(config, enabled) });
       }
       const result = { allowExternalServices: enabled ?? policy.allowExternalServices };
       console.log(

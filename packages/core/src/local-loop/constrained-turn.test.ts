@@ -3,9 +3,11 @@ import {
   CONSTRAINED_WRITE_MIN_TOKENS,
   type LocalChatCompletionTool,
   applyConstrainedTurnShape,
+  disableTemplateThinking,
   isImmediateFileWriteTurn,
   isScenarioFileRepairPrompt,
   readFileOnlyTools,
+  requiredToolOnly,
   writeFileOnlyTools,
 } from './constrained-turn.js';
 
@@ -120,5 +122,29 @@ describe('applyConstrainedTurnShape', () => {
     applyConstrainedTurnShape(body);
     expect(body.tool_choice).toBeUndefined();
     expect(body.tools).toBeUndefined();
+  });
+});
+
+describe('a turn that must be one call', () => {
+  const tool = (name: string) => ({
+    type: 'function' as const,
+    function: { name, description: name, parameters: {} },
+  });
+  it('offers that tool alone, or nothing when the turn does not have it', () => {
+    const tools = [tool('get_board'), tool('make_move')];
+    expect(requiredToolOnly(tools, 'make_move').map((t) => t.function.name)).toEqual(['make_move']);
+    expect(requiredToolOnly(tools, 'reply')).toEqual([]);
+    expect(requiredToolOnly(undefined, 'make_move')).toEqual([]);
+  });
+  it('turns thinking off without touching sampling', () => {
+    const body: Record<string, unknown> = {
+      temperature: 0.9,
+      chat_template_kwargs: { enable_thinking: true },
+    };
+    disableTemplateThinking(body);
+    expect(body).toMatchObject({
+      temperature: 0.9,
+      chat_template_kwargs: { enable_thinking: false },
+    });
   });
 });

@@ -38,6 +38,7 @@ import {
   WriteTaskNoteInputSchema,
   findGezelInRoster,
   findProjectByReference,
+  formatMediaClock,
   gezelNotFoundMessage,
   gezelRosterHint,
   normalizeArtifactPath,
@@ -151,6 +152,7 @@ import {
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
+  unknownTaskStepText,
   workspaceDrawerPrefix,
   writeTaskNoteText,
 } from '@bendyline/gezel';
@@ -9304,13 +9306,10 @@ async function explainAdvanceFailure(
   }
   if (steps.length === 0) return base;
   const ids = steps.map((s) => s.id);
+  if (next && next !== 'next' && !ids.includes(next))
+    return `${base}\n${unknownTaskStepText('next', next, steps)}`;
+  if (!ids.includes(stepId)) return `${base}\n${unknownTaskStepText('stepId', stepId, steps)}`;
   const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
-  if (next && next !== 'next' && !ids.includes(next)) {
-    return `${base}\nThis task has no step "${next}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to advance to the following step in order.`;
-  }
-  if (!ids.includes(stepId)) {
-    return `${base}\nThis task has no step "${stepId}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
-  }
   return `${base}\nThe task's steps are: ${roster}.`;
 }
 
@@ -11392,19 +11391,29 @@ server.tool(
 
 server.tool(
   'search_images',
-  'Find images in the workspace by filename, caption, or dimensions. Returns matching image paths with width/height/format and a caption when the index has one. Use describe_folder for a folder overview, find_similar_images for visual lookalikes.',
+  'Find images in the workspace by what they show (e.g. "whiteboard with a sprint plan", "red bicycle"), or by filename or caption. Set kinds to also find moments in audio and video files. Returns paths with width/height/format, a caption when the index has one, and for audio/video the matching time window. Use describe_folder for a folder overview, find_similar_images for visual lookalikes.',
   {
-    query: z.string().min(1).describe('Keywords — filename words, caption terms, or format.'),
+    query: z
+      .string()
+      .min(1)
+      .describe('What to find — a description of the content, or filename/caption words.'),
     maxResults: z.number().int().positive().max(100).optional(),
+    kinds: z
+      .array(z.enum(['image', 'audio', 'video']))
+      .min(1)
+      .optional()
+      .describe('Media to search (default ["image"]).'),
   },
   async (args) => {
     try {
       const res = await api.toolSearchImages(projectId, args);
+      const clock = formatMediaClock;
       const lines = res.results.map(
         (r) =>
-          `${r.path}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
+          `${r.path}${r.kind && r.kind !== 'image' ? ` [${r.kind}${r.startMs !== undefined ? ` ${clock(r.startMs)}${r.endMs !== undefined ? `–${clock(r.endMs)}` : ''}` : ''}]` : ''}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
       );
-      const summary = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      const noun = args.kinds?.some((k) => k !== 'image') ? 'match' : 'image';
+      const summary = `${res.results.length} ${noun}${res.results.length === 1 ? '' : noun === 'match' ? 'es' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
       return okResult(
         SearchToolOutputSchema,
         {
@@ -11425,7 +11434,7 @@ server.tool(
 
 server.tool(
   'find_similar_images',
-  'Find images visually similar to a given image (by CLIP embedding). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
+  'Find images visually similar to a given image (on-device image embeddings). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
   {
     path: z.string().min(1).describe('Workspace-relative path of the reference image.'),
     maxResults: z.number().int().positive().max(100).optional(),

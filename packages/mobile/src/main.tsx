@@ -25,6 +25,7 @@ async function boot() {
   const service = new PortableProductService(store, host.inference, token, {
     htmlPreview,
     speech: host.speech,
+    vision: host.vision,
     projectTypes: async () => (await import('virtual:gezel-portable-project-types')).default,
   });
   service.setScripts(createMobileScripts(store));

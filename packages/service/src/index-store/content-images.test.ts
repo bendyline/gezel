@@ -1,7 +1,7 @@
 /**
  * Phase 5 image modality — deterministic tier: dimension extraction, filename
- * search, and folder description. (Captions/CLIP similarity need a vision model
- * and are covered by the graceful-degradation path.)
+ * search, and folder description. (Captions and media-search similarity need a
+ * vision model and are covered by the graceful-degradation path.)
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -82,7 +82,7 @@ describe('image-intel', () => {
     expect(desc.samples).toContain('photos/a.png');
   });
 
-  it('find_similar_images degrades to unavailable without CLIP embeddings', async () => {
+  it('find_similar_images degrades to unavailable without media embeddings', async () => {
     await mkdir(join(dir, 'photos'), { recursive: true });
     await writeFile(join(dir, 'photos', 'a.png'), PNG_800x600);
     await runWorkspaceContentIndex(dir, 'c', artifacts);

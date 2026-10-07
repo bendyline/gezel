@@ -48,6 +48,10 @@
       "types": "./dist/native-release.d.ts",
       "import": "./dist/native-release.js"
     },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "import": "./dist/media.js"
+    },
     "./dist/bin/gezeld.js": "./dist/bin/gezeld.js",
     "./package.json": "./package.json",
     "./packaging": {
@@ -124,7 +128,7 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.3.1",
     "kokoro-js": "^1.2.1",
     "node-pty": "^1.1.0"
   },
@@ -141,7 +145,7 @@
   },
   "devDependencies": {
     "@github/copilot-sdk": "^1.0.7",
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.3.1",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^24.13.3",
     "@types/nodemailer": "^8.0.1",

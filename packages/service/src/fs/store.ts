@@ -430,6 +430,8 @@ function craftbookVersionManifest(book: Craftbook): Record<string, unknown> {
     // straight into the step prompts and gates.
     ...(book.connectors ? { connectors: book.connectors } : {}),
     ...(book.commands ? { commands: book.commands } : {}),
+    ...(book.models ? { models: book.models } : {}),
+    ...(book.services ? { services: book.services } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     ...(book.command ? { command: book.command } : {}),
@@ -459,6 +461,8 @@ function craftbookFieldsFromVersionManifest(v: Record<string, unknown>): Partial
     ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
     ...(Array.isArray(v.connectors) ? { connectors: v.connectors as Craftbook['connectors'] } : {}),
     ...(Array.isArray(v.commands) ? { commands: v.commands as Craftbook['commands'] } : {}),
+    ...(Array.isArray(v.models) ? { models: v.models as Craftbook['models'] } : {}),
+    ...(Array.isArray(v.services) ? { services: v.services as Craftbook['services'] } : {}),
     ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
     ...(isRecord(v.paramSchema) ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] } : {}),
     ...(typeof v.command === 'string' ? { command: v.command } : {}),

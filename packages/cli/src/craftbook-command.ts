@@ -5,7 +5,12 @@
  */
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Craftbook, Task } from '@bendyline/gezel';
-import { type AwakeBudget, createAwakeTimeout } from '@bendyline/gezel';
+import {
+  type AwakeBudget,
+  composeCraftbookLaunch,
+  createAwakeTimeout,
+  paramAsksUser,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
 import { type StartCraftbook, findCraftbook } from './tui/craftbook-start.js';
@@ -19,44 +24,95 @@ export function resolveCraftbookInvocation(books: StartCraftbook[], tokens: stri
   throw new CliError(`craftbook not found: ${tokens.join(' ')}`);
 }
 
-export function parseCraftbookParams(book: Pick<Craftbook, 'paramSchema'>, tokens: string[]) {
+const NAMED_ARGUMENT = /^([A-Za-z][\w.-]*)=([\s\S]*)$/;
+
+function checkParamValue(key: string, def: Record<string, unknown>, value: string) {
+  if (Array.isArray(def.enum) && !def.enum.map(String).includes(value)) {
+    throw new CliError(`${key} must be one of: ${def.enum.join(', ')}`);
+  }
+  if (def.type === 'boolean' && !['true', 'false'].includes(value))
+    throw new CliError(`${key} must be true or false`);
+  if (def.type === 'number' || def.type === 'integer') {
+    const number = Number(value);
+    if (
+      !value.trim() ||
+      !Number.isFinite(number) ||
+      (def.type === 'integer' && !Number.isInteger(number))
+    )
+      throw new CliError(`${key} must be a ${def.type}`);
+    if (typeof def.minimum === 'number' && number < def.minimum)
+      throw new CliError(`${key} must be at least ${def.minimum}`);
+    if (typeof def.maximum === 'number' && number > def.maximum)
+      throw new CliError(`${key} must be at most ${def.maximum}`);
+  }
+  if (typeof def.pattern === 'string' && !new RegExp(def.pattern).test(value))
+    throw new CliError(`${key} must match ${def.pattern}`);
+  if (typeof def.minLength === 'number' && value.trim().length < def.minLength)
+    throw new CliError(`${key} is too short`);
+}
+
+export interface CraftbookArguments {
+  params: Record<string, string>;
+  /**
+   * The bare words no required parameter took, joined: the person's request.
+   * `composeCraftbookLaunch` makes it the task description and, when the
+   * book declares one, its main content parameter.
+   */
+  request?: string;
+}
+
+/**
+ * Split `gezel do` arguments into parameters and a request. `key=value` (or
+ * `--param key=value`, passed as `named`) sets any declared parameter,
+ * including ones a launch form never shows. A bare word fills the next
+ * required parameter a person is asked for that has no default, in
+ * declaration order: what a book cannot start without, such as a branch or a
+ * source file. Every other bare word belongs to the request.
+ *
+ * Bare words used to fill parameters in declaration order regardless. In 257
+ * of 296 bundled books the first was the runtime-owned `workPath`, so
+ * `gezel do summarize-long "Summarize notes.txt"` named the artifacts folder
+ * after the sentence, and the request itself reached the task nowhere.
+ */
+export function parseCraftbookArguments(
+  book: Pick<Craftbook, 'paramSchema'>,
+  tokens: string[],
+  named: string[] = [],
+): CraftbookArguments {
   const schema = book.paramSchema ?? {};
   const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-  const keys = Object.keys(properties);
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const slots = Object.keys(properties).filter(
+    (key) =>
+      required.has(key) &&
+      properties[key]!.default === undefined &&
+      paramAsksUser(properties[key], key),
+  );
   const params: Record<string, string> = {};
-  for (const token of tokens) {
-    const match = /^([A-Za-z][\w.-]*)=([\s\S]*)$/.exec(token);
-    const key = match?.[1] ?? keys.find((name) => !Object.hasOwn(params, name));
-    if (!key || !Object.hasOwn(properties, key))
-      throw new CliError(`unknown craftbook argument: ${token}`);
+  const requestWords: string[] = [];
+  const set = (key: string, value: string, token: string) => {
+    if (!Object.hasOwn(properties, key)) throw new CliError(`unknown craftbook argument: ${token}`);
     if (Object.hasOwn(params, key)) throw new CliError(`duplicate craftbook parameter: ${key}`);
-    const value = match ? match[2]! : token;
-    const def = properties[key]!;
-    if (Array.isArray(def.enum) && !def.enum.map(String).includes(value)) {
-      throw new CliError(`${key} must be one of: ${def.enum.join(', ')}`);
-    }
-    if (def.type === 'boolean' && !['true', 'false'].includes(value))
-      throw new CliError(`${key} must be true or false`);
-    if (def.type === 'number' || def.type === 'integer') {
-      const number = Number(value);
-      if (
-        !value.trim() ||
-        !Number.isFinite(number) ||
-        (def.type === 'integer' && !Number.isInteger(number))
-      )
-        throw new CliError(`${key} must be a ${def.type}`);
-      if (typeof def.minimum === 'number' && number < def.minimum)
-        throw new CliError(`${key} must be at least ${def.minimum}`);
-      if (typeof def.maximum === 'number' && number > def.maximum)
-        throw new CliError(`${key} must be at most ${def.maximum}`);
-    }
-    if (typeof def.pattern === 'string' && !new RegExp(def.pattern).test(value))
-      throw new CliError(`${key} must match ${def.pattern}`);
-    if (typeof def.minLength === 'number' && value.trim().length < def.minLength)
-      throw new CliError(`${key} is too short`);
+    checkParamValue(key, properties[key]!, value);
     params[key] = value;
+  };
+
+  for (const token of tokens) {
+    const match = NAMED_ARGUMENT.exec(token);
+    if (match) {
+      set(match[1]!, match[2]!, token);
+      continue;
+    }
+    const slot = slots.find((key) => !Object.hasOwn(params, key));
+    if (slot) set(slot, token, token);
+    else requestWords.push(token);
   }
-  for (const key of Array.isArray(schema.required) ? schema.required : []) {
+  for (const token of named) {
+    const match = NAMED_ARGUMENT.exec(token);
+    if (!match) throw new CliError(`--param expects key=value: ${token}`);
+    set(match[1]!, match[2]!, token);
+  }
+  for (const key of required) {
     if (
       typeof key === 'string' &&
       !Object.hasOwn(params, key) &&
@@ -65,7 +121,27 @@ export function parseCraftbookParams(book: Pick<Craftbook, 'paramSchema'>, token
       throw new CliError(`missing required craftbook parameter: ${key}`);
   }
   // Defaults, especially {{task.dir}}, belong to the server after task allocation.
-  return params;
+  const request = requestWords.join(' ').trim();
+  return request ? { params, request } : { params };
+}
+
+/**
+ * The task fields `gezel do` lays over the book's start request. A request
+ * goes through the launch composition every other surface uses, so it reads
+ * the same here as from the chat composer.
+ */
+export function craftbookDoLaunch(
+  craftbook: Pick<Craftbook, 'name' | 'paramSchema'>,
+  { params, request }: CraftbookArguments,
+): { description?: string; craftbookParams: Record<string, string> } {
+  if (!request) return { craftbookParams: params };
+  const launch = composeCraftbookLaunch({
+    message: request,
+    craftbookName: craftbook.name,
+    paramSchema: craftbook.paramSchema,
+    params,
+  });
+  return { description: launch.description, craftbookParams: launch.params };
 }
 
 export interface TaskWaitResult {

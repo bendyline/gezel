@@ -368,10 +368,11 @@ mac:
   # Info.plist telling users "This app needs access to the camera" and
   # "…to Bluetooth" for hardware nothing in the product touches.
   #
-  # Voice input is the sole live-media exception: the chat composer's explicit
-  # Narrate action records microphone-only audio and sends short takes to the
-  # user's configured speech-to-text engine. Camera, screen capture, Bluetooth,
-  # WebUSB, and Web Serial still have no product surface and remain absent.
+  # Two live-media exceptions, both explicit composer actions: Narrate records
+  # microphone-only audio and sends short takes to the user's configured
+  # speech-to-text engine, and Take photo captures one still from the camera
+  # into the prompt draft. Screen capture, Bluetooth, WebUSB, and Web Serial
+  # still have no product surface and remain absent.
   # Apple Events is the one non-media key: the ambient wallpaper asks System
   # Events to read and set the desktop picture.
   #
@@ -391,7 +392,7 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: Gezel records your voice when you choose Narrate so your configured speech-to-text engine can add it to the chat prompt.
     NSAppleEventsUsageDescription: Gezel asks System Events to set your desktop picture when you turn on the ambient display wallpaper, and to put your own picture back when you turn it off.
-    NSCameraUsageDescription: null
+    NSCameraUsageDescription: Gezel uses the camera when you choose Take photo so the picture can be added to your chat message.
     NSAudioCaptureUsageDescription: null
     NSBluetoothAlwaysUsageDescription: null
     NSBluetoothPeripheralUsageDescription: null

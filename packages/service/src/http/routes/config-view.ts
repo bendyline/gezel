@@ -127,6 +127,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     faceRecognition: config.faceRecognition,
     taskReferences: config.taskReferences,
     relevanceModel: config.relevanceModel,
+    mediaSearch: config.mediaSearch,
     ambientDashboard: config.ambientDashboard,
     ambientDisplay: config.ambientDisplay,
     autoRecall: config.autoRecall,

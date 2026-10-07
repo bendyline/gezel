@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskCraftbookStep } from './schemas/task.js';
-import { isOwnerStep, stepOwnerGezelId, taskActiveAssignee } from './task-execution.js';
+import {
+  isContextOverflowError,
+  isOwnerStep,
+  stepOwnerGezelId,
+  taskActiveAssignee,
+} from './task-execution.js';
 
 const step = (over: Partial<TaskCraftbookStep> = {}): TaskCraftbookStep =>
   ({ id: 'owner-review', name: 'Owner Review', ...over }) as TaskCraftbookStep;
@@ -35,5 +40,20 @@ describe('stepOwnerGezelId', () => {
     const bare = step();
     expect(stepOwnerGezelId(t(bare), bare)).toBe('kylian');
     expect(isOwnerStep(bare)).toBe(false);
+  });
+});
+
+describe('isContextOverflowError', () => {
+  it.each([
+    "This conversation is too long for Android's on-device AI. Start a new conversation.",
+    'Input text length exceeds the limit. Please check the countTokens API.',
+    'This conversation is too long for Apple on-device AI. Start a new conversation.',
+    'Prompt plus requested output exceeds the context; shorten the transcript or output',
+  ])('recognizes %j', (message) => {
+    expect(isContextOverflowError(new Error(message))).toBe(true);
+  });
+
+  it('leaves other failures alone', () => {
+    expect(isContextOverflowError(new Error('Android on-device AI is busy'))).toBe(false);
   });
 });

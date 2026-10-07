@@ -18,7 +18,11 @@
  * daemon's model cache.
  */
 
-import { type KnowledgeEmbeddingProfile, embeddingProfileArtifacts } from '@bendyline/gezk';
+import {
+  type KnowledgeEmbeddingProfile,
+  embeddingProfileArtifacts,
+  profileUnitVector,
+} from '@bendyline/gezk';
 import { type VerifiedArtifacts, verifyProfileArtifacts } from './artifact-verify.js';
 
 const MAX_BATCH = 8;
@@ -28,9 +32,12 @@ export interface ProfileEmbedder {
   readonly profile: KnowledgeEmbeddingProfile;
   /** What the loaded model files were checked against after loading. */
   readonly verification: VerifiedArtifacts;
-  /** Raw passage embed — takes ALREADY-PREFIXED texts (the compiler's contract). */
+  /**
+   * Raw passage embed — takes ALREADY-PREFIXED texts (the compiler's
+   * contract) and returns the model's own width; the compiler projects.
+   */
   embed(texts: string[]): Promise<number[][]>;
-  /** Query embed — applies the profile's queryInstruction itself. */
+  /** Query embed — applies the queryInstruction and the profile's projection itself. */
   embedQuery(text: string): Promise<Float32Array>;
   /** Profile-tokenizer token count (sync once loaded — chunking's contract). */
   countTokens(text: string): number;
@@ -42,7 +49,7 @@ export interface ProfileEmbedder {
  * as its optional peer dependency (a test holds the two together). Error
  * messages quote it so the install command they print is exact.
  */
-export const TRANSFORMERS_PEER_RANGE = '^3.8.1';
+export const TRANSFORMERS_PEER_RANGE = '^4.3.1';
 
 export class EmbedderUnavailableError extends Error {
   readonly isActionable = true;
@@ -61,8 +68,43 @@ export interface TransformersModule {
   AutoTokenizer: {
     from_pretrained: (model: string, options?: Record<string, unknown>) => Promise<TokenizerFn>;
   };
+  /**
+   * Read a repo's config before choosing a loader. Optional so a test fake
+   * that only knows the pipeline keeps working; without it every profile
+   * loads through `pipeline`.
+   */
+  AutoConfig?: {
+    from_pretrained: (
+      model: string,
+      options?: Record<string, unknown>,
+    ) => Promise<Record<string, unknown>>;
+  };
+  /** Multimodal encoders: loads the text session alone (see `isMultimodalEncoderConfig`). */
+  AutoModel?: {
+    from_pretrained: (model: string, options?: Record<string, unknown>) => Promise<EncoderModelFn>;
+  };
   env: { cacheDir?: string; useFSCache?: boolean; allowRemoteModels?: boolean };
 }
+
+/** A tensor as this module reads it: flat data plus its shape. */
+export interface TensorLike {
+  data: ArrayLike<number>;
+  dims: number[];
+}
+
+/** A tokenizer called on a batch, as the encoder path feeds a model directly. */
+export type BatchTokenizerFn = TokenizerFn &
+  ((
+    texts: string[],
+    options: { padding: boolean; truncation: boolean; max_length: number },
+  ) => {
+    attention_mask?: TensorLike;
+  });
+
+/** A text-session encoder: tokenized inputs in, named tensors out. */
+export type EncoderModelFn = ((inputs: unknown) => Promise<Record<string, TensorLike>>) & {
+  dispose?: () => Promise<unknown>;
+};
 
 export type PipelineFn = ((
   texts: string[],
@@ -171,6 +213,60 @@ export function transformersGraphOptions(
   return { dtype, subfolder, model_file_name: modelFileName };
 }
 
+/**
+ * A multimodal embedding model (one space for text, images, audio) carries
+ * its media encoders' configs beside the text model's. Through the
+ * `feature-extraction` pipeline it would load every encoder; the text path
+ * needs only the text session, which `AutoModel` loads once those configs
+ * are cleared.
+ */
+export function isMultimodalEncoderConfig(config: Record<string, unknown>): boolean {
+  return Boolean(config.vision_config || config.audio_config);
+}
+
+/** How many external-data sidecars the profile pins beside its graph (`<graph>_data`, `<graph>_data_1`, …). */
+export function pinnedExternalDataChunks(profile: KnowledgeEmbeddingProfile): number {
+  const { onnxFile, files } = embeddingProfileArtifacts(profile);
+  const prefix = `${onnxFile}_data`;
+  return files.filter((f) => f.path === prefix || /^_\d+$/.test(f.path.slice(prefix.length)))
+    .length;
+}
+
+/**
+ * The model's raw output rows from an encoder run: the graph's own
+ * `sentence_embedding` when it has one (pooling inside the graph), else the
+ * attention-masked mean of `last_hidden_state`.
+ */
+function encoderRows(
+  outputs: Record<string, TensorLike>,
+  attentionMask: TensorLike | undefined,
+): number[][] {
+  const pooled = outputs.sentence_embedding;
+  if (pooled) {
+    const [batch = 0, width = 0] = pooled.dims;
+    return Array.from({ length: batch }, (_, b) =>
+      Array.from({ length: width }, (_, d) => pooled.data[b * width + d] as number),
+    );
+  }
+  const hidden = outputs.last_hidden_state;
+  if (!hidden || !attentionMask) {
+    throw new Error('the encoder returned neither sentence_embedding nor last_hidden_state');
+  }
+  const [batch = 0, tokens = 0, width = 0] = hidden.dims;
+  return Array.from({ length: batch }, (_, b) => {
+    const sum = new Array<number>(width).fill(0);
+    let count = 0;
+    for (let t = 0; t < tokens; t++) {
+      if (!Number(attentionMask.data[b * tokens + t])) continue;
+      count++;
+      const base = (b * tokens + t) * width;
+      for (let d = 0; d < width; d++)
+        sum[d] = (sum[d] as number) + (hidden.data[base + d] as number);
+    }
+    return sum.map((v) => v / Math.max(1, count));
+  });
+}
+
 async function loadTransformers(): Promise<TransformersModule> {
   try {
     const specifier = '@huggingface/transformers';
@@ -224,16 +320,45 @@ export async function createProfileEmbedder(
   const progress = opts.onDownloadProgress
     ? { progress_callback: aggregateDownloadProgress(opts.onDownloadProgress) }
     : {};
-  const [pipe, tokenizer] = await Promise.all([
-    transformers.pipeline('feature-extraction', profile.model.repo, {
-      ...modelOptions,
-      ...(opts.localFilesOnly ? { local_files_only: true } : {}),
-      ...(opts.sessionOptions ? { session_options: opts.sessionOptions } : {}),
-      ...progress,
-    }),
+  const localOnly = opts.localFilesOnly ? { local_files_only: true } : {};
+  const sessionOptions = opts.sessionOptions ? { session_options: opts.sessionOptions } : {};
+  const config = transformers.AutoConfig
+    ? await transformers.AutoConfig.from_pretrained(profile.model.repo, {
+        revision: modelOptions.revision,
+        ...localOnly,
+        ...progress,
+      })
+    : null;
+  const multimodal = config !== null && isMultimodalEncoderConfig(config);
+  if (multimodal && !transformers.AutoModel) {
+    throw new EmbedderUnavailableError(
+      `profile ${profile.id} is a multimodal encoder; this runtime cannot load its text session`,
+    );
+  }
+  const externalData = pinnedExternalDataChunks(profile);
+  const [runner, tokenizer] = await Promise.all([
+    multimodal
+      ? (transformers.AutoModel as NonNullable<TransformersModule['AutoModel']>).from_pretrained(
+          profile.model.repo,
+          {
+            ...modelOptions,
+            config: { ...config, vision_config: null, audio_config: null },
+            ...(externalData > 0 ? { use_external_data_format: externalData } : {}),
+            ...localOnly,
+            ...sessionOptions,
+            ...progress,
+          },
+        )
+      : transformers.pipeline('feature-extraction', profile.model.repo, {
+          ...modelOptions,
+          ...(externalData > 0 ? { use_external_data_format: externalData } : {}),
+          ...localOnly,
+          ...sessionOptions,
+          ...progress,
+        }),
     transformers.AutoTokenizer.from_pretrained(profile.model.repo, {
       revision: modelOptions.revision,
-      ...(opts.localFilesOnly ? { local_files_only: true } : {}),
+      ...localOnly,
       ...progress,
     }),
   ]);
@@ -244,19 +369,29 @@ export async function createProfileEmbedder(
       cacheDir: cacheDir ?? transformers.env.cacheDir ?? '',
     });
   } catch (err) {
-    await pipe.dispose?.().catch(() => {});
+    await runner.dispose?.().catch(() => {});
     throw err;
   }
 
   const cap = (text: string): string =>
     text.length <= MAX_CHARS ? text : text.slice(0, MAX_CHARS);
 
+  const runBatch = multimodal
+    ? async (slice: string[]): Promise<number[][]> => {
+        const inputs = (tokenizer as BatchTokenizerFn)(slice, {
+          padding: true,
+          truncation: true,
+          max_length: profile.maxTokens,
+        });
+        return encoderRows(await (runner as EncoderModelFn)(inputs), inputs.attention_mask);
+      }
+    : async (slice: string[]): Promise<number[][]> =>
+        (await (runner as PipelineFn)(slice, { pooling, normalize: true })).tolist();
+
   const embed = async (texts: string[]): Promise<number[][]> => {
     const out: number[][] = [];
     for (let i = 0; i < texts.length; i += MAX_BATCH) {
-      const slice = texts.slice(i, i + MAX_BATCH).map(cap);
-      const result = await pipe(slice, { pooling, normalize: true });
-      out.push(...result.tolist());
+      out.push(...(await runBatch(texts.slice(i, i + MAX_BATCH).map(cap))));
     }
     return out;
   };
@@ -267,11 +402,12 @@ export async function createProfileEmbedder(
     embed,
     embedQuery: async (text) => {
       const [vector] = await embed([`${profile.queryInstruction}${text}`]);
-      return Float32Array.from(vector ?? []);
+      if (!vector) throw new Error(`profile ${profile.id} returned no query vector`);
+      return profileUnitVector(profile, vector);
     },
     countTokens: (text) => tokenizer.encode(text).length,
     dispose: async () => {
-      await pipe.dispose?.();
+      await runner.dispose?.();
     },
   };
 }

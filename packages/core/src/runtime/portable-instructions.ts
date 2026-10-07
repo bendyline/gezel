@@ -3,6 +3,7 @@ import { profileHasBehavior } from '../local-loop/profile.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { isOutsideInInternalPath } from '../outside-in-paths.js';
+import { leanSession } from '../project-types/composition.js';
 import {
   type BuiltInstructions,
   type PromptTaskContext,
@@ -123,7 +124,7 @@ export async function buildPortableInstructions(
     ...(input.minimalContext ? { minimalContext: true } : {}),
     ...(input.inAppWebPreview ? { inAppWebPreview: true } : {}),
     ...(step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
-    ...(project.leanProfile ? { leanProfile: true } : {}),
+    ...(leanSession(project, session) ? { leanProfile: true } : {}),
     ...(profileHasBehavior(profile, 'prompt.retrieval-first') ? { retrievalFirstHint: true } : {}),
     workspaceWritable: projectManagedWorkspaceWritable(project) || Boolean(input.task?.diffpackId),
     // The desktop's llama.cpp default. Templates that allow one system

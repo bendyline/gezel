@@ -967,6 +967,24 @@ would put the caret somewhere different on every keystroke. The glyph is
 chevrons pushing apart, closing back together once expanded, and carries
 `title` + `aria-label` + `aria-pressed` like every other icon key.
 
+**Take photo is the camera's one door.** The composer toolbar's camera key
+sits between Insert image and Attach file and inserts `![Photo](…)` into the
+draft, like the other two. A phone opens its own camera
+(`<input capture>`): the system camera is better than anything we could
+draw, and the person already knows it. A desktop gets a small viewfinder
+dialog ([`CameraCaptureDialog`](../packages/ui/src/components/CameraCaptureDialog.tsx)):
+live preview, one shutter press, then a still to Retake or Insert. The key
+appears only where a camera exists. The camera runs only while its preview
+is on screen: it stops on the shutter press, so the indicator light never
+outlives what the person can see. Photos are capped at 2048px on the long
+edge and re-encoded, which also strips a phone photo's GPS metadata before it
+reaches a prompt. When the model cannot see images, the message carries a
+warning saying so; never let the person assume a gezel saw a picture it only
+had the name of. On a phone the photo is read on the device before the model
+runs (labels and text always, a description where a describer is ready), and
+the warning names what was missing: only labels, or nothing. Settings → AI →
+Photos is where a describer is fetched; a chat turn never starts a download.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:
@@ -1198,6 +1216,17 @@ rail's add key opens `KnowledgeCatalogsDialog`, which hosts the same
 the shelves is part of using the library, so it should not move the person to
 another area. Installs announce themselves, and the rail picks each one up
 while the dialog is still open.
+
+**A media hit says what matched and opens on it.** A search hit on a photo, a
+clip or a recording reads `Photo`, `Video · 1:30–2:00` or `Sound · 0:00–0:30`
+(`mediaSpanLabel` in core, the one wording for every surface). In the titlebar
+it leads the muted subtitle; in the Knowledge results it is its own muted line
+under the title, and a photo also gets a 3rem `--radius-sm` thumbnail beside
+the text. Opening a hit lands on the moment: a workspace file's player starts
+at the matched window, and a catalog hit opens its article with the media in
+a bordered `--radius-lg` figure above it, the asset's credit in the caption.
+Players start where the hit matched, never at 0:00 with the time left for the
+person to find.
 
 **Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
 entries Gezel ships and reviews with thousands imported automatically from

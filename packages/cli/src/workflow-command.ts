@@ -8,6 +8,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type Craftbook,
+  type CraftbookSetupNeeds,
   type ProjectCompletionRequest,
   type Task,
   craftbookFromDoc,
@@ -17,7 +18,8 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
-import { parseCraftbookParams, waitForTask } from './craftbook-command.js';
+import { parseCraftbookArguments, waitForTask } from './craftbook-command.js';
+import { ensureCraftbookSetup, terminalPrompter } from './craftbook-setup.js';
 
 /** Validate generated documents with the same contracts as the daemon, before installing them. */
 export function validateWorkflowCraftbook(document: unknown): Craftbook {
@@ -53,6 +55,20 @@ export async function runWorkflow(
   const module = await import(pathToFileURL(path).href);
   if (typeof module.run !== 'function')
     throw new CliError(`workflow ${path} must export an async run(context) function`);
+  const ensureSetup = (
+    needs: CraftbookSetupNeeds,
+    book: Pick<Craftbook, 'name' | 'paramSchema'> | undefined = invocation?.craftbook,
+    params: Record<string, string> | undefined = invocation?.params,
+  ) =>
+    ensureCraftbookSetup(client, {
+      projectId,
+      label: book?.name ?? 'This workflow',
+      needs,
+      ...(params ? { params } : {}),
+      ...(book?.paramSchema ? { paramSchema: book.paramSchema } : {}),
+      prompter: terminalPrompter(),
+      write: (text) => process.stderr.write(text),
+    });
   return module.run({
     client,
     projectId,
@@ -65,6 +81,9 @@ export async function runWorkflow(
     // more reliable than a task that must read its input back through tools.
     complete: (request: ProjectCompletionRequest, signal?: AbortSignal) =>
       client.completeInProject(projectId, request, signal),
+    // Needs the module computes at run time (models chosen by its own
+    // options): asked for at a terminal, otherwise a CliError naming the fix.
+    ensureSetup: (needs: CraftbookSetupNeeds) => ensureSetup(needs),
     runCraftbook: async (
       id: string,
       params: Record<string, string>,
@@ -79,10 +98,12 @@ export async function runWorkflow(
       let ref = options.taskRef;
       if (!ref) {
         const { craftbook: book } = await client.getCraftbook(id, { projectId, source: 'project' });
-        const parsed = parseCraftbookParams(
+        const { params: parsed } = parseCraftbookArguments(
           book,
+          [],
           Object.entries(params).map(([key, value]) => `${key}=${value}`),
         );
+        await ensureSetup(book, book, parsed);
         const task = await client.createTask(projectId, {
           title: options.title ?? book.name,
           description: `Run the project craftbook ${book.name}. Follow every step and satisfy its required outcomes before completing this task.`,

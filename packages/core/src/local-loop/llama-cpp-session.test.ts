@@ -2059,6 +2059,72 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(requestCount).toBe(1);
   });
 
+  it('offers a required call alone on the turn’s first request, then the whole surface', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length > 1)
+        return sseResponse([
+          { choices: [{ index: 0, delta: { content: 'No legal move there.' } }] },
+          { choices: [{ index: 0, finish_reason: 'stop' }] },
+          '[DONE]',
+        ]);
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_move',
+                    type: 'function',
+                    function: { name: 'make_move', arguments: '{"from":"b6","to":"z9"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    Object.defineProperty(provider, 'supportsForcedToolChoice', { value: true });
+    const session = await provider.createSession({
+      systemMessage: 'Play from the current board.',
+      model: 'qwen',
+      terminalToolPolicy: { toolNames: ['make_move'], fallbackText: 'Your turn.' },
+    });
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['get_board', 'make_move', 'new_game'].map((name) => ({
+          name,
+          description: name,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async () => 'ERROR: z9 is not a square on the board.',
+    };
+
+    await session.sendAndWait('Your opponent played c3-d4. Make your move.', {
+      requiredTool: 'make_move',
+    });
+
+    const names = (body: Record<string, unknown>) =>
+      (body.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
+    expect(names(bodies[0]!)).toEqual(['make_move']);
+    expect(bodies[0]!.tool_choice).toBe('required');
+    expect(bodies[0]!.chat_template_kwargs).toMatchObject({ enable_thinking: false });
+    // The move was refused: the model answers with everything in reach again.
+    expect(names(bodies[1]!)).toEqual(['get_board', 'make_move', 'new_game']);
+    expect(bodies[1]!.tool_choice).toBeUndefined();
+  });
+
   it('ends a task-step turn after advance succeeds and skips later calls in the batch', async () => {
     let requestCount = 0;
     let staleWriteRan = false;

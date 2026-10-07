@@ -372,6 +372,36 @@
   overflow: hidden;
 }
 
+/* A media hit (photo, clip, recording): a thumbnail beside the text for
+   photos, and the kind + matched moment as a muted line under the title. */
+.knowledge-doc-row--media {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.knowledge-doc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.knowledge-doc-thumb {
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.knowledge-doc-media {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 .knowledge-list-more {
   margin: 0.25rem 1rem 1rem;
   align-self: flex-start;
@@ -396,6 +426,28 @@
   margin: 0;
   font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+/* The photo, clip or recording a media search hit opened, above the article. */
+.knowledge-reader-media {
+  margin: 0.75rem 1.5rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.knowledge-reader-media img,
+.knowledge-reader-media video {
+  display: block;
+  max-width: 100%;
+  max-height: 22rem;
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+}
+
+.knowledge-reader-media figcaption {
+  margin-top: 0.5rem;
 }
 
 .knowledge-reader-body {

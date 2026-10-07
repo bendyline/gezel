@@ -5,13 +5,20 @@
  * renders, which tools a session or page sees, or who fills a crew slot lives
  * here, so the two hosts cannot drift apart.
  */
+import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { type ModelTier, tierAtLeast } from '../roles/tier.js';
-import type { ProjectTypeManifest, ProjectTypeTool } from '../schemas/catalog.js';
+import type {
+  ProjectTypeManifest,
+  ProjectTypeTool,
+  ProjectTypeToolReaction,
+} from '../schemas/catalog.js';
 import {
   type GezelFrontmatter,
   GezelFrontmatterSchema,
   type GezelSummary,
 } from '../schemas/gezel.js';
+import type { TurnMessageOrigin } from '../schemas/session.js';
+import { scriptOutputMatches } from '../scripts/predicates.js';
 
 /** The builtins a lean (game / chat-room) type keeps beside its own script tools. */
 export const LEAN_PROFILE_BUILTIN_TOOLS: readonly string[] = ['ask_user_question'];
@@ -280,4 +287,147 @@ export function projectTypeHostGap(
   if ((manifest.toolsets?.length ?? 0) > 0 && !host.toolsets)
     return 'Needs tools that only the desktop app installs.';
   return undefined;
+}
+
+/**
+ * Whether a session runs lean: a conversation in a lean type (a game, a tutor,
+ * the chat room). A task step there keeps the kit its step needs; narrowed to
+ * the type's own tools, a craftbook's steps could not write what they owe.
+ */
+export function leanSession(
+  project: { leanProfile?: boolean } | null | undefined,
+  session: { taskRef?: string },
+): boolean {
+  return project?.leanProfile === true && !session.taskRef;
+}
+
+type TurnTool = Pick<ProjectTypeTool, 'name' | 'turn' | 'state'>;
+
+/** How an activity's turns run, on every host, from what its tools declare. */
+export interface ProjectTypeTurnRules {
+  /** A person's message is answered from this tool's output (`state`). */
+  stateTool?: string;
+  /**
+   * The calls that are a turn's whole job (`turn`): a successful one ends the
+   * turn, its `say` argument the reply. Asked for more, a small model writes
+   * the call again: Gemini Nano followed six of twelve checkers moves with
+   * another `make_move`, escaped and shown raw as its reply (Galaxy S26+,
+   * 2026-10-06).
+   */
+  terminal?: TerminalToolPolicy;
+}
+
+/**
+ * Catalog versions published before tools declared `turn` and `state`
+ * (checkers 1.2.1, chess 1.0.4, go 1.0.2 and earlier) get the same rules from
+ * the tool names every board game shares. Remove once the pinned catalog's
+ * games all declare them.
+ */
+function legacyGameTurnTools(
+  tools: readonly TurnTool[],
+  project: { leanProfile?: boolean } | null | undefined,
+): readonly TurnTool[] {
+  const names = new Set(tools.map((tool) => tool.name));
+  if (!project?.leanProfile || !names.has('get_board') || !names.has('make_move')) return tools;
+  return tools.map((tool) =>
+    tool.name === 'get_board'
+      ? { ...tool, state: true }
+      : tool.name === 'make_move'
+        ? { ...tool, turn: { say: 'moveThought', fallback: 'Move made — your turn.' } }
+        : tool,
+  );
+}
+
+/** The turn rules a session's type tools declare, if any. */
+export function projectTypeTurnRules(
+  tools: readonly TurnTool[],
+  project?: { leanProfile?: boolean } | null,
+): ProjectTypeTurnRules | undefined {
+  const effective = tools.some((tool) => tool.turn || tool.state)
+    ? tools
+    : legacyGameTurnTools(tools, project);
+  const stateTool = effective.find((tool) => tool.state)?.name;
+  const turnTools = effective.filter((tool) => tool.turn);
+  if (!stateTool && turnTools.length === 0) return undefined;
+  return {
+    ...(stateTool ? { stateTool } : {}),
+    ...(turnTools.length
+      ? {
+          terminal: {
+            toolNames: turnTools.map((tool) => tool.name),
+            closingArgByTool: Object.fromEntries(
+              turnTools.flatMap((tool) => (tool.turn?.say ? [[tool.name, tool.turn.say]] : [])),
+            ),
+            fallbackText:
+              turnTools.find((tool) => tool.turn?.fallback)?.turn?.fallback ?? 'Your turn.',
+            maxClosingChars: 600,
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The tool a reaction's turn must call: its `turn.tool`, when that is one of
+ * the session's turn tools and `turn.when` holds over the output of the tool
+ * that summoned it. Otherwise the turn is an ordinary one, free to say
+ * something instead (checkers: the game is over, so there is no move to make).
+ */
+export function reactionRequiredTool(
+  reaction: Pick<ProjectTypeToolReaction, 'turn'> | undefined,
+  output: unknown,
+  tools: readonly TurnTool[],
+  project?: { leanProfile?: boolean } | null,
+): string | undefined {
+  const turn = reaction?.turn;
+  if (!turn) return undefined;
+  const turnTools = projectTypeTurnRules(tools, project)?.terminal?.toolNames ?? [];
+  if (!turnTools.includes(turn.tool)) return undefined;
+  if (turn.when && !scriptOutputMatches(turn.when, output)) return undefined;
+  return turn.tool;
+}
+
+/** What is wrong with a type's turn declarations, for content checks. */
+export function projectTypeTurnProblems(
+  manifest: Pick<ProjectTypeManifest, 'tools' | 'pages'>,
+): string[] {
+  const problems: string[] = [];
+  const pageTools = new Set(manifest.pages?.tools ?? []);
+  const byName = new Map(manifest.tools.map((tool) => [tool.name, tool]));
+  for (const tool of manifest.tools) {
+    if ((tool.turn || tool.state) && pageTools.has(tool.name))
+      problems.push(`${tool.name} is a page tool; turn and state apply to tools the model calls`);
+    const turn = tool.reaction?.turn;
+    if (!turn) continue;
+    const target = byName.get(turn.tool);
+    if (!target)
+      problems.push(
+        `${tool.name}: reaction.turn names ${turn.tool}, which is not a tool of this type`,
+      );
+    else if (pageTools.has(turn.tool))
+      problems.push(
+        `${tool.name}: reaction.turn names ${turn.tool}, a page tool the model never sees`,
+      );
+    else if (!target.turn)
+      problems.push(`${tool.name}: reaction.turn names ${turn.tool}, which does not declare turn`);
+  }
+  if (manifest.tools.filter((tool) => tool.state).length > 1)
+    problems.push('more than one tool declares state; a message is answered from one');
+  return problems;
+}
+
+/**
+ * Whether a turn starts from freshly read state: any message a person sent or
+ * answered, so "your move" works whatever happened to the last seed. Never a
+ * page seed, a crew handoff or a nudge, which carry or need no state, and
+ * never text that already carries a board.
+ */
+export function turnStateWanted(text: string, origin: TurnMessageOrigin): boolean {
+  if (origin !== 'direct-user' && origin !== 'question-answer') return false;
+  return text.trim().length > 0 && !/\b(?:board now|legal moves)\s*:/i.test(text);
+}
+
+/** The state a person's message is answered from, ahead of their words. */
+export function renderTurnStatePrelude(tool: string, output: unknown): string {
+  return `[Latest state — read from \`${tool}\` immediately before this turn. It overrides every older copy in the conversation; act on this one.]\n${JSON.stringify(output)}`;
 }

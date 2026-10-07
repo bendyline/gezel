@@ -11,19 +11,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  CLIP_MEAN,
-  CLIP_STD,
   type ImageDecodeError,
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
   applyOrientation,
-  centerCrop,
   decodeImage,
-  normalizeToCHW,
-  preprocessForClip,
+  gemmaVisionTargetSize,
+  isGemmaVisionSize,
   readBoundedImageFile,
+  resizeBicubic,
   resizeBilinear,
-  resizeShortestSide,
   rgbaToRgb,
 } from './image-pixels.js';
 
@@ -182,38 +179,43 @@ describe('geometry + normalization', () => {
     expect(out.data[0]).toBe(100); // (0+100+200+100)/4
   });
 
-  it('resizeShortestSide preserves aspect and centerCrop takes the middle', () => {
-    const image = { data: new Uint8Array(8 * 4 * 3), width: 8, height: 4 };
-    const resized = resizeShortestSide(image, 2);
-    expect(resized.height).toBe(2);
-    expect(resized.width).toBe(4);
-    const cropped = centerCrop(resized, 2, 2);
-    expect(cropped.width).toBe(2);
-    expect(cropped.height).toBe(2);
-  });
-
-  it('normalizeToCHW produces exact per-channel values in planar order', () => {
-    const image = { data: new Uint8Array([255, 0, 128]), width: 1, height: 1 };
-    const chw = normalizeToCHW(image);
-    expect(chw).toHaveLength(3);
-    expect(chw[0]).toBeCloseTo((1 - CLIP_MEAN[0]) / CLIP_STD[0], 6);
-    expect(chw[1]).toBeCloseTo((0 - CLIP_MEAN[1]) / CLIP_STD[1], 6);
-    expect(chw[2]).toBeCloseTo((128 / 255 - CLIP_MEAN[2]) / CLIP_STD[2], 6);
-  });
-
-  it('preprocessForClip yields a uniform tensor for a solid-color image', () => {
-    const png = pngOf(solidRgba(8, 8, [100, 150, 200, 255]), 8, 8);
-    const chw = preprocessForClip(png, 4);
-    expect(chw).toHaveLength(3 * 4 * 4);
-    const expected = [
-      (100 / 255 - CLIP_MEAN[0]) / CLIP_STD[0],
-      (150 / 255 - CLIP_MEAN[1]) / CLIP_STD[1],
-      (200 / 255 - CLIP_MEAN[2]) / CLIP_STD[2],
-    ];
-    for (let c = 0; c < 3; c++) {
-      for (let i = 0; i < 16; i++) {
-        expect(chw[c * 16 + i]).toBeCloseTo(expected[c]!, 5);
+  it('sizes to whole pooling blocks within the token budget, as the Gemma processor does', () => {
+    expect(gemmaVisionTargetSize(640, 427, 280)).toEqual({ width: 960, height: 624 });
+    expect(gemmaVisionTargetSize(612, 612, 70)).toEqual({ width: 384, height: 384 });
+    for (const [w, h] of [
+      [640, 427],
+      [100, 166],
+      [4000, 300],
+      [48, 48],
+      [1920, 1080],
+    ] as const) {
+      for (const budget of [70, 140, 280, 560, 1120]) {
+        const size = gemmaVisionTargetSize(w, h, budget);
+        expect(isGemmaVisionSize(size.width, size.height, budget), `${w}x${h}@${budget}`).toBe(
+          true,
+        );
       }
     }
+  });
+
+  it('recognises an already-sized frame, because the sizing rule is not idempotent', () => {
+    const once = gemmaVisionTargetSize(100, 166, 280);
+    expect(once).toEqual({ width: 576, height: 1008 });
+    expect(gemmaVisionTargetSize(once.width, once.height, 280)).toEqual({
+      width: 576,
+      height: 1056,
+    });
+    expect(isGemmaVisionSize(once.width, once.height, 280)).toBe(true);
+    expect(isGemmaVisionSize(577, 1008, 280)).toBe(false);
+    expect(isGemmaVisionSize(48 * 30, 48 * 30, 280)).toBe(false);
+  });
+
+  it('bicubic resize keeps a flat image flat and returns the requested size', () => {
+    const flat = { data: new Uint8Array(9 * 7 * 3).fill(173), width: 9, height: 7 };
+    const down = resizeBicubic(flat, 4, 3);
+    expect([down.width, down.height]).toEqual([4, 3]);
+    expect([...down.data].every((v) => v === 173)).toBe(true);
+    const up = resizeBicubic(flat, 20, 15);
+    expect([...up.data].every((v) => v === 173)).toBe(true);
   });
 });

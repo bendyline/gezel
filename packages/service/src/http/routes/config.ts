@@ -552,6 +552,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
     // Turning the relevance check on (or picking another model) downloads the
     // model in the background, network permitting.
     if (body.relevanceModel !== undefined) void ctx.relevance.reconcile().catch(() => {});
+    // Media search: a budget change re-keys the index; turning it on downloads the model.
+    if (body.mediaSearch !== undefined) void ctx.mediaSearch.reconcile().catch(() => {});
     const creds = await readCredentialView(ctx.secrets);
     const copilotCliInstallDir = (
       await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk')

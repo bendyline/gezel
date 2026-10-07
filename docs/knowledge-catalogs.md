@@ -226,8 +226,10 @@ What this document needs from it:
   `index/shards/NNN.db` (chunks, chunk FTS, sign-bit and int8 vectors in
   plain BLOB tables). Every entry is stored uncompressed. Nothing beyond stock
   SQLite with FTS5 reads it — sqlite-vec is not part of the format.
-- The manifest (`kind: gezk-catalog`, `formatVersion: "0.7"`,
-  `indexSchemaVersion: 4`) carries identity, publisher, license (with the
+- The manifest (`kind: gezk-catalog`, `formatVersion: "0.7"` with
+  `indexSchemaVersion: 4`, or `"0.8"` with `5` — the writer emits the oldest
+  generation that can express the catalog, so a text-only bge or e5 build
+  stays readable by 0.7 readers) carries identity, publisher, license (with the
   notice path), the full embedding and chunking profiles, the shipped table of
   contents, shard statistics, every file's SHA-256, and an optional Ed25519
   signature over its RFC 8785 canonical form. The archive's own SHA-256 lives
@@ -239,10 +241,23 @@ What this document needs from it:
   descendants up (a 0.5 catalog filed everything at a root); `ordinal`
   orders a topic's documents and `meta` carries opaque producer metadata
   (canonical JSON, 16 KiB). Images ship under `assets/` — PNG, JPEG, GIF,
-  WebP and inert SVG only, magic bytes checked — and the daemon serves them
-  from the mounted catalog behind bearer auth, so the UI turns them into
-  `blob:` URLs rather than pointing an `<img>` at the route.
-- Vectors use the two-stage `bit+int8` encoding: 384 sign bits for the
+  WebP and inert SVG only, magic bytes checked — and, from 0.8, video (MP4,
+  M4V, MOV, WebM) and audio (MP3, M4A, OGG/Opus, WAV, FLAC) up to 512 MiB a
+  file and 8 GiB a catalog. The daemon serves assets from the mounted catalog
+  behind bearer auth, with byte ranges (206) so players can seek; the UI turns
+  them into `blob:` URLs rather than pointing an element at the route.
+- A 0.8 catalog built with a multimodal profile also has **media rows**:
+  one per referenced image and one per 30-second window of a video or
+  recording, stored after the document's text chunks in the shard `chunks`
+  table (`modality`, `asset_path`, `start_ms`/`end_ms`, per-asset
+  attribution) so every text `chunk_uid` matches a text-only build. Their
+  vectors embed the media itself, in the same space as text queries. Readers
+  search them in a separate exact lane (`searchMedia`) — in this space a photo
+  sits further from its description than a passage does, so it rarely
+  survives the text stage-1 cut — and fuse them per row, at most four per
+  search and one per document, on explicit search only.
+- Vectors use the two-stage `bit+int8` encoding: sign bits (one per
+  dimension — 384, or 512 for `embeddinggemma-2-512@1`) for the
   stage-1 pre-filter, int8 for the cosine rerank, with the rounding rule
   pinned by the conformance kit. A profile says whether the bits are the raw
   signs (`sign`) or the signs of `vector − center` (`centered-sign`, the
@@ -252,13 +267,20 @@ What this document needs from it:
   the format.
 - Embedding profiles are self-describing (Hugging Face repo + revision, the
   exact ONNX graph and tokenizer file with their sha256 digests, pooling,
-  normalization, instructions, encoding). Published profiles:
+  normalization, instructions, encoding; from 0.8 also every additional file
+  the runtime loads, such as `.onnx_data` weights, a Matryoshka `truncation`,
+  and a `media` block describing how image, video and audio vectors were
+  made). Published profiles:
   `multilingual-e5-small@2` (public catalogs; centered stage-1 bits),
   `multilingual-e5-small@1` (its predecessor — same vectors, raw bits;
   still readable) and `bge-small-en-v1.5@1` (local builds), all pinned to
-  the full-precision `onnx/model.onnx`. A reader never mixes vectors across
-  vector spaces (`sameVectorSpace`: model, files, instructions, int8 rerank;
-  the two e5 revisions share one); matching only a dimension is unsafe, and
+  the full-precision `onnx/model.onnx`; and `embeddinggemma-2-512@1`
+  (EmbeddingGemma 2's q8 text model, truncated from 768 to 512 dimensions,
+  centered bits, with vision and audio encoders for media rows — see
+  [ADR 0019](decisions/0019-multimodal-embeddings.md)). A reader never mixes vectors across
+  vector spaces (`sameVectorSpace`: model, files, truncation, instructions,
+  int8 rerank; the two e5 revisions share one); matching only a dimension is
+  unsafe, a query of the wrong width is refused (`CatalogQueryError`), and
   gezel's embedders refuse to serve a profile whose fetched files do not
   hash to its pins (see [gezk-format.md](gezk-format.md)).
 - References are publisher-qualified: `knowledge://<publisherId>/<catalogId>/<documentId>[#chunk=…]`.

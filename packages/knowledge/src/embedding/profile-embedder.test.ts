@@ -12,10 +12,13 @@ import {
 } from './artifact-verify.js';
 import {
   EmbedderUnavailableError,
+  type EncoderModelFn,
   type PipelineFn,
   TRANSFORMERS_PEER_RANGE,
   type TransformersModule,
   createProfileEmbedder,
+  isMultimodalEncoderConfig,
+  pinnedExternalDataChunks,
   resolveTransformersModelOptions,
 } from './profile-embedder.js';
 
@@ -32,6 +35,8 @@ function profileWith(patch: {
   const base = MULTILINGUAL_E5_SMALL_1;
   return {
     ...base,
+    // The fake pipeline below emits 3-wide vectors.
+    dimensions: 3,
     model: {
       repo: base.model.repo,
       revision: base.model.revision,
@@ -173,9 +178,16 @@ describe('createProfileEmbedder', () => {
     expect(runtime.module.env).toEqual({ cacheDir, useFSCache: true, allowRemoteModels: true });
     expect(embedder.verification.status).toBe('verified');
     expect(embedder.verification.checks.map((c) => c.role)).toEqual(['onnx', 'tokenizer']);
-    // The query instruction is applied by the embedder, the text capped by the pipe.
+    // The query instruction is applied by the embedder, the text capped by
+    // the pipe, and the result projected (normalized) through the profile.
     const vector = await embedder.embedQuery('hello');
-    expect(Array.from(vector)).toEqual(['query: hello'.length, 1, 0]);
+    const length = 'query: hello'.length;
+    const norm = Math.hypot(length, 1);
+    expect(Array.from(vector)).toEqual([
+      expect.closeTo(length / norm, 6),
+      expect.closeTo(1 / norm, 6),
+      0,
+    ]);
     expect(embedder.countTokens('one two three')).toBe(3);
     await embedder.dispose();
     expect(runtime.disposed).toBe(1);
@@ -297,5 +309,129 @@ describe('TRANSFORMERS_PEER_RANGE', () => {
       await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
     ) as { peerDependencies: Record<string, string> };
     expect(manifest.peerDependencies['@huggingface/transformers']).toBe(TRANSFORMERS_PEER_RANGE);
+  });
+});
+
+describe('multimodal encoder profiles', () => {
+  let cacheDir: string;
+  const repo = 'example/multimodal-embed';
+  const revision = 'd'.repeat(40);
+  const GRAPH = Buffer.from('graph header');
+  const WEIGHTS = Buffer.from('external weights');
+  const CONFIG = Buffer.from(
+    '{"model_type":"embedding_gemma2","vision_config":{},"audio_config":{}}',
+  );
+  const TOKENIZER = Buffer.from('{"model":{"type":"BPE"}}');
+  const profile: KnowledgeEmbeddingProfile = {
+    ...MULTILINGUAL_E5_SMALL_1,
+    id: 'example-multimodal@1',
+    model: {
+      repo,
+      revision,
+      onnxFile: 'onnx/model_quantized.onnx',
+      onnxDigest: sha(GRAPH),
+      files: [
+        { path: 'onnx/model_quantized.onnx_data', digest: sha(WEIGHTS) },
+        { path: 'config.json', digest: sha(CONFIG) },
+      ],
+    },
+    tokenizer: { kind: 'gemma-bpe', file: 'tokenizer.json', digest: sha(TOKENIZER) },
+    dimensions: 2,
+    truncation: { method: 'prefix', sourceDimensions: 4 },
+    queryInstruction: 'task: search result | query: ',
+    passageInstruction: 'title: none | text: ',
+  };
+
+  beforeAll(async () => {
+    cacheDir = await mkdtemp(join(tmpdir(), 'gezel-profile-encoder-'));
+    for (const [file, bytes] of [
+      ['onnx/model_quantized.onnx', GRAPH],
+      ['onnx/model_quantized.onnx_data', WEIGHTS],
+      ['config.json', CONFIG],
+      ['tokenizer.json', TOKENIZER],
+    ] as const) {
+      const path = transformersCachePath(cacheDir, repo, revision, file);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, bytes);
+    }
+  });
+
+  afterAll(async () => {
+    await rm(cacheDir, { recursive: true, force: true });
+  });
+
+  it('recognizes a multimodal config and counts pinned sidecars', () => {
+    expect(isMultimodalEncoderConfig({ vision_config: {} })).toBe(true);
+    expect(isMultimodalEncoderConfig({ audio_config: {} })).toBe(true);
+    expect(isMultimodalEncoderConfig({ model_type: 'bert' })).toBe(false);
+    expect(pinnedExternalDataChunks(profile)).toBe(1);
+    expect(pinnedExternalDataChunks(MULTILINGUAL_E5_SMALL_1)).toBe(0);
+  });
+
+  it('loads only the text session, reads sentence_embedding, and truncates queries', async () => {
+    const modelCalls: Array<Record<string, unknown> | undefined> = [];
+    let pipelineCalled = false;
+    let disposed = 0;
+    const module: TransformersModule = {
+      env: {},
+      pipeline: async () => {
+        pipelineCalled = true;
+        throw new Error('the pipeline must not load a multimodal encoder');
+      },
+      AutoConfig: {
+        from_pretrained: async () => JSON.parse(CONFIG.toString()) as Record<string, unknown>,
+      },
+      AutoModel: {
+        from_pretrained: async (_model, options) => {
+          modelCalls.push(options);
+          const run = (async (inputs: unknown) => {
+            const texts = (inputs as { texts: string[] }).texts;
+            return {
+              sentence_embedding: {
+                data: texts.flatMap((t) => [t.length, 1, 9, 9]),
+                dims: [texts.length, 4],
+              },
+            };
+          }) as EncoderModelFn;
+          run.dispose = async () => {
+            disposed++;
+          };
+          return run;
+        },
+      },
+      AutoTokenizer: {
+        from_pretrained: async () =>
+          Object.assign((texts: string[]) => ({ texts }), {
+            encode: (text: string) => text.split(/\s+/).filter(Boolean) as never,
+          }) as never,
+      },
+    };
+    const embedder = await createProfileEmbedder(profile, { cacheDir, transformers: module });
+    expect(pipelineCalled).toBe(false);
+    expect(modelCalls[0]).toMatchObject({
+      revision,
+      dtype: 'q8',
+      subfolder: 'onnx',
+      model_file_name: 'model',
+      use_external_data_format: 1,
+      config: { vision_config: null, audio_config: null },
+    });
+    expect(embedder.verification.checks.map((c) => c.file)).toEqual([
+      'onnx/model_quantized.onnx',
+      'tokenizer.json',
+      'onnx/model_quantized.onnx_data',
+      'config.json',
+    ]);
+    // Raw model width for passages; the projection is the compiler's.
+    expect(await embedder.embed(['abc'])).toEqual([[3, 1, 9, 9]]);
+    const query = await embedder.embedQuery('hi');
+    const length = 'task: search result | query: hi'.length;
+    const norm = Math.hypot(length, 1);
+    expect(Array.from(query)).toEqual([
+      expect.closeTo(length / norm, 6),
+      expect.closeTo(1 / norm, 6),
+    ]);
+    await embedder.dispose();
+    expect(disposed).toBe(1);
   });
 });

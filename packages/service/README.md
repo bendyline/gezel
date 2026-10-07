@@ -51,28 +51,28 @@ features work without them. Install the optional peers only when this npm
 deployment needs in-process memory embeddings or Kokoro text-to-speech:
 
 ```bash
-npm install @huggingface/transformers@^3.8.1 kokoro-js@^1.2.1
+npm install @huggingface/transformers@^4.3.1 kokoro-js@^1.2.1
 ```
 
-Until their upstream dependency ranges move to the fixed releases, npm
-consumers should also pin the secure transitive versions in the application's
-root `package.json` (npm ignores overrides declared by dependencies).
-Transformers 3.8 still asks for `sharp` 0.34, which `npm audit` flags;
-`sharp` 0.35.4 and `adm-zip` 0.6.1 are the first releases that clear their
-advisories:
+npm consumers should also add two overrides to the application's root
+`package.json` (npm ignores overrides declared by dependencies). `kokoro-js`
+1.2.1 still declares Transformers.js `^3.5.1`; without the override npm
+installs a second, 3.x copy beside the service's 4.x one, and the service
+hands Kokoro tensors built from its own copy. `adm-zip` 0.6.1 is the first
+release that clears its advisory:
 
 ```json
 {
   "overrides": {
     "adm-zip": "0.6.1",
-    "sharp": "0.35.5"
+    "kokoro-js": { "@huggingface/transformers": "^4.3.1" }
   }
 }
 ```
 
 The desktop installers and the relocatable Node distribution already include
 this ML runtime with the reviewed overrides. Both paths use one Transformers
-3.x / ONNX Runtime line rather than installing independent 3.x and 4.x stacks.
+4.x / ONNX Runtime line rather than installing independent 3.x and 4.x stacks.
 
 ## Native engines
 

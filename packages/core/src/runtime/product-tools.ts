@@ -7,7 +7,7 @@ import {
   normalizeRelativeToolPath,
   workspaceDrawerPrefix,
 } from '../path-rules.js';
-import { LEAN_PROFILE_BUILTIN_TOOLS } from '../project-types/composition.js';
+import { LEAN_PROFILE_BUILTIN_TOOLS, leanSession } from '../project-types/composition.js';
 import {
   type AskQuestionRequest,
   AskQuestionRequestSchema,
@@ -262,7 +262,7 @@ export async function portableToolSurface(
   const grants = applyStepToolPolicy(roleGrants, step)!;
   // A lean type (a game, the chat room) keeps only its own tools and a way
   // to ask the person, as on the desktop.
-  const lean = project.leanProfile === true ? new Set(LEAN_PROFILE_BUILTIN_TOOLS) : null;
+  const lean = leanSession(project, session) ? new Set(LEAN_PROFILE_BUILTIN_TOOLS) : null;
 
   const builtins = (
     Object.entries(definitions) as Array<[PortableToolName, (typeof definitions)[PortableToolName]]>

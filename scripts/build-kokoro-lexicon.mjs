@@ -65,8 +65,20 @@ for (const name of WANTED) {
       `${inventory[`${name}.gz`].entries.toLocaleString()} entries`,
   );
 }
+// The dictionaries are Apache-2.0 data; redistribution must carry the pack's
+// license text beside them.
+const license = execFileSync('tar', ['-xjOf', pack, 'kokoro-int8-multi-lang-v1_0/LICENSE']);
+writeFileSync(join(destination, 'LICENSE'), license);
 writeFileSync(
   join(destination, 'manifest.json'),
-  `${JSON.stringify({ source: pins['kokoro-model'], files: inventory }, null, 2)}\n`,
+  `${JSON.stringify(
+    {
+      source: pins['kokoro-model'],
+      license: { file: 'LICENSE', sha256: createHash('sha256').update(license).digest('hex') },
+      files: inventory,
+    },
+    null,
+    2,
+  )}\n`,
 );
-console.log(`staged ${WANTED.length} dictionaries in ${destination}`);
+console.log(`staged ${WANTED.length} dictionaries and their LICENSE in ${destination}`);

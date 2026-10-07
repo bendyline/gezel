@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bumpStepActivation } from './step-activation.js';
-import { resolveNextStep } from './step-routing.js';
+import { explicitStepJump, resolveNextStep } from './step-routing.js';
 
 const steps = [
   { id: 'build', next: 'review' },
@@ -83,5 +83,25 @@ describe('bumpStepActivation', () => {
       >
     )[0]!;
     expect(a.gateAttempts).toBe(2);
+  });
+});
+
+describe('an explicit jump a model left blank', () => {
+  const steps = [{ id: 'scope' }, { id: 'plan' }, { id: 'list' }];
+  it('means whatever comes next, as an omitted one does', () => {
+    for (const blank of ['', '  ', '""', "''", '"next"', 'next'])
+      expect(resolveNextStep({ steps, currentId: 'scope', override: blank })).toEqual({
+        kind: 'advance',
+        to: 'plan',
+      });
+    expect(explicitStepJump(' "list" ')).toBe('list');
+    expect(resolveNextStep({ steps, currentId: 'scope', override: '"list"' })).toEqual({
+      kind: 'advance',
+      to: 'list',
+    });
+    expect(resolveNextStep({ steps, currentId: 'scope', override: 'plan_menu' })).toEqual({
+      kind: 'invalid',
+      to: 'plan_menu',
+    });
   });
 });

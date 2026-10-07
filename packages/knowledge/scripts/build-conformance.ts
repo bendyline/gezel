@@ -28,29 +28,34 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   GEZK_FORMAT_VERSION,
+  type KnowledgeEmbeddingProfile,
   canonicalizeJson,
   formatKnowledgeUri,
-  l2Normalize,
   locationDistanceMeters,
   parseKnowledgeUri,
+  profileUnitVector,
   quantizeBinary,
+  quantizeBinaryForProfile,
   quantizeInt8,
 } from '@bendyline/gezk';
 import { chunkContentHash, chunkUid, knowledgeKeyId, signManifest } from '@bendyline/gezk/node';
 import { requireGezkCheckout } from '../../gezk/scripts/gezk-checkout.js';
 import { extractGezkVerified } from '../src/archive/read.js';
 import { compileKnowledgeCatalog } from '../src/compiler/compile.js';
-import { type ShardBitIndex, hammingTopK } from '../src/reader/bit-scan.js';
+import { type ShardBitIndex, asymmetricTopK, hammingTopK } from '../src/reader/bit-scan.js';
 import { CatalogHandle } from '../src/reader/catalog-handle.js';
 import {
   FIXTURE_ASSETS,
   FIXTURE_ASSET_DOCUMENT_ID,
   FIXTURE_ASSET_PATH,
   FIXTURE_CHUNKING_PROFILE,
-  FIXTURE_EMBEDDING_PROFILE,
+  FIXTURE_EMBEDDING_PROFILE_08,
+  FIXTURE_MP4,
   FIXTURE_TOPICS,
+  FIXTURE_WAV,
   fakeCountTokens,
   fakeEmbed,
+  fakeEmbedMedia,
   fixtureMeta,
   generateFixtureCorpus,
 } from '../src/test/fixture.js';
@@ -85,6 +90,18 @@ DOCS[3]!.locations = [
   { id: 'mentioned-seattle', latitude: 47.6062, longitude: -122.3321, role: 'associated' },
 ];
 DOCS[4]!.locations = [{ id: 'decimal', latitude: 30.1, longitude: 50.2, role: 'subject' }];
+// 0.8 media rows: doc-0004 references an audio clip and a video; doc-0001
+// already references the image asset.
+const MEDIA_DOCUMENT_ID = 'doc-0004';
+const mediaDocument = DOCS.find((doc) => doc.id === MEDIA_DOCUMENT_ID);
+if (!mediaDocument) throw new Error('Missing media fixture document');
+mediaDocument.markdown +=
+  '\n\n## Sounds\n\nThe workshop bell. ![Brass chime ringing](assets/chime.wav)\n\n![Lathe at speed](assets/clip.mp4)\n';
+const CONFORMANCE_ASSETS = [
+  ...FIXTURE_ASSETS,
+  { path: 'assets/chime.wav', content: FIXTURE_WAV, attribution: { license: 'CC0-1.0' } },
+  { path: 'assets/clip.mp4', content: FIXTURE_MP4 },
+];
 const SHARED_DOCUMENT_ID = 'doc-0000';
 const sharedDocument = DOCS.find((doc) => doc.id === SHARED_DOCUMENT_ID);
 if (!sharedDocument) throw new Error('Missing shared fixture document');
@@ -144,12 +161,15 @@ async function main(): Promise<void> {
         for (const doc of DOCS) yield doc;
       })(),
       outputPath: archivePath,
-      embeddingProfile: FIXTURE_EMBEDDING_PROFILE,
+      // The 0.8 profile (truncation + centered sign bits) is what makes the
+      // writer emit the 0.8 generation this kit describes.
+      embeddingProfile: FIXTURE_EMBEDDING_PROFILE_08,
       chunkingProfile: FIXTURE_CHUNKING_PROFILE,
       embed: fakeEmbed,
+      embedMedia: fakeEmbedMedia,
       countTokens: fakeCountTokens,
       workDir: join(work, 'build'),
-      assets: FIXTURE_ASSETS,
+      assets: CONFORMANCE_ASSETS,
       smokeQueries: DOCS.slice(0, 6).map((doc) => ({
         query: doc.title,
         expectedDocumentIds: [doc.id],
@@ -194,6 +214,29 @@ async function main(): Promise<void> {
       rows: 4,
     };
     const hammingQuery = Uint8Array.from([0b00000001, 0b11111111]);
+    const truncationProfile = (dimensions: number, sourceDimensions: number) =>
+      ({
+        ...FIXTURE_EMBEDDING_PROFILE_08,
+        dimensions,
+        truncation: { method: 'prefix', sourceDimensions },
+        quantization: {
+          int8: { method: 'symmetric-linear', scale: 127 },
+          binary: { method: 'sign', threshold: 0, packing: 'lsb-first' },
+        },
+      }) satisfies KnowledgeEmbeddingProfile;
+    const { truncation: _truncation, ...untruncated } = FIXTURE_EMBEDDING_PROFILE_08;
+    const centeredProfile = (center: number[]) =>
+      ({
+        ...untruncated,
+        dimensions: center.length,
+        quantization: {
+          int8: { method: 'symmetric-linear', scale: 127 },
+          binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center },
+        },
+      }) satisfies KnowledgeEmbeddingProfile;
+    const asymmetricQuery = [
+      0.5, -0.25, 0.125, 0, -0.5, 0.75, -0.125, 0.25, 0.1, -0.2, 0.3, -0.4, 0, 0, 0.05, -0.05,
+    ];
 
     const vectors = {
       formatVersion: GEZK_FORMAT_VERSION,
@@ -223,16 +266,49 @@ async function main(): Promise<void> {
         ],
       },
       hashEmbedder: {
-        id: FIXTURE_EMBEDDING_PROFILE.id,
+        id: FIXTURE_EMBEDDING_PROFILE_08.id,
         description:
-          'A deterministic stand-in for a model: SHA-256 of the UTF-8 text, extended by re-hashing the previous digest, each byte read as a signed int8 and mapped to (b + 0.5) / 128; the compiler L2-normalizes the result.',
+          'A deterministic stand-in for a model: SHA-256 of the UTF-8 text, extended by re-hashing the previous digest, each byte read as a signed int8 and mapped to (b + 0.5) / 128, giving 384 values. The fixture profile truncates: keep the first 256, then L2-normalize.',
         dimensions: 384,
+        storedDimensions: FIXTURE_EMBEDDING_PROFILE_08.dimensions,
         sample: {
           text: probe.embedInput,
           unitVector: Array.from(
-            l2Normalize((await fakeEmbed([probe.embedInput]))[0] as number[]),
+            profileUnitVector(
+              FIXTURE_EMBEDDING_PROFILE_08,
+              (await fakeEmbed([probe.embedInput]))[0] as number[],
+            ),
           ).slice(0, 8),
         },
+      },
+      // 0.8: Matryoshka truncation — keep the prefix, normalize again.
+      truncation: [
+        { dimensions: 2, sourceDimensions: 4, input: [3, 4, 12, 84] },
+        { dimensions: 3, sourceDimensions: 6, input: [1, 2, 2, 9, -9, 9] },
+      ].map((c) => ({
+        ...c,
+        expected: Array.from(
+          profileUnitVector(truncationProfile(c.dimensions, c.sourceDimensions), c.input),
+        ),
+      })),
+      // centered-sign: bits of (unit vector − center); int8 is never centered.
+      centeredBits: [
+        {
+          input: [0.5, -0.5, 0.1, -0.1, 0.3, 0.2, -0.2, 0.05],
+          center: [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+        },
+      ].map((c) => ({
+        ...c,
+        bits: Array.from(quantizeBinaryForProfile(centeredProfile(c.center), c.input)),
+        int8: Array.from(quantizeInt8(c.input)),
+      })),
+      // The stage-1 scan readers run: score = sum of query[d] * (bit ? +1 : -1).
+      asymmetric: {
+        rows: Array.from(bits.bits),
+        bytesPerRow: bits.bytesPerRow,
+        query: asymmetricQuery,
+        k: 3,
+        expected: asymmetricTopK(bits, asymmetricQuery, 3),
       },
       chunkUid: [
         {
@@ -366,6 +442,17 @@ async function main(): Promise<void> {
           sha256: a.sha256,
         })),
         assetDocument: { documentId: FIXTURE_ASSET_DOCUMENT_ID, path: FIXTURE_ASSET_PATH },
+        // 0.8: media rows by modality, and one probe the media lane must
+        // answer: the audio clip's first window, embedded with `fakeEmbedMedia`.
+        media: report.manifest.counts.media,
+        mediaProbe: {
+          modality: 'audio',
+          assetPath: 'assets/chime.wav',
+          embedInput: `media:audio:${createHash('sha256').update(FIXTURE_WAV).digest('hex')}:0`,
+          documentId: MEDIA_DOCUMENT_ID,
+          startMs: 0,
+          endMs: 1000,
+        },
       },
       // Earlier generations' fixtures and their expectations, carried forward
       // from the previous kit so a reader proves it still opens them.
@@ -385,12 +472,22 @@ edit by hand. An implementation conforms when it reproduces every entry in
 - \`jcs\` — RFC 8785 canonical JSON, the signature input.
 - \`uri\` / \`uriFormat\` — \`knowledge://\` parsing and formatting.
 - \`hamming\` — the stage-1 top-K selection over sign-bit rows.
+- \`asymmetric\` — the stage-1 scan readers run: a float query scored against
+  sign bits (+1 / −1 per dimension).
+- \`truncation\` (0.8) — Matryoshka truncation: keep the first \`dimensions\`
+  values of the model output, then L2-normalize.
+- \`centeredBits\` — \`centered-sign\` bits, taken from \`vector − center\`;
+  the int8 encoding of the same vector is never centered.
+- \`fixture.media\` / \`fixture.mediaProbe\` (0.8) — media rows: an image, an
+  audio clip and a video, two one-second windows each for the latter, embedded
+  with the hash embedder over \`media:<modality>:<asset sha256>[:<startMs>]\`.
+  The probe's vector must find its window first by an exact media scan.
 - \`signature\` — the fixture manifest verifies under the TEST public key and
   fails once the named field is tampered with.
 - \`fixture\` — archive digest, counts, full-text queries, a document body
   round trip, a two-stage semantic probe embedded with the documented hash
   embedder, and (0.6) the nested topic's rollup, an ordinal-first listing,
-  a metadata sample, and the shipped asset; (0.7) shared TOC placements without\n  duplicated canonical documents.
+  a metadata sample, and the shipped asset; (0.7) shared TOC placements without\n  duplicated canonical documents; (0.8) a truncating profile (384 → 256) with\n  centered sign bits, so the probe must be projected before it is searched.
 - \`spatial\` — spherical-distance probes and radius results for multiple subject\n  anchors, associated places, date-line and pole coordinates.\n- \`legacy\` — the same fixture facts for every earlier generation whose
   archive still ships under \`fixtures/\`; a reader for this version reads
   those too.

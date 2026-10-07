@@ -12,12 +12,7 @@ import {
   setLogLevel,
   setLogOutput,
 } from '@bendyline/gezel';
-import {
-  type KnowledgeInstallEvent,
-  type LlamaCppInstallEvent,
-  type MlxInstallEvent,
-  streamChatEvents,
-} from '@bendyline/gezel-client';
+import { type KnowledgeInstallEvent, streamChatEvents } from '@bendyline/gezel-client';
 import {
   GezelClient,
   createTrustingFetch,
@@ -29,7 +24,7 @@ import {
   stopProcessByPid,
 } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
   CliError,
@@ -41,6 +36,7 @@ import {
   describeMachineEngineBroker,
   ensureCliProjectLead,
   findHealthySystemService,
+  previewRunProject,
   resolveDevHome,
   resolveRunProject,
   resolveStartPortEnv,
@@ -50,10 +46,19 @@ import {
   withTransientConnection,
 } from '../connection.js';
 import {
-  parseCraftbookParams,
+  craftbookDoLaunch,
+  parseCraftbookArguments,
   resolveCraftbookInvocation,
   waitForTask,
 } from '../craftbook-command.js';
+import { ensureCraftbookSetup, terminalPrompter } from '../craftbook-setup.js';
+import {
+  SHORTHAND_FLAG,
+  craftbookForShorthand,
+  craftbookShorthandArgv,
+  shorthandEcho,
+  workspaceCraftbookId,
+} from '../craftbook-shorthand.js';
 import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
@@ -62,6 +67,7 @@ import {
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
 import { exportModelToFile } from '../model-export.js';
+import { pullChatModel } from '../model-pull.js';
 import {
   formatNativeList,
   formatNativeStatus,
@@ -91,6 +97,10 @@ const program = new Command();
 program
   .name('gezel')
   .description('Gezel — assemble a team of AI companions (gezels) and put them to work.')
+  .addHelpText(
+    'after',
+    '\nAny craftbook also runs by name: `gezel <craftbook> …` is `gezel do <craftbook> …`.',
+  )
   .version(GEZEL_VERSION)
   .option(
     '--connect <url>',
@@ -123,6 +133,47 @@ program.hook('preAction', () => {
   applyHome(globals);
 });
 
+/** Every built-in command word. Built-ins always win over a craftbook of the same name. */
+function builtinCommandNames(): string[] {
+  return ['help', ...program.commands.flatMap((command) => [command.name(), ...command.aliases()])];
+}
+
+/** What followed the word in `gezel <craftbook> …`, echoed as the expanded `do` command. */
+let shorthandTail: string[] = [];
+
+/**
+ * The craftbook `gezel <word> …` names, found without creating a project, so
+ * a mistyped command leaves the folder as it was. Fails with the ordinary
+ * unknown-command message, suggestion included, when nothing matches.
+ */
+async function resolveCraftbookShorthand(
+  parts: string[],
+): Promise<{ client: GezelClient; id: string }> {
+  const word = parts[0] ?? '';
+  const unknown = unknownCommandMessage(parts, builtinCommandNames());
+  let client: GezelClient;
+  let id: string | undefined;
+  try {
+    client = await connectOwned(cliGlobals());
+    const preview = await previewRunProject(client, cliGlobals());
+    const [config, items] = await Promise.all([
+      client.getConfig(),
+      preview.projectId
+        ? client.listProjectCraftbooks(preview.projectId).then((result) => result.items)
+        : client.listCatalogItems('craftbook-template').then((result) => result.items),
+    ]);
+    const books = normalizeCraftbooks(items, config.showWorkInProgressFeatures === true);
+    id =
+      craftbookForShorthand(books, word)?.id ??
+      (preview.projectId === null ? await workspaceCraftbookId(preview.root, word) : undefined);
+  } catch (err) {
+    const reason = formatCliFailure(err) ?? (err instanceof Error ? err.message : String(err));
+    throw new CliError(`${unknown}\n(Could not look for a craftbook named '${word}': ${reason})`);
+  }
+  if (!id) throw new CliError(unknown);
+  return { client, id };
+}
+
 // Default command: a bare `gezel` (no subcommand) launches the interactive
 // TUI bound to the current folder's project. Honors developer mode for the
 // home dir (.gezel-dev). Otherwise it prefers the Electron-installed system
@@ -131,8 +182,7 @@ program.hook('preAction', () => {
 // the other subcommands don't pay their load cost.
 program.action(async () => {
   if (program.args.length > 0) {
-    const known = program.commands.flatMap((command) => [command.name(), ...command.aliases()]);
-    throw new CliError(unknownCommandMessage(program.args, known));
+    throw new CliError(unknownCommandMessage(program.args, builtinCommandNames()));
   }
   // Ink needs raw-mode stdin and a real screen; without them it crashes with
   // a React stack trace on both streams. Piped, CI, and IDE output panes land
@@ -175,7 +225,7 @@ program
   .description('Start the Gezel daemon (no-op if already running)')
   .option(
     '--port <port>',
-    'Bind to a specific port (spawns a fresh daemon, does not adopt a running one)',
+    'Bind to a specific port (reuses a daemon already on it; see --restart for one that is not)',
   )
   .option(
     '--foreground',
@@ -183,78 +233,123 @@ program
   )
   .option(
     '--web',
-    'Serve the web UI over HTTP on loopback and print a one-time browser URL (spawns a fresh HTTP daemon).',
+    'Serve the web UI over HTTP on loopback and print a one-time browser URL (reuses a daemon already serving it).',
   )
   .option('--open', 'With --web, open the printed URL in your default browser.')
-  .action(async (opts: { port?: string; foreground?: boolean; web?: boolean; open?: boolean }) => {
-    const port = opts.port ? Number.parseInt(opts.port, 10) : undefined;
-    if (port !== undefined && !Number.isFinite(port)) {
-      console.error(`invalid --port: ${opts.port}`);
-      process.exitCode = 1;
-      return;
-    }
+  .option(
+    '--restart',
+    'With --web or --port, stop a running daemon started without them and start a new one.',
+  )
+  .action(
+    async (opts: {
+      port?: string;
+      foreground?: boolean;
+      web?: boolean;
+      open?: boolean;
+      restart?: boolean;
+    }) => {
+      const port = opts.port ? Number.parseInt(opts.port, 10) : undefined;
+      if (port !== undefined && !Number.isFinite(port)) {
+        console.error(`invalid --port: ${opts.port}`);
+        process.exitCode = 1;
+        return;
+      }
 
-    // Web mode serves HTTP on loopback (a browser can't trust our
-    // self-signed cert) and mints a dedicated browser token. Both flow
-    // to the spawned daemon as env so they apply to fresh + foreground.
-    const userEnv = { ...process.env };
-    delete userEnv.GEZEL_SERVICE_ROLE;
-    delete userEnv.GEZEL_SYSTEM_SCOPE;
-    delete userEnv.GEZEL_PORT;
-    const spawnEnv: NodeJS.ProcessEnv = {
-      ...userEnv,
-      GEZEL_SERVICE_ROLE: 'user',
-    };
-    // Explicit --port hard-binds. With a machine service registered the
-    // daemon stays ephemeral ('0') — the broker owns canonical 6228.
-    // Otherwise GEZEL_PORT is omitted so gezeld prefers 6228 with
-    // ephemeral fallback, giving standalone installs the stable
-    // third-party /v1 base URL.
-    const portEnv = resolveStartPortEnv(port, await shouldPreferCanonicalPort());
-    if (portEnv !== undefined) spawnEnv.GEZEL_PORT = portEnv;
-    if (opts.web) {
-      spawnEnv.GEZEL_WEB = '1';
-      spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
-    }
+      // Web mode serves HTTP on loopback (a browser can't trust our
+      // self-signed cert) and mints a dedicated browser token. Both flow
+      // to the spawned daemon as env so they apply to fresh + foreground.
+      const userEnv = { ...process.env };
+      delete userEnv.GEZEL_SERVICE_ROLE;
+      delete userEnv.GEZEL_SYSTEM_SCOPE;
+      delete userEnv.GEZEL_PORT;
+      const spawnEnv: NodeJS.ProcessEnv = {
+        ...userEnv,
+        GEZEL_SERVICE_ROLE: 'user',
+      };
+      // Explicit --port hard-binds. With a machine service registered the
+      // daemon stays ephemeral ('0') — the broker owns canonical 6228.
+      // Otherwise GEZEL_PORT is omitted so gezeld prefers 6228 with
+      // ephemeral fallback, giving standalone installs the stable
+      // third-party /v1 base URL.
+      const portEnv = resolveStartPortEnv(port, await shouldPreferCanonicalPort());
+      if (portEnv !== undefined) spawnEnv.GEZEL_PORT = portEnv;
+      if (opts.web) {
+        spawnEnv.GEZEL_WEB = '1';
+        spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
+      }
 
-    if (opts.foreground) {
-      await startForeground(spawnEnv);
-      return;
-    }
+      if (opts.foreground) {
+        await startForeground(spawnEnv);
+        return;
+      }
 
-    // Force a fresh spawn when the user pinned a port or asked for web
-    // mode: adopting a running daemon would silently ignore --port, or
-    // (for --web) hand back a possibly-HTTPS daemon whose URL a browser
-    // can't use. Otherwise adopt-or-spawn as usual.
-    if (port !== undefined || opts.web) {
-      const entry = resolveDaemonEntry(import.meta.url);
-      const result = await discoverOrSpawn({
-        daemonEntry: entry,
-        detached: true,
-        env: spawnEnv,
-        // Always spawn fresh — don't adopt a running daemon that may be
-        // on the wrong port / transport. (forceSpawn keeps the readiness
-        // poll working, unlike a null readRuntimeFn override.)
-        forceSpawn: true,
-        // A cold first boot (fresh home: layout + default gezels +
-        // native probe + catalog) routinely exceeds the 5s default, so
-        // the spawn would time out while the daemon is still coming up —
-        // and in --web mode the user would never see their URL. Give it
-        // real headroom.
-        timeoutMs: 20_000,
-      });
-      const health = await result.client.health();
-      console.log(
-        `gezeld running (version ${health.version}) on port ${new URL(result.baseUrl).port}`,
-      );
-      if (opts.web) await printWebUrl(result.baseUrl, opts.open === true);
-      return;
-    }
+      // A pinned port or the web UI are launch-time choices: the web token is
+      // minted at boot and web mode serves plain HTTP a browser can use. Reuse
+      // a running daemon that already has them. Replace one that does not only
+      // when asked, since it may be serving the desktop app or running tasks.
+      if (port !== undefined || opts.web) {
+        const runtime = await readRuntime();
+        const running = runtime && isProcessAlive(runtime.pid) ? runtime : null;
+        const reuse =
+          running !== null && (await runtimeServes(running, { port, web: opts.web === true }));
+        if (running && !reuse) {
+          const wanted = opts.web ? 'with the web UI' : `on port ${port}`;
+          if (!opts.restart) {
+            const retry = ['gezel start', ...(port !== undefined ? [`--port ${port}`] : [])];
+            if (opts.web) retry.push('--web');
+            throw new CliError(
+              `gezeld is already running for this home ${opts.web ? 'without the web UI' : `on port ${running.port}`} (pid ${running.pid}).\n` +
+                `Restart it ${wanted} with \`${[...retry, '--restart'].join(' ')}\`, or stop it first with \`gezel stop --daemon\`.`,
+            );
+          }
+          console.error(`Restarting gezeld (pid ${running.pid}) ${wanted}…`);
+          if (!(await stopDaemonPid(running.pid))) {
+            throw new CliError(`failed to confirm gezeld pid=${running.pid} stopped`);
+          }
+        }
+        const entry = resolveDaemonEntry(import.meta.url);
+        const result = await discoverOrSpawn({
+          daemonEntry: entry,
+          detached: true,
+          env: spawnEnv,
+          // Never adopt a daemon that lacks the requested port or transport.
+          // A forced spawn accepts only its own process, so losing a race
+          // fails here instead of reporting someone else's daemon.
+          forceSpawn: !reuse,
+          // A cold first boot (fresh home: layout + default gezels +
+          // native probe + catalog) routinely exceeds the 5s default, so
+          // the spawn would time out while the daemon is still coming up —
+          // and in --web mode the user would never see their URL. Give it
+          // real headroom.
+          timeoutMs: 20_000,
+        });
+        const health = await result.client.health();
+        console.log(
+          `gezeld running (version ${health.version}) on port ${new URL(result.baseUrl).port}`,
+        );
+        if (opts.web) await printWebUrl(result.baseUrl, opts.open === true);
+        return;
+      }
 
-    const client = await connectOwned(cliGlobals(), { announceSpawn: false });
-    const health = await client.health();
-    console.log(`gezeld running (version ${health.version})`);
-  });
+      const client = await connectOwned(cliGlobals(), { announceSpawn: false });
+      const health = await client.health();
+      console.log(`gezeld running (version ${health.version})`);
+    },
+  );
+
+/** Whether a running daemon already has what `start --port` / `--web` asked for. */
+async function runtimeServes(
+  runtime: { port: number; baseUrl: string },
+  want: { port: number | undefined; web: boolean },
+): Promise<boolean> {
+  if (want.port !== undefined && runtime.port !== want.port) return false;
+  if (!want.web) return true;
+  if (new URL(runtime.baseUrl).protocol !== 'http:') return false;
+  const { readFile } = await import('node:fs/promises');
+  const { gezelPaths } = await import('@bendyline/gezel/paths');
+  const token = await readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '');
+  return token.trim().length > 0;
+}
 
 /**
  * Read the daemon's per-launch web-UI token from its runtime file and
@@ -266,16 +361,11 @@ program
 async function printWebUrl(baseUrl: string, open: boolean): Promise<void> {
   const { readFile } = await import('node:fs/promises');
   const { gezelPaths } = await import('@bendyline/gezel/paths');
-  let token: string;
-  try {
-    token = (await readFile(gezelPaths().runtime.webUiToken, 'utf8')).trim();
-  } catch {
-    console.error('web UI: could not read the web-ui token from the runtime files.');
-    return;
-  }
+  const token = (await readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '')).trim();
   if (!token) {
-    console.error('web UI: the web-ui token file was empty.');
-    return;
+    throw new CliError(
+      'gezeld is running, but it published no web UI token, so there is no browser URL to print. Run `gezel start --web --restart`.',
+    );
   }
   const url = `${new URL(baseUrl).origin}/?token=${encodeURIComponent(token)}`;
   console.log('');
@@ -486,6 +576,13 @@ async function clearStaleRuntime(stoppedPid: number): Promise<void> {
   );
 }
 
+/** Stop a user-owned daemon process and clear the runtime files it left behind. */
+async function stopDaemonPid(pid: number): Promise<boolean> {
+  const stopped = await stopProcessByPid(pid);
+  if (stopped) await clearStaleRuntime(pid);
+  return stopped;
+}
+
 async function stopUserDaemon(globals: CliGlobals): Promise<void> {
   if (globals.connect) {
     throw new CliError('gezel stop --daemon cannot stop an explicit remote service.');
@@ -502,9 +599,7 @@ async function stopUserDaemon(globals: CliGlobals): Promise<void> {
     console.log('gezeld is not running');
     return;
   }
-  const stopped = await stopProcessByPid(runtime.pid);
-  if (stopped) {
-    await clearStaleRuntime(runtime.pid);
+  if (await stopDaemonPid(runtime.pid)) {
     console.log(`stopped gezeld pid=${runtime.pid}`);
   } else {
     console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
@@ -615,7 +710,20 @@ program
 
 program
   .command('do <craftbook...>')
-  .description("Start a craftbook as a task in the current directory's project")
+  .description(
+    "Start a craftbook as a task in the current directory's project; words after its required values are the request",
+  )
+  .addHelpText(
+    'after',
+    `
+Bare values fill the craftbook's required parameters in order; key=value sets any
+parameter; every other word is your request, which becomes the task description.
+
+Examples:
+  gezel do summarize-long "Summarize notes.txt for the board"
+  gezel do ship feature/login --wait
+  gezel do powerpoint-deck "A deck about Delft" audience=investors`,
+  )
   .option(
     '--param <key=value>',
     'named craftbook parameter (repeatable)',
@@ -629,6 +737,7 @@ program
     '--strict-sandbox',
     'require OS network isolation for custom scripts (CLI launches otherwise trust this recipe snapshot)',
   )
+  .addOption(new Option(SHORTHAND_FLAG).hideHelp())
   .action(
     async (
       craftbookParts: string[],
@@ -638,10 +747,14 @@ program
         timeout: string;
         json?: boolean;
         strictSandbox?: boolean;
+        viaCraftbookShorthand?: boolean;
       },
     ) => {
       const timeoutMs = positiveSeconds(opts.timeout);
-      const client = await connectOwned(cliGlobals());
+      const shorthand = opts.viaCraftbookShorthand
+        ? await resolveCraftbookShorthand(craftbookParts)
+        : undefined;
+      const client = shorthand?.client ?? (await connectOwned(cliGlobals()));
       const projectId = await resolveRunProject(client, cliGlobals());
       const [config, result] = await Promise.all([
         client.getConfig(),
@@ -651,20 +764,50 @@ program
         result.items,
         config.showWorkInProgressFeatures === true,
       );
-      const { book, args } = resolveCraftbookInvocation(craftbooks, craftbookParts);
+      // A shorthand names one exact craftbook; the rest of its words are never part of the name.
+      const shorthandBook =
+        shorthand && craftbooks.find((candidate) => candidate.id === shorthand.id);
+      if (shorthand && !shorthandBook) throw new CliError(`craftbook not found: ${shorthand.id}`);
+      const { book, args } = shorthandBook
+        ? { book: shorthandBook, args: craftbookParts.slice(1) }
+        : resolveCraftbookInvocation(craftbooks, craftbookParts);
       const { craftbook } = await client.getCraftbook(book.id, {
         projectId,
         source: book.source,
         version: book.version,
       });
-      const craftbookParams = parseCraftbookParams(craftbook, [...args, ...opts.param]);
+      if (shorthand) {
+        // A workflow module is this repository's own code, run with the
+        // person's permissions. A word typed in a fresh clone must not run it.
+        if (craftbook.cliWorkflow)
+          throw new CliError(
+            `${book.id} runs a workflow module from this project's code, so it does not start by name alone. Run it with: gezel do ${book.id}`,
+          );
+        process.stderr.write(`${shorthandEcho(book.id, shorthandTail)}\n`);
+      }
+      const parsed = parseCraftbookArguments(craftbook, args, opts.param);
+      const setUp = () =>
+        ensureCraftbookSetup(client, {
+          projectId,
+          label: craftbook.name,
+          needs: craftbook,
+          params: parsed.params,
+          ...(craftbook.paramSchema ? { paramSchema: craftbook.paramSchema } : {}),
+          prompter: terminalPrompter(),
+          write: (text) => process.stderr.write(text),
+        });
       if (craftbook.cliWorkflow) {
         if (book.source !== 'project')
           throw new CliError('CLI workflow craftbooks must belong to this project.');
+        if (parsed.request)
+          throw new CliError(
+            `${craftbook.name} runs a workflow module and takes no request text; pass its parameters as key=value (unused: "${parsed.request}").`,
+          );
         if (opts.strictSandbox)
           throw new CliError(
             'CLI workflows execute ordinary repository code and cannot use --strict-sandbox.',
           );
+        await setUp();
         const workspace =
           typeof cliGlobals().project === 'string'
             ? (cliGlobals().project as string)
@@ -679,16 +822,17 @@ program
           console.error,
           {
             craftbook,
-            params: craftbookParams,
+            params: parsed.params,
             timeoutMs,
           },
         );
         printWorkflowResult(result, opts.json);
         return;
       }
+      await setUp();
       const created = await client.createTask(projectId, {
         ...craftbookStartRequest(book),
-        craftbookParams,
+        ...craftbookDoLaunch(craftbook, parsed),
         trustScripts: !opts.strictSandbox,
         roleBasedNameOnlyMode: true,
       });
@@ -1058,7 +1202,7 @@ knowledge
   .description('Compile a catalog folder into a .gezk archive')
   .option('--out <file>', 'output path (default <dir>/<id>-<version>.gezk)')
   .option('--sign-key <pemfile>', 'Ed25519 private key (PKCS#8 PEM) to sign the manifest')
-  .option('--skip-images', 'Build without image assets, keeping image alt text')
+  .option('--skip-images', 'Build without image, video or audio assets, keeping their alt text')
   .action(async (dir: string, opts: { out?: string; signKey?: string }) => {
     const { runKnowledgeBuild } = await loadKnowledgeCommand();
     await runKnowledgeBuild(dir, opts);
@@ -2039,40 +2183,7 @@ model
   .action(async (id: string, opts: { provider?: string }) => {
     const client = await connectOwned(cliGlobals());
     const provider = resolveModelProvider(opts.provider);
-    let lastPct = -1;
-    let pullError: string | undefined;
-    // MLX repos are multi-file (config + shards); the SSE carries
-    // cumulative `bytesWrittenAll`/`totalBytesAll` across every file, while
-    // the GGUF engines report a single `bytesWritten`/`totalBytes`. Render
-    // whichever the event provides so one progress line covers both.
-    const onEvent = (ev: MlxInstallEvent | LlamaCppInstallEvent): void => {
-      if (ev.type === 'progress') {
-        const written = 'bytesWrittenAll' in ev ? ev.bytesWrittenAll : ev.bytesWritten;
-        const total = 'totalBytesAll' in ev ? ev.totalBytesAll : (ev.totalBytes ?? 0);
-        const pct = total > 0 ? Math.floor((written / total) * 100) : 0;
-        if (pct !== lastPct) {
-          lastPct = pct;
-          process.stderr.write(
-            `\rpulling ${id} (${provider}): ${String(pct).padStart(3)}%  ${(written / 1e9).toFixed(2)}/${(total / 1e9).toFixed(2)} GB`,
-          );
-        }
-      } else if (ev.type === 'retrying') {
-        process.stderr.write(`\n  retry ${ev.attempt}/${ev.maxAttempts}: ${ev.reason}\n`);
-      } else if (ev.type === 'error') {
-        pullError = ev.error;
-        process.stderr.write('\n');
-      } else if (ev.type === 'done' && !pullError) {
-        process.stderr.write(`\rpulled ${id} (${provider})${' '.repeat(48)}\n`);
-      }
-    };
-    if (provider === 'mlx') {
-      await client.installMlxModel(id, onEvent);
-    } else if (provider === 'ds4') {
-      await client.installDs4Model(id, onEvent);
-    } else {
-      await client.installLlamaCppModel(id, onEvent);
-    }
-    if (pullError) throw new CliError(`pull failed: ${pullError}`);
+    await pullChatModel(client, provider, id, (text) => process.stderr.write(text));
   });
 
 model
@@ -2349,7 +2460,11 @@ async function pollStorageJob(
 // commander copies this setting into subcommands created after it.
 program.allowExcessArguments();
 
-program.parseAsync(process.argv).catch((err: unknown) => {
+// `gezel <craftbook> …` runs `gezel do <craftbook> …` (see craftbook-shorthand.ts).
+const shorthand = craftbookShorthandArgv(process.argv, new Set(builtinCommandNames()));
+if (shorthand) shorthandTail = shorthand.tail;
+
+program.parseAsync(shorthand?.argv ?? process.argv).catch((err: unknown) => {
   // CliError and service API errors are user-facing failures — print one
   // actionable line, no stack. Anything else is a bug report and keeps it.
   const friendly = formatCliFailure(err);

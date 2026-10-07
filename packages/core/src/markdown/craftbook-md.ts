@@ -74,6 +74,8 @@ const FRONTMATTER_KEYS = [
   'runModes',
   'toolsets',
   'connectors',
+  'models',
+  'services',
   'paramSchema',
   'cliWorkflow',
   'hooks',

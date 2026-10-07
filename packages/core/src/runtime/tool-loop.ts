@@ -1,11 +1,17 @@
 import { isEngagementAllowed } from '../engagement.js';
+import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import { terminalToolClosingText } from '../local-loop/terminal-tool-policy.js';
 import { createLogger } from '../log.js';
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { isContextOverflowError } from '../task-execution.js';
-import { parseToolEnvelopeReply } from '../tools/envelope.js';
+import {
+  parseToolEnvelopeReply,
+  trailingToolCallStart,
+  withoutToolCallText,
+} from '../tools/envelope.js';
 import {
   NATIVE_TOOL_LISTINGS,
   NATIVE_TOOL_NOTE,
@@ -153,9 +159,12 @@ const ACTION_LIMIT =
 export const PORTABLE_TURN_ACTION_LIMIT = 24;
 
 /** A reply that set out to be a JSON tool call, whether or not it parses. */
-const CALL_SHAPED = /^\s*(?:```[A-Za-z]*\s*)?\{\s*"name"\s*:/;
+const CALL_SHAPED = /^\s*(?:```[A-Za-z]*\s*)?\{\s*\\?"name\\?"\s*:/;
 const UNPARSED_CALL_NOTE =
   'That tool call is not valid JSON, so it did not run. Reply with only the call as one JSON object, every key with a value: {"name": "tool_name", "arguments": {"key": "value"}}. Leave out keys you have no value for.';
+/** Prose with a call after it: the call never runs from inside a reply. */
+const MIXED_CALL_NOTE =
+  'Your reply put a tool call after some text, so the call did not run. To act, reply with only the call as one JSON object; to answer, reply with only text.';
 
 function withNativeToolNote(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
@@ -354,6 +363,17 @@ export async function runPortableToolLoop(options: {
     narrowed?(listing: PortableToolListing): void;
   };
   actions: PortableToolActions;
+  /**
+   * Tools whose success is the turn's whole job (a game's move): the turn ends
+   * on it with the closing line the policy names, as on the desktop.
+   */
+  terminalToolPolicy?: TerminalToolPolicy;
+  /**
+   * The turn's first request offers only this tool (a reaction's `turn`):
+   * these engines cannot be made to call it, but a listing of one leaves
+   * nothing else to reach for.
+   */
+  requiredTool?: string;
   cancelled(): boolean;
   checkpoint(message: ChatMessage): Promise<void>;
   tool(call: ChatMessageToolCall): void;
@@ -508,6 +528,14 @@ export async function runPortableToolLoop(options: {
         };
     }
 
+    // Only the tools this turn's policy names: this loop settles a task step
+    // its own way below, whatever the shared policy says about advancing.
+    const closing =
+      call.success && options.terminalToolPolicy?.toolNames.includes(name)
+        ? terminalToolClosingText(options.terminalToolPolicy, name, args, serialized)
+        : null;
+    if (closing !== null) return { end: { text: closing, stopReason: 'stop' } };
+
     if (call.success && ['message_gezel', 'start_project'].includes(name))
       return {
         end: {
@@ -541,6 +569,10 @@ export async function runPortableToolLoop(options: {
   };
 
   let retriedUnparsedCall = false;
+  const required =
+    options.requiredTool && tools?.inventory.some((tool) => tool.name === options.requiredTool)
+      ? options.requiredTool
+      : undefined;
   for (let iteration = 0; iteration <= PORTABLE_TURN_ACTION_LIMIT; iteration++) {
     await check();
     await assertPortableTaskSessionActive(options.store, session);
@@ -551,11 +583,15 @@ export async function runPortableToolLoop(options: {
     let ended: Omit<LoopResult, 'message'> | undefined;
     for (;;) {
       const base = conversation();
+      const offered =
+        iteration === 0 && required
+          ? tools!.inventory.filter((tool) => tool.name === required)
+          : tools?.inventory;
       const prompt = !tools
         ? base
         : native
           ? withNativeToolNote(base, listing)
-          : withToolListing(base, tools.inventory, listing);
+          : withToolListing(base, offered!, listing);
       const inputError = portableInputLimitError(prompt);
       if (inputError) {
         // This host's own ceiling on a request: the oldest turns give way.
@@ -566,7 +602,7 @@ export async function runPortableToolLoop(options: {
         continue;
       }
       const nativeSpecs = binding
-        ? nativeToolSpecs(tools!.inventory, listing as NativeToolListing, binding)
+        ? nativeToolSpecs(offered!, listing as NativeToolListing, binding)
         : [];
       let nativeCalls = 0;
       let limited = false;
@@ -694,20 +730,24 @@ export async function runPortableToolLoop(options: {
     // A call that will not parse was never streamed, so a second try costs the
     // person nothing. Shown instead, it reached them as the reply: Gemini Nano
     // answered a question with its own broken JSON (Galaxy S26+, 2026-10-02).
+    const unparsedCall = CALL_SHAPED.test(visibleText);
+    const mixedCall = !unparsedCall && trailingToolCallStart(visibleText) > 0;
     if (
       !envelope &&
       !retriedUnparsedCall &&
       result.stopReason === 'stop' &&
-      CALL_SHAPED.test(visibleText)
+      (unparsedCall || mixedCall)
     ) {
       retriedUnparsedCall = true;
       messages.push(
         { role: 'assistant', content: visibleText.trim() },
-        { role: 'user', content: UNPARSED_CALL_NOTE },
+        { role: 'user', content: unparsedCall ? UNPARSED_CALL_NOTE : MIXED_CALL_NOTE },
       );
       continue;
     }
-    if (!envelope) return { ...result, text: visibleText, message, streamed: prose };
+    // A call that did not run is never the reply a person reads.
+    if (!envelope)
+      return { ...result, text: withoutToolCallText(visibleText), message, streamed: prose };
     if (++actionCount > PORTABLE_TURN_ACTION_LIMIT) break;
     const outcome = await perform(envelope.name, envelope.arguments);
     if ('end' in outcome) return { ...outcome.end, message };

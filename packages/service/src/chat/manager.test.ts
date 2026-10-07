@@ -6851,7 +6851,10 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(sendCall?.prompt).toContain('b6-c5, d6-c5');
     const createCall = mock.calls.find((call) => call.kind === 'create');
     expect(createCall?.opts?.terminalToolPolicy).toEqual(
-      expect.objectContaining({ toolNames: ['make_move'], closingArg: 'moveThought' }),
+      expect.objectContaining({
+        toolNames: ['make_move'],
+        closingArgByTool: { make_move: 'moveThought' },
+      }),
     );
   });
 

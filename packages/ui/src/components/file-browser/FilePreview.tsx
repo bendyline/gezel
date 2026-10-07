@@ -77,10 +77,13 @@ export function AuthedMediaPreview({
   kind,
   path,
   fetchBlob,
+  startMs,
 }: {
   kind: 'image' | 'video' | 'audio';
   path: string;
   fetchBlob: (path: string) => Promise<Blob>;
+  /** Start playback here (a search hit's matched moment) once the media loads. */
+  startMs?: number;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,12 +108,34 @@ export function AuthedMediaPreview({
   if (error) return <p className="muted small">Preview failed: {error}</p>;
   if (!blobUrl) return null;
   if (kind === 'image') return <img src={blobUrl} alt={path} />;
+  const seek =
+    startMs === undefined
+      ? undefined
+      : (e: React.SyntheticEvent<HTMLMediaElement>) => {
+          e.currentTarget.currentTime = startMs / 1000;
+        };
   if (kind === 'audio') {
-    // biome-ignore lint/a11y/useMediaCaption: user-supplied audio file; no caption track exists.
-    return <audio src={blobUrl} controls style={{ width: '100%' }} />;
+    return (
+      // biome-ignore lint/a11y/useMediaCaption: user-supplied audio file; no caption track exists.
+      <audio
+        key={startMs}
+        src={blobUrl}
+        controls
+        onLoadedMetadata={seek}
+        style={{ width: '100%' }}
+      />
+    );
   }
-  // biome-ignore lint/a11y/useMediaCaption: user-supplied video file; no caption track exists.
-  return <video src={blobUrl} controls style={{ maxWidth: '100%', maxHeight: '100%' }} />;
+  return (
+    // biome-ignore lint/a11y/useMediaCaption: user-supplied video file; no caption track exists.
+    <video
+      key={startMs}
+      src={blobUrl}
+      controls
+      onLoadedMetadata={seek}
+      style={{ maxWidth: '100%', maxHeight: '100%' }}
+    />
+  );
 }
 
 /** The whole non-text branch of the viewer: media players plus the binary stop. */
@@ -119,12 +144,15 @@ export function NonTextFilePreview({
   path,
   fetchBlob,
   sizeBytes,
+  startMs,
 }: {
   content: string;
   path: string;
   fetchBlob: (path: string) => Promise<Blob>;
   /** On-disk size, when the source knew it. The only fact we can offer about a file we cannot show. */
   sizeBytes?: number;
+  /** Where video or sound starts playing: the moment a search hit matched. */
+  startMs?: number;
 }) {
   const kind =
     content === MEDIA_IMAGE
@@ -137,7 +165,12 @@ export function NonTextFilePreview({
   return (
     <div className="image-preview">
       {kind ? (
-        <AuthedMediaPreview kind={kind} path={path} fetchBlob={fetchBlob} />
+        <AuthedMediaPreview
+          kind={kind}
+          path={path}
+          fetchBlob={fetchBlob}
+          {...(startMs === undefined ? {} : { startMs })}
+        />
       ) : (
         <p className="muted" style={{ textAlign: 'center' }}>
           Binary file — no text preview available.

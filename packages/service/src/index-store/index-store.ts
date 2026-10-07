@@ -28,7 +28,18 @@ import {
  * ripgrep/live-read when `IndexStore.open` returns null (sqlite unavailable).
  */
 
-export type Modality = 'text' | 'code' | 'doc' | 'image' | 'audio' | 'email';
+export type Modality = 'text' | 'code' | 'doc' | 'image' | 'audio' | 'video' | 'email';
+/** The modalities the media tier embeds (one row per image, per window otherwise). */
+export type MediaVectorModality = 'image' | 'audio' | 'video';
+
+export interface MediaVectorRow {
+  contentHash: string;
+  filePath: string;
+  modality: MediaVectorModality;
+  startMs: number;
+  endMs: number | null;
+  vec: Float32Array;
+}
 export type CollectionKind =
   | 'workspace'
   | 'documents'
@@ -399,11 +410,11 @@ function reconcileEmbedModel(db: SqliteDriver, vecAvailable: boolean): void {
 }
 
 /**
- * Same contract as {@link reconcileEmbedModel} for the image embedder: vectors
- * from a different CLIP-class model are not comparable, so a model swap wipes
- * image_vectors and the image_embed_state gate (the tier re-embeds lazily).
- * Face vectors are NOT touched — the face embedder is a separate pinned model
- * with its own catalog, not governed by GEZEL_IMAGE_EMBED_MODEL.
+ * Same contract as {@link reconcileEmbedModel} for the media embedder: its
+ * identity is the profile plus the vision token budget, since a budget change
+ * moves every image vector. A change wipes media_vectors and the
+ * image_embed_state gate (the tier re-embeds lazily). Face vectors are NOT
+ * touched — the face embedder is a separate pinned model with its own catalog.
  */
 function reconcileImageEmbedModel(db: SqliteDriver): void {
   const current = imageEmbedModelId();
@@ -412,7 +423,7 @@ function reconcileImageEmbedModel(db: SqliteDriver): void {
     .get<{ value: string }>()?.value;
   if (stored === current) return;
   if (stored) {
-    db.exec('DELETE FROM image_vectors');
+    db.exec('DELETE FROM media_vectors');
     db.exec('DELETE FROM image_embed_state');
   }
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('image_embed_model', ?)").run(
@@ -2252,31 +2263,89 @@ export class IndexStore {
    * detect incomparable leftovers instead of computing garbage cosine.
    */
   putImageVector(contentHash: string, filePath: string, vec: number[] | Float32Array): void {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO image_vectors (content_hash, collection_id, file_path, model, dim, vec, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        contentHash,
-        this.collectionId,
-        filePath,
-        imageEmbedModelId(),
-        vec.length,
-        vectorToBlob(vec),
-        nowIso(),
-      );
+    this.putMediaVectors(contentHash, filePath, 'image', [{ startMs: 0, endMs: null, vec }]);
+  }
+
+  /**
+   * Store every embedded window of one media file (one row for an image),
+   * replacing whatever that content hash held before.
+   */
+  putMediaVectors(
+    contentHash: string,
+    filePath: string,
+    modality: MediaVectorModality,
+    windows: ReadonlyArray<{ startMs: number; endMs: number | null; vec: number[] | Float32Array }>,
+  ): void {
+    const model = imageEmbedModelId();
+    const insert = this.db.prepare(
+      `INSERT OR REPLACE INTO media_vectors (content_hash, start_ms, end_ms, collection_id, file_path, modality, model, dim, vec, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.db.transaction(() => {
+      this.db
+        .prepare('DELETE FROM media_vectors WHERE content_hash = ? AND collection_id = ?')
+        .run(contentHash, this.collectionId);
+      for (const w of windows) {
+        insert.run(
+          contentHash,
+          w.startMs,
+          w.endMs,
+          this.collectionId,
+          filePath,
+          modality,
+          model,
+          w.vec.length,
+          vectorToBlob(w.vec),
+          nowIso(),
+        );
+      }
+    });
   }
 
   /** The stored vector for one image hash, or null. */
   imageVectorByHash(contentHash: string): { filePath: string; vec: Float32Array } | null {
     const r = this.db
       .prepare(
-        'SELECT file_path, vec FROM image_vectors WHERE content_hash = ? AND collection_id = ?',
+        `SELECT file_path, vec FROM media_vectors
+         WHERE content_hash = ? AND collection_id = ? AND modality = 'image'`,
       )
       .get<{ file_path: string; vec: Uint8Array }>(contentHash, this.collectionId);
     if (!r?.vec) return null;
     return { filePath: r.file_path, vec: blobToFloat32(r.vec) };
+  }
+
+  /**
+   * Every stored media vector of the given kinds (default all), joined to
+   * `files` so a deleted file's windows never surface — the text→media
+   * search arm's brute-force candidate set.
+   */
+  allMediaVectors(modalities?: readonly MediaVectorModality[]): MediaVectorRow[] {
+    const filter = modalities?.length
+      ? ` AND v.modality IN (${modalities.map(() => '?').join(', ')})`
+      : '';
+    return this.db
+      .prepare(
+        `SELECT v.content_hash, f.path AS file_path, v.modality, v.start_ms, v.end_ms, v.vec
+         FROM media_vectors v
+         JOIN files f ON f.hash = v.content_hash AND f.collection_id = v.collection_id
+         WHERE v.collection_id = ?${filter}`,
+      )
+      .all<{
+        content_hash: string;
+        file_path: string;
+        modality: MediaVectorModality;
+        start_ms: number;
+        end_ms: number | null;
+        vec: Uint8Array;
+      }>(this.collectionId, ...(modalities ?? []))
+      .map((r) => ({
+        contentHash: r.content_hash,
+        filePath: r.file_path,
+        modality: r.modality,
+        startMs: Number(r.start_ms),
+        endMs: r.end_ms === null ? null : Number(r.end_ms),
+        vec: blobToFloat32(r.vec),
+      }));
   }
 
   /**
@@ -2290,9 +2359,9 @@ export class IndexStore {
   allImageVectors(): Array<{ contentHash: string; filePath: string; vec: Float32Array }> {
     return this.db
       .prepare(
-        `SELECT v.content_hash, f.path AS file_path, v.vec FROM image_vectors v
+        `SELECT v.content_hash, f.path AS file_path, v.vec FROM media_vectors v
          JOIN files f ON f.hash = v.content_hash AND f.collection_id = v.collection_id
-         WHERE v.collection_id = ?`,
+         WHERE v.collection_id = ? AND v.modality = 'image'`,
       )
       .all<{ content_hash: string; file_path: string; vec: Uint8Array }>(this.collectionId)
       .map((r) => ({
@@ -2308,31 +2377,36 @@ export class IndexStore {
    * the runner via markImageEmbedUnsupported (the work-list is gate-driven,
    * not extension-driven, so a future decoder re-admits nothing stale).
    */
-  filesNeedingImageEmbed(limit = 10): FileRecord[] {
+  filesNeedingImageEmbed(
+    limit = 10,
+    modalities: readonly MediaVectorModality[] = ['image'],
+  ): FileRecord[] {
     return this.db
       .prepare(
         `SELECT f.* FROM files f
          LEFT JOIN image_embed_state s ON s.content_hash = f.hash
-         WHERE f.collection_id = ? AND f.modality = 'image' AND f.hash IS NOT NULL
+         WHERE f.collection_id = ? AND f.modality IN (${modalities.map(() => '?').join(', ')})
+           AND f.hash IS NOT NULL
            AND (s.content_hash IS NULL
                 OR (s.state = 'failed' AND COALESCE(s.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))
          ORDER BY f.path LIMIT ?`,
       )
-      .all<FileRow>(this.collectionId, limit)
+      .all<FileRow>(this.collectionId, ...modalities, limit)
       .map(rowToFile);
   }
 
   /** COUNT companion to {@link filesNeedingImageEmbed}. */
-  countNeedingImageEmbed(): number {
+  countNeedingImageEmbed(modalities: readonly MediaVectorModality[] = ['image']): number {
     const row = this.db
       .prepare(
         `SELECT COUNT(*) AS n FROM files f
          LEFT JOIN image_embed_state s ON s.content_hash = f.hash
-         WHERE f.collection_id = ? AND f.modality = 'image' AND f.hash IS NOT NULL
+         WHERE f.collection_id = ? AND f.modality IN (${modalities.map(() => '?').join(', ')})
+           AND f.hash IS NOT NULL
            AND (s.content_hash IS NULL
                 OR (s.state = 'failed' AND COALESCE(s.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))`,
       )
-      .get<{ n: number }>(this.collectionId);
+      .get<{ n: number }>(this.collectionId, ...modalities);
     return row?.n ?? 0;
   }
 

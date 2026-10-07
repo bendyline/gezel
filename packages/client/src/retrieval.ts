@@ -1,4 +1,5 @@
 import type {
+  MediaSearchStatusResponse,
   RelevanceModelStatusResponse,
   RelevanceScoreRequest,
   RetrievalPreviewRequest,
@@ -33,6 +34,26 @@ export class RetrievalClient {
     modelId?: string,
   ): Promise<{ started: boolean; installed?: boolean; reason?: string }> {
     return this.request('POST', '/api/relevance-model/install', modelId ? { modelId } : {});
+  }
+
+  /** Media search (photos, video and audio by meaning): model parts, download, ffmpeg. */
+  mediaSearchStatus(): Promise<MediaSearchStatusResponse> {
+    return this.request('GET', '/api/media-search');
+  }
+
+  /**
+   * Download the media-search model in the background (`audio` adds the audio
+   * encoder video and sound files need); poll `mediaSearchStatus` for progress.
+   */
+  installMediaSearch(
+    opts: { audio?: boolean } = {},
+  ): Promise<{ started: boolean; installed?: boolean; reason?: string }> {
+    return this.request('POST', '/api/media-search/install', opts.audio ? { audio: true } : {});
+  }
+
+  /** Look for ffmpeg again (after the person installs one) and return the fresh status. */
+  recheckMediaSearchFfmpeg(): Promise<MediaSearchStatusResponse> {
+    return this.request('POST', '/api/media-search/ffmpeg/recheck', {});
   }
 
   /** Raw relevance-model scores for (query, passage) pairs — the calibration path. */

@@ -4,7 +4,7 @@
  * pinned transport. Global options are declared here and applied by bin/gezel.ts.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
@@ -998,6 +998,29 @@ export async function ensureCliProjectLead(
 /** Resolve the command project: the current directory unless explicitly overridden. */
 export async function resolveRunProject(client: GezelClient, globals: CliGlobals): Promise<string> {
   return resolveCommandProject(client, globals);
+}
+
+/**
+ * What {@link resolveRunProject} would answer, without creating anything: the
+ * folder's existing project, the Default project for a folder gezel never
+ * owns, or null with the folder that would become a new project.
+ */
+export async function previewRunProject(
+  client: GezelClient,
+  globals: CliGlobals,
+): Promise<{ projectId: string; root?: undefined } | { projectId: null; root: string }> {
+  const p = globals.project;
+  const requested = resolve(typeof p === 'string' ? p : process.cwd());
+  const folder = await realpath(requested).catch(() => requested);
+  try {
+    const res = await client.inferProjectForPath({ path: folder, kind: 'folder', create: false });
+    return res.project
+      ? { projectId: res.project.id }
+      : { projectId: null, root: res.root ?? folder };
+  } catch (err) {
+    if (forbiddenProjectFolderName(err)) return { projectId: DEFAULT_PROJECT_ID };
+    throw err;
+  }
 }
 
 /** Resolve the project id for the interactive TUI; same rules as `run`. */

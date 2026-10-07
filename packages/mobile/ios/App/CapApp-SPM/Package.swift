@@ -12,7 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.2"),
-        .package(name: "BendylineGezelCapacitor", path: "../../../node_modules/@bendyline/gezel-capacitor")
+        .package(name: "BendylineGezelCapacitor", path: "../../../../capacitor")
     ],
     targets: [
         .target(

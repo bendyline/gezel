@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   KnowledgeAssetPathSchema,
-  MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
-  MAX_KNOWLEDGE_ASSET_BYTES,
   MAX_KNOWLEDGE_ASSET_COUNT,
   assetExtension,
   assetKindForExtension,
+  knowledgeAssetLimitsProblem,
+  maxKnowledgeAssetBytes,
   sniffAssetType,
   svgInertnessProblem,
 } from '@bendyline/gezk';
@@ -17,6 +17,11 @@ export interface CompileAsset {
   /** Exactly one of absPath / content. */
   absPath?: string;
   content?: Buffer;
+  /**
+   * Who made it and under which terms (license, author, sourceUrl, …).
+   * Recorded on the asset's media rows, where readers surface it.
+   */
+  attribution?: Record<string, unknown>;
 }
 
 export interface PreparedAsset {
@@ -24,6 +29,7 @@ export interface PreparedAsset {
   bytes: Buffer;
   sizeBytes: number;
   sha256: string;
+  attribution?: Record<string, unknown>;
 }
 
 /** Validate before embedding; omitted images must never reach the archive. */
@@ -48,7 +54,6 @@ export function prepareAssets(
     skippedPaths.add(path);
     opts.onWarning?.(`${message}; skipped (references replaced with their text)`);
   };
-  let total = 0;
   for (const asset of assets) {
     const parsed = KnowledgeAssetPathSchema.safeParse(asset.path);
     if (!parsed.success) throw new Error(`invalid asset path: ${asset.path}`);
@@ -59,10 +64,11 @@ export function prepareAssets(
       throw new Error(`asset ${asset.path} must supply exactly one of content / absPath`);
     }
     const bytes = asset.content ?? readFileSync(asset.absPath as string);
-    if (bytes.byteLength > MAX_KNOWLEDGE_ASSET_BYTES) {
+    const limit = maxKnowledgeAssetBytes(asset.path);
+    if (bytes.byteLength > limit) {
       rejectContent(
         asset.path,
-        `asset ${asset.path} is ${bytes.byteLength} bytes; the limit is ${MAX_KNOWLEDGE_ASSET_BYTES}`,
+        `asset ${asset.path} is ${bytes.byteLength} bytes; the limit is ${limit}`,
       );
       continue;
     }
@@ -83,17 +89,16 @@ export function prepareAssets(
         continue;
       }
     }
-    total += bytes.byteLength;
-    if (total > MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES) {
-      throw new Error(`assets exceed ${MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES} bytes in total`);
-    }
     prepared.push({
       path: asset.path,
       bytes,
       sizeBytes: bytes.byteLength,
       sha256: createHash('sha256').update(bytes).digest('hex'),
+      ...(asset.attribution ? { attribution: asset.attribution } : {}),
     });
   }
+  const totals = knowledgeAssetLimitsProblem(prepared);
+  if (totals) throw new Error(totals);
   return { assets: prepared.sort((a, b) => (a.path < b.path ? -1 : 1)), skippedPaths };
 }
 

@@ -1,3 +1,4 @@
+import { spliceIntoText } from '../recognition/digest.js';
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 
 export type HistoryMessage = {
@@ -82,7 +83,10 @@ export function portableConversationHistory(messages: ChatMessage[]): HistoryMes
       (message) => message.content.trim() || message.pendingQuestionId || message.toolCalls?.length,
     );
     if (request && completed && meaningful) {
-      history.push({ role: 'user', content: request.content });
+      history.push({
+        role: 'user',
+        content: spliceIntoText(request.content, request.recognizedImages),
+      });
       for (const message of responses) {
         const actions = message.toolCalls?.length || message.pendingQuestionId;
         const content = [

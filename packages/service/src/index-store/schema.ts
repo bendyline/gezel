@@ -150,25 +150,32 @@ CREATE TABLE IF NOT EXISTS enrichments (
   last_error TEXT
 );
 
--- CLIP-style whole-image embeddings (v12). Keyed by content hash, NOT chunk
--- id: putChunks is delete-then-insert and the AI-shadow tier re-chunks every
--- image it captions, so a chunk-keyed vector orphans on the first re-chunk
--- (the original v1 shape had exactly that latent bug — it shipped with zero
--- writers, so re-keying cost nothing). A plain BLOB, deliberately not vec0:
--- dimension-agnostic, brute-force cosine is fine at this scale, and image
--- vectors must work even where sqlite-vec didn't load.
-CREATE TABLE IF NOT EXISTS image_vectors (
-  content_hash TEXT PRIMARY KEY,
+-- Media embeddings (v14): whole images, and windows of audio and video, in
+-- the media-search profile's space (EmbeddingGemma 2), so a text query reaches
+-- them and an image reaches its lookalikes. Keyed by content hash plus the
+-- window's start (0 for an image), NOT chunk id: putChunks is
+-- delete-then-insert and the AI-shadow tier re-chunks every image it
+-- captions, so a chunk-keyed vector would orphan on the first re-chunk. A
+-- plain BLOB, deliberately not vec0: dimension-agnostic, brute-force cosine
+-- is fine at this scale, and media vectors must work even where sqlite-vec
+-- didn't load.
+CREATE TABLE IF NOT EXISTS media_vectors (
+  content_hash TEXT NOT NULL,
+  start_ms INTEGER NOT NULL DEFAULT 0,
+  end_ms INTEGER,
   collection_id TEXT NOT NULL,
   file_path TEXT NOT NULL,
+  modality TEXT NOT NULL,
   model TEXT,
   dim INTEGER,
   vec BLOB,
-  created_at TEXT
+  created_at TEXT,
+  PRIMARY KEY (content_hash, start_ms)
 );
-CREATE INDEX IF NOT EXISTS idx_image_vectors_col ON image_vectors (collection_id);
+CREATE INDEX IF NOT EXISTS idx_media_vectors_col ON media_vectors (collection_id, modality);
 
--- Image-embed gate (v12): same content-addressed discipline as shadow_state.
+-- Media-embed gate (v12; images, and from v14 audio and video too): same
+-- content-addressed discipline as shadow_state.
 -- state 'ok'/'unsupported' consume the gate; 'failed' rows retry while
 -- attempts < the cap. Separate from embed_state (text) so the two tiers'
 -- failure accounting never mixes.
@@ -462,7 +469,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
 // tables (face_vectors/face_clusters/face_state). Additive otherwise.
 // v13: enrichments.last_error — why a hash stopped being retried, so the
 // status popover can name the file AND the reason instead of a bare count.
-const SCHEMA_VERSION = 13;
+// v14: image_vectors (CLIP, 512-d, image→image only) → media_vectors
+// (EmbeddingGemma 2, images plus audio/video windows). The old vectors live
+// in another space, so they are dropped, not migrated; the media tier
+// re-embeds lazily.
+const SCHEMA_VERSION = 14;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -504,6 +515,13 @@ export function applySchema(
     if (cols.some((c) => c.name === 'chunk_id')) db.exec('DROP TABLE image_vectors');
   } catch {
     /* introspection failed — BASE_DDL below will surface any real problem */
+  }
+  // v13 → v14: CLIP image vectors are not comparable with the media-search
+  // model's, so drop them; reconcileImageEmbedModel then clears the gate.
+  try {
+    db.exec('DROP TABLE IF EXISTS image_vectors');
+  } catch {
+    /* nothing to drop */
   }
   db.exec(BASE_DDL);
 

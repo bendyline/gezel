@@ -8,6 +8,7 @@ import type { PortableCatalogModel, PortableProductService } from '@bendyline/ge
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import * as Select from '../../ui/src/primitives/Select.js';
 import type { MobileHost, ModelInventory } from './native.js';
+import { isProjectorModel } from './vision-model.js';
 
 const gigabytes = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 
@@ -90,11 +91,15 @@ export function modelChoices({
         ]
       : []),
     ...ready.map((provider) => ({ value: `provider:${provider.id}`, label: provider.name })),
-    ...inventory.models.map((model) => ({
-      value: `model:${model.id}`,
-      label: modelDisplayName(model.name),
-      size: gigabytes(model.sizeBytes),
-    })),
+    // A vision projector is stored like a model so its download is verified,
+    // but it cannot hold a conversation.
+    ...inventory.models
+      .filter((model) => !isProjectorModel(model))
+      .map((model) => ({
+        value: `model:${model.id}`,
+        label: modelDisplayName(model.name),
+        size: gigabytes(model.sizeBytes),
+      })),
   ];
   const toDownload: ModelChoice[] = [
     ...toPrepare.map((provider) => ({ value: `provider:${provider.id}`, label: provider.name })),

@@ -450,6 +450,26 @@ const cases: ContractCase[] = [
     invoke: (c) => c.retrieval.installRelevanceModel('minilm'),
   },
   {
+    name: 'media search status',
+    method: 'GET',
+    path: '/api/media-search',
+    invoke: (c) => c.retrieval.mediaSearchStatus(),
+  },
+  {
+    name: 'media search install with audio',
+    method: 'POST',
+    path: '/api/media-search/install',
+    body: { audio: true },
+    invoke: (c) => c.retrieval.installMediaSearch({ audio: true }),
+  },
+  {
+    name: 'media search ffmpeg recheck',
+    method: 'POST',
+    path: '/api/media-search/ffmpeg/recheck',
+    body: {},
+    invoke: (c) => c.retrieval.recheckMediaSearchFfmpeg(),
+  },
+  {
     name: 'relevance score',
     method: 'POST',
     path: '/api/relevance-model/score',

@@ -531,6 +531,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   } | null>(null);
   const [workspaceSourceReveal, setWorkspaceSourceReveal] =
     useState<WorkspaceSourceRevealRequest | null>(null);
+  // A video or sound search hit opens its file at the matched moment.
+  const [mediaStart, setMediaStart] = useState<{ path: string; startMs: number } | null>(null);
   // In-session output-pane choice, held only until the write to
   // `project.outputPaneVisible` lands (and, for a pre-server-side install,
   // until the localStorage value is migrated). The PROJECT is the source of
@@ -1208,9 +1210,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       source: FileTab,
       line?: number,
       fromQuestion?: boolean,
+      startMs?: number,
     ) => {
       setTab(source);
       setQuestionReturnPath(fromQuestion ? path : null);
+      setMediaStart(startMs === undefined ? null : { path, startMs });
       try {
         const file = await loadProjectFile(projectId, path, source);
         setOpenFile(file);
@@ -1270,12 +1274,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           source?: FileTab;
           line?: number;
           fromQuestion?: boolean;
+          startMs?: number;
         }>
       ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion);
+        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion, d.startMs);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1295,6 +1300,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           intent.source,
           intent.line,
           intent.fromQuestion,
+          intent.startMs,
         );
       }
     });
@@ -3271,6 +3277,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 {...(openFile.size === undefined
                                   ? {}
                                   : { sizeBytes: openFile.size })}
+                                {...(mediaStart?.path === openFile.path
+                                  ? { startMs: mediaStart.startMs }
+                                  : {})}
                               />
                               {openFile.content === MEDIA_IMAGE &&
                                 openFile.source === 'workspace' && (

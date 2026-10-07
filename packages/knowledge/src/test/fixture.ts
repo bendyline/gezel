@@ -139,6 +139,82 @@ export const FIXTURE_EMBEDDING_PROFILE: KnowledgeEmbeddingProfile = {
   },
 };
 
+/**
+ * The 0.8 conformance profile: the same hash embedder, truncated from 384 to
+ * 256 dimensions (Matryoshka prefix) and scanned with centered sign bits
+ * around a fixed synthetic center, so a reader exercises both 0.8 rules.
+ */
+export const FIXTURE_EMBEDDING_PROFILE_08: KnowledgeEmbeddingProfile = {
+  ...FIXTURE_EMBEDDING_PROFILE,
+  id: 'test-hash-embed@2',
+  dimensions: 256,
+  truncation: { method: 'prefix', sourceDimensions: 384 },
+  quantization: {
+    int8: { method: 'symmetric-linear', scale: 127 },
+    binary: {
+      method: 'centered-sign',
+      threshold: 0,
+      packing: 'lsb-first',
+      center: Array.from({ length: 256 }, (_, i) => (((i * 37) % 17) - 8) / 1000),
+    },
+  },
+  media: {
+    image: {
+      encoder: { onnxFile: 'onnx/vision.onnx' },
+      tokenBudget: 280,
+      resample: 'bicubic',
+      alpha: 'composite-white',
+    },
+    video: { framesPerSecond: 1, maxFrames: 32, tokenBudgetPerFrame: 140 },
+    audio: {
+      encoder: { onnxFile: 'onnx/audio.onnx' },
+      sampleRate: 16_000,
+      channels: 1,
+      maxWindowMs: 30_000,
+    },
+  },
+};
+
+/** A minimal ISO BMFF header (`ftyp isom`) — the 0.8 kit's video asset; never decoded. */
+export const FIXTURE_MP4 = Buffer.concat([
+  Buffer.from([0, 0, 0, 0x18]),
+  Buffer.from('ftypisom'),
+  Buffer.from([0, 0, 2, 0]),
+  Buffer.from('isomiso2'),
+]);
+
+/**
+ * The fixture's media embedder, as reimplementable as `fakeEmbed`: the hash
+ * embedder over `media:<modality>:<asset sha256>[:<startMs>]`. An image is
+ * one vector; audio and video are two one-second windows.
+ */
+export async function fakeEmbedMedia(request: {
+  modality: 'image' | 'video' | 'audio';
+  bytes: Buffer;
+}): Promise<Array<{ vector: number[]; startMs?: number; endMs?: number }>> {
+  const sha = createHash('sha256').update(request.bytes).digest('hex');
+  if (request.modality === 'image') {
+    const [vector] = await fakeEmbed([`media:image:${sha}`]);
+    return [{ vector: vector as number[] }];
+  }
+  return Promise.all(
+    [0, 1000].map(async (startMs) => {
+      const [vector] = await fakeEmbed([`media:${request.modality}:${sha}:${startMs}`]);
+      return { vector: vector as number[], startMs, endMs: startMs + 1000 };
+    }),
+  );
+}
+
+/** A minimal WAV header (RIFF/WAVE, no samples) — the 0.8 kit's audio asset. */
+export const FIXTURE_WAV = Buffer.concat([
+  Buffer.from('RIFF'),
+  Buffer.from([36, 0, 0, 0]),
+  Buffer.from('WAVEfmt '),
+  Buffer.from([16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 2, 0, 16, 0]),
+  Buffer.from('data'),
+  Buffer.from([0, 0, 0, 0]),
+]);
+
 export const FIXTURE_CHUNKING_PROFILE: KnowledgeChunkingProfile = {
   id: 'markdown-chunks@2',
   unit: 'tokens',

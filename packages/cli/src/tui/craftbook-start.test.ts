@@ -10,6 +10,7 @@ import {
 function catalogCraftbook(input: {
   id: string;
   name: string;
+  command?: string;
   sourceId?: string;
   stepCount?: number;
   tags?: string[];
@@ -26,6 +27,7 @@ function catalogCraftbook(input: {
       kind: 'craftbook-template',
       id: input.id,
       name: input.name,
+      ...(input.command ? { command: input.command } : {}),
       description: input.description,
       version: input.version ?? '1.0.0',
       role: input.role ?? 'general',
@@ -57,6 +59,17 @@ describe('craftbook start helpers', () => {
       ['release', 'Release'],
     ]);
     expect(normalized[0]).toMatchObject({ source: 'project', sourceId: 'project' });
+  });
+
+  it('carries the terminal command token, defaulting to the id', () => {
+    const normalized = normalizeCraftbooks([
+      catalogCraftbook({ id: 'qualla-stories', name: 'Qualla Stories', command: 'qs' }),
+      catalogCraftbook({ id: 'release', name: 'Release' }),
+    ]);
+    expect(normalized.map((book) => [book.id, book.command])).toEqual([
+      ['qualla-stories', 'qs'],
+      ['release', 'release'],
+    ]);
   });
 
   it('hides connector-backed craftbooks unless WIP features are enabled', () => {
@@ -125,11 +138,12 @@ describe('craftbook start helpers', () => {
     expect(categories.at(-1)).toMatchObject({ id: 'all', hint: '3 craftbooks' });
   });
 
-  it('finds the selected book by id or display name', () => {
+  it('finds the selected book by id, command, or display name', () => {
     const books = [
       {
         id: 'code-review',
         name: 'Code Review',
+        command: 'review',
         sourceId: 'bundled',
         source: 'bundled' as const,
         stepCount: 3,
@@ -140,6 +154,7 @@ describe('craftbook start helpers', () => {
     ];
     expect(findCraftbook(books, 'CODE-REVIEW')?.id).toBe('code-review');
     expect(findCraftbook(books, 'code review')?.id).toBe('code-review');
+    expect(findCraftbook(books, 'review')?.id).toBe('code-review');
   });
 
   it('creates and immediately dispatches a task from the selected craftbook', () => {
@@ -148,6 +163,7 @@ describe('craftbook start helpers', () => {
       name: 'Code Review',
       description: 'Review the selected change and report actionable findings.',
       version: '2.1.0',
+      command: 'code-review',
       sourceId: 'bundled',
       source: 'bundled',
       stepCount: 3,

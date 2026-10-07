@@ -136,6 +136,15 @@ neighbour and a title that shares a word with the request.
   `search` tool.
 - **Ceilings.** At most 2 chunks in Balanced (4 in Deep) within 25% (35%) of
   the turn budget, and `knowledge` is last in every diversification round.
+- **Media rows stay out of per-turn injection.** Photos, video windows and
+  audio windows — from `embeddinggemma-2-512@1` catalogs and from the
+  workspace media index alike — reach explicit search only: the titlebar, the
+  Knowledge browser, `search` and `search_images`. Each counts only above its
+  modality's floor (`<profile>#image`, `#video`, `#audio`, measured by the
+  media bench in [MEDIA-BENCH-2026-10-06.md](../evals/src/retrieval-bench/MEDIA-BENCH-2026-10-06.md));
+  a modality nobody measured contributes no vector evidence, because a
+  nearest photo always exists and has no query words to be grounded in. The
+  relevance model does not judge them.
 
 Floors and the knowledge bar below are measured on real catalogs:
 [KNOWLEDGE-CALIBRATION-2026-09-30.md](../evals/src/retrieval-bench/KNOWLEDGE-CALIBRATION-2026-09-30.md).

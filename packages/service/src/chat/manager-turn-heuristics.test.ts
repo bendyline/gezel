@@ -1,3 +1,4 @@
+import { turnStateWanted } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   buildContinuationNudge,
@@ -6,7 +7,6 @@ import {
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
   messageExpressesModifyIntent,
-  shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';
 
@@ -34,16 +34,23 @@ describe('buildContinuationNudge', () => {
 });
 
 describe('lean game turn recovery', () => {
-  it.each(['Can you take your turn?', 'Please make a move.', "It's black's turn.", 'Try again.'])(
-    'refreshes authoritative state for %j',
+  it.each(['Can you take your turn?', 'It is your move.', 'Nice one!', 'Try again.'])(
+    "refreshes authoritative state for a person's %j",
     (prompt) => {
-      expect(shouldRefreshLeanGameState(prompt)).toBe(true);
+      expect(turnStateWanted(prompt, 'direct-user')).toBe(true);
     },
   );
 
-  it('does not refresh a page reaction that already carries legal moves', () => {
+  it('never refreshes for a page seed, a handoff or text that already carries the board', () => {
+    expect(turnStateWanted('Your opponent played c3-d4. It is your turn.', 'system')).toBe(
+      false,
+    );
+    expect(turnStateWanted('Please make a move.', 'cross-gezel')).toBe(false);
     expect(
-      shouldRefreshLeanGameState('Board now:\n...\nLegal moves: b6-c5\nPlease make a move.'),
+      turnStateWanted(
+        'Board now:\n...\nLegal moves: b6-c5\nPlease make a move.',
+        'direct-user',
+      ),
     ).toBe(false);
   });
 

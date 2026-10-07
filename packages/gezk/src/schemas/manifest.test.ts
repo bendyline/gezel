@@ -5,6 +5,7 @@ import {
   GEZK_INDEX_SCHEMA_VERSION,
   GEZK_SUPPORTED_FORMAT_VERSIONS,
   GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS,
+  formatAtLeast,
   isSupportedFormatVersion,
   isSupportedIndexSchemaVersion,
 } from '../format/constants.js';
@@ -16,7 +17,10 @@ import { KnowledgeRegistryIndexSchema } from './registry.js';
 
 const SHA = 'a'.repeat(64);
 
-function manifestFor(formatVersion: '0.5' | '0.6' | '0.7', patch: Record<string, unknown> = {}) {
+function manifestFor(
+  formatVersion: '0.5' | '0.6' | '0.7' | '0.8',
+  patch: Record<string, unknown> = {},
+) {
   return {
     kind: 'gezk-catalog',
     formatVersion,
@@ -61,10 +65,15 @@ function manifestFor(formatVersion: '0.5' | '0.6' | '0.7', patch: Record<string,
       ],
       totalCentroids: 1,
     },
-    counts: { documents: 1, chunks: 1, shards: 1 },
+    counts: {
+      documents: 1,
+      chunks: 1,
+      shards: 1,
+      ...(formatVersion === '0.8' ? { media: { image: 0, video: 0, audio: 0 } } : {}),
+    },
     files: [{ path: 'index/router.db', sizeBytes: 1, sha256: SHA }],
     requires: { formatVersion, features: [] },
-    ...(formatVersion === '0.7'
+    ...(formatVersion === '0.7' || formatVersion === '0.8'
       ? {
           spatial: {
             schema: 'document-points@1',
@@ -83,8 +92,8 @@ function manifestFor(formatVersion: '0.5' | '0.6' | '0.7', patch: Record<string,
 describe('format generations', () => {
   it('the writer emits the newest supported pair', () => {
     expect(GEZK_FORMAT_GENERATIONS[GEZK_FORMAT_VERSION]).toBe(GEZK_INDEX_SCHEMA_VERSION);
-    expect(GEZK_SUPPORTED_FORMAT_VERSIONS).toEqual(['0.5', '0.6', '0.7']);
-    expect(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS).toEqual([2, 3, 4]);
+    expect(GEZK_SUPPORTED_FORMAT_VERSIONS).toEqual(['0.5', '0.6', '0.7', '0.8']);
+    expect(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS).toEqual([2, 3, 4, 5]);
     expect(KNOWLEDGE_MANIFEST_INDEX_SCHEMA_VERSIONS).toEqual(GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS);
   });
 
@@ -92,12 +101,21 @@ describe('format generations', () => {
     expect(isSupportedFormatVersion('0.5')).toBe(true);
     expect(isSupportedFormatVersion('0.6')).toBe(true);
     expect(isSupportedFormatVersion('0.7')).toBe(true);
+    expect(isSupportedFormatVersion('0.8')).toBe(true);
+    expect(isSupportedFormatVersion('0.9')).toBe(false);
     expect(isSupportedFormatVersion('0.4')).toBe(false);
     expect(isSupportedFormatVersion(0.6)).toBe(false);
     expect(isSupportedIndexSchemaVersion(2)).toBe(true);
     expect(isSupportedIndexSchemaVersion(3)).toBe(true);
     expect(isSupportedIndexSchemaVersion(4)).toBe(true);
-    expect(isSupportedIndexSchemaVersion(5)).toBe(false);
+    expect(isSupportedIndexSchemaVersion(5)).toBe(true);
+    expect(isSupportedIndexSchemaVersion(6)).toBe(false);
+  });
+
+  it('orders generations by index schema', () => {
+    expect(formatAtLeast('0.8', '0.7')).toBe(true);
+    expect(formatAtLeast('0.7', '0.7')).toBe(true);
+    expect(formatAtLeast('0.6', '0.7')).toBe(false);
   });
 });
 
@@ -197,5 +215,67 @@ describe('KnowledgeRegistryIndexSchema', () => {
       });
       expect(result.success, formatVersion).toBe(true);
     }
+  });
+});
+
+describe('KnowledgeCatalogManifestSchema at 0.8', () => {
+  const truncatedEmbedding = {
+    ...manifestFor('0.7').embedding,
+    id: 'test-hash-embed@2',
+    dimensions: 256,
+    truncation: { method: 'prefix', sourceDimensions: 384 },
+  };
+
+  it('accepts a 0.8 manifest with spatial and counts.media', () => {
+    expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.8')).success).toBe(true);
+  });
+
+  it('requires counts.media in 0.8 and refuses it before', () => {
+    const base = manifestFor('0.8');
+    const missing = manifestFor('0.8', {
+      counts: { documents: 1, chunks: 1, shards: 1 },
+    });
+    expect(KnowledgeCatalogManifestSchema.safeParse(missing).success).toBe(false);
+    const early = manifestFor('0.7', { counts: base.counts });
+    expect(KnowledgeCatalogManifestSchema.safeParse(early).success).toBe(false);
+  });
+
+  it('refuses 0.8 profile vocabulary in an older format', () => {
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(
+        manifestFor('0.7', { embedding: truncatedEmbedding }),
+      ).success,
+    ).toBe(false);
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(
+        manifestFor('0.8', { embedding: truncatedEmbedding }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('needs a media block for every modality it counts, within counts.chunks', () => {
+    const counts = { documents: 1, chunks: 3, shards: 1, media: { image: 2, video: 0, audio: 0 } };
+    expect(KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.8', { counts })).success).toBe(
+      false,
+    );
+    const embedding = {
+      ...manifestFor('0.8').embedding,
+      media: {
+        image: {
+          encoder: { onnxFile: 'onnx/vision.onnx' },
+          tokenBudget: 280,
+          resample: 'bicubic',
+          alpha: 'composite-white',
+        },
+      },
+    };
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.8', { counts, embedding })).success,
+    ).toBe(true);
+    const tooMany = { ...counts, chunks: 1 };
+    expect(
+      KnowledgeCatalogManifestSchema.safeParse(manifestFor('0.8', { counts: tooMany, embedding }))
+        .success,
+    ).toBe(false);
   });
 });

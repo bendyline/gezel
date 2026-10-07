@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 import GezelLlama
 import os
@@ -57,6 +58,25 @@ private final class NativeChatBatch {
         pending.removeAll()
         DispatchQueue.main.async { plugin.notifyListeners("chatChunk", data: ["requestId": requestId, "chunks": chunks]) }
     }
+}
+
+/// The vision describer's text, collected without streaming it to JavaScript.
+private final class NativeTextCollector {
+    weak var plugin: GezelNativeRuntime?
+    let requestId: String
+    var text = ""
+    init(plugin: GezelNativeRuntime, requestId: String) {
+        self.plugin = plugin
+        self.requestId = requestId
+    }
+}
+
+private func receiveLlamaText(_ bytes: UnsafePointer<CChar>?, _ length: Int, _ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let bytes, let context else { return 1 }
+    let collector = Unmanaged<NativeTextCollector>.fromOpaque(context).takeUnretainedValue()
+    guard let plugin = collector.plugin, !plugin.isCancelled(collector.requestId) else { return 1 }
+    collector.text.append(String(decoding: UnsafeRawBufferPointer(start: bytes, count: length), as: UTF8.self))
+    return 0
 }
 
 private func receiveLlamaJSON(_ bytes: UnsafePointer<CChar>?, _ length: Int, _ context: UnsafeMutableRawPointer?) -> Int32 {
@@ -205,6 +225,14 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     /// Room a larger window must leave in the process allowance, so the chosen
     /// window is not the one that barely fits.
     private static let ladderSpareBytes: Int64 = 256 * 1024 * 1024
+    /// A description needs the picture's tokens and a few hundred more.
+    private static let describeContext = 4096
+    /// The projector's encoder graph and image batch beside the weights;
+    /// desktop budgets the same flat amount (core model-fit.ts).
+    private static let visionComputeBytes: UInt64 = 384 * 1024 * 1024
+    /// Long edge of the pixels handed to the projector, which sizes them again
+    /// under its own token cap; more only costs the decode.
+    private static let describeMaxEdge = 768
 
     private init(root: URL) {
         do {
@@ -768,6 +796,156 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         cancellation.cancel()
         batch.flush()
         finishGeneration(call, terminal: terminal)
+    }
+
+    /// Describes one photo with a small vision model: an installed llama.cpp
+    /// model and its projector, downloaded beside it as a second library entry.
+    /// The phone's describer for a device whose OS has none, such as an iPhone
+    /// without Apple Intelligence. The photo arrives as base64 and is decoded,
+    /// turned upright, and sized here.
+    public func describeImage(_ call: NativeCall) {
+        guard let requestId = call.getString("requestId"), !requestId.isEmpty, requestId.utf8.count <= 128,
+              let modelId = call.getString("modelId"), !modelId.isEmpty,
+              let projectorId = call.getString("projectorId"), !projectorId.isEmpty, projectorId != modelId,
+              let encoded = call.getString("image"), !encoded.isEmpty, encoded.utf8.count <= 22_400_000,
+              let image = Data(base64Encoded: encoded),
+              let user = call.getString("user"), !user.isEmpty, user.utf8.count <= 16 * 1024, !user.contains("\0") else {
+            call.reject("A vision model, its projector, a photo and an instruction are required", "INVALID_REQUEST"); return
+        }
+        let system = call.getString("system")
+        guard (system?.utf8.count ?? 0) <= 16 * 1024, system?.contains("\0") != true,
+              !call.contains("maxTokens") || call.getInt("maxTokens") != nil else {
+            call.reject("Invalid description settings", "INVALID_REQUEST"); return
+        }
+        let maxTokens = call.getInt("maxTokens") ?? 400
+        guard (1...1024).contains(maxTokens) else { call.reject("Invalid description settings", "INVALID_REQUEST"); return }
+        guard engine != nil else { call.reject("The native inference engine could not initialize.", "UNAVAILABLE"); return }
+        operationLock.lock()
+        guard !backgrounded else { operationLock.unlock(); call.reject("Reopen the app to read photos", "BACKGROUND"); return }
+        guard activeId == nil, !modelMutation, !releasing else { operationLock.unlock(); call.reject("Another conversation is running", "BUSY"); return }
+        activeId = requestId; cancelled = false; activeFailure = nil
+        operationLock.unlock()
+        inferenceQueue.async {
+            self.runDescribe(call, requestId: requestId, modelId: modelId, projectorId: projectorId, image: image,
+                             system: system, user: user, maxTokens: maxTokens)
+        }
+    }
+
+    private func runDescribe(_ call: NativeCall, requestId: String, modelId: String, projectorId: String, image: Data,
+                             system: String?, user: String, maxTokens: Int) {
+        let collector = NativeTextCollector(plugin: self, requestId: requestId)
+        let cancellation = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+        cancellation.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50))
+        cancellation.setEventHandler { [weak self] in
+            guard let self, self.isCancelled(requestId) else { return }
+            self.cancelActive(requestId)
+        }
+        cancellation.resume()
+        func nativeFailure(_ status: Int32, _ error: inout gezel_llama_error) -> NSError {
+            NSError(domain: "GezelLlama", code: Int(status), userInfo: [NSLocalizedDescriptionKey: errorText(&error)])
+        }
+        func perform() throws -> [String: Any] {
+            guard let engine, let store else { throw storeError ?? MobileStoreError.unknownModel }
+            let (model, url) = try store.modelURL(id: modelId)
+            let (projector, projectorURL) = try store.modelURL(id: projectorId)
+            let pixels = try Self.rgbPixels(image, maxEdge: Self.describeMaxEdge)
+            var nativeError = gezel_llama_error()
+            let visionBytes = UInt64(projector.sizeBytes) + Self.visionComputeBytes
+            if loadedModelId != model.id {
+                try unloadLlama()
+                appliedChatConfig = nil
+                guard awaitCooling(requestId) else { return ["status": "cancelled"] }
+                try checkResources(additionalBytes: requiredBytes(path: url.path, sizeBytes: model.sizeBytes, contextSize: Self.describeContext) + visionBytes)
+                guard let operation = nextOperation(requestId) else { return ["status": "cancelled"] }
+                var options = loadOptions(contextSize: Self.describeContext)
+                options.request_id = operation
+                notifyPhase(requestId, "loading_model")
+                sizingLock.lock()
+                let status = url.path.withCString { gezel_llama_load(engine, $0, &options, &nativeError) }
+                if status == 0 { loadedModelId = model.id; loadedPath = url.path; loadedContextSize = Self.describeContext }
+                sizingLock.unlock()
+                guard status == 0 else {
+                    if isCancelled(requestId) { return ["status": "cancelled"] }
+                    throw nativeFailure(status, &nativeError)
+                }
+            } else {
+                guard awaitCooling(requestId) else { return ["status": "cancelled"] }
+                try checkResources(additionalBytes: visionBytes)
+            }
+            guard let operation = nextOperation(requestId) else { return ["status": "cancelled"] }
+            var options = gezel_llama_default_image_options()
+            options.request_id = operation
+            options.timeout_ms = 180_000
+            options.max_tokens = UInt32(maxTokens)
+            var result = gezel_llama_result()
+            notifyPhase(requestId, "prefill")
+            let status = projectorURL.path.withCString { projectorPath in
+                user.withCString { instruction in
+                    pixels.data.withUnsafeBytes { raw in
+                        let rgb = raw.bindMemory(to: UInt8.self).baseAddress
+                        let context = Unmanaged.passUnretained(collector).toOpaque()
+                        if let system {
+                            return system.withCString { systemPrompt in
+                                gezel_llama_describe_image(engine, projectorPath, rgb, UInt32(pixels.width), UInt32(pixels.height),
+                                    systemPrompt, instruction, &options, receiveLlamaText, context, &result, &nativeError)
+                            }
+                        }
+                        return gezel_llama_describe_image(engine, projectorPath, rgb, UInt32(pixels.width), UInt32(pixels.height),
+                            nil, instruction, &options, receiveLlamaText, context, &result, &nativeError)
+                    }
+                }
+            }
+            if status == 0 {
+                return ["status": "ok", "description": collector.text, "promptTokens": Int(result.prompt_tokens),
+                        "generatedTokens": Int(result.generated_tokens), "truncated": result.finish_reason == 2]
+            }
+            if isCancelled(requestId) || status == 7 { return ["status": "cancelled"] }
+            throw nativeFailure(status, &nativeError)
+        }
+        var terminal: Result<[String: Any], Error>
+        do { terminal = .success(try perform()) }
+        catch {
+            terminal = isCancelled(requestId) ? .success(["status": "cancelled"]) : .failure(error)
+        }
+        cancellation.cancel()
+        finishGeneration(call, terminal: terminal)
+    }
+
+    /// Upright RGB pixels, at most `maxEdge` on the long side. The thumbnail
+    /// path applies EXIF orientation while decoding and reads HEIC.
+    private static func rgbPixels(_ data: Data, maxEdge: Int) throws -> (data: Data, width: Int, height: Int) {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxEdge,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw MobileInferenceError(code: "INVALID_REQUEST", message: "This photo could not be read")
+        }
+        let width = image.width, height = image.height
+        var rgba = Data(count: width * height * 4)
+        let drawn = rgba.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { throw MobileInferenceError(code: "INVALID_REQUEST", message: "This photo could not be read") }
+        var rgb = Data(count: width * height * 3)
+        rgb.withUnsafeMutableBytes { output in
+            rgba.withUnsafeBytes { input in
+                let from = input.bindMemory(to: UInt8.self), to = output.bindMemory(to: UInt8.self)
+                for pixel in 0..<(width * height) {
+                    to[pixel * 3] = from[pixel * 4]
+                    to[pixel * 3 + 1] = from[pixel * 4 + 1]
+                    to[pixel * 3 + 2] = from[pixel * 4 + 2]
+                }
+            }
+        }
+        return (rgb, width, height)
     }
 
     private func errorText(_ error: inout gezel_llama_error) -> String {

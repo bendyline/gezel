@@ -431,10 +431,23 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       const prov = await ctx.store.readProjectCraftbookProvenance(id, it.manifest.id);
       if (prov?.installedBy === 'project-type') suggested.add(it.manifest.id);
     }
+    // A catalog type with no detected kind still names the shelf its books
+    // sit on; without a name the launcher hides the suggestions.
+    const applied = !type && project?.projectType ? project.projectType : undefined;
+    const appliedName = applied
+      ? await ctx.catalog
+          .get('project-type', applied.id, applied.source, applied.version)
+          .then((detail) => detail?.manifest.name)
+          .catch(() => undefined)
+      : undefined;
     return c.json({
       items,
       missingToolsets,
-      projectType: type ? { id: type.id, label: type.label } : null,
+      projectType: type
+        ? { id: type.id, label: type.label }
+        : applied
+          ? { id: applied.id, label: appliedName ?? applied.id }
+          : null,
       suggestedIds: [...suggested],
       establishedCodebase,
     });

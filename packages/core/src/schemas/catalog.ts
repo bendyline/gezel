@@ -7,10 +7,12 @@ import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookModelNeedSchema,
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
+  CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
   CraftbookStepSchema,
   CraftbookToolsetNeedSchema,
@@ -24,6 +26,7 @@ import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
+import { ScriptOutputPredicateSchema } from './script.js';
 
 /**
  * ─ Catalog items ────────────────────────────────────────────────────
@@ -738,6 +741,10 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /** Command needs for commandEvidence gates (see CraftbookCommandNeedSchema). */
   commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Chat models the book runs on, offered as a download (see CraftbookModelNeedSchema). */
+  models: z.array(CraftbookModelNeedSchema).optional(),
+  /** Capabilities the book cannot run without (see CraftbookServiceNeedSchema). */
+  services: z.array(CraftbookServiceNeedSchema).optional(),
   /** Authored mode-agnostic — see `CraftbookSchema.diffpackCapable`. */
   diffpackCapable: z.boolean().optional(),
   /** Minimum model tier for the whole book (see CraftbookSchema.capabilityFloor). */
@@ -810,6 +817,10 @@ export const CraftbookTemplateManifestSchema = z.object({
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /** Command needs (mirrored from the version manifest). */
   commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Model needs (mirrored from the version manifest). */
+  models: z.array(CraftbookModelNeedSchema).optional(),
+  /** Service needs (mirrored from the version manifest). */
+  services: z.array(CraftbookServiceNeedSchema).optional(),
   /** Authored mode-agnostic (mirrored from the version manifest). */
   diffpackCapable: z.boolean().optional(),
   /** Whole-book model-tier floor (mirrored from the version manifest). */
@@ -896,6 +907,19 @@ export const ProjectTypeToolReactionSchema = z.object({
    * only what this turn's model call sees changes. Defaults to false.
    */
   standalone: z.boolean().optional(),
+  /**
+   * The summoned turn is one call to `tool` (a model tool of this type that
+   * declares `turn`): its first request offers only that tool and asks the
+   * engine to require it. `when` is checked against this tool's output, so a
+   * move is required only while one is due (checkers: `status` is
+   * `playing`); otherwise the turn is an ordinary one.
+   */
+  turn: z
+    .object({
+      tool: z.string().regex(/^[a-z][a-z0-9_]*$/),
+      when: ScriptOutputPredicateSchema.optional(),
+    })
+    .optional(),
 });
 export type ProjectTypeToolReaction = z.infer<typeof ProjectTypeToolReactionSchema>;
 
@@ -923,6 +947,25 @@ export const ProjectTypeToolSchema = z.object({
   bind: z.record(z.string(), z.unknown()).optional(),
   /** Gezel turn summoned when this tool completes via a page invoke. */
   reaction: ProjectTypeToolReactionSchema.optional(),
+  /**
+   * A successful call is the turn's whole job: it ends the turn, and its
+   * `say` argument (when given) is the reply. A small model asked to say
+   * something after acting acts again; the checkers move once came back
+   * as its own call written out as the reply. `fallback` replies when the
+   * call left `say` empty.
+   */
+  turn: z
+    .object({
+      say: z.string().min(1).optional(),
+      fallback: z.string().min(1).optional(),
+    })
+    .optional(),
+  /**
+   * Reads the activity's current state (a board, a deck). A message a person
+   * sends is answered from its output, read just before the turn, so the
+   * model never acts on a stale copy from earlier in the conversation.
+   */
+  state: z.boolean().optional(),
 });
 export type ProjectTypeTool = z.infer<typeof ProjectTypeToolSchema>;
 
