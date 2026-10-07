@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +22,7 @@ import {
   isModelInstalled,
   linkModelIntoTrial,
   readOnlyModelRoots,
+  shouldHardLinkModelFile,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
@@ -524,6 +527,46 @@ describe('linkModelIntoTrial', () => {
       rmSync(cacheRoot, { recursive: true, force: true });
       rmSync(trialHome, { recursive: true, force: true });
     }
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'hard-links large weight files and copies everything else',
+    async () => {
+      const cacheRoot = mkdtempSync(join(tmpdir(), 'gezel-model-cache-'));
+      const trialHome = mkdtempSync(join(tmpdir(), 'gezel-model-trial-'));
+      const source = join(cacheRoot, 'engines', 'llama-cpp', 'models', 'big-q4');
+      mkdirSync(source, { recursive: true });
+      writeFileSync(join(source, 'manifest.json'), '{"model":"big"}');
+      const weights = join(source, 'big-Q4_K_M.gguf');
+      writeFileSync(weights, '');
+      truncateSync(weights, 64 * 1024 * 1024);
+      try {
+        await linkModelIntoTrial({
+          cacheRoot,
+          trialHome,
+          engine: 'llama-cpp',
+          modelId: 'big-q4',
+        });
+        const destination = join(trialHome, 'engines', 'llama-cpp', 'models', 'big-q4');
+        expect(statSync(join(destination, 'big-Q4_K_M.gguf')).ino).toBe(statSync(weights).ino);
+        expect(statSync(join(destination, 'manifest.json')).ino).not.toBe(
+          statSync(join(source, 'manifest.json')).ino,
+        );
+      } finally {
+        rmSync(cacheRoot, { recursive: true, force: true });
+        rmSync(trialHome, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('shouldHardLinkModelFile', () => {
+  it('links only large weight files', () => {
+    const big = 64 * 1024 * 1024;
+    expect(shouldHardLinkModelFile('m/Qwen3.8-27B.gguf', big)).toBe(true);
+    expect(shouldHardLinkModelFile('m/model.safetensors', big * 2)).toBe(true);
+    expect(shouldHardLinkModelFile('m/mmproj-F16.gguf', big - 1)).toBe(false);
+    expect(shouldHardLinkModelFile('m/manifest.json', big)).toBe(false);
   });
 });
 

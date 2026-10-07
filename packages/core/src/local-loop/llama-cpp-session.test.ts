@@ -8479,7 +8479,7 @@ describe('strict alternation tool transcript fallback', () => {
 });
 
 describe('compactSuccessfulWriteToolCallForTranscript', () => {
-  it('replaces large successful write_file content with a compact transcript marker', () => {
+  it('drops large successful write_file content, leaving nothing a model could copy back', () => {
     const call = {
       id: 'call_1',
       type: 'function' as const,
@@ -8492,11 +8492,15 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
 
     expect(compactSuccessfulWriteToolCallForTranscript(call, args, 'Wrote index.html')).toBe(true);
 
-    const compacted = JSON.parse(call.function.arguments) as { path: string; content: string };
+    const compacted = JSON.parse(call.function.arguments) as {
+      path: string;
+      content?: string;
+      omittedChars?: number;
+    };
     expect(compacted.path).toBe('index.html');
-    expect(compacted.content).toContain('2500 chars were written');
-    expect(compacted.content).toContain('Use read_file');
-    expect(compacted.content).not.toContain('x'.repeat(100));
+    expect(compacted.content).toBeUndefined();
+    expect(compacted.omittedChars).toBe(2_500);
+    expect(call.function.arguments).not.toContain('x'.repeat(100));
   });
 
   it('leaves failed or small writes unchanged', () => {

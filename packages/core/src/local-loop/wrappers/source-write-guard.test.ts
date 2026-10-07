@@ -117,6 +117,36 @@ describe('SourceWriteGuard — binary-container paths refuse text writes', () =>
   });
 });
 
+describe('SourceWriteGuard — a transcript placeholder is not file content', () => {
+  const placeholder =
+    '[omitted from future model transcript after successful write_file; 2891 chars were written to synthesis.md. Use read_file to inspect current contents.]';
+
+  it('refuses the placeholder with a message that names what it is, for every text writer', async () => {
+    for (const tool of ['write_file', 'replace_lines', 'append_to_file']) {
+      const verdict = await SourceWriteGuard.preProcess?.(
+        tool,
+        { path: 'synthesis.md', content: placeholder },
+        ctx('# Synthesis\n'.repeat(200)),
+      );
+      expect(verdict?.kind).toBe('reject');
+      if (verdict?.kind === 'reject') {
+        expect(verdict.error).toContain('note the runtime left in your transcript');
+        expect(verdict.error).toContain('`synthesis.md`');
+        expect(verdict.error).toContain('read_file');
+      }
+    }
+  });
+
+  it('allows ordinary content that merely mentions the phrase', async () => {
+    const verdict = await SourceWriteGuard.preProcess?.(
+      'write_file',
+      { path: 'notes.txt', content: 'The log said [omitted from future model transcript].' },
+      ctx(),
+    );
+    expect(verdict?.kind).toBe('allow');
+  });
+});
+
 describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by default)', () => {
   // The guard ships disabled (it backfired on e4b — see the source comment).
   // Enable it for the behavior tests; verify the default-off path separately.

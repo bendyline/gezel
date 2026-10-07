@@ -16,6 +16,7 @@ import {
   resolvePromptFootprint,
   stepOwnerGezelId,
   taskTranscriptCompatible,
+  todayIso,
   turnStateWanted,
   withCurrentDateTimeLine,
 } from '@bendyline/gezel';
@@ -100,6 +101,7 @@ import {
   turnCancelledMessage,
   validateScriptInput,
   withEffectiveTaskStatuses,
+  withInferredConsumes,
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -7978,13 +7980,17 @@ export class ChatManager extends LocalEngineRuntime {
       }
       // A factual-mode turn starts here: what the person has said counts as
       // evidence, and refusal counts reset. Nudges continue the turn they
-      // belong to rather than starting one.
+      // belong to rather than starting one. Today's date counts too: the
+      // turn's own clock line tells the model, and "past the current date
+      // (2026-10-07)" was refused as an invented number.
       const evidenceLedger = this.evidenceLedgers.get(sessionId);
       if (evidenceLedger && messageOrigin !== 'background-nudge' && messageOrigin !== 'system') {
         evidenceLedger.beginTurn(
           [
             ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
             userText,
+            renderCurrentDateTimeLine(),
+            todayIso(),
           ].join('\n'),
         );
       }
@@ -14982,7 +14988,9 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
+      ...(taskContext?.step
+        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
+        : {}),
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),
@@ -15381,7 +15389,7 @@ export class ChatManager extends LocalEngineRuntime {
     // guard and get pointed at `write_file` (wrong for a review step)
     // and either fabricate or stall again.
     if (taskContext?.step) {
-      const step = taskContext.step;
+      const step = withInferredConsumes(taskContext.task, taskContext.step);
       // Lists run in order; the LAST onExit ref's output drives branch
       // routing, so that's the one the anti-spin corrective names.
       const exitRefs = normalizeScriptRefs(step.onExit);
@@ -16664,7 +16672,9 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
+      ...(taskContext?.step
+        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
+        : {}),
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
         ? { generalistSteps: taskContext.task.craftbook.steps }
         : {}),

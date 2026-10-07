@@ -30,6 +30,21 @@ function binaryContainerWriteError(path: string, hasTool: (name: string) => bool
   return `${base} Produce it through the document-production workflow and copy the real converted bytes to this path instead.`;
 }
 
+/**
+ * The note an older transcript left where a large write's content used to
+ * be. qwen3.8 models resent it as the new file content: five identical
+ * 151-byte writes over a 2.9 KB synthesis, refused as "much shorter" with no
+ * word about why, then an aborted turn (conflict-synthesis, 2026-10-06; 50
+ * such writes across 24 trials, two files actually overwritten). Transcripts
+ * no longer carry copyable text there, but resumed sessions still can.
+ */
+const TRANSCRIPT_PLACEHOLDER_RE = /^\s*\[omitted from future model transcript\b/i;
+
+function transcriptPlaceholderWriteError(path: string): string {
+  const target = path ? `\`${path}\`` : 'the file';
+  return `ERROR: Not written: that text is a note the runtime left in your transcript in place of an earlier write, not file content. ${target} still holds what you wrote before. To change it, read it with \`read_file\` and send the complete new content, or make a focused edit.`;
+}
+
 export const SourceWriteGuard: McpToolWrapper = {
   id: 'source-write-guard',
   matches(spec: McpServerSpec): boolean {
@@ -51,6 +66,9 @@ export const SourceWriteGuard: McpToolWrapper = {
     // through).
     if (path && BINARY_CONTAINER_EXT_RE.test(path)) {
       return { kind: 'reject', error: binaryContainerWriteError(path, ctx.hasTool) };
+    }
+    if (TRANSCRIPT_PLACEHOLDER_RE.test(content)) {
+      return { kind: 'reject', error: transcriptPlaceholderWriteError(path) };
     }
     if (toolName === 'append_to_file') return { kind: 'allow' };
     if (!path || !SOURCE_EXT_RE.test(path) || content.length === 0) return { kind: 'allow' };

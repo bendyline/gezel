@@ -165,6 +165,7 @@ export * from './grounding/factual-writing.js';
 export * from './tasks/gate-accounting.js';
 export * from './tasks/gate-scripts.js';
 export * from './tasks/prompt-context.js';
+export * from './tasks/inferred-step-inputs.js';
 export * from './tasks/step-activation.js';
 export * from './tasks/step-dispatch-seed.js';
 export * from './tasks/step-routing.js';

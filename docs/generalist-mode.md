@@ -49,7 +49,11 @@ migrated once by `Store.ensureLayout` and is never written by current code.
   — the book's goal and every step marked done / active / pending, with
   fanout steps annotated — and the recency anchor says the owner owns every
   step while only the active step's procedure is in force. It lives inside the
-  task block so the `focused` prompt profile keeps it.
+  task block so the `focused` prompt profile keeps it. Since 2026-10-07 a
+  stepwise session of a multi-step task sees a lean outline too (steps and
+  states, no gate or fanout markers) closed by "Only the active step is
+  yours", so the A/B no longer measures the outline — only continuity and the
+  union tool surface.
 - **The tool surface is the union.** The deliverable kit, the tools every
   step's procedure mandates, the conditional built-ins and the research-intent
   flag are unions over all of the task's steps, under the same `mode: 'never'`

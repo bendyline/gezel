@@ -135,6 +135,71 @@ describe('EvidenceLedger', () => {
     );
   });
 
+  it('numbers each file of a batch read as its own evidence', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    const label = ledger.labelToolResult(
+      'read_files',
+      { files: [{ path: 'memo-product.md' }, { path: 'finance.csv' }] },
+      [
+        '[read_files requested=2 ok=2 errors=0]',
+        '1 OK memo-product.md lines=1-1 totalLines=1 complete',
+        '2 OK finance.csv lines=1-2 totalLines=2 complete',
+        '',
+        '--- memo-product.md (lines=1-1 totalLines=1) ---',
+        '1→The launch budget is 240,000 EUR.',
+        '',
+        '--- finance.csv (lines=1-2 totalLines=2) ---',
+        '1→line_item,amount_eur',
+        '2→campaign,120000',
+      ].join('\n'),
+    );
+    expect(label).toContain('memo-product.md');
+    expect(label).toContain('finance.csv');
+    expect(ledger.size).toBe(2);
+    const grounded = ledger.checkProseFileWrite('write_file', {
+      path: 'synthesis.md',
+      content: 'The launch budget is 240,000 EUR [1].',
+    });
+    expect(grounded?.kind).toBe('allow');
+  });
+
+  it('sends a writer whose sources are project files back to the reader, not to search', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('Reconcile the memos.');
+    ledger.setLookupTools(['read_file', 'read_files', 'search', 'write_file']);
+    ledger.labelToolResult(
+      'read_file',
+      { path: 'memo-product.md' },
+      'The launch budget is 240,000 EUR.',
+    );
+    const refused = ledger.checkProseFileWrite('write_file', {
+      path: 'synthesis.md',
+      content: 'The launch budget is 310,000 EUR.',
+    });
+    expect(refused?.kind).toBe('reject');
+    if (refused?.kind === 'reject') {
+      expect(refused.error).toContain('Your next tool call must be `read_file`');
+      expect(refused.error).toContain('`memo-product.md`');
+      expect(refused.error).toContain('`search`');
+    }
+  });
+
+  it('names the source files the conversation mentions when nothing was read yet', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('Reconcile memo-product.md and finance.csv into synthesis.md.');
+    ledger.setLookupTools(['read_file', 'search', 'write_file']);
+    const refused = ledger.checkProseFileWrite('write_file', {
+      path: 'synthesis.md',
+      content: 'The launch budget is 310,000 EUR.',
+    });
+    expect(refused).toEqual({
+      kind: 'reject',
+      error:
+        'Not saved: no source evidence has been collected. Do not call `write_file` again yet. Your next tool call must be `read_file` (`memo-product.md`, `finance.csv`). Use what it returns before writing.',
+    });
+  });
+
   it('does not fail open while lookup tools exist but no evidence was collected', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Write a sourced report.');

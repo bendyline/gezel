@@ -736,7 +736,12 @@ both in the volatile band:
   one-sentence ownership statement. Rendered by `renderTaskOutline` in
   `chat/instructions.ts`; it names `advance_task_step` only when the turn
   wired it. The recency anchor gains the same ownership clause. The per-step
-  procedure and gate contract stay the authoritative instructions.
+  procedure and gate contract stay the authoritative instructions. A stepwise
+  task of more than one step renders the same outline without gate or fanout
+  markers, closed by "Only the active step is yours" instead of the ownership
+  sentence, and its task block adds the earlier steps' files
+  (`core/tasks/inferred-step-inputs.ts`): a file the procedure names becomes a
+  required input, the rest are listed under `#### Earlier steps' files`.
 - **A union tool surface** — the deliverable kit, mandated tools, conditional
   built-ins and research intent are unions over every step of the task
   (`generalistSteps` in `chat/session-tool-surface.ts`), so the tools block is

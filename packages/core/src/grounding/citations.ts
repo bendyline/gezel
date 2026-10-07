@@ -114,7 +114,9 @@ export function citedSentences(markdown: string): Array<{ text: string; cites: n
   for (const unit of units) {
     // A marker written after the full stop belongs to the sentence before it.
     const normalized = unit.replace(/([.!?])((?:\s*\[\d[\d,\s–-]*\])+)/g, '$2$1');
-    const pieces = normalized.split(/(?<=[.!?]["”’)]?)\s+(?=["“‘(]?[A-Z0-9])/);
+    // A bold or italic lead opens a sentence too: unsplit, "… on timing.
+    // **Winner:** the engineering memo" read "Winner" as a name.
+    const pieces = normalized.split(/(?<=[.!?]["”’)]?)\s+(?=(?:\*\*|__|\*|_|["“‘(])?[A-Z0-9])/);
     const sentences: string[] = [];
     for (const piece of pieces) {
       const previous = sentences.at(-1);
@@ -222,7 +224,15 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   const tokens = raw.map((t) => t.replace(/^[^\p{L}]+|[^\p{L}'’-]+$/gu, ''));
   // A word after a colon or dash opens a clause, like the first word of a
   // sentence: "**Augustine Jr.**: Survived to adulthood" names no "Survived".
-  const opensClause = (i: number) => i === 0 || /[:;—–]\**$/.test(raw[i - 1] ?? '');
+  // So does the first word of a list item or quote line: "- **Caveat:** …"
+  // and "1. Salivary amylase …" named "Caveat" and "Salivary" until the
+  // marker counted as the start of the line (2026-10-06 review).
+  const opensClause = (i: number) =>
+    i === 0 ||
+    /[:;—–]\**$/.test(raw[i - 1] ?? '') ||
+    /^(?:[-*+>•]|\d{1,3}[.)])$/.test(raw[i - 1] ?? '');
+  // "CO₂", "CO2": a formula, not a name called "CO".
+  const isFormula = (i: number) => /\p{Lu}\p{L}*[0-9₀-₉]/u.test(raw[i] ?? '');
   let run: string[] = [];
   let runStart = -1;
   const flush = () => {
@@ -245,6 +255,7 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   tokens.forEach((token, i) => {
     if (
       /^\p{Lu}[\p{L}'’-]*$/u.test(token) &&
+      !isFormula(i) &&
       !(opensClause(i) && COMMON_CAPITALIZED.has(token.toLowerCase()))
     ) {
       if (run.length === 0) runStart = i;
@@ -280,12 +291,26 @@ function claimPattern(kind: ClaimKind, value: string): RegExp {
   return new RegExp(`(?<![\\p{L}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'gu');
 }
 
+const QUOTE_EDGE_PUNCTUATION = /^[\s,.;:!?…]+|[\s,.;:!?…]+$/g;
+
+/**
+ * A quote is normalized exactly like the evidence it is looked up in, or
+ * "The launch budget is 240,000 EUR" never matches the source's own words
+ * (the evidence side drops the thousands comma). Punctuation at its edges is
+ * the writer's ("Weekly syncs on Tuesdays," for a source ending in a period),
+ * and an elided quote must match each of its pieces (2026-10-07,
+ * conflict-synthesis: three verbatim quotes refused).
+ */
+function quoteFound(value: string, evidence: string): boolean {
+  const pieces = normalizeEvidence(value)
+    .split(/…|\.\.\./)
+    .map((piece) => piece.replace(QUOTE_EDGE_PUNCTUATION, ''))
+    .filter(Boolean);
+  return pieces.length > 0 && pieces.every((piece) => evidence.includes(piece));
+}
+
 function claimFound(kind: ClaimKind, value: string, evidence: string): boolean {
-  if (kind === 'quote') {
-    return evidence.includes(
-      value.toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' '),
-    );
-  }
+  if (kind === 'quote') return quoteFound(value, evidence);
   return claimPattern(kind, value).test(evidence);
 }
 
@@ -297,29 +322,49 @@ const NEAR_CHARS = 160;
  * sentence attaches them to. "Mildred Washington: Born 1737 [7]" passed a
  * presence check because [7] mentioned a Mildred and, elsewhere, 1737; the
  * wrong year for the right relative is the commonest family-tree error.
+ *
+ * Judged per source: a number is detached only when a source naming the
+ * anchor also states the number, and never near it. A number that comes
+ * from another source is a synthesis this check cannot judge; joined, the
+ * sources made "Skylark launches on 2026-09-01 … Marcus as launch DRI" read
+ * as a date detached from Marcus, because the org chart named Marcus and
+ * the engineering memo the date (2026-10-07, conflict-synthesis).
  */
 function detachedNumbers(
   claims: ReadonlyArray<{ kind: ClaimKind; value: string }>,
-  text: string,
+  sources: readonly string[],
 ): string[] {
-  // The anchor is the sentence's rarest name in the source: in an article
+  // The anchor is the sentence's rarest name in the sources: in an article
   // about George Washington, "Washington" sits near every year it states,
   // while "Mildred" sits only near hers.
+  const occurrences = (kind: ClaimKind, value: string, text: string) => [
+    ...text.matchAll(claimPattern(kind, value)),
+  ];
   let anchor: { value: string; count: number } | null = null;
   for (const claim of claims) {
     if (claim.kind !== 'name') continue;
-    const count = [...text.matchAll(claimPattern('name', claim.value))].length;
+    const count = sources.reduce(
+      (sum, text) => sum + occurrences('name', claim.value, text).length,
+      0,
+    );
     if (count > 0 && (!anchor || count < anchor.count)) anchor = { value: claim.value, count };
   }
   if (!anchor) return [];
   const near = new RegExp(claimPattern('name', anchor.value).source, 'u');
+  const anchored = sources.filter((text) => near.test(text));
   const out: string[] = [];
   for (const claim of claims) {
     if (claim.kind !== 'year' && claim.kind !== 'number') continue;
-    const placed = [...text.matchAll(claimPattern(claim.kind, claim.value))].some((m) => {
-      const at = m.index ?? 0;
-      return near.test(text.slice(Math.max(0, at - NEAR_CHARS), at + NEAR_CHARS));
-    });
+    const stated = anchored
+      .map((text) => ({ text, at: occurrences(claim.kind, claim.value, text) }))
+      .filter((source) => source.at.length > 0);
+    if (stated.length === 0) continue;
+    const placed = stated.some(({ text, at }) =>
+      at.some((m) => {
+        const i = m.index ?? 0;
+        return near.test(text.slice(Math.max(0, i - NEAR_CHARS), i + NEAR_CHARS));
+      }),
+    );
     if (!placed) out.push(`${claim.value} next to ${anchor.value}`);
   }
   return out;
@@ -344,6 +389,8 @@ interface GroundContext {
   normalized: Map<number, string>;
   /** Every evidence text plus what the person said, normalized once. */
   everything: string;
+  /** The same texts kept apart, for checks that must not read across sources. */
+  sources: string[];
   given: string;
   opaque?: (n: number) => boolean;
 }
@@ -358,6 +405,7 @@ function groundContext(
     evidence,
     normalized,
     everything: [...normalized.values()].join('\n') + given,
+    sources: [...normalized.values(), ...(given ? [given] : [])],
     given,
     ...(options.opaque ? { opaque: options.opaque } : {}),
   };
@@ -367,7 +415,28 @@ function checkAgainst(
   claims: Array<{ kind: ClaimKind; value: string }>,
   text: string,
 ): ClaimCheck[] {
-  return claims.map((claim) => ({ ...claim, found: claimFound(claim.kind, claim.value, text) }));
+  return withShownArithmetic(
+    claims.map((claim) => ({ ...claim, found: claimFound(claim.kind, claim.value, text) })),
+  );
+}
+
+/**
+ * A number the sentence derives from two of its own sourced numbers: "the
+ * 30,000 EUR gap between 240,000 and 210,000" shows its working, so the gap
+ * is not an invention even though no source states it (2026-10-07,
+ * conflict-synthesis). Only a sum or difference of two numbers the same
+ * sentence states and the evidence holds counts.
+ */
+function withShownArithmetic(checks: ClaimCheck[]): ClaimCheck[] {
+  const sourced = checks.filter((c) => c.kind === 'number' && c.found).map((c) => Number(c.value));
+  if (sourced.length < 2) return checks;
+  const derived = (value: number) =>
+    sourced.some((a, i) =>
+      sourced.some((b, j) => j > i && a !== b && (a + b === value || Math.abs(a - b) === value)),
+    );
+  return checks.map((c) =>
+    c.kind === 'number' && !c.found && derived(Number(c.value)) ? { ...c, found: true } : c,
+  );
 }
 
 /** "I could not verify…", "…is unconfirmed": the honest answer the rule asks for. */
@@ -401,23 +470,23 @@ function groundWith(
     };
   }
   if (opaque.length > 0) return { ...sentence, status: 'cited', checks: [], missing: [] };
-  const holds = (text: string) => {
-    const checks = checkAgainst(claims, text);
-    return checks.every((c) => c.found) && detachedNumbers(claims, text).length === 0
+  const holds = (sources: string[]) => {
+    const checks = checkAgainst(claims, sources.join('\n'));
+    return checks.every((c) => c.found) && detachedNumbers(claims, sources).length === 0
       ? checks
       : null;
   };
+  const given = ctx.given ? [ctx.given] : [];
   if (sentence.cites.length > 0) {
-    const cited = sentence.cites.map((n) => ctx.normalized.get(n) ?? '').join('\n') + ctx.given;
-    const checks = holds(cited);
+    const checks = holds([...sentence.cites.map((n) => ctx.normalized.get(n) ?? ''), ...given]);
     if (checks) return { ...sentence, status: 'supported', checks, missing: [] };
   } else if (ctx.given) {
-    const checks = holds(ctx.given);
+    const checks = holds(given);
     if (checks) return { ...sentence, status: 'supported', checks, missing: [] };
   }
   const checks = checkAgainst(claims, ctx.everything);
   const absent = checks.filter((c) => !c.found).map((c) => c.value);
-  const missing = absent.length > 0 ? absent : detachedNumbers(claims, ctx.everything);
+  const missing = absent.length > 0 ? absent : detachedNumbers(claims, ctx.sources);
   if (missing.length === 0) return { ...sentence, status: 'unattributed', checks, missing };
   return {
     ...sentence,

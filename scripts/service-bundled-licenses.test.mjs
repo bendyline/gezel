@@ -16,6 +16,7 @@ import {
   embeddedLicenseRecords,
   embeddedPackagesOf,
   loadEmbeddedLicenses,
+  matchesRecordedSha,
   stageServiceBundledLicenses,
   verifyServiceBundledLicenses,
 } from './service-bundled-licenses.mjs';
@@ -202,4 +203,14 @@ test('an inlined package needs a reviewed text for the exact carrier version', a
     () => embeddedLicenseRecords(packages, embedded, strict),
     /inlines src, which legal\/embedded-licenses\/manifest\.json does not list/,
   );
+});
+
+test('a recorded license hash survives a line-ending conversion, not an edit', () => {
+  const crlf = Buffer.from('MIT License\r\n\r\nCopyright inlined authors\r\n');
+  const recorded = createHash('sha256').update(crlf).digest('hex');
+  const lf = Buffer.from('MIT License\n\nCopyright inlined authors\n');
+  assert.equal(matchesRecordedSha(crlf, recorded), true);
+  assert.equal(matchesRecordedSha(lf, recorded), true, 'an LF checkout of a CRLF-recorded text');
+  assert.equal(matchesRecordedSha(Buffer.from('MIT License\n\nCopyright someone else\n'), recorded), false);
+  assert.equal(matchesRecordedSha(lf, undefined), false);
 });

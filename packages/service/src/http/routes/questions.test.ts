@@ -233,6 +233,55 @@ describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
   });
 });
 
+describe('POST /api/questions/:id/answer — task-paused card', () => {
+  async function pausedTaskCard(name: string) {
+    const project = await svc.context.store.createProject({ name });
+    const task = await svc.context.tasks.create(project.id, {
+      title: 'Monthly Invoice Run',
+      description: 'A two-step run that paused on its first step.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'collect', name: 'Collect' },
+        { id: 'finish', name: 'Finish', terminal: true },
+      ],
+    });
+    await svc.context.tasks.setStatus(project.id, task.num, 'paused');
+    const questionId = crypto.randomUUID();
+    await svc.context.store.writeQuestion({
+      id: questionId,
+      projectId: project.id,
+      gezelId: '',
+      sessionId: '',
+      prompt: `Task ${task.ref} paused for help at step \`collect\`.`,
+      choices: ['Dismiss', 'Try again'],
+      allowWriteIn: false,
+      taskRef: task.ref,
+      intent: {
+        kind: 'task-paused',
+        taskRef: task.ref,
+        stepId: 'collect',
+        reason: 'gate_exhausted',
+      },
+      createdAt: new Date().toISOString(),
+    });
+    return { project, task, questionId };
+  }
+
+  it('restarts the task when the answer is "Try again"', async () => {
+    const { project, task, questionId } = await pausedTaskCard('Try Again Card');
+    const res = await api('POST', `/api/questions/${questionId}/answer`, { selectedChoices: [1] });
+    expect(res.status).toBe(200);
+    expect((await svc.context.tasks.get(project.id, task.num))?.status).toBe('active');
+  });
+
+  it('leaves the task paused when the card is dismissed', async () => {
+    const { project, task, questionId } = await pausedTaskCard('Dismiss Card');
+    const res = await api('POST', `/api/questions/${questionId}/answer`, { selectedChoices: [0] });
+    expect(res.status).toBe(200);
+    expect((await svc.context.tasks.get(project.id, task.num))?.status).toBe('paused');
+  });
+});
+
 describe('POST /api/questions/:id/answer — task-finished card', () => {
   // The card names the wrap-up thread only so Updates can open it there.
   it('dismisses without starting a turn in the wrap-up thread', async () => {

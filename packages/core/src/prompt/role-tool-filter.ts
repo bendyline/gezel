@@ -930,6 +930,20 @@ function fileRepairToolsWithExplicitDirectives(
   return tools;
 }
 
+/**
+ * A data file is rebuilt from its sources by a script, not retyped: the
+ * data-wrangle repair message itself says "do not hand-edit the JSON … use a
+ * real CSV parse". With no file runner on the repair surface, gemma4-e4b
+ * wrote `scripts/clean_data.mjs` and called `run_installed_script` on it 10-18
+ * times per failed trial (2026-10-07). Same reasoning as FILE_WORK_SCRIPT_TOOLS.
+ */
+const DATA_FILE_REPAIR_RUNNERS: readonly string[] = ['run_nodejs_script', 'derive_file'];
+const DATA_FILE_EXTENSION = /\.(?:json|jsonl|ndjson|csv|tsv|ya?ml|xml)$/i;
+
+function scenarioCheckedFile(text: string): string | undefined {
+  return /\[scenario check\][^`\n]*`([^`\n]+)`/i.exec(text)?.[1];
+}
+
 export function constrainAllowlistForScenarioFileRepair(
   allowlist: Set<string> | null,
   opts: {
@@ -946,6 +960,9 @@ export function constrainAllowlistForScenarioFileRepair(
       ? REVIEW_FILE_REPAIR_TOOLS
       : SCENARIO_FILE_REPAIR_TOOLS;
   const toolSet = fileRepairToolsWithExplicitDirectives(baseToolSet, text);
+  if (DATA_FILE_EXTENSION.test(scenarioCheckedFile(text) ?? '')) {
+    for (const name of DATA_FILE_REPAIR_RUNNERS) toolSet.add(name);
+  }
   const next = new Set<string>();
   for (const name of toolSet) {
     if (allowlist.has(name)) next.add(name);

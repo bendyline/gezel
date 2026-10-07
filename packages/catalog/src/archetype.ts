@@ -354,9 +354,36 @@ export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook
           ],
         }
       : {}),
-    // Default forward edge loops back to the build phase — the safe failure
-    // mode is "keep improving", never "ship half-done".
-    next: loopBackTo,
+    // Route on a written verdict, not on a `next` argument the model must
+    // remember. The old shape defaulted this edge back to the build phase and
+    // asked for `next: "finish"` in prose; one added sentence made gemma-12b
+    // omit it in 7 of 8 advances and cycle for an hour, and 249 of 296
+    // catalog books still carry that shape (2026-10-06 review). The gate
+    // passes only a verdict with no FAIL and sends any FAIL back to the
+    // build phase; three rejections pause the task for a person.
+    advanceWhen: { file: EVALUATE_VERDICT_PATH, minBytes: 40, sniff: 'nonempty', artifact: true },
+    gate: {
+      at: 'completion',
+      checks: [
+        {
+          kind: 'contains',
+          file: EVALUATE_VERDICT_PATH,
+          pattern: '\\bPASS\\b',
+          label: 'verdict lists passing criteria',
+          artifact: true,
+        },
+        {
+          kind: 'notContains',
+          file: EVALUATE_VERDICT_PATH,
+          pattern: '\\bFAIL\\b',
+          label: 'no criterion marked FAIL',
+          artifact: true,
+        },
+      ],
+      onReject: loopBackTo,
+      maxAttempts: 3,
+    },
+    next: 'finish',
   });
 
   steps.push({
@@ -373,14 +400,17 @@ export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook
   return { steps, entryStepId: spec.phases[0]!.id };
 }
 
+/** Where a generated evaluate step writes the verdict its gate routes on. */
+export const EVALUATE_VERDICT_PATH = '{{task.dir}}/verdict.md';
+
 function evaluateRoutingFooter(
   loopBackTo: string,
   hasGate: boolean,
   artifactPath: string | null = null,
 ): string {
-  const lastLine = hasGate
-    ? "Never route to `finish` while any criterion is unmet. The build phase's completion gate already blocked a grossly-incomplete deliverable; your job is the judgment an automated check cannot make (does it actually work, read well, look right). After ~3 unproductive loops, stop and report DONE_WITH_CONCERNS so the user can step in."
-    : 'Never route to `finish` while any criterion is unmet. If you advance without a target, the loop sends you back by design. After ~3 unproductive loops, stop and report DONE_WITH_CONCERNS so the user can step in.';
+  const judgment = hasGate
+    ? " The build phase's completion gate already blocked a grossly incomplete deliverable; your job is the judgment an automated check cannot make (does it actually work, read well, look right)."
+    : '';
   return [
     ...(artifactPath
       ? [
@@ -388,12 +418,9 @@ function evaluateRoutingFooter(
           '',
         ]
       : []),
-    'Then route — this is the whole point of the loop:',
+    `Then write your verdict to the artifact \`${EVALUATE_VERDICT_PATH}\` with \`write_artifact\`: one line per acceptance criterion, each marked **PASS** or **FAIL**, and for every FAIL the specific gap to fix. Then call \`advance_task_step({ ref, stepId: "evaluate" })\` with no target.`,
     '',
-    `- **Every criterion PASSES →** call \`advance_task_step({ ref, stepId: "evaluate", next: "finish" })\`.`,
-    `- **Any criterion FAILS →** write the specific gaps to notes, then call \`advance_task_step({ ref, stepId: "evaluate", next: "${loopBackTo}" })\` to loop back. The builder fixes exactly those gaps.`,
-    '',
-    lastLine,
+    `The runtime routes on what you wrote: every criterion PASS → finish; any FAIL → back to \`${loopBackTo}\`, where the builder fixes exactly the gaps you named. Mark PASS only for a criterion you actually checked.${judgment}`,
   ].join('\n');
 }
 

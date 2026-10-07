@@ -6,6 +6,7 @@ import {
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
   type TaskInputRecord,
+  WORKSPACE_SOURCE_READERS,
   applyStepToolPolicy,
   createLogger,
   deliverableKindForStep,
@@ -48,6 +49,15 @@ import {
   stepToolKitDisabled,
   unionStepKit,
 } from './step-tool-kit.js';
+
+/** A factual session's lookups plus the readers for sources already in the project. */
+function factualSourceTools(allowlist: Iterable<string>): string[] {
+  const available = new Set(allowlist);
+  return [
+    ...factualLookupTools(available),
+    ...WORKSPACE_SOURCE_READERS.filter((t) => available.has(t)),
+  ];
+}
 import type { AvailableToolInfo } from './tools-block.js';
 import { shouldConstrainToExactCraftbookInvocation } from './turn-intent-plan.js';
 
@@ -576,7 +586,7 @@ export async function resolveSessionToolSurface(
     stepMandatedTools: new Set([
       ...mandatedStepTools,
       ...conditionallyReferencedStepTools,
-      ...(opts.factualWriting && rawAllowlist ? factualLookupTools(rawAllowlist) : []),
+      ...(opts.factualWriting && rawAllowlist ? factualSourceTools(rawAllowlist) : []),
     ]),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
@@ -728,10 +738,13 @@ export async function resolveSessionToolSurface(
   // paragraph about Martha Washington's children" reads as an immediate file
   // write, and the clamp left a Writer holding `write_file` alone: it saved
   // four wrong dates from memory and, with nothing to research with, told the
-  // person it had no sources (gemma4-31b, 2026-10-02).
+  // person it had no sources (gemma4-31b, 2026-10-02). The workspace readers
+  // survive with them: a synthesis whose sources are project memos was left
+  // with `write_file, read_document, search`, and `read_document` cannot open
+  // a workspace file (qwen3.8-27b conflict-synthesis, 2026-10-06).
   if (opts.factualWriting && allowlist && cappedAllowlist && allowlist !== cappedAllowlist) {
     const withLookups = new Set(allowlist);
-    for (const name of factualLookupTools(cappedAllowlist)) withLookups.add(name);
+    for (const name of factualSourceTools(cappedAllowlist)) withLookups.add(name);
     allowlist = withLookups;
   }
 

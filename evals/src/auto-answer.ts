@@ -189,6 +189,34 @@ export function toolPermissionAutoChoice(
 }
 
 /**
+ * A task that paused for help gets what a person at the desk would give it:
+ * one "Try again", then a dismissal. Picking by option order chose "Dismiss"
+ * every time, so 213 paused trials dead-ended and kept running ~70 GPU-hours
+ * after the pause (2026-10-06 review). Each retry is logged as an
+ * `[auto-answer] task-paused` line, so a pass that needed one is visible.
+ */
+export function taskPausedAutoChoice(
+  intent: unknown,
+  choices: readonly string[],
+  retriesUsed: number,
+  maxRetries: number,
+): { index: number; retry: boolean } | null {
+  if (!intent || typeof intent !== 'object') return null;
+  if ((intent as { kind?: unknown }).kind !== 'task-paused') return null;
+  const tryAgain = choices.findIndex((choice) => /^\s*try again\b/i.test(choice));
+  if (tryAgain >= 0 && retriesUsed < maxRetries) return { index: tryAgain, retry: true };
+  const dismiss = choices.findIndex((choice) => /^\s*dismiss\b/i.test(choice));
+  return { index: dismiss >= 0 ? dismiss : 0, retry: false };
+}
+
+/** Retries per paused task in unattended trials (`GEZEL_EVAL_PAUSE_RETRIES`, default 1). */
+export function evalPauseRetries(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GEZEL_EVAL_PAUSE_RETRIES?.trim();
+  const n = raw === undefined || raw === '' ? 1 : Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 1;
+}
+
+/**
  * Make headless confirmation answers operational, not merely affirmative.
  * Small local models can otherwise ask the same "should I proceed?" card
  * after every Yes response without taking the already-scoped action.
@@ -250,6 +278,8 @@ export function createAutoAnswerPoller(opts: AutoAnswerOptions): () => Promise<v
     opts.defaultAnswer ??
     'Use your best judgment — make the call you think fits this project best, document it in your reply, and proceed. Treat any open question as your call. No need to wait for further input.';
   const seenStructured = new Set<string>();
+  const pauseRetries = new Map<string, number>();
+  const maxPauseRetries = evalPauseRetries();
   let lastInlineRepliedToMessageAt: string | null = null;
 
   function messageText(content: unknown): string {
@@ -290,6 +320,28 @@ export function createAutoAnswerPoller(opts: AutoAnswerOptions): () => Promise<v
           `[auto-answer] structured ${q.id} (${q.gezelId}/${q.projectId}) "${promptPreview}" → npm decisions (${npmDecisions
             .map((d) => `${d.package}@${d.version}:${d.decision}`)
             .join(', ')})`,
+        );
+        continue;
+      }
+      const pausedTaskRef =
+        q.intent && typeof q.intent === 'object' && 'taskRef' in q.intent
+          ? String((q.intent as { taskRef?: unknown }).taskRef ?? '')
+          : '';
+      const pausedChoice = taskPausedAutoChoice(
+        q.intent,
+        choices,
+        pauseRetries.get(pausedTaskRef) ?? 0,
+        maxPauseRetries,
+      );
+      if (pausedChoice) {
+        if (pausedChoice.retry) {
+          pauseRetries.set(pausedTaskRef, (pauseRetries.get(pausedTaskRef) ?? 0) + 1);
+        }
+        await opts.client.answerQuestion(q.id, { selectedChoices: [pausedChoice.index] });
+        opts.log(
+          pausedChoice.retry
+            ? `[auto-answer] task-paused ${pausedTaskRef} "${promptPreview}" → Try again (retry ${pauseRetries.get(pausedTaskRef)}/${maxPauseRetries})`
+            : `[auto-answer] task-paused ${pausedTaskRef} "${promptPreview}" → Dismiss (retries used: ${pauseRetries.get(pausedTaskRef) ?? 0}/${maxPauseRetries})`,
         );
         continue;
       }

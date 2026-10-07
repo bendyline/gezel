@@ -99,7 +99,14 @@ holds one session's evidence:
   ``[4] Evidence from `wikipedia_read` — Wikipedia: George Washington. Cite
   facts from it as [4].`` It is applied in `McpBridge.callToolRich` through the
   session's `grounding` hooks, after the output cap, so the ledger holds
-  exactly what the model saw.
+  exactly what the model saw. The batch readers (`read_files`,
+  `read_artifacts`) count like their single-file twins, numbered once per
+  file section.
+- **Refusal remedies follow the source.** When the session's evidence so far
+  came from a workspace reader, or the person's messages name source files,
+  a refused write is sent back to `read_file` on those files rather than to
+  `search`. Searching for text a writer already read cost the core synthesis
+  scenarios 3-5x their wall-clock on 2026-10-05/06.
 - **What the person said.** All of the person's messages in the session
   count as evidence that needs no citation. Restating someone's own facts
   back to them is not invention.
@@ -117,7 +124,12 @@ splits text into prose sentences, attaches each `[n]`, and extracts the
 details a person could check: years, numbers (thousands separators and
 spelled small numbers match), months, quotations of three words or more, and
 capitalized names. Every detail must appear in the text of the evidence the
-sentence cites. Each sentence ends up as one of:
+sentence cites. A quotation is normalized like the evidence (case, line
+breaks, thousands separators), loses the writer's punctuation at its edges,
+and matches piece by piece across an ellipsis. A year or number must also sit
+near the sentence's rarest name, but only in a source that states both:
+a number taken from a different source is a synthesis the check cannot judge.
+Each sentence ends up as one of:
 
 | Status | Meaning |
 |---|---|
@@ -175,6 +187,9 @@ It checks the text, not the world:
 - A wrong *relationship* between true names passes: "Lawrence was George's
   son" when the evidence names both men.
 - A sentence with no checkable detail is never `supported`, only `cited`.
+- A number the writer computed ("30,000 EUR more than the finance sheet")
+  appears in no source, so it reads as invented. Cite the inputs and state
+  the arithmetic, or leave the number out.
 
 The answer to these is not a bigger regex. It is a narrow model check of the
 flagged sentences, kept for later and measured with the factuality bench

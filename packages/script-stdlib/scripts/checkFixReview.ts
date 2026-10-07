@@ -83,6 +83,25 @@ interface TaskStepView {
 
 const input = gezel.input as InferredInput<typeof meta>;
 
+/**
+ * File types a review can cite. Any backticked `name.ext` used to count, so
+ * `JSON.parse`, `USERS.get`, `order.giftNote`, `68.00` and `src/{a,b}.js`
+ * were reported as fabricated files: 87 trials across 12 books hit citation
+ * rejections, many for code a reviewer quoted correctly (2026-10-06 review).
+ */
+const CITED_FILE_EXTENSIONS = new Set(
+  'js mjs cjs jsx ts mts cts tsx json jsonc md mdx txt csv tsv yml yaml toml ini cfg conf env html htm css scss sass less vue svelte py rb go rs java kt kts swift c h cc cpp hpp cs php sh bash ps1 sql xml svg png jpg jpeg gif webp pdf docx xlsx pptx lock graphql gql proto gradle dockerfile'.split(
+    ' ',
+  ),
+);
+
+/** True for a backticked token that names a file rather than code or a number. */
+function looksLikeCitedFile(token: string): boolean {
+  if (/[{}*?]/.test(token)) return false;
+  const ext = token.slice(token.lastIndexOf('.') + 1).toLowerCase();
+  return CITED_FILE_EXTENSIONS.has(ext);
+}
+
 /** Strip citation decoration so `./src/x.ts`, `a/src/x.ts`, `src/x.ts` compare equal. */
 function normPath(p: string): string {
   return p
@@ -241,7 +260,7 @@ if (!reviewPath) {
     }
     for (const m of report.matchAll(/`([^`\s]+?\.[A-Za-z0-9]{1,8})(?::\d+(?:-\d+)?)?`/g)) {
       const p = m[1];
-      if (p) cited.add(normPath(p));
+      if (p && looksLikeCitedFile(p)) cited.add(normPath(p));
     }
     const reviewDir = reviewPath.includes('/')
       ? reviewPath.slice(0, reviewPath.lastIndexOf('/'))

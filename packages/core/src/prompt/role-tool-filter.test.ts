@@ -1407,6 +1407,32 @@ describe('computeToolAllowlist', () => {
     ).toBe(false);
   });
 
+  it('keeps the script runner on a scenario repair of a data file, not of a page', () => {
+    const repairOf = (file: string) =>
+      `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.\n` +
+      "Signals that didn't fire: **dates-iso**.\n" +
+      'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.';
+    const allow = computeToolAllowlist({
+      role: 'Developer',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-e4b-q4',
+      webSearchProvider: 'brave',
+    });
+    expect(allow!.has('run_nodejs_script')).toBe(true);
+    const data = constrainAllowlistForScenarioFileRepair(allow, {
+      role: 'Developer',
+      latestUserMessage: repairOf('out/customers.json'),
+    });
+    expect(data!.has('run_nodejs_script')).toBe(true);
+    expect(data!.has('write_file')).toBe(true);
+    const page = constrainAllowlistForScenarioFileRepair(allow, {
+      role: 'Developer',
+      latestUserMessage: repairOf('index.html'),
+    });
+    expect(page!.has('run_nodejs_script')).toBe(false);
+  });
+
   it('does not collapse source-parse repair nudges to immediate write_file only', () => {
     const repair =
       "[Message from Priya]: [scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { copyFile, link, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -760,7 +760,37 @@ const execFileAsync = promisify(execFile);
  * The fallback keeps the old behavior wherever cloning is unavailable
  * (non-APFS volumes, Linux CI) — a slower trial setup, never a broken one.
  */
+/** Weight files large enough to matter and never written after install. */
+const HARD_LINKABLE_WEIGHTS = /\.(?:gguf|safetensors|bin)$/i;
+const HARD_LINK_MIN_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Hard-link a large weight file instead of copying it, where no reflink
+ * exists. On ext4 `COPYFILE_FICLONE` falls back to a full byte copy, so every
+ * trial wrote the whole model: 82 s for the 89 GB qwen3.8-flash-next and
+ * 165 s for a 138 GB ds4 model, about 76 TB across the eval history, and the
+ * copy's writeback overlapped the trial's own measurements (2026-10-06
+ * review). Weights are only ever read after install, and the product refuses
+ * linked *directories*, not hard-linked files. Small files (manifests,
+ * sentinels) are still copied, so a daemon writing one can never alter the
+ * shared cache.
+ */
+export function shouldHardLinkModelFile(path: string, sizeBytes: number): boolean {
+  return HARD_LINKABLE_WEIGHTS.test(path) && sizeBytes >= HARD_LINK_MIN_BYTES;
+}
+
 async function cloneFile(source: string, destination: string): Promise<void> {
+  if (process.platform !== 'darwin' && process.env.GEZEL_EVAL_NO_HARDLINK !== '1') {
+    try {
+      if (shouldHardLinkModelFile(source, statSync(source).size)) {
+        await link(source, destination);
+        return;
+      }
+    } catch {
+      // Cross-device, a filesystem without hard links, or a permission
+      // refusal: fall through to the copy.
+    }
+  }
   if (process.platform === 'darwin') {
     try {
       await execFileAsync('cp', ['-c', source, destination]);

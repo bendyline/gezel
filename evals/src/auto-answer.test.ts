@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evalPauseRetries,
   npmInstallAutoDecisions,
   permissionToProceedAutoAnswerText,
   pickAutoAnswerChoice,
   projectContextAutoAnswerText,
   repoSourceAutoAnswerText,
+  taskPausedAutoChoice,
   toolPermissionAutoChoice,
   workspaceFixtureAutoAnswerText,
 } from './auto-answer.ts';
@@ -212,5 +214,31 @@ describe('pickAutoAnswerChoice', () => {
       { package: 'csv-parse', version: 'latest', decision: 'decline' },
       { package: 'left-pad', version: 'latest', decision: 'decline' },
     ]);
+  });
+});
+
+describe('taskPausedAutoChoice', () => {
+  const intent = { kind: 'task-paused', taskRef: 'p/3' };
+  const choices = ['Dismiss', 'Try again'];
+
+  it('tries again until the retry budget is spent, then dismisses', () => {
+    expect(taskPausedAutoChoice(intent, choices, 0, 1)).toEqual({ index: 1, retry: true });
+    expect(taskPausedAutoChoice(intent, choices, 1, 1)).toEqual({ index: 0, retry: false });
+  });
+
+  it('dismisses an older card that only offers Dismiss', () => {
+    expect(taskPausedAutoChoice(intent, ['Dismiss'], 0, 1)).toEqual({ index: 0, retry: false });
+  });
+
+  it('ignores every other card', () => {
+    expect(taskPausedAutoChoice({ kind: 'tool-permission' }, choices, 0, 1)).toBeNull();
+    expect(taskPausedAutoChoice(undefined, choices, 0, 1)).toBeNull();
+  });
+
+  it('reads the retry budget from the environment, defaulting to one', () => {
+    expect(evalPauseRetries({})).toBe(1);
+    expect(evalPauseRetries({ GEZEL_EVAL_PAUSE_RETRIES: '0' })).toBe(0);
+    expect(evalPauseRetries({ GEZEL_EVAL_PAUSE_RETRIES: '3' })).toBe(3);
+    expect(evalPauseRetries({ GEZEL_EVAL_PAUSE_RETRIES: 'lots' })).toBe(1);
   });
 });

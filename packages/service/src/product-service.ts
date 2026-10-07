@@ -1662,7 +1662,11 @@ export async function startProductService(
       gezelId: config.meesterGezelId ?? '',
       sessionId: '',
       prompt: `Task ${task.ref} ("${task.title}") paused for help${stepPart}: ${detail}`,
-      choices: ['Dismiss'],
+      // "Try again" is a real choice, not only the desktop card's button, so
+      // every client can restart the task. The eval harness and plain-choice
+      // clients saw only "Dismiss": 213 paused trials dead-ended there and
+      // ran on for ~70 GPU-hours (2026-10-06 review).
+      choices: ['Dismiss', 'Try again'],
       allowWriteIn: false,
       multiSelect: false,
       taskRef: task.ref,

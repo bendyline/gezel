@@ -185,3 +185,68 @@ describe('renderTaskContextBlock', () => {
     expect(isGatedStep(task.craftbook.steps[0]!, task.craftbook.steps)).toBe(false);
   });
 });
+
+describe('renderTaskContextBlock — stepwise handoffs', () => {
+  const steps = [
+    {
+      id: 'scope',
+      name: 'Scope the run',
+      completedAt: 't',
+      advanceWhen: { file: 'tasks/3/scope.md', artifact: true },
+    },
+    {
+      id: 'billables',
+      name: 'List billables',
+      completedAt: 't',
+      advanceWhen: { file: 'tasks/3/billables.json', artifact: true },
+    },
+    {
+      id: 'collect',
+      name: 'Collect',
+      prompt: 'Name any client skipped this month, as recorded in scope.md.',
+      advanceWhen: { file: 'tasks/3/collect.md', artifact: true },
+    },
+  ];
+  const invoiceTask = (executionMode: 'generalist' | 'stepwise') =>
+    ({
+      ...task,
+      activeStepId: 'collect',
+      executionMode,
+      craftbook: { id: 'invoice-run', steps },
+    }) as unknown as Task;
+
+  it('gives a stepwise step the earlier files its procedure names, and the rest as a list', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('stepwise'),
+      step: steps[2] as never,
+    });
+    expect(block).toContain(
+      '`tasks/3/scope.md` — written by the earlier step **Scope the run**, and this procedure uses it. Open it with `read_artifact({ path: "tasks/3/scope.md" })`.',
+    );
+    expect(block).toContain("#### Earlier steps' files");
+    expect(block).toContain('**List billables** → `tasks/3/billables.json` (artifacts drawer)');
+  });
+
+  it('adds neither for a generalist owner, who wrote those files itself', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('generalist'),
+      step: steps[2] as never,
+    });
+    expect(block).not.toContain('written by the earlier step');
+    expect(block).not.toContain("Earlier steps' files");
+  });
+
+  it('shows a stepwise session the outline, scoped to its own step', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('stepwise'),
+      step: steps[2] as never,
+    });
+    expect(block).toContain('### Task outline');
+    expect(block).toContain(
+      '1. Scope the run (done)\n2. List billables (done)\n3. Collect (active)',
+    );
+    expect(block).toContain('Only the active step is yours.');
+    expect(block).not.toContain('You own every step');
+    expect(block.indexOf('### Task outline')).toBeLessThan(block.indexOf('#### Step procedure'));
+  });
+});

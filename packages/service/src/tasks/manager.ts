@@ -667,6 +667,11 @@ export class TaskManager {
     reason: TaskNeedsHelpReason;
     detail: string;
   }): Promise<void> {
+    // A stable line for anything reading the log after the fact: evals class
+    // an unrecovered pause from it rather than burying it in "model-default".
+    log.info(
+      `[tasks] ${ctx.task.ref} paused for help (${ctx.reason})${ctx.stepId ? ` at step "${ctx.stepId}"` : ''}`,
+    );
     if (!this.onTaskNeedsHelp) return;
     try {
       await this.onTaskNeedsHelp(ctx);

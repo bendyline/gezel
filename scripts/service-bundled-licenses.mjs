@@ -49,6 +49,20 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
+/**
+ * True when `content` matches `recorded` with either line ending. Git checks
+ * these texts out as LF (`eol=lf`), so a hash recorded from a CRLF copy fails
+ * on every other machine: chevrotain-allstar@0.3.1-LICENSE broke the service
+ * build that way (2026-10-07). Line endings carry no legal meaning; any other
+ * byte change still fails.
+ */
+export function matchesRecordedSha(content, recorded) {
+  if (typeof recorded !== 'string') return false;
+  const lf = Buffer.from(content.toString('utf8').replace(/\r\n/g, '\n'));
+  const crlf = Buffer.from(lf.toString('utf8').replace(/\n/g, '\r\n'));
+  return [content, lf, crlf].some((variant) => sha256(variant) === recorded);
+}
+
 export function serviceBundledLicenseRoot(serviceDist = SERVICE_DIST) {
   return join(serviceDist, 'licenses', 'npm');
 }
@@ -229,7 +243,7 @@ export async function loadEmbeddedLicenses(root = EMBEDDED_LICENSES_ROOT) {
     const path = join(root, file);
     if (!existsSync(path)) throw new Error(`missing legal/embedded-licenses/${file}`);
     const content = await readFile(path);
-    if (sha256(content) !== record?.sha256) {
+    if (!matchesRecordedSha(content, record?.sha256)) {
       throw new Error(`legal/embedded-licenses/${file} does not match its recorded sha256`);
     }
     texts.set(file, { file, path, content, sha256: record.sha256, source: record.source });

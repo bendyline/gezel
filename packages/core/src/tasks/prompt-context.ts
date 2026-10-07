@@ -20,6 +20,7 @@ import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
 import { stepCheckedArtifactPaths } from '../tools/results.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
+import { earlierStepProducts, inferredStepInputs } from './inferred-step-inputs.js';
 
 /**
  * One input's line in the invocation block: how many files, where they are,
@@ -92,21 +93,24 @@ export function isGatedStep(
 }
 
 /**
- * The bird's-eye view a generalist task carries on every turn: the goal the
- * book works toward and every step with its state, so one owner walking the
- * whole task can shape today's step for tomorrow's. The closing sentence
- * names `advance_task_step` only when the turn wired it.
+ * The bird's-eye view a task carries on every turn: the goal the book works
+ * toward and every step with its state, so whoever holds today's step can
+ * shape it for tomorrow's. A generalist owner is told it owns every step; a
+ * stepwise session, which holds one step and remembers nothing of the others,
+ * is told to do only its own and leave its files for the steps after it. The
+ * closing sentence names `advance_task_step` only when the turn wired it.
  */
 export function renderTaskOutline(
   task: Task,
   activeStep: TaskCraftbookStep | undefined,
-  opts: { advanceWired: boolean },
+  opts: { advanceWired: boolean; stepwise?: boolean },
 ): string {
   const goal = (task.craftbook.description ?? task.description ?? '').trim();
   const activeId = activeStep?.id ?? task.activeStepId;
   const steps = task.craftbook.steps.map((s, i) => {
     const state = s.completedAt ? 'done' : s.id === activeId ? 'active' : 'pending';
     const desc = s.description?.trim() ? ` — ${s.description.trim()}` : '';
+    if (opts.stepwise) return `${i + 1}. ${s.name} (${state})${desc}`;
     const gated = isGatedStep(s, task.craftbook.steps) ? ' (gated)' : '';
     const fanout = s.spawnFanout
       ? ' [fanout: the runtime spawns one child task per item here and holds this step until they settle]'
@@ -116,13 +120,10 @@ export function renderTaskOutline(
   const reveal = opts.advanceWired
     ? 'finish and pass them before `advance_task_step` reveals the next'
     : 'finish and pass them before the next step is revealed';
-  return [
-    '### Task outline',
-    ...(goal ? [`Goal: ${goal}`] : []),
-    ...steps,
-    '',
-    `You own every step of this task in this one conversation. Steps are disclosed one at a time; the **Step procedure** and **Phase gate** below are the authoritative instructions now — ${reveal}.`,
-  ].join('\n');
+  const closing = opts.stepwise
+    ? 'Only the active step is yours. Do not start the others: the **Step procedure** and **Phase gate** below are your instructions, and later steps open the files you write.'
+    : `You own every step of this task in this one conversation. Steps are disclosed one at a time; the **Step procedure** and **Phase gate** below are the authoritative instructions now — ${reveal}.`;
+  return ['### Task outline', ...(goal ? [`Goal: ${goal}`] : []), ...steps, '', closing].join('\n');
 }
 
 /**
@@ -181,10 +182,15 @@ export function renderTaskContextBlock(
     `### Current task: ${t.ref} — "${t.title}"`,
     `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
   ];
-  if (t.executionMode === 'generalist') {
+  // A stepwise session gets the outline too once the task has more than one
+  // step: without it a fresh session cannot tell what the steps after it
+  // will need from its files, which is half of why generalist led the
+  // paired runs (2026-10-06 review).
+  if (t.executionMode === 'generalist' || (step && t.craftbook.steps.length > 1)) {
     lines.push(
       renderTaskOutline(t, step, {
         advanceWired: wired('advance_task_step'),
+        stepwise: t.executionMode !== 'generalist',
       }),
     );
   }
@@ -309,16 +315,49 @@ export function renderTaskContextBlock(
         `#### Output contract\n\n${contract}${additionalContract} Any write surface not listed here is intentionally unavailable; do not substitute one drawer for another.`,
       );
     }
-    if (step.consumes && step.consumes.length > 0) {
-      const inputLines = step.consumes.map((input) => {
-        const tool = input.artifact ? 'read_artifact' : 'read_file';
+    // A stepwise session remembers nothing from earlier steps, so files they
+    // produced that this procedure names count as inputs even when the book
+    // forgot to consume them. A generalist owner wrote them itself.
+    const stepwise = t.executionMode !== 'generalist';
+    const inferred = stepwise ? inferredStepInputs(t.craftbook.steps, step) : [];
+    if ((step.consumes && step.consumes.length > 0) || inferred.length > 0) {
+      const readCall = (file: string, artifact: boolean) => {
+        const tool = artifact ? 'read_artifact' : 'read_file';
+        return { tool, call: `${tool}({ path: ${JSON.stringify(file)} })` };
+      };
+      const inputLines = (step.consumes ?? []).map((input) => {
+        const { tool, call } = readCall(input.file, input.artifact === true);
         const drawer = input.artifact ? 'artifacts drawer' : 'project workspace';
-        const call = `${tool}({ path: ${JSON.stringify(input.file)} })`;
         return wired(tool)
           ? `- \`${input.file}\` — required input in the **${drawer}**. Open it with \`${call}\`; do not try the other drawer.`
           : `- \`${input.file}\` — required input in the **${drawer}**, but \`${tool}\` is not wired this turn. Do not claim it is missing; delegate or surface the unavailable read capability.`;
       });
-      lines.push(`#### Required inputs\n\n${inputLines.join('\n')}`);
+      for (const input of inferred) {
+        const { tool, call } = readCall(input.file, input.artifact);
+        if (!wired(tool)) continue;
+        inputLines.push(
+          `- \`${input.file}\` — written by the earlier step **${input.producedBy}**, and this procedure uses it. Open it with \`${call}\`.`,
+        );
+      }
+      if (inputLines.length > 0) lines.push(`#### Required inputs\n\n${inputLines.join('\n')}`);
+    }
+    if (stepwise) {
+      const listed = new Set([
+        ...(step.consumes ?? []).map((input) => input.file),
+        ...inferred.map((input) => input.file),
+      ]);
+      const earlier = earlierStepProducts(t.craftbook.steps, step).filter(
+        (product) => !listed.has(product.file),
+      );
+      if (earlier.length > 0) {
+        const rows = earlier.map(
+          (product) =>
+            `- **${product.stepName}** → \`${product.file}\`${product.artifact ? ' (artifacts drawer)' : ''}`,
+        );
+        lines.push(
+          `#### Earlier steps' files\n\nFinished steps of this task left these files. Open one when this step needs what that step found.\n\n${rows.join('\n')}`,
+        );
+      }
     }
     if (activeStepIsGate) {
       const attemptNote =

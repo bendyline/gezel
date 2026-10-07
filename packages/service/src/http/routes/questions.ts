@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import { answerOwnerStep } from '../../tasks/owner-step.js';
+import { retryPausedTask } from '../../tasks/retry.js';
 import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 import { applyNpmInstallApprovals, intentPackages } from '../../workspace/npm.js';
 import {
@@ -332,11 +333,23 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     }
 
     // Task-paused cards are the same shape: service-synthesized, no live
-    // session. Dismiss collapses the card; fixing/resuming the task
-    // happens through the attached "Open task" link, not the answer.
+    // session. Dismiss collapses the card; "Try again" (choice 1) also
+    // restarts the task. Fixing it otherwise happens through "Open task".
     // Task-finished cards point at the wrap-up thread only for "Open in
     // chat"; dismissing one must not seed a turn there.
     if (question.intent?.kind === 'task-paused' || question.intent?.kind === 'task-finished') {
+      // Choice 1 on a pause card is "Try again": the same restart the task
+      // page offers. The card still collapses if the retry is held.
+      const tryAgain =
+        question.intent.kind === 'task-paused' &&
+        (question.answer?.selectedChoices ?? []).includes(1) &&
+        question.answer?.declined !== true;
+      const ref = tryAgain && question.taskRef ? parseTaskRef(question.taskRef) : null;
+      if (ref) {
+        await retryPausedTask(ctx, ref.projectId, ref.num).catch((err) =>
+          log.warn(`[questions] try-again failed for ${question.taskRef}:`, err),
+        );
+      }
       return c.json(question);
     }
 

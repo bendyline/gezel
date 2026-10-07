@@ -86,6 +86,26 @@ describe('extractClaims', () => {
     expect(extractClaims('They had no children together.')).toEqual([]);
     expect(extractClaims('However, the plan worked.')).toEqual([]);
   });
+
+  it('reads the first word of a list item or quote line as a clause start', () => {
+    const names = (text: string) =>
+      extractClaims(text)
+        .filter((c) => c.kind === 'name')
+        .map((c) => c.value);
+    expect(names('- **Caveat:** Absorbed sugars raise blood glucose quickly.')).toEqual([]);
+    expect(names('1. **Salivary amylase** starts starch digestion.')).toEqual([]);
+    expect(names('* Inside the small intestine, enzymes finish the job.')).toEqual([]);
+    expect(names('> **Note:** Inside the cell, glucose is phosphorylated.')).toEqual([]);
+    expect(names('- Ada Lovelace wrote the first published algorithm.')).toEqual([
+      'Ada',
+      'Lovelace',
+    ]);
+  });
+
+  it('does not read a chemical formula as a name', () => {
+    expect(extractClaims('Plants fix CO₂ during photosynthesis.')).toEqual([]);
+    expect(extractClaims('Plants fix CO2 during photosynthesis.')).toEqual([]);
+  });
 });
 
 describe('groundText', () => {
@@ -171,6 +191,47 @@ describe('groundText', () => {
     );
   });
 
+  it('does not read a number from one source as detached from a name in another', () => {
+    const ev = [
+      { n: 1, text: 'Org chart: Launch DRI: Marcus (since June 1). Campaign lead: Iris.' },
+      {
+        n: 2,
+        text: 'Engineering memo on Skylark readiness. The August date is not achievable: the migration alone takes six weeks, so this memo supersedes the product memo on timing and the launch date is 2026-09-01.',
+      },
+    ];
+    const sentence = 'Skylark launches on 2026-09-01 with Marcus as launch DRI';
+    expect(groundText(`${sentence}.`, ev).sentences[0]?.status).toBe('unattributed');
+    expect(groundText(`${sentence} [1][2].`, ev).sentences[0]?.status).toBe('supported');
+  });
+
+  it('starts a sentence at a bold lead, so its label is not a name', () => {
+    const ev = [{ n: 1, text: 'This memo supersedes the product memo on timing.' }];
+    const result = groundText(
+      'The engineering memo supersedes the product memo on timing [1]. **Winner:** the engineering memo.',
+      ev,
+    );
+    expect(result.sentences.map((s) => s.status)).toEqual(['cited', 'non-factual']);
+  });
+
+  it('accepts a sum or difference the sentence works out from its own sourced numbers', () => {
+    const ev = [
+      { n: 1, text: 'The launch budget is 240,000 EUR.' },
+      { n: 2, text: 'total_budget,210000' },
+    ];
+    expect(
+      groundText('The 30,000 EUR gap between 240,000 and 210,000 is unexplained [1][2].', ev)
+        .sentences[0]?.status,
+    ).toBe('supported');
+    expect(
+      groundText('The gap is 30,000 EUR [1][2].', ev).sentences[0]?.status,
+      'without its operands the number is unsourced',
+    ).toBe('unsupported');
+    expect(
+      groundText('The 35,000 EUR gap between 240,000 and 210,000 is unexplained [1][2].', ev)
+        .sentences[0]?.status,
+    ).toBe('unsupported');
+  });
+
   it('lets a sentence that says it could not verify something stand', () => {
     const text =
       'I could not verify when Lawrence Washington died. His burial place is unconfirmed. No record names a third son.';
@@ -189,6 +250,33 @@ describe('groundText', () => {
     expect(
       groundText('The estate covered 1426 acres and 2 mills [1].', ev).sentences[0]?.status,
     ).toBe('supported');
+  });
+
+  // conflict-synthesis, 2026-10-07: each of these quotes is verbatim from the
+  // memo the model had just read, and each was refused.
+  it('finds a verbatim quote across a line break, a thousands comma, or the writer’s own punctuation', () => {
+    const ev = [
+      {
+        n: 1,
+        text: 'We are targeting a launch on 2026-08-15. The launch budget is 240,000 EUR,\ncovering the campaign, the event, and two contractors.',
+      },
+      {
+        n: 2,
+        text: 'Priya is the launch DRI. Weekly syncs on Tuesdays. This plan predates the\nreorg.',
+      },
+    ];
+    for (const sentence of [
+      'The memo states "The launch budget is 240,000 EUR" [1].',
+      'It frames the figure as "covering the campaign, the event, and two contractors," [1].',
+      'The old plan records "weekly syncs on Tuesdays," [2].',
+      'The plan itself notes it "predates the reorg." [2]',
+      'The memo says "The launch budget … covering the campaign" [1].',
+    ]) {
+      expect(groundText(sentence, ev).sentences[0]?.status, sentence).toBe('supported');
+    }
+    expect(
+      groundText('The memo says "the launch budget is 250,000 EUR" [1].', ev).sentences[0]?.status,
+    ).toBe('unsupported');
   });
 });
 

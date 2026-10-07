@@ -1362,11 +1362,12 @@ export function compactSuccessfulWriteToolCallForTranscript(
   if (typeof content !== 'string' || content.length < WRITE_TRANSCRIPT_COMPACT_MIN_CHARS) {
     return false;
   }
-  const path = typeof args.path === 'string' && args.path.trim() ? args.path : '(unknown path)';
-  call.function.arguments = JSON.stringify({
-    ...args,
-    [fieldName]: `[omitted from future model transcript after successful ${call.function.name}; ${content.length} chars were written to ${path}. Use read_file to inspect current contents.]`,
-  });
+  // Drop the field rather than leave a note in it: a note where content was
+  // is text a model can copy, and qwen3.8 resent it as the next file
+  // (conflict-synthesis, 2026-10-06). A bare count gives nothing to copy, and
+  // a reused call without content fails validation in plain words.
+  const { [fieldName]: _omitted, ...rest } = args;
+  call.function.arguments = JSON.stringify({ ...rest, omittedChars: content.length });
   return true;
 }
 

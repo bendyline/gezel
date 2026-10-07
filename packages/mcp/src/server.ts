@@ -200,6 +200,11 @@ import {
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import {
+  installedScriptMissHint,
+  isPathShapedScriptName,
+  scriptFileCandidates,
+} from './installed-script-miss.js';
+import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
   inferSourceDeliverablePath,
@@ -11956,15 +11961,17 @@ server.tool(
     // in the 2026-08-02 core suite (six failed calls, then hand-authored
     // output). A generic "script not found" left it concluding the platform
     // was broken, so name the right tool at the moment of the mistake.
-    const looksLikePath = /[/\\]/.test(name) || /\.(mjs|cjs|js|ts|py|sh)$/i.test(name);
-    if (looksLikePath) {
+    const hintFor = (written?: string) =>
+      installedScriptMissHint({
+        name,
+        ...(written ? { written } : {}),
+        canRunFiles: toolIsAuthorizedForThisSession('run_nodejs_script'),
+        canDerive: toolIsAuthorizedForThisSession('derive_file'),
+        canWriteFiles: toolIsAuthorizedForThisSession('write_file'),
+      });
+    if (isPathShapedScriptName(name)) {
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `"${name}" looks like a file path, but run_installed_script takes the NAME of a script already installed in the project (see list_scripts). To run a script file you wrote yourself, use run_nodejs_script instead. To build a derived data file from other files, derive_file is usually better still.`,
-          },
-        ],
+        content: [{ type: 'text' as const, text: hintFor() }],
         isError: true as const,
       };
     }
@@ -11979,6 +11986,17 @@ server.tool(
       return formatScriptRunResult(res);
     } catch (err) {
       const msg = unwrapApiError(err);
+      if (/not found/i.test(msg)) {
+        let written: string | undefined;
+        for (const candidate of scriptFileCandidates(name)) {
+          const stat = await statWorkspacePath(candidate).catch(() => null);
+          if (stat?.kind === 'file') {
+            written = candidate;
+            break;
+          }
+        }
+        return errorResult(`run_installed_script failed: ${msg}\n${hintFor(written)}`);
+      }
       return errorResult(`run_installed_script failed: ${msg}`);
     }
   },
