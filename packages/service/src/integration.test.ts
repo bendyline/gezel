@@ -450,6 +450,39 @@ describe('projects API', () => {
     });
   });
 
+  it("recruits an added folder's crew only for the app's own credential", async () => {
+    const make = async (name: string) => {
+      const dir = join(fixtureRoot, 'added', name);
+      await mkdir(dir, { recursive: true });
+      for (let i = 0; i < 6; i++) await writeFile(join(dir, `IMG_${i}.jpg`), 'jpeg');
+      return dir;
+    };
+    type Inferred = { project: { id: string; properties?: Record<string, string> } };
+
+    const cli = await svc.context.tokenStore.issue({
+      appId: 'test-cli',
+      appName: 'Test CLI',
+      scopes: ['cli'],
+    });
+    const fromCli = await httpFetch(`${baseUrl}/api/projects/infer-for-path`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cli.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: await make('cli-photos'), kind: 'folder', recruitCrew: true }),
+    });
+    expect(fromCli.status).toBe(200);
+    const ignored = (await fromCli.json()) as Inferred;
+    expect(ignored.project.properties?.['gezel.folderKind']).toBeUndefined();
+
+    const fromApp = await api('POST', '/api/projects/infer-for-path', {
+      path: await make('app-photos'),
+      kind: 'folder',
+      recruitCrew: true,
+    });
+    expect(fromApp.status).toBe(200);
+    const recruited = (await fromApp.json()) as Inferred;
+    expect(recruited.project.properties?.['gezel.folderKind']).toBe('pictures');
+  });
+
   it('default project exists from boot', async () => {
     const res = await api('GET', '/api/projects');
     const data = (await res.json()) as { projects: Array<{ id: string }> };

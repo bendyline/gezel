@@ -16,6 +16,7 @@ import {
   effectiveGeneralistModeSetting,
   formatNightShiftSummary,
   formatSuspension,
+  isSharedLibraryProject,
   isTaskWorkAllowed,
   nowIso,
   onSuspension,
@@ -68,7 +69,7 @@ import {
 } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import { DiffpackManager } from './diffpack/manager.js';
-import { planNightFixes } from './diffpack/night-fix-planner.js';
+import { planProjectNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
@@ -124,6 +125,7 @@ import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
 import { readImageStaticMeta } from './index-store/image-meta.js';
+import { migrateWorkspaceIndexes } from './index-store/index-placement.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
@@ -135,7 +137,10 @@ import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { mailCatalogEntries } from './mail/search-catalog.js';
-import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
+import {
+  ensureNightShiftOversightTask,
+  findNightShiftOversightTask,
+} from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
 import { warmEmbeddings } from './memory/embeddings.js';
@@ -146,7 +151,7 @@ import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 
 import { migrateLegacySystemModels } from './models/storage-roots.js';
 import { DuckRunner } from './observations/duck.js';
-import { runObservationNightly } from './observations/nightly.js';
+import { runProjectObservationNightly } from './observations/nightly.js';
 import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import {
   discoverManagedScriptRuntimes,
@@ -383,6 +388,13 @@ export async function startProductService(
   sharedProject = await store.ensureSharedProject();
   await store.ensureDefaultMeester();
   await store.ensureDefaultKlerk();
+  // Before anything opens a content index: earlier builds kept it inside the
+  // person's folder.
+  await migrateWorkspaceIndexes({ store, home }).catch((err: unknown) =>
+    log.warn(
+      `[index] placement migration skipped: ${err instanceof Error ? err.message : String(err)}`,
+    ),
+  );
 
   const paths = gezelPaths(home);
   // Keep the daemon's root credential process-local. Cross-process clients
@@ -748,12 +760,36 @@ export async function startProductService(
   // NightShiftManager owns the Night Shift ON/OFF state (nightly window +
   // manual shifts). Its `isActive` read gates deferred night-shift work in
   // the scheduler, runner, and enrichment loop below.
+  // A folder of the person's own (or a linked repository) that tonight's
+  // index sweep would cover. Cheap: reads project records, opens no index.
+  const hasNightSweepProject = async (): Promise<boolean> => {
+    const projects = await store.listProjects().catch(() => []);
+    return projects.some(
+      (p) =>
+        Boolean(p.workingDir || p.github) &&
+        p.indexingEnabled !== false &&
+        projectAllowsAmbientWork(p) &&
+        !isSharedLibraryProject(p),
+    );
+  };
+  // The desktop app's OS-idle and power reports; read by enrichment and the
+  // night shift.
+  const systemIdle = new SystemIdleState();
   const nightShift = new NightShiftManager({
     store,
     manager: tasks,
     events: chatEvents,
+    ...(opts.nightShiftNow ? { now: opts.nightShiftNow } : {}),
     quotaGate: nightQuotaGate,
     resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
+    // A person's folders are owed a nightly sweep whether or not any task
+    // is waiting. Without this the shift ran only for tasks, and a paused
+    // oversight task meant no index catch-up or fix planning at all.
+    ambientWork: {
+      hasEligibleProject: () => hasNightSweepProject(),
+      isRunning: () => indexEnrichmentRef?.isNightWorkRunning() ?? false,
+    },
+    power: systemIdle,
   });
 
   // Per-project last-activity stamps, fed by the history + chat buses.
@@ -1585,6 +1621,12 @@ export async function startProductService(
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
   // the shift accomplished as a needs-input card with report links.
+  // The nightly oversight task is ensured at boot; ensure it again as each
+  // window opens, so a task deleted, renamed or stuck on an old prompt since
+  // boot is repaired in time to run tonight.
+  nightShift.setOnWindowOpened(async () => {
+    await ensureNightShiftOversightTask(store, tasks);
+  });
   nightShift.setOnWindowSettled(async (windowKey) => {
     const existing = await store.listProjectQuestions('default').catch(() => []);
     if (
@@ -1597,10 +1639,32 @@ export async function startProductService(
     const review = await buildNightShiftReview(
       { store, tasks, reportActions, diffpacks },
       nightShift.currentWindow(),
-      new Date(),
+      // The shift's own clock, so the review and the settled window agree.
+      opts.nightShiftNow?.() ?? new Date(),
     );
     if (review.windowKey !== windowKey) return;
-    if (review.tasksCompleted.length === 0 && review.reports.length === 0) return;
+    const outcome = nightShift.windowOutcome(windowKey);
+    // A paused review never re-arms on its own (its pause is meant for the
+    // person), so the morning card is where they hear about it.
+    const oversight = await findNightShiftOversightTask(store);
+    const pausedReview =
+      oversight?.status === 'paused' ? { projectId: 'default', num: oversight.num } : undefined;
+    const empty =
+      review.tasksCompleted.length === 0 &&
+      review.reports.length === 0 &&
+      review.diffpacks.length === 0;
+    if (empty && !pausedReview) {
+      // A night that produced nothing still gets a card saying why — but only
+      // when work was owed. An install with no folders and nothing queued
+      // shouldn't hear about every night it had nothing to do.
+      const owed =
+        (await hasNightSweepProject()) ||
+        (await tasks.list({ status: 'active' }).catch(() => [])).some(
+          (t) => t.nightShift?.enabled === true,
+        );
+      if (!owed) return;
+    }
+    const quiet = empty ? { reason: outcome.reason ?? ('no-work' as const) } : undefined;
     const config = await store.readConfig().catch(() => ({}) as GezelConfig);
     // `suggested`, not `total`: the tally is a call to action, and an
     // action already fired or dismissed is not one the user still owes
@@ -1617,6 +1681,8 @@ export async function startProductService(
         reports: review.reports.length,
         proposals: review.diffpacks.length,
         actions: actionTotal,
+        ...(quiet ? { quiet } : {}),
+        ...(pausedReview ? { pausedReview: true } : {}),
       }),
       choices: ['Dismiss'],
       allowWriteIn: false,
@@ -1634,9 +1700,32 @@ export async function startProductService(
           title: r.title,
           actionCount: r.actionCounts.total,
         })),
+        ...(quiet ? { quiet } : {}),
+        ...(pausedReview ? { pausedReview } : {}),
       },
       createdAt: new Date().toISOString(),
     });
+    // One audit record per settled window, written under the same per-window
+    // dedupe as the card, so a restart replaying the settle can't double it.
+    await history
+      .log({
+        kind: 'night-shift.window-settled',
+        projectId: 'default',
+        summary: quiet
+          ? `Night shift ${windowKey}: nothing done (${quiet.reason})`
+          : `Night shift ${windowKey}: ${review.tasksCompleted.length} task(s), ${review.reports.length} report(s), ${review.diffpacks.length} proposal(s)`,
+        details: {
+          windowKey,
+          ran: outcome.ran,
+          ...(outcome.reason ? { reason: outcome.reason } : {}),
+          ...(outcome.startedAt ? { startedAt: outcome.startedAt } : {}),
+          ...(outcome.endedAt ? { endedAt: outcome.endedAt } : {}),
+          tasksCompleted: review.tasksCompleted.length,
+          reports: review.reports.length,
+          proposals: review.diffpacks.length,
+        },
+      })
+      .catch((err) => log.warn(`[night-shift] settle history event failed: ${String(err)}`));
   });
   // Paused-for-help fan-in: every pause-for-help path (gate exhausted /
   // plateau / unsatisfiable / infrastructure, stalled step, spent budget)
@@ -1835,7 +1924,6 @@ export async function startProductService(
   const indexingJob = new IndexingJobControl(store, tasks);
   // Background "boekwachter" enrichment: summaries + embeddings when idle,
   // bulk during night shift, folder/architecture rollups once files drain.
-  const systemIdle = new SystemIdleState();
   const indexEnrichment = new IndexEnrichmentManager({
     store,
     chat,
@@ -1922,38 +2010,64 @@ export async function startProductService(
   // constructed far earlier in boot order — hand it over once both exist.
   contentIndex.setDuckRunner(duck);
 
-  // Night bug fixing: once the shift's index sweep drains, hand every
-  // qualifying project's open Boekwachter issues to its developer, who drafts
-  // change proposals into artifacts. Runs here rather than on activation so
-  // it plans against tonight's findings, not last night's. The gate is crew
-  // composition — a Boekwachter and a developer on the roster — and nothing
-  // it produces touches the workspace.
+  // Night bug fixing: as each project's slice of the night's index sweep
+  // finishes, hand its open Boekwachter issues to its developer, who drafts
+  // change proposals into artifacts. Runs off the sweep rather than on
+  // activation so it plans against tonight's findings, not last night's, and
+  // per project so a big photo library still indexing doesn't hold back the
+  // code project next to it. The gate is crew composition — a Boekwachter and
+  // a developer on the roster — and nothing it produces touches the workspace.
+  const nightFixDeps = {
+    store,
+    tasks,
+    taskRunner,
+    contentIndex,
+    catalog,
+    diffpacks,
+    history,
+    nightShiftWindow: () => nightShift.currentWindow(),
+  };
+  // Observation-corpus maintenance rides the same edge: compact the NDJSON
+  // that daytime syncs left sealed, materialize declared rollups for the
+  // partitions that changed, then apply retention. Deliberately NOT done
+  // inline at sync time — compaction is minutes of CPU on a large pass, and
+  // the rows are already queryable before it runs.
+  const observationDeps = {
+    store,
+    duck,
+    // Picks up tabular workspace files the interactive index pass deferred
+    // for being too large to convert while a user was waiting.
+    drainWorkspaceTables: (projectId: string) =>
+      contentIndex.drainWorkspaceTablesAtNight(projectId),
+    nightShiftWindow: () => nightShift.currentWindow(),
+  };
+  const runProjectNightWork = async (projectId: string): Promise<void> => {
+    const plan = await planProjectNightFixes(nightFixDeps, projectId).catch((err) => {
+      log.warn(`[diffpack] night fix planning failed for ${projectId}: ${String(err)}`);
+      return null;
+    });
+    if (plan?.taskRef) {
+      log.info(`[diffpack] night fixing planned for ${projectId} (${plan.issueCount} issue(s))`);
+    }
+    await runProjectObservationNightly(observationDeps, projectId).catch((err) =>
+      log.warn(`[observations] nightly maintenance failed for ${projectId}: ${String(err)}`),
+    );
+  };
+  indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
+    if (!nightShift.isActive()) return;
+    await runProjectNightWork(projectId);
+  });
+  // The sweep covers only indexing-enabled projects. Observation upkeep for
+  // the rest runs once the whole sweep is done.
   indexEnrichment.setOnCatchUpDrained(async () => {
     if (!nightShift.isActive()) return;
-    await planNightFixes({
-      store,
-      tasks,
-      taskRunner,
-      contentIndex,
-      catalog,
-      diffpacks,
-      history,
-      nightShiftWindow: () => nightShift.currentWindow(),
-    }).catch((err) => log.warn(`[diffpack] night fix planning failed: ${String(err)}`));
-
-    // Observation-corpus maintenance rides the same edge: compact the
-    // NDJSON that daytime syncs left sealed, materialize declared rollups
-    // for the partitions that changed, then apply retention. Deliberately
-    // NOT done inline at sync time — compaction is minutes of CPU on a large
-    // pass, and the rows are already queryable before it runs.
-    await runObservationNightly({
-      store,
-      duck,
-      // Picks up tabular workspace files the interactive index pass deferred
-      // for being too large to convert while a user was waiting.
-      drainWorkspaceTables: (projectId) => contentIndex.drainWorkspaceTablesAtNight(projectId),
-      nightShiftWindow: () => nightShift.currentWindow(),
-    }).catch((err) => log.warn(`[observations] nightly maintenance failed: ${String(err)}`));
+    const projects = await store.listProjects().catch(() => []);
+    for (const project of projects) {
+      if (project.indexingEnabled !== false) continue;
+      await runProjectObservationNightly(observationDeps, project.id).catch((err) =>
+        log.warn(`[observations] nightly maintenance failed for ${project.id}: ${String(err)}`),
+      );
+    }
   });
   // Scan-complete → immediate embed drain: the moment a workspace scan
   // enrolls files, the always-on local embed tiers start filling vectors —

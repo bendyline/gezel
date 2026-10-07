@@ -226,6 +226,13 @@ export interface EvalScenario {
    */
   requiresEmbeddings?: boolean;
   /**
+   * Run with the Night Shift on, its window placed around the trial
+   * (`trialNightWindow`). Every other trial forces it off, because the bundled
+   * oversight task would otherwise spend the model under test whenever the
+   * wall clock is inside the default window.
+   */
+  nightShift?: true;
+  /**
    * Golden and decoy documents for retrieval exposure facts. The runner
    * writes it to `<runDir>/retrieval-oracle.json`; `facts.retrieval.exposure`
    * reports which channel (reference list, injection, tool read) reached each.

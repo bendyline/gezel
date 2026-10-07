@@ -28,6 +28,8 @@ export class SystemIdleState {
   private idleSeconds: number | null = null;
   private reportedAtMs = 0;
   private everReported = false;
+  private onBattery: boolean | null = null;
+  private powerReportedAtMs = 0;
   private readonly startedAtMs: number;
   private readonly now: () => number;
 
@@ -36,11 +38,33 @@ export class SystemIdleState {
     this.startedAtMs = now();
   }
 
-  /** Called by the OS-idle HTTP report. */
-  report(idleSeconds: number): void {
+  /**
+   * Called by the OS-idle HTTP report. `onBattery` rides along from shells
+   * that know it; an older shell's report leaves the last known state to go
+   * stale rather than claiming mains.
+   */
+  report(idleSeconds: number, onBattery?: boolean): void {
     this.idleSeconds = Math.max(0, idleSeconds);
     this.reportedAtMs = this.now();
     this.everReported = true;
+    if (onBattery !== undefined) this.reportPower(onBattery);
+  }
+
+  /** The shell's power source, pushed on every change and with each idle report. */
+  reportPower(onBattery: boolean): void {
+    this.onBattery = onBattery;
+    this.powerReportedAtMs = this.now();
+  }
+
+  /**
+   * Whether the computer runs on battery: null when no shell has said, or the
+   * last word is stale (a closed app must not leave the shift held, or freed,
+   * on a reading nobody is refreshing).
+   */
+  onBatteryPower(): boolean | null {
+    if (this.onBattery === null) return null;
+    if (this.now() - this.powerReportedAtMs > STALE_MS) return null;
+    return this.onBattery;
   }
 
   /** Latest OS idle seconds, or null when unknown/stale. */

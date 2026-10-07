@@ -210,4 +210,35 @@ describe('formatNightShiftSummary', () => {
       'The night shift ran, but nothing came of it.',
     );
   });
+
+  it('explains a quiet night by its reason', () => {
+    expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'asleep' } })).toBe(
+      "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.",
+    );
+    expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'stopped' } })).toBe(
+      'The night shift was stopped last night, so nothing ran.',
+    );
+  });
+
+  it('ignores a quiet reason when the night produced something', () => {
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, quiet: { reason: 'asleep' } })).toBe(
+      'The night shift finished 1 task.',
+    );
+  });
+
+  it('says when the nightly review is paused, after the rest of the night', () => {
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, pausedReview: true })).toBe(
+      "The night shift finished 1 task. Your nightly review paused and won't run again until you resume it.",
+    );
+    expect(
+      formatNightShiftSummary({
+        tasks: 0,
+        reports: 0,
+        quiet: { reason: 'no-work' },
+        pausedReview: true,
+      }),
+    ).toBe(
+      "The night shift ran, but nothing came of it. Your nightly review paused and won't run again until you resume it.",
+    );
+  });
 });

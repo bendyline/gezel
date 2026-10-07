@@ -2501,6 +2501,9 @@ export const GezelConfigSchema = z.object({
    *     does not sleep while night-shift work is in flight (all OS).
    *   - `wakeOnStart` — schedule an OS wake at window start so a sleeping
    *     machine comes up for the shift (macOS `pmset` only; no-op else).
+   *   - `pauseOnBattery` — stand the shift down while the computer runs on
+   *     battery (as the desktop app reports it) and resume on mains. Absent
+   *     = on. Unknown power state never holds the shift.
    *   - `modelOverride` — optional Night Shift provider/model defaults.
    *     Disabled or absent inherits the ordinary install defaults. Per-gezel
    *     provider/model pins still win because this remains a default, not a
@@ -2532,6 +2535,7 @@ export const GezelConfigSchema = z.object({
         .optional(),
       keepAwakeWhileRunning: z.boolean().optional(),
       wakeOnStart: z.boolean().optional(),
+      pauseOnBattery: z.boolean().optional(),
       modelOverride: z
         .object({
           enabled: z.boolean().optional(),
@@ -4077,6 +4081,13 @@ export const CreateProjectRequestSchema = z.object({
    * roster carried two, one of them idle.
    */
   lead: z.enum(['auto', 'none']).optional(),
+  /**
+   * Give a folder project its crew: the Boekwachter, plus a lead suited to what
+   * the folder holds (`recruitCrewForFolder`). Sent only when the person adds a
+   * folder themselves (onboarding, the add-folder sheet); the service ignores
+   * it from any caller but the app's own credential.
+   */
+  recruitCrew: z.boolean().optional(),
   /**
    * Opt out of structural and content indexing for this project's workspace.
    * Missing/true keeps the historical indexing behavior.
@@ -6593,6 +6604,8 @@ export type NightShiftWindowBounds = z.infer<typeof NightShiftWindowBoundsSchema
 export const NightShiftStatusResponseSchema = z.object({
   active: z.boolean(),
   source: z.enum(['scheduled', 'manual']).nullable(),
+  /** True while the shift has work but is standing down because the computer is on battery. */
+  heldOnBattery: z.boolean().optional(),
   /** Present while >=1 pending night task is held by the quota reserve. */
   quotaHold: z
     .object({

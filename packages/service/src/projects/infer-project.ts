@@ -74,6 +74,8 @@ export interface InferProjectDeps {
   home: string;
   /** Creates a project exactly as `POST /api/projects` does. */
   createProject: (body: CreateProjectRequest) => Promise<ProjectDetail>;
+  /** Recruits an existing folder project's crew when the request asks (see `recruitCrewForFolder`). */
+  recruitCrew?: (projectId: string) => Promise<void>;
   history?: HistoryManager;
   // Test seams. Production passes none of these; the daemon's own view of
   // the machine is the only authority, never a client-supplied home.
@@ -298,6 +300,7 @@ export async function inferProjectForPath(
   );
 
   if (outcome.matchedBy === 'existing') {
+    if (create && request.recruitCrew) await recruitExistingCrew(deps, outcome.projectId);
     const project = (await deps.store.getProject(outcome.projectId)) ?? null;
     if (!project) throw new Error(`project ${outcome.projectId} disappeared during inference`);
     return {
@@ -362,6 +365,7 @@ export async function inferProjectForPath(
           pathsEqual(p.workingDir, root, view.platform)),
     );
     if (raced) {
+      if (request.recruitCrew) await recruitExistingCrew(deps, raced.id);
       const project = (await deps.store.getProject(raced.id)) ?? null;
       if (project) {
         return {
@@ -409,6 +413,8 @@ export async function inferProjectForPath(
         mode: request.mode ?? 'solo',
         workingDir: root,
         ...(folder?.kind === 'downloads' ? { indexingEnabled: false } : {}),
+        // The crew recruiter below seats the lead that suits the folder.
+        ...(request.recruitCrew && deps.recruitCrew ? { lead: 'none' as const } : {}),
       });
     }
     project = await deps.store.updateProject(project.id, {
@@ -418,6 +424,12 @@ export async function inferProjectForPath(
         ...(folder ? { [INFERRED_PROJECT_WELL_KNOWN_PROPERTY]: folder.kind } : {}),
       },
     });
+    // After the well-known kind is stamped: it decides a Pictures or
+    // Documents folder's crew ahead of the file mix.
+    if (request.recruitCrew) {
+      await recruitExistingCrew(deps, project.id);
+      project = (await deps.store.getProject(project.id)) ?? project;
+    }
     await deps.history
       ?.log({
         kind: 'project.inferred',
@@ -446,6 +458,12 @@ export async function inferProjectForPath(
       ...(summary ? { wellKnown: summary } : {}),
       warnings: outcome.warnings,
     };
+  });
+}
+
+async function recruitExistingCrew(deps: InferProjectDeps, projectId: string): Promise<void> {
+  await deps.recruitCrew?.(projectId).catch((err: unknown) => {
+    log.warn(`[projects] crew recruitment failed for ${projectId}: ${String(err)}`);
   });
 }
 

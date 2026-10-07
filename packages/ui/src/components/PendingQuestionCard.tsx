@@ -1,6 +1,7 @@
 import type {
   AnswerQuestionRequest,
   ClaudeUserQuestionIntent,
+  NightShiftReviewIntent,
   NightShiftReviewResponse,
   NpmInstallApprovalDecision,
   NpmInstallApprovalPackage,
@@ -352,15 +353,16 @@ function NightShiftReviewCard({
   question: Question;
   onAnswered?: (q: Question) => void;
 }) {
-  const intent = question.intent as {
-    kind: 'night-shift-review';
-    windowKey: string;
-    tasksCompleted: number;
-    reports: Array<{ projectId: string; path: string; title?: string; actionCount: number }>;
-  };
+  const intent = question.intent as NightShiftReviewIntent;
   const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
   const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
+  const [resume, setResume] = useQuestionDraft<'idle' | 'resuming' | 'resumed'>(
+    question.id,
+    'resume',
+    () => 'idle',
+  );
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
+  const pausedReview = intent.pausedReview;
 
   useEffect(() => {
     let cancelled = false;
@@ -390,6 +392,21 @@ function NightShiftReviewCard({
     }
   }, [question.id, submitting, onAnswered, setSubmitting, setError]);
 
+  // A night task's retry waits for the shift, so resuming in the morning
+  // queues the review for tonight rather than running it now.
+  const resumeReview = useCallback(async () => {
+    if (!pausedReview || resume !== 'idle') return;
+    setResume('resuming');
+    setError(null);
+    try {
+      await api.retryTask(pausedReview.projectId, pausedReview.num);
+      setResume('resumed');
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to resume the nightly review.');
+      setResume('idle');
+    }
+  }, [pausedReview, resume, setResume, setError]);
+
   const tasks = review?.tasksCompleted ?? [];
   const proposals = review?.diffpacks ?? [];
   const reports =
@@ -413,6 +430,8 @@ function NightShiftReviewCard({
     reports: reports.length,
     proposals: proposals.length,
     actions: reports.reduce((n, r) => n + r.actionCount, 0),
+    ...(intent.quiet ? { quiet: intent.quiet } : {}),
+    ...(pausedReview && resume !== 'resumed' ? { pausedReview: true } : {}),
   });
 
   // The lead report is already open in the column beside the card — a row
@@ -505,8 +524,21 @@ function NightShiftReviewCard({
           ))}
         </div>
       )}
+      {resume === 'resumed' && (
+        <p className="pending-question-hold muted">Your nightly review will run again tonight.</p>
+      )}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
+        {pausedReview && resume !== 'resumed' && (
+          <button
+            type="button"
+            className="pending-question-submit"
+            onClick={() => void resumeReview()}
+            disabled={resume === 'resuming' || submitting}
+          >
+            {resume === 'resuming' ? 'Resuming…' : 'Resume nightly review'}
+          </button>
+        )}
         <button
           type="button"
           className="pending-question-skip subtle"

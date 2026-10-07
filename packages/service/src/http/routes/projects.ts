@@ -83,6 +83,7 @@ import {
   inferProjectForPath,
   listWellKnownFolders,
 } from '../../projects/infer-project.js';
+import { recruitCrewForFolder } from '../../projects/recruit-crew.js';
 import { browserScriptEnv } from '../../sandbox/runner.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
@@ -97,6 +98,7 @@ import {
 } from '../../workspace/npm.js';
 import { runWorkspaceScript } from '../../workspace/runner.js';
 import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspace/scripts.js';
+import { isFirstPartyCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
@@ -148,7 +150,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/', async (c) => {
-    const body = CreateProjectRequestSchema.parse(await c.req.json());
+    const parsed = CreateProjectRequestSchema.parse(await c.req.json());
+    // Recruiting a folder's crew turns night work on: the person's act only.
+    const { recruitCrew, ...rest } = parsed;
+    const body = recruitCrew && isFirstPartyCaller(c) ? parsed : rest;
     const project = await createProjectWithLead(ctx, body);
     return c.json(project, 201);
   });
@@ -158,6 +163,16 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     home: ctx.home,
     history: ctx.history,
     createProject: (body: CreateProjectRequest) => createProjectWithLead(ctx, body),
+    recruitCrew: async (projectId: string) => {
+      const crew = await recruitCrewForFolder(ctx, projectId);
+      for (const gezel of crew.createdGezels) {
+        ctx.chatEvents.publishGlobalEvent({
+          type: 'gezel_created',
+          gezelId: gezel.id,
+          name: gezel.name,
+        });
+      }
+    },
   });
 
   /**
@@ -172,8 +187,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!parsed.success) {
       return c.json({ error: 'invalid_request', issues: parsed.error.issues }, 400);
     }
+    const { recruitCrew, ...rest } = parsed.data;
+    const request = recruitCrew && isFirstPartyCaller(c) ? parsed.data : rest;
     try {
-      return c.json(await inferProjectForPath(inferDeps(), parsed.data));
+      return c.json(await inferProjectForPath(inferDeps(), request));
     } catch (err) {
       if (err instanceof InferProjectError) {
         return c.json(

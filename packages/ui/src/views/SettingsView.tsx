@@ -32,6 +32,7 @@ import {
   useReasoningSupport,
 } from '../components/ModelPicker.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import { StartAtLoginToggle } from '../components/StartAtLoginToggle.js';
 import { shortModelName } from '../components/model-display-name.js';
 import { providerLabel } from '../components/provider-label.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
@@ -877,6 +878,7 @@ function DaemonSettingsView() {
       window?: { startHour: number; endHour: number };
       keepAwakeWhileRunning?: boolean;
       wakeOnStart?: boolean;
+      pauseOnBattery?: boolean;
       modelOverride?: {
         enabled?: boolean;
         provider?: ProviderName;
@@ -1933,22 +1935,35 @@ function DaemonSettingsView() {
                   />
                   <span>Keep this machine awake while night-shift work is running</span>
                 </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.4rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.pauseOnBattery !== false}
+                    onChange={(e) => void saveNightShift({ pauseOnBattery: e.target.checked })}
+                  />
+                  <span>Pause night work while this computer runs on battery</span>
+                </label>
+                <StartAtLoginToggle
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.4rem',
+                  }}
+                />
                 {isDarwin && (
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      marginTop: '0.4rem',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={config?.nightShift?.wakeOnStart === true}
-                      onChange={(e) => void saveNightShift({ wakeOnStart: e.target.checked })}
-                    />
-                    <span>Wake this machine when the window opens</span>
-                  </label>
+                  <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.6rem' }}>
+                    macOS lets only administrators schedule a wake, so Gezel can't wake a sleeping
+                    Mac for the night shift. It works through the night while the Mac stays awake
+                    and plugged in.
+                  </p>
                 )}
               </section>
               <section style={{ marginTop: '2rem' }}>

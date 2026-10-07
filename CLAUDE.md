@@ -101,6 +101,8 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       │                    creation, shared by fanout children; craftbooks
 │       │                    address it via the {{task.dir}} token
 │       ├── workspace/       internal fallback when no external dir
+│       ├── index/           content index (index.db) — always here, never in workingDir
+│       ├── quarantine/      connector content the safety scanner refused
 │       └── memories/        same structure as gezel memories
 ├── memories/                the person's own memories ("About you"), read by every gezel:
 │                            daily/YYYY-MM-DD.md + index/mem.db
@@ -499,14 +501,22 @@ own pack through the `{{diffpack.dir}}` token, **not** `{{task.num}}`, which
 the spawn template.
 
 Overnight, [diffpack/night-fix-planner.ts](packages/service/src/diffpack/night-fix-planner.ts)
-runs when the night shift's index catch-up drains (so it plans against tonight's
+runs as each project's index catch-up drains (so it plans against tonight's
 findings) and hands each qualifying project's open Boekwachter issues to its
 developer. The gate is crew composition, per the `resolveProjectAutonomousGezel`
 convention: a **Boekwachter** and a **developer** on the roster, plus
-`projectAllowsAmbientWork` and the `nightlyFixesEnabled` opt-out (missing =
-on). It never recruits — conjuring the gezel that unlocks the feature would
-make the gate meaningless. The developer clusters the issues and the runtime
-fans out one shard, and therefore one proposal, per cluster.
+`projectAllowsAmbientWork`, the `nightlyFixesEnabled` opt-out (missing =
+on), and a **code folder** (`gezel.folderKind` of `code`, else a detected coding
+type or a linked GitHub repo — a review of a Word file is not a fix anyone
+asked for). It never recruits — conjuring the gezel that unlocks the feature
+would make the gate meaningless. Crew is added only when the person adds a
+folder: `recruitCrewForFolder` ([projects/recruit-crew.ts](packages/service/src/projects/recruit-crew.ts))
+runs for a `recruitCrew: true` request from the app's own credential
+(`isFirstPartyCaller`; dropped from model, CLI and add-in callers), once per
+project, and gives a code folder the Builder and every other kind a
+Boekwachter lead ([ADR 0021](docs/decisions/0021-read-only-folders.md)). The
+developer clusters the issues and the runtime fans out one shard, and
+therefore one proposal, per cluster.
 
 ### Generalist mode
 
@@ -573,7 +583,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/ai-apps/` — installed AI App (.gezapp) packages: `registry.json` (the atomic activation point) plus immutable `{appId}/{version}/` slices with receipts, owned by [project-type/gezapp.ts](packages/service/src/project-type/gezapp.ts) (`importGezapp`/`listGezapps`/`setGezappEnabled`/`removeGezapp`, all serialized on its install lock); surfaced at `/api/ai-apps` and `gezel app`
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` and `~/.gezel/memories/index/` — sqlite-vec indexes (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
-  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006), which is forced home-side so no database rides the user's — possibly cloud-synced — documents folder
+  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006)
+  - `~/.gezel/projects/{id}/index/` — the project's content index (`index.db` + WAL), owned by [ContentIndex](packages/service/src/index-store/content-index.ts). Home-side for **every** project, so adding a folder writes nothing into it; earlier builds' `<workingDir>/.gezel/index/` is moved here once at boot by [index-placement.ts](packages/service/src/index-store/index-placement.ts) — moved, never rebuilt, because it holds hours of model output. Device-tier, excluded from backups. `~/.gezel/projects/{id}/quarantine/` beside it holds connector content the scanner refused (`Store.projectQuarantineDir`). See [ADR 0021](docs/decisions/0021-read-only-folders.md)
   - `~/.gezel/projects/{id}/artifacts/shadow/` — the reserved shadow-file cache: markdown twins of workspace content (sandboxed squisq conversions of office docs from the static index pass; vision descriptions and STT transcripts from the AI tier), laid out as `<parent>/<basename>_files/<stem>.md` and owned by the content indexer ([index-store/docs.ts](packages/service/src/index-store/docs.ts) + [index-store/ai-shadow.ts](packages/service/src/index-store/ai-shadow.ts)). Lives under artifacts — never the (possibly read-only) workspace — write-denied through the artifact store, hidden from listings, orphan-swept, regenerable, safe to delete. See [ADR 0005](docs/decisions/0005-indexing-3.0.md).
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
   - `~/.gezel/handboek/narration/` — content-hash-keyed TTS narration WAVs + duration sidecars for Handboek articles, owned by [handboek/narration.ts](packages/service/src/handboek/narration.ts); derived cache, safe to delete
@@ -749,7 +760,7 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | Search returns the same documents for every query | The vector arm lost its floor. KNN always returns its k nearest rows, and rank fusion scores a rank-0 vector hit at a flat 1.0, so an unfloored arm outranks genuine keyword matches with the whole corpus |
 | A chat turn injected indexed context that has nothing to do with the request | Read the turn's `retrieval.context-injected` history event — it lists every hit with its score and the per-arm timings. Injection is round-robin across corpora ([project-retrieval.ts](packages/service/src/search/project-retrieval.ts)'s `diversify`), so a corpus that returned anything gets a slot; the guards are `clearsInjectionFloor` and, for keyword arms, `isGrounded`. If the hit is keyword-derived, check what the query actually became — `queryTerms` ([query-terms.ts](packages/service/src/index-store/query-terms.ts)) applies the one stopword list, `QUERY_STOP_WORDS` ([query-stopwords.ts](packages/gezk/src/query-stopwords.ts), shared with the knowledge-catalog reader and the phone's memory recall), and FTS5 sees an OR of prefix terms, not the sentence. For a knowledge hit, the trace's `similarity` against its catalog's floor in [knowledge/vector-floors.ts](packages/service/src/knowledge/vector-floors.ts) says whether the floor or the relevance model let it through |
 | The relevance check is on but changes nothing | The service log's `[relevance] resolved enabled= model= source= surfaces= installed=` line, then the event's `relevanceModel.status`: `cold` means the model was still loading (it never holds a turn — the next one gets scores), `unavailable` means it failed its load-time self-check or its graph pin. An uncalibrated model (registry `thresholds: null`) only reorders; nothing is dropped until the bench has calibrated it |
-| A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |
+| A `.gezel/` dir, `*.db`, or any new file appeared in a folder the person added | Something wrote into a read-only workspace. The index belongs home-side (`projectContentIndexDbFile`); a stale `.gezel/index/` that survives a boot is one the migration could not take sole ownership of (another process held it — look for `[index] <id>: workspace index copied`/`left-in-place`). Anything else is a new write path: `index-store/read-only-promise.test.ts` is where to reproduce it (ADR 0021) |
 | A spreadsheet or big CSV never became a table | Check `tabular_state` in the project index: `blocked` is terminal for that content hash (empty file, unreadable, unsafe path), `deferred` means it was too large for the interactive pass and the night shift has it. A CSV under `MAX_INDEXABLE_BYTES` is deliberately left alone — it is already chunked and readable |
 | A spreadsheet's numbers are wrong by 100x, or dates are text | Something read the markdown shadow instead of the typed path. `formattedNumberText` renders `0.15` as `"15.0%"`; the data path is squisq's `xlsxToTables` via `convertInSandbox(path, 'xlsx', 'tables')` |
 | A gezel says a data table is empty, or `query_table` errors | Is there a corpus? `GET /api/projects/<id>/connectors` shows `tables[]` per binding. The tools are registered only when `GEZEL_TABLES_ENABLED` is set, which the chat manager does after probing for `artifacts/data/*/tables/` — a project with no tabular corpus has no query tools at all, by design |

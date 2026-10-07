@@ -35,10 +35,15 @@ that want media:
   `truncation: { method: 'prefix', sourceDimensions: 768 }`; one gezk function,
   `profileUnitVector`, keeps the first 512 values and re-normalizes, for
   passages, queries and media alike.
-- **Centered sign bits.** The 512-entry center is the mean of 13,500 catalog
-  chunks (|c| = 0.763). Stage-1 recall of the top 24 was 94.9% raw versus
-  95.0% centered at 192 candidates on mixed corpora, and centering helps on
-  narrow ones, so the profile keeps `centered-sign`.
+- **Centered sign bits.** The 512-entry center is the mean of the 49,474
+  passage vectors of a real build of this profile (gezel's compiler over
+  Wikipedia Food & Drink, Azure docs and the Handboek; |c| = 0.763, split-half
+  agreement 0.99998). With the reader's 1,024 candidates, stage-1 recall of
+  the exact top 24 is 98.7% centered against 98.3% raw, and the full
+  two-stage reader returns 99.0% of an exhaustive int8 search's top 10 at
+  about 10 ms a query. Centering matters little on mixed corpora and a lot on
+  narrow ones (85% raw against 99% centered on gezel's own docs), so the
+  profile keeps `centered-sign`.
 - **Format 0.8, index schema 5.** Profiles gain `model.files` (every
   additional file the runtime loads, so the 314 MB of weights is verified, not
   only the 0.5 MB graph), `truncation` and `media`. Shard `chunks` gain

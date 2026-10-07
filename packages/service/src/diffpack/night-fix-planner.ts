@@ -1,8 +1,11 @@
 import {
   type BoekwachterIssue,
   type NightShiftWindow,
+  type Project,
   createLogger,
+  folderKindOf,
   isActiveDiffpackStatus,
+  isCodingProject,
   nightShiftDayKey,
   projectAllowsAmbientWork,
   projectAllowsNightlyFixes,
@@ -49,6 +52,7 @@ export interface NightFixPlanResult {
     | 'inactive'
     | 'opted-out'
     | 'indexing-off'
+    | 'not-code'
     | 'no-boekwachter'
     | 'no-developer'
     | 'nothing-open'
@@ -67,8 +71,14 @@ export interface NightFixPlanResult {
  *
  * The gate is crew composition, per the product rule that a role on the
  * roster is what switches autonomous work on: a Boekwachter (who found the
- * issues) plus a developer (who can fix them). Nothing recruits — conjuring
- * the gezel that unlocks the feature would make the gate meaningless.
+ * issues) plus a developer (who can fix them). The planner never recruits —
+ * conjuring the gezel that unlocks the feature would make the gate
+ * meaningless. Crew arrives only when the person adds a folder
+ * (`recruitCrewForFolder`), and only a code folder gets a developer.
+ *
+ * Only code folders qualify. Boekwachter reviews cover documents and text
+ * too, and a fix proposal against a Word file or a photo caption is not a
+ * fix anyone asked for.
  */
 export async function planNightFixes(deps: NightFixPlannerDeps): Promise<NightFixPlanResult[]> {
   const projects = await deps.store.listProjects().catch(() => []);
@@ -104,6 +114,7 @@ export async function planProjectNightFixes(
   if (!projectAllowsAmbientWork(project)) return skip('inactive');
   if (!projectAllowsNightlyFixes(project)) return skip('opted-out');
   if (project.indexingEnabled === false) return skip('indexing-off');
+  if (!projectHoldsCode(project)) return skip('not-code');
 
   const [boekwachter, developer] = await Promise.all([
     resolveProjectBoekwachter(deps.store, projectId),
@@ -236,4 +247,14 @@ async function claimedPaths(
     for (const file of pack.files) out.add(file.path);
   }
   return out;
+}
+
+/**
+ * A code folder: the kind recorded when its crew was recruited, else a
+ * detected coding type or a linked GitHub repository.
+ */
+function projectHoldsCode(project: Project): boolean {
+  const kind = folderKindOf(project);
+  if (kind) return kind === 'code';
+  return isCodingProject(project) || Boolean(project.github?.url);
 }

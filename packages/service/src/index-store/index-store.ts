@@ -2182,6 +2182,13 @@ export class IndexStore {
     return out;
   }
 
+  /** Remove one metadata key from one file. */
+  deleteMetadataKey(filePath: string, key: string): void {
+    this.db
+      .prepare('DELETE FROM metadata WHERE collection_id = ? AND path = ? AND key = ?')
+      .run(this.collectionId, filePath, key);
+  }
+
   /** Upsert specific metadata keys for one file (delete-then-insert; the
    *  table has no unique constraint). */
   mergeMetadata(filePath: string, entries: Array<{ key: string; value: string }>): void {

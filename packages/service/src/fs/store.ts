@@ -4338,6 +4338,15 @@ export class Store {
     return this.artifacts.projectArtifactsDir(id);
   }
 
+  /**
+   * Where connector content the safety scanner refused is kept: gezel's own
+   * per-project folder, never the workspace, so a connector sync never writes
+   * into a person's folder. Not indexed and not reachable through any tool.
+   */
+  projectQuarantineDir(id: string): string {
+    return join(projectPrivateDir(this.home, id), 'quarantine');
+  }
+
   async listProjectArtifacts(
     id: string,
     subpath = '',

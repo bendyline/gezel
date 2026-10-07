@@ -21,16 +21,15 @@
  * (attacker-controlled) source is slugged by the adapter AND every write goes
  * through `resolveInside`, so a hostile id / title / filename can't escape the
  * artifact tree. The body runs through the content scanner; a quarantine
- * verdict diverts the raw body to the workspace's
- * `.gezel/quarantine/<namespace>/` (outside the artifact tree) and writes only
- * a stub to the corpus.
+ * verdict diverts the raw body to the project's private quarantine folder
+ * (`Store.projectQuarantineDir`, outside both the artifact tree and the
+ * workspace) and writes only a stub to the corpus.
  */
 
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { projectLocalQuarantineDir } from '@bendyline/gezel/paths';
 import { copyFileAtomic, writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import { withFrontmatter } from '../index-store/frontmatter.js';
@@ -66,8 +65,8 @@ export type WriteStatus = 'written' | 'refreshed' | 'exists' | 'quarantined';
 export interface WriteRecordInput {
   /** Project artifacts root where this connector's corpus lands. */
   storageDir: string;
-  /** Resolved workspace root; quarantined raw bodies remain under `.gezel/` here. */
-  quarantineWorkspaceDir: string;
+  /** Gezel-private folder for quarantined raw bodies; never inside the workspace. */
+  quarantineDir: string;
   /** Top dir under artifacts where this connector's corpus lands. */
   corpusDir: string;
   record: NormalizedRecord;
@@ -131,7 +130,7 @@ async function existingRecords(
  * `trust`/`scan_action`, and manages attachments + the flags sidecar.
  */
 export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordResult> {
-  const { storageDir, quarantineWorkspaceDir, corpusDir, record } = input;
+  const { storageDir, quarantineDir, corpusDir, record } = input;
   const recordHash8 = sha8(record.recordId);
   const hash = contentHash(record);
 
@@ -175,11 +174,13 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   if (verdict.action === 'quarantine') {
     // Divert the raw body to quarantine (unindexed); index only a stub. Create
     // the dir before resolveInside so its realpath check has an existing base.
-    const qBase = projectLocalQuarantineDir(quarantineWorkspaceDir);
-    await mkdir(join(qBase, record.quarantineNamespace), { recursive: true });
-    const qAbs = await resolveInside(qBase, `${record.quarantineNamespace}/${recordHash8}.md`);
+    await mkdir(join(quarantineDir, record.quarantineNamespace), { recursive: true });
+    const qAbs = await resolveInside(
+      quarantineDir,
+      `${record.quarantineNamespace}/${recordHash8}.md`,
+    );
     await writeFileAtomic(qAbs, withFrontmatter(frontmatter, record.bodyMarkdown));
-    const stub = `${record.quarantineLabel} was held for safety review (flags: ${verdict.flags.join(', ') || 'injection'}). Its content is not indexed. See \`.gezel/quarantine/${record.quarantineNamespace}/${recordHash8}.md\`.`;
+    const stub = `${record.quarantineLabel} was held for safety review (flags: ${verdict.flags.join(', ') || 'injection'}). Its content is not indexed; the original is kept in gezel's private quarantine folder.`;
     await writeFileAtomic(
       await resolveInside(storageDir, relPath),
       withFrontmatter(frontmatter, stub),

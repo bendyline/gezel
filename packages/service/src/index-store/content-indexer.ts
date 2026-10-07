@@ -14,7 +14,6 @@ import {
   shadowDocFilesPaths,
 } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
-import { ensureIndexGitignore } from './gitignore.js';
 import { sha256, sha256File } from './hash.js';
 import { readImageStaticMeta } from './image-meta.js';
 import { IndexStore } from './index-store.js';
@@ -36,6 +35,8 @@ const log = createLogger('index:content');
 
 /** Generous safety cap so a runaway tree can't index forever. */
 const MAX_FILES = 50_000;
+/** Metadata key on a file whose bytes were only in the cloud when last indexed. */
+export const CLOUD_ONLY_META_KEY = 'cloud_only';
 
 /**
  * Bump when the structural extraction OUTPUT SHAPE changes (new columns, new
@@ -126,9 +127,45 @@ export async function indexWorkspaceContent(
     const forceThis = forceCode && cls.kind === 'code';
 
     const existing = store.getFile(file.path);
+    if (file.cloudOnly && !cls.trivial) {
+      // Only in the cloud: reading it would download it. Record it by name,
+      // size and date, and drop the hash so no AI tier reads it either. The
+      // tiers key their output by content hash, so whatever an earlier pass
+      // made for this file is reused once it is local again.
+      const recorded =
+        existing !== undefined &&
+        existing.hash == null &&
+        existing.mtimeMs === file.mtimeMs &&
+        existing.size === file.size;
+      if (!recorded) {
+        store.upsertFile({
+          path: file.path,
+          hash: null,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          lang: cls.lang,
+          kind: cls.kind,
+          modality: cls.modality,
+          trivial: cls.trivial,
+          indexedAt,
+          loc: existing?.loc ?? null,
+        });
+        store.mergeMetadata(file.path, [{ key: CLOUD_ONLY_META_KEY, value: '1' }]);
+      }
+      stats.skipped++;
+      continue;
+    }
+    // A file that came back from the cloud keeps the size and date it had as
+    // a placeholder, so the change gate below would never read it.
+    const backFromCloud =
+      existing?.hash == null &&
+      !cls.trivial &&
+      existing !== undefined &&
+      store.getMetadata(file.path)[CLOUD_ONLY_META_KEY] === '1';
     // Cheap change gate: same mtime + size ⇒ unchanged, no read/hash.
     if (
       !forceThis &&
+      !backFromCloud &&
       existing &&
       existing.mtimeMs === file.mtimeMs &&
       existing.size === file.size
@@ -136,6 +173,7 @@ export async function indexWorkspaceContent(
       stats.skipped++;
       continue;
     }
+    if (backFromCloud) store.deleteMetadataKey(file.path, CLOUD_ONLY_META_KEY);
 
     if (cls.trivial) {
       // Record the file (so deletions/later phases see it) but do no content work.
@@ -554,17 +592,18 @@ function convState(conv: { markdown: string | null; blocked?: string } | null): 
 }
 
 /**
- * Convenience: open the workspace collection store, index, and close. Used by
- * tests and one-shot callers. Returns null stats when sqlite is unavailable.
+ * Convenience for tests: open a workspace collection store, index, and close.
+ * The database defaults to the workspace's legacy `.gezel/index/` path, which
+ * only fixtures use; the daemon goes through `ContentIndex`, whose database is
+ * always home-side. Returns null stats when sqlite is unavailable.
  */
 export async function runWorkspaceContentIndex(
   workspaceDir: string,
   collectionId: string,
   artifactsDir: string,
-  opts: { maxFiles?: number } = {},
+  opts: { maxFiles?: number; dbPath?: string } = {},
 ): Promise<ContentIndexStats | null> {
-  await ensureIndexGitignore(workspaceDir);
-  const store = await IndexStore.open(projectLocalIndexDbFile(workspaceDir), {
+  const store = await IndexStore.open(opts.dbPath ?? projectLocalIndexDbFile(workspaceDir), {
     collectionId,
     kind: 'workspace',
     rootPath: workspaceDir,

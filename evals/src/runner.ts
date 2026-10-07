@@ -67,6 +67,7 @@ import { captureRecordingScreenshots } from './recording/screenshots.ts';
 import { completedRepairActionSnapshot } from './repair-actions.ts';
 import { withRepairPolicy } from './repair-policy.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
+import { trialNightWindow } from './scenarios/night-in-the-life.ts';
 import {
   HARNESS_INTERVENTION_SETTLE_MS,
   lastDeliveredHarnessIntervention,
@@ -1134,8 +1135,11 @@ export async function runTrial(
       // inside the night window. Every trial run at night then spends one or
       // two turns of the provider under test on an unrelated task and mixes a
       // second task into the trial's history (Opus, 2026-09-19: every cell).
-      // No scenario depends on the shift; the trial clock should not matter.
-      nightShift: { enabled: false },
+      // Only a scenario about the night itself runs one, in a window opened
+      // around the trial so the wall clock does not decide.
+      nightShift: scenario.nightShift
+        ? { enabled: true, window: trialNightWindow(new Date()), keepAwakeWhileRunning: true }
+        : { enabled: false },
       ...(opts.keurmeester
         ? {
             keurmeester: {

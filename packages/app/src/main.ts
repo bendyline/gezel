@@ -76,6 +76,7 @@ import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
+import { getStartAtLogin, launchedAtLogin, setStartAtLogin } from './start-at-login.js';
 import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
@@ -611,8 +612,9 @@ async function createWindow(): Promise<void> {
     title: 'Gezel',
     backgroundColor: '#667f62',
     // Auto-show activates the window on creation (→ focus theft). In E2E we
-    // suppress it and call `showInactive()` after construction instead.
-    show: !e2e,
+    // suppress it and call `showInactive()` after construction instead. A
+    // login launch stays hidden until the person opens it from the tray.
+    show: !e2e && !launchHidden,
     // Park the window off every display in E2E so it's never visible.
     ...(e2e ? { x: -32000, y: -32000 } : {}),
     ...(icon ? { icon } : {}),
@@ -1181,6 +1183,40 @@ ipcMain.handle('gezel:update:install', async () => {
     message: result.error ?? 'The verified installer could not be opened.',
   });
   return { ok: false as const, error: result.error };
+});
+
+/**
+ * Launched by the login item: the first window is created hidden and the app
+ * stays in the tray, so the night shift has a running app without a window
+ * appearing at every login. Cleared once that window exists.
+ */
+let launchHidden = false;
+
+function startAtLoginDeps() {
+  return {
+    platform: process.platform,
+    app,
+    execPath: process.env.APPIMAGE ?? process.execPath,
+    configDir: process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+  };
+}
+
+// Start at login. Packaged only: in dev the login item would point at the
+// development Electron binary.
+ipcMain.handle('gezel:start-at-login:get', () => {
+  if (!app.isPackaged) return { supported: false as const, enabled: false };
+  try {
+    return { supported: true as const, enabled: getStartAtLogin(startAtLoginDeps()) };
+  } catch {
+    return { supported: false as const, enabled: false };
+  }
+});
+ipcMain.handle('gezel:start-at-login:set', async (_event, enabled: unknown) => {
+  if (!app.isPackaged || typeof enabled !== 'boolean') {
+    return { supported: false as const, enabled: false };
+  }
+  await setStartAtLogin(startAtLoginDeps(), enabled);
+  return { supported: true as const, enabled: getStartAtLogin(startAtLoginDeps()) };
 });
 
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
@@ -2335,16 +2371,40 @@ let idleReportTimer: ReturnType<typeof setInterval> | null = null;
  */
 function startIdleReporting(): void {
   if (idleReportTimer) clearInterval(idleReportTimer);
+  hookPowerSourceChanges();
   const report = () => {
     try {
       const idleSeconds = powerMonitor.getSystemIdleTime();
-      void apiClient?.reportSystemIdle(idleSeconds).catch(() => {});
+      // Rides along so the daemon's reading never goes stale while the app
+      // runs; the Night Shift stands down on battery.
+      const onBattery = powerMonitor.isOnBatteryPower();
+      void apiClient?.reportSystemIdle(idleSeconds, onBattery).catch(() => {});
     } catch {
       /* powerMonitor unavailable (headless/test) — ignore */
     }
   };
   report();
   idleReportTimer = setInterval(report, 60_000);
+}
+
+let powerSourceHooked = false;
+
+/** Tell the daemon about an unplug or replug now, not at the next idle report. */
+function hookPowerSourceChanges(): void {
+  if (powerSourceHooked) return;
+  powerSourceHooked = true;
+  const push = (onBattery: boolean) => {
+    void apiClient
+      ?.reportSystemPower(onBattery)
+      .then(() => repollPowerIntent?.())
+      .catch(() => {});
+  };
+  try {
+    powerMonitor.on('on-battery', () => push(true));
+    powerMonitor.on('on-ac', () => push(false));
+  } catch {
+    /* powerMonitor unavailable (headless/test) — ignore */
+  }
 }
 
 let nightShiftPowerTimer: ReturnType<typeof setInterval> | null = null;
@@ -2395,8 +2455,14 @@ function startNightShiftPowerControl(): void {
       console.log('[night-shift] wakeOnStart is only supported on macOS; skipping');
       return;
     }
-    // `pmset schedule wake "MM/dd/yy HH:mm:ss"` (local time). Requires the
-    // app to be allowed; failures are non-fatal (logged).
+    // pmset modifies settings only as root, and the app runs as the person
+    // who logged in; Settings says so instead of offering the toggle.
+    if (process.getuid?.() !== 0) {
+      console.log('[night-shift] wakeOnStart needs root on macOS; skipping');
+      return;
+    }
+    // `pmset schedule wake "MM/dd/yy HH:mm:ss"` (local time). Failures are
+    // non-fatal (logged).
     const d = new Date(wakeAtIso);
     const pad = (n: number) => String(n).padStart(2, '0');
     const stamp = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
@@ -3123,7 +3189,10 @@ app.whenReady().then(async () => {
   // the service bundle and provisions the bundled runtimes on first launch,
   // which is minutes of work on a cold machine; doing this afterwards is what
   // made a fresh install look like it had failed to launch.
+  launchHidden = app.isPackaged && launchedAtLogin(startAtLoginDeps(), process.argv);
   await createWindow();
+  const startedHidden = launchHidden;
+  launchHidden = false;
 
   try {
     connection = await connectOrStart({
@@ -3289,6 +3358,9 @@ app.whenReady().then(async () => {
   // Reads `showSystemTray` (default on); skipped under the E2E harness so
   // its window-close specs keep quitting. Non-fatal if it fails.
   await initTray();
+  // A hidden launch with no tray to open it from (Windows/Linux, tray turned
+  // off) would leave no way in: show the window after all.
+  if (startedHidden && !tray?.active && process.platform !== 'darwin') void ensureWindow();
 
   // Resolve the latest exact `v<semver>` app release, then point
   // electron-updater at that immutable release's metadata. This deliberately
@@ -3298,6 +3370,10 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    // The Dock icon of an app launched hidden at login opens its window.
+    else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      void ensureWindow();
+    }
   });
 });
 

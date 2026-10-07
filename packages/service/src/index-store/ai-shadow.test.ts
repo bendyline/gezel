@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { classifyFile } from './classify.js';
@@ -45,7 +46,9 @@ async function seedMedia(): Promise<void> {
   await mkdir(join(dir, 'photos'), { recursive: true });
   await writeFile(join(dir, 'photos', 'cat-sunset.png'), PNG_800x600);
   await writeFile(join(dir, 'standup.m4a'), 'fake-audio-bytes');
-  await runWorkspaceContentIndex(dir, 'c', artifacts);
+  await runWorkspaceContentIndex(dir, 'c', artifacts, {
+    dbPath: projectContentIndexDbFile(home, 'c', dir),
+  });
 }
 
 describe('classifyFile audio modality', () => {
@@ -135,8 +138,9 @@ describe('ContentIndex.aiShadows', () => {
     await ci.aiShadows('c', { describeImage, transcribeAudio }, 10);
 
     // Wipe only the DB gate (delete the whole index) — the sidecars remain.
-    await rm(join(dir, '.gezel'), { recursive: true, force: true });
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const dbPath = projectContentIndexDbFile(home, 'c', dir);
+    await rm(dirname(dbPath), { recursive: true, force: true });
+    await runWorkspaceContentIndex(dir, 'c', artifacts, { dbPath });
     const readopted = await ci.aiShadows('c', { describeImage, transcribeAudio }, 10);
     expect(readopted).toEqual({ files: 2, produced: 2, called: 0 });
     expect(describeImage).toHaveBeenCalledTimes(1);
@@ -148,7 +152,9 @@ describe('ContentIndex.aiShadows', () => {
     await writeFile(join(dir, 'assets', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
     await writeFile(join(dir, 'assets', 'app.ico'), Buffer.from([0, 0, 1, 0, 1, 0]));
     await writeFile(join(dir, 'assets', 'photo.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const describeImage = vi.fn(async (_abs: string) => ({ body: 'described' }));
     const first = await ci.aiShadows('c', { describeImage }, 10);

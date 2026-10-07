@@ -693,19 +693,39 @@ describe('SettingsView', () => {
     ).toBeInTheDocument();
   });
 
-  it('only shows the night-shift wake option on macOS', async () => {
+  it('explains on macOS why the night shift cannot wake a sleeping Mac', async () => {
     const { unmount } = render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
-    expect(
-      screen.queryByRole('checkbox', { name: 'Wake this machine when the window opens' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't wake a sleeping Mac/)).not.toBeInTheDocument();
     unmount();
 
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     render(<SettingsView />);
+    expect(await screen.findByText(/can't wake a sleeping Mac/)).toBeInTheDocument();
+  });
+
+  it('pauses night work on battery by default and offers start at login on the desktop', async () => {
+    const set = vi.fn().mockResolvedValue({ supported: true, enabled: true });
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: 'test-token',
+      startAtLogin: { get: vi.fn().mockResolvedValue({ supported: true, enabled: false }), set },
+    };
+    render(<SettingsView />);
     expect(
-      await screen.findByRole('checkbox', { name: 'Wake this machine when the window opens' }),
-    ).toBeInTheDocument();
+      await screen.findByRole('checkbox', {
+        name: 'Pause night work while this computer runs on battery',
+      }),
+    ).toBeChecked();
+    const login = await screen.findByRole('checkbox', {
+      name: 'Start Gezel when I log in, without opening a window',
+    });
+    expect(login).not.toBeChecked();
+    fireEvent.click(login);
+    await waitFor(() => expect(login).toBeChecked());
+    expect(set).toHaveBeenCalledWith(true);
+    // The shared setup spreads the previous bridge forward.
+    window.__GEZEL__ = { ...window.__GEZEL__, startAtLogin: undefined };
   });
 
   it('defaults the quota reserve to overall-on at 20% with per-day opt-in', async () => {

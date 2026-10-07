@@ -46,6 +46,7 @@ import {
   isSharedLibraryProject,
   nowIso,
   projectAllowsWorkspaceTables,
+  projectManagedWorkspaceWritable,
 } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
@@ -53,7 +54,6 @@ import {
   projectArtifactsIndexDbFile,
   projectContentIndexDbFile,
   projectLocalFilesDir,
-  projectLocalIndexDbFile,
   projectLocalVillageFile,
   projectStorageScope,
 } from '@bendyline/gezel/paths';
@@ -105,7 +105,6 @@ import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
 import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
 import { refreshGitStats } from './git-stats.js';
-import { ensureIndexGitignore } from './gitignore.js';
 import {
   type FileReviewRow,
   IndexStore,
@@ -259,15 +258,26 @@ export class ContentIndex {
     this.duck = duck;
   }
 
-  private cityStoreFor(projectId: string, workspaceDir: string | null): VillageFileStore {
-    let cs = this.cityStores.get(projectId);
+  /**
+   * The village file lives in the workspace (where it can be committed) only
+   * when gezel may write there; otherwise in gezel's own folder. Viewing the
+   * map of a read-only folder must not write into it.
+   */
+  private cityStoreFor(
+    projectId: string,
+    workspaceDir: string | null,
+    workspaceWritable: boolean,
+  ): VillageFileStore {
+    const key = `${projectId}\u0000${workspaceWritable ? 'w' : 'r'}`;
+    let cs = this.cityStores.get(key);
     if (!cs) {
+      const inWorkspace = workspaceWritable ? workspaceDir : null;
       cs = new VillageFileStore({
-        workspaceDir,
-        primaryPath: workspaceDir ? projectLocalVillageFile(workspaceDir) : null,
+        workspaceDir: inWorkspace,
+        primaryPath: inWorkspace ? projectLocalVillageFile(inWorkspace) : null,
         fallbackPath: fallbackProjectVillageFile(this.home, projectId),
       });
-      this.cityStores.set(projectId, cs);
+      this.cityStores.set(key, cs);
     }
     return cs;
   }
@@ -277,20 +287,12 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { workspaceDir, artifactsDir, dbPath, isLibrary } = opened;
-    try {
-      // The library keeps its database home-side, so there is no in-workspace
-      // `.gezel/` to ignore — and writing one into the user's documents
-      // folder is exactly what that placement avoids.
-      if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
-        await ensureIndexGitignore(workspaceDir);
-      }
-    } finally {
-      // The worker owns the only open connection while it writes. Keeping a
-      // parent connection alive is unnecessary and makes SQLite lock behavior
-      // platform-dependent.
-      opened.index.close();
-    }
+    const { workspaceDir, artifactsDir, dbPath, isLibrary, workspaceWritable } = opened;
+    // The worker owns the only open connection while it writes. Keeping a
+    // parent connection alive is unnecessary and makes SQLite lock behavior
+    // platform-dependent. (No `.gezel/` gitignore to write any more: the
+    // database is home-side, so nothing lands in the workspace.)
+    opened.index.close();
 
     const stats = await runStaticIndex({
       dbPath,
@@ -299,12 +301,18 @@ export class ContentIndex {
       collectionId: projectId,
       ...(isLibrary ? { scope: 'library' as const } : {}),
     });
-    if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
+    if (
+      !isLibrary &&
+      workspaceWritable &&
+      projectStorageScope(this.home, projectId) !== 'machine-shared'
+    ) {
       // Conversions now live under artifacts/shadow; the old in-workspace
       // cache is stranded stale content and doubled disk. Regenerable and
-      // deny-all-gitignored, so removal is safe. Machine-shared workspaces are
-      // skipped: an older daemon on another account would recreate the tree,
-      // and cross-daemon churn is worse than a stale cache.
+      // deny-all-gitignored, so removal is safe — but only where gezel may
+      // write: a read-only folder is left exactly as the person has it.
+      // Machine-shared workspaces are skipped: an older daemon on another
+      // account would recreate the tree, and cross-daemon churn is worse than
+      // a stale cache.
       await rm(projectLocalFilesDir(workspaceDir), { recursive: true, force: true }).catch(
         () => {},
       );
@@ -360,7 +368,7 @@ export class ContentIndex {
       try {
         await buildFileMap(post.index, workspaceDir, {
           persist: true,
-          villageFile: this.cityStoreFor(projectId, workspaceDir),
+          villageFile: this.cityStoreFor(projectId, workspaceDir, post.workspaceWritable),
           userFacing: false,
         });
       } catch {
@@ -1116,7 +1124,7 @@ export class ContentIndex {
       return await buildFileMap(opened.index, opened.workspaceDir, {
         scope: req.scope,
         persist: true,
-        villageFile: this.cityStoreFor(projectId, opened.workspaceDir),
+        villageFile: this.cityStoreFor(projectId, opened.workspaceDir, opened.workspaceWritable),
         userFacing: true,
       });
     } finally {
@@ -1630,14 +1638,6 @@ export class ContentIndex {
    * db). Recall consults it before paying the query-embed cost.
    */
   async hasIndex(projectId: string): Promise<boolean> {
-    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
-      try {
-        const workspaceDir = await this.store.projectWorkspaceDir(projectId);
-        if (existsSync(projectLocalIndexDbFile(workspaceDir))) return true;
-      } catch {
-        /* fall through to the home-scoped fallback */
-      }
-    }
     return existsSync(join(fallbackProjectIndexDir(this.home, projectId), 'index.db'));
   }
 
@@ -2765,6 +2765,8 @@ export class ContentIndex {
     artifactsDir: string;
     dbPath: string;
     isLibrary: boolean;
+    /** Whether gezel may write into the workspace itself (see `projectManagedWorkspaceWritable`). */
+    workspaceWritable: boolean;
   } | null> {
     let workspaceDir: string;
     try {
@@ -2794,27 +2796,23 @@ export class ContentIndex {
         ? await this.store.getProject(projectId).catch(() => null)
         : null;
     const isLibrary = meta ? isSharedLibraryProject(meta) : false;
-    let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir, {
-      ...(isLibrary ? { forceHomeSide: true } : {}),
-    });
+    const workspaceWritable = projectManagedWorkspaceWritable(meta);
+    // Home-side for every project: adding a folder writes nothing into it.
+    const dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
     let index: IndexStore | null;
     try {
       index = await open(dbPath);
     } catch (error) {
-      // A busy/locked primary EXISTS and is mid-write (the static worker
-      // holds long transactions during a full pass). Falling back would mint
-      // an empty home-side db whose zero counts masquerade as real status —
-      // report "unavailable this call" and let the next poll succeed.
+      // A busy/locked index EXISTS and is mid-write (the static worker holds
+      // long transactions during a full pass) — report "unavailable this
+      // call" and let the next poll succeed.
       if (isTransientIndexError(error)) return null;
       index = null;
     }
-    if (!index) {
-      // Workspace `.gezel/` not writable — fall back to the home-local dir.
-      dbPath = join(fallbackProjectIndexDir(this.home, projectId), 'index.db');
-      index = await open(dbPath).catch(() => null);
-    }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir, artifactsDir, dbPath, isLibrary } : null;
+    return index
+      ? { index, workspaceDir, artifactsDir, dbPath, isLibrary, workspaceWritable }
+      : null;
   }
 
   private async syncFindingLifecycle(

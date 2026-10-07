@@ -8,8 +8,9 @@
  * **Device** is everything else: settings, engines, models, search indexes,
  * transaction journals, logs, caches. It stays in the app's own storage.
  *
- * Data derived from Work (memory indexes, shadow conversions, workspace
- * tables, unlaunched uploads, per-folder `.gezel` index directories) is
+ * Data derived from Work (memory indexes, project content indexes, shadow
+ * conversions, workspace tables, unlaunched uploads, legacy per-folder
+ * `.gezel` index directories) is
  * Device, so a synced folder never carries a cache that can be rebuilt, the
  * same rule the shared document library follows.
  *
@@ -30,6 +31,7 @@ const WORK_ROOTS = new Set([
 const DERIVED_IN_WORK: readonly RegExp[] = [
   /^gezels\/[^/]+\/memories\/index(?:\/|$)/,
   /^memories\/index(?:\/|$)/,
+  /^projects\/[^/]+\/index(?:\/|$)/,
   /^projects\/[^/]+\/artifacts\/(?:shadow|tabular)(?:\/|$)/,
   /^projects\/[^/]+\/input-staging(?:\/|$)/,
   /^projects\/[^/]+\/digest-state\.json$/,

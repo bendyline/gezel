@@ -2,6 +2,10 @@
 
 Status: Accepted (2026-08)
 
+Index placement superseded by [0021](0021-read-only-folders.md): every
+project's index database now lives home-side, so the in-folder index and its
+home-dir fallback described below no longer exist.
+
 ## Context
 
 The per-project content index grew in layers: a deterministic structural pass

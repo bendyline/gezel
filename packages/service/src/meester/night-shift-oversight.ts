@@ -1,4 +1,4 @@
-import type { StepGate } from '@bendyline/gezel';
+import type { StepGate, Task } from '@bendyline/gezel';
 import { MAX_RESTART_RESUMES, REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -62,6 +62,14 @@ Suggest changes that genuinely move projects toward their objectives; do not gil
 
 When the report is written, call \`advance_task_step\` to finish this run. The task re-arms automatically for tomorrow night.`;
 
+/** The bundled oversight task, when installed. */
+export async function findNightShiftOversightTask(
+  store: Pick<Store, 'listProjectTasks'>,
+): Promise<Task | null> {
+  const tasks = await store.listProjectTasks('default').catch(() => []);
+  return tasks.find((t) => t.title === OVERSIGHT_TITLE) ?? null;
+}
+
 /**
  * Ensure the always-present bundled night-shift task exists: a single
  * perpetual, self-looping step assigned to the Meester that produces a
@@ -82,8 +90,7 @@ export async function ensureNightShiftOversightTask(
   const meesterId = config?.meesterGezelId;
   if (!meesterId) return; // no meester yet; ensureDefaultMeester runs first, so rare
 
-  const existing = await store.listProjectTasks('default').catch(() => []);
-  const installed = existing.find((t) => t.title === OVERSIGHT_TITLE);
+  const installed = await findNightShiftOversightTask(store);
   if (installed) {
     await migrateOversightTask(store, installed.num).catch((err) => {
       log.warn(

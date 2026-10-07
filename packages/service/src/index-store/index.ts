@@ -17,7 +17,6 @@ export {
   vectorToBlob,
 } from './sqlite-driver.js';
 export { applySchema, TEXT_EMBED_DIM } from './schema.js';
-export { ensureIndexGitignore } from './gitignore.js';
 export { classifyFile, type FileClass, MAX_INDEXABLE_BYTES } from './classify.js';
 export { sha256 } from './hash.js';
 export {

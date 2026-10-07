@@ -141,6 +141,11 @@ declare global {
         requestId: string,
         authUrl: string,
       ) => Promise<{ code: string; state: string } | { error: string }>;
+      /** Start the app hidden at login (packaged desktop only; `supported: false` elsewhere). */
+      startAtLogin?: {
+        get(): Promise<{ supported: boolean; enabled: boolean }>;
+        set(enabled: boolean): Promise<{ supported: boolean; enabled: boolean }>;
+      };
       autostart?: {
         status(): Promise<{ ok: true; installed: boolean } | { ok: false; error: string }>;
         install(): Promise<{ ok: true } | { ok: false; error: string }>;

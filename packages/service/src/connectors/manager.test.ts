@@ -68,7 +68,7 @@ function fakeWriter(statusFor: (id: string) => WriteRecordResult['status'] = () 
 
 const base = {
   storageDir: '/artifacts',
-  quarantineWorkspaceDir: '/ws',
+  quarantineDir: '/private/quarantine',
   corpusDir: 'c',
   backfillLimit: 500,
 };

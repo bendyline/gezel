@@ -20,12 +20,42 @@ const ALWAYS_SKIP_DIRS = new Set([
   '.DS_Store',
 ]);
 
+/**
+ * Library packages a photo app owns. Reading inside one is reading the app's
+ * database and derivatives, not the person's folder, and a change there is
+ * the app's to make.
+ */
+const SKIPPED_PACKAGE_SUFFIXES = ['.photoslibrary', '.photolibrary', '.aplibrary'];
+
+function isSkippedDir(name: string): boolean {
+  if (ALWAYS_SKIP_DIRS.has(name)) return true;
+  const lower = name.toLowerCase();
+  return SKIPPED_PACKAGE_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+}
+
+/** Below this, fetching a placeholder costs little, and some filesystems store tiny files with no blocks. */
+const PLACEHOLDER_MIN_BYTES = 8 * 1024;
+
+/**
+ * Whether a file's bytes live only in the cloud: an iCloud "Optimize Storage"
+ * or File Provider dataless file, or a OneDrive Files On-Demand placeholder.
+ * They report their full size but allocate nothing on disk (on Windows, libuv
+ * derives `blocks` from the allocation size). Reading one downloads it, so
+ * the indexer records it by name, size and date only. Stat alone never
+ * triggers the download.
+ */
+export function looksCloudOnly(st: { size: number; blocks?: number }): boolean {
+  return st.size > PLACEHOLDER_MIN_BYTES && st.blocks === 0;
+}
+
 export interface DiscoveredWorkspaceFile {
   /** Forward-slashed relative path from the requested workspace root. */
   path: string;
   abs: string;
   size: number;
   mtimeMs: number;
+  /** The bytes are not on this machine; see {@link looksCloudOnly}. */
+  cloudOnly?: true;
 }
 
 export interface DiscoveredWorkspaceFiles {
@@ -152,7 +182,13 @@ async function statListedFiles(
           // Match the fallback walk: do not follow symlinks outside the
           // workspace merely because Git tracks the link itself.
           if (!st.isFile()) return null;
-          return { path, abs, size: st.size, mtimeMs: st.mtimeMs };
+          return {
+            path,
+            abs,
+            size: st.size,
+            mtimeMs: st.mtimeMs,
+            ...(looksCloudOnly(st) ? { cloudOnly: true as const } : {}),
+          };
         } catch {
           // A file can disappear between `git ls-files` and lstat.
           return null;
@@ -183,7 +219,7 @@ async function walkFilesystem(
   }
   for (const entry of entries) {
     if (out.length >= maxFiles) return;
-    if (entry.isDirectory() && ALWAYS_SKIP_DIRS.has(entry.name)) continue;
+    if (entry.isDirectory() && isSkippedDir(entry.name)) continue;
     const abs = join(dir, entry.name);
     const rel = relative(root, abs).replaceAll('\\', '/');
     if (ignorePath?.(rel)) continue;
@@ -197,6 +233,7 @@ async function walkFilesystem(
           abs,
           size: st.size,
           mtimeMs: st.mtimeMs,
+          ...(looksCloudOnly(st) ? { cloudOnly: true as const } : {}),
         });
       } catch {
         /* unreadable or removed mid-walk — skip */
@@ -208,5 +245,5 @@ async function walkFilesystem(
 function containsAlwaysSkippedDir(path: string): boolean {
   const parts = path.split('/');
   // The last part is a filename; only directory segments apply here.
-  return parts.slice(0, -1).some((part) => ALWAYS_SKIP_DIRS.has(part));
+  return parts.slice(0, -1).some(isSkippedDir);
 }

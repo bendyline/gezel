@@ -19,6 +19,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 const priorEmbedModel = process.env.GEZEL_EMBED_MODEL;
@@ -105,7 +106,9 @@ it('every retrieval arm returns a hit on the golden fixture, clearing its floor'
     join(artifacts, 'data', 'reports', 'audit.md'),
     '# Quarterly audit\n\nInvoice reconciliation found three mismatched totals.\n',
   );
-  await runWorkspaceContentIndex(dir, 'c', artifacts);
+  await runWorkspaceContentIndex(dir, 'c', artifacts, {
+    dbPath: projectContentIndexDbFile(home, 'c', dir),
+  });
 
   // ── AI tiers with a content-aware mock summarizer + real embedder ───────
   const describeImage = vi.fn(async () => ({

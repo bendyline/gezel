@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   mailOAuthListen: (opts) => ipcRenderer.invoke('mail:oauth-listen', opts ?? null),
   mailOAuthAwait: (requestId, authUrl) =>
     ipcRenderer.invoke('mail:oauth-await', { requestId, authUrl }),
+  // Start the app hidden at login, so night work has a running app.
+  startAtLogin: {
+    get: () => ipcRenderer.invoke('gezel:start-at-login:get'),
+    set: (enabled) => ipcRenderer.invoke('gezel:start-at-login:set', enabled),
+  },
   autostart: {
     status: () => ipcRenderer.invoke('gezel:autostart:status'),
     install: () => ipcRenderer.invoke('gezel:autostart:install'),

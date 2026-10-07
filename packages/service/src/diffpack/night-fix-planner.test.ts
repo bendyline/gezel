@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BoekwachterIssue, Task } from '@bendyline/gezel';
-import { DEFAULT_NIGHT_SHIFT_WINDOW } from '@bendyline/gezel';
+import { DEFAULT_NIGHT_SHIFT_WINDOW, FOLDER_KIND_PROPERTY } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -94,6 +94,7 @@ beforeEach(async () => {
   store = new Store({ home });
   await store.ensureLayout();
   projectId = (await store.createProject({ name: 'Fixture' })).id;
+  await store.updateProject(projectId, { properties: { [FOLDER_KIND_PROPERTY]: 'code' } });
   await mkdir(await store.projectWorkspaceDir(projectId), { recursive: true });
   issues = [issue('BW-1')];
   created = [];
@@ -183,6 +184,21 @@ describe('the project gates', () => {
     expect(await planProjectNightFixes(makeDeps(), projectId)).toMatchObject({
       skipped: 'indexing-off',
     });
+  });
+
+  it('skips a folder that is not code, even with a developer on the roster', async () => {
+    await store.updateProject(projectId, { properties: { [FOLDER_KIND_PROPERTY]: 'documents' } });
+    expect(await planProjectNightFixes(makeDeps(), projectId)).toMatchObject({
+      skipped: 'not-code',
+    });
+  });
+
+  it('counts a detected coding type as code when no kind was recorded', async () => {
+    await store.updateProject(projectId, {
+      properties: { [FOLDER_KIND_PROPERTY]: '' },
+      detectedProjectType: { id: 'web-app', score: 0.9, scannedAt: '2026-10-07T00:00:00.000Z' },
+    });
+    expect((await planProjectNightFixes(makeDeps(), projectId)).taskRef).toBeTruthy();
   });
 });
 

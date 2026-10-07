@@ -1,4 +1,5 @@
 import {
+  AwakeBudget,
   type GezelDetail,
   type HistoryEvent,
   createLogger,
@@ -119,7 +120,21 @@ export interface IndexEnrichmentManagerOptions {
    * are waiting and their lane is still closed. Absent in tests.
    */
   ensureAudioVideo?: () => Promise<boolean>;
+  /**
+   * Awake time one project gets per round of the night-shift catch-up before
+   * the sweep moves on (see {@link IndexEnrichmentManager.catchUpAll}).
+   * Defaults to {@link CATCH_UP_SLICE_MS}; tests shrink it.
+   */
+  catchUpSliceMs?: number;
 }
+
+/**
+ * Awake time per project per round of the night catch-up. Long enough that a
+ * normal project finishes in its first slice; short enough that a first-night
+ * photo library (hours of captioning) can't keep every other project — and,
+ * through the dispatch hold, every night task — waiting until morning.
+ */
+const CATCH_UP_SLICE_MS = 10 * 60_000;
 
 /**
  * On-demand drive intensity:
@@ -146,6 +161,34 @@ interface CatchUpToken {
   aborted: boolean;
 }
 
+/**
+ * A sweep token that also stands down once this project's slice of awake
+ * time is spent. Polled at the drive's batch boundaries, like the sweep's
+ * own token, so no timer is armed. The clock starts at the drive's first
+ * check, so a slow start can't spend a slice before any work is done.
+ * `ranOut` tells a slice that ended the drive apart from a drive that
+ * finished (or a sweep that was cancelled).
+ */
+function catchUpSlice(sweep: CatchUpToken, budgetMs: number): CatchUpToken & { ranOut(): boolean } {
+  let budget: AwakeBudget | null = null;
+  const spent = (): boolean => {
+    if (!budget) {
+      budget = new AwakeBudget(Math.max(1, budgetMs));
+      return false;
+    }
+    return budget.expired();
+  };
+  return {
+    get aborted() {
+      return sweep.aborted || spent();
+    },
+    set aborted(value: boolean) {
+      sweep.aborted = value;
+    },
+    ranOut: () => !sweep.aborted && budget !== null && budget.expired(),
+  };
+}
+
 export class IndexEnrichmentManager {
   private readonly store: Store;
   private readonly chat: ChatManager;
@@ -162,6 +205,7 @@ export class IndexEnrichmentManager {
   private readonly history: IndexEnrichmentManagerOptions['history'];
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
   private readonly ensureAudioVideo: (() => Promise<boolean>) | undefined;
+  private readonly catchUpSliceMs: number;
   /**
    * Shared across projects and across deps rebuilds: the summarizer target is
    * one engine, so a streak of timeouts on project A is evidence about project
@@ -193,6 +237,8 @@ export class IndexEnrichmentManager {
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
   private readonly catchUps = new Set<Promise<void>>();
+  /** Drained hooks (fix planning, observation upkeep) still running. */
+  private drainedInFlight = 0;
   /**
    * Stand-down flags for the running catch-up sweeps. A set rather than one
    * field because a shift can end and restart while the first sweep is still
@@ -226,6 +272,7 @@ export class IndexEnrichmentManager {
     this.history = opts.history;
     this.refreshStatic = opts.refreshStatic;
     this.ensureAudioVideo = opts.ensureAudioVideo;
+    this.catchUpSliceMs = opts.catchUpSliceMs ?? CATCH_UP_SLICE_MS;
   }
 
   start(): void {
@@ -312,6 +359,16 @@ export class IndexEnrichmentManager {
     return this.catchUpRuns > 0;
   }
 
+  /**
+   * Whether any night work this manager owns is still going: a catch-up
+   * sweep, one that just finished and hasn't fired its drained hook yet, or
+   * that hook's downstream work (fix planning, observation maintenance). The
+   * Night Shift reads it to stay on until the sweep's work is done.
+   */
+  isNightWorkRunning(): boolean {
+    return this.catchUpRuns > 0 || this.catchUps.size > 0 || this.drainedInFlight > 0;
+  }
+
   /** True while an on-demand drive is running (optionally for one project). */
   isDriving(projectId?: string): boolean {
     return projectId ? this.drives.has(projectId) : this.drives.size > 0;
@@ -369,10 +426,14 @@ export class IndexEnrichmentManager {
   }
 
   /**
-   * Bring every indexing-enabled project's static AND AI index up to date,
-   * sequentially at full intensity — the night-shift activation sweep. The
-   * catch-up flag is raised synchronously so a caller that kicks this (not
-   * awaited) and then wakes the TaskRunner still gets the dispatch hold.
+   * Bring every indexing-enabled project's static AND AI index up to date
+   * at full intensity — the night-shift activation sweep. Projects take
+   * turns in time slices ({@link CATCH_UP_SLICE_MS} of awake time each per
+   * round), so a first-night photo library can't hold every other project
+   * until morning. The catch-up flag is raised synchronously so a caller
+   * that kicks this (not awaited) and then wakes the TaskRunner still gets
+   * the dispatch hold; it is released once every project has had its first
+   * slice, so queued night tasks run while big folders keep indexing.
    */
   catchUpAll(): Promise<void> {
     if (this.stopping) return Promise.resolve();
@@ -400,16 +461,7 @@ export class IndexEnrichmentManager {
           );
           return;
         }
-        // try/catch as well as .catch(): a hook that throws SYNCHRONOUSLY
-        // would escape this `finally` and reject the sweep itself, taking
-        // down indexing because a downstream planner had a bad day.
-        try {
-          void Promise.resolve(this.onCatchUpDrained?.()).catch((err) =>
-            log.warn(`[enrich] catch-up drained hook failed: ${describe(err)}`),
-          );
-        } catch (err) {
-          log.warn(`[enrich] catch-up drained hook threw: ${describe(err)}`);
-        }
+        this.fireDrainedHook('catch-up drained', () => this.onCatchUpDrained?.());
       }
     });
     this.catchUps.add(run);
@@ -423,6 +475,50 @@ export class IndexEnrichmentManager {
    */
   setOnCatchUpDrained(fn: () => void | Promise<void>): void {
     this.onCatchUpDrained = fn;
+  }
+
+  /**
+   * Late-bound callback fired as soon as ONE project's catch-up finishes,
+   * without waiting for the rest of the sweep: night work that reads a
+   * project's index (fix planning, observation upkeep) starts while bigger
+   * folders are still indexing. Not fired for a project whose slice ran out.
+   */
+  setOnProjectCaughtUp(fn: (projectId: string) => void | Promise<void>): void {
+    this.onProjectCaughtUp = fn;
+  }
+
+  private onProjectCaughtUp?: (projectId: string) => void | Promise<void>;
+
+  /**
+   * Run a downstream hook off the sweep. A hook that throws SYNCHRONOUSLY
+   * must not escape into the sweep and take down indexing because a
+   * downstream planner had a bad day. Counted while in flight: the Night
+   * Shift stays on until the work it hands off has finished.
+   */
+  private fireDrainedHook(label: string, fn: () => void | Promise<void>): void {
+    this.drainedInFlight++;
+    let hook: Promise<void>;
+    try {
+      hook = Promise.resolve(fn());
+    } catch (err) {
+      hook = Promise.reject(err);
+    }
+    void hook
+      .catch((err) => log.warn(`[enrich] ${label} hook failed: ${describe(err)}`))
+      .finally(() => {
+        this.drainedInFlight--;
+      });
+  }
+
+  /** One project is current: hand it to its downstream night work. */
+  private projectCaughtUp(projectId: string): void {
+    const hook = this.onProjectCaughtUp;
+    if (!hook || this.stopping) return;
+    // Same reasoning as the sweep-level hook: model-dependent work planned
+    // off a sweep whose summarizer never answered would queue straight into
+    // the wall the stand-down exists to stop.
+    if (this.summarizerBreaker.isStoodDown()) return;
+    this.fireDrainedHook(`project ${projectId} caught-up`, () => hook(projectId));
   }
 
   /**
@@ -452,25 +548,54 @@ export class IndexEnrichmentManager {
 
   private async runCatchUpAll(token: CatchUpToken): Promise<void> {
     this.catchUpRuns++;
+    let holding = true;
+    const releaseHold = () => {
+      if (!holding) return;
+      holding = false;
+      this.catchUpRuns--;
+    };
     try {
       const projects = await this.store.listProjects().catch(() => []);
-      for (const p of projects) {
-        if (this.stopping || token.aborted) return;
-        if (p.indexingEnabled === false) continue;
-        const existing = this.drives.get(p.id);
-        if (existing) {
-          await existing.run.catch(() => {});
-          continue;
+      let queue = projects.filter((p) => p.indexingEnabled !== false).map((p) => p.id);
+      while (queue.length > 0) {
+        const unfinished: string[] = [];
+        for (const projectId of queue) {
+          if (this.stopping || token.aborted) return;
+          const existing = this.drives.get(projectId);
+          if (existing) {
+            // An on-demand drive already covers this project; wait for it
+            // rather than open the index twice.
+            await existing.run.catch(() => {});
+            if (this.stopping || token.aborted) return;
+            this.projectCaughtUp(projectId);
+            continue;
+          }
+          const slice = catchUpSlice(token, this.catchUpSliceMs);
+          const run = this.runDrive(projectId, { intensity: 'full' }, slice).finally(() => {
+            this.drives.delete(projectId);
+            this.driveStops.delete(projectId);
+          });
+          this.drives.set(projectId, { mode: 'full', run });
+          await run.catch((err) =>
+            log.warn(`[enrich] catch-up ${projectId} failed: ${describe(err)}`),
+          );
+          if (this.stopping || token.aborted) return;
+          if (slice.ranOut()) unfinished.push(projectId);
+          else this.projectCaughtUp(projectId);
         }
-        const run = this.runDrive(p.id, { intensity: 'full' }, token).finally(() => {
-          this.drives.delete(p.id);
-          this.driveStops.delete(p.id);
-        });
-        this.drives.set(p.id, { mode: 'full', run });
-        await run.catch((err) => log.warn(`[enrich] catch-up ${p.id} failed: ${describe(err)}`));
+        // Every project has had a slice: queued night tasks may run now,
+        // against indexes that are current everywhere except the folders
+        // still in progress.
+        releaseHold();
+        if (unfinished.length > 0) {
+          log.info(
+            `[enrich] catch-up round done — ${unfinished.length} project(s) still indexing: ${unfinished.join(', ')}`,
+          );
+        }
+        queue = unfinished;
       }
     } finally {
-      this.catchUpRuns--;
+      releaseHold();
     }
   }
 

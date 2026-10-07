@@ -163,6 +163,40 @@ function joinList(items: string[]): string {
 }
 
 /**
+ * Why a night window produced nothing, for the morning card:
+ *  - `asleep` — gezel never saw the window open: the computer slept through
+ *    it, or gezel wasn't running.
+ *  - `stopped` — the person stopped the shift.
+ *  - `quota-held` — everything owed was waiting on a cloud plan's quota reserve.
+ *  - `on-battery` — the shift waited because the computer ran on battery.
+ *  - `no-work` — it ran, and nothing it touched needed doing.
+ */
+export const NIGHT_SHIFT_QUIET_REASONS = [
+  'asleep',
+  'stopped',
+  'quota-held',
+  'on-battery',
+  'no-work',
+] as const;
+export type NightShiftQuietReason = (typeof NIGHT_SHIFT_QUIET_REASONS)[number];
+
+/** One plain sentence for a night that produced nothing, and why. */
+export function describeQuietNight(reason: NightShiftQuietReason): string {
+  switch (reason) {
+    case 'asleep':
+      return "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.";
+    case 'stopped':
+      return 'The night shift was stopped last night, so nothing ran.';
+    case 'quota-held':
+      return "Last night's work waited because your cloud plan's quota reserve was reached.";
+    case 'on-battery':
+      return 'Your crew waited last night because the computer was running on battery.';
+    case 'no-work':
+      return 'The night shift ran, but nothing came of it.';
+  }
+}
+
+/**
  * How a settled night window is described to the user, in one or two
  * plain sentences. Shared by the morning needs-input card, Home's "Last
  * night" panel, and the question prompt the service synthesizes, so the
@@ -176,6 +210,10 @@ export function formatNightShiftSummary(counts: {
   proposals?: number;
   /** Report-embedded actions still in the `suggested` state. */
   actions?: number;
+  /** Why the window produced nothing, when it didn't. */
+  quiet?: { reason: NightShiftQuietReason };
+  /** The nightly oversight review is paused and won't run until resumed. */
+  pausedReview?: boolean;
 }): string {
   const leftBehind: string[] = [];
   if (counts.reports > 0) leftBehind.push(countOf(counts.reports, 'report'));
@@ -191,10 +229,15 @@ export function formatNightShiftSummary(counts: {
   } else if (leftBehind.length > 0) {
     summary = `The night shift left ${joinList(leftBehind)} for you.`;
   } else {
-    summary = 'The night shift ran, but nothing came of it.';
+    summary = describeQuietNight(counts.quiet?.reason ?? 'no-work');
   }
 
   const actions = counts.actions ?? 0;
-  if (actions === 0) return summary;
-  return `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+  if (actions > 0) {
+    summary = `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+  }
+  if (counts.pausedReview) {
+    summary = `${summary} Your nightly review paused and won't run again until you resume it.`;
+  }
+  return summary;
 }

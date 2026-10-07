@@ -103,6 +103,10 @@ You can start the same thing by hand any time: open a file the Boekwachter has
 flagged, and hit **Fix** on the issue. It doesn't wait for nightfall, and it
 produces the same reviewable proposal.
 
+Proposed fixes are for code. A folder of documents or photos gets its
+summaries, descriptions and reviews, but never a developer drafting edits to
+your Word files or captions.
+
 If you'd rather your crew didn't do this, turn off nightly fixing in the
 project's settings. It's on by default only because you assembled a crew that
 can do it.
@@ -123,5 +127,27 @@ it, or dismiss it, right from the page. Nothing a report suggests ever
 runs on its own: firing is always your click, and Gezel records the
 resulting task and observed tool activity in History.
 
-For the Night Shift to run while the app is closed, enable the background
-service in Settings.
+Every night gets a morning card, including a quiet one, and it says why:
+the computer was asleep or Gezel wasn't running, you stopped the shift, it
+ran on battery, the quota reserve held the work, or there was simply
+nothing to do. If the nightly project review paused after failing, the
+card says so and offers **Resume nightly review**, which queues it for
+the next night.
+
+## Keeping the computer ready
+
+The night shift needs Gezel running and the computer awake. In Settings →
+Night Shift:
+
+- **Start Gezel when I log in, without opening a window** keeps the app in
+  the tray (the menu bar on a Mac) from the moment you log in.
+- **Keep this machine awake while night-shift work is running** stops it
+  dozing off mid-shift.
+- **Pause night work while this computer runs on battery** is on by
+  default: unplug and the shift stands down, plug back in and it picks up
+  where it left off.
+
+A Mac that's already asleep stays asleep: macOS lets only administrators
+schedule a wake, so leave it plugged in and awake for the night. To run
+night work with the app closed altogether, enable the background service
+in Settings.

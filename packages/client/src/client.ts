@@ -1213,6 +1213,8 @@ export interface ConfigResponse {
     window?: { startHour: number; endHour: number };
     keepAwakeWhileRunning?: boolean;
     wakeOnStart?: boolean;
+    /** Stand the shift down on battery (absent = on). */
+    pauseOnBattery?: boolean;
     /** Optional provider/model defaults used only by Night Shift work. */
     modelOverride?: {
       enabled?: boolean;
@@ -6723,8 +6725,16 @@ export class GezelClient {
   }
 
   /** OS-idle heartbeat from the Electron shell (gates background enrichment). */
-  reportSystemIdle(idleSeconds: number): Promise<{ ok: boolean }> {
-    return this.request('POST', '/api/system/idle', { idleSeconds });
+  reportSystemIdle(idleSeconds: number, onBattery?: boolean): Promise<{ ok: boolean }> {
+    return this.request('POST', '/api/system/idle', {
+      idleSeconds,
+      ...(onBattery !== undefined ? { onBattery } : {}),
+    });
+  }
+
+  /** Push a power-source change between idle reports (Night Shift pauses on battery). */
+  reportSystemPower(onBattery: boolean): Promise<{ ok: boolean }> {
+    return this.request('POST', '/api/system/idle', { onBattery });
   }
 
   /**

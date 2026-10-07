@@ -76,6 +76,12 @@ export const InferProjectForPathRequestSchema = z.object({
     .optional(),
   /** `false` previews the answer without creating a project. Default `true`. */
   create: z.boolean().optional(),
+  /**
+   * Recruit the folder's crew (see `CreateProjectRequest.recruitCrew`), on a
+   * project this creates or one that already owns the folder. Honored only
+   * from the app's own credential.
+   */
+  recruitCrew: z.boolean().optional(),
   /** Used only when a project is created. */
   description: z.string().max(2000).optional(),
   about: z.string().max(20_000).optional(),

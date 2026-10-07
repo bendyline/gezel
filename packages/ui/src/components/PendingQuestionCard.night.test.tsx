@@ -12,6 +12,7 @@ const COVERAGE_JSON = '{\n  "batchNumber": 18,\n  "reviewedFiles": []\n}\n';
 vi.mock('../api.js', () => ({
   api: createMockApi({
     readDocument: vi.fn().mockResolvedValue({ content: COVERAGE_JSON, kind: 'artifact' }),
+    retryTask: vi.fn().mockResolvedValue({ dispatched: true }),
     getNightShiftReview: vi.fn().mockResolvedValue({
       windowKey: '2026-08-25',
       windowStart: '2026-08-25T22:00:00.000Z',
@@ -140,5 +141,27 @@ describe('night-shift review card', () => {
     await screen.findByText('Coverage sweep for PR-41');
     expect(container.querySelector('.pending-question-document-panel')).toBeNull();
     expect(container.querySelector('.pending-question-splitwrap')).toBeNull();
+  });
+
+  it('offers to resume a paused nightly review and queues it for tonight', async () => {
+    const base = nightCard();
+    render(
+      <PendingQuestionCard
+        question={nightCard({
+          intent: {
+            ...(base.intent as object),
+            pausedReview: { projectId: 'default', num: 4 },
+          } as Question['intent'],
+        })}
+      />,
+    );
+
+    await screen.findByText(/Your nightly review paused and won't run again until you resume it\./);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume nightly review' }));
+
+    await screen.findByText('Your nightly review will run again tonight.');
+    expect(vi.mocked(api.retryTask)).toHaveBeenCalledWith('default', 4);
+    expect(screen.queryByRole('button', { name: 'Resume nightly review' })).toBeNull();
+    expect(screen.queryByText(/Your nightly review paused/)).toBeNull();
   });
 });

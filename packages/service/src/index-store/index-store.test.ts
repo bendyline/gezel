@@ -1,9 +1,7 @@
-import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ensureIndexGitignore } from './gitignore.js';
 import { IndexStore } from './index-store.js';
 
 let dir: string;
@@ -303,14 +301,5 @@ describe('IndexStore', () => {
     });
     expect(store.getSummary('h1')).toBe('Handles widget rendering.');
     store.close();
-  });
-
-  it('writes a gitignore that covers the index subtree and no legacy files dir', async () => {
-    await ensureIndexGitignore(dir);
-    const gi = await readFile(join(dir, '.gezel', 'index', '.gitignore'), 'utf8');
-    expect(gi.trim()).toBe('*');
-    // Conversions live under artifacts/shadow now — the workspace-local
-    // `.gezel/files/` tree must no longer be created.
-    expect(existsSync(join(dir, '.gezel', 'files'))).toBe(false);
   });
 });

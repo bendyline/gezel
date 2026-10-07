@@ -89,6 +89,9 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
   const { cleanedArgs, configEnv } = relocateSecretGitConfig(args);
   const env: Record<string, string> = {
     ...filterEnv(process.env),
+    // A status or diff would otherwise refresh `.git/index` in a folder the
+    // person added read-only. Writes still take their locks; callers may override.
+    GIT_OPTIONAL_LOCKS: '0',
     ...(opts.env ?? {}),
     ...configEnv,
     // Keep this safety set last: callers may add environment variables,

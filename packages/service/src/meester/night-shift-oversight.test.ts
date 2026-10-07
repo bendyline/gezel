@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from '../tasks/manager.js';
-import { ensureNightShiftOversightTask } from './night-shift-oversight.js';
+import {
+  ensureNightShiftOversightTask,
+  findNightShiftOversightTask,
+} from './night-shift-oversight.js';
 
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
 
@@ -160,5 +163,19 @@ describe('night-shift oversight task', () => {
       expect(task.status).toBe('paused');
       expect((await store.getQuestion('default', 'q-paused'))?.answer).toBeUndefined();
     });
+  });
+
+  it('finds the installed task, paused or not, so the morning card can offer Resume', async () => {
+    expect(await findNightShiftOversightTask(store)).toBeNull();
+    await ensureNightShiftOversightTask(store, tasks);
+    const found = await findNightShiftOversightTask(store);
+    expect(found?.title).toBe(OVERSIGHT_TITLE);
+
+    await tasks.setStatus('default', found!.num, 'paused');
+    expect((await findNightShiftOversightTask(store))?.status).toBe('paused');
+    // Ensuring again (each window open) repairs the task but never resumes a
+    // pause that is meant for the person.
+    await ensureNightShiftOversightTask(store, tasks);
+    expect((await findNightShiftOversightTask(store))?.status).toBe('paused');
   });
 });

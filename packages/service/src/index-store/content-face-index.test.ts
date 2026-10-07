@@ -7,6 +7,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { FaceDetectOutcome, FaceModelPaths } from '../memory/image-embeddings.js';
@@ -78,7 +79,9 @@ describe('face tier (mock detector)', () => {
         Buffer.concat([PNG_800x600, Buffer.from([i])]),
       );
     }
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
 
     const r = await ci.faceIndex('p', 10, { detect: sameFaceEverywhere(), models: MODELS });
     expect(r).toMatchObject({
@@ -113,7 +116,9 @@ describe('face tier (mock detector)', () => {
         Buffer.concat([PNG_800x600, Buffer.from([i])]),
       );
     }
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
     await ci.faceIndex('p', 10, { detect: sameFaceEverywhere(), models: MODELS });
 
     const listed = await ci.listPeople('p');
@@ -139,7 +144,9 @@ describe('face tier (mock detector)', () => {
 
   it('stops the drain on a detector outage without burning attempt budgets', async () => {
     await writeFile(join(dir, 'a.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
     const r = await ci.faceIndex('p', 10, {
       detect: async () => {
         throw new Error('face model unloadable');
@@ -151,7 +158,9 @@ describe('face tier (mock detector)', () => {
 
   it('reports unavailable when no models are installed — and never downloads', async () => {
     await writeFile(join(dir, 'a.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
     // faceIndex never touches the network: with no deps.models and no
     // engines/face-models tree in the temp home, it must return unavailable
     // fast (the manager owns the one-time opt-in download).

@@ -167,6 +167,12 @@ export const HistoryEventKindSchema = z.enum([
    */
   'keurmeester.intervention',
   'keurmeester.digest.generated',
+  /**
+   * A Night Shift window closed. `details` carries `{ windowKey, ran,
+   * reason?, startedAt?, endedAt?, tasksCompleted, reports, proposals }`;
+   * `reason` says why a window that produced nothing produced nothing.
+   */
+  'night-shift.window-settled',
   'task.created',
   'task.activated',
   'task.updated',
