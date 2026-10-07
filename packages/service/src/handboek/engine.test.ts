@@ -167,33 +167,33 @@ describe('handboek engine', () => {
     expect(article!.generated).toBe(false);
   });
 
-  it('links catalog discovery articles to the public Gezel Gilde', async () => {
+  it('links catalog discovery articles to the public catalog on gezel.com', async () => {
     const engine = makeEngine();
     for (const [articleId, url] of [
-      ['craftbooks-overview', 'https://gezelgilde.com/craftbooks/'],
-      ['local-models-and-tiers', 'https://gezelgilde.com/models/'],
-      ['roles-index', 'https://gezelgilde.com/roles/'],
-      ['tools-and-toolsets', 'https://gezelgilde.com/toolsets/'],
-      ['tools-and-toolsets', 'https://gezelgilde.com/community/'],
-      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/toolsets/#project-types'],
-      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/craftbooks/'],
-      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/roles/'],
-      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/models/'],
+      ['craftbooks-overview', 'https://gezel.com/docs/craftbooks-index/'],
+      ['local-models-and-tiers', 'https://gezel.com/docs/model-catalog/'],
+      ['roles-index', 'https://gezel.com/docs/role-catalog/'],
+      ['tools-and-toolsets', 'https://gezel.com/docs/toolset-catalog/'],
+      ['building-ai-apps-inside-gezel', 'https://gezel.com/docs/project-types-index/'],
+      ['building-ai-apps-inside-gezel', 'https://gezel.com/docs/craftbooks-index/'],
+      ['building-ai-apps-inside-gezel', 'https://gezel.com/docs/role-catalog/'],
+      ['building-ai-apps-inside-gezel', 'https://gezel.com/docs/model-catalog/'],
     ] as const) {
       const article = await engine.article(articleId, { mode: 'site' });
       expect(article!.markdown).toContain(url);
+      expect(article!.markdown).not.toContain('gezelgilde.com');
     }
   });
 
   it('serves generated craftbook and project-type articles', async () => {
     const engine = makeEngine();
     const bookIndex = await engine.article('craftbooks-index', { mode: 'site' });
-    expect(bookIndex!.markdown).toContain('https://gezelgilde.com/craftbooks/');
+    expect(bookIndex!.markdown).not.toContain('gezelgilde.com');
     const book = await engine.article('craftbook/status-report', { mode: 'site' });
     expect(book!.title).toBe('Status Report');
     expect(book!.markdown).toContain('| 1 | Collect | Voorman |');
     const ptIndex = await engine.article('project-types-index', { mode: 'site' });
-    expect(ptIndex!.markdown).toContain('https://gezelgilde.com/toolsets/#project-types');
+    expect(ptIndex!.markdown).not.toContain('gezelgilde.com');
     const pt = await engine.article('project-type/web-shop', { mode: 'site' });
     expect(pt!.markdown).toContain('web-developer');
     expect(pt!.markdown).toContain('`0 9 * * 1`');

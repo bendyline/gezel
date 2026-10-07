@@ -2385,6 +2385,9 @@ export class ContentIndex {
       };
 
       let vectorHits = 0;
+      // A file's best-matching window: a filename hit on the same file joins
+      // it rather than listing the file a second time without a moment.
+      const bestKeyByPath = new Map<string, string>();
       const vector = opts.vector === undefined ? await mediaQueryVector(query) : opts.vector;
       if (vector) {
         const floors = resolveKnowledgeVectorFloors();
@@ -2404,8 +2407,10 @@ export class ContentIndex {
           .sort((a, b) => b.cosine - a.cosine);
         scored.slice(0, maxResults * 2).forEach(({ row, cosine: c }, rank) => {
           const windowed = row.modality !== 'image';
+          const key = `${row.filePath}\u0000${windowed ? row.startMs : ''}`;
+          if (!bestKeyByPath.has(row.filePath)) bestKeyByPath.set(row.filePath, key);
           add(
-            `${row.filePath}\u0000${windowed ? row.startMs : ''}`,
+            key,
             {
               ...describe(row.filePath, row.modality),
               score: c,
@@ -2427,7 +2432,12 @@ export class ContentIndex {
           const f = index.getFile(h.filePath);
           const kind = f?.modality as MediaVectorModality | undefined;
           if (!kind || !kinds.includes(kind)) continue;
-          add(`${h.filePath}\u0000`, describe(h.filePath, kind), 0.5, rank++);
+          add(
+            bestKeyByPath.get(h.filePath) ?? `${h.filePath}\u0000`,
+            describe(h.filePath, kind),
+            0.5,
+            rank++,
+          );
           ftsHits++;
           if (rank > maxResults * 2) break;
         }

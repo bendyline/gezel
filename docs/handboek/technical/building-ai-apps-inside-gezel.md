@@ -13,7 +13,7 @@ subcategory:
 
 An AI App is a reusable experience that runs *inside* Gezel: a tailored project, a purpose-built crew, repeatable craftbooks, scripts, data, and an optional interactive dashboard. A language trainer, research room, board game, or client-service workspace can all use the same underlying pieces while feeling like a distinct application.
 
-The project type is the composition root and installer. Public AI Apps arrive through the [Gezel Gilde project-type collection](https://gezelgilde.com/toolsets/#project-types); private or experimental apps travel as `.gezapp` packages. Both start life as the same thing: a source folder you can build with the command line, by hand, or with an AI agent — this article is the guide to that folder.
+The project type is the composition root and installer. Public AI Apps arrive through the [project-type collection](https://gezel.com/docs/project-types-index/); private or experimental apps travel as `.gezapp` packages. Both start life as the same thing: a source folder you can build with the command line, by hand, or with an AI agent — this article is the guide to that folder.
 
 An AI App is different from a connected app. A connected app runs in its own process and interface and reaches Gezel through `@bendyline/gezel-app-sdk`. See [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md) when that is what you are building.
 
@@ -78,14 +78,14 @@ my-app/
 
 Scripts have two equal authoring forms. The version manifest's `scripts` map holds inline TypeScript strings — the form models author most reliably — and `versions/<v>/scripts/<name>.ts` holds the same scripts as real files, which people and typecheckers prefer. Pack folds sidecars into the map and drops the files, so the shipped app is byte-identical either way; defining one name in both forms is a validation error.
 
-Craftbooks also have two homes. A procedure private to this app lives embedded at `versions/<v>/craftbooks/<id>.json` — it ships inside the project type and appears in no catalog. A reusable procedure is its own `craftbook-templates/` item with a `craftbook.json` and a `test.json` eval sidecar — or simply a reference to an existing recipe in the [Gilde craftbook collection](https://gezelgilde.com/craftbooks/). The version manifest's `craftbooks` list references both by id, and an embedded document wins over a catalog item with the same id.
+Craftbooks also have two homes. A procedure private to this app lives embedded at `versions/<v>/craftbooks/<id>.json` — it ships inside the project type and appears in no catalog. A reusable procedure is its own `craftbook-templates/` item with a `craftbook.json` and a `test.json` eval sidecar — or simply a reference to an existing recipe in the [craftbook collection](https://gezel.com/docs/craftbooks-index/). The version manifest's `craftbooks` list references both by id, and an embedded document wins over a catalog item with the same id.
 
 ## The parts of an AI App
 
 | Part | What it contributes |
 | --- | --- |
 | Project type | Identity, version, setup params, project templates, crew roster, and references to every other part |
-| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the voorman, or a solo type presents its one gezel under a custom `leadLabel`. Browse the [Gilde role collection](https://gezelgilde.com/roles/) before writing a new one |
+| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the voorman, or a solo type presents its one gezel under a custom `leadLabel`. Browse the [role collection](https://gezel.com/docs/role-catalog/) before writing a new one |
 | Craftbooks | Repeatable procedures installed into each project — embedded (type-private) or referenced catalog items |
 | Scripts and tools | Capability-declared TypeScript run in Gezel's sandbox; a `tools` entry exposes a script as a schema-validated tool for a gezel or the page |
 | Output page | A read-limited HTML/CSS/JS experience pinned into the project's Output tab |
@@ -115,7 +115,7 @@ Pages must work in both themes: declare `color-scheme: light dark`, drive colors
 
 `gezel app validate` collects every finding at once, in layers: folder shape and portable paths, every manifest and craftbook parsed with the same schemas the runtime uses, the exact verification an install runs (hashes, reference closure, dependency locks), referenced files and craftbook step graphs, script diagnostics from the real TypeScript compiler, page syntax and theme checks, and offline dependency availability. Errors mean install or adoption would break; warnings are advisory.
 
-`gezel app pack` derives the manifest and produces the `.gezapp` — a renamed zip holding the root manifest and the `items/` tree, with a SHA-256 digest per embedded item. Exactly one entry project type travels, along with every role and craftbook template it references; toolsets, connectors, and models stay outside as an exact-version dependency lock — models remain separate catalog choices (browse the [Gilde model collection](https://gezelgilde.com/models/)) and are never bundled into an app. Version 1 packages are explicitly `unsigned` — hashes detect corruption, not authorship, so install only from sources you trust.
+`gezel app pack` derives the manifest and produces the `.gezapp` — a renamed zip holding the root manifest and the `items/` tree, with a SHA-256 digest per embedded item. Exactly one entry project type travels, along with every role and craftbook template it references; toolsets, connectors, and models stay outside as an exact-version dependency lock — models remain separate catalog choices (browse [every model](https://gezel.com/docs/model-catalog/)) and are never bundled into an app. Version 1 packages are explicitly `unsigned` — hashes detect corruption, not authorship, so install only from sources you trust.
 
 Installation is `gezel app add`: a first pass previews publisher, contents, compatibility, conflicts, and missing dependencies without writing anything; the confirmed pass installs atomically under `~/.gezel/ai-apps/`, records a receipt, and mounts the app as one catalog source. Import never executes package contents, and `gezel app list/show/enable/disable/remove/update` manage the installed lifecycle.
 

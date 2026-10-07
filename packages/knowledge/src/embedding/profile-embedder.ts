@@ -24,6 +24,12 @@ import {
   profileUnitVector,
 } from '@bendyline/gezk';
 import { type VerifiedArtifacts, verifyProfileArtifacts } from './artifact-verify.js';
+import {
+  isExternalDataFile,
+  missingPinnedFiles,
+  pinnedLoadFiles,
+  prefetchExternalData,
+} from './pinned-files.js';
 
 const MAX_BATCH = 8;
 const MAX_CHARS = 8_000;
@@ -283,6 +289,35 @@ async function loadTransformers(): Promise<TransformersModule> {
   }
 }
 
+/**
+ * Make a load of a profile with weight sidecars safe from transformers.js's
+ * sidecar hang (see pinned-files.ts): a local-only load fails fast, naming
+ * the files that are missing; a networked load downloads the sidecars first,
+ * hash-verified. A profile without sidecars loads exactly as before.
+ */
+export async function preparePinnedLoad(
+  profile: KnowledgeEmbeddingProfile,
+  opts: {
+    cacheDir: string;
+    localFilesOnly?: boolean;
+    modalities?: ReadonlyArray<'image' | 'video' | 'audio'>;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<void> {
+  const files = pinnedLoadFiles(profile, opts.modalities);
+  if (!files.some((f) => isExternalDataFile(f.path))) return;
+  if (opts.localFilesOnly) {
+    const missing = await missingPinnedFiles(profile, opts);
+    if (missing.length > 0) {
+      throw new EmbedderUnavailableError(
+        `the model files for profile ${profile.id} are not all installed (missing: ${missing.join(', ')})`,
+      );
+    }
+    return;
+  }
+  await prefetchExternalData(profile, opts);
+}
+
 export async function createProfileEmbedder(
   profile: KnowledgeEmbeddingProfile,
   opts: {
@@ -321,6 +356,12 @@ export async function createProfileEmbedder(
     ? { progress_callback: aggregateDownloadProgress(opts.onDownloadProgress) }
     : {};
   const localOnly = opts.localFilesOnly ? { local_files_only: true } : {};
+  if (!opts.transformers) {
+    await preparePinnedLoad(profile, {
+      cacheDir: cacheDir ?? transformers.env.cacheDir ?? '',
+      ...(opts.localFilesOnly ? { localFilesOnly: true } : {}),
+    });
+  }
   const sessionOptions = opts.sessionOptions ? { session_options: opts.sessionOptions } : {};
   const config = transformers.AutoConfig
     ? await transformers.AutoConfig.from_pretrained(profile.model.repo, {

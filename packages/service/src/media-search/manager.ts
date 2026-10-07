@@ -43,6 +43,13 @@ export class MediaSearchManager {
       home: string;
       readConfig: () => Promise<GezelConfig | null>;
       fetchImpl?: typeof fetch;
+      /**
+       * Whether boot and the indexing tier may start the download on their
+       * own. Off where first-boot background downloads are (see
+       * {@link backgroundDownloadsAllowed}); turning media search on in
+       * Settings still installs.
+       */
+      backgroundDownloads?: boolean;
     },
   ) {}
 
@@ -137,16 +144,16 @@ export class MediaSearchManager {
       await this.applyGate();
       return true;
     }
-    await this.install(['text', 'vision', 'audio']);
+    if (this.opts.backgroundDownloads !== false) await this.install(['text', 'vision', 'audio']);
     return false;
   }
 
-  /** Bring disk and gate in line with the setting. */
-  async reconcile(): Promise<void> {
+  /** Bring disk and gate in line with the setting; `install: false` only gates. */
+  async reconcile(opts: { install?: boolean } = {}): Promise<void> {
     const setting = await this.setting();
     process.env.GEZEL_MEDIA_IMAGE_TOKEN_BUDGET = String(setting.imageTokenBudget);
     await this.applyGate();
-    if (setting.enabled) await this.install();
+    if (setting.enabled && opts.install !== false) await this.install();
   }
 
   /** Deferred boot step: log what is resolved, then reconcile. */
@@ -156,7 +163,7 @@ export class MediaSearchManager {
     log.info(
       `[media-search] resolved enabled=${setting.enabled} profile=${MEDIA_SEARCH_PROFILE.id} budget=${setting.imageTokenBudget} installed=${[...parts].join(',') || 'none'}`,
     );
-    await this.reconcile();
+    await this.reconcile({ install: this.opts.backgroundDownloads !== false });
   }
 
   /** Open or close the media embed tiers to match the setting, the files on disk and ffmpeg. */
@@ -182,4 +189,19 @@ export class MediaSearchManager {
     const config = await this.opts.readConfig().catch(() => null);
     return config ? resolveSecurityPolicy(config).allowAppNetwork : true;
   }
+}
+
+/**
+ * Whether boot may fetch the model unasked: not where first-boot background
+ * downloads are skipped (`GEZEL_SKIP_SYSTEM_BOOTSTRAP=1`, the mock provider),
+ * and never inside a test run. A test that booted the service for longer
+ * than the boot-warm delay fetched half the model into the shared test cache,
+ * and that partial install is what hung the image-embed tests.
+ */
+export function backgroundDownloadsAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !(
+    env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
+    env.GEZEL_MOCK_PROVIDER === '1' ||
+    Boolean(env.VITEST)
+  );
 }

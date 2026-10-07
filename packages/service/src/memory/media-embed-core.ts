@@ -18,6 +18,7 @@
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
 import {
   EmbedderUnavailableError,
+  preparePinnedLoad,
   transformersGraphOptions,
   verifyMediaArtifacts,
   verifyProfileArtifacts,
@@ -190,6 +191,13 @@ export async function loadMediaEncoder(
     lib.env.cacheDir = cacheDir;
     lib.env.useFSCache = true;
     lib.env.allowRemoteModels = true;
+  }
+  if (!opts.transformers) {
+    await preparePinnedLoad(profile, {
+      cacheDir: cacheDir ?? lib.env.cacheDir ?? '',
+      modalities: [...modalities],
+      ...(opts.localFilesOnly ? { localFilesOnly: true } : {}),
+    });
   }
   const repo = profile.model.repo;
   const common = {

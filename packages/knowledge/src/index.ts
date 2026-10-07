@@ -28,6 +28,7 @@ export * from './export/parquet.js';
 export * from './profiles/registry.js';
 export * from './embedding/profile-embedder.js';
 export * from './embedding/artifact-verify.js';
+export * from './embedding/pinned-files.js';
 export * from './markdown-adapter/load.js';
 export * from './markdown-adapter/outline.js';
 export * from './registry-client/fetch.js';

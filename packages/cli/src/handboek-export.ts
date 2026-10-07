@@ -21,6 +21,15 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { OgCardPlan, OgCardsResult } from './handboek-og-cards.js';
 import { ogCardPath, writeOgCards } from './handboek-og-cards.js';
+import {
+  CRAFTBOOK_ART_FILE,
+  type SiteCatalogPage,
+  buildSiteCatalog,
+  craftbookArtHtml,
+  demoSectionHtml,
+  insertAfterTitle,
+  insertDemoSection,
+} from './handboek-site-catalog.js';
 import { BASELINE_CSS } from './handboek-site-css.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 
@@ -139,17 +148,32 @@ export async function runHandboekExport(
       'no handboek content tree found — run from a gezel checkout or install, or set GEZEL_HANDBOEK_DIR',
     );
   }
+  const catalog = new CatalogService();
   const engine = createHandboekEngine({
-    catalog: new CatalogService(),
+    catalog,
     device: siteDeviceInfo,
     contentDir,
   });
 
   const toc = await engine.toc();
+  const site = await buildSiteCatalog(catalog);
+  const sitePages = new Map<string, SiteCatalogPage>(site.pages.map((p) => [p.entry.id, p]));
+  const demos = new Map(site.demos.map((d) => [`project-type/${d.projectTypeId}`, d]));
   const areas = toc.areas
-    .map((a) => ({ ...a, entries: a.entries.filter((e) => e.siteVisible !== false) }))
+    .map((a) => ({
+      ...a,
+      entries: [
+        ...a.entries.filter((e) => e.siteVisible !== false),
+        ...site.pages
+          .filter((p) => p.listed && !p.replaces && p.entry.area === a.area)
+          .map((p) => p.entry),
+      ].sort((x, y) => x.order - y.order),
+    }))
     .filter((a) => a.entries.length > 0);
-  const entries = areas.flatMap((a) => a.entries);
+  const entries = [
+    ...areas.flatMap((a) => a.entries),
+    ...site.pages.filter((p) => !p.listed && !p.replaces).map((p) => p.entry),
+  ];
   const ids = new Set(entries.map((e) => e.id));
   const byStem = new Map<string, string>();
   for (const e of entries) {
@@ -174,7 +198,10 @@ export async function runHandboekExport(
   const cardPlans: OgCardPlan[] = [];
 
   for (const entry of entries) {
-    const article = await engine.article(entry.id, { mode: 'site' });
+    const sitePage = sitePages.get(entry.id);
+    const article = sitePage
+      ? { id: entry.id, title: entry.title, markdown: sitePage.markdown, defaultDuration: undefined }
+      : await engine.article(entry.id, { mode: 'site' });
     if (!article) {
       skipped.push(entry.id);
       continue;
@@ -183,11 +210,25 @@ export async function runHandboekExport(
     const markdown = rewriteSiteLinks(article.markdown, entry.id, ids, byStem);
     const parsed = parseMarkdown(markdown);
 
-    const { html: body, headings } = withHeadingIds(
-      wrapTables(extractBody(markdownDocToPlainHtml(parsed, { title: article.title }))),
-    );
+    const demo = demos.get(entry.id);
+    const art = entry.id.startsWith('craftbook/')
+      ? site.craftbookArt.get(entry.id.slice('craftbook/'.length))
+      : undefined;
+    let rendered = wrapTables(extractBody(markdownDocToPlainHtml(parsed, { title: article.title })));
+    if (sitePage?.html) rendered = `${rendered}\n${sitePage.html}`;
+    if (demo) rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title));
+    if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title));
+    const { html: body, headings } = withHeadingIds(rendered);
     const dir = join(out, ...entry.id.split('/'));
     await mkdir(dir, { recursive: true });
+    if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art);
+    if (demo) {
+      for (const file of demo.files) {
+        const target = join(dir, 'demo', ...file.path.split('/'));
+        await mkdir(join(target, '..'), { recursive: true });
+        await writeFile(target, file.bytes);
+      }
+    }
 
     const headline = resolveOgHeadline(entry, headlines);
     if (ogBase) {
@@ -511,6 +552,15 @@ ${links}
 </header>`;
 }
 
+/**
+ * How many articles an area holds, not counting an `-index` landing page: "All
+ * 288 craftbooks" read wrong beside an index that says there are 287.
+ */
+function articleCount(area: HandboekTocArea): number {
+  const landing = areaLanding(area);
+  return area.entries.filter((e) => !(e.id === landing && e.id.endsWith('-index'))).length;
+}
+
 /** An area's own overview article when it has one, else its first entry. */
 function areaLanding(area: HandboekTocArea): string {
   const index = area.entries.find((e) => e.id.endsWith('-index') || e.id.endsWith('-overview'));
@@ -529,7 +579,7 @@ function sidebar(areas: HandboekTocArea[], entry: HandboekTocEntry, depth: numbe
     const list = items.length ? sidebarEntryList(items, entry.id, depth) : '';
     const more =
       isCurrent && area.entries.length > NAV_INLINE_MAX
-        ? `<p class="hb-more"><a href="${up(depth)}${esc(areaLanding(area))}/">All ${area.entries.length} ${esc(area.title.toLowerCase())}</a></p>`
+        ? `<p class="hb-more"><a href="${up(depth)}${esc(areaLanding(area))}/">All ${articleCount(area)} ${esc(area.title.toLowerCase())}</a></p>`
         : '';
     const heading = isCurrent
       ? `<h2 class="hb-current">${esc(area.title)}</h2>`
@@ -694,7 +744,7 @@ ${listed.map((e) => `<li><a href="${esc(e.id)}/">${esc(e.title)}</a></li>`).join
 <h2><a href="${esc(landing)}/">${esc(area.title)}</a></h2>
 <p class="hb-area-blurb">${esc(AREA_BLURBS[area.area] ?? '')}</p>
 ${list}
-<p class="hb-more"><a href="${esc(landing)}/">Browse all ${area.entries.length} ${esc(area.title.toLowerCase())}</a></p>
+<p class="hb-more"><a href="${esc(landing)}/">Browse all ${articleCount(area)} ${esc(area.title.toLowerCase())}</a></p>
 </section>`;
     })
     .join('\n');

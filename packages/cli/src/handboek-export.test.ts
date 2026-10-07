@@ -217,7 +217,7 @@ describe('runHandboekExport', () => {
   }, 120_000);
 
   it('puts generated catalog tables in a scroll container and lets cells wrap', async () => {
-    const page = await readFile(join(out, 'craftbooks-index', 'index.html'), 'utf8');
+    const page = await readFile(join(out, 'project-types-index', 'index.html'), 'utf8');
     expect(page).toContain('<div class="hb-table-scroll"><table>');
     const css = await readFile(join(out, 'assets', 'handboek.css'), 'utf8');
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -229,6 +229,38 @@ describe('runHandboekExport', () => {
     expect(page).toContain('<aside class="hb-sidebar">');
     expect(page).toContain('Craftbooks');
     expect(page).toContain('class="hb-breadcrumb"');
+  });
+
+  it('publishes the public catalog: models, toolsets, role templates, art and demos', async () => {
+    const models = await readFile(join(out, 'model-catalog', 'index.html'), 'utf8');
+    const modelId = models.match(/href="\.\.\/model\/([^"/]+)\/"/)?.[1];
+    expect(modelId).toBeTruthy();
+    expect(existsSync(join(out, 'model', modelId!, 'index.html'))).toBe(true);
+    expect(existsSync(join(out, 'toolset-catalog', 'index.html'))).toBe(true);
+
+    const roles = await readFile(join(out, 'role-catalog', 'index.html'), 'utf8');
+    const roleId = roles.match(/href="\.\.\/role-template\/([^"/]+)\/"/)?.[1];
+    expect(roleId).toBeTruthy();
+    expect(existsSync(join(out, 'role-template', roleId!, 'index.html'))).toBe(true);
+
+    const gallery = await readFile(join(out, 'craftbooks-index', 'index.html'), 'utf8');
+    expect(gallery).toContain('class="hb-gallery"');
+    const book = await readFile(join(out, 'craftbook', 'status-report', 'index.html'), 'utf8');
+    expect(book).toContain('class="hb-craftbook-art"');
+    expect(existsSync(join(out, 'craftbook', 'status-report', 'logo.webp'))).toBe(true);
+
+    const demoPages = await readFile(join(out, 'project-type', 'caregiving-binder', 'index.html'), 'utf8');
+    expect(demoPages).toContain('class="hb-demo"');
+    expect(
+      existsSync(join(out, 'project-type', 'caregiving-binder', 'demo', 'dashboard', 'index.html')),
+    ).toBe(true);
+  });
+
+  it('lists the catalog pages in navigation but not the per-model pages', async () => {
+    const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
+    expect(page).toContain('href="../model-catalog/"');
+    expect(page).toContain('href="../toolset-catalog/"');
+    expect(page).not.toMatch(/class="hb-sidebar"[\s\S]*href="\.\.\/model\/[^"]+\/"[\s\S]*<\/aside>/);
   });
 
   it('groups technical navigation into the four documented subheadings', async () => {

@@ -195,7 +195,13 @@ function makeScenario(remembered: boolean): EvalScenario {
       : 'The same three-turn Spanish lesson with a fresh language-trainer tutor: the baseline for memory-tutor-remembered, and a check that a tutor with no memories invents no history.',
     prompt: 'Turns are driven from successCheck; this prompt is never sent.',
     skipInitialPrompt: true,
-    ...(process.env.GEZEL_MEMORY_EVAL_EMBEDDINGS === '1' ? { requiresEmbeddings: true } : {}),
+    // Memories reach the tutor only through per-turn retrieval, which trials
+    // leave off unless asked. Balanced is the desktop default.
+    retrieval: {
+      mode: 'balanced',
+      references: false,
+      embeddings: process.env.GEZEL_MEMORY_EVAL_EMBEDDINGS === '1',
+    },
     timeoutMs: 40 * 60_000,
     judge: {
       artifactBasename: 'transcript.md',

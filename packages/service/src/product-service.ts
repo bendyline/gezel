@@ -165,7 +165,7 @@ import { InputStagingManager } from './tasks/inputs/staging.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
-import { MediaSearchManager } from './media-search/manager.js';
+import { MediaSearchManager, backgroundDownloadsAllowed } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
@@ -1806,7 +1806,11 @@ export async function startProductService(
   search.setRelevanceProvider(relevance);
   // Media search (EmbeddingGemma 2): the gate the media embed tier reads and
   // the model download, which waits for the deferred boot step below.
-  const mediaSearch = new MediaSearchManager({ home, readConfig: () => store.readConfig() });
+  const mediaSearch = new MediaSearchManager({
+    home,
+    readConfig: () => store.readConfig(),
+    backgroundDownloads: backgroundDownloadsAllowed(),
+  });
   if (knowledge) {
     await knowledge.start();
     search.setKnowledgeSearch({

@@ -336,8 +336,12 @@ async function requireReadOnlyModel(opts: {
 
 export async function runTrial(
   scenarioInput: EvalScenario,
-  opts: TrialOptions,
+  trialOptions: TrialOptions,
 ): Promise<TrialResult> {
+  const opts: TrialOptions =
+    trialOptions.retrieval || !scenarioInput.retrieval
+      ? trialOptions
+      : { ...trialOptions, retrieval: scenarioInput.retrieval };
   const scenario = withRepairPolicy(scenarioInput, opts.repairPolicy);
   const engine = opts.engine ?? 'llama-cpp';
   const category = categorizeProvider(engine);

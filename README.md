@@ -4,7 +4,7 @@
 
 Gezel is a free, open-source desktop app that gives you a crew of AI helpers (a researcher, a writer, a developer, and more) working on your own computer. Tell the Meester what you need and they bring in the right helpers. The work can run overnight, and in the morning it's waiting for you as reports and suggested changes. Your own files only change when you say so.
 
-**[Download for macOS, Windows or Linux](https://gezel.com/#download)** · [Docs](https://gezel.com/docs/) · [Model scorecard](https://gezel.com/docs/model-scorecard/) · [Craftbook catalog](https://gezelgilde.com/)
+**[Download for macOS, Windows or Linux](https://gezel.com/#download)** · [Docs](https://gezel.com/docs/) · [Craftbooks](https://gezel.com/docs/craftbooks-index/) · [Models](https://gezel.com/docs/model-catalog/) · [Model scorecard](https://gezel.com/docs/model-scorecard/)
 
 ![Gezel's home screen in the morning: the Meester has turned last night's request into a plan for three helpers, the full crew is listed in the sidebar, and the top bar shows background work in progress](docs/assets/gezel-home.png)
 
@@ -14,8 +14,8 @@ Gezel is a free, open-source desktop app that gives you a crew of AI helpers (a 
 
 - **A crew, not a chat box.** Each helper (a *gezel*, Dutch for journeyman) has a name, one role, a short list of tools, and a memory of past work. Your first conversation is with the Meester, who sets up the project and brings in the helpers it needs.
 - **Work that keeps going while you're away.** The [Night Shift](https://gezel.com/docs/night-shift/) runs from 22:00 to 06:00 by default, or whenever you start it. Your crew works through tasks, reviews and indexing, and leaves a morning summary with reports and proposed changes for you to approve.
-- **Tested plans for real jobs.** More than 250 [craftbooks](https://gezelgilde.com/craftbooks/), step-by-step plans with a quality check at the end, cover jobs such as research briefs, slide decks, Word documents, code reviews and websites.
-- **Built for the AI on your computer.** Gezel recommends models that fit your hardware and runs them on bundled engines (llama.cpp and MLX). Focused roles and step-by-step plans are what let smaller models finish multi-step work, and we publish [measured results](https://gezel.com/docs/model-scorecard/) for the models we test.
+- **Tested plans for real jobs.** More than 250 [craftbooks](https://gezel.com/docs/craftbooks-index/), step-by-step plans with a quality check at the end, cover jobs such as research briefs, slide decks, Word documents, code reviews and websites.
+- **Built for the AI on your computer.** Gezel recommends [models](https://gezel.com/docs/model-catalog/) that fit your hardware and runs them on bundled engines (llama.cpp and MLX). Focused roles and step-by-step plans are what let smaller models finish multi-step work, and we publish [measured results](https://gezel.com/docs/model-scorecard/) for the models we test.
 - **Or use the plan you already pay for.** Gezel can work through the Claude, ChatGPT or GitHub Copilot plan you already have, using the Claude and Codex command-line tools or a Copilot sign-in. OpenAI and Anthropic API keys work too, and each gezel can use a different provider.
 - **Yours, as plain files.** Projects, conversations and memories are saved on your own disk as Markdown, JSON and SQLite you can read, search and back up.
 

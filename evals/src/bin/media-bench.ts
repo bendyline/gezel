@@ -21,7 +21,7 @@
  *   --videos <n>          MSR-VTT test clips (default 100; 0 skips)
  *   --runs-dir <path>     output folder (default evals/runs/media-bench-<ts>)
  *
- * Method and the recorded run: evals/src/retrieval-bench/MEDIA-BENCH-2026-10-06.md.
+ * Method and the recorded run: evals/src/retrieval-bench/MEDIA-BENCH-2026-10-07.md.
  */
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

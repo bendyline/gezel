@@ -141,7 +141,7 @@ neighbour and a title that shares a word with the request.
   workspace media index alike — reach explicit search only: the titlebar, the
   Knowledge browser, `search` and `search_images`. Each counts only above its
   modality's floor (`<profile>#image`, `#video`, `#audio`, measured by the
-  media bench in [MEDIA-BENCH-2026-10-06.md](../evals/src/retrieval-bench/MEDIA-BENCH-2026-10-06.md));
+  media bench in [MEDIA-BENCH-2026-10-07.md](../evals/src/retrieval-bench/MEDIA-BENCH-2026-10-07.md));
   a modality nobody measured contributes no vector evidence, because a
   nearest photo always exists and has no query words to be grounded in. The
   relevance model does not judge them.

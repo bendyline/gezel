@@ -232,6 +232,13 @@ export interface EvalScenario {
    */
   retrievalOracle?: import('./retrieval-facts.ts').RetrievalOracle;
   /**
+   * The retrieval arm this scenario needs when the run names none. Trials
+   * otherwise run with per-turn retrieval off, so a scenario about recall
+   * would measure nothing (the first memory-tutor A/B did exactly that).
+   * `--retrieval` still overrides it.
+   */
+  retrieval?: TrialRetrievalArm;
+  /**
    * Grader-lint contract: for every signal the scenario's grader hard-
    * REQUIRES, the pattern that must be satisfiable from the prompt text
    * itself. `grader-lint.test.ts` asserts `pattern.test(prompt)` for each

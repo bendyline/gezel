@@ -54,10 +54,12 @@ that want media:
   stage-1 cut. Readers score media rows exactly (`searchMedia`), and fusion
   keeps at most four per search and one per document. Media rows reach
   explicit search only, never per-turn injection.
-- **Floors per modality.** `<profile>#image`, `#video`, `#audio`, measured by
-  the media bench. A modality with no measured floor contributes no vector
-  evidence: a nearest photo always exists, and media has no query words to be
-  grounded in. The relevance model does not judge media rows.
+- **Floors per modality.** `<profile>#image` 0.67, `#video` 0.66, `#audio`
+  0.68 (text 0.735), measured by the media bench on COCO, MSR-VTT and ESC-50
+  and each set a step above the lowest floor no off-topic prompt reached. A
+  modality with no measured floor contributes no vector evidence: a nearest
+  photo always exists, and media has no query words to be grounded in. The
+  relevance model does not judge media rows.
 - **Replace CLIP outright.** The workspace lane keys stored vectors on
   `embeddinggemma-2-512@1#image@<budget>`; schema v14 drops the CLIP table and
   the idle tier re-embeds. Media search defaults on, downloads only when the
@@ -99,9 +101,15 @@ that want media:
 - The default-on download grows from 88 MB (CLIP) to about 510 MB, plus
   340 MB on first video or audio work. Both are visible in Settings → Image
   recognition and gated on network policy.
-- Cost (M5 Max CPU, q8): about 2.1 s per photo at 280 vision tokens, 0.46 s at
-  70, 0.36 s per 5-second sound clip; see the bench record for video. All of
-  it runs in the idle and Night Shift tiers, never on a chat turn.
+- Retrieval (bench): text→photo R@1 0.80 and R@10 0.99 at 280 vision
+  tokens (0.77 and 0.99 at 70); text→video R@1 0.85. Environmental sound
+  searched by class name is weak (R@1 0.24, R@10 0.76) while speech scores
+  well; a speech set is the bench's next addition.
+- Cost (M5 Max CPU, q8, measured under load): about 2.1 s per photo at 280
+  vision tokens, 0.46 s at 70, about 2 s per 30-second sound window and
+  15–21 s per 30-second video window. An hour of video is roughly half an
+  hour of CPU. All of it runs in the idle and Night Shift tiers, never on a
+  chat turn.
 - transformers.js moved from 3.8.1 to 4.3.1 (the first release with
   `embedding_gemma2`) and ORT to 1.30.0, with a release-age exception for
   4.3.1. kokoro-js is held on v4 by an override; its output matched for the
@@ -127,4 +135,4 @@ that want media:
   every registered profile has a measured floor.
 - The media bench (`pnpm --filter @bendyline/gezel-evals run media-bench`) is
   the floor and cost record:
-  [MEDIA-BENCH-2026-10-06.md](../../evals/src/retrieval-bench/MEDIA-BENCH-2026-10-06.md).
+  [MEDIA-BENCH-2026-10-07.md](../../evals/src/retrieval-bench/MEDIA-BENCH-2026-10-07.md).

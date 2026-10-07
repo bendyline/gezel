@@ -7,10 +7,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectLocalIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
+import { IndexStore } from './index-store.js';
 
 let dir: string;
 let home: string;
@@ -61,6 +63,43 @@ describe('image-intel', () => {
       height: 600,
       format: 'png',
     });
+  });
+
+  it('lists a clip once, at its matching moment, when its name matches too', async () => {
+    await mkdir(join(dir, 'clips'), { recursive: true });
+    await writeFile(join(dir, 'clips', 'sea-turtle.mp4'), Buffer.alloc(64, 1));
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const store = (await IndexStore.open(projectLocalIndexDbFile(dir), {
+      collectionId: 'c',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    const hash = store.getFile('clips/sea-turtle.mp4')?.hash;
+    expect(hash).toBeTruthy();
+    const unit = (hot: number) => Array.from({ length: 512 }, (_, i) => (i === hot ? 1 : 0));
+    store.putMediaVectors(hash as string, 'clips/sea-turtle.mp4', 'video', [
+      { startMs: 0, endMs: 30_000, vec: Float32Array.from(unit(1)) },
+      { startMs: 30_000, endMs: 60_000, vec: Float32Array.from(unit(2)) },
+    ]);
+    store.close();
+
+    const prior = process.env.GEZEL_KNOWLEDGE_VECTOR_FLOORS;
+    process.env.GEZEL_KNOWLEDGE_VECTOR_FLOORS = 'off';
+    try {
+      const search = await ci.searchImages('c', 'sea turtle', 10, {
+        kinds: ['video'],
+        vector: unit(2),
+      });
+      expect(search.engine).toBe('hybrid');
+      const turtle = search.results.filter((r) => r.path === 'clips/sea-turtle.mp4');
+      expect(turtle[0]).toMatchObject({ kind: 'video', startMs: 30_000, endMs: 60_000 });
+      // The filename match joined the best window instead of adding a row
+      // with no moment; the other window is its own row.
+      expect(turtle.map((r) => r.startMs)).toEqual([30_000, 0]);
+    } finally {
+      if (prior === undefined) delete process.env.GEZEL_KNOWLEDGE_VECTOR_FLOORS;
+      else process.env.GEZEL_KNOWLEDGE_VECTOR_FLOORS = prior;
+    }
   });
 
   it('describes a folder of images', async () => {

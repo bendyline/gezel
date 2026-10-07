@@ -18,7 +18,7 @@ code execution, a coordinator gets team management. You can add or remove groups
 per gezel, and third-party toolsets from the gilde catalog extend the set
 further.
 
-The public [Gezel Gilde toolset catalog](https://gezelgilde.com/toolsets/) collects first-party toolsets, connector types, and ready-made project types in one place.
+[Add-on toolsets and connectors](https://gezel.com/docs/toolset-catalog/) on gezel.com lists what you can add beyond the built-in groups, and [every project type](https://gezel.com/docs/project-types-index/) shows the ready-made project setups.
 
 Calls through Gezel's built-in tool groups are mediated by its policy, consent,
 and audit layers. Provider-native tools, approved package commands, and
@@ -40,7 +40,7 @@ than the ordinary installed-toolsets JSON. Provider-native MCP integrations that
 only accept local processes (currently Copilot and Claude CLI) load the `stdio`
 entries and skip hosted entries.
 
-For third-party options, the [Gilde community directory](https://gezelgilde.com/community/) is searchable by category. Review a community server before adding it to a crew; these entries are outside Gezel's first-party toolsets.
+For third-party options, the toolset browser also lists thousands of community MCP servers, marked **Community**. Review a community server before adding it to a crew; these entries are outside Gezel's first-party toolsets.
 
 A project can also declare its approved MCP toolsets as files in its working
 folder. Gezel discovers `.gezel/mcp.json`, `.vscode/mcp.json`, and the common
