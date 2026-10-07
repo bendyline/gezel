@@ -30,6 +30,7 @@ import { NATIVE_TOOL_NOTE } from '../tools/native-tools.js';
 
 export type { PromptTaskContext };
 export { renderTaskOutline };
+import { renderPersonNotesBlock } from '../memory-notes.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
 import type { ProviderName } from '../schemas/gezel.js';
@@ -161,6 +162,14 @@ export interface BuildInstructionsOptions {
    * invalidation stays bounded.
    */
   lessons?: string;
+  /**
+   * What the crew knows about the person (the "About you" memory scope),
+   * already selected for this footprint (`selectPersonNotes`). Rendered as a
+   * `### About the person` block in the STABLE prefix right after lessons:
+   * every gezel shares it, and it changes only when a note about the person
+   * is saved.
+   */
+  personNotes?: readonly string[];
   /**
    * Standing behavior traits (frontmatter `traits[].text`), adopted via
    * the growth system's level-up flow. Rendered as a `### Traits` block
@@ -708,6 +717,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const lessonsBlock = opts.lessons
     ? `\n\n---\n\n### Lessons from past work\n\n(accumulated by you across projects — preferences and practices that have proven out)\n\n${opts.lessons}`
     : '';
+  const personBlock = renderPersonNotesBlock(opts.personNotes ?? []);
 
   // Delegation guardrail. Roles whose tool groups don't include
   // `workspace-fs-write`/`code-execution` (Meester, Voorman, Planner)
@@ -1732,6 +1742,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     ['about (persona body)', body, 'stable'],
     ['traits', traitsBlock, 'stable'],
     ['lessons', lessonsBlock, 'stable'],
+    ['aboutPerson', personBlock, 'stable'],
     ['projectContext (about+mission+github)', projectContext, 'stable'],
     ['actDontNarrate', actDontNarrate, 'stable'],
     ['decisionGuidance', decisionGuidance, 'stable'],
@@ -1792,13 +1803,14 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       ? `\n\n---\n\nYou are working in the project "${project.name}".${brief ? `\n\n${brief}` : ''}`
       : '';
     const minimalFull = minimalContextNativeTools
-      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
-      : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
+      ? `${header}${aboutIntro}${cappedBody}${personBlock}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
+      : `${header}${aboutIntro}${cappedBody}${personBlock}${MINIMAL_CONTEXT_CONDUCT}`;
     const minimalSections: PromptSection[] = minimalContextNativeTools
       ? [
           ['header', header, 'stable'],
           ['aboutIntro', aboutIntro, 'stable'],
           ['about (persona body)', cappedBody, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
           ['minimalConduct', MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT, 'stable'],
           ['projectBrief', minimalProject, 'stable'],
           ['taskContext', taskContext, 'volatile'],
@@ -1808,6 +1820,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
           ['header', header, 'stable'],
           ['aboutIntro', aboutIntro, 'stable'],
           ['about (persona body)', cappedBody, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
           ['minimalConduct', MINIMAL_CONTEXT_CONDUCT, 'stable'],
         ];
     return {
@@ -1861,7 +1874,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     // byte-prefix of `full` — siblings of the same (gezel, project) render
     // everything up to `taskContext` identically. Concatenation order is
     // unchanged, so `full` stays byte-identical to the single-string form.
-    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
+    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${personBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
     const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
     return {
       full: `${sharedPrefix}${sessionTail}`,
@@ -1876,7 +1889,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // above) — and ONLY removes the volatile band. The gezel-identity
   // prefix (everything before projectContext) is a true byte-prefix of
   // the full stable message, so adapters key `prefix-gezel` ⊂ `prefix-gp`.
-  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
+  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${personBlock}`;
   const stableSystem = `${gezelPrefix}${projectContext}${operationalGuidanceSection}${responseGuidanceSection}`;
 
   // Volatile band → a frozen message injected after the tool block. The

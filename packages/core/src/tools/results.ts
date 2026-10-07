@@ -1,6 +1,8 @@
 import { formatMediaClock } from '../media-label.js';
+import { memoryNoteLine, memoryScopeOfSource } from '../memory-notes.js';
 import { normalizeArtifactPath } from '../path-rules.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
+import { type MemoryScope, isMemoryKind, isMemoryScope } from '../runtime/memory-markdown.js';
 /**
  * The text a model reads back from a gezel tool, shared by the desktop MCP
  * server and the portable runtime. The desktop loop branches on this text
@@ -445,29 +447,44 @@ export function listDocumentsText(files: readonly ListedEntry[]): string {
 
 // ── Memory ─────────────────────────────────────────────────────────────
 
+/** Memory search results, as the same notes per-turn recall shows (core memory-notes.ts). */
 export function searchMemoryText(
-  results: readonly { text: string; score: number; day: string; scope: string }[],
+  results: readonly { text: string; score: number; day: string; scope: string; kind?: string }[],
   degradedMessage?: string,
 ): string {
   const resultSummary = results.length
-    ? `Found ${results.length} relevant ${results.length === 1 ? 'memory' : 'memories'}.`
+    ? `Found ${results.length} relevant ${results.length === 1 ? 'memory' : 'memories'}, best first.`
     : 'No relevant memories found.';
   const summary = degradedMessage ? `${degradedMessage} ${resultSummary}` : resultSummary;
   const formatted = results
-    .map((r) => `[${r.scope}/${r.day} score=${r.score.toFixed(2)}] ${r.text}`)
-    .join('\n\n');
+    .map((r) =>
+      isMemoryScope(r.scope)
+        ? memoryNoteLine({
+            scope: r.scope,
+            text: r.text,
+            day: r.day,
+            ...(isMemoryKind(r.kind) ? { kind: r.kind } : {}),
+          })
+        : `- ${r.text}`,
+    )
+    .join('\n');
   return formatted ? `${summary}\n${formatted}` : summary;
 }
+
+const SAVED_TO: Record<MemoryScope, string> = {
+  gezel: 'your notes',
+  project: 'the project’s notes',
+  user: 'your notes about the person',
+};
 
 export function saveMemoryText(
   status: 'saved' | 'duplicate',
   scope: string,
   degradedMessage?: string,
 ): string {
+  const where = isMemoryScope(scope) ? SAVED_TO[scope] : scope;
   const savedSummary =
-    status === 'duplicate'
-      ? `Memory already existed (${scope}); no duplicate was added.`
-      : `Memory saved (${scope}).`;
+    status === 'duplicate' ? `Already in ${where}; nothing was added.` : `Saved to ${where}.`;
   return degradedMessage ? `${savedSummary} ${degradedMessage}` : savedSummary;
 }
 
@@ -879,6 +896,8 @@ export interface SearchResultRow {
   source?: string;
   retrievalSource?: string;
   tier?: string;
+  /** A memory hit's day and kind; it renders as a note, as recall shows it. */
+  memory?: { day: string; kind: string };
   /** A media hit: an image, or a window of audio or video. */
   media?: {
     modality: 'image' | 'video' | 'audio';
@@ -927,6 +946,15 @@ export function searchResultText(input: {
 }): { text: string; summary: string; moreExists: boolean; hidden: number; nextCursor?: number } {
   const { projectId } = input;
   const lines = input.results.map((r) => {
+    const memoryScope = memoryScopeOfSource(r.retrievalSource);
+    if (memoryScope) {
+      return memoryNoteLine({
+        scope: memoryScope,
+        text: r.snippet ?? r.title,
+        ...(r.memory ? { day: r.memory.day } : {}),
+        ...(isMemoryKind(r.memory?.kind) ? { kind: r.memory.kind } : {}),
+      });
+    }
     const provenance = r.retrievalSource ?? r.source ?? r.kind;
     const projectScope = r.projectId && r.projectId !== projectId ? ` project=${r.projectId}` : '';
     // Mark only high-confidence hits; unmarked rows are the weak tier —

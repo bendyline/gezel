@@ -1,9 +1,11 @@
 import { effectiveGeneralistModeSetting, resolveGeneralistKickoff } from '../generalist-mode.js';
 import { profileHasBehavior } from '../local-loop/profile.js';
+import { selectPersonNotes } from '../memory-notes.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { isOutsideInInternalPath } from '../outside-in-paths.js';
 import { leanSession } from '../project-types/composition.js';
+import { PROMPT_FOOTPRINT_POLICY } from '../prompt-footprint.js';
 import {
   type BuiltInstructions,
   type PromptTaskContext,
@@ -45,6 +47,8 @@ export interface PortableInstructionsInput {
   toolNames: readonly string[];
   /** The phone's footprint for this window; only `minimal` changes the desktop builder. */
   minimalContext: boolean;
+  /** Room for the standing notes about the person; defaults to the footprint's. */
+  personNotesMaxChars?: number;
   /** The app previews the project's HTML pages itself. */
   inAppWebPreview?: boolean;
 }
@@ -65,7 +69,7 @@ export async function buildPortableInstructions(
     ? context.crew.find((member) => member.id === project.voormanGezelId)
     : undefined;
   const sessionIsLibrary = isSharedLibraryProject(project);
-  const [workspace, documents, lessons, task, assignedTasks] = await Promise.all([
+  const [workspace, documents, lessons, task, assignedTasks, person] = await Promise.all([
     store
       .listFiles('workspace', project.id, '', true)
       .then(promptListing)
@@ -79,6 +83,7 @@ export async function buildPortableInstructions(
     store.readMemoryLessons(gezel.id).catch(() => ''),
     input.task ? taskContext(store, session, input.task) : undefined,
     session.taskRef ? [] : assignedTo(store, session),
+    store.personMemoryEntries().catch(() => []),
   ]);
   const documentFiles = documents.entries.filter((entry) => !isOutsideInInternalPath(entry.path));
   const traits = gezel.parsed.frontmatter.traits?.map((trait) => trait.text) ?? [];
@@ -89,6 +94,11 @@ export async function buildPortableInstructions(
     gezelId: gezel.id,
     about: gezel.about,
     ...(lessons.trim() ? { lessons: lessons.trim() } : {}),
+    personNotes: selectPersonNotes(
+      person,
+      input.personNotesMaxChars ??
+        PROMPT_FOOTPRINT_POLICY[input.minimalContext ? 'minimal' : 'compact'].personNotesMaxChars,
+    ),
     ...(traits.length ? { traits } : {}),
     role: gezel.role,
     providerName: 'llama-cpp',

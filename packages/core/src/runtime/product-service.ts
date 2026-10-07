@@ -7,6 +7,7 @@ import { checkHandoffChain } from '../handoff-limits.js';
 import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
 import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { createLogger } from '../log.js';
+import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
 import type { PortableInference, PortableSampling } from '../mobile/inference.js';
 import { classifyModelTier } from '../model-profile/local-model-tier.js';
@@ -1285,6 +1286,7 @@ export class PortableProductService {
           profile: structuredChat.profile,
           toolNames: inventoryTools.map((tool) => tool.name),
           minimalContext: footprintName === 'minimal',
+          personNotesMaxChars: footprint.personNotesMaxChars,
           inAppWebPreview: this.capabilities.htmlPreview,
         });
       if (structuredChat?.prompt)
@@ -1295,6 +1297,12 @@ export class PortableProductService {
             .join('\n\n')
         : [
             capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
+            renderPersonNotesBlock(
+              selectPersonNotes(
+                await this.store.personMemoryEntries().catch(() => []),
+                footprint.personNotesMaxChars,
+              ),
+            ).replace(/^\s*(?:---\s*)?/, ''),
             activeTask &&
               renderTaskContextBlock(
                 { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },

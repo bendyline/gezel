@@ -498,7 +498,9 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
      *   saves it to the gezel whose chat called the script instead — how a
      *   scored activity decides what its gezel remembers (a learner's mistake
      *   as a `correction`, a strong answer as an `example`). Those entries need
-     *   a `kind` and at most 200 characters. Other fields are ignored.
+     *   a `kind` and at most 200 characters. Write a correction with the wrong
+     *   form first, in quotes (`Said "soy cansado"; it is "estoy cansado"`):
+     *   when the person repeats it, recall says so. Other fields are ignored.
      */
     save(text: string, meta?: Record<string, unknown>): Promise<void>;
   };

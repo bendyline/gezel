@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
   MINIMAL_FOOTPRINT_MAX_WINDOW,
+  PROMPT_FOOTPRINT_POLICY,
   buildToolReceipt,
   estimateTokens,
   findAskCycleOrDepth,
@@ -14,6 +15,7 @@ import {
   renderTurnStatePrelude,
   resolveFactualWriting,
   resolvePromptFootprint,
+  selectPersonNotes,
   stepOwnerGezelId,
   taskTranscriptCompatible,
   todayIso,
@@ -130,6 +132,7 @@ import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
+import { USER_MEMORY_ID } from '../memory/daily-markdown.js';
 import { extractMemories, isCancelledExtraction } from '../memory/extractor.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { renderRecallBlock, runAutoRecall } from '../memory/recall.js';
@@ -14396,6 +14399,11 @@ export class ChatManager extends LocalEngineRuntime {
     // sweep. Loaded fresh on every session (re)build like about.md — a
     // live session keeps its prompt until its next natural rebuild.
     const lessonsMd = await this.store.readMemoryLessons(record.gezelId).catch(() => '');
+    // What the crew knows about the person, read the same way. A visitor on a
+    // shared mini-site is someone else, so they never see it.
+    const personEntries = record.visitorAccess
+      ? []
+      : await this.memory.allEntries?.('user', USER_MEMORY_ID).catch(() => []);
     const voorman = project?.voormanGezelId
       ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
       : null;
@@ -15121,6 +15129,10 @@ export class ChatManager extends LocalEngineRuntime {
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
       ...(lessonsMd.trim() ? { lessons: lessonsMd.trim() } : {}),
+      personNotes: selectPersonNotes(
+        personEntries ?? [],
+        PROMPT_FOOTPRINT_POLICY[promptFootprint].personNotesMaxChars,
+      ),
       ...((gezel?.parsed.frontmatter.traits?.length ?? 0) > 0
         ? { traits: gezel!.parsed.frontmatter.traits!.map((t) => t.text) }
         : {}),

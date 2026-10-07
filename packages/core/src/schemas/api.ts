@@ -2,6 +2,7 @@ import { KnowledgeLocationSchema } from '@bendyline/gezk';
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
+import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
 import {
   AmbientDashboardDisplayTargetSchema,
   AmbientDashboardResolutionSchema,
@@ -5690,6 +5691,8 @@ export const UnifiedSearchResultSchema = z.object({
   relevance: z.number().min(0).max(1).optional(),
   /** Coarse confidence derived from `relevance` — render hints, early-stop cues. */
   tier: z.enum(['strong', 'weak']).optional(),
+  /** What a memory hit records: the day it was written and its kind (kind 'memory' only). */
+  memory: z.object({ day: z.string(), kind: z.enum(MEMORY_KINDS) }).optional(),
   // ── knowledge provenance (kind 'knowledge' only) ────────────────────────
   /** Catalog the hit came from, plus the exact installed version. */
   catalogId: z.string().optional(),

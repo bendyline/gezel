@@ -1,4 +1,10 @@
-import { type ChatSession, type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  type ChatSession,
+  type GezelConfig,
+  createLogger,
+  memoryNoteLine,
+  renderMemoryNotes,
+} from '@bendyline/gezel';
 import type { ContentIndex } from '../index-store/content-index.js';
 import {
   type MemoryKind,
@@ -387,11 +393,15 @@ export function renderRecallBlock(hits: RecallHit[], now: Date = new Date()): st
     .map((h) => {
       if (h.scope === 'workspace') return `- [workspace] ${h.text}`;
       if (h.scope === 'library') return `- [library] ${h.text}`;
-      if (h.kind === 'status') {
-        return `- [${h.scope}/${h.day}] As of ${h.day} (${agePhrase(ageInDays(h.day, now))}): ${h.text}`;
-      }
-      return `- [${h.scope}/${h.day}] ${h.text}`;
+      const text =
+        h.kind === 'status' ? `As of ${agePhrase(ageInDays(h.day, now))}: ${h.text}` : h.text;
+      return memoryNoteLine({
+        scope: h.scope,
+        text,
+        day: h.day,
+        ...(h.kind ? { kind: h.kind } : {}),
+      });
     })
     .join('\n');
-  return `\n\n### Recalled from prior sessions\n\nHints from earlier work — these are informational, not authoritative. Use them to avoid re-asking the user things they've already told the team:\n\n${lines}`;
+  return `\n\n### Recalled from prior sessions\n\n${renderMemoryNotes([lines])}`;
 }

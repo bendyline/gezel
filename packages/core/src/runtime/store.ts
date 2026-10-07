@@ -109,6 +109,9 @@ export class PortableStore {
   searchMemoryScope(scope: memories.PortableMemoryScope, id: string, query: string) {
     return this.run((repo) => memories.searchMemoryScope(repo, scope, id, query));
   }
+  personMemoryEntries() {
+    return this.run((repo) => memories.personMemoryEntries(repo));
+  }
   recallMemories(args: Parameters<typeof recallPortableMemories>[1]) {
     return this.run((repo) => recallPortableMemories(repo, args));
   }

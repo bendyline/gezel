@@ -203,3 +203,19 @@ export async function searchMemories(
     truncated: scopes.some((scope) => scope.truncated) || all.length > (input.topK ?? 10),
   };
 }
+/**
+ * The person's notes from their most recent days, newest first: the source of
+ * the standing "About the person" section. Bounded so a long history never
+ * slows a turn; older notes still come back through recall.
+ */
+export async function personMemoryEntries(
+  repo: PortableRepository,
+  maxDays = 90,
+): Promise<{ text: string; kind: MemoryKind; day: string }[]> {
+  const entries: { text: string; kind: MemoryKind; day: string }[] = [];
+  for (const day of (await listMemoryDays(repo, 'user', USER_MEMORY_ID)).slice(0, maxDays)) {
+    for (const block of parseMemoryDay(await readMemoryDay(repo, 'user', USER_MEMORY_ID, day)))
+      entries.push({ text: block.text, kind: block.kind, day });
+  }
+  return entries;
+}
