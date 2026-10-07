@@ -5,7 +5,12 @@
  */
 
 import { type ChatMessage, createLogger } from '@bendyline/gezel';
-import { type MemoryKind, isMemoryKind } from './daily-markdown.js';
+import {
+  type MemoryKind,
+  type MemoryScope,
+  USER_MEMORY_ID,
+  isMemoryKind,
+} from './daily-markdown.js';
 import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
@@ -34,7 +39,8 @@ const EXTRACT_PROMPT_OPENER =
 const EXTRACT_EXAMPLES = [
   'PROJECT/FACT: Sessions are stored as JSON files under the data directory.',
   'PROJECT/DECISION: Chose sqlite-vec over Vectra for the memory index.',
-  'GEZEL/PREF: The user prefers terse replies without emojis.',
+  'USER/PREF: The user prefers terse replies without emojis.',
+  'GEZEL/CORRECTION: Read a file before patching it; edits made from memory missed.',
   'PROJECT/STATUS: The OpenAI API key is currently missing from config.',
 ] as const;
 
@@ -44,13 +50,16 @@ Every line of your reply must start with a tag in the form SCOPE/KIND: followed 
 
 SCOPE is one of:
 - PROJECT — specific to this project: its facts, decisions, current state.
-- GEZEL — transferable to any project: the user's general preferences, lessons about how to work well.
+- USER — about the person, true in any project: their name, circumstances, goals, preferences.
+- GEZEL — how you do your own work well in any project: lessons, techniques.
 
 KIND is one of:
 - FACT — a durable fact (paths, names, architecture, who/what/where).
 - DECISION — a choice that was made, and why.
 - PREF — a preference or working style.
 - STATUS — a temporary condition that is true right now.
+- CORRECTION — something that was wrong, and what is right.
+- EXAMPLE — an approach or answer the user confirmed worked.
 
 Examples:
 ${EXTRACT_EXAMPLES.join('\n')}
@@ -66,13 +75,25 @@ Conversation:
 `;
 
 export interface TaggedMemory {
-  scope: 'gezel' | 'project';
+  scope: MemoryScope;
   kind: MemoryKind;
   text: string;
 }
 
-const FULL_TAG_RE = /^(PROJECT|GEZEL)\s*\/\s*(FACT|DECISION|PREF|STATUS)\s*:\s*(.+)$/i;
-const KIND_TAG_RE = /^(FACT|DECISION|PREF|STATUS)\s*:\s*(.+)$/i;
+const FULL_TAG_RE =
+  /^(PROJECT|GEZEL|USER)\s*\/\s*(FACT|DECISION|PREF|STATUS|CORRECTION|EXAMPLE)\s*:\s*(.+)$/i;
+const KIND_TAG_RE = /^(FACT|DECISION|PREF|STATUS|CORRECTION|EXAMPLE)\s*:\s*(.+)$/i;
+
+/**
+ * Where a line tagged with a kind alone belongs, by the rule the prompt
+ * teaches: a preference is the person's, a correction or a worked example is
+ * about doing the work, everything else is this project's.
+ */
+function scopeForKind(kind: string): MemoryScope {
+  if (kind === 'pref') return 'user';
+  if (kind === 'correction' || kind === 'example') return 'gezel';
+  return 'project';
+}
 
 /**
  * Parse one extracted line into its routed scope + kind. Tolerant by
@@ -90,7 +111,7 @@ export function parseExtractedLine(raw: string): TaggedMemory | null {
   if (full) {
     const kind = full[2]!.toLowerCase();
     return {
-      scope: full[1]!.toLowerCase() as 'gezel' | 'project',
+      scope: full[1]!.toLowerCase() as MemoryScope,
       kind: isMemoryKind(kind) ? kind : 'fact',
       text: full[3]!.trim(),
     };
@@ -100,7 +121,7 @@ export function parseExtractedLine(raw: string): TaggedMemory | null {
   if (kindOnly) {
     const kind = kindOnly[1]!.toLowerCase();
     return {
-      scope: kind === 'pref' ? 'gezel' : 'project',
+      scope: scopeForKind(kind),
       kind: isMemoryKind(kind) ? kind : 'fact',
       text: kindOnly[2]!.trim(),
     };
@@ -232,10 +253,14 @@ export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> 
     let saved = 0;
     let deduped = 0;
     for (const m of parsed) {
-      // Route by classification: transferable lines to the gezel's own
-      // memory, project-specific lines to the shared project memory.
-      const targetId = m.scope === 'gezel' ? gezelId : projectId;
-      const outcome = await memory.save(m.scope, targetId, m.text, m.kind);
+      // Route by classification: the person's lines to their own memory,
+      // craft lessons to the gezel's, project lines to the shared project's.
+      const targetId =
+        m.scope === 'gezel' ? gezelId : m.scope === 'user' ? USER_MEMORY_ID : projectId;
+      const outcome = await memory.save(m.scope, targetId, m.text, m.kind, {
+        project: projectId,
+        gezel: gezelId,
+      });
       if (outcome?.status === 'duplicate') deduped++;
       else saved++;
     }

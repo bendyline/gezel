@@ -12,13 +12,14 @@
  */
 
 import { z } from 'zod';
+import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
 /** A verbatim excerpt from a real gezel-scope memory entry. */
 export const GrowthEvidenceSchema = z.object({
   /** Memory-file day (YYYY-MM-DD) — rewritten server-side from the matched entry. */
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  kind: z.enum(['fact', 'decision', 'pref', 'status']),
+  kind: z.enum(MEMORY_KINDS),
   excerpt: z.string().min(1).max(400),
 });
 export type GrowthEvidence = z.infer<typeof GrowthEvidenceSchema>;

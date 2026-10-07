@@ -653,6 +653,20 @@ export function projectMemoriesDir(
 }
 
 /**
+ * The person's own memories ("About you"), shared by every gezel: daily
+ * markdown laid out like a gezel's `memories/`, with no lessons file.
+ * Always under the account's home, never a machine-shared root.
+ */
+export function userMemoriesDir(root: string): string {
+  return join(root, 'memories');
+}
+
+/** Derived vector index for the person's memories. */
+export function userMemoryIndexDir(root: string): string {
+  return join(userMemoriesDir(root), 'index');
+}
+
+/**
  * Per-account derived vector index for project memories. The canonical memory
  * markdown follows the project via {@link projectMemoriesDir}; mutable SQLite
  * never does.

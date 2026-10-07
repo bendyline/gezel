@@ -24,6 +24,7 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
+import { UserMemoriesEditor } from '../components/MemoriesTree.js';
 import {
   EffortPicker,
   EffortTray,
@@ -198,6 +199,7 @@ type SectionId =
   | 'general'
   | 'deviceIntegration'
   | 'team'
+  | 'aboutYou'
   | 'folders'
   | 'defaults'
   | 'copilot'
@@ -338,6 +340,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'general', label: 'General' },
     { id: 'deviceIntegration', label: 'Device Integration' },
     { id: 'team', label: 'Your Team' },
+    { id: 'aboutYou', label: 'About You' },
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
     { id: 'defaults', label: 'Artificial Intelligence', groupHeader: 'ai' },
@@ -2664,6 +2667,7 @@ function DaemonSettingsView() {
             </>
           )}
 
+          {section === 'aboutYou' && <UserMemoriesEditor />}
           {section === 'folders' && <FoldersSettings />}
 
           {section === 'defaults' && (

@@ -31,6 +31,7 @@ describe('phone Settings', () => {
     expect([...picker.options].map((option) => option.textContent)).toEqual([
       'Artificial Intelligence',
       'General',
+      'About you',
       'Backup and restore',
       'About',
     ]);

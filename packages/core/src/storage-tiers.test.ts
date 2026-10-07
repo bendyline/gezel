@@ -13,6 +13,7 @@ describe('storage tiers', () => {
       'projects/default/artifacts/prompts/2026-10-01-0001/message.md',
       'projects/default/history.jsonl',
       'documents/guidelines.md',
+      'memories/daily/2026-10-07.md',
       'tasks/history/1.json',
       'history.jsonl',
     ])
@@ -29,6 +30,7 @@ describe('storage tiers', () => {
       'logs/service-2026-10-01.log',
       'index/global.db',
       'gezels/nadia/memories/index/mem.db',
+      'memories/index/mem.db',
       'projects/default/artifacts/shadow/report.docx_files/report.md',
       'projects/default/artifacts/tabular/sheet.xlsx_tables/tables/a',
       'projects/default/input-staging/x/meta.json',

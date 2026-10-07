@@ -195,6 +195,8 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   readMemoryDay: { content: '' },
   readMemorySummary: { content: '' },
   readMemoryLessons: { content: '' },
+  writeMemoryLessons: { ok: true },
+  updateMemoryDay: { ok: true, indexed: true },
   getSdkTypes: { version: 'v0', files: [] },
   listMemories: { memories: [] },
   getHandboekArticle: {

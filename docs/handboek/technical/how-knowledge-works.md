@@ -25,6 +25,7 @@ Several sources meet in search, but they have different owners and lifecycles:
 | --- | --- | --- | --- |
 | Gezel memory | Daily Markdown notes and lessons | A rebuildable SQLite `mem.db` with text vectors | The named gezel |
 | Project memory | Daily Markdown notes and lessons | A separate rebuildable `mem.db` | The project |
+| Your memory ("About you") | Daily Markdown notes | A separate rebuildable `mem.db` | You; every gezel reads it |
 | Workspace and artifacts | Your original files and produced artifacts | Content indexes with structural data, full-text search, and, where supported, embeddings | The active project and explicitly admitted sources |
 | Shared document library | Your library files | The shared library project's content index | Available across projects |
 | Reference catalogs | Documents, metadata, and indexes shipped in a `.gezk` file | Immutable SQLite databases extracted from the catalog | Installed and enabled catalogs, intersected with project selection |
@@ -44,6 +45,7 @@ The main storage locations are:
 | --- | --- |
 | `~/.gezel/gezels/<id>/memories/index/mem.db` | Derived vector index for a gezel's memory |
 | `~/.gezel/projects/<id>/memories/index/mem.db` | Account-local derived vector index for project memory |
+| `~/.gezel/memories/index/mem.db` | Derived vector index for what the crew knows about you |
 | `<workspace>/.gezel/index/index.db` | Content index for an ordinary writable workspace |
 | `~/.gezel/projects/<id>/index/index.db` | Content index when the workspace cannot host it, and for the shared library or machine-shared projects |
 | `~/.gezel/index/global.db` | Full-text mirror of sessions and history; this database does not store embeddings |
@@ -195,9 +197,11 @@ Proactive retrieval is bounded separately from a full search. It diversifies sou
 
 Memory recall has an additional time dimension. Durable facts, decisions, and preferences remain searchable, while `status` notes decay for automatic recall so an old “the build is broken” observation does not keep appearing as current state. Dates and source scope remain attached to recalled notes.
 
+A note saved to a gezel's memory or to yours also records the project it came from, written after its kind — `## 14:30 [pref] {project:spanish gezel:wren}`. Recall ranks notes from the current project a little higher, and growth credits the gezel that wrote a note about you. When the text embedder is cold or unavailable, memory recall falls back to keyword matching over the daily files instead of dropping out; a keyword note is admitted only if it contains a word from the message. Phones have no embedder and always recall this way, within the window's retrieval budget (about 160 tokens at a 4K context, 320 at 8K).
+
 ## Scope, citations, and model context
 
-Each session has a named gezel and a project. The model-facing `search` tool searches the admitted workspace, artifacts, project memory, that gezel's memory, shared library, and reference catalogs. It can restrict sources or catalog ids. Project catalog policy is `inherit`, `selected`, or `off`; a selected catalog must also be installed, enabled, and successfully mounted.
+Each session has a named gezel and a project. The model-facing `search` tool searches the admitted workspace, artifacts, project memory, that gezel's memory, what the crew knows about you, shared library, and reference catalogs. It can restrict sources or catalog ids. Project catalog policy is `inherit`, `selected`, or `off`; a selected catalog must also be installed, enabled, and successfully mounted.
 
 The Knowledge browser and `gezel knowledge find` use the user's installed catalog search surface. They do not implicitly adopt the project policy of whichever directory the CLI runs in. Project-scoped retrieval applies that policy through the session's project context.
 
@@ -232,7 +236,7 @@ The built-in Handboek is itself a `.gezk` catalog. Gezel builds it from these do
 | Symptom | What to check |
 | --- | --- |
 | A file appears by name but not by meaning | Embedding readiness and project indexing/enrichment status; the structural pass can finish first |
-| A memory cannot be recalled | Correct gezel/project scope, saved Markdown, memory index health, and any status-note age |
+| A memory cannot be recalled | Correct gezel/project/user scope, saved Markdown, memory index health, and any status-note age |
 | A catalog appears installed but supplies no results | Enabled/mounted state, quarantine reason, project selection, and the query profile's readiness |
 | Offline keyword search works but semantic search fails | Embedding runtime installation, cached pinned model files, and supported profile |
 | A title is found but a related passage is missed | Shard routing and candidate limits; compare keyword and semantic results |

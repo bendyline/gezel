@@ -1,3 +1,4 @@
+import { type MemoryScope, USER_MEMORY_ID } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -10,15 +11,18 @@ type GezelSelectedNode =
 
 interface GezelMemoryTree {
   summary: string | null;
-  lessons: string | null;
   days: string[];
   expanded: boolean;
 }
 
+const PINNED_HINT =
+  'Lines under a “## Pinned” heading are kept exactly as written; the rest is refreshed from new notes.';
+
 /**
- * Read-only browser for memories owned by one gezel. Project memory is kept
- * out of this character-level surface and is shown in that project's Settings
- * page instead.
+ * The memories one gezel owns: its daily notes and its lessons, each editable
+ * in place. Project memory is kept out of this character-level surface and is
+ * shown in that project's Settings page; what the crew knows about the person
+ * is in Settings → About you.
  */
 export function MemoriesTree({
   gezelId,
@@ -40,7 +44,7 @@ export function MemoriesTree({
     setTree(null);
     setSelected(null);
     void (async () => {
-      const [days, summary, lessons] = await Promise.all([
+      const [days, summary] = await Promise.all([
         api
           .listMemoryDays('gezel', gezelId)
           .then((result) => result.days)
@@ -49,14 +53,8 @@ export function MemoriesTree({
           .readMemorySummary('gezel', gezelId)
           .then((result) => result.content)
           .catch(() => ''),
-        api
-          .readMemoryLessons(gezelId)
-          .then((result) => result.content)
-          .catch(() => ''),
       ]);
-      if (!cancelled) {
-        setTree({ days, summary: summary || null, lessons: lessons || null, expanded: true });
-      }
+      if (!cancelled) setTree({ days, summary: summary || null, expanded: true });
     })();
     return () => {
       cancelled = true;
@@ -103,30 +101,62 @@ export function MemoriesTree({
   if (tree === null) {
     return null;
   }
-  if (tree.days.length === 0 && !tree.summary && !tree.lessons) {
-    return (
-      <p className="placeholder">
-        No memories yet. This gezel will build an individual memory over time as you work together.
-      </p>
-    );
-  }
 
   return (
-    <div className="memories-pane" data-testid="memories-tree">
-      <div className="memories-tree" role="tree">
-        <p className="memories-tree-total muted small">
-          {tree.days.length} day{tree.days.length === 1 ? '' : 's'} of individual memories.
+    <>
+      {tree.days.length === 0 && (
+        <p className="placeholder">
+          No notes yet. This gezel builds a memory as you work together, and you can write its
+          lessons yourself.
         </p>
-        <GezelTreeNode
-          gezelName={gezelName}
-          tree={tree}
-          onToggle={toggleExpand}
-          onSelect={setSelected}
-          selected={selected}
-        />
+      )}
+      <div className="memories-pane" data-testid="memories-tree">
+        <div className="memories-tree" role="tree">
+          <p className="memories-tree-total muted small">
+            {tree.days.length} day{tree.days.length === 1 ? '' : 's'} of individual memories.
+          </p>
+          <GezelTreeNode
+            gezelName={gezelName}
+            tree={tree}
+            onToggle={toggleExpand}
+            onSelect={setSelected}
+            selected={selected}
+          />
+        </div>
+        <div className="memories-preview">
+          {!selected ? (
+            <p className="placeholder">Select a day or the lessons to read and edit them.</p>
+          ) : preview.error ? (
+            <p className="error">{preview.error}</p>
+          ) : preview.content === null || preview.loading ? null : selected.kind === 'summary' ? (
+            <>
+              <header className="memories-preview-header">
+                <code>{selected.label}</code>
+              </header>
+              <pre className="memories-preview-body">{preview.content || '(empty)'}</pre>
+            </>
+          ) : (
+            <MemoryTextEditor
+              key={`${gezelId}:${selected.kind === 'day' ? selected.day : 'lessons'}`}
+              resourceKey={`gezel:${gezelId}:memory:${selected.kind === 'day' ? selected.day : 'lessons'}`}
+              heading={selected.label}
+              label={
+                selected.kind === 'day'
+                  ? `${gezelName} memory for ${selected.day}`
+                  : `${gezelName} lessons`
+              }
+              initial={preview.content}
+              save={(content) =>
+                selected.kind === 'day'
+                  ? api.updateMemoryDay('gezel', gezelId, selected.day, content)
+                  : api.writeMemoryLessons(gezelId, content)
+              }
+              statusLabel={selected.kind === 'day' ? 'Memory markdown' : PINNED_HINT}
+            />
+          )}
+        </div>
       </div>
-      <MemoryPreview selected={selected} preview={preview} />
-    </div>
+    </>
   );
 }
 
@@ -151,20 +181,17 @@ function GezelTreeNode({
         </span>
         <span className="memories-tree-scope-label">{gezelName}</span>
         <span className="muted small">
-          {tree.days.length} day{tree.days.length === 1 ? '' : 's'}
-          {tree.lessons ? ' + lessons' : ''}
+          {tree.days.length} day{tree.days.length === 1 ? '' : 's'} + lessons
           {tree.summary ? ' + summary' : ''}
         </span>
       </button>
       {tree.expanded && (
         <ul className="memories-tree-children">
-          {tree.lessons && (
-            <MemoryLeaf
-              active={selected?.kind === 'lessons'}
-              label="lessons"
-              onClick={() => onSelect({ kind: 'lessons', label: `${gezelName} · lessons` })}
-            />
-          )}
+          <MemoryLeaf
+            active={selected?.kind === 'lessons'}
+            label="lessons"
+            onClick={() => onSelect({ kind: 'lessons', label: `${gezelName} · lessons` })}
+          />
           {tree.summary && (
             <MemoryLeaf
               active={selected?.kind === 'summary'}
@@ -208,32 +235,6 @@ function MemoryLeaf({
   );
 }
 
-function MemoryPreview({
-  selected,
-  preview,
-}: {
-  selected: GezelSelectedNode | null;
-  preview: { loading: boolean; content: string | null; error: string | null };
-}) {
-  return (
-    <div className="memories-preview">
-      {selected ? (
-        <>
-          <header className="memories-preview-header">
-            <code>{selected.label}</code>
-          </header>
-          {preview.error && <p className="error">{preview.error}</p>}
-          {preview.content !== null && !preview.loading && !preview.error && (
-            <pre className="memories-preview-body">{preview.content || '(empty)'}</pre>
-          )}
-        </>
-      ) : (
-        <p className="placeholder">Select a day or lesson on the left to view its contents.</p>
-      )}
-    </div>
-  );
-}
-
 /** Editable project-owned memory files for the Project Settings page. */
 export function ProjectMemoriesEditor({
   projectId,
@@ -241,6 +242,55 @@ export function ProjectMemoriesEditor({
 }: {
   projectId: string;
   projectName: string;
+}) {
+  return (
+    <MemoryDaysEditor
+      scope="project"
+      id={projectId}
+      ownerName={projectName}
+      sectionId="project-about-memories"
+      sectionClassName="project-about-section project-about-anchor"
+      title="Project memories"
+      hint="Notes shared by every gezel working in this project. Changes are saved to the project’s memory files and used in future recall."
+      emptyText="No project memories yet. Gezels add shared notes here as work progresses."
+    />
+  );
+}
+
+/** What the crew has learned about the person, shared by every gezel. */
+export function UserMemoriesEditor() {
+  return (
+    <MemoryDaysEditor
+      scope="user"
+      id={USER_MEMORY_ID}
+      ownerName="About you"
+      sectionId="settings-about-you"
+      title="About you"
+      hint="What your gezels have learned about you, shared by all of them. Correct or remove anything here; gezels read the new version from their next message."
+      emptyText="Nothing yet. As you work together, gezels note what they learn about you here."
+    />
+  );
+}
+
+/** One scope's daily memory files: a day list beside an autosaving editor. */
+function MemoryDaysEditor({
+  scope,
+  id,
+  ownerName,
+  sectionId,
+  sectionClassName,
+  title,
+  hint,
+  emptyText,
+}: {
+  scope: MemoryScope;
+  id: string;
+  ownerName: string;
+  sectionId: string;
+  sectionClassName?: string;
+  title: string;
+  hint: string;
+  emptyText: string;
 }) {
   const [days, setDays] = useState<string[] | null>(null);
   const [daysError, setDaysError] = useState<string | null>(null);
@@ -259,7 +309,7 @@ export function ProjectMemoriesEditor({
     setSelectedDay(null);
     setDayContent(null);
     void api
-      .listMemoryDays('project', projectId)
+      .listMemoryDays(scope, id)
       .then((result) => {
         if (cancelled) return;
         setDays(result.days);
@@ -274,7 +324,7 @@ export function ProjectMemoriesEditor({
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [scope, id]);
 
   useEffect(() => {
     if (!selectedDay) {
@@ -285,7 +335,7 @@ export function ProjectMemoriesEditor({
     const day = selectedDay;
     setDayContent({ day, loading: true, content: null, error: null });
     void api
-      .readMemoryDay('project', projectId, day)
+      .readMemoryDay(scope, id, day)
       .then((result) => {
         if (!cancelled)
           setDayContent({ day, loading: false, content: result.content, error: null });
@@ -303,21 +353,16 @@ export function ProjectMemoriesEditor({
     return () => {
       cancelled = true;
     };
-  }, [projectId, selectedDay]);
+  }, [scope, id, selectedDay]);
 
   return (
-    <section id="project-about-memories" className="project-about-section project-about-anchor">
-      <h3 className="project-about-section-title">Project memories</h3>
-      <p className="muted small project-memories-hint">
-        Notes shared by every gezel working in this project. Changes are saved to the project’s
-        memory files and used in future recall.
-      </p>
+    <section id={sectionId} className={sectionClassName}>
+      <h3 className="project-about-section-title">{title}</h3>
+      <p className="muted small project-memories-hint">{hint}</p>
       {days === null ? null : daysError ? (
         <p className="error">{daysError}</p>
       ) : days.length === 0 ? (
-        <p className="placeholder">
-          No project memories yet. Gezels add shared notes here as work progresses.
-        </p>
+        <p className="placeholder">{emptyText}</p>
       ) : (
         <div className="project-memories-browser">
           <div className="memories-tree project-memories-days">
@@ -341,12 +386,14 @@ export function ProjectMemoriesEditor({
               dayContent &&
               !dayContent.loading &&
               !dayContent.error && (
-                <ProjectMemoryDayEditor
-                  key={`${projectId}:${dayContent.day}`}
-                  projectId={projectId}
-                  projectName={projectName}
-                  day={dayContent.day}
+                <MemoryTextEditor
+                  key={`${scope}:${id}:${dayContent.day}`}
+                  resourceKey={`${scope}:${id}:memory:${dayContent.day}`}
+                  heading={`${ownerName} · ${dayContent.day}`}
+                  label={`${ownerName} memory for ${dayContent.day}`}
                   initial={dayContent.content}
+                  save={(content) => api.updateMemoryDay(scope, id, dayContent.day, content)}
+                  statusLabel="Memory markdown"
                 />
               )}
           </div>
@@ -356,40 +403,39 @@ export function ProjectMemoriesEditor({
   );
 }
 
-function ProjectMemoryDayEditor({
-  projectId,
-  projectName,
-  day,
+/** One memory file edited in place; it autosaves, with the state in its status bar. */
+function MemoryTextEditor({
+  resourceKey,
+  heading,
+  label,
   initial,
+  save,
+  statusLabel,
 }: {
-  projectId: string;
-  projectName: string;
-  day: string;
+  resourceKey: string;
+  heading: string;
+  label: string;
   initial: string;
+  save: (content: string) => Promise<unknown>;
+  statusLabel: string;
 }) {
-  const autosave = useSerializedAutosave({
-    resourceKey: `project:${projectId}:memory:${day}`,
-    initialValue: initial,
-    save: (content) => api.updateMemoryDay('project', projectId, day, content),
-  });
+  const autosave = useSerializedAutosave({ resourceKey, initialValue: initial, save });
 
   return (
     <>
       <div className="project-memory-editor-heading">
-        <code>
-          {projectName} · {day}
-        </code>
+        <code>{heading}</code>
       </div>
       <div className="project-memory-source-editor">
         <textarea
           className="project-memory-source"
-          aria-label={`${projectName} memory for ${day}`}
+          aria-label={label}
           value={autosave.desiredValue()}
           onChange={(event) => autosave.update(event.target.value)}
           spellCheck={false}
         />
         <div className="project-memory-source-status">
-          <span>Memory markdown</span>
+          <span>{statusLabel}</span>
           <AutosaveStatus autosave={autosave} />
         </div>
       </div>

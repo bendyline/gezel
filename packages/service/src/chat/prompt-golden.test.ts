@@ -127,7 +127,9 @@ const corpus: Record<string, BuildInstructionsOptions> = {
 describe('system prompt golden', () => {
   for (const [name, opts] of Object.entries(corpus)) {
     it(`renders ${name} byte-for-byte`, () => {
-      const built = buildInstructions(opts);
+      // The golden pins prompt bytes; section sizes are derived from them and
+      // tested on their own (core instructions-sections.test.ts).
+      const { sections: _sizes, ...built } = buildInstructions(opts);
       const actual = `${JSON.stringify(built, null, 2)}\n`;
       const file = join(dir, `${name}.json`);
       if (process.env.UPDATE_PROMPT_GOLDEN === '1') {

@@ -18,7 +18,7 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
-import { parseMemoryDay } from './daily-markdown.js';
+import { type MemoryScope, USER_MEMORY_ID, parseMemoryDay } from './daily-markdown.js';
 import { embedProfileId } from './embed-core.js';
 import { embeddingsDisabledReason } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
@@ -100,9 +100,10 @@ export class MemoryHealthMonitor {
         this.store.listGezels(),
         this.store.listProjects(),
       ]);
-      const targets: Array<{ scope: 'gezel' | 'project'; id: string }> = [
+      const targets: Array<{ scope: MemoryScope; id: string }> = [
         ...gezels.map((g) => ({ scope: 'gezel' as const, id: g.id })),
         ...projects.map((p) => ({ scope: 'project' as const, id: p.id })),
+        { scope: 'user', id: USER_MEMORY_ID },
       ];
       let rebuilt = 0;
       for (const t of targets) {
@@ -124,7 +125,7 @@ export class MemoryHealthMonitor {
     }
   }
 
-  private async needsRebuild(scope: 'gezel' | 'project', id: string): Promise<boolean> {
+  private async needsRebuild(scope: MemoryScope, id: string): Promise<boolean> {
     const markdownCount = await this.countMarkdownMemories(scope, id);
     if (markdownCount === 0) return false;
     const indexDir = this.store.memoryIndexDir(scope, id);
@@ -143,7 +144,7 @@ export class MemoryHealthMonitor {
     return vectorCount < markdownCount;
   }
 
-  private async countMarkdownMemories(scope: 'gezel' | 'project', id: string): Promise<number> {
+  private async countMarkdownMemories(scope: MemoryScope, id: string): Promise<number> {
     const days = await this.store.listMemoryDays(scope, id);
     let total = 0;
     for (const day of days) {

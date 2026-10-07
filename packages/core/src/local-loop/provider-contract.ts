@@ -249,6 +249,13 @@ export interface LLMSession {
    */
   getWireTranscript?(): WireTranscriptEntry[] | undefined;
   /**
+   * The tool roster the latest turn advertised, sized. Engines template the
+   * JSON schemas into the prompt, so they cost prompt tokens the system text
+   * does not show. `undefined` before the first turn, or where the engine
+   * keeps the schemas out of reach.
+   */
+  getToolSurface?(): ToolSurfaceSize | undefined;
+  /**
    * Best-effort prompt-cache prefill for the session's current exact prompt.
    * Remote sessions use this to send their A-owned prompt/transcript/tool
    * surface to B's inference-only warm endpoint. Implementations must not
@@ -447,6 +454,13 @@ export interface ExternalToolCall {
   id: string;
   name: string;
   arguments: string;
+}
+
+/** Size of an advertised tool roster. See {@link LLMSession.getToolSurface}. */
+export interface ToolSurfaceSize {
+  count: number;
+  /** ~4 characters a token over the serialized schemas. */
+  tokens: number;
 }
 
 /**

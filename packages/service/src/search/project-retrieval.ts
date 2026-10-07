@@ -53,6 +53,7 @@ const ALL_SOURCES: readonly RetrievalSource[] = [
   'artifacts',
   'project-memory',
   'gezel-memory',
+  'user-memory',
   'shared',
   'knowledge',
 ];

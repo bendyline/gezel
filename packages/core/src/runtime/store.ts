@@ -27,6 +27,7 @@ import * as drafts from './drafts.js';
 import * as gezels from './gezels.js';
 import { ensureLayout } from './layout.js';
 import * as memories from './memories.js';
+import { recallPortableMemories } from './memory-recall.js';
 import * as files from './project-files.js';
 import * as projectTypes from './project-types.js';
 import * as projects from './projects.js';
@@ -107,6 +108,9 @@ export class PortableStore {
   }
   searchMemoryScope(scope: memories.PortableMemoryScope, id: string, query: string) {
     return this.run((repo) => memories.searchMemoryScope(repo, scope, id, query));
+  }
+  recallMemories(args: Parameters<typeof recallPortableMemories>[1]) {
+    return this.run((repo) => recallPortableMemories(repo, args));
   }
   planBackup(options: backup.PortableBackupOptions = {}) {
     return this.run((repo) => backup.planBackup(repo, options));

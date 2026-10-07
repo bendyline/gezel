@@ -282,7 +282,7 @@ async function generateTraitDrafts(args: ProposalGenArgs): Promise<TraitProposal
   const cutoff = new Date(Date.now() - PROPOSAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
-  const all = await memory.allEntries('gezel', gezelId);
+  const all = await memory.authoredEntries(gezelId);
   const recent = all.filter((e) => e.day >= cutoff);
   // Newest first within the budget.
   recent.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));

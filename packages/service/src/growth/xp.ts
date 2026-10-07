@@ -14,7 +14,14 @@ import type { GrowthSignals, Task, TaskCraftbookStep } from '@bendyline/gezel';
 import type { MemoryKind } from '../memory/daily-markdown.js';
 
 export const XP_WEIGHTS = {
-  memory: { pref: 6, decision: 6, fact: 3, status: 1 } satisfies Record<MemoryKind, number>,
+  memory: {
+    pref: 6,
+    decision: 6,
+    correction: 6,
+    example: 4,
+    fact: 3,
+    status: 1,
+  } satisfies Record<MemoryKind, number>,
   lessonsUpdate: 15,
   stepCompleted: 10,
   taskCompleted: 25,

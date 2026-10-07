@@ -12,6 +12,7 @@ import {
   capAboutForFootprint,
   renderProjectBrief,
 } from '../prompt-footprint.js';
+import { estimateTokens } from '../retrieval-budget.js';
 import { normalizeStepGate } from '../schemas/gate.js';
 import type { GezelGender } from '../schemas/gezel.js';
 import type { ProjectFileEntry } from '../schemas/project.js';
@@ -108,6 +109,30 @@ export interface BuiltInstructions {
    * Only returned on the flat path. Layered mode has its own `layers`.
    */
   sharedPrefix?: string;
+  /**
+   * What fills the system prompt, section by section in prompt order (empty
+   * sections left out), at ~4 characters a token. The record a host keeps of
+   * each compiled prompt (`prompt.compiled`), and the measure a budget is
+   * checked against.
+   */
+  sections: PromptSectionSize[];
+}
+
+/** One section of a compiled system prompt and its estimated size. */
+export interface PromptSectionSize {
+  name: string;
+  tokens: number;
+  /** `stable` sections key the prompt cache; `volatile` ones change per session or turn. */
+  band: 'stable' | 'volatile';
+}
+
+type PromptSection = readonly [name: string, text: string, band: PromptSectionSize['band']];
+
+/** The sizes of the sections a prompt was built from, in order, empty ones left out. */
+function promptSectionSizes(sections: readonly PromptSection[]): PromptSectionSize[] {
+  return sections
+    .filter(([, text]) => text.length > 0)
+    .map(([name, text, band]) => ({ name, tokens: estimateTokens(text), band }));
 }
 
 export interface BuildInstructionsOptions {
@@ -1693,43 +1718,43 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const aboutIntro =
     '\n\nThe section below is your "about" document — it describes your role, what you know, and how you should behave.\n\n---\n\n';
 
-  // Per-section size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). Prints what
-  // actually fills the system prefix so we can see where the prefill tokens go
-  // and trim with data instead of guessing. Token counts are a ~4-chars/token
-  // estimate — fine for relative comparison; the engine's own counts are exact.
-  // NOTE: this is only the system TEXT; the tool JSON schemas are a separate
-  // `tools` array (logged at the send site) and are NOT counted here.
+  // Every section of the standard path, in prompt order. Sizes ride the
+  // result (`sections`); GEZEL_PROMPT_BREAKDOWN=1 also prints them, largest
+  // first, so prefill can be trimmed with data instead of guesses. Token
+  // counts are a ~4-chars/token estimate — fine for relative comparison; the
+  // engine's own counts are exact. This is the system TEXT only: the tool JSON
+  // schemas are a separate `tools` array the local engines report themselves.
+  const sections: PromptSection[] = [
+    ['header', header, 'stable'],
+    ['delegationGuardrail', delegationGuardrail, 'stable'],
+    ['exactFormatGuidance', exactFormatGuidance, 'stable'],
+    ['aboutIntro', aboutIntro, 'stable'],
+    ['about (persona body)', body, 'stable'],
+    ['traits', traitsBlock, 'stable'],
+    ['lessons', lessonsBlock, 'stable'],
+    ['projectContext (about+mission+github)', projectContext, 'stable'],
+    ['actDontNarrate', actDontNarrate, 'stable'],
+    ['decisionGuidance', decisionGuidance, 'stable'],
+    ['browsingForRole', browsingForRole, 'stable'],
+    ['markdownGuidance', markdownGuidance, 'stable'],
+    ['untrustedContent', untrustedContentBlock, 'stable'],
+    ['factualWriting', factualWritingBlock, 'stable'],
+    ['localHints', localHints, 'stable'],
+    ['verboseModelHints', verboseModelHints, 'stable'],
+    ['availableTools (text block)', availableToolsBlock, 'stable'],
+    ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
+    ['workspaceGestalt', workspaceGestaltBlock, 'volatile'],
+    ['workspaceFiles', workspaceFilesBlock, 'volatile'],
+    ['documents', documentsContext, 'volatile'],
+    ['taskContext', taskContext, 'volatile'],
+    ['assignedTasks', assignedTasksContext, 'volatile'],
+    ['recall (memory)', recall, 'volatile'],
+    ['consultationAddendum', consultationAddendum, 'volatile'],
+    ['freshProjectAddendum', freshProjectAddendum, 'volatile'],
+    ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+  ];
   if (process.env.GEZEL_PROMPT_BREAKDOWN === '1') {
     const estTok = (s: string) => Math.round((s?.length ?? 0) / 4);
-    const sections: Array<readonly [string, string, 'stable' | 'volatile']> = [
-      ['header', header, 'stable'],
-      ['delegationGuardrail', delegationGuardrail, 'stable'],
-      ['exactFormatGuidance', exactFormatGuidance, 'stable'],
-      ['aboutIntro', aboutIntro, 'stable'],
-      ['about (persona body)', body, 'stable'],
-      ['traits', traitsBlock, 'stable'],
-      ['lessons', lessonsBlock, 'stable'],
-      ['projectContext (about+mission+github)', projectContext, 'stable'],
-      ['actDontNarrate', actDontNarrate, 'stable'],
-      ['decisionGuidance', decisionGuidance, 'stable'],
-      ['browsingForRole', browsingForRole, 'stable'],
-      ['markdownGuidance', markdownGuidance, 'stable'],
-      ['untrustedContent', untrustedContentBlock, 'stable'],
-      ['factualWriting', factualWritingBlock, 'stable'],
-      ['localHints', localHints, 'stable'],
-      ['verboseModelHints', verboseModelHints, 'stable'],
-      ['availableTools (text block)', availableToolsBlock, 'stable'],
-      ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
-      ['workspaceGestalt', workspaceGestaltBlock, 'volatile'],
-      ['workspaceFiles', workspaceFilesBlock, 'volatile'],
-      ['documents', documentsContext, 'volatile'],
-      ['taskContext', taskContext, 'volatile'],
-      ['assignedTasks', assignedTasksContext, 'volatile'],
-      ['recall (memory)', recall, 'volatile'],
-      ['consultationAddendum', consultationAddendum, 'volatile'],
-      ['freshProjectAddendum', freshProjectAddendum, 'volatile'],
-      ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
-    ];
     const totalTok = sections.reduce((n, [, s]) => n + estTok(s), 0);
     const rows = sections
       .filter(([, s]) => (s?.length ?? 0) > 0)
@@ -1769,9 +1794,26 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     const minimalFull = minimalContextNativeTools
       ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
       : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
+    const minimalSections: PromptSection[] = minimalContextNativeTools
+      ? [
+          ['header', header, 'stable'],
+          ['aboutIntro', aboutIntro, 'stable'],
+          ['about (persona body)', cappedBody, 'stable'],
+          ['minimalConduct', MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT, 'stable'],
+          ['projectBrief', minimalProject, 'stable'],
+          ['taskContext', taskContext, 'volatile'],
+          ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+        ]
+      : [
+          ['header', header, 'stable'],
+          ['aboutIntro', aboutIntro, 'stable'],
+          ['about (persona body)', cappedBody, 'stable'],
+          ['minimalConduct', MINIMAL_CONTEXT_CONDUCT, 'stable'],
+        ];
     return {
       full: minimalFull,
       ...(layeredPrefixCache ? { layers: { gezel: minimalFull, project: minimalFull } } : {}),
+      sections: promptSectionSizes(minimalSections),
     };
   }
 
@@ -1783,19 +1825,34 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // model-specific tool syntax, and the late recency anchor.
   if (focusedTaskContext && task?.step?.prompt) {
     const actionGuidance = actDontNarrate ? `\n\n${actDontNarrate}` : '';
-    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+    const focusedIntro = `\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n`;
+    const stable = `${header}${focusedIntro}${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
     const volatile = `${taskContext}${consultationAddendum}${activeTaskAnchor}`
       .replace(/^\n+(?:---\n+)?/, '')
       .trim();
+    const focusedSections = promptSectionSizes([
+      ['header', header, 'stable'],
+      ['focusedStepIntro', focusedIntro, 'stable'],
+      ['markdownGuidance', markdownGuidance, 'stable'],
+      ['untrustedContent', untrustedContentBlock, 'stable'],
+      ['factualWriting', factualWritingBlock, 'stable'],
+      ['localHints', localHints, 'stable'],
+      ['availableTools (text block)', availableToolsBlock, 'stable'],
+      ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
+      ['taskContext', taskContext, 'volatile'],
+      ['consultationAddendum', consultationAddendum, 'volatile'],
+      ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+    ]);
     if (layeredPrefixCache) {
       return {
         full: stable,
         layers: { gezel: stable, project: stable },
         ...(volatile ? { volatileContext: volatile } : {}),
+        sections: focusedSections,
       };
     }
     const full = `${stable}${taskContext}${consultationAddendum}${activeTaskAnchor}`;
-    return { full, sharedPrefix: stable };
+    return { full, sharedPrefix: stable, sections: focusedSections };
   }
 
   // Legacy single-band ordering (flag OFF) — byte-identical to before.
@@ -1806,7 +1863,11 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     // unchanged, so `full` stays byte-identical to the single-string form.
     const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
     const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
-    return { full: `${sharedPrefix}${sessionTail}`, sharedPrefix };
+    return {
+      full: `${sharedPrefix}${sessionTail}`,
+      sharedPrefix,
+      sections: promptSectionSizes(sections),
+    };
   }
 
   // Layered ordering (flag ON). The stable system message keeps every
@@ -1832,5 +1893,6 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     full: stableSystem,
     layers: { gezel: gezelPrefix, project: stableSystem },
     ...(volatileContext ? { volatileContext } : {}),
+    sections: promptSectionSizes(sections),
   };
 }

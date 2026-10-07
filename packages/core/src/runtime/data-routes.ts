@@ -4,6 +4,7 @@ import { BackupRequestSchema, RestoreConfirmSchema } from '../schemas/storage.js
 import { PORTABLE_BACKUP_LIMITS } from './backup-zip.js';
 import { json } from './http/json.js';
 import { type PortableMemoryScope, PortableSaveMemorySchema } from './memories.js';
+import { MEMORY_SCOPES } from './memory-markdown.js';
 import type { PortableStore } from './store.js';
 
 const ContentSchema = z.object({ content: z.string() }).strict();
@@ -68,7 +69,7 @@ export async function handlePortableDataRequest(
     );
   if (path.startsWith('/api/memory/')) {
     const scope = z
-      .enum(['gezel', 'project'])
+      .enum(MEMORY_SCOPES)
       .parse(url.searchParams.get('scope') ?? 'gezel') as PortableMemoryScope;
     const id = url.searchParams.get('id') ?? '';
     if (path === '/api/memory/search' && method === 'POST')

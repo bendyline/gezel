@@ -9,6 +9,7 @@ import type {
   ScriptTemplateId,
   SdkTypesResponse,
 } from '../schemas/script.js';
+import { resolveScriptMemorySave } from '../scripts/memory.js';
 import { toScriptTaskStep } from '../scripts/task-step.js';
 import { projectManagedWorkspaceWritable, resolveSecurityPolicy } from '../security/policy.js';
 import { validatePortablePath } from './files.js';
@@ -177,6 +178,17 @@ export class PortableScriptHost {
         return method === 'task.appendNote' ? note : undefined;
       }
       throw new Error(`SDK method "${method}" is unavailable on this device`);
+    }
+    if (method === 'memory.search')
+      return (await this.store.searchMemoryScope('project', context.projectId, text('query')))
+        .results;
+    if (method === 'memory.save') {
+      const save = resolveScriptMemorySave(p, {
+        projectId: context.projectId,
+        ...(context.trigger?.kind === 'chat' ? { gezelId: context.trigger.gezelId } : {}),
+      });
+      check();
+      return this.store.saveMemory(save);
     }
     const area: PortableFileArea = method.startsWith('fs.')
       ? 'workspace'

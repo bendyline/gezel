@@ -24,9 +24,14 @@ import type { HistoryManager } from '../history/manager.js';
 import {
   DEFAULT_MEMORY_KIND,
   type MemoryKind,
+  type MemoryScope,
+  type MemorySource,
+  USER_MEMORY_ID,
   formatMemoryBlock,
   isMemoryKind,
   parseMemoryDay,
+  parseMemorySource,
+  renderMemorySource,
 } from './daily-markdown.js';
 import { embeddingsDisabledReason } from './embeddings.js';
 import { runLessonsDistillation } from './lessons.js';
@@ -66,19 +71,25 @@ Rules:
 - Discard trivia, greetings, dead ends, and one-off operational chatter.
 - Discard stale status entries (work described as in-progress weeks ago). Keep decisions, preferences, and durable facts regardless of age.
 - NEVER invent facts. Every output entry must be directly supported by the input.
-- Preserve each entry's kind tag: fact, decision, pref, or status. If an input entry has no tag, use fact.
+- Preserve each entry's kind tag: fact, decision, pref, status, correction, or example. If an input entry has no tag, use fact.
+- Keep a {source} tag exactly as written, and merge only entries with the same tag.
 - Each entry is ONE clear, self-contained sentence.
 
 Output format — one entry per line, nothing else, no headings, no commentary:
-YYYY-MM-DD [kind] text
+YYYY-MM-DD [kind] {source} text   (the {source} part only when the input had one)
 
 Use the (approximate) date the information came from. If nothing is worth keeping, respond with exactly: NONE.
 
 Entries:
 `;
 
-const OUTPUT_LINE_RE = /^(\d{4}-\d{2}-\d{2})(?:\s*\[([a-z]+)\])?\s+(.+)$/;
+const OUTPUT_LINE_RE = /^(\d{4}-\d{2}-\d{2})(?:\s*\[([a-z]+)\])?(?:\s*\{([^{}\n]*)\})?\s+(.+)$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** One input line for the compactor: `YYYY-MM-DD [kind] {source} text`. */
+function renderEntry(e: ParsedEntry): string {
+  return `${e.day} [${e.kind}]${renderMemorySource(e.source)} ${e.text.replace(/\n+/g, ' ')}`;
+}
 
 export type CompactOneShot = (
   prompt: string,
@@ -114,13 +125,14 @@ interface CompactionState {
 }
 
 interface ScopeTarget {
-  scope: 'gezel' | 'project';
+  scope: MemoryScope;
   id: string;
 }
 
 interface ParsedEntry {
   day: string;
   kind: MemoryKind;
+  source?: MemorySource;
   text: string;
 }
 
@@ -194,6 +206,7 @@ export class MemoryCompactor {
       const targets: ScopeTarget[] = [
         ...gezels.map((g) => ({ scope: 'gezel' as const, id: g.id })),
         ...projects.map((p) => ({ scope: 'project' as const, id: p.id })),
+        { scope: 'user', id: USER_MEMORY_ID },
       ];
       let compacted = 0;
       for (const t of targets) {
@@ -250,7 +263,12 @@ export class MemoryCompactor {
       const content = await this.store.readMemoryDay(scope, id, day);
       dayContents.set(day, content);
       for (const block of parseMemoryDay(content)) {
-        entries.push({ day, kind: block.kind, text: block.text });
+        entries.push({
+          day,
+          kind: block.kind,
+          ...(block.source ? { source: block.source } : {}),
+          text: block.text,
+        });
       }
     }
     if (entries.length < minEntries) return false;
@@ -270,18 +288,14 @@ export class MemoryCompactor {
     let inputChars = 0;
     for (const day of eligibleDays) {
       const dayEntries = entries.filter((e) => e.day === day);
-      const rendered = dayEntries
-        .map((e) => `${e.day} [${e.kind}] ${e.text.replace(/\n+/g, ' ')}`)
-        .join('\n');
+      const rendered = dayEntries.map(renderEntry).join('\n');
       if (inputChars + rendered.length > COMPACT_INPUT_BUDGET && fedDays.length > 0) break;
       fedDays.push(day);
       inputChars += rendered.length + 1;
     }
     const fedEntries = entries.filter((e) => fedDays.includes(e.day));
     if (fedEntries.length < minEntries) return false;
-    const input = fedEntries
-      .map((e) => `${e.day} [${e.kind}] ${e.text.replace(/\n+/g, ' ')}`)
-      .join('\n');
+    const input = fedEntries.map(renderEntry).join('\n');
 
     const raw = (
       await this.oneShot(`${COMPACT_PROMPT}${input}`, 180_000, {
@@ -320,7 +334,7 @@ export class MemoryCompactor {
       const content = dayEntries
         // Synthetic 00:00 — original times only feed the index's `at`
         // column, which nothing ranks on.
-        .map((e) => formatMemoryBlock('00:00', e.text, e.kind))
+        .map((e) => formatMemoryBlock('00:00', e.text, e.kind, e.source))
         .join('');
       await this.store.writeMemoryDay(scope, id, day, content);
     }
@@ -339,7 +353,7 @@ export class MemoryCompactor {
     }
     await this.history?.log({
       kind: 'memory.compacted',
-      ...(scope === 'project' ? { projectId: id } : { gezelId: id }),
+      ...(scope === 'project' ? { projectId: id } : scope === 'gezel' ? { gezelId: id } : {}),
       summary: `Compacted ${scope} memory: ${fedEntries.length} → ${survivors.length} entries across ${fedDays.length} → ${byDay.size} day file(s)`,
       details: {
         scope,
@@ -382,7 +396,8 @@ export class MemoryCompactor {
       if (day < minDay) day = minDay;
       if (day > maxDay) day = maxDay;
       const kind = m[2] && isMemoryKind(m[2]) ? m[2] : DEFAULT_MEMORY_KIND;
-      parsed.push({ day, kind, text: m[3]!.trim() });
+      const source = parseMemorySource(m[3]);
+      parsed.push({ day, kind, ...(source ? { source } : {}), text: m[4]!.trim() });
     }
     if (parsed.length < lines.length * MIN_PARSE_RATIO) return null;
     return parsed;
@@ -416,13 +431,13 @@ export class MemoryCompactor {
     }
   }
 
-  private statePath(scope: 'gezel' | 'project', id: string): string {
+  private statePath(scope: MemoryScope, id: string): string {
     // Sibling of daily/ — derived from the summary path's parent dir so
     // we don't add another Store accessor for one file.
     return join(this.store.memorySummaryPath(scope, id), '..', 'compaction-state.json');
   }
 
-  private async readState(scope: 'gezel' | 'project', id: string): Promise<CompactionState> {
+  private async readState(scope: MemoryScope, id: string): Promise<CompactionState> {
     try {
       return JSON.parse(await readFile(this.statePath(scope, id), 'utf8')) as CompactionState;
     } catch {
@@ -430,11 +445,7 @@ export class MemoryCompactor {
     }
   }
 
-  private async writeState(
-    scope: 'gezel' | 'project',
-    id: string,
-    state: CompactionState,
-  ): Promise<void> {
+  private async writeState(scope: MemoryScope, id: string, state: CompactionState): Promise<void> {
     await writeFileAtomic(this.statePath(scope, id), `${JSON.stringify(state, null, 2)}\n`);
   }
 }

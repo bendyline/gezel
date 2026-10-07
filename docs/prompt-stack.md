@@ -2,7 +2,8 @@
 
 Status: written after the Craftbooks V2 round. Measured sizes below are from
 that review — re-measure with `GEZEL_PROMPT_BREAKDOWN=1` (per-section token table printed by
-`buildInstructions`) rather than trusting this doc or any docblock.
+`buildInstructions`) or read a session's `prompt.compiled` history event (see
+[The prompt record](#the-prompt-record)) rather than trusting this doc or any docblock.
 
 ## The mental model
 
@@ -274,8 +275,15 @@ while they stream.
   skips the plan, the prelude, and the `invoke_craftbook` clamp for that one turn. The
   prelude path remains for the CLI, evals, and older clients, which send neither.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
-  evidence block from the active project, current gezel memory, and shared
-  library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.
+  evidence block from the active project, current gezel memory, the person's
+  own memory ("About you"), and shared library. Off/Lean/Balanced/Deep plus a
+  context-window ceiling bound its size. Memory arms answer by keyword when the
+  embedder is cold, under the same grounding rule as every other keyword arm.
+  The phone has no embedder: a person's message there gets a lexical memory
+  block instead (`recallPortableMemories` in
+  [runtime/memory-recall.ts](../packages/core/src/runtime/memory-recall.ts)),
+  within the same `contextBudgetCeiling` and with a one-line header, since a
+  4K window's 160 tokens cannot carry the desktop's.
   In a factual-mode session each row carries its session-wide evidence
   number (`[7] [knowledge] …`), and evidence tool results get the same
   `[n]` header in the bridge ([factual-writing.md](factual-writing.md)).
@@ -509,7 +517,34 @@ they compete with text for context and prefill. Measured accounting:
   ~225 ch/tool estimate above badly undercounts the heavy tail — size the wire, not the
   average. Diagnostics: `GEZEL_PROMPT_BREAKDOWN=1` (per-section text table, passed
   through by the eval harness) + the `wire tools= schemaChars=` debug line in the
-  llama-cpp provider.
+  llama-cpp provider. The `prompt.compiled` event carries both halves per session.
+
+## The prompt record
+
+Every prompt a session runs on is recorded, sizes only, so "why was this turn slow" or
+"what crowded the window" has an answer without a rerun:
+
+- **Sections.** `buildInstructions` returns `sections`: each non-empty section's name,
+  estimated tokens (`estimateTokens`, ~4 characters each), and band, in prompt order.
+  Every path reports them: standard, layered, minimal, and focused. The
+  `GEZEL_PROMPT_BREAKDOWN` table prints the same list, so there is one registry.
+- **Tools.** Engines template the tool schemas into the prompt, so they cost tokens the
+  text does not show. `LLMSession.getToolSurface()` reports the roster the latest turn
+  advertised (llama.cpp and MLX). A required-tool turn narrows what one request offers;
+  the record sizes the whole roster.
+- **The event.** After a turn, [chat/prompt-record.ts](../packages/service/src/chat/prompt-record.ts)
+  logs `prompt.compiled` once per distinct prompt per session (keyed by a hash of the
+  system message and volatile context; a daemon restart logs it again). Details:
+  `provider`, `model`, `footprint`, `contextWindow`, `systemTokens`, `volatileTokens`,
+  `sections`, session-scoped `extraSections` (craftbook editing, visitor rules), and
+  `tools: { count, tokens }`. Read it with `search_history` or
+  `GET /api/history?kind=prompt.compiled`.
+- **The text, in debug mode only.** The prompt holds about.md, project documents, and
+  recalled memories, so the text is never logged by default. With debug mode on, the
+  last 5 prompts per session are written to `logs/prompts/<sessionId>/` with their
+  section table; folders untouched for 7 days are swept.
+- **Phones** have no history log. The llama.cpp path logs the section sizes at debug
+  level once per distinct prompt.
 
 ## Prompt/tool contract matrix
 

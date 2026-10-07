@@ -17,6 +17,8 @@ export const RETRIEVAL_SOURCES = [
   'artifacts',
   'project-memory',
   'gezel-memory',
+  // The person's own memories ("About you"), shared by every gezel.
+  'user-memory',
   'shared',
   // Installed knowledge catalogs (read-only reference corpora — .gezk).
   // Scoped by the user's registry + the project's knowledgeCatalogs policy.

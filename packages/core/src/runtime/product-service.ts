@@ -245,6 +245,8 @@ export class PortableProductService {
   /** One turn per conversation, waiting for the engine or running on it. */
   private readonly turns = new Map<string, Turn>();
   private readonly admissions = new Map<string, Admission>();
+  /** The prompt each session last logged sizes for, so a debug log names each one once. */
+  private readonly loggedPromptShapes = new Map<string, string>();
   /**
    * The engine runs one generation at a time across every provider, so
    * turns, transforms and task steps share this single-slot queue — the
@@ -1285,6 +1287,8 @@ export class PortableProductService {
           minimalContext: footprintName === 'minimal',
           inAppWebPreview: this.capabilities.htmlPreview,
         });
+      if (structuredChat?.prompt)
+        this.logPromptSizes(session.id, structuredChat.prompt, footprintName);
       const instructions = structuredChat?.prompt
         ? [structuredChat.prompt.full, structuredChat.prompt.volatileContext]
             .filter(Boolean)
@@ -1309,6 +1313,19 @@ export class PortableProductService {
           ]
             .filter(Boolean)
             .join('\n\n');
+      // A person's own message carries what the crew remembers about it, for
+      // the model only; seeds, handoffs and task turns bring their own context.
+      const recall =
+        origin === 'direct-user' && config.retrieval?.mode !== 'off'
+          ? await this.store
+              .recallMemories({
+                gezelId: session.gezelId,
+                projectId: session.projectId,
+                text,
+                contextWindow: limits.contextSize,
+              })
+              .catch(() => null)
+          : null;
       const input = [
         { role: 'system' as const, content: instructions },
         ...(placement.standalone
@@ -1319,6 +1336,7 @@ export class PortableProductService {
         {
           role: 'user' as const,
           content: [
+            recall?.block,
             gameState,
             text,
             portableFileTurnContext(validated.fileTurnIntent, session.expectedDeliverable),
@@ -2258,6 +2276,24 @@ export class PortableProductService {
    * that turn ends, the task carries on as after any step turn rather than
    * waiting on a step nobody is driving.
    */
+  /**
+   * The phone's counterpart of the daemon's `prompt.compiled` record: there is
+   * no history log here, so a debug line names each distinct prompt's sizes once.
+   */
+  private logPromptSizes(sessionId: string, prompt: BuiltInstructions, footprint: string): void {
+    const shape = `${prompt.full.length}:${prompt.volatileContext?.length ?? 0}`;
+    if (this.loggedPromptShapes.get(sessionId) === shape) return;
+    this.loggedPromptShapes.delete(sessionId);
+    this.loggedPromptShapes.set(sessionId, shape);
+    if (this.loggedPromptShapes.size > 64) {
+      const oldest = this.loggedPromptShapes.keys().next().value;
+      if (oldest !== undefined) this.loggedPromptShapes.delete(oldest);
+    }
+    const total = prompt.sections.reduce((n, section) => n + section.tokens, 0);
+    const parts = prompt.sections.map((section) => `${section.name}=${section.tokens}`).join(' ');
+    log.debug(`prompt ${sessionId.slice(0, 8)} ~${total} tok (${footprint}): ${parts}`);
+  }
+
   private async continueTaskAfterAnswer(
     sessionId: string,
     ref: string,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
 import { ProjectTypeToolSchema } from './catalog.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
@@ -374,11 +375,11 @@ export const ChatSessionSchema = z.object({
           /** 'workspace' = an index-derived code hit (path:line + snippet)
            *  and 'library' = a shared-document hit — neither is a memory, so
            *  `day` is empty for both. */
-          scope: z.enum(['gezel', 'project', 'workspace', 'library']),
+          scope: z.enum(['gezel', 'project', 'user', 'workspace', 'library']),
           day: z.string(),
           score: z.number(),
           /** Memory kind; absent on hits recalled before kinds existed. */
-          kind: z.enum(['fact', 'decision', 'pref', 'status']).optional(),
+          kind: z.enum(MEMORY_KINDS).optional(),
         }),
       ),
     })

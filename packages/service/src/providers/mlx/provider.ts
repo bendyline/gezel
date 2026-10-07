@@ -36,7 +36,11 @@ import {
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
-import { leadingSystemMessages, standaloneTurnMessages } from '@bendyline/gezel/local-loop';
+import {
+  leadingSystemMessages,
+  standaloneTurnMessages,
+  toolSurfaceSize,
+} from '@bendyline/gezel/local-loop';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
@@ -129,6 +133,7 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
+  ToolSurfaceSize,
   WireTranscriptEntry,
 } from '../types.js';
 import {
@@ -861,6 +866,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   private readonly externalToolNames: Set<string>;
   private capturedCalls: ExternalToolCall[] = [];
+  private toolSurface: ToolSurfaceSize | undefined;
   /**
    * Session-scoped quarantine for the assisted MTP route. Once an emitted
    * Hermes call proves that decode-time required-field enforcement diverged,
@@ -921,6 +927,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   getWireTranscript(): WireTranscriptEntry[] | undefined {
     return mlxWireTranscript(this.messages);
+  }
+
+  getToolSurface(): ToolSurfaceSize | undefined {
+    return this.toolSurface;
   }
 
   get numCtx(): number {
@@ -1223,6 +1233,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       bridgeTools.length + externalAsChatCompletions.length > 0
         ? [...bridgeTools, ...externalAsChatCompletions]
         : undefined;
+    this.toolSurface = toolSurfaceSize(tools ?? []);
     // Names of tools the model actually sees this turn. This must be
     // derived from the advertised request surface, not the raw bridge
     // inventory: role filtering hides tools from builders, but the bridge

@@ -33,6 +33,7 @@ import { knowledgeEffectivenessScenarios } from './knowledge-effectiveness.ts';
 import { largePrReviewScenario } from './large-pr-review.ts';
 import { meesterEndToEndScenarios } from './meester-e2e.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
+import { memoryTutorFreshScenario, memoryTutorRememberedScenario } from './memory-tutor.ts';
 import {
   molenFootballStadiumScenario,
   molenSpaceNeedleScenario,
@@ -153,6 +154,8 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // Run warm-vs-cold via the ab-index bin (GEZEL_INDEX_ARM).
   [squisqBroadRefactorScenario.id]: squisqBroadRefactorScenario,
   [squisqCodebaseQaScenario.id]: squisqCodebaseQaScenario,
+  [memoryTutorFreshScenario.id]: memoryTutorFreshScenario,
+  [memoryTutorRememberedScenario.id]: memoryTutorRememberedScenario,
   [selfCorrectionScenario.id]: selfCorrectionScenario,
   [squisqReviewScenario.id]: squisqReviewScenario,
   [largePrReviewScenario.id]: largePrReviewScenario,

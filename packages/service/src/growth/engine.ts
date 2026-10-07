@@ -158,7 +158,7 @@ export class GrowthEngine {
 
   /** Gather live inputs and compute (un-ratcheted) signals. */
   private async computeLiveSignals(gezelId: string): Promise<GrowthSignals> {
-    const entries = await this.memory.allEntries('gezel', gezelId);
+    const entries = await this.memory.authoredEntries(gezelId);
     const memoryEntries = entries.map((e) => ({
       kind: isMemoryKind(e.kind) ? e.kind : ('fact' as const),
     }));

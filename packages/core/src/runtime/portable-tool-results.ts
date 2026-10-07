@@ -41,6 +41,7 @@ import {
   withLineNumbers,
   writeTaskNoteText,
 } from '../tools/results.js';
+import { isMemoryScope } from './memory-markdown.js';
 import type { PortableStore } from './store.js';
 
 type Value = Record<string, unknown>;
@@ -128,7 +129,7 @@ export async function portableToolResultText(
       return ok(
         saveMemoryText(
           value.status === 'duplicate' ? 'duplicate' : 'saved',
-          args.scope === 'project' ? 'project' : 'gezel',
+          isMemoryScope(args.scope as string) ? (args.scope as string) : 'gezel',
         ),
       );
     case 'read_task_notes': {

@@ -142,6 +142,7 @@ export * from './scripts/output.js';
 export * from './scripts/errors.js';
 export * from './scripts/redact.js';
 export * from './scripts/runs.js';
+export * from './scripts/memory.js';
 export * from './scripts/policy.js';
 
 export * from './preview/modules.js';

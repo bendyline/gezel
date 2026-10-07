@@ -33,6 +33,8 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
                       pictures, and recordings (rebuilt automatically —
                       safe to delete, not a place to put your own files)
   documents/          the shared library
+  memories/           what your gezels have learned about you ("About you"),
+                      shared by all of them
   ambient/            ambient dashboard images (dated PNGs + latest.png),
                       made to be shown as wallpaper or lock screen
   integrations/

@@ -48,11 +48,21 @@ describe('parseExtractedLine', () => {
     });
   });
 
-  it('routes kind-only tags: PREF → gezel, others → project', () => {
+  it('routes kind-only tags: PREF → user, CORRECTION/EXAMPLE → gezel, others → project', () => {
     expect(parseExtractedLine('PREF: Short commit messages.')).toEqual({
-      scope: 'gezel',
+      scope: 'user',
       kind: 'pref',
       text: 'Short commit messages.',
+    });
+    expect(parseExtractedLine('CORRECTION: "Estoy cansado", not "soy cansado".')).toEqual({
+      scope: 'gezel',
+      kind: 'correction',
+      text: '"Estoy cansado", not "soy cansado".',
+    });
+    expect(parseExtractedLine('USER/EXAMPLE: A two-line summary first worked well.')).toEqual({
+      scope: 'user',
+      kind: 'example',
+      text: 'A two-line summary first worked well.',
     });
     expect(parseExtractedLine('DECISION: Use Hono for routing.')).toEqual({
       scope: 'project',
@@ -85,15 +95,18 @@ describe('parseExtractedLine', () => {
 function recordingMemory(): {
   memory: MemoryManager;
   saves: Array<{ scope: string; id: string; text: string; kind: string | undefined }>;
+  sources: unknown[];
 } {
   const saves: Array<{ scope: string; id: string; text: string; kind: string | undefined }> = [];
+  const sources: unknown[] = [];
   const memory = {
-    save: async (scope: string, id: string, text: string, kind?: string) => {
+    save: async (scope: string, id: string, text: string, kind?: string, source?: unknown) => {
       saves.push({ scope, id, text, kind });
+      sources.push(source);
       return { status: 'saved' as const };
     },
   } as unknown as MemoryManager;
-  return { memory, saves };
+  return { memory, saves, sources };
 }
 
 const msg = (role: 'user' | 'assistant', content: string): ChatMessage => ({
@@ -108,17 +121,22 @@ const messages: ChatMessage[] = [
 ];
 
 describe('extractMemories routing', () => {
-  it('routes gezel lines to the gezel id only and project lines to the project id only', async () => {
-    const { memory, saves } = recordingMemory();
+  it('routes each scope to its own owner and records where every line came from', async () => {
+    const { memory, saves, sources } = recordingMemory();
     await extractMemories({
       messages,
       extractedUpTo: 0,
       oneShot: async () =>
-        'PROJECT/FACT: Deploy pipeline lives in scripts/deploy.sh.\nGEZEL/PREF: User prefers concise status updates.\n',
+        'PROJECT/FACT: Deploy pipeline lives in scripts/deploy.sh.\nGEZEL/PREF: User prefers concise status updates.\nUSER/FACT: The user lives in Utrecht.\n',
       memory,
       gezelId: 'ada',
       projectId: 'proj-1',
     });
+    expect(sources).toEqual([
+      { project: 'proj-1', gezel: 'ada' },
+      { project: 'proj-1', gezel: 'ada' },
+      { project: 'proj-1', gezel: 'ada' },
+    ]);
     expect(saves).toEqual([
       {
         scope: 'project',
@@ -132,6 +150,7 @@ describe('extractMemories routing', () => {
         text: 'User prefers concise status updates.',
         kind: 'pref',
       },
+      { scope: 'user', id: 'user', text: 'The user lives in Utrecht.', kind: 'fact' },
     ]);
   });
 

@@ -27,6 +27,7 @@ export type {
   ProviderSessionState,
   SendAndWaitOpts,
   ToolArgsDeltaMeta,
+  ToolSurfaceSize,
   TurnUsage,
 } from '@bendyline/gezel/local-loop';
 

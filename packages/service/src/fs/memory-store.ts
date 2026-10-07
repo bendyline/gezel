@@ -5,10 +5,14 @@ import {
   gezelMemoriesDir,
   projectMemoriesDir,
   projectMemoryIndexDir,
+  userMemoriesDir,
+  userMemoryIndexDir,
 } from '@bendyline/gezel/paths';
 import {
   DEFAULT_MEMORY_KIND,
   type MemoryKind,
+  type MemoryScope,
+  type MemorySource,
   formatMemoryBlock,
 } from '../memory/daily-markdown.js';
 import { writeFileAtomic } from './atomic.js';
@@ -28,35 +32,38 @@ export class MemoryStore {
     this.external = opts.external;
   }
 
-  private memoryBaseDir(scope: 'gezel' | 'project', id: string): string {
+  private memoryBaseDir(scope: MemoryScope, id: string): string {
+    // The person's own memories have one owner, so the id names nothing.
+    if (scope === 'user') return userMemoriesDir(this.home);
     return scope === 'gezel'
       ? gezelMemoriesDir(this.home, id, this.external)
       : projectMemoriesDir(this.home, id, this.external);
   }
 
-  private memoryDir(scope: 'gezel' | 'project', id: string): string {
+  private memoryDir(scope: MemoryScope, id: string): string {
     return join(this.memoryBaseDir(scope, id), 'daily');
   }
 
-  private todayFile(scope: 'gezel' | 'project', id: string): string {
+  private todayFile(scope: MemoryScope, id: string): string {
     const date = new Date().toISOString().slice(0, 10);
     return join(this.memoryDir(scope, id), `${date}.md`);
   }
 
   async appendMemory(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     text: string,
     kind: MemoryKind = DEFAULT_MEMORY_KIND,
+    source?: MemorySource,
   ): Promise<void> {
     const dir = this.memoryDir(scope, id);
     await mkdir(dir, { recursive: true });
     const file = this.todayFile(scope, id);
     const time = new Date().toISOString().slice(11, 16);
-    await appendFile(file, formatMemoryBlock(time, text, kind), 'utf8');
+    await appendFile(file, formatMemoryBlock(time, text, kind, source), 'utf8');
   }
 
-  async listMemoryDays(scope: 'gezel' | 'project', id: string): Promise<string[]> {
+  async listMemoryDays(scope: MemoryScope, id: string): Promise<string[]> {
     const dir = this.memoryDir(scope, id);
     try {
       const entries = await readdir(dir);
@@ -70,7 +77,7 @@ export class MemoryStore {
     }
   }
 
-  async readMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<string> {
+  async readMemoryDay(scope: MemoryScope, id: string, day: string): Promise<string> {
     try {
       return await readFile(join(this.memoryDir(scope, id), `${day}.md`), 'utf8');
     } catch {
@@ -78,7 +85,7 @@ export class MemoryStore {
     }
   }
 
-  async readRecentMemories(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
+  async readRecentMemories(scope: MemoryScope, id: string, days = 7): Promise<string> {
     const recent = (await this.listMemoryDays(scope, id)).slice(0, days);
     const parts: string[] = [];
     for (const day of recent) {
@@ -89,7 +96,7 @@ export class MemoryStore {
   }
 
   async writeMemoryDay(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     day: string,
     content: string,
@@ -99,12 +106,12 @@ export class MemoryStore {
     await writeFileAtomic(join(dir, `${day}.md`), content);
   }
 
-  async deleteMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<void> {
+  async deleteMemoryDay(scope: MemoryScope, id: string, day: string): Promise<void> {
     await rm(join(this.memoryDir(scope, id), `${day}.md`), { force: true });
   }
 
   async archiveMemoryDays(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     days: string[],
     runId: string,
@@ -117,7 +124,7 @@ export class MemoryStore {
     return archiveDir;
   }
 
-  memorySummaryPath(scope: 'gezel' | 'project', id: string): string {
+  memorySummaryPath(scope: MemoryScope, id: string): string {
     return join(this.memoryBaseDir(scope, id), 'summary.md');
   }
 
@@ -138,7 +145,7 @@ export class MemoryStore {
     await writeFileAtomic(this.memoryLessonsPath(gezelId), content);
   }
 
-  async readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<string> {
+  async readMemorySummary(scope: MemoryScope, id: string): Promise<string> {
     try {
       return await readFile(this.memorySummaryPath(scope, id), 'utf8');
     } catch {
@@ -146,7 +153,8 @@ export class MemoryStore {
     }
   }
 
-  memoryIndexDir(scope: 'gezel' | 'project', id: string): string {
+  memoryIndexDir(scope: MemoryScope, id: string): string {
+    if (scope === 'user') return userMemoryIndexDir(this.home);
     return scope === 'project'
       ? projectMemoryIndexDir(this.home, id)
       : join(this.memoryBaseDir(scope, id), 'index');

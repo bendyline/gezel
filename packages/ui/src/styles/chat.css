@@ -3409,6 +3409,16 @@ button.timeline-session-divider-child::before {
   padding: 0.5rem;
 }
 
+/* An editable memory file fills the preview pane instead of sizing to its text. */
+.memories-preview .project-memory-source-editor {
+  flex: 1;
+}
+
+.memories-preview .project-memory-source {
+  flex: 1;
+  resize: none;
+}
+
 .memories-preview-header {
   padding: 0 0.2rem 0.4rem 0.2rem;
   border-bottom: 1px solid var(--border);

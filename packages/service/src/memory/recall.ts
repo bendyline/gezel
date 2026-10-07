@@ -1,6 +1,11 @@
 import { type ChatSession, type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { ContentIndex } from '../index-store/content-index.js';
-import type { MemoryKind } from './daily-markdown.js';
+import {
+  type MemoryKind,
+  type MemoryScope,
+  USER_MEMORY_ID,
+  sameProjectMemoryScore,
+} from './daily-markdown.js';
 import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
@@ -14,7 +19,7 @@ export interface RecallHit {
    * scoped to the session's project: the library is the install's knowledge,
    * so a policy filed once should surface wherever the question is asked.
    */
-  scope: 'gezel' | 'project' | 'workspace' | 'library';
+  scope: MemoryScope | 'workspace' | 'library';
   day: string;
   /** EFFECTIVE score — post-decay; this is what ranking and filtering used. */
   score: number;
@@ -167,7 +172,8 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
   const memoryAvailable =
     typeof args.memory.hasIndex === 'function'
       ? args.memory.hasIndex('gezel', args.gezelId) ||
-        args.memory.hasIndex('project', args.projectId)
+        args.memory.hasIndex('project', args.projectId) ||
+        args.memory.hasIndex('user', USER_MEMORY_ID)
       : true;
   if (!memoryAvailable) {
     const codeAvailable = (await args.contentIndex?.hasIndex?.(args.projectId)) ?? false;
@@ -212,11 +218,15 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
   if (args.signal?.aborted) return null;
 
   const fetchK = Math.max(topK * 2, topK);
-  const [gezelResults, projectResults] = await Promise.all([
+  const [gezelResults, projectResults, userResults] = await Promise.all([
     args.memory.searchVector('gezel', args.gezelId, vector, fetchK).catch(() => []),
     args.memory.searchVector('project', args.projectId, vector, fetchK).catch(() => []),
+    args.memory.searchVector('user', USER_MEMORY_ID, vector, fetchK).catch(() => []),
   ]);
-  const results = [...gezelResults, ...projectResults];
+  const results = [...gezelResults, ...projectResults, ...userResults].map((r) => ({
+    ...r,
+    score: sameProjectMemoryScore(r.score, r.source, args.projectId),
+  }));
   if (args.signal?.aborted) return null;
 
   const ranked = results
@@ -235,7 +245,7 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     seen.add(r.text);
     hits.push({
       text: r.text,
-      scope: r.scope as 'gezel' | 'project',
+      scope: r.scope as MemoryScope,
       day: r.day,
       score: r.effective,
       ...(r.kind ? { kind: r.kind } : {}),

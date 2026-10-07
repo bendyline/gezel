@@ -296,11 +296,44 @@ describe('dispatcher: memory', () => {
     const save = vi.fn().mockResolvedValue({ status: 'saved' });
     const { dispatch } = makeDispatcher({ memory: { save } as unknown as MemoryManager });
     await dispatch(ctx(['memory.write']), 'memory.save', { text: 'x', meta: { kind: 'pref' } });
-    expect(save).toHaveBeenCalledWith('project', 'p1', 'x', 'pref');
+    expect(save).toHaveBeenCalledWith('project', 'p1', 'x', 'pref', undefined);
 
     save.mockClear();
     await dispatch(ctx(['memory.write']), 'memory.save', { text: 'y', meta: { kind: 'bogus' } });
-    expect(save).toHaveBeenCalledWith('project', 'p1', 'y', undefined);
+    expect(save).toHaveBeenCalledWith('project', 'p1', 'y', undefined, undefined);
+  });
+
+  it('memory.save writes a short, kinded entry to the gezel whose chat called it', async () => {
+    const save = vi.fn().mockResolvedValue({ status: 'saved' });
+    const { dispatch } = makeDispatcher({ memory: { save } as unknown as MemoryManager });
+    const run = { ...ctx(['memory.write']), gezelId: 'wren' };
+    await dispatch(run, 'memory.save', {
+      text: 'Said "soy cansado"; it is "estoy cansado".',
+      meta: { scope: 'gezel', kind: 'correction' },
+    });
+    expect(save).toHaveBeenCalledWith(
+      'gezel',
+      'wren',
+      'Said "soy cansado"; it is "estoy cansado".',
+      'correction',
+      { project: 'p1' },
+    );
+
+    await expect(
+      dispatch(run, 'memory.save', { text: 'x', meta: { scope: 'gezel' } }),
+    ).rejects.toThrow(/needs meta.kind/);
+    await expect(
+      dispatch(run, 'memory.save', {
+        text: 'x'.repeat(201),
+        meta: { scope: 'gezel', kind: 'fact' },
+      }),
+    ).rejects.toThrow(/at most 200 characters/);
+    await expect(
+      dispatch(ctx(['memory.write']), 'memory.save', {
+        text: 'x',
+        meta: { scope: 'gezel', kind: 'fact' },
+      }),
+    ).rejects.toThrow(/only when a gezel called the script/);
   });
 
   it('memory.search is denied without memory.read', async () => {

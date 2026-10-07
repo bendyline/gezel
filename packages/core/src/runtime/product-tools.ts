@@ -73,7 +73,12 @@ import { unionStepKit } from '../tools/step-kit.js';
 import { applyStepToolPolicy } from '../tools/step-policy.js';
 import { WorkspaceEditError } from '../workspace-edit-error.js';
 import { computeReplaceInFile, computeReplaceLines } from '../workspace-edits.js';
-import type { MemoryKind } from './memory-markdown.js';
+import {
+  type MemoryKind,
+  type MemoryScope,
+  USER_MEMORY_ID,
+  isMemoryScope,
+} from './memory-markdown.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
 import { taskActiveAssignee } from './tasks.js';
@@ -627,14 +632,16 @@ export async function executePortableTool(
       maxResults: Math.min(20, (args.maxResults as number | undefined) ?? 20),
     });
   if (name === 'save_memory' || name === 'search_memory') {
-    const scope = args.scope === 'project' ? 'project' : 'gezel';
-    const id = scope === 'project' ? session.projectId : session.gezelId;
+    const scope = isMemoryScope(args.scope as string) ? (args.scope as MemoryScope) : 'gezel';
+    const id =
+      scope === 'project' ? session.projectId : scope === 'user' ? USER_MEMORY_ID : session.gezelId;
     if (name === 'save_memory')
       return store.saveMemory({
         scope,
         id,
         text: String(args.text),
         ...(typeof args.kind === 'string' ? { kind: args.kind as MemoryKind } : {}),
+        source: { project: session.projectId, gezel: session.gezelId },
       });
     return store.searchMemories({
       gezelId: session.gezelId,

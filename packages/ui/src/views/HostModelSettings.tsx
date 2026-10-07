@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestBackupRestore } from '../components/BackupRestoreDialog.js';
+import { UserMemoriesEditor } from '../components/MemoriesTree.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import {
   clearPendingSettingsSection,
@@ -53,6 +54,7 @@ export function HostModelSettings() {
   const sections = [
     { id: 'models', label: 'Artificial Intelligence' },
     { id: 'general', label: 'General' },
+    ...(runtimeCapabilities().memories ? [{ id: 'aboutYou', label: 'About you' }] : []),
     ...(runtimeCapabilities().audio ? [{ id: 'audio', label: 'Audio' }] : []),
     ...(runtimeCapabilities().backups ? [{ id: 'backups', label: 'Backup and restore' }] : []),
     { id: 'about', label: 'About' },
@@ -80,6 +82,8 @@ export function HostModelSettings() {
       <div className="settings-panel" data-testid={`settings-section-${section}`}>
         {section === 'models' ? (
           window.__GEZEL__?.renderModelSettings?.()
+        ) : section === 'aboutYou' ? (
+          <UserMemoriesEditor />
         ) : section === 'audio' ? (
           <AudioEngineSettings />
         ) : section === 'about' ? (
@@ -154,6 +158,7 @@ function HostAbout() {
 
 function hostSection(section: string | null): string {
   if (section === 'general' || section === 'about') return section;
+  if (section === 'aboutYou' && runtimeCapabilities().memories) return section;
   if (section === 'audio' && runtimeCapabilities().audio) return section;
   if (section === 'backups' && runtimeCapabilities().backups) return section;
   return 'models';

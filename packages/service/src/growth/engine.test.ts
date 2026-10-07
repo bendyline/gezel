@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Task } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { MemoryManager } from '../memory/manager.js';
-import type { Task } from '@bendyline/gezel';
 import { GrowthEngine } from './engine.js';
 
 vi.mock('../memory/embeddings.js', () => {
@@ -128,6 +128,15 @@ describe('GrowthEngine.refresh', () => {
     for (const day of days) await store.deleteMemoryDay('gezel', 'sprout', day);
     const state = await engine().refresh('sprout', { allowKlerk: false });
     expect(state.signals.memoryXp).toBe(102);
+  });
+
+  it('credits a gezel for what it saved about the person, and no one else for it', async () => {
+    await store.appendMemory('user', 'user', 'Prefers metric units.', 'pref', { gezel: 'sprout' });
+    await store.appendMemory('user', 'user', 'Lives in Utrecht.', 'fact', {
+      gezel: 'someone-else',
+    });
+    const state = await engine().refresh('sprout', { allowKlerk: false });
+    expect(state.signals.memoryXp).toBe(6);
   });
 
   it('no-ops when growth is disabled', async () => {

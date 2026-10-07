@@ -59,7 +59,7 @@ export const GEZEL_TOOL_DESCRIPTIONS = {
   search:
     "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
   search_memory:
-    'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
+    "Search your memories, the project's, and what you know about the person you work for. Returns the most relevant remembered facts, decisions, and context.",
   save_memory:
     'Save an important fact, decision, preference, or context to memory so you can recall it later. Use this when you learn something worth remembering.',
   read_task_notes:

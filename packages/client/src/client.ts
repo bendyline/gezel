@@ -579,7 +579,13 @@ export interface GezelClientOptions {
   fetch?: typeof fetch;
 }
 
-export type MemoryKind = 'fact' | 'decision' | 'pref' | 'status';
+export type MemoryKind = 'fact' | 'decision' | 'pref' | 'status' | 'correction' | 'example';
+
+/** Whose memory: one gezel's, one project's, or the person's own ("About you"). */
+export type MemoryScope = 'gezel' | 'project' | 'user';
+
+/** The id that names the person's own memories in every scoped call. */
+export const USER_MEMORY_ID = 'user';
 
 export interface QuotaBucket {
   name: string;
@@ -5029,22 +5035,23 @@ export class GezelClient {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, body);
   }
 
-  // ── Memory (per-gezel + per-project daily files + summary) ──
+  // ── Memory (per-gezel, per-project and the person's own daily files) ──
 
   saveMemory(body: {
-    scope: 'gezel' | 'project';
+    scope: MemoryScope;
     id: string;
     text: string;
     kind?: MemoryKind;
+    source?: { project?: string; gezel?: string };
   }): Promise<{ ok: true; status: 'saved' | 'duplicate' }> {
     return this.request('POST', '/api/memory/save', body);
   }
 
-  listMemoryDays(scope: 'gezel' | 'project', id: string): Promise<{ days: string[] }> {
+  listMemoryDays(scope: MemoryScope, id: string): Promise<{ days: string[] }> {
     return this.request('GET', `/api/memory/days?scope=${scope}&id=${encodeURIComponent(id)}`);
   }
 
-  readMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<{ content: string }> {
+  readMemoryDay(scope: MemoryScope, id: string, day: string): Promise<{ content: string }> {
     return this.request(
       'GET',
       `/api/memory/day?scope=${scope}&id=${encodeURIComponent(id)}&day=${encodeURIComponent(day)}`,
@@ -5052,7 +5059,7 @@ export class GezelClient {
   }
 
   updateMemoryDay(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     day: string,
     content: string,
@@ -5064,12 +5071,19 @@ export class GezelClient {
     );
   }
 
-  readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<{ content: string }> {
+  readMemorySummary(scope: MemoryScope, id: string): Promise<{ content: string }> {
     return this.request('GET', `/api/memory/summary?scope=${scope}&id=${encodeURIComponent(id)}`);
   }
 
   readMemoryLessons(gezelId: string): Promise<{ content: string }> {
     return this.request('GET', `/api/memory/lessons?gezelId=${encodeURIComponent(gezelId)}`);
+  }
+
+  /** Replace a gezel's lessons. Lessons distillation keeps building on this text. */
+  writeMemoryLessons(gezelId: string, content: string): Promise<{ ok: true }> {
+    return this.request('PUT', `/api/memory/lessons?gezelId=${encodeURIComponent(gezelId)}`, {
+      content,
+    });
   }
 
   // ── App tools (tools a connected app runs itself) ──

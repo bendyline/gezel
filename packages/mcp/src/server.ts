@@ -87,6 +87,7 @@ import {
   NpmRegistryVersionSchema,
   type Outcome,
   ProviderNameSchema,
+  RETRIEVAL_SOURCES,
   type ReadWorkspaceFilesResponse,
   type StepDeliverable,
   StepGateUnionSchema,
@@ -981,6 +982,11 @@ server.tool(
   },
 );
 
+/** The id a memory scope is addressed by from this session. */
+function memoryScopeId(scope: 'gezel' | 'project' | 'user'): string {
+  return scope === 'gezel' ? gezelId : scope === 'project' ? projectId : 'user';
+}
+
 server.tool(
   'save_memory',
   GEZEL_TOOL_DESCRIPTIONS.save_memory,
@@ -995,9 +1001,10 @@ server.tool(
         },
         body: JSON.stringify({
           scope,
-          id: scope === 'gezel' ? gezelId : projectId,
+          id: memoryScopeId(scope),
           text: normalizeMarkdown(text),
           ...(kind ? { kind } : {}),
+          source: { project: projectId, gezel: gezelId },
         }),
       });
       if (!res.ok) {
@@ -1032,14 +1039,16 @@ server.tool(
 
 server.tool(
   'list_memories',
-  'List recent memory entries for the current agent or project.',
+  'List recent memory entries: yours, the project’s, or what you know about the person you work for.',
   {
-    scope: z.enum(['gezel', 'project']).describe('Which memory to list'),
+    scope: z
+      .enum(['gezel', 'project', 'user'])
+      .describe('Which memory to list: "gezel" (yours), "project", or "user" (about the person)'),
     days: z.number().int().positive().optional().describe('How many days back to look (default 7)'),
   },
   async ({ scope, days }) => {
     try {
-      const id = scope === 'gezel' ? gezelId : projectId;
+      const id = memoryScopeId(scope);
       const res = await fetchImpl(
         `${baseUrl}/api/memory/recent?scope=${scope}&id=${encodeURIComponent(id)}&days=${days ?? 7}`,
         { headers: { Authorization: `Bearer ${token}` } },
@@ -10923,9 +10932,7 @@ server.tool(
         'Search only these knowledge catalogs. Implies sources: ["knowledge"] unless sources is given.',
       ),
     sources: z
-      .array(
-        z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
-      )
+      .array(z.enum(RETRIEVAL_SOURCES))
       .optional()
       .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
     maxResults: z

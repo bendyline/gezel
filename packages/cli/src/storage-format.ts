@@ -213,6 +213,7 @@ export function formatBackupPlan(plan: BackupPlan): string {
     gezel: 'gezels',
     project: 'projects',
     'document-root': 'documents',
+    'memory-root': 'memories about you',
     'settings-file': 'settings files',
   };
   for (const [kind, bucket] of byKind) {

@@ -181,7 +181,7 @@ import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
 import { sanitizeSvg } from '../icon/sanitize.js';
-import type { MemoryKind } from '../memory/daily-markdown.js';
+import type { MemoryKind, MemoryScope, MemorySource } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
   type DiskProbeBudget,
@@ -6339,32 +6339,33 @@ export class Store {
     }
   }
 
-  // ---------- memories (agent + project) ----------
+  // ---------- memories (gezel, project, and the person's own) ----------
 
   async appendMemory(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     text: string,
     kind?: MemoryKind,
+    source?: MemorySource,
   ): Promise<void> {
-    await this.memories.appendMemory(scope, id, text, kind);
+    await this.memories.appendMemory(scope, id, text, kind, source);
   }
 
-  async listMemoryDays(scope: 'gezel' | 'project', id: string): Promise<string[]> {
+  async listMemoryDays(scope: MemoryScope, id: string): Promise<string[]> {
     return this.memories.listMemoryDays(scope, id);
   }
 
-  async readMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<string> {
+  async readMemoryDay(scope: MemoryScope, id: string, day: string): Promise<string> {
     return this.memories.readMemoryDay(scope, id, day);
   }
 
-  async readRecentMemories(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
+  async readRecentMemories(scope: MemoryScope, id: string, days = 7): Promise<string> {
     return this.memories.readRecentMemories(scope, id, days);
   }
 
   /** Replace one daily memory file wholesale (compaction output). */
   async writeMemoryDay(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     day: string,
     content: string,
@@ -6372,7 +6373,7 @@ export class Store {
     await this.memories.writeMemoryDay(scope, id, day, content);
   }
 
-  async deleteMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<void> {
+  async deleteMemoryDay(scope: MemoryScope, id: string, day: string): Promise<void> {
     await this.memories.deleteMemoryDay(scope, id, day);
   }
 
@@ -6383,7 +6384,7 @@ export class Store {
    * only). Returns the archive directory path.
    */
   async archiveMemoryDays(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     days: string[],
     runId: string,
@@ -6391,7 +6392,7 @@ export class Store {
     return this.memories.archiveMemoryDays(scope, id, days, runId);
   }
 
-  memorySummaryPath(scope: 'gezel' | 'project', id: string): string {
+  memorySummaryPath(scope: MemoryScope, id: string): string {
     return this.memories.memorySummaryPath(scope, id);
   }
 
@@ -6490,11 +6491,11 @@ export class Store {
    * anymore (compaction rewrites the daily corpus in place instead).
    * Kept so existing files on disk remain viewable.
    */
-  async readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<string> {
+  async readMemorySummary(scope: MemoryScope, id: string): Promise<string> {
     return this.memories.readMemorySummary(scope, id);
   }
 
-  memoryIndexDir(scope: 'gezel' | 'project', id: string): string {
+  memoryIndexDir(scope: MemoryScope, id: string): string {
     return this.memories.memoryIndexDir(scope, id);
   }
 

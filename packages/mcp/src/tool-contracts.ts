@@ -162,12 +162,12 @@ export const GitToolOutputSchema = ExecutionToolOutputSchema.extend({
 
 export const MemorySaveToolOutputSchema = ToolResultSummarySchema.extend({
   status: z.enum(['saved', 'duplicate']),
-  scope: z.enum(['gezel', 'project']),
+  scope: z.enum(['gezel', 'project', 'user']),
   indexed: z.boolean().optional(),
 });
 
 export const MemoryListToolOutputSchema = ToolResultSummarySchema.extend({
-  scope: z.enum(['gezel', 'project']),
+  scope: z.enum(['gezel', 'project', 'user']),
   days: z.number().int().positive(),
   content: z.string(),
 });

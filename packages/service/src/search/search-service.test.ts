@@ -45,6 +45,8 @@ function makeService(
     /** Vector-memory rows returned for every scope the fan-out asks about. */
     memoryHits?: Array<{ text: string; score: number; day: string }>;
     memorySearch?: MemoryManager['searchVector'];
+    /** Keyword-memory rows, returned per scope the fan-out asks about. */
+    termSearch?: MemoryManager['searchTerms'];
     searchImages?: ContentIndex['searchImages'];
   } = {},
 ) {
@@ -89,6 +91,7 @@ function makeService(
 
   const memory = {
     searchVector: opts.memorySearch ?? vi.fn(async () => opts.memoryHits ?? []),
+    searchTerms: opts.termSearch ?? vi.fn(async () => []),
   } as unknown as MemoryManager;
 
   const indexManager = {
@@ -590,7 +593,8 @@ describe('SearchService.searchProject', () => {
     expect(results.some((result) => result.projectId === 'p2')).toBe(false);
     expect(results.some((result) => result.kind === 'session')).toBe(false);
     expect(new Set(results.map((result) => result.retrievalSource))).toEqual(
-      new Set(['workspace', 'project-memory', 'gezel-memory', 'shared']),
+      // The person's own memories are every session's to read.
+      new Set(['workspace', 'project-memory', 'gezel-memory', 'user-memory', 'shared']),
     );
     expect(results.find((result) => result.id === 'overview:p1:::project')).toMatchObject({
       title: 'Driving Game overview',
@@ -642,6 +646,50 @@ describe('SearchService.searchProject', () => {
       'queryVector',
     );
     expect(results.map((result) => result.path)).toContain('src/physics.ts');
+  });
+
+  it('recalls memories by keyword while the embedder is cold, this project’s first', async () => {
+    const termSearch = vi.fn(async (scope: string, _id: string, _terms: readonly string[]) =>
+      scope === 'user'
+        ? [
+            {
+              text: 'Plays checkers on Sundays.',
+              score: 1,
+              day: '2026-10-01',
+              scope,
+              id: 'user',
+              kind: 'fact' as const,
+              source: { project: 'elsewhere' },
+            },
+            {
+              text: 'Likes checkers puzzles.',
+              score: 1,
+              day: '2026-10-02',
+              scope,
+              id: 'user',
+              kind: 'pref' as const,
+              source: { project: 'p1' },
+            },
+          ]
+        : [],
+    ) as unknown as MemoryManager['searchTerms'];
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Board games' }], termSearch });
+    embeddingStatusMock.mockReturnValue('cold');
+
+    const { results } = await svc.searchProject('what about checkers?', {
+      projectIds: ['p1'],
+      skipColdEmbedder: true,
+    });
+
+    expect(embedMock).not.toHaveBeenCalled();
+    expect((termSearch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).toEqual([
+      'checkers',
+    ]);
+    const memories = results.filter((result) => result.retrievalSource === 'user-memory');
+    expect(memories.map((result) => [result.snippet, result.arm])).toEqual([
+      ['Likes checkers puzzles.', 'fts'],
+      ['Plays checkers on Sundays.', 'fts'],
+    ]);
   });
 
   it('waits for the embedder when the caller did not opt out', async () => {

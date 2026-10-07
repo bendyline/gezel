@@ -19,10 +19,17 @@ import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
+import { queryTerms } from '../index-store/query-terms.js';
 import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
+import {
+  type MemoryScope,
+  USER_MEMORY_ID,
+  sameProjectMemoryScore,
+} from '../memory/daily-markdown.js';
 import { embedKnowledgeQuery, embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
 import { imageEmbedAvailability } from '../memory/image-embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
+import type { SearchResult as MemorySearchResult } from '../memory/vector-index.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import {
   type ActiveRelevance,
@@ -731,6 +738,33 @@ export class SearchService {
     // under-represent the corpus — distinct from caps/dedupe truncation.
     let sourcesIncomplete = false;
 
+    // One memory scope's hits: by meaning when the embedder answered, else by
+    // keyword over the daily files, so a cold or disabled embedder still
+    // recalls. Keyword hits rank like every other `fts` arm and stay subject
+    // to retrieval's grounding check; the current project's entries rank first.
+    const memoryTerms = vector ? [] : queryTerms(query);
+    const preferProject = scope?.primaryProjectId;
+    const memoryHits = async (
+      memoryScope: MemoryScope,
+      id: string,
+    ): Promise<Array<{ row: MemorySearchResult; arm: 'vector' | 'fts'; relevance: number }>> => {
+      if (vector) {
+        const rows = await this.memory.searchVector(memoryScope, id, vector, PER_MEMORY_RESULTS);
+        return rows
+          .filter((row) => row.score >= MEMORY_MIN_SIMILARITY)
+          .map((row) => ({
+            row,
+            arm: 'vector' as const,
+            relevance: sameProjectMemoryScore(row.score, row.source, preferProject),
+          }));
+      }
+      const rows = await this.memory.searchTerms(memoryScope, id, memoryTerms, PER_MEMORY_RESULTS);
+      return rows
+        .map((row) => ({ row, s: sameProjectMemoryScore(row.score, row.source, preferProject) }))
+        .sort((a, b) => b.s - a.s)
+        .map(({ row }, rank) => ({ row, arm: 'fts' as const, relevance: ftsRankRelevance(rank) }));
+    };
+
     // Per-arm timing/outcome telemetry. Every arm is caught-to-null below,
     // so without this a failing arm is indistinguishable from an empty one.
     const armTimings: RetrievalArmTiming[] = [];
@@ -835,13 +869,12 @@ export class SearchService {
                 () => this.contentIndex.searchAreaSummaries(p.id, query, perSource),
               )
             : Promise.resolve(null),
-          vector && wants('project-memory')
+          wants('project-memory')
             ? timed(
-                'project-memory',
+                vector ? 'project-memory' : 'project-memory:keyword',
                 p.id,
                 (r) => r?.length ?? 0,
-                () =>
-                  this.memory.searchVector('project', p.id, vector as number[], PER_MEMORY_RESULTS),
+                () => memoryHits('project', p.id),
               )
             : Promise.resolve(null),
           workspaceIndexing && wantMedia && wants('workspace')
@@ -975,8 +1008,7 @@ export class SearchService {
             ...scoreResult('file', h.score),
           });
         }
-        for (const r of mem ?? []) {
-          if (r.score < MEMORY_MIN_SIMILARITY) continue;
+        for (const { row: r, arm, relevance } of mem ?? []) {
           out.push({
             kind: 'memory',
             id: `memory:project:${p.id}:${r.day}:${hashText(r.text)}`,
@@ -986,43 +1018,68 @@ export class SearchService {
             projectId: p.id,
             projectName: p.name,
             retrievalSource: 'project-memory',
-            arm: 'vector',
-            ...scoreResult('memory', r.score),
+            arm,
+            ...scoreResult('memory', relevance),
           });
         }
         return out;
       },
     }));
 
-    // One pool unit per gezel: gezel memory (vector-only).
-    const perGezel =
-      vector && wants('gezel-memory')
-        ? gezels.map((g) => ({
-            label: `gezel:${g.id}`,
+    // One pool unit per gezel: gezel memory.
+    const perGezel = wants('gezel-memory')
+      ? gezels.map((g) => ({
+          label: `gezel:${g.id}`,
+          run: async () => {
+            const mem =
+              (await timed(
+                vector ? 'gezel-memory' : 'gezel-memory:keyword',
+                g.id,
+                (r) => r?.length ?? 0,
+                () => memoryHits('gezel', g.id),
+              )) ?? [];
+            return mem.map(({ row: r, arm, relevance }) => ({
+              kind: 'memory' as const,
+              id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
+              title: r.text.slice(0, 80),
+              subtitle: `Memory · ${g.name}`,
+              snippet: r.text,
+              retrievalSource: 'gezel-memory' as const,
+              arm,
+              ...scoreResult('memory', relevance),
+            }));
+          },
+        }))
+      : [];
+
+    // One pool unit for the person's own memories ("About you"), which every
+    // gezel reads.
+    const perUser = wants('user-memory')
+      ? [
+          {
+            label: 'user',
             run: async () => {
               const mem =
                 (await timed(
-                  'gezel-memory',
-                  g.id,
+                  vector ? 'user-memory' : 'user-memory:keyword',
+                  undefined,
                   (r) => r?.length ?? 0,
-                  () =>
-                    this.memory.searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS),
+                  () => memoryHits('user', USER_MEMORY_ID),
                 )) ?? [];
-              return mem
-                .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
-                .map((r) => ({
-                  kind: 'memory' as const,
-                  id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
-                  title: r.text.slice(0, 80),
-                  subtitle: `Memory · ${g.name}`,
-                  snippet: r.text,
-                  retrievalSource: 'gezel-memory' as const,
-                  arm: 'vector' as const,
-                  ...scoreResult('memory', r.score),
-                }));
+              return mem.map(({ row: r, arm, relevance }) => ({
+                kind: 'memory' as const,
+                id: `memory:user:${r.day}:${hashText(r.text)}`,
+                title: r.text.slice(0, 80),
+                subtitle: 'Memory · About you',
+                snippet: r.text,
+                retrievalSource: 'user-memory' as const,
+                arm,
+                ...scoreResult('memory', relevance),
+              }));
             },
-          }))
-        : [];
+          },
+        ]
+      : [];
 
     // Global collections (session transcripts + documents content) — one task
     // each, not per-project: the global index answers across all scopes in a
@@ -1128,7 +1185,7 @@ export class SearchService {
       });
     }
 
-    const tasks = [...perProject, ...perGezel, ...globalTasks];
+    const tasks = [...perProject, ...perGezel, ...perUser, ...globalTasks];
     const settled = await mapPool(tasks, FANOUT_CONCURRENCY, async (task) => {
       const res = await withTimeout(task.run(), PER_SCOPE_TIMEOUT_MS, null);
       if (res === null) {

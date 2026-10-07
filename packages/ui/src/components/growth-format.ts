@@ -31,6 +31,8 @@ export const MEMORY_KIND_LABELS: Record<string, string> = {
   decision: 'Decision',
   pref: 'Preference',
   status: 'Status',
+  correction: 'Correction',
+  example: 'Example',
 };
 
 export interface CounterTile {

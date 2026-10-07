@@ -18,10 +18,18 @@
  */
 export type StorageTier = 'work' | 'device';
 
-const WORK_ROOTS = new Set(['gezels', 'projects', 'documents', 'tasks', 'history.jsonl']);
+const WORK_ROOTS = new Set([
+  'gezels',
+  'projects',
+  'documents',
+  'memories',
+  'tasks',
+  'history.jsonl',
+]);
 
 const DERIVED_IN_WORK: readonly RegExp[] = [
   /^gezels\/[^/]+\/memories\/index(?:\/|$)/,
+  /^memories\/index(?:\/|$)/,
   /^projects\/[^/]+\/artifacts\/(?:shadow|tabular)(?:\/|$)/,
   /^projects\/[^/]+\/input-staging(?:\/|$)/,
   /^projects\/[^/]+\/digest-state\.json$/,

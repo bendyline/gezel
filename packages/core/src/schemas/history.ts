@@ -223,6 +223,11 @@ export const HistoryEventKindSchema = z.enum([
   'memory.auto-recalled',
   /** Per-turn indexed context injected on the user-message channel. */
   'retrieval.context-injected',
+  /**
+   * A session's system prompt, sized by section, logged once per distinct
+   * prompt. Sizes only; the text itself is kept only in debug mode.
+   */
+  'prompt.compiled',
   'memory.auto-summarized',
   'memory.compacted',
   'memory.lessons-updated',

@@ -37,10 +37,13 @@ import {
   gezelDir,
   gezelPaths,
   projectStorageDir,
+  userMemoriesDir,
 } from '@bendyline/gezel/paths';
 import * as yauzl from 'yauzl';
+import { writeFileAtomic } from '../fs/atomic.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
+import { mergeMemoryDay } from '../memory/daily-markdown.js';
 import type { StorageJobManager } from './job-manager.js';
 import { invalidateStorageSummary } from './summary.js';
 
@@ -190,8 +193,13 @@ export async function runRestore(
   // an existing item is replaced only when this request said so by name.
   for (const item of planned) {
     const target = targetPathFor(deps, item.kind, item.id);
+    // Documents and the person's memories merge into what is here, so an
+    // existing folder is never a conflict for them.
     const liveConflict =
-      item.kind !== 'document-root' && target !== null && (await pathExists(target));
+      item.kind !== 'document-root' &&
+      item.kind !== 'memory-root' &&
+      target !== null &&
+      (await pathExists(target));
     if (
       (item.conflict === 'exists' || liveConflict) &&
       chosen.get(`${item.kind}:${item.id}`) !== 'replace'
@@ -226,6 +234,8 @@ export async function runRestore(
       const staged = join(stage, ...backupEntryPrefix(item).split('/'));
       if (item.kind === 'document-root') {
         unwritten.push(...(await mergeDocuments(staged, target, backupDay(manifest))));
+      } else if (item.kind === 'memory-root') {
+        unwritten.push(...(await mergeMemories(staged, target)));
       } else {
         // A backup that carries none of a project's working files was made
         // without them; replacing the project must not delete the ones here.
@@ -273,6 +283,7 @@ function targetPathFor(
   if (kind === 'gezel') return gezelDir(deps.home, id, external);
   if (kind === 'project') return projectStorageDir(deps.home, id);
   if (kind === 'document-root') return gezelPaths(deps.home, external).documents;
+  if (kind === 'memory-root') return userMemoriesDir(deps.home);
   return null; // settings files are merged, not swapped wholesale
 }
 
@@ -452,6 +463,35 @@ async function mergeDocuments(staged: string, root: string, day: string): Promis
         `[restore] could not restore document ${rel}: ${err instanceof Error ? err.message : String(err)}`,
       );
       unwritten.push(rel);
+    }
+  }
+  return unwritten;
+}
+
+/**
+ * Add the backup's memories about the person to the ones here: a day this
+ * install lacks is copied, and a day it has gains each entry it was missing.
+ * Nothing here is removed or replaced. Returns the days that could not be
+ * written; the rest still land.
+ */
+async function mergeMemories(staged: string, root: string): Promise<string[]> {
+  const unwritten: string[] = [];
+  for (const rel of await stagedFiles(staged)) {
+    const destination = /^daily\/\d{4}-\d{2}-\d{2}\.md$/.test(rel) ? safeJoin(root, rel) : null;
+    if (!destination) continue;
+    try {
+      await mkdir(dirname(destination), { recursive: true });
+      const incoming = await readFile(join(staged, ...rel.split('/')), 'utf8');
+      const existing = await readFile(destination, 'utf8').catch(() => null);
+      await writeFileAtomic(
+        destination,
+        existing === null ? incoming : mergeMemoryDay(existing, incoming),
+      );
+    } catch (err) {
+      log.warn(
+        `[restore] could not restore memories for ${rel}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      unwritten.push(`memories/${rel}`);
     }
   }
   return unwritten;

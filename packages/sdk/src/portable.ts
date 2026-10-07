@@ -490,12 +490,15 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
      */
     search(query: string): Promise<unknown[]>;
     /**
-     * Save a memory to the project's store. Near-duplicate text is
-     * skipped automatically.
+     * Save a memory. Near-duplicate text is skipped automatically.
      * @param text - The fact to remember.
-     * @param meta - Optional metadata. A `kind` of `'fact'` |
-     *   `'decision'` | `'pref'` | `'status'` categorizes the memory;
-     *   other fields are ignored.
+     * @param meta - Optional metadata. A `kind` of `'fact'` | `'decision'` |
+     *   `'pref'` | `'status'` | `'correction'` | `'example'` categorizes the
+     *   memory. By default it goes to the project's store; `scope: 'gezel'`
+     *   saves it to the gezel whose chat called the script instead — how a
+     *   scored activity decides what its gezel remembers (a learner's mistake
+     *   as a `correction`, a strong answer as an `example`). Those entries need
+     *   a `kind` and at most 200 characters. Other fields are ignored.
      */
     save(text: string, meta?: Record<string, unknown>): Promise<void>;
   };

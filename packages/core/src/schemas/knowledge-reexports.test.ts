@@ -35,6 +35,9 @@ const TOOLCHAIN_ONLY = new Set([
   'sniffAssetType',
   'svgInertnessProblem',
   'ZIP_FIXED_MTIME',
+  // The keyword-search stopwords live in gezk only because it is the one
+  // package core, knowledge and the service can all import.
+  'QUERY_STOP_WORDS',
 ]);
 
 describe('core forwards the gezk format surface', () => {

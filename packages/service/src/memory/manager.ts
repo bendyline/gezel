@@ -2,7 +2,17 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
-import { DEFAULT_MEMORY_KIND, type MemoryKind, parseMemoryDay } from './daily-markdown.js';
+import { termMatchFraction } from '../index-store/query-terms.js';
+import {
+  DEFAULT_MEMORY_KIND,
+  type MemoryKind,
+  type MemoryScope,
+  type MemorySource,
+  USER_MEMORY_ID,
+  memoryEntrySource,
+  parseMemoryDay,
+  sameProjectMemoryScore,
+} from './daily-markdown.js';
 import {
   type EmbeddingPipelineStatus,
   embed,
@@ -90,12 +100,14 @@ export class MemoryManager {
    * monitor self-heals the derived index once embeddings recover.
    */
   async save(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     text: string,
     kind: MemoryKind = DEFAULT_MEMORY_KIND,
+    source?: MemorySource,
   ): Promise<SaveOutcome> {
     const trimmed = text.trim();
+    const kept = memoryEntrySource(scope, source);
 
     const exact = await this.findExactRecent(scope, id, trimmed);
     if (exact) {
@@ -108,7 +120,7 @@ export class MemoryManager {
     try {
       vector = await embed(trimmed);
     } catch (err) {
-      await this.store.appendMemory(scope, id, trimmed, kind);
+      await this.store.appendMemory(scope, id, trimmed, kind, kept);
       log.warn(
         `[memory] saved ${scope}/${id} to Markdown; semantic indexing deferred: ${describeError(err)}`,
       );
@@ -133,7 +145,7 @@ export class MemoryManager {
       return { status: 'duplicate', match: { text: top.text, score: top.score, via: 'vector' } };
     }
 
-    await this.store.appendMemory(scope, id, trimmed, kind);
+    await this.store.appendMemory(scope, id, trimmed, kind, kept);
     try {
       await addToIndex(
         indexDir,
@@ -144,6 +156,7 @@ export class MemoryManager {
           day: new Date().toISOString().slice(0, 10),
           at: new Date().toISOString(),
           kind,
+          ...(kept ? { source: kept } : {}),
         },
         vector,
       );
@@ -164,7 +177,7 @@ export class MemoryManager {
    * when embeddings are disabled and immune to index drift.
    */
   private async findExactRecent(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     trimmed: string,
   ): Promise<string | null> {
@@ -180,12 +193,7 @@ export class MemoryManager {
     return null;
   }
 
-  async search(
-    scope: 'gezel' | 'project',
-    id: string,
-    query: string,
-    topK = 10,
-  ): Promise<SearchResult[]> {
+  async search(scope: MemoryScope, id: string, query: string, topK = 10): Promise<SearchResult[]> {
     const indexDir = this.store.memoryIndexDir(scope, id);
     if (!this.hasIndex(scope, id)) return this.searchLexical(scope, id, query, topK);
     try {
@@ -204,7 +212,7 @@ export class MemoryManager {
    * memory scopes instead of paying one embed per scope.
    */
   async searchVector(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     vector: number[],
     topK = 10,
@@ -232,7 +240,7 @@ export class MemoryManager {
    * consults it BEFORE embedding so a fresh install's first message never
    * pays the embedder cold-start for a search that can't hit anything.
    */
-  hasIndex(scope: 'gezel' | 'project', id: string): boolean {
+  hasIndex(scope: MemoryScope, id: string): boolean {
     return existsSync(join(this.store.memoryIndexDir(scope, id), 'mem.db'));
   }
 
@@ -257,10 +265,18 @@ export class MemoryManager {
     query: string,
     topK = 10,
   ): Promise<MemorySearchOutcome> {
-    const gezelIndexed = this.hasIndex('gezel', gezelId);
-    const projectIndexed = this.hasIndex('project', projectId);
+    // A scope with no index and no memories has nothing to search, and must
+    // not turn a fully indexed search into a "hybrid" one.
+    const scopes: Array<[MemoryScope, string]> = [];
+    const indexed: boolean[] = [];
+    for (const [scope, id] of memoryScopesFor(gezelId, projectId)) {
+      const hasIndex = this.hasIndex(scope, id);
+      if (!hasIndex && (await this.store.listMemoryDays(scope, id)).length === 0) continue;
+      scopes.push([scope, id]);
+      indexed.push(hasIndex);
+    }
 
-    if (!gezelIndexed && !projectIndexed) {
+    if (!indexed.some(Boolean)) {
       return {
         results: await this.searchAllLexical(gezelId, projectId, query, topK),
         mode: 'lexical',
@@ -268,20 +284,19 @@ export class MemoryManager {
     }
 
     try {
-      // Embed ONCE for both scopes. The old path embedded the same query twice
-      // concurrently, doubling cold-start work and duplicate download failure.
+      // Embed ONCE for every scope. The old path embedded the same query once
+      // per scope concurrently, multiplying cold-start work and download failures.
       const vector = await embedQuery(query);
-      const [gezelResults, projectResults] = await Promise.all([
-        gezelIndexed
-          ? this.searchVector('gezel', gezelId, vector, topK)
-          : this.searchLexical('gezel', gezelId, query, topK),
-        projectIndexed
-          ? this.searchVector('project', projectId, vector, topK)
-          : this.searchLexical('project', projectId, query, topK),
-      ]);
+      const results = await Promise.all(
+        scopes.map(([scope, id], index) =>
+          indexed[index]
+            ? this.searchVector(scope, id, vector, topK)
+            : this.searchLexical(scope, id, query, topK),
+        ),
+      );
       return {
-        results: rankSearchResults([...gezelResults, ...projectResults], topK),
-        mode: gezelIndexed && projectIndexed ? 'semantic' : 'hybrid',
+        results: rankSearchResults(results.flat(), topK, projectId),
+        mode: indexed.every(Boolean) ? 'semantic' : 'hybrid',
       };
     } catch (error) {
       log.warn(
@@ -305,22 +320,47 @@ export class MemoryManager {
     query: string,
     topK: number,
   ): Promise<SearchResult[]> {
-    const [gezelResults, projectResults] = await Promise.all([
-      this.searchLexical('gezel', gezelId, query, topK),
-      this.searchLexical('project', projectId, query, topK),
-    ]);
-    return rankSearchResults([...gezelResults, ...projectResults], topK);
+    const results = await Promise.all(
+      memoryScopesFor(gezelId, projectId).map(([scope, id]) =>
+        this.searchLexical(scope, id, query, topK),
+      ),
+    );
+    return rankSearchResults(results.flat(), topK, projectId);
   }
 
   private async searchLexical(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     query: string,
     topK: number,
   ): Promise<SearchResult[]> {
+    return this.rankEntries(scope, id, topK, (text) => lexicalScore(query, text));
+  }
+
+  /**
+   * Keyword search over the daily files, scored by the share of `terms` an
+   * entry contains. Per-turn retrieval's memory arm when the embedder cannot
+   * answer: no index, no model, so a cold or disabled embedder still recalls.
+   */
+  async searchTerms(
+    scope: MemoryScope,
+    id: string,
+    terms: readonly string[],
+    topK: number,
+  ): Promise<SearchResult[]> {
+    if (terms.length === 0) return [];
+    return this.rankEntries(scope, id, topK, (text) => termMatchFraction(text, terms));
+  }
+
+  private async rankEntries(
+    scope: MemoryScope,
+    id: string,
+    topK: number,
+    score: (text: string) => number,
+  ): Promise<SearchResult[]> {
     const entries = await this.allEntries(scope, id);
     return entries
-      .map((entry) => ({ entry, score: lexicalScore(query, entry.text) }))
+      .map((entry) => ({ entry, score: score(entry.text) }))
       .filter((candidate) => candidate.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.at.localeCompare(a.entry.at))
       .slice(0, topK)
@@ -331,14 +371,15 @@ export class MemoryManager {
         scope: entry.scope,
         id: entry.id,
         kind: entry.kind ?? DEFAULT_MEMORY_KIND,
+        ...(entry.source ? { source: entry.source } : {}),
       }));
   }
 
-  async listDays(scope: 'gezel' | 'project', id: string): Promise<string[]> {
+  async listDays(scope: MemoryScope, id: string): Promise<string[]> {
     return this.store.listMemoryDays(scope, id);
   }
 
-  async readDay(scope: 'gezel' | 'project', id: string, day: string): Promise<string> {
+  async readDay(scope: MemoryScope, id: string, day: string): Promise<string> {
     return this.store.readMemoryDay(scope, id, day);
   }
 
@@ -348,7 +389,7 @@ export class MemoryManager {
    * save; the health monitor will rebuild the derived cache on its next sweep.
    */
   async replaceDay(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     day: string,
     content: string,
@@ -365,7 +406,7 @@ export class MemoryManager {
     }
   }
 
-  async getRecent(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
+  async getRecent(scope: MemoryScope, id: string, days = 7): Promise<string> {
     return this.store.readRecentMemories(scope, id, days);
   }
 
@@ -374,14 +415,14 @@ export class MemoryManager {
    * (which rewrites the daily corpus in place) and lessons.md. Kept so
    * users with an existing summary.md on disk can still view it.
    */
-  async readSummary(scope: 'gezel' | 'project', id: string): Promise<string> {
+  async readSummary(scope: MemoryScope, id: string): Promise<string> {
     return this.store.readMemorySummary(scope, id);
   }
 
   /**
    * Parse all daily files into MemoryEntry objects for reindexing.
    */
-  async allEntries(scope: 'gezel' | 'project', id: string): Promise<MemoryEntry[]> {
+  async allEntries(scope: MemoryScope, id: string): Promise<MemoryEntry[]> {
     const days = await this.store.listMemoryDays(scope, id);
     const entries: MemoryEntry[] = [];
     for (const day of days) {
@@ -394,13 +435,27 @@ export class MemoryManager {
           day,
           at: `${day}T${block.time}`,
           kind: block.kind,
+          ...(block.source ? { source: block.source } : {}),
         });
       }
     }
     return entries;
   }
 
-  async reindex(scope: 'gezel' | 'project', id: string): Promise<number> {
+  /**
+   * What one gezel wrote down: its own memories, plus the entries about the
+   * person it saved to the shared "About you" scope. Growth reads these, so a
+   * preference a gezel learned still counts toward it after moving there.
+   */
+  async authoredEntries(gezelId: string): Promise<MemoryEntry[]> {
+    const [own, person] = await Promise.all([
+      this.allEntries('gezel', gezelId),
+      this.allEntries('user', USER_MEMORY_ID),
+    ]);
+    return [...own, ...person.filter((entry) => entry.source?.gezel === gezelId)];
+  }
+
+  async reindex(scope: MemoryScope, id: string): Promise<number> {
     const entries = await this.allEntries(scope, id);
     const indexDir = this.store.memoryIndexDir(scope, id);
     await rebuildIndex(indexDir, entries);
@@ -409,8 +464,27 @@ export class MemoryManager {
   }
 }
 
-function rankSearchResults(results: SearchResult[], topK: number): SearchResult[] {
-  return results.sort((a, b) => b.score - a.score).slice(0, topK);
+/** Every memory a gezel in a project reads: its own, the project's, and the person's. */
+function memoryScopesFor(gezelId: string, projectId: string): Array<[MemoryScope, string]> {
+  return [
+    ['gezel', gezelId],
+    ['project', projectId],
+    ['user', USER_MEMORY_ID],
+  ];
+}
+
+function rankSearchResults(
+  results: SearchResult[],
+  topK: number,
+  projectId?: string,
+): SearchResult[] {
+  return results
+    .map((result) => ({
+      ...result,
+      score: sameProjectMemoryScore(result.score, result.source, projectId),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
 }
 
 function deferredIndexOutcome(): SaveOutcome {

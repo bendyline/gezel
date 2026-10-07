@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
-import { runLessonsDistillation } from './lessons.js';
+import { runLessonsDistillation, splitPinnedLessons } from './lessons.js';
 import { MemoryManager } from './manager.js';
 
 vi.mock('./embeddings.js', () => {
@@ -85,6 +85,26 @@ describe('runLessonsDistillation', () => {
     expect(content).toContain('single-file deliverables');
   });
 
+  it('keeps the person’s pinned lessons word for word through a rewrite', async () => {
+    await seedNotes();
+    await store.writeMemoryLessons(
+      'learner',
+      '## Pinned\n\n- Always answer in British English.\n\n## Habits\n\n- Old habit.\n',
+    );
+    let prompt = '';
+    await runLessonsDistillation(
+      args(async (p) => {
+        prompt = p;
+        return '- New habit.';
+      }),
+    );
+    expect(prompt).toContain('Pinned by the person');
+    expect(prompt).toContain('- Old habit.');
+    expect(await store.readMemoryLessons('learner')).toBe(
+      '## Pinned\n\n- Always answer in British English.\n\n- New habit.\n',
+    );
+  });
+
   it('rewrites (not appends) on subsequent runs and feeds the current doc back in', async () => {
     await seedNotes();
     await runLessonsDistillation(args(async () => '- First lesson.'));
@@ -160,5 +180,18 @@ describe('runLessonsDistillation', () => {
     expect(prompt).toContain('FORBIDDEN: project-specific facts');
     expect(prompt).toContain('completion status');
     expect(prompt).toContain('REWRITE the document from scratch');
+  });
+});
+
+describe('splitPinnedLessons', () => {
+  it('takes the pinned section out from its heading to the next one', () => {
+    expect(splitPinnedLessons('- a\n\n## pinned\n- b\n## Other\n- c')).toEqual({
+      pinned: '## pinned\n- b',
+      rest: '- a\n\n## Other\n- c',
+    });
+    expect(splitPinnedLessons('- only distilled')).toEqual({
+      pinned: '',
+      rest: '- only distilled',
+    });
   });
 });

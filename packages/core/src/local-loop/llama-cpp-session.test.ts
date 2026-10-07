@@ -2123,6 +2123,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     // The move was refused: the model answers with everything in reach again.
     expect(names(bodies[1]!)).toEqual(['get_board', 'make_move', 'new_game']);
     expect(bodies[1]!.tool_choice).toBeUndefined();
+    // The prompt record sizes the whole roster, not the one-tool narrowing.
+    expect(session.getToolSurface?.()).toMatchObject({ count: 3 });
+    expect(session.getToolSurface?.()?.tokens).toBeGreaterThan(0);
   });
 
   it('ends a task-step turn after advance succeeds and skips later calls in the batch', async () => {

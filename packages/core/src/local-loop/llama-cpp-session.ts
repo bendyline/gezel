@@ -121,6 +121,7 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   TerminalToolPolicy,
+  ToolSurfaceSize,
 } from './provider-contract.js';
 import { runOnLiveProvider } from './provider-disposal.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
@@ -147,7 +148,7 @@ import {
   terminalToolClosingText,
 } from './terminal-tool-policy.js';
 import { coerceToolCallArgs } from './tool-arg-schema-coercion.js';
-import { computeToolBudgetChars } from './tool-budget.js';
+import { computeToolBudgetChars, toolSurfaceSize } from './tool-budget.js';
 import { type ToolFailureLoop, ToolFailureTracker } from './tool-failure-tracker.js';
 import {
   isLlamaCppForcedToolChoiceError,
@@ -1580,6 +1581,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
    * the trace on the assistant message.
    */
   private lastTurnReasoning = '';
+  private toolSurface: ToolSurfaceSize | undefined;
   /**
    * Active in-turn handle the provider's stdout pipeline writes to
    * when it detects engine-level reasoning-budget transitions. Set on
@@ -1692,6 +1694,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       }
       this.messages.push({ role: m.role, content: m.content });
     }
+  }
+
+  getToolSurface(): ToolSurfaceSize | undefined {
+    return this.toolSurface;
   }
 
   capturedToolCalls(): ExternalToolCall[] {
@@ -2069,10 +2075,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       bridgeTools.length + externalAsChatCompletions.length > 0
         ? [...bridgeTools, ...externalAsChatCompletions]
         : undefined;
+    // Schemas are templated into the prompt by llama-server, so their JSON
+    // size is prompt tokens. Pairs with the system prompt's section sizes for
+    // full accounting.
+    this.toolSurface = toolSurfaceSize(tools ?? []);
     if (tools) {
-      // Wire-cost diagnostic: schemas are templated into the prompt by
-      // llama-server, so their JSON size is prompt tokens. Pairs with
-      // GEZEL_PROMPT_BREAKDOWN's text-section table for full accounting.
       log.debug(
         `wire tools=${tools.length} schemaChars=${tools.reduce((n, t) => n + JSON.stringify(t).length, 0)}`,
       );
