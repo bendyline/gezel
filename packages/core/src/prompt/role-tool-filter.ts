@@ -375,15 +375,15 @@ const GITHUB_REMOTE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * True when a role's default toolset groups contain neither
- * `workspace-fs-write` nor `code-execution` — i.e. the role is "pure
- * delegation": meant to coordinate other gezels rather than do work
+ * True when the role's contract is pure coordination: it is meant to
+ * route work to other gezels rather than produce the role's deliverable
  * itself. Today: Meester, Voorman, Planner.
  *
- * Note we check the *write* split, not read. Voorman gets
- * `workspace-fs-read` so they can investigate a bug before delegating
- * the fix; that doesn't make them a builder. The "do you build?"
- * marker is whether you can mutate the workspace.
+ * This must be an intent classification, not an inference from missing
+ * `workspace-fs-write` / `code-execution` groups. Curator and the media
+ * generators intentionally lack those groups too, but they are still
+ * executors: Curator produces photo-library proposals, while the media
+ * tools persist their own outputs.
  *
  * Used by the system-prompt builder to decide whether to inject the
  * "you route, you don't build" guardrail prose. Per-gezel toolset
@@ -393,9 +393,8 @@ const GITHUB_REMOTE_TOOLS: ReadonlySet<string> = new Set([
  * something's off" as good guidance.
  */
 export function isPureDelegationRole(role: string | undefined): boolean {
-  if (canonicalRoleKey(role) === 'conversationalist') return false;
-  const groups = roleToolsetGroups(role);
-  return !groups.includes('workspace-fs-write') && !groups.includes('code-execution');
+  const canonical = canonicalRoleKey(role);
+  return canonical !== null && DELEGATION_ORCHESTRATOR_ROLES.has(canonical);
 }
 
 /**

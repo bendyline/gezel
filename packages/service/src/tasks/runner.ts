@@ -443,6 +443,21 @@ export class TaskRunner {
   }
 
   /**
+   * True while the Night Shift gate holds this task: the shift is off, or a
+   * `onceADay` task already ran tonight. The stuck-step sweep consults this
+   * too. A self-looping daily task (the Meester's oversight review) sits
+   * active on its re-armed step until tomorrow by design, and re-driving it
+   * re-ran a finished night's review three times into a session whose pass
+   * was over (2026-10-08).
+   */
+  isHeldForNightShift(task: Task): boolean {
+    return (
+      task.nightShift?.enabled === true &&
+      (!this.isNightShiftActive() || !this.isNightShiftPending(task))
+    );
+  }
+
+  /**
    * Transfer an already-running dispatch to a fresh activation of the same
    * task step. Completion-gate self-loops driven by the active model turn do
    * not enqueue a replacement handoff—the current turn consumes the verdict
@@ -685,9 +700,7 @@ export class TaskRunner {
         // Meester's oversight task waits active all day, so charging it
         // paused it after the fourth daytime launch and asked the user for
         // help with a task that had never run.
-        const heldForNightShift =
-          task.nightShift?.enabled === true &&
-          (!this.isNightShiftActive() || !this.isNightShiftPending(task));
+        const heldForNightShift = this.isHeldForNightShift(task);
         if (opts.afterRestart && this.noteRestartResume && !heldForNightShift) {
           const { count, exhausted } = await this.noteRestartResume(
             proj.id,

@@ -189,13 +189,12 @@ export interface BuildInstructionsOptions {
   /**
    * Gezel's role from frontmatter (e.g. `'Meester'`, `'Voorman'`,
    * `'Developer'`). Drives the delegation-guardrail decision: roles
-   * whose tool groups exclude `workspace-fs-write`/`code-execution`
-   * (i.e. Meester, Voorman, Planner) get an explicit "don't try to
-   * write code or run shells — delegate" block prepended to the
-   * system prompt. Voorman is unusual — they have `workspace-fs-read`
-   * for diagnostic browsing but still don't *build*, so the
-   * orientation prose for "where work belongs" still treats them as
-   * a delegator.
+   * with an explicit coordination contract (Meester, Voorman, Planner)
+   * get a "don't try to write code or run shells — delegate" block
+   * prepended to the system prompt. Voorman is unusual — they have
+   * `workspace-fs-read` for diagnostic browsing but still don't *build*,
+   * so the orientation prose for "where work belongs" still treats them
+   * as a delegator.
    */
   role?: string;
   /**
@@ -729,14 +728,15 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     : '';
   const personBlock = renderPersonNotesBlock(opts.personNotes ?? []);
 
-  // Delegation guardrail. Roles whose tool groups don't include
-  // `workspace-fs-write`/`code-execution` (Meester, Voorman, Planner)
-  // get explicit prose telling them what they CAN'T do — otherwise the
-  // model reads its (still-rich) about.md and assumes it should
-  // build the thing the user asked for. The tool-denial layer
-  // (`--disallowedTools` for Claude CLI, MCP exclude env for
-  // gezel-mcp) is the hard guardrail; this prose is the soft one
-  // telling the model how to think when it hits a denial.
+  // Delegation guardrail. Explicit coordinator roles (Meester, Voorman,
+  // Planner) get prose telling them what they CAN'T do — otherwise the
+  // model reads its (still-rich) about.md and assumes it should build the
+  // thing the user asked for. Missing workspace/code tools alone are not
+  // enough to classify a role: Curator and media generators are executors
+  // whose output tools do not require generic workspace writes. The
+  // tool-denial layer (`--disallowedTools` for Claude CLI, MCP exclude env
+  // for gezel-mcp) is the hard guardrail; this prose is the soft one telling
+  // the model how to think when it hits a denial.
   //
   // Provider gate: we've only observed denial-spelunking on Claude
   // CLI so far (the model dives into `ToolSearch` looking for any

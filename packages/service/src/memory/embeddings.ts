@@ -21,6 +21,7 @@
 import { Worker } from 'node:worker_threads';
 import { type KnowledgeEmbeddingProfile, createLogger, sameVectorSpace } from '@bendyline/gezel';
 import type { ModelDownloadProgress } from '@bendyline/gezel-knowledge';
+import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
   PipelineLoadError,
@@ -129,6 +130,8 @@ let worker: Worker | null = null;
 // Flips false once we give up on the worker path (no built file, spawn error,
 // or a crash loop) and fall back to in-process inference for good.
 let workerUsable = true;
+/** Set by service shutdown: no new worker, request, or in-process load until reopened. */
+let closed = false;
 let crashCount = 0;
 let nextId = 1;
 const pending = new Map<number, Pending>();
@@ -143,7 +146,7 @@ function workerEntry(): string | null {
 }
 
 function ensureWorker(): Worker | null {
-  if (!workerUsable) return null;
+  if (closed || !workerUsable) return null;
   if (worker) return worker;
   const entry = workerEntry();
   if (!entry) {
@@ -301,8 +304,32 @@ function markDisabled(message: string, optionalPeerMissing = false): void {
   log.error('[memory] underlying error:', message);
 }
 
+const SHUTTING_DOWN = 'the service is shutting down';
+
+/**
+ * Close for service shutdown: refuse new work (it would start a worker, or
+ * load the model in-process, as the process exits), then terminate the worker
+ * once its in-flight work has finished, waiting at most `drainMs`.
+ */
+export async function shutdownEmbeddings(drainMs: number): Promise<void> {
+  closed = true;
+  const w = worker;
+  if (!w) return;
+  if (await retireModelWorker(w, () => pending.size === 0, drainMs)) {
+    if (worker === w) worker = null;
+    return;
+  }
+  log.warn('[memory] an embedding was still running at shutdown; leaving its worker to exit');
+}
+
+/** Reopen after shutdown — an embedded service can be started again in the same process. */
+export function openEmbeddings(): void {
+  closed = false;
+}
+
 /** Embed `texts`, preferring the worker and degrading to in-process. */
 async function embedMany(texts: string[]): Promise<number[][]> {
+  if (closed) throw new EmbeddingsUnavailableError(SHUTTING_DOWN);
   if (disabledByEnv()) throw new EmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
   const temporaryReason = currentUnavailableReason();
@@ -394,6 +421,7 @@ export async function embedKnowledgeQuery(
   } = {},
 ): Promise<number[]> {
   const { onDownloadProgress, localFilesOnly = false } = opts;
+  if (closed) throw new EmbeddingsUnavailableError(SHUTTING_DOWN);
   // The default daemon pipeline may fetch weights on a cold load.
   if (!localFilesOnly && sharesDaemonEmbedder(profile)) {
     const vector = await embedQuery(text);

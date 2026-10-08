@@ -112,7 +112,8 @@ existing environment variable so the value does not appear in command arguments:
 ```bash
 gezel secret list
 gezel secret set braveSearchApiKey --env BRAVE_SEARCH_API_KEY --use-for-search
-gezel secret set openaiApiKey --stdin < /path/to/private-key-file
+gezel secret set openaiApiKey --env OPENAI_API_KEY
+gezel secret set anthropicApiKey --env ANTHROPIC_API_KEY
 gezel secret remove openaiApiKey
 ```
 
@@ -124,6 +125,10 @@ printed. All three commands support `--json`, and honor `--home` / `--connect`.
 This covers the built-in provider credentials, including webhooks; it is not an
 arbitrary environment-variable store. Storage uses the same native keyring or
 encrypted fallback as the application.
+
+After saving an OpenAI or Anthropic key, run `gezel` and use `/model` to choose
+one of that provider's available models. The desktop app and CLI share the same
+daemon credential store, so a key saved in either interface is available to both.
 
 Search also requires the selected environment to allow external services.
 `gezel security external-services` shows that setting; append `on` or `off` to

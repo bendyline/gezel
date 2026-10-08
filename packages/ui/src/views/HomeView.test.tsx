@@ -543,17 +543,27 @@ describe('HomeView', () => {
     });
   });
 
-  it('skips the auto-probe when openai is selected without a key', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'openai',
-      hasOpenaiApiKey: false,
-    } as never);
+  it.each([
+    ['openai', { hasOpenaiApiKey: false }],
+    ['anthropic', { hasAnthropicApiKey: false }],
+  ] as const)('skips the auto-probe when %s is selected without a key', async (provider, key) => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider, ...key } as never);
     render(<HomeView />);
     await waitFor(() => {
       expect(api.getConfig).toHaveBeenCalled();
     });
     await new Promise((r) => setTimeout(r, 50));
     expect(api.testProvider).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['openai', { hasOpenaiApiKey: true }],
+    ['anthropic', { hasAnthropicApiKey: true }],
+  ] as const)('auto-probes %s when its API key is configured', async (provider, key) => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider, ...key } as never);
+    render(<HomeView />);
+
+    await waitFor(() => expect(api.testProvider).toHaveBeenCalledWith(provider));
   });
 
   it('does not render or poll the crew rail', async () => {

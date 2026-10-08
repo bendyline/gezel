@@ -17,6 +17,7 @@ import {
   formatSuspension,
   isSharedLibraryProject,
   isTaskWorkAllowed,
+  nightShiftDayKey,
   nowIso,
   onSuspension,
   parseTaskRef,
@@ -35,7 +36,6 @@ import {
   type TaskAssignee,
   type TaskCraftbookStep,
   resolveDistributionProfile,
-  resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 
@@ -50,17 +50,11 @@ import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
-import { registerAzureMonitorLogsAdapters } from './connectors/natives/azure-monitor-logs.js';
-import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
-import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
-import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
-import { registerGitHubReleasesAdapters } from './connectors/natives/github-releases.js';
-import { registerGitHubWikiAdapters } from './connectors/natives/github-wiki.js';
-import { registerInstagramAdapters } from './connectors/natives/instagram-media.js';
-import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js';
-import { registerXAdapters } from './connectors/natives/x-posts.js';
+import {
+  registerProductConnectorAdapters,
+  wireProductConnectorTaskPreparation,
+} from './connectors/product-wiring.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
-import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import {
@@ -79,8 +73,9 @@ import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
-import { startResponsivenessMonitor } from './perf/responsiveness.js';
+import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
+import { deferBootWork } from './boot-work.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
@@ -136,7 +131,6 @@ import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
-import { registerMailAdapters } from './mail/registry.js';
 import { mailCatalogEntries } from './mail/search-catalog.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
@@ -144,6 +138,7 @@ import { MemoryCompactor } from './memory/compaction.js';
 import { warmEmbeddings } from './memory/embeddings.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
+import { openModelWorkers, shutdownModelWorkers } from './model-workers.js';
 
 import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 
@@ -169,6 +164,7 @@ import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 import { MediaSearchManager, backgroundDownloadsAllowed } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
+import { ensureLlamaEngineStatus } from './providers/llama-cpp/build-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
 import type { LLMProvider } from './providers/types.js';
@@ -250,6 +246,9 @@ export async function startProductService(
 ): Promise<RunningService> {
   const home = opts.home ?? gezelHome();
   const embeddedInferenceOnly = opts.embeddedInferenceOnly === true;
+  // A previous service in this process (an embedded host restarting) closed
+  // the shared model workers on its way out.
+  openModelWorkers();
   // Sleep-aware clock, started before anything can arm a deadline. Every
   // long-running budget in the daemon — engine turns, one-shots, MCP tool
   // calls, engine idle eviction — is measured in awake time, and a budget
@@ -564,6 +563,7 @@ export async function startProductService(
   const bootConfig = await store.readConfig().catch(() => ({}) as GezelConfig);
   const debug = new DebugFlag(bootConfig.debugMode === true);
   perfDebug = debug;
+  syncPerfProfiling();
   if (debug.isEnabled()) {
     log.info('[debug] verbose diagnostics ON (GezelConfig.debugMode=true)');
   }
@@ -653,6 +653,9 @@ export async function startProductService(
   const recognition = new RecognitionManager({
     home,
     ...(bootConfig.defaultRecognitionModel ? { modelId: bootConfig.defaultRecognitionModel } : {}),
+    // Describing photos needs llama.cpp even where chat runs on MLX; fetch
+    // the pinned engine the same verified way the on-device chat path does.
+    ensureEngine: async () => ensureLlamaEngineStatus(engineBinaries, await store.readConfig()),
   });
 
   const appToolRelays = new AppToolRelayRegistry();
@@ -1880,10 +1883,14 @@ export async function startProductService(
     history,
     refreshStatic: (projectId) => workspaceIndex.refreshAndWait(projectId),
     ensureAudioVideo: () => mediaSearch.ensureAudio(),
-    // AI-shadow producers: availability is probed per call (cheap health
-    // checks; a missing vision/STT model degrades to null, and the shadow
-    // gate's attempt cap stops per-file retries).
+    // AI-shadow producers. Availability is checked once per batch: with no
+    // image-recognition or STT model set up, the files wait rather than spend
+    // their attempts, so they are described once a model is chosen. A failure
+    // on one file still counts against that file's attempt cap.
     shadowProducers: {
+      describeAvailable: () => recognition.isAvailable(),
+      transcribeAvailable: async () =>
+        (await (await stt.providerForModel()).health()).status === 'ok',
       describeImage: async (absPath) => {
         // HEIC and RAW reach the model as a temporary JPEG, released below.
         const raster = await toDecodableRaster(absPath, VISION_RASTER_FORMATS).catch(() => null);
@@ -2002,28 +2009,26 @@ export async function startProductService(
     await runProjectObservationNightly(observationDeps, projectId).catch((err) =>
       log.warn(`[observations] nightly maintenance failed for ${projectId}: ${String(err)}`),
     );
+    // Keyed to the night, not the clock: a night crossing midnight wrote
+    // photos-10-07 and codebase-10-08 for the same run (2026-10-08).
+    const now = opts.nightShiftNow?.() ?? new Date();
+    const night = nightShiftDayKey(now, nightShift.currentWindow());
     // Model-free, so it runs on any machine; writes nothing for a folder
     // without photos.
-    await writeNightlyPhotoReport(
-      { store, contentIndex },
-      projectId,
-      opts.nightShiftNow?.() ?? new Date(),
-    ).catch((err) => log.warn(`[index] photo report failed for ${projectId}: ${String(err)}`));
+    await writeNightlyPhotoReport({ store, contentIndex }, projectId, now, night).catch((err) =>
+      log.warn(`[index] photo report failed for ${projectId}: ${String(err)}`),
+    );
     // Albums the night's craftbook wrote link workspace photos; store the
     // copies now so they play and export in the morning.
     await storeAllAlbumPhotos(albumMediaDeps(store), projectId).catch((err) =>
       log.warn(`[index] storing album photos failed for ${projectId}: ${String(err)}`),
     );
-    await writeNightlyDocumentsReport(
-      { store, contentIndex },
-      projectId,
-      opts.nightShiftNow?.() ?? new Date(),
-    ).catch((err) => log.warn(`[index] documents report failed for ${projectId}: ${String(err)}`));
-    await writeNightlyCodebaseReport(
-      { store, contentIndex },
-      projectId,
-      opts.nightShiftNow?.() ?? new Date(),
-    ).catch((err) => log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`));
+    await writeNightlyDocumentsReport({ store, contentIndex }, projectId, now, night).catch((err) =>
+      log.warn(`[index] documents report failed for ${projectId}: ${String(err)}`),
+    );
+    await writeNightlyCodebaseReport({ store, contentIndex }, projectId, now, night).catch((err) =>
+      log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`),
+    );
   };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
     if (!nightShift.isActive()) return;
@@ -2090,15 +2095,7 @@ export async function startProductService(
   // all behind ONE idle/posture-gated sync loop over `project.connectors`.
   // Mail accounts are ordinary `mail-*` bindings — the legacy `project.mail`
   // stack (MailManager + its routes) was retired in the connector overhaul.
-  registerMailAdapters();
-  registerCalendarAdapters();
-  registerBlueskyAdapters();
-  registerXAdapters();
-  registerInstagramAdapters();
-  registerLinkedInAdapters();
-  registerGitHubReleasesAdapters();
-  registerGitHubWikiAdapters();
-  registerAzureMonitorLogsAdapters();
+  registerProductConnectorAdapters();
   // Sync passes, binding mutations, and action commits all read-modify-write
   // the same project state (project.json bindings, the corpus, the `_actions`
   // staging dirs), so the sync manager and the action manager share ONE lock —
@@ -2139,61 +2136,7 @@ export async function startProductService(
   // reviews local artifact files instead of needing live API tools mid-turn.
   // Registered here (rather than as a TaskManager dependency) so the task
   // layer stays free of the connector subsystem.
-  registerGitHubPullsAdapters({
-    prs: gitHubPrs,
-    project: async (projectId) => {
-      const project = await store.getProject(projectId);
-      if (!project) throw new Error(`project ${projectId} not found`);
-      return project;
-    },
-    // Degrades to the link's pinned branch rather than failing the launch
-    // when the checkout is missing or git is unreadable.
-    currentBranch: async (project) => (await git.status(project).catch(() => null))?.branch,
-  });
-  tasks.setConnectorPrepHook(
-    async ({ projectId, craftbookId, connectors: needs, params }) => {
-      const prep = await runConnectorTaskPrep(
-        {
-          getProject: (id) => store.getProject(id),
-          sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
-          allowConnectorData: async () =>
-            resolveSecurityPolicy(await store.readConfig()).allowConnectorData,
-          ensureBinding: async (project, need) => {
-            if (need.typeId !== 'github-pulls') return null;
-            if (!project.github?.url) return null;
-            return connectors.bind(project, {
-              type: 'github-pulls',
-              displayName: 'GitHub Pull Requests',
-              config: {},
-            });
-          },
-          ...(process.env.GEZEL_EVAL_REUSE_PREPARED_CONNECTOR_CORPORA === '1'
-            ? {
-                reusePreparedCorpus: async (project, need, preparedParams) => {
-                  const corpusScope = preparedParams.corpusScope
-                    ?.trim()
-                    .replace(/^artifacts\//, '')
-                    .replace(/\/+$/, '');
-                  if (!corpusScope) return null;
-                  const listing = await store.listProjectArtifactsRecursiveDetailed(project.id, {
-                    subpath: corpusScope,
-                  });
-                  const fileCount = listing.entries.filter((entry) => !entry.isDirectory).length;
-                  if (fileCount === 0) return null;
-                  return {
-                    params: { corpusScope },
-                    summary: `Reused ${fileCount}${listing.truncated ? '+' : ''} locally seeded ${need.typeId} record(s) from \`${corpusScope}/\` (eval fixture; no source sync).`,
-                  };
-                },
-              }
-            : {}),
-        },
-        { projectId, craftbookId, connectors: needs, params },
-      );
-      return { params: prep.params, ...(prep.note ? { note: prep.note } : {}) };
-    },
-    { autoPreparedTypes: ['github-pulls'] },
-  );
+  wireProductConnectorTaskPreparation({ store, connectors, tasks, git, gitHubPrs });
 
   // In-chat terminal: per-(project, workingDir) thread manager + its
   // own pub/sub bus. Separate from `chatEvents` because the chat
@@ -2817,25 +2760,40 @@ export async function startProductService(
   );
   idleSessionTimer.unref();
   const stopMemoryDiagnostics = startMemoryDiagnostics();
+  // Cancelled by stop(): deferred work that starts during shutdown can load a
+  // model worker that process.exit then aborts mid-load (see boot-work.ts).
+  const cancelBootWork: Array<() => void> = [];
   if (!embeddedInferenceOnly) {
-    setTimeout(() => {
-      chat.runIdleSummarizationSweep().catch(() => {
-        /* swallow */
-      });
-    }, 60_000).unref();
+    cancelBootWork.push(
+      deferBootWork(
+        60_000,
+        () => {
+          chat.runIdleSummarizationSweep().catch(() => {
+            /* swallow */
+          });
+        },
+        () => stopping,
+      ),
+    );
   }
   // Load the embedding pipeline before an interactive caller needs it. The
   // titlebar search fans out over content on every query, so without this
   // the model's one-time load lands on somebody's first keystroke. Deferred
   // so it never competes with boot or the first-run model download.
   if (!embeddedInferenceOnly) {
-    setTimeout(() => {
-      void warmEmbeddings().then((warmed) => {
-        if (warmed) log.debug('[memory] embedding pipeline warmed');
-      });
-      void relevance.bootWarm().catch(() => {});
-      void mediaSearch.bootWarm().catch(() => {});
-    }, 20_000).unref();
+    cancelBootWork.push(
+      deferBootWork(
+        20_000,
+        () => {
+          void warmEmbeddings().then((warmed) => {
+            if (warmed) log.debug('[memory] embedding pipeline warmed');
+          });
+          void relevance.bootWarm().catch(() => {});
+          void mediaSearch.bootWarm().catch(() => {});
+        },
+        () => stopping,
+      ),
+    );
   }
 
   if (embeddedInferenceOnly) log.info('[service] embedded inference ready');
@@ -2855,6 +2813,11 @@ export async function startProductService(
       : {}),
     async stop() {
       stopping = true;
+      for (const cancel of cancelBootWork) cancel();
+      // Model workers refuse new work from here and drain while the rest
+      // shuts down; each is terminated once idle, never mid-run, because
+      // process.exit tearing one down inside onnxruntime aborts the process.
+      const modelWorkersStopped = shutdownModelWorkers();
       const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
         observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
       log.info('[service] shutdown started');
@@ -2992,6 +2955,7 @@ export async function startProductService(
       // fire — same orphan pattern as the chat MlxProvider above.
       await shutdownStep('terminal sessions', () => terminals.shutdown().catch(() => {}));
       await shutdownStep('image renderer', () => renderer.stop());
+      await shutdownStep('model workers', () => modelWorkersStopped);
       await shutdownStep('runtime lock', () => runtimeLock.release());
       log.info('[service] shutdown complete');
     },

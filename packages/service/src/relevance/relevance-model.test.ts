@@ -136,3 +136,41 @@ describe('resolveRelevanceSetting', () => {
     expect(resolveRelevanceSetting(null, { GEZEL_RELEVANCE_MODEL: 'nope@1' }).enabled).toBe(false);
   });
 });
+
+describe('relevance scorer at service shutdown', () => {
+  it('refuses warm-ups and scoring once shut down, and reopens', async () => {
+    let calls = 0;
+    const counting: RelevanceBackend = {
+      warm: async () => {
+        calls++;
+      },
+      score: async (_model, _query, passages) => {
+        calls++;
+        return {
+          scores: passages.map(() => 0.5),
+          partial: false,
+          truncatedPassages: 0,
+          inferMs: 1,
+        };
+      },
+    };
+    const scorer = createRelevanceScorer(counting);
+    await scorer.shutdown(0);
+    // A warm-up during shutdown would start a worker as the process exits.
+    expect(await scorer.warm(MODEL)).toBe(false);
+    expect(
+      await scorer.score({
+        model: MODEL,
+        query: 'q',
+        passages: ['a'],
+        budgetMs: 1_000,
+        waitForLoad: true,
+      }),
+    ).toMatchObject({ status: 'unavailable', reason: 'the service is shutting down' });
+    expect(calls).toBe(0);
+    scorer.open();
+    expect(await scorer.warm(MODEL)).toBe(true);
+    expect(calls).toBe(1);
+    scorer.dispose();
+  });
+});

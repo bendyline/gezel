@@ -241,7 +241,11 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
-import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
+import {
+  sessionReboundToCurrentPass,
+  staleTaskStepRefusal,
+  taskStepMutationRejection,
+} from './task-step-authority.js';
 import {
   ActionToolOutputSchema,
   ExecutionToolOutputSchema,
@@ -374,10 +378,31 @@ let sessionStepCompleted = false;
 let sessionStepCompletion: 'automatic' | 'manual' | 'unknown' = 'unknown';
 let sessionStepCheckedArtifacts: string[] = [];
 
+async function reboundToCurrentPass(): Promise<boolean> {
+  if (!sessionId) return false;
+  try {
+    const parsed = await parseRef(sessionTaskRef);
+    const [task, session] = await Promise.all([
+      api.getTask(parsed.projectId, parsed.num),
+      api.getChatSession(sessionId),
+    ]);
+    return sessionReboundToCurrentPass({
+      sessionStepId,
+      activeStepId: task.activeStepId,
+      activeStepActivation: task.craftbook.steps.find((s) => s.id === task.activeStepId)
+        ?.lastActivatedAt,
+      sessionActivation: session.stepActivationId,
+    });
+  } catch {
+    return false;
+  }
+}
+
 async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
   sessionStepCompletion = 'unknown';
   sessionStepCheckedArtifacts = [];
+  if (sessionStepCompleted && (await reboundToCurrentPass())) sessionStepCompleted = false;
 
   let activeStepId: string | undefined;
   let activeStepOwnedBySession = false;

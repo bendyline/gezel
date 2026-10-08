@@ -913,6 +913,32 @@ describe('buildEnrichDeps enricher override', () => {
     expect(reviewMs).toBeGreaterThanOrEqual(180_000);
   });
 
+  it('defers, rather than charges, a summary that timed out still waiting behind other work', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const timeout = () =>
+      Object.assign(new Error('one-shot timed out after 365s'), { name: 'TimeoutError' });
+    const { chat, store, oneShotCompletion } = makeDepsFixture();
+    const outcomes: string[] = [];
+    const deps = await buildEnrichDeps(store, chat, { onOutcome: (o) => outcomes.push(o) });
+
+    // Queued behind a long task turn until the deadline: the model never saw it.
+    oneShotCompletion.mockImplementationOnce(async (_p, _ms, opts) => {
+      opts.onQueueWait({ aheadOf: 1 });
+      throw timeout();
+    });
+    expect(await deps.summarize('p')).toMatchObject({ text: '', deferred: true });
+
+    // Admitted and answering, then too slow: a real timeout, charged as before.
+    oneShotCompletion.mockImplementationOnce(async (_p, _ms, opts) => {
+      opts.onQueueWait({ aheadOf: 1 });
+      opts.onDelta('The file');
+      throw timeout();
+    });
+    expect(await deps.summarize('p')).toBe('');
+    expect(outcomes).toEqual(['unavailable', 'timeout']);
+  });
+
   it('omits the review completion when no local model is configured', async () => {
     delete process.env.GEZEL_ENRICH_MODEL;
     const chat = { oneShotCompletion: vi.fn() } as unknown as ChatManager;

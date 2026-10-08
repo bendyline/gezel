@@ -269,11 +269,11 @@ must not be committed.
 ## `run-gilde-build-index.mjs`
 
 Thin wrapper for the canonical index generator, which lives in the gilde
-repo (`tools/build-index.mjs`) so gilde CI can verify index freshness
-without any gezel dependency. Walks `data/` and `data/community/` in the
-gilde checkout and emits a single `index.json` per kind directory
-containing every resolved manifest. The runtime `BundledSource.list()`
-reads this file directly and skips the per-item folder walk.
+repo (`tools/build-index.mjs`) so gilde can build indexes without any gezel
+dependency. Walks `data/` and `data/community/` in the gilde checkout and
+emits a single `index.json` per kind directory containing every resolved
+manifest. The runtime `BundledSource.list()` reads this file directly and
+skips the per-item folder walk.
 
 Toolset entries get an auto-derived `category` via the keyword heuristic
 (vendored into gilde's `tools/lib/categorize.mjs`; the gezel copy is
@@ -291,8 +291,10 @@ pnpm --filter @bendyline/gezel-catalog build-index --kind=toolset
 ```
 
 Re-run after any direct edit to `data/**/manifest.json` in the gilde
-checkout or after an `import-mcp-registry` run. Gilde CI fails PRs whose
-committed indexes are stale (`node tools/build-index.mjs --check`).
+checkout or after an `import-mcp-registry` run when you need a source-linked
+catalog locally. Gilde's catalog-root indexes are Git-ignored build artifacts;
+`npm run build` produces them, and npm's `prepack` lifecycle regenerates them
+for every published tarball.
 
 ### Output
 

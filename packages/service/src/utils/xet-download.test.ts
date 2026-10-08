@@ -100,6 +100,9 @@ function segmentedXetFetch(opts: {
   failAt?: number;
   failTimes?: number;
   delayMs?: number;
+  /** Xorb index that answers only after `slowMs`, holding up the in-order writer. */
+  slowAt?: number;
+  slowMs?: number;
   concurrency?: { active: number; maxActive: number };
 }): typeof fetch {
   const segments = opts.parts.map((part) => noneChunk(part));
@@ -153,6 +156,9 @@ function segmentedXetFetch(opts: {
       }
       try {
         if (opts.delayMs) await new Promise((resolve) => setTimeout(resolve, opts.delayMs));
+        if (index === opts.slowAt && opts.slowMs) {
+          await new Promise((resolve) => setTimeout(resolve, opts.slowMs));
+        }
         if (index === opts.failAt && failures < budget) {
           failures++;
           return new Response(null, { status: 503 });
@@ -332,6 +338,29 @@ describe('downloadWithRetry — Xet path', () => {
 
     expect(result.kind).toBe('ok');
     expect(concurrency.maxActive).toBeGreaterThan(1);
+    expect(readFileSync(`${destPath}.partial`)).toEqual(Buffer.concat(parts));
+  });
+
+  // Bytes reach the file only in term order. With the first term slow, the
+  // bar read 0% while the rest of the file arrived (a 2 GB model, 2026-10-08).
+  it('moves progress with bytes received while the first term is still arriving', async () => {
+    const parts = [Buffer.alloc(4000, 1), Buffer.alloc(4000, 2), Buffer.alloc(4000, 3)];
+    const destPath = join(dir, 'slow-head.bin');
+
+    const { events, result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath,
+        approxSizeBytes: 12_000,
+        fetchImpl: segmentedXetFetch({ parts, requested: [], slowAt: 0, slowMs: 1_300 }),
+      }),
+    );
+
+    expect(result.kind).toBe('ok');
+    const written = events.flatMap((e) => (e.type === 'progress' ? [e.bytesWritten] : []));
+    expect(written.some((b) => b > 0 && b < 12_000)).toBe(true);
+    expect(written).toEqual([...written].sort((a, b) => a - b));
+    expect(written.at(-1)).toBe(12_000);
     expect(readFileSync(`${destPath}.partial`)).toEqual(Buffer.concat(parts));
   });
 

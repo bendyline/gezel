@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { readImageStaticMeta } from '../../index-store/image-meta.js';
+import { ChatModelInstallRegistry } from '../../models/install-registry.js';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
@@ -14,7 +15,12 @@ import {
   findRecognitionCatalogEntry,
 } from '../../providers/recognition/catalog.js';
 import { resolveAutoMode } from '../../providers/recognition/prompts.js';
+import type {
+  RecognitionPullEvent,
+  RecognitionPullSpec,
+} from '../../providers/recognition/types.js';
 import type { ServiceContext } from '../context.js';
+import { subscribeToInstallSse } from './install-sse.js';
 
 const log = createLogger('recognition');
 
@@ -138,33 +144,32 @@ export function recognitionRoutes(ctx: ServiceContext): Hono {
     return c.json({ models: await provider.listInstalledModels() });
   });
 
+  // One download per model, owned by the daemon rather than the request.
+  // Tied to the request, a second click (or a cancel and a fresh start) ran a
+  // second download into the same `.partial`; both appended to it, it failed
+  // its checksum, one deleted it, and the other died opening it (ENOENT).
+  const pulls = new ChatModelInstallRegistry<RecognitionPullEvent, RecognitionPullSpec>({
+    engine: 'recognition',
+    run: (id, spec) => pullThroughCurrent(id, spec),
+  });
+  async function* pullThroughCurrent(
+    id: string,
+    spec: RecognitionPullSpec,
+  ): AsyncIterable<RecognitionPullEvent> {
+    const provider = await ctx.recognition.current();
+    yield* provider.pullModel(id, spec);
+  }
+
   app.post('/models/:id/pull', async (c) => {
     const id = c.req.param('id');
     const entry = findRecognitionCatalogEntry(id);
     if (!entry) return c.json({ error: `unknown recognition model: ${id}` }, 404);
-    return streamSSE(c, async (stream) => {
-      try {
-        const provider = await ctx.recognition.current();
-        for await (const event of provider.pullModel(id, entry.spec)) {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-          if (event.type === 'done' || event.type === 'error') {
-            if (event.type === 'error') {
-              await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-            }
-            return;
-          }
-        }
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: 'error',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        });
-        await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-      }
-    });
+    pulls.start(id, entry.spec);
+    return streamSSE(c, (stream) => subscribeToInstallSse(pulls, id, stream));
   });
+
+  /** Cancel a download. Closing the page only detaches; the download keeps going. */
+  app.delete('/models/:id/pull', (c) => c.json({ cancelled: pulls.cancel(c.req.param('id')) }));
 
   app.delete('/models/:id', async (c) => {
     const id = c.req.param('id');

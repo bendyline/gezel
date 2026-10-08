@@ -144,19 +144,24 @@ export function AudioModelManager({
     [kind, refresh, onModelsChanged],
   );
 
-  const cancelPull = useCallback((id: string) => {
-    const pull = pullsRef.current.get(id);
-    if (pull?.error) {
-      // Already failed — abort is a no-op; this acts as Dismiss.
-      setPulls((prev) => {
-        const next = new Map(prev);
-        next.delete(id);
-        return next;
-      });
-      return;
-    }
-    pull?.controller.abort();
-  }, []);
+  const cancelPull = useCallback(
+    (id: string) => {
+      const pull = pullsRef.current.get(id);
+      if (pull?.error) {
+        // Already failed — abort is a no-op; this acts as Dismiss.
+        setPulls((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+        return;
+      }
+      // The download runs in the daemon; closing our stream only detaches.
+      void api.cancelAudioModelPull(kind, id).catch(() => undefined);
+      pull?.controller.abort();
+    },
+    [kind],
+  );
 
   const confirmDelete = useCallback(async () => {
     if (!toDelete) return;

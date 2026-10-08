@@ -171,16 +171,18 @@ export function HomeView({
       ? Boolean(config?.hasGithubToken)
       : provider === 'openai'
         ? Boolean(config?.hasOpenaiApiKey)
-        : // Ollama has no credential — the base URL is its "connection".
-          // Treat it as always configured; the probe tells us if the server
-          // is actually reachable.
-          true;
+        : provider === 'anthropic'
+          ? Boolean(config?.hasAnthropicApiKey)
+          : // Ollama has no credential — the base URL is its "connection".
+            // Treat it as always configured; the probe tells us if the server
+            // is actually reachable.
+            true;
 
   // Auto-probe once config loads — gives the user a green checkmark
   // without clicking. Copilot can authenticate via the SDK's own flow
   // (gh auth / device code) without a stored token. Ollama has no
-  // credential at all. Both can be probed immediately. OpenAI strictly
-  // needs an API key, so wait until one is saved.
+  // credential at all. Both can be probed immediately. OpenAI and Anthropic
+  // strictly need an API key, so wait until one is saved.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-probe only when the specific config fields change — not on every probe-state or derived-hasCreds tick.
   useEffect(() => {
     if (!config) return;
@@ -188,7 +190,13 @@ export function HomeView({
     if (provider === 'copilot' || provider === 'ollama' || hasCreds) {
       void runProbe(provider);
     }
-  }, [config?.provider, config?.hasGithubToken, config?.hasOpenaiApiKey, config?.ollamaBaseUrl]);
+  }, [
+    config?.provider,
+    config?.hasGithubToken,
+    config?.hasOpenaiApiKey,
+    config?.hasAnthropicApiKey,
+    config?.ollamaBaseUrl,
+  ]);
 
   // Retry timer for Ollama's cold-start window. Held in a ref so provider
   // changes / unmounts cancel it cleanly.

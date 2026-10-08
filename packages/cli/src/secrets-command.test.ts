@@ -94,6 +94,26 @@ describe('credential commands', () => {
       vi.unstubAllEnvs();
     }
   });
+  it.each([
+    ['openaiApiKey', 'GEZEL_TEST_OPENAI_KEY', 'sk-test-openai'],
+    ['anthropicApiKey', 'GEZEL_TEST_ANTHROPIC_KEY', 'sk-ant-test-anthropic'],
+  ])(
+    'stores the %s credential used by app and TUI provider selection',
+    async (name, env, value) => {
+      const { run, client, output } = fixture();
+      vi.stubEnv(env, value);
+      try {
+        await run('set', name, '--env', env, '--json');
+        expect(client.updateConfig).toHaveBeenCalledWith({ [name]: value });
+        expect(JSON.parse(output.mock.calls[0]?.[0] ?? '')).toEqual({
+          name,
+          configured: true,
+        });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
   it('clears through the write-only API and refuses arbitrary config keys before connecting', async () => {
     const { run, client, connect } = fixture();
     await expect(run('remove', 'deviceIdentity')).rejects.toThrow('Unknown credential');

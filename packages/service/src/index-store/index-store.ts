@@ -584,6 +584,14 @@ export class IndexStore {
    * or stale for the current content hash. Same capped-retry discipline as
    * {@link filesNeedingEnrichment}; an 'ok' row is the terminal success.
    */
+  /** Every indexed path holding this exact content: a file and its copies. */
+  pathsWithHash(contentHash: string): string[] {
+    return this.db
+      .prepare('SELECT path FROM files WHERE collection_id = ? AND hash = ? ORDER BY path')
+      .all<{ path: string }>(this.collectionId, contentHash)
+      .map((r) => r.path);
+  }
+
   filesNeedingAiShadow(limit = 5, maxAttempts = MAX_ENRICH_ATTEMPTS): FileRecord[] {
     return this.db
       .prepare(

@@ -17,6 +17,13 @@ export interface RecognitionManagerOptions {
   provider?: RecognitionProvider;
   cache?: RecognitionCache;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Start (or join) the llama.cpp engine download when no engine is known,
+   * and say how it is going. Chat only fetches llama.cpp for a llama.cpp chat
+   * model, so on a Mac chatting through MLX recognition was otherwise left
+   * with no engine at all outside a packaged build.
+   */
+  ensureEngine?: () => Promise<{ detail: string } | undefined>;
 }
 
 export class RecognitionManager {
@@ -26,6 +33,9 @@ export class RecognitionManager {
   private modelId?: string;
   private provider: RecognitionProvider | null;
   private building: Promise<RecognitionProvider> | null = null;
+  /** The engine path the current provider was built with. */
+  private builtWithEngine: string | undefined;
+  private readonly ensureEngine?: () => Promise<{ detail: string } | undefined>;
   /** In-flight recognitions keyed by cache key — see {@link recognize}. */
   private readonly inFlight = new Map<string, Promise<ImageRecognition>>();
 
@@ -35,11 +45,22 @@ export class RecognitionManager {
     this.provider = opts.provider ?? null;
     this.cache = opts.cache ?? new RecognitionCache({ home: opts.home });
     this.env = opts.env;
+    if (opts.ensureEngine) this.ensureEngine = opts.ensureEngine;
+  }
+
+  private engineBinary(): string | undefined {
+    return (this.env ?? process.env).GEZEL_LLAMA_SERVER_BIN;
   }
 
   async current(): Promise<RecognitionProvider> {
+    // The engine arrived after this provider was built (a background
+    // download finished and stamped its path): build again so it is used.
+    if (this.provider && this.builtWithEngine !== this.engineBinary()) {
+      await this.reset();
+    }
     if (this.provider) return this.provider;
     if (!this.building) {
+      this.builtWithEngine = this.engineBinary();
       this.building = createRecognitionProvider({
         home: this.home,
         ...(this.modelId ? { modelId: this.modelId } : {}),
@@ -67,7 +88,10 @@ export class RecognitionManager {
 
   async health(): Promise<RecognitionHealth> {
     const provider = await this.current();
-    return provider.health();
+    const health = await provider.health();
+    if (health.state !== 'not-configured' || !this.ensureEngine) return health;
+    const ensured = await this.ensureEngine().catch(() => undefined);
+    return ensured ? { ...health, detail: ensured.detail } : health;
   }
 
   /** Cheap enough to call on every turn — `health()` never spawns the engine. */

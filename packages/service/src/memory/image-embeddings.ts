@@ -15,6 +15,7 @@
 
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { PipelineLoadError } from './embed-core.js';
 import { type FaceDetectOutcome, type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
@@ -151,6 +152,8 @@ interface WorkerReply {
 
 let worker: Worker | null = null;
 let workerUsable = true;
+/** Set by service shutdown: no new worker or request until reopened. */
+let closed = false;
 const allowTestFallback = Boolean(process.env.VITEST);
 let workerFailureReason: string | null = null;
 let crashCount = 0;
@@ -163,7 +166,7 @@ function workerEntry(): string | null {
 }
 
 function ensureWorker(): Worker | null {
-  if (!workerUsable) return null;
+  if (closed || !workerUsable) return null;
   if (worker) return worker;
   const entry = workerEntry();
   if (!entry) {
@@ -248,6 +251,29 @@ function onWorkerDown(reason: string): void {
   }
 }
 
+const SHUTTING_DOWN = 'the service is shutting down';
+
+/**
+ * Close for service shutdown: refuse new work, then terminate the worker once
+ * its in-flight work has finished, waiting at most `drainMs` (see
+ * retire-model-worker.ts for why it must never be torn down mid-run).
+ */
+export async function shutdownImageEmbeddings(drainMs: number): Promise<void> {
+  closed = true;
+  const w = worker;
+  if (!w) return;
+  if (await retireModelWorker(w, () => pending.size === 0, drainMs)) {
+    if (worker === w) worker = null;
+    return;
+  }
+  log.warn('[memory] an image analysis was still running at shutdown; leaving its worker to exit');
+}
+
+/** Reopen after shutdown — an embedded service can be started again in the same process. */
+export function openImageEmbeddings(): void {
+  closed = false;
+}
+
 function sendToWorker(w: Worker, images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   const id = nextId++;
   return new Promise<AnyOutcomes>((resolve, reject) => {
@@ -270,6 +296,7 @@ function sendMediaToWorker(w: Worker, media: MediaEmbedJob[]): Promise<MediaEmbe
  */
 export async function embedMediaFiles(media: MediaEmbedJob[]): Promise<MediaEmbedOutcome[]> {
   if (media.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
   const availability = audioVideoEmbedAvailability();
   if (!availability.ok) {
     throw new ImageEmbeddingsUnavailableError(availability.reason ?? 'unavailable');
@@ -388,6 +415,7 @@ function describe(err: unknown): string {
  */
 export async function embedImageFiles(images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   if (images.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
   if (disabledByEnv()) throw new ImageEmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new ImageEmbeddingsDisabledError(disabledReason);
   if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
@@ -425,6 +453,7 @@ export async function detectFaces(
   models: FaceModelPaths,
 ): Promise<FaceDetectOutcome[]> {
   if (images.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
   if (faceDisabledReason) throw new ImageEmbeddingsDisabledError(faceDisabledReason);
   if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
   const temporaryReason = currentFaceUnavailableReason();

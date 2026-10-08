@@ -44,7 +44,7 @@ export interface SchedulerOptions {
    * stuck-step sweep asks it whether a step's handoff is already queued or in
    * flight before treating the step as stalled.
    */
-  runner?: () => Pick<TaskRunner, 'hasHandoffFor'> | undefined;
+  runner?: () => Pick<TaskRunner, 'hasHandoffFor' | 'isHeldForNightShift'> | undefined;
   intervalMs?: number;
   /** Clock override for tests. */
   now?: () => Date;
@@ -145,7 +145,9 @@ export class TaskScheduler {
   private readonly manager: TaskManager;
   private readonly chat?: ChatManager;
   private readonly store?: Store;
-  private readonly runner?: () => Pick<TaskRunner, 'hasHandoffFor'> | undefined;
+  private readonly runner?: () =>
+    | Pick<TaskRunner, 'hasHandoffFor' | 'isHeldForNightShift'>
+    | undefined;
   private readonly intervalMs: number;
   private readonly now: () => Date;
   private readonly debug?: { isEnabled(): boolean };
@@ -154,6 +156,8 @@ export class TaskScheduler {
   private readonly activity?: ActivityTracker;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** Tasks whose question hold was already logged; cleared once answered. */
+  private readonly questionHoldLogged = new Set<string>();
   /** Serialize background and user-requested cron passes to prevent double ticks. */
   private cronTickQueue: Promise<void> = Promise.resolve();
 
@@ -321,6 +325,10 @@ export class TaskScheduler {
     // `messageGezel` opens the step session directly — so a one-slot local
     // engine got five fanout children at once, and the sweep's own dispatch
     // then made the real barrier release look like a duplicate handoff.
+    // A night-shift task waits for the shift, and a once-a-day one that ran
+    // tonight waits for tomorrow. Its step stays active meanwhile, and that is
+    // not a stall.
+    if (this.runner?.()?.isHeldForNightShift(task)) return;
     if (this.runner?.()?.hasHandoffFor(task.ref, step.id)) {
       log.debug(
         `[scheduler] ${task.ref} step "${step.id}": skip re-drive — a handoff for this step is already queued or in flight`,
@@ -383,11 +391,13 @@ export class TaskScheduler {
         (q.taskRef ? q.taskRef === task.ref : q.gezelId === assignee),
     ).length;
     if (unanswered > 0) {
-      log.info(
-        `[scheduler] ${task.ref}: skip re-drive — ${unanswered} unanswered user question(s) pending`,
-      );
+      const line = `[scheduler] ${task.ref}: skip re-drive — ${unanswered} unanswered user question(s) pending`;
+      if (this.questionHoldLogged.has(task.ref)) log.debug(line);
+      else log.info(line);
+      this.questionHoldLogged.add(task.ref);
       return;
     }
+    this.questionHoldLogged.delete(task.ref);
 
     // Staleness: the latest of step activation, our own last re-drive, and
     // the assignee's most-recent session activity on THIS task. Keying on

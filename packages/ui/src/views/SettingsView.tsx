@@ -718,6 +718,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ provider });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus('saved — open chats restart on their next message.');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1019,6 +1020,7 @@ function DaemonSettingsView() {
         ...(openaiOrgDraft.trim() ? { openaiOrganization: openaiOrgDraft.trim() } : {}),
       });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setOpenaiKeyDraft('');
       setStatus('saved — any open chat threads have been reset');
     } catch (err) {
@@ -1031,6 +1033,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ openaiApiKey: '' });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setOpenaiKeyDraft('');
       setStatus('OpenAI key cleared');
     } catch (err) {
@@ -1044,6 +1047,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ anthropicApiKey: anthropicKeyDraft.trim() });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setAnthropicKeyDraft('');
       setStatus('saved — any open chat threads have been reset');
     } catch (err) {
@@ -1056,6 +1060,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ anthropicApiKey: '' });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setAnthropicKeyDraft('');
       setStatus('Anthropic key cleared');
     } catch (err) {
@@ -1450,20 +1455,11 @@ function DaemonSettingsView() {
     nightShiftProvider === 'copilot' ||
     copilotAvailability?.available !== false;
 
-  // The API-key OpenAI and Anthropic surfaces are untested and stay hidden for
-  // now; their CLI counterparts (codex-cli, anthropic-cli) are unaffected and
-  // remain on offer. Same escape hatch as ds4/Copilot above: an already-chosen
-  // provider — or one that already has a key on file — keeps its tab and pill
-  // so a configured user is never stranded without a way to change it.
-  const showOpenaiProvider =
-    provider === 'openai' || nightShiftProvider === 'openai' || hasOpenaiKey;
   // Apple's own on-device model needs no download, only an Apple silicon Mac
   // with the helper installed; a chosen provider stays on offer regardless.
   const showAppleProvider =
     provider === 'apple-foundation-models' ||
     config?.appleFoundationModelsStatus?.installed === true;
-  const showAnthropicProvider =
-    provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
   // Super Lockdown — and any custom posture with external chat switched off —
   // refuses to build a non-local provider at all: `ChatManager.ensureProvider`
@@ -1563,9 +1559,9 @@ function DaemonSettingsView() {
         ]
       : []),
     ...(showCopilotProvider ? [{ id: 'copilot' as const, label: 'GitHub Copilot' }] : []),
-    ...(showOpenaiProvider ? [{ id: 'openai' as const, label: 'OpenAI' }] : []),
+    { id: 'openai', label: 'OpenAI' },
     { id: 'codex-cli', label: 'OpenAI Codex CLI' },
-    ...(showAnthropicProvider ? [{ id: 'anthropic' as const, label: 'Anthropic Claude' }] : []),
+    { id: 'anthropic', label: 'Anthropic Claude' },
     { id: 'anthropic-cli', label: 'Anthropic Claude CLI' },
     { id: 'ollama', label: 'Ollama' },
   ];
@@ -1579,8 +1575,6 @@ function DaemonSettingsView() {
       // matter on Windows, where ds4 has no native build but remains usable
       // through an external server.
       if (s.id === 'ds4' && !showDs4Provider) return false;
-      if (s.id === 'openai' && !showOpenaiProvider) return false;
-      if (s.id === 'anthropic' && !showAnthropicProvider) return false;
       // A posture with external chat off can't run these at all, so their
       // setup tabs are dead ends — sign-in flows and CLI permission modes for
       // a provider the daemon refuses to construct. The greyed pill on the
@@ -1598,8 +1592,6 @@ function DaemonSettingsView() {
     uiPlatform,
     isDarwin,
     showDs4Provider,
-    showOpenaiProvider,
-    showAnthropicProvider,
     externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
@@ -2524,18 +2516,12 @@ function DaemonSettingsView() {
                                   Copilot{hasGithubToken ? ' ✓' : ''}
                                 </Select.Item>
                               )}
-                              {(showAnthropicProvider ||
-                                config?.keurmeester?.providerName === 'anthropic') && (
-                                <Select.Item value="anthropic">
-                                  Anthropic{hasAnthropicKey ? ' ✓' : ''}
-                                </Select.Item>
-                              )}
-                              {(showOpenaiProvider ||
-                                config?.keurmeester?.providerName === 'openai') && (
-                                <Select.Item value="openai">
-                                  OpenAI{hasOpenaiKey ? ' ✓' : ''}
-                                </Select.Item>
-                              )}
+                              <Select.Item value="anthropic">
+                                Anthropic{hasAnthropicKey ? ' ✓' : ''}
+                              </Select.Item>
+                              <Select.Item value="openai">
+                                OpenAI{hasOpenaiKey ? ' ✓' : ''}
+                              </Select.Item>
                               <Select.Item value="anthropic-cli">Anthropic CLI</Select.Item>
                               <Select.Item value="codex-cli">Codex CLI</Select.Item>
                             </Select.Content>
@@ -2748,17 +2734,15 @@ function DaemonSettingsView() {
                       GitHub Copilot
                     </button>
                   )}
-                  {showOpenaiProvider && (
-                    <button
-                      type="button"
-                      className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
-                      onClick={() => void setProvider('openai')}
-                      disabled={providerBlocked('openai')}
-                      title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
-                    >
-                      OpenAI
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('openai')}
+                    disabled={providerBlocked('openai')}
+                    title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
+                  >
+                    OpenAI
+                  </button>
                   <button
                     type="button"
                     className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
@@ -2772,19 +2756,17 @@ function DaemonSettingsView() {
                   >
                     OpenAI Codex CLI
                   </button>
-                  {showAnthropicProvider && (
-                    <button
-                      type="button"
-                      className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
-                      onClick={() => void setProvider('anthropic')}
-                      disabled={providerBlocked('anthropic')}
-                      title={
-                        providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
-                      }
-                    >
-                      Anthropic Claude
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('anthropic')}
+                    disabled={providerBlocked('anthropic')}
+                    title={
+                      providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
+                    }
+                  >
+                    Anthropic Claude
+                  </button>
                   <button
                     type="button"
                     className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
@@ -3445,7 +3427,7 @@ function DaemonSettingsView() {
                     >
                       platform.openai.com/api-keys
                     </a>{' '}
-                    and create a secret key with All Permissions.
+                    and create a secret key with access to the models you want to use.
                   </li>
                   <li>Paste it below. Organization ID is optional.</li>
                 </ol>
@@ -3707,12 +3689,12 @@ function DaemonSettingsView() {
                 <li>
                   Go to{' '}
                   <a
-                    href="https://console.anthropic.com/settings/keys"
+                    href="https://platform.claude.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
                     style={{ color: 'var(--accent)' }}
                   >
-                    console.anthropic.com/settings/keys
+                    platform.claude.com/settings/keys
                   </a>{' '}
                   and create an API key.
                 </li>

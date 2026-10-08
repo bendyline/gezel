@@ -3731,6 +3731,16 @@ export class GezelClient {
     });
   }
 
+  /** Cancel an audio model download. Closing the stream alone only detaches from it. */
+  cancelAudioModelPull(kind: 'stt' | 'tts', id: string): Promise<{ cancelled: boolean }> {
+    return this.request('DELETE', `/api/audio/${kind}/models/${encodeURIComponent(id)}/pull`);
+  }
+
+  /** Cancel an image-recognition model download. Closing the stream alone only detaches. */
+  cancelRecognitionModelPull(id: string): Promise<{ cancelled: boolean }> {
+    return this.request('DELETE', `/api/recognition/models/${encodeURIComponent(id)}/pull`);
+  }
+
   /** Image-recognition readiness. Never spawns the engine. */
   getRecognitionHealth(): Promise<RecognitionHealth> {
     return this.request('GET', '/api/recognition/health');

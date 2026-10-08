@@ -47,13 +47,14 @@ export async function writeNightlyDocumentsReport(
   deps: DocumentsReportDeps,
   projectId: string,
   now: Date,
+  /** The night's day key, so one night files one report whichever side of midnight it lands. */
+  day = localDay(now),
 ): Promise<string | null> {
   const project = await deps.store.getProject(projectId).catch(() => null);
   const kind = project?.properties?.[FOLDER_KIND_PROPERTY];
   if (!project?.workingDir || (kind !== 'documents' && kind !== 'mixed')) return null;
   if (isSharedLibraryProject(project)) return null;
 
-  const day = localDay(now);
   const path = `reports/documents-${day}.md`;
   if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
     return null;

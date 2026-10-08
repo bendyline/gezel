@@ -1390,7 +1390,20 @@ export class ContentIndex {
     deps: AiShadowDeps,
     limit = 3,
   ): Promise<{ files: number; produced: number; called: number } | null> {
-    if (!deps.describeImage && !deps.transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const ready = async (probe?: () => Promise<boolean>) =>
+      probe ? await probe().catch(() => false) : true;
+    const describeImage =
+      deps.describeImage && (await ready(deps.describeAvailable)) ? deps.describeImage : undefined;
+    const transcribeAudio =
+      deps.transcribeAudio && (await ready(deps.transcribeAvailable))
+        ? deps.transcribeAudio
+        : undefined;
+    if (!describeImage && !transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const live: AiShadowDeps = {
+      ...(describeImage ? { describeImage } : {}),
+      ...(transcribeAudio ? { transcribeAudio } : {}),
+      ...(deps.provenance ? { provenance: deps.provenance } : {}),
+    };
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir, artifactsDir } = opened;
@@ -1400,7 +1413,7 @@ export class ContentIndex {
       let called = 0;
       let handled = 0;
       for (const file of files) {
-        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, deps);
+        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, live);
         if (r.skipped) continue;
         handled++;
         if (r.produced) produced++;

@@ -41,8 +41,9 @@ export async function writeNightlyPhotoReport(
   deps: PhotoReportDeps,
   projectId: string,
   now: Date,
+  /** The night's day key, so one night files one report whichever side of midnight it lands. */
+  day = localDay(now),
 ): Promise<string | null> {
-  const day = localDay(now);
   const path = `reports/photos-${day}.md`;
   if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
     return null;

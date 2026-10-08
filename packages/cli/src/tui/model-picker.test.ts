@@ -28,12 +28,13 @@ describe('configuredModelProviders', () => {
       configuredModelProviders(
         config({
           hasOpenaiApiKey: true,
+          hasAnthropicApiKey: true,
           anthropicCliStatus: { installed: false },
           codexCliStatus: { installed: true },
         }),
         { platform: 'linux', arch: 'x64', copilotAvailable: false, totalRamBytes: 64 * 1024 ** 3 },
       ),
-    ).toEqual(['llama-cpp', 'ds4', 'ollama', 'openai', 'codex-cli']);
+    ).toEqual(['llama-cpp', 'ds4', 'ollama', 'openai', 'anthropic', 'codex-cli']);
   });
 
   it('adds MLX on macOS and preserves Copilot for older daemons', () => {

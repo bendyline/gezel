@@ -99,6 +99,20 @@ describe('roleToolsetGroups', () => {
     expect(groups).not.toContain('code-execution');
   });
 
+  it.each(['Meester', 'Voorman', 'Planner', 'Fitness Coach'])(
+    'classifies the coordinator role %s as pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(true);
+    },
+  );
+
+  it.each(['Curator', 'Image Generator', 'Video Generator', 'Conversationalist'])(
+    'does not mistake the non-writing executor role %s for pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(false);
+    },
+  );
+
   it('gives the voorman read-only workspace access (so they can investigate before delegating)', () => {
     const groups = roleToolsetGroups('voorman');
     expect(groups).toContain('workspace-fs-read');

@@ -183,3 +183,52 @@ describe('ContentIndex.aiShadows', () => {
     expect(failing).toHaveBeenCalledTimes(6);
   });
 });
+
+describe('identical copies', () => {
+  it('reuses a twin’s description, and goes quiet when the model stops answering', async () => {
+    await mkdir(join(dir, 'eval8'), { recursive: true });
+    await mkdir(join(dir, 'eval9'), { recursive: true });
+    await writeFile(join(dir, 'eval8', 'slide-01.png'), PNG_800x600);
+    await writeFile(join(dir, 'eval9', 'attempt9b-slide-01.png'), PNG_800x600);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
+    // Answers once, then the engine goes away (idle eviction at night).
+    const describeImage = vi
+      .fn<(abs: string) => Promise<{ body: string; model?: string } | null>>()
+      .mockResolvedValueOnce({ body: 'A title slide with a blue band.', model: 'vision-x' })
+      .mockResolvedValue(null);
+
+    const runs = [];
+    for (let i = 0; i < 4; i++) runs.push(await ci.aiShadows('c', { describeImage }));
+
+    expect(describeImage).toHaveBeenCalledTimes(1);
+    expect(runs.at(-1)).toEqual({ files: 0, produced: 0, called: 0 });
+    const copy = await readFile(
+      join(artifacts, 'shadow', 'eval9', 'attempt9b-slide-01.png_files', 'attempt9b-slide-01.md'),
+      'utf8',
+    );
+    const fm = parseFrontmatter(copy);
+    expect(fm.data.source).toBe('eval9/attempt9b-slide-01.png');
+    expect(fm.data.model).toBe('vision-x');
+    expect(fm.body.trim()).toBe('A title slide with a blue band.');
+  });
+});
+
+describe('no describer set up', () => {
+  it('leaves photos waiting, with their attempts intact, until a model is available', async () => {
+    await seedMedia();
+    const describeImage = vi.fn(async () => ({ body: 'A cat at sunset.', model: 'vision-x' }));
+    let available = false;
+    const deps = { describeImage, describeAvailable: async () => available };
+
+    for (let i = 0; i < 5; i++) {
+      expect(await ci.aiShadows('c', deps)).toEqual({ files: 0, produced: 0, called: 0 });
+    }
+    expect(describeImage).not.toHaveBeenCalled();
+
+    available = true;
+    expect(await ci.aiShadows('c', deps)).toMatchObject({ produced: 1, called: 1 });
+    expect(describeImage).toHaveBeenCalledTimes(1);
+  });
+});

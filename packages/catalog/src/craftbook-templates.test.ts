@@ -28,16 +28,6 @@ import { gildeDataDir } from './gilde-data.js';
 
 const indexPath = join(gildeDataDir(), 'craftbook-templates', 'index.json');
 
-/**
- * Exact temporary debt in the immutable published package. Gilde source has
- * the three logos ready for its next release; binding this exception to both
- * package version and ids keeps any additional missing artwork fatal.
- */
-const PINNED_GILDE_MISSING_LOGOS = {
-  version: '0.1.23',
-  ids: ['draft-social-post', 'reception-report', 'social-digest'],
-} as const;
-
 interface BundledManifest {
   logo?: string;
   id: string;
@@ -58,14 +48,6 @@ async function loadManifests(): Promise<BundledManifest[]> {
   const raw = await readFile(indexPath, 'utf8');
   const parsed = JSON.parse(raw) as { entries: { manifest: BundledManifest }[] };
   return parsed.entries.map((e) => e.manifest);
-}
-
-async function expectedMissingLogoDebt(): Promise<Set<string>> {
-  const packageJsonPath = join(gildeDataDir(), '..', 'package.json');
-  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as { version?: string };
-  return packageJson.version === PINNED_GILDE_MISSING_LOGOS.version
-    ? new Set(PINNED_GILDE_MISSING_LOGOS.ids)
-    : new Set();
 }
 
 describe('bundled craftbook templates', () => {
@@ -140,32 +122,23 @@ describe('bundled craftbook templates', () => {
   });
 
   /**
-   * Gallery artwork. Gilde ships a `logo.webp` per craftbook and points each
-   * manifest at it; the UI resolves that through `logoUrlFor` into a
-   * `/api/catalog/.../file/...` path.
+   * Optional gallery artwork. When Gilde points a craftbook manifest at a
+   * logo, the UI resolves it through `logoUrlFor` into a
+   * `/api/catalog/.../file/...` path. A missing declaration intentionally
+   * falls back to the craftbook's category glyph.
    *
    * This guards the failure mode that hid the artwork for four days: the
-   * imagery landed in gilde but the published npm package predated it, and
-   * because a missing logo degrades silently to a category glyph, the app
-   * looked identical either way. A release that drops or renames the files
-   * fails here instead of quietly reverting the gallery to glyphs.
+   * imagery landed in gilde but the published npm package predated it. A
+   * release that declares a missing or empty file fails here instead of
+   * rendering broken artwork.
    */
-  it('every template declares a logo whose file is present in the package', async () => {
+  it('every declared logo is present in the package', async () => {
     const manifests = await loadManifests();
-    const expectedDebt = await expectedMissingLogoDebt();
-    const missingDeclaration = manifests
-      .filter((m) => !m.logo)
-      .map((m) => m.id)
-      .sort();
-    expect(missingDeclaration, 'craftbooks with no manifest.logo').toEqual(
-      [...expectedDebt].sort(),
-    );
-
     const missingFile: string[] = [];
     for (const m of manifests) {
-      if (expectedDebt.has(m.id)) continue;
+      if (!m.logo) continue;
       const shard = m.id.slice(0, 2).toLowerCase();
-      const path = join(gildeDataDir(), 'craftbook-templates', shard, m.id, String(m.logo));
+      const path = join(gildeDataDir(), 'craftbook-templates', shard, m.id, m.logo);
       try {
         const bytes = await readFile(path);
         // A zero-byte or near-empty file would still "exist" while rendering

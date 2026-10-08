@@ -341,6 +341,18 @@ describe('Sidebar', () => {
     );
   });
 
+  it.each([
+    ['openai', { hasOpenaiApiKey: false }],
+    ['anthropic', { hasAnthropicApiKey: false }],
+  ] as const)('labels the home tab "Get started" when %s has no API key', async (provider, key) => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider, ...key } as never);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Get started'),
+    );
+  });
+
   it('labels the home tab "Home" once an on-device model is installed', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as never);
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({

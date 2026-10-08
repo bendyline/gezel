@@ -302,6 +302,13 @@ export interface ChatRequest {
   temperature?: number;
   max_tokens?: number;
   /**
+   * OpenAI's reasoning control. `none` or `minimal` turns a local model's
+   * thinking phase off. Apps never receive that reasoning, so for a thinking
+   * model it is silent time before the first token; send `none` unless the
+   * extra depth is worth the wait.
+   */
+  reasoning_effort?: string;
+  /**
    * Tool definitions advertised to the model. The daemon halts on the
    * first tool call and returns the calls in the response — the
    * caller executes them locally and posts results back via a

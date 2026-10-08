@@ -55,13 +55,14 @@ export async function writeNightlyCodebaseReport(
   deps: CodebaseReportDeps,
   projectId: string,
   now: Date,
+  /** The night's day key, so one night files one report whichever side of midnight it lands. */
+  day = localDay(now),
 ): Promise<string | null> {
   const project = await deps.store.getProject(projectId).catch(() => null);
   if (!project) return null;
   const kind = project.properties?.[FOLDER_KIND_PROPERTY];
   if (kind !== 'code' && !(kind === undefined && isCodingProject(project))) return null;
 
-  const day = localDay(now);
   const path = `reports/codebase-${day}.md`;
   if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
     return null;
