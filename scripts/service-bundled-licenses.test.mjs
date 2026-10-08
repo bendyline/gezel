@@ -211,6 +211,9 @@ test('a recorded license hash survives a line-ending conversion, not an edit', (
   const lf = Buffer.from('MIT License\n\nCopyright inlined authors\n');
   assert.equal(matchesRecordedSha(crlf, recorded), true);
   assert.equal(matchesRecordedSha(lf, recorded), true, 'an LF checkout of a CRLF-recorded text');
-  assert.equal(matchesRecordedSha(Buffer.from('MIT License\n\nCopyright someone else\n'), recorded), false);
+  assert.equal(
+    matchesRecordedSha(Buffer.from('MIT License\n\nCopyright someone else\n'), recorded),
+    false,
+  );
   assert.equal(matchesRecordedSha(lf, undefined), false);
 });

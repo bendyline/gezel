@@ -12,7 +12,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import type { SecurityFindingInput, SecuritySeverity } from '../index-store/index-store.js';
+import type { SecurityFindingInput, SecuritySeverity } from '../index-store/index-store-types.js';
 
 const log = createLogger('security');
 const exec = promisify(execFile);

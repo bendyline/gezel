@@ -1,3 +1,4 @@
+import { seedCharacter } from '../character/index.js';
 import { assertSafeEntityId, isSafeEntityId } from '../entity-id.js';
 import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
 import { type Poppetje, PoppetjeSchema } from '../poppetje/schema.js';
@@ -16,6 +17,7 @@ import {
   type GezelSummary,
   GezelSummarySchema,
 } from '../schemas/gezel.js';
+import { GezelGrowthStateSchema } from '../schemas/growth.js';
 import { pickRoleBasedName, slugifyEntityName } from './entities.js';
 import { boundedText } from './files.js';
 import type { PortableRepository } from './repository.js';
@@ -36,7 +38,12 @@ export function gezelWrites(
   input: PortableCreateGezelInput & { id: string; roleBasedName?: string; poppetje?: unknown },
 ): Map<string, Uint8Array> {
   const root = gezelRoot(input.id);
-  const frontmatter = GezelFrontmatterSchema.parse({ ...input.frontmatter, ...input });
+  // The character is seeded from the id like the poppetje; a template's own wins.
+  const frontmatter = GezelFrontmatterSchema.parse({
+    character: seedCharacter(input.id),
+    ...input.frontmatter,
+    ...input,
+  });
   const source = serializeGezelMarkdown({ frontmatter, sections: [], source: '' });
   const poppetje = PoppetjeSchema.parse(
     input.poppetje ?? initialPoppetjeForGezel(input.id, input.name, input.gender),
@@ -68,12 +75,19 @@ export async function getGezel(repo: PortableRepository, id: string): Promise<Ge
     parsed.frontmatter.gender,
   );
   const metadata = (await repo.list(root)).find((entry) => entry.name === 'gezel.md');
+  // Inline the growth summary like the desktop, so the badge needs no second request.
+  const growth = (await repo.exists(`${root}/growth.json`))
+    ? await repo.tolerantRecord(`${root}/growth.json`, GezelGrowthStateSchema, `growth for ${id}`)
+    : null;
   return GezelDetailSchema.parse({
     ...parsed.frontmatter,
     id,
     parsed,
     about: (await repo.text(`${root}/about.md`)) ?? '',
     ...(poppetje ? { poppetje } : {}),
+    ...(growth
+      ? { growth: { level: growth.level, ...(growth.pendingLevelUp ? { pending: true } : {}) } }
+      : {}),
     updatedAt: new Date(metadata?.mtime ?? 0).toISOString(),
     toolsMd: null,
   });

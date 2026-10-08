@@ -590,3 +590,42 @@ describe('dispatcher: index readiness', () => {
     );
   });
 });
+
+describe('dispatcher: reminders', () => {
+  it('reminder.set stores the project’s reminder and tells the notifiers', async () => {
+    const setProjectReminder = vi.fn().mockResolvedValue(undefined);
+    const remindersChanged = vi.fn();
+    const { dispatch } = makeDispatcher({
+      store: { setProjectReminder } as unknown as Store,
+      remindersChanged,
+    });
+    const at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await dispatch(ctx(['reminders']), 'reminder.set', { at, title: 'Cards are due' });
+    expect(setProjectReminder).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({
+        projectId: 'p1',
+        at,
+        title: 'Cards are due',
+        source: 'test-script',
+      }),
+    );
+    expect(remindersChanged).toHaveBeenCalledWith('p1');
+
+    await dispatch(ctx(['reminders']), 'reminder.clear', {});
+    expect(setProjectReminder).toHaveBeenLastCalledWith('p1', null);
+  });
+
+  it('reminder.set needs the capability and a future time', async () => {
+    const setProjectReminder = vi.fn().mockResolvedValue(undefined);
+    const { dispatch } = makeDispatcher({ store: { setProjectReminder } as unknown as Store });
+    const at = new Date(Date.now() + 60_000).toISOString();
+    await expect(
+      dispatch(ctx(['workspace.write']), 'reminder.set', { at, title: 'Hi' }),
+    ).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(
+      dispatch(ctx(['reminders']), 'reminder.set', { at: '2020-01-01T00:00:00Z', title: 'Hi' }),
+    ).rejects.toThrow(/future/);
+    expect(setProjectReminder).not.toHaveBeenCalled();
+  });
+});

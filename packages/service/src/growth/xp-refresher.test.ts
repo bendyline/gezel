@@ -49,8 +49,8 @@ describe('createXpRefresher', () => {
 it('serializes slow refreshes across gezels and coalesces work arriving in flight', async () => {
   vi.useFakeTimers();
   const releases: Array<() => void> = [];
-  let active = 0,
-    maximum = 0;
+  let active = 0;
+  let maximum = 0;
   const refresh = vi.fn(async () => {
     active++;
     maximum = Math.max(maximum, active);

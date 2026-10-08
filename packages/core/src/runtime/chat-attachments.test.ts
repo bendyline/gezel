@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OFFLINE_RUNTIME_CAPABILITIES } from '../schemas/runtime-capabilities.js';
+import { type PortableInference, PortableProductService } from './product-service.js';
+import { portableFixture } from './test-files.js';
 import {
   PORTABLE_LABELS_ONLY_WARNINGS,
   PORTABLE_UNREAD_IMAGE_WARNING,
   PORTABLE_UNSEEN_IMAGE_WARNING,
-  type PortableInference,
-  PortableProductService,
-} from './product-service.js';
-import { portableFixture } from './test-files.js';
+} from './turn-attachments.js';
 import type { PortableVision } from './vision.js';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x10]);

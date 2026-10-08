@@ -4,6 +4,7 @@ import {
   EngagementDeniedError,
   assertScriptMethodAllowed,
   isEngagementAllowed,
+  parseReminderRequest,
   resolveScriptMemorySave,
   toScriptTaskStep as toTaskStep,
 } from '@bendyline/gezel';
@@ -120,6 +121,8 @@ export interface DispatcherDeps {
    * constructed (they come up later in boot than the runner); until then
    * those calls return a typed error.
    */
+  /** Told when a script sets or clears its project's reminder, so notifiers reschedule. */
+  remindersChanged?: (projectId: string) => void;
   index?: {
     status(projectId: string): Promise<WorkspaceIndexStatus>;
     ensureFresh(
@@ -446,6 +449,28 @@ export function buildDispatcher(deps: DispatcherDeps): {
           ...(ctx.gezelId ? { gezelId: ctx.gezelId } : {}),
         });
         return deps.memory.save(save.scope, save.id, save.text, save.kind, save.source);
+      },
+    },
+
+    'reminder.set': {
+      capability: 'reminders',
+      handler: async (ctx, params) => {
+        const reminder = parseReminderRequest(params, {
+          projectId: ctx.projectId,
+          source: ctx.scriptName,
+          now: new Date(),
+        });
+        await store.setProjectReminder(ctx.projectId, reminder);
+        deps.remindersChanged?.(ctx.projectId);
+        return undefined;
+      },
+    },
+    'reminder.clear': {
+      capability: 'reminders',
+      handler: async (ctx) => {
+        await store.setProjectReminder(ctx.projectId, null);
+        deps.remindersChanged?.(ctx.projectId);
+        return undefined;
       },
     },
 

@@ -7,7 +7,7 @@ import type {
   PhotoGroupsResponse,
   PhotoRecord,
 } from '@bendyline/gezel';
-import type { PhotoRow } from './index-store.js';
+import type { PhotoRow } from './index-store-types.js';
 
 /**
  * The photo library, read from the index: no file is opened and no model

@@ -249,7 +249,10 @@ describe('runHandboekExport', () => {
     expect(book).toContain('class="hb-craftbook-art"');
     expect(existsSync(join(out, 'craftbook', 'status-report', 'logo.webp'))).toBe(true);
 
-    const demoPages = await readFile(join(out, 'project-type', 'caregiving-binder', 'index.html'), 'utf8');
+    const demoPages = await readFile(
+      join(out, 'project-type', 'caregiving-binder', 'index.html'),
+      'utf8',
+    );
     expect(demoPages).toContain('class="hb-demo"');
     expect(
       existsSync(join(out, 'project-type', 'caregiving-binder', 'demo', 'dashboard', 'index.html')),
@@ -260,7 +263,9 @@ describe('runHandboekExport', () => {
     const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
     expect(page).toContain('href="../model-catalog/"');
     expect(page).toContain('href="../toolset-catalog/"');
-    expect(page).not.toMatch(/class="hb-sidebar"[\s\S]*href="\.\.\/model\/[^"]+\/"[\s\S]*<\/aside>/);
+    expect(page).not.toMatch(
+      /class="hb-sidebar"[\s\S]*href="\.\.\/model\/[^"]+\/"[\s\S]*<\/aside>/,
+    );
   });
 
   it('groups technical navigation into the four documented subheadings', async () => {

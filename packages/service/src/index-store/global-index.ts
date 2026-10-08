@@ -1,6 +1,7 @@
 import type { HistoryEvent, HistoryFilter } from '@bendyline/gezel';
 import { globalIndexDbFile } from '@bendyline/gezel/paths';
-import { type CollectionKind, IndexStore } from './index-store.js';
+import type { CollectionKind } from './index-store-types.js';
+import { IndexStore } from './index-store.js';
 import { isTransientIndexError } from './sqlite-driver.js';
 
 /**

@@ -1,15 +1,15 @@
-export {
-  IndexStore,
-  type FileRecord,
-  type SymbolInput,
-  type SymbolHit,
-  type ChunkInput,
-  type DocHit,
-  type VectorHit,
-  type Modality,
-  type CollectionKind,
-  type OpenOptions,
-} from './index-store.js';
+export { IndexStore } from './index-store.js';
+export type {
+  FileRecord,
+  SymbolInput,
+  SymbolHit,
+  ChunkInput,
+  DocHit,
+  VectorHit,
+  Modality,
+  CollectionKind,
+  OpenOptions,
+} from './index-store-types.js';
 export {
   type SqliteDriver,
   type SqliteStatement,

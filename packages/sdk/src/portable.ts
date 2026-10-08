@@ -506,6 +506,29 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
   };
 
   /**
+   * **Reminder** — the project's one reminder, for a time this script
+   * computed from the project's own state (the next flashcard coming due),
+   * never a time picked for its own sake. The app turns it into a
+   * notification, within the person's daily allowance. Requires the
+   * `reminders` capability.
+   *
+   * @example
+   * ```ts
+   * await gezel.reminder.set({ at: nextDue.toISOString(), title: 'Cards are due', body: '4 cards to review' });
+   * ```
+   */
+  reminder: {
+    /**
+     * Set the project's reminder, replacing any earlier one.
+     * @param reminder - `at`: a future ISO date-time, at most 30 days ahead;
+     *   `title`: up to 80 characters; `body`: up to 160.
+     */
+    set(reminder: { at: string; title: string; body?: string }): Promise<void>;
+    /** Clear the project's reminder (nothing is due). */
+    clear(): Promise<void>;
+  };
+
+  /**
    * **LLM** — one-shot model completions. Requires the `llm` capability,
    * and the project's AI engagement mode must not be `off` (otherwise
    * the call rejects with an engagement error).
@@ -711,6 +734,10 @@ export function createGezelSDK(rpc: ScriptTransport, options: GezelSDKOptions = 
     memory: {
       search: (query) => rpc.call<unknown[]>('memory.search', { query }),
       save: (text, meta) => rpc.call<void>('memory.save', { text, meta }),
+    },
+    reminder: {
+      set: (reminder) => rpc.call<void>('reminder.set', reminder),
+      clear: () => rpc.call<void>('reminder.clear', {}),
     },
     llm: {
       oneShot: (prompt, opts) => rpc.call<string>('llm.oneShot', { prompt, opts }),

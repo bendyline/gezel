@@ -180,6 +180,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   },
   listProjectCodeReviews: { reviews: [] },
   listQuestions: { questions: [] },
+  listReminders: { reminders: [] },
   listScripts: { scripts: [] },
   listProjectScripts: { scripts: [] },
   listStandardScripts: { scripts: [] },

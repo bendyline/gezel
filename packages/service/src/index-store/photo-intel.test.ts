@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PhotoRow } from './index-store.js';
+import type { PhotoRow } from './index-store-types.js';
 import { kmBetween, listPhotos, onThisDay, photoGroups } from './photo-intel.js';
 
 function row(path: string, over: Partial<PhotoRow> = {}): PhotoRow {

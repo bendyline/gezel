@@ -358,6 +358,22 @@ declare global {
        */
       notify?: (opts: { title: string; body?: string; view?: string }) => Promise<boolean>;
       /**
+       * A host whose own notifications the UI drives (the phone): the app
+       * runs its earned-notification policy here and hands the results to
+       * the OS. Electron leaves this out — its main process owns them.
+       */
+      earnedNotifications?: {
+        notify(opts: { title: string; body: string; view: string }): Promise<void>;
+        /** Replace every scheduled reminder with these. */
+        scheduleReminders(
+          reminders: ReadonlyArray<{ id: number; at: string; title: string; body: string }>,
+        ): Promise<void>;
+        /** The person is back: clear what the notification tray still shows. */
+        clearDelivered(): Promise<void>;
+        /** Ask the OS for permission, if it has not been asked; only while in the app. */
+        requestPermission(): Promise<void>;
+      };
+      /**
        * Screenshot a region of the renderer page (CSS/DIP pixels, matching
        * `getBoundingClientRect`) as a PNG data URL. The output pane uses
        * this to capture its sandboxed preview iframe — the iframe runs

@@ -18,11 +18,16 @@
  */
 export { registerAppTools } from './app-tools.js';
 export { GezelApp } from './client.js';
-export { KnowledgeClient } from './knowledge-client.js';
+export {
+  KnowledgeClient,
+  type KnowledgeRetrieveInput,
+  type KnowledgeState,
+} from './knowledge-client.js';
 export type {
   AppKnowledgeState,
   AppKnowledgeAction,
   AppKnowledgeQuery,
+  AppKnowledgeRelevance,
   AppKnowledgeRetrieval,
 } from '@bendyline/gezel-client/app-models';
 export { GezelSdkError } from './errors.js';

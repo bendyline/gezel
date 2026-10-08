@@ -1409,9 +1409,11 @@ describe('computeToolAllowlist', () => {
 
   it('keeps the script runner on a scenario repair of a data file, not of a page', () => {
     const repairOf = (file: string) =>
-      `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.\n` +
-      "Signals that didn't fire: **dates-iso**.\n" +
-      'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.';
+      [
+        `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.`,
+        "Signals that didn't fire: **dates-iso**.",
+        'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.',
+      ].join('\n');
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',

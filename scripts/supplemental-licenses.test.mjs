@@ -98,7 +98,10 @@ test('every rule-matched binary in the installed ONNX Runtime packages is covere
   }
   // Transformers.js 4.x loads the WebAssembly builds from onnxruntime-web and
   // copies none into its own dist, so it must carry no licensed binary.
-  assert.deepEqual(await findLicensedBinaries(installedPackageDir('@huggingface/transformers')), []);
+  assert.deepEqual(
+    await findLicensedBinaries(installedPackageDir('@huggingface/transformers')),
+    [],
+  );
   const node = await findLicensedBinaries(packages[0][1]);
   assert.ok(
     node.some((binary) => binary.path.endsWith('win32/x64/DirectML.dll')),

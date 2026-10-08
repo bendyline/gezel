@@ -12,6 +12,7 @@ import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
+import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
@@ -536,6 +537,12 @@ export function HomeView({
               <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
                 A small model on this device (about 24 MB) keeps unrelated articles out of your
                 conversations.
+              </p>
+              <div style={{ marginTop: '0.6rem' }}>
+                <SocialModeToggle describe={false} />
+              </div>
+              <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
+                Gezels show their own character, and their growth is on display.
               </p>
               <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
                 Adjustable any time in Settings.

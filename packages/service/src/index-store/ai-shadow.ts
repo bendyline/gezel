@@ -3,12 +3,8 @@ import { createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
 import { chunkMarkdown, shadowDocFilesPaths, writeConvertedMarkdownAt } from './docs.js';
 import { parseFrontmatter, withFrontmatter } from './frontmatter.js';
-import {
-  type FileRecord,
-  type IndexProvenance,
-  type IndexStore,
-  MAX_ENRICH_ATTEMPTS,
-} from './index-store.js';
+import type { FileRecord, IndexProvenance } from './index-store-types.js';
+import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
 import { canNormalizeRaster } from './raster-normalize.js';
 
 /**

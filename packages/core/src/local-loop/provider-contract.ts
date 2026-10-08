@@ -499,6 +499,12 @@ export interface TerminalToolPolicy {
   closingArg?: string;
   /** Per-tool `closingArg`, for a policy over tools whose replies sit in different arguments. */
   closingArgByTool?: Record<string, string>;
+  /**
+   * Per-tool output field that, when the script returns it, is the reply in
+   * place of the argument: text the app composed (a tutor's line plus the
+   * corrections it graded). Held to its own bound, not the sociability cap.
+   */
+  closingOutputByTool?: Record<string, string>;
   fallbackText: string;
   maxClosingChars?: number;
   /**

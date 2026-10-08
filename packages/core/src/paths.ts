@@ -499,6 +499,11 @@ export function projectReportActionsFile(root: string, projectId: string): strin
   return join(projectPrivateDir(root, projectId), 'report-actions.json');
 }
 
+/** The project's one reminder, set by its own scripts. Account-private. */
+export function projectReminderFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'reminder.json');
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,

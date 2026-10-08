@@ -1,5 +1,5 @@
 import { basename, extname } from 'node:path';
-import type { Modality } from './index-store.js';
+import type { Modality } from './index-store-types.js';
 
 /**
  * Cheap, deterministic file classification — language, a coarse `kind`, the

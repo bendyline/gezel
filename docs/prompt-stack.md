@@ -40,6 +40,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); with generalist kickoff off it is emitted only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); with generalist kickoff on (`config.generalistMode`, see docs/generalist-mode.md) it is emitted for any delegation role | ~2.3K ch |
 | 3 | About intro + **the gezel's `about.md`, verbatim** | always | meester template ~4.6K ch |
 | 4 | `### Traits` | frontmatter traits present | varies |
+| 4b | `### Character` — the gezel's style + temperament, quirk, and a small-talk word cap, rendered from its persisted `character` record by `renderCharacterBlock` ([core character/](../packages/core/src/character/index.ts)); kept at every footprint, including `minimal` | **social mode on** (`resolveSocialMode`: `config.social`, else on for phones, off for the desktop) | ≤ 60 tok |
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
 | 5b | `### About the person` — what the crew has learned about the person (the "About you" memory scope), durable kinds only, newest first (`selectPersonNotes` in [memory-notes.ts](../packages/core/src/memory-notes.ts)); kept at every footprint, never in a visitor session | notes about the person exist | ≤ 700 / 450 / 260 ch (standard / compact / minimal) |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
@@ -196,8 +197,8 @@ even "hi there" before generating a token. On the desktop,
 the provider's reported window for native-tool providers) and, when it is `minimal`,
 early-returns a stripped prompt instead of the layer stack. There are two forms:
 
-- **Text-only** (talkie): header + capped about.md + one "you have no tools, just
-  converse" line. Everything else is dropped: guardrail, project context,
+- **Text-only** (talkie): header + capped about.md + the character block (social mode
+  only) + one "you have no tools, just converse" line. Everything else is dropped: guardrail, project context,
   workspace/documents, task blocks, recall, the full conduct core, and the tools block.
   The floor falls from ~2.7K tokens to ~350. This is deliberately lossy; pair it with the
   `just-chat` project type, which hides the work-oriented tabs to match.

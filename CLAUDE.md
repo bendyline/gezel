@@ -244,7 +244,7 @@ the item still resolves and the no-regression gate passes.
 
 A named AI agent. Fields worth knowing:
 
-- **Frontmatter** (in `gezel.md`): `id, name, description?, role?, model?, provider?, reasoningEffort?, iconOverride?`
+- **Frontmatter** (in `gezel.md`): `id, name, description?, role?, model?, provider?, reasoningEffort?, iconOverride?, character?` — see "Character, social mode, and growth" below
 - **`about.md`**: injected verbatim into the model's system prompt when this gezel runs
 - **`poppetje.json`**: a parametric carved-figure character. Body shape, skin, hair, hat, accessories, expression — see "Poppetje" below. The primary visual identity.
 - **`icon.svg`**: an optional LLM-generated abstract sigil. When `iconOverride: true` in frontmatter, the UI shows this instead of the poppetje. Off by default.
@@ -263,6 +263,23 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 - **The renderer reads one struct.** Variants (`full`, `headshot`, `icon`) are different `viewBox` crops of the same SVG content tree — no duplicated geometry.
 - **No body-shape-to-identity mapping.** Shapes, skin, and hair mix freely across the cast — never bound to gender or craft.
 - **Whorls are organic, not identity markers.** ~25% of figures get knot marks deterministically from the seed; never assign one to a specific gezel as an identity stamp.
+
+### Character, social mode, and growth
+
+**Social mode** (`config.social`) decides how much personality shows. `resolveSocialMode(config, host)` in [core character/](packages/core/src/character/index.ts) is the only reader: the person's choice, else on for phones and off for the desktop. The desktop's config response returns it resolved; the phone's returns raw config. Off must reproduce the plain register exactly — no character block in any prompt, no Growth tab or level badges, no visit card, no growth announcements in chat. It is a separate switch from "Show gezel names and poppetjes"; never merge them.
+
+**`character`** is a frontmatter record `{ temperament, quirk, style, sociability: 0-4 }` from a small fixed vocabulary in [schemas/character.ts](packages/core/src/schemas/character.ts). It follows the poppetje contract: seeded from the id at creation (`seedCharacter`), **persisted explicitly**, backfilled once by `ensureLayout` on both hosts, so adding values later never changes an existing gezel. The schema is lenient (`.catch(undefined)`), so a bad hand edit drops the field rather than hiding the gezel. Every value has one effect line in `TEMPERAMENT_EFFECTS` / `QUIRK_EFFECTS` / `STYLE_EFFECTS`; those lines ARE the `### Character` prompt block (at most 60 tokens, stable band after traits, kept at the `minimal` footprint) and what the character editor shows, so the UI and the model cannot disagree. Mechanical effects: sociability and the temperament/quirk length factor cap a turn tool's `say` through `withCharacterChatCap`. `traits` (growth-learned rules) and `voice` (the TTS id) are different fields — don't reuse them.
+
+**Growth** (XP, levels, user-approved proposals, cosmetics) lives in [core growth/](packages/core/src/growth/): XP math, the refresher, proposal generation over injected `GrowthProposalSources`, and the level-up transitions as pure functions. The desktop's [service growth/](packages/service/src/growth/) files are shims and adapters (store, MemoryManager, `oneShotCompletion`); the phone runs the same code through `PortableGrowth` ([runtime/growth-engine.ts](packages/core/src/runtime/growth-engine.ts)), counting consultations from messages with `from` (the phone keeps no history log) and generating proposals with a Klerk one-shot in the engine's background ambient lane, aborted on suspend. The phone has no sweep, so a completed task is what creates a pending level-up there. Growth keeps accruing with social mode off; only its display and announcements are held. A person's own progress (a Spanish level, a streak) is project data, never gezel XP.
+
+### Earned notifications
+
+A notification must be earned by something durable that happened. The sources are: a question (`question_asked`), work the person asked for finishing (`task_settled`, owner-launched only: `isOwnerLaunchedCompletion`), a level-up (social mode only), the night's review card, and a project reminder. The policy lives once in [core notifications/](packages/core/src/notifications/). `earnedItemFor` decides what an event is worth and in which register (social mode names the gezel, otherwise plain status text). `NotificationGate` folds what arrives within 4 s into one notification, stays quiet while the person is watching, and holds the rest once `config.notifications.dailyCap` (default 3, 0 = off) is spent. The cap is enforced through a per-host ledger that also dedupes replays. `EarnedNotifier` feeds the gate from the event stream and keeps reminders scheduled. Nothing fires on the clock alone, and the gate tests pin that. Two hosts run it:
+
+- **Electron main** ([earned-notifications.ts](packages/app/src/earned-notifications.ts) `startEarnedNotifications`) owns desktop notifications, so they arrive with the window closed. Its ledger is `notification-ledger.json` in Electron's userData. The renderer never raises one.
+- **The phone's UI** ([useHostNotifications.ts](packages/ui/src/components/useHostNotifications.ts)) drives `window.__GEZEL__.earnedNotifications`, the mobile bridge over `@capacitor/local-notifications` ([mobile/src/notifications.ts](packages/mobile/src/notifications.ts)). Its ledger is localStorage. It asks the OS for permission the first time something earned happens while the person is in the app, and clears the tray when they return.
+
+**Reminders** are the only time-based source, and the time must come from the project's own state. A script with the `reminders` capability calls `gezel.reminder.set({ at, title, body })` / `clear()`; `parseReminderRequest` enforces a future time at most 30 days out. The host stores one per project (`projects/{id}/reminder.json` through `Store` / `PortableStore`), announces `reminders_updated`, and `GET /api/reminders` lists them. `planReminders` schedules the week ahead, at most the cap per day. The desktop arms one timer and re-checks on resume; the phone hands them to the OS. Flashcards 1.1.2 is the reference content.
 
 ### Project
 

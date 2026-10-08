@@ -50,7 +50,7 @@ A phone reads each photo in tiers, and the model gets everything that ran:
    list hides it.
 
 The portable runtime runs this as the first phase of the turn, inside the
-turn's engine slot (`readTurnImages`), because tier 3 needs the engine. It
+turn's engine slot (`readPortableTurnImages`), because tier 3 needs the engine. It
 saves the result on the message as the desktop's `MessageImageDigest`,
 rendered by the same core module (`recognition/digest.ts`), so later turns
 replay the text instead of reading the photo again. When only labels and

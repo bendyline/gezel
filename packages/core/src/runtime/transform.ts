@@ -54,6 +54,19 @@ export function portableRewriteText(
   return complete(inference, buildRewritePrompt(opts), options);
 }
 
+/**
+ * One completion of a prompt the caller wrote, by the Klerk, with no
+ * conversation around it: what background work such as growth proposals
+ * asks of the phone's model. Same limits and cleanup as a text transform.
+ */
+export function portablePromptCompletion(
+  inference: PortableInference,
+  prompt: string,
+  options: PortableTransformOptions,
+): Promise<string> {
+  return complete(inference, prompt, options);
+}
+
 function stopped(message = 'Text transform stopped', name = 'AbortError'): Error {
   const error = new Error(message);
   error.name = name;

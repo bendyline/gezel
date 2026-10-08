@@ -1706,6 +1706,46 @@ header that says they apply after the edits and never replace a file. Past a
 dozen, the rows group by destination folder, each a disclosure row with its
 count, so a tidy-up of a thousand photos reads as a handful of folders.
 
+**Social mode is one switch, and off means today.** Settings → General (and
+the phone's first-run Preferences) carry a single *Social mode* checkbox,
+beside — never merged with — *Show gezel names and poppetjes*. On, gezels
+speak with their character, growth (the Growth tab and level badges) is on
+display, and opening a chat shows what is waiting. Off reproduces the plain
+register exactly: no character block in any prompt, no growth surfaces, no
+card. It defaults on for phones and off for the desktop until the person
+chooses; `useSocialMode` is the only reader in the UI.
+
+**A character is edited as rows of keys, with its effect in plain words.**
+The gezel's Appearance panel (social mode only) shows Temperament, Quirk,
+Style and Sociability, each a `gz-tray` of `gz-key`s that saves on click (no
+Save button, like every autosave editor). Under the rows, the exact lines the
+model will read are shown, so nothing a choice does is hidden. A key's title
+carries that value's line; there is no second description to drift.
+
+**Notifications are earned, and there are few of them.** A notification
+says that something happened: a gezel asked a question, work the person asked
+for finished, a gezel reached a level (social mode only), the night's review
+landed, or a project's own script worked out that something is due (a
+flashcard). Nothing fires on the clock alone, no "haven't seen you in a while".
+What arrives within a few seconds becomes one notification ("3 things are
+waiting"). Nothing is said while the person is looking at the app, and at most
+`notifications.dailyCap` a day (default 3). The cap is a row of keys in
+Settings → General (*Off · 1 · 3 · 5 · 10*), saved on click. Held items still
+sit in Updates and their chats; the cap only limits interruptions. The policy
+lives once in core `notifications`. Electron's main process raises desktop
+notifications, so they arrive with the window closed. The phone's UI raises
+its own through the native bridge, and asks the OS for permission the first
+time something worth a notification happens while the person is in the app.
+The renderer never raises one on the desktop.
+
+**A chat opens on what is waiting, never on a greeting.** In social mode,
+opening a gezel's chat (and a just-chat project) shows at most one
+`.visit-card` above the thread: an open question that gezel asked, else work
+it finished in the last three days. It is read from questions and tasks on
+disk, never written by a model, so an empty moment stays empty. It is
+dismissible per item and sits outside the timeline because it is not a
+message.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that

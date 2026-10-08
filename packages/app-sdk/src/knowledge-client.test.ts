@@ -57,6 +57,91 @@ describe('knowledge SDK', () => {
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer app-token');
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(query);
   });
+  it('defaults to auto retrieval and accepts unranked passages', async () => {
+    const bodies: unknown[] = [];
+    const app = new GezelApp({
+      baseUrl: 'http://127.0.0.1',
+      token: 'test',
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ reranked: false, passages: [] });
+      },
+    });
+    expect(
+      await app.knowledge.retrieve({ query: 'query', maxResults: 4, maxCharacters: 4000 }),
+    ).toEqual({ reranked: false, passages: [] });
+    expect(bodies).toEqual([
+      { query: 'query', rerank: 'auto', maxResults: 4, maxCharacters: 4000 },
+    ]);
+  });
+  it('answers auto on a Gezel that predates it, without passages when unranked', async () => {
+    const sent: string[] = [];
+    const app = new GezelApp({
+      baseUrl: 'http://127.0.0.1',
+      token: 'test',
+      fetch: async (_url, init) => {
+        const rerank = (JSON.parse(String(init?.body)) as { rerank: string }).rerank;
+        sent.push(rerank);
+        return rerank === 'auto'
+          ? Response.json({ error: 'Invalid enum value' }, { status: 422 })
+          : Response.json(
+              { error: { code: 'reranker_required', message: 'Download the relevance model.' } },
+              { status: 409 },
+            );
+      },
+    });
+    const query = { query: 'query', maxResults: 4, maxCharacters: 4000 };
+    expect(await app.knowledge.retrieve(query)).toEqual({ reranked: false, passages: [] });
+    expect(await app.knowledge.retrieve(query)).toEqual({ reranked: false, passages: [] });
+    // The second call goes straight to the mode that Gezel understands.
+    expect(sent).toEqual(['auto', 'required', 'required']);
+  });
+  it('offers the improvement download only when a catalog would use it', async () => {
+    const catalog = {
+      id: 'science',
+      name: 'Science',
+      description: '',
+      version: '1',
+      installedVersion: '1',
+      enabled: true,
+      updateAvailable: false,
+      downloadBytes: null,
+      documents: null,
+      state: 'installed',
+      percent: null,
+      message: null,
+    };
+    const missing = { ready: false, downloading: false, percent: null, downloadBytes: 300 };
+    const offer = async (catalogs: unknown[], relevance: () => Response) => {
+      const app = new GezelApp({
+        baseUrl: 'http://127.0.0.1',
+        token: 'test',
+        fetch: async (url) =>
+          new URL(String(url)).pathname.endsWith('/relevance')
+            ? relevance()
+            : Response.json({
+                catalogs,
+                reranker: { ready: false, downloading: false, message: null },
+              }),
+      });
+      return (await app.knowledge.state()).improvement;
+    };
+    expect(await offer([catalog], () => Response.json(missing))).toEqual({
+      downloadBytes: 300,
+      downloading: false,
+      percent: null,
+    });
+    expect(await offer([{ ...catalog, enabled: false }], () => Response.json(missing))).toBe(null);
+    expect(await offer([catalog], () => Response.json({ ...missing, ready: true }))).toBe(null);
+    expect(await offer([catalog], () => Response.json({ ...missing, downloadBytes: null }))).toBe(
+      null,
+    );
+    // A Gezel without the route: a 404, or its UI shell for unknown paths.
+    expect(
+      await offer([catalog], () => Response.json({ error: 'not found' }, { status: 404 })),
+    ).toBe(null);
+    expect(await offer([catalog], () => new Response('<!doctype html>'))).toBe(null);
+  });
   it('rejects malformed and unranked responses', async () => {
     for (const response of [
       { reranked: false, passages: [] },

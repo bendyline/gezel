@@ -56,11 +56,20 @@ function localTarget(raw) {
   return href ? decodeURIComponent(href) : null;
 }
 
+// Link syntax shown as an example (`![Photo](clips/plane.mp4)`) is not a link.
+// An inline span never crosses a blank line, so a stray backtick cannot hide
+// the rest of a document's links.
+function withoutCode(markdown) {
+  return markdown
+    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, ' ')
+    .replace(/(`+)(?:(?!\n[ \t]*\n)[\s\S])*?\1/g, ' ');
+}
+
 async function main() {
   const files = await markdownFiles(repoRoot);
   const broken = [];
   for (const file of files) {
-    const markdown = await readFile(file, 'utf8');
+    const markdown = withoutCode(await readFile(file, 'utf8'));
     for (const match of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
       const target = localTarget(match[1]);
       if (!target) continue;

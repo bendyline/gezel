@@ -225,7 +225,7 @@ export class TaskScheduler {
    * `stallMs`, this either:
    *
    *   1. AUTO-ADVANCES when the deliverable already clears the gate — the
-   *      idle-time twin of `ChatManager.maybeAutoAdvanceOnObservableProgress`
+   *      idle-time twin of `maybeAutoAdvanceOnObservableProgress`
    *      (which only fires at end-of-turn); or
    *   2. RE-NUDGES the assignee in their own session to continue the step,
    *      up to `maxRedrives` times; then

@@ -142,10 +142,7 @@
               "target": "win32-x64"
             }
           ],
-          "texts": [
-            "LICENSE-directml.txt",
-            "NOTICE-directml-ThirdPartyNotices.txt"
-          ]
+          "texts": ["LICENSE-directml.txt", "NOTICE-directml-ThirdPartyNotices.txt"]
         },
         {
           "id": "directx-shader-compiler",
@@ -227,14 +224,10 @@
       "license": "MIT",
       "source": "https://github.com/jpassing/elevate",
       "path": "resources/elevate.exe",
-      "targets": [
-        "win32-x64"
-      ],
+      "targets": ["win32-x64"],
       "carrier": "electron-builder NSIS toolset nsis-3.0.4.1",
       "note": "electron-builder copies it into every per-machine NSIS build; electron-updater uses it to re-run an update elevated.",
-      "texts": [
-        "LICENSE-elevate-MIT.txt"
-      ]
+      "texts": ["LICENSE-elevate-MIT.txt"]
     }
   }
 }

@@ -724,6 +724,19 @@ export function scriptRunText(res: ScriptRunSummary): { text: string; isError: b
   return { text: `${header}${outputBlock}${callsSummary}`, isError: false };
 }
 
+/** The `output` object back out of {@link scriptRunText}'s text, or undefined. */
+export function scriptRunOutputFromText(text: string): unknown {
+  const start = text.indexOf('\noutput:\n');
+  if (start < 0) return undefined;
+  const body = text.slice(start + '\noutput:\n'.length);
+  const end = body.indexOf('\ncalls:\n');
+  try {
+    return JSON.parse(end < 0 ? body : body.slice(0, end));
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Roster, projects and tasks ─────────────────────────────────────────
 
 export function listGezelsText(gezels: readonly { id: string; name: string; role?: string }[]) {

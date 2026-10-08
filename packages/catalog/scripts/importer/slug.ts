@@ -1,7 +1,7 @@
 /**
  * Convert upstream registry names (reverse-DNS like `io.github.foo/bar`)
  * to gezel catalog ids that conform to `IdRegex` from
- * `packages/core/src/schemas/catalog.ts`:
+ * `packages/core/src/schemas/catalog-id.ts`:
  *
  *   /^[a-z0-9][a-z0-9.\-:]{1,63}$/
  *

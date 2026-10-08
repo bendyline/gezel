@@ -14,6 +14,7 @@ import {
 import { formatTaskNotesDigest, newestTaskNotesFirst } from '../prompt/task-notes-digest.js';
 import type { AvailableToolInfo } from '../prompt/tools-block.js';
 import type { GezelConfig } from '../schemas/api.js';
+import type { GezelCharacter } from '../schemas/character.js';
 import type { GezelDetail, GezelSummary } from '../schemas/gezel.js';
 import type { ProjectDetail, ProjectFileEntry } from '../schemas/project.js';
 import type { ChatSession } from '../schemas/session.js';
@@ -49,6 +50,8 @@ export interface PortableInstructionsInput {
   minimalContext: boolean;
   /** Room for the standing notes about the person; defaults to the footprint's. */
   personNotesMaxChars?: number;
+  /** The gezel's character, only in social mode. */
+  character?: GezelCharacter;
   /** The app previews the project's HTML pages itself. */
   inAppWebPreview?: boolean;
 }
@@ -100,6 +103,7 @@ export async function buildPortableInstructions(
         PROMPT_FOOTPRINT_POLICY[input.minimalContext ? 'minimal' : 'compact'].personNotesMaxChars,
     ),
     ...(traits.length ? { traits } : {}),
+    ...(input.character ? { character: input.character } : {}),
     role: gezel.role,
     providerName: 'llama-cpp',
     generalistKickoff: resolveGeneralistKickoff(

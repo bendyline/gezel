@@ -10,6 +10,9 @@ const capabilities = new Set([
   'documents.write',
   'tasks.read',
   'tasks.write',
+  'memory.read',
+  'memory.write',
+  'reminders',
 ]);
 const members = new Set([
   // The file APIs themselves, handed to an SDK store helper, which calls
@@ -30,6 +33,11 @@ const members = new Set([
   ...['get', 'steps', 'currentStep', 'readNotes', 'writeNotes', 'appendNote'].map(
     (name) => `task.${name}`,
   ),
+  // The phone's script host serves these itself (runtime/script-host.ts).
+  'memory.search',
+  'memory.save',
+  'reminder.set',
+  'reminder.clear',
 ]);
 /** Conservative packaging eligibility, not an authorization boundary. The runtime rechecks every call. */
 export function supportsPortableScriptSource(

@@ -15,7 +15,14 @@ const catalog = {
   source: 'gilde',
   updateAvailable: false,
 };
-function fixture() {
+const handboek = {
+  ref: { catalogId: 'handboek', version: '1' },
+  enabled: true,
+  mounted: true,
+  source: 'bundled',
+  updateAvailable: false,
+};
+function fixture(installed: readonly object[] = [catalog]) {
   const score = vi.fn(async () => ({ status: 'scored', scores: [0.2, 0.9] }));
   const search = vi.fn(async () => [
     { uri: 'knowledge://pub/science/a' },
@@ -23,13 +30,19 @@ function fixture() {
   ]);
   const install = vi.fn(() => ({ jobId: 'science' }));
   const remove = vi.fn(async () => true);
+  const setEnabled = vi.fn(async () => true);
+  const status = vi.fn(async () => ({
+    status: 'ready',
+    models: [{ id: 'reranker', installed: true, approxBytes: 300_000_000 }],
+    modelId: 'reranker',
+  }));
   const forSurface = vi.fn(async () => ({
     model: { id: 'reranker' },
     thresholds: null,
   }));
   const ctx = {
     knowledge: {
-      list: async () => [catalog],
+      list: async () => installed,
       available: async () => [
         {
           id: 'science',
@@ -44,7 +57,7 @@ function fixture() {
       getJob: () => undefined,
       startInstall: install,
       remove,
-      setEnabled: vi.fn(async () => true),
+      setEnabled,
       cancelJob: vi.fn(),
       searchUnified: search,
       resolveCitation: async (uri: string) => ({
@@ -58,10 +71,7 @@ function fixture() {
     relevance: {
       forSurface,
       scorer: { score },
-      status: async () => ({
-        models: [{ id: 'reranker', installed: true }],
-        modelId: 'reranker',
-      }),
+      status,
       setting: async () => ({ spec: { id: 'reranker' } }),
       install: vi.fn(async () => ({ started: true })),
     },
@@ -75,7 +85,7 @@ function fixture() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-  return { app, ctx, request, score, search, forSurface, install, remove };
+  return { app, ctx, request, score, search, forSurface, install, remove, setEnabled, status };
 }
 const query = {
   query: 'science',
@@ -180,6 +190,97 @@ describe('app knowledge boundary', () => {
       id: 'science',
       placement: 'user',
     });
+  });
+  it("keeps Gezel's bundled Handboek out of the app surface", async () => {
+    // Enabled on every install: exposing it would make a fresh Gezel demand a
+    // relevance model from apps before the person chose any catalog.
+    const alone = fixture([handboek]);
+    const empty = await alone.request('retrieve', query);
+    expect(await empty.json()).toEqual({ reranked: true, passages: [] });
+    expect(alone.forSurface).not.toHaveBeenCalled();
+    expect(alone.search).not.toHaveBeenCalled();
+
+    const f = fixture([catalog, handboek]);
+    const state = (await (await f.app.request('/v1/knowledge/state')).json()) as {
+      catalogs: Array<{ id: string }>;
+    };
+    expect(state.catalogs.map((entry) => entry.id)).toEqual(['science']);
+    expect((await f.request('retrieve', query)).status).toBe(200);
+    expect(f.search).toHaveBeenCalledWith(
+      'science',
+      expect.objectContaining({ catalogs: ['science'] }),
+    );
+    for (const action of ['enable', 'disable', 'remove'])
+      expect((await f.request('update', { action, catalogId: 'handboek' })).status).toBe(404);
+    expect(f.setEnabled).not.toHaveBeenCalled();
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+  it('answers an auto query without the relevance model by the unjudged bar', async () => {
+    const f = fixture();
+    f.forSurface.mockResolvedValue(null as never);
+    f.search.mockResolvedValue([
+      // A keyword-only hit: an encyclopedia always shares a word with the request.
+      { uri: 'knowledge://pub/science/a', kind: 'knowledge', arm: 'fts', relevance: 0.95 },
+      { uri: 'knowledge://pub/science/b', kind: 'knowledge', arm: 'vector', relevance: 0.9 },
+    ] as never);
+    const response = await f.request('retrieve', { ...query, rerank: 'auto' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      reranked: false,
+      passages: [expect.objectContaining({ title: 'B', text: 'Best passage' })],
+    });
+    expect(f.score).not.toHaveBeenCalled();
+    // `required` keeps refusing.
+    expect((await f.request('retrieve', query)).status).toBe(409);
+  });
+  it('falls back to the unjudged bar when an auto query cannot be scored', async () => {
+    const f = fixture();
+    f.score.mockResolvedValue({ status: 'timeout', scores: [] } as never);
+    f.search.mockResolvedValue([
+      { uri: 'knowledge://pub/science/a', kind: 'knowledge', arm: 'vector', relevance: 0.1 },
+      { uri: 'knowledge://pub/science/b', kind: 'knowledge', arm: 'vector', relevance: 0.9 },
+    ] as never);
+    expect(await (await f.request('retrieve', { ...query, rerank: 'auto' })).json()).toEqual({
+      reranked: false,
+      passages: [expect.objectContaining({ title: 'B' })],
+    });
+  });
+  it('reports the relevance model download without starting it', async () => {
+    const f = fixture();
+    expect(await (await f.app.request('/v1/knowledge/relevance')).json()).toEqual({
+      ready: true,
+      downloading: false,
+      percent: null,
+      downloadBytes: null,
+    });
+    f.status.mockResolvedValue({
+      status: 'not-installed',
+      models: [{ id: 'reranker', installed: false, approxBytes: 300_000_000 }],
+      modelId: 'reranker',
+    });
+    expect(await (await f.app.request('/v1/knowledge/relevance')).json()).toMatchObject({
+      ready: false,
+      downloadBytes: 300_000_000,
+    });
+    f.status.mockResolvedValue({
+      status: 'blocked-network',
+      models: [{ id: 'reranker', installed: false, approxBytes: 300_000_000 }],
+      modelId: 'reranker',
+    });
+    expect(await (await f.app.request('/v1/knowledge/relevance')).json()).toMatchObject({
+      downloadBytes: null,
+    });
+    f.status.mockResolvedValue({
+      status: 'downloading',
+      progress: { bytesDone: 75, bytesTotal: 300 },
+      models: [{ id: 'reranker', installed: false, approxBytes: 300 }],
+      modelId: 'reranker',
+    } as never);
+    expect(await (await f.app.request('/v1/knowledge/relevance')).json()).toMatchObject({
+      downloading: true,
+      percent: 25,
+    });
+    expect(f.ctx.relevance.install).not.toHaveBeenCalled();
   });
   it('rejects attempts to disable reranking', async () => {
     const f = fixture();

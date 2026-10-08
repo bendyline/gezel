@@ -9,7 +9,8 @@ import type { DocumentChangeEvent, SessionChangeEvent, Store } from '../fs/store
 import type { HistoryManager } from '../history/manager.js';
 import { beginPerfWork } from '../perf/responsiveness.js';
 import { HISTORY_BACKFILL_META_KEY, openGlobalCollection } from './global-index.js';
-import type { ChunkInput, IndexStore } from './index-store.js';
+import type { ChunkInput } from './index-store-types.js';
+import type { IndexStore } from './index-store.js';
 
 /**
  * Single writer for `~/.gezel/index/global.db`. Change hooks (Store session/

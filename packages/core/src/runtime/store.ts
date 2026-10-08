@@ -10,6 +10,8 @@ import type {
   UpdateProjectRequest,
 } from '../schemas/api.js';
 import type { GezelDetail, GezelFrontmatter, GezelSummary } from '../schemas/gezel.js';
+import type { GezelGrowthState } from '../schemas/growth.js';
+import type { ProjectReminder } from '../schemas/notifications.js';
 import { type ProjectDetail, ProjectSchema } from '../schemas/project.js';
 import type {
   CreatePromptDraftRequest,
@@ -25,6 +27,7 @@ import * as backup from './backup.js';
 import { promptDraftFiles, promptDraftHost } from './drafts-portable.js';
 import * as drafts from './drafts.js';
 import * as gezels from './gezels.js';
+import * as growth from './growth.js';
 import { ensureLayout } from './layout.js';
 import * as memories from './memories.js';
 import { recallPortableMemories } from './memory-recall.js';
@@ -32,6 +35,7 @@ import * as files from './project-files.js';
 import * as projectTypes from './project-types.js';
 import * as projects from './projects.js';
 import * as questions from './questions.js';
+import * as reminders from './reminders.js';
 import { PortableRepository, type PortableStoreOptions } from './repository.js';
 import * as scriptRuns from './script-runs.js';
 import * as scriptSources from './script-sources.js';
@@ -108,6 +112,27 @@ export class PortableStore {
   }
   searchMemoryScope(scope: memories.PortableMemoryScope, id: string, query: string) {
     return this.run((repo) => memories.searchMemoryScope(repo, scope, id, query));
+  }
+  readGezelGrowth(gezelId: string) {
+    return this.run((repo) => growth.readGezelGrowth(repo, gezelId));
+  }
+  writeGezelGrowth(gezelId: string, state: GezelGrowthState) {
+    return this.run((repo) => growth.writeGezelGrowth(repo, gezelId, state));
+  }
+  authoredMemoryEntries(gezelId: string) {
+    return this.run((repo) => growth.authoredMemoryEntries(repo, gezelId));
+  }
+  consultationsByDay(gezelId: string) {
+    return this.run((repo) => growth.consultationsByDay(repo, gezelId));
+  }
+  getProjectReminder(projectId: string) {
+    return this.run((repo) => reminders.getProjectReminder(repo, projectId));
+  }
+  setProjectReminder(projectId: string, reminder: ProjectReminder | null) {
+    return this.run((repo) => reminders.setProjectReminder(repo, projectId, reminder));
+  }
+  listReminders() {
+    return this.run((repo) => reminders.listReminders(repo));
   }
   personMemoryEntries() {
     return this.run((repo) => memories.personMemoryEntries(repo));

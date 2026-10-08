@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, relative } from 'node:path';
 import { PROJECT_SHADOW_DIR_NAME } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
-import type { ChunkInput } from './index-store.js';
+import type { ChunkInput } from './index-store-types.js';
 import { convertInSandbox } from './sandbox-convert.js';
 
 /**

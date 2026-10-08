@@ -12,12 +12,9 @@ import {
   GENERALIST_TEMPLATE_ID,
   type GezelConfig,
   type ProviderName,
-  type Question,
   createLogger,
   effectiveGeneralistModeSetting,
-  formatNightShiftSummary,
   formatSuspension,
-  hasNightShiftIndexing,
   isSharedLibraryProject,
   isTaskWorkAllowed,
   nowIso,
@@ -26,6 +23,7 @@ import {
   projectAllowsAmbientWork,
   projectLeadGezelId,
   projectNightWorkEnabled,
+  resolveSocialMode,
   resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
@@ -50,7 +48,6 @@ import { AppToolRelayRegistry } from './app-tools/relay-registry.js';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
-import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
 import { registerAzureMonitorLogsAdapters } from './connectors/natives/azure-monitor-logs.js';
@@ -79,7 +76,6 @@ import {
 import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
-import { writeWeeklyRecap } from './digest/weekly-recap.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
@@ -104,21 +100,12 @@ import { stepCreditedGezelId } from './growth/xp.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { generateLoopbackCert } from './http/cert.js';
-import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
-import {
-  codexBridgePortForHome,
-  opencodeBridgePortForHome,
-  piBridgePortForHome,
-  vscodeBridgePortForHome,
-} from './http/local-bridge-port.js';
-import { listenLoopback } from './http/loopback-listener.js';
+import { bindMainListener } from './http/main-listener.js';
 import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
-import { buildOpenCodeBridgeApp, createOpenCodeBridgeController } from './http/opencode-bridge.js';
-import { buildPiBridgeApp, createPiBridgeController } from './http/pi-bridge.js';
 import {
   PreviewCapabilityStore,
   normalizePreviewPath,
@@ -128,7 +115,6 @@ import { buildRemoteApp } from './http/remote-server.js';
 import { invalidateModelsCache } from './http/routes/models.js';
 import { buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
-import { buildVSCodeBridgeApp, createVSCodeBridgeController } from './http/vscode-bridge.js';
 import { VISION_RASTER_FORMATS } from './index-store/ai-shadow.js';
 import { writeNightlyCodebaseReport } from './index-store/codebase-report.js';
 import { ContentIndex } from './index-store/content-index.js';
@@ -148,14 +134,11 @@ import { KeurmeesterManager } from './keurmeester/manager.js';
 import { KnowledgeManager } from './knowledge/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
-import { createLocalHarnessModelSource } from './local-harness/model-source.js';
+import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { mailCatalogEntries } from './mail/search-catalog.js';
-import {
-  ensureNightShiftOversightTask,
-  findNightShiftOversightTask,
-} from './meester/night-shift-oversight.js';
+import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
 import { warmEmbeddings } from './memory/embeddings.js';
@@ -167,13 +150,11 @@ import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 import { migrateLegacySystemModels } from './models/storage-roots.js';
 import { DuckRunner } from './observations/duck.js';
 import { runProjectObservationNightly } from './observations/nightly.js';
-import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import {
   discoverManagedScriptRuntimes,
   ensureBundledNodeOnPath,
 } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
-import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { PromptDraftManager } from './prompt-drafts/manager.js';
@@ -213,7 +194,7 @@ import {
 } from './search/search-service.js';
 import { MemorySecretStore, openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
-import { DEFAULT_PORT, type RunningService, type StartServiceOptions } from './service-options.js';
+import type { RunningService, StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
 import { runSystemBootstrap, stopSystemBootstraps } from './system-toolsets/bootstrap.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
@@ -228,9 +209,8 @@ import { reviewTaskFigures } from './tasks/figure-review.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
-import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
+import { postNightShiftReviewCard } from './tasks/night-review-card.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
-import { buildNightShiftTally, nightShiftTallyPeriod } from './tasks/night-tally.js';
 import { ownerStepQuestion } from './tasks/owner-step.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
@@ -244,7 +224,6 @@ import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
-import { createVSCodeSetupManager } from './vscode-setup/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
@@ -933,7 +912,16 @@ export async function startProductService(
   // `secrets` store flows in so the runner's dispatcher can resolve
   // `credential:<name>` capabilities via a DefaultCredentialRegistry
   // — credentials stay server-side, scripts only ever name them.
-  const scriptRunner = new ScriptRunner({ store, chat, memory, tasks, secrets, catalog });
+  const scriptRunner = new ScriptRunner({
+    store,
+    chat,
+    memory,
+    tasks,
+    secrets,
+    catalog,
+    remindersChanged: (projectId) =>
+      chatEvents.publishGlobalEvent({ type: 'reminders_updated', projectId }),
+  });
   tasks.setScriptRunner(scriptRunner);
   // Hook scripts go through the same runner. Wired post-construction
   // so ChatManager and ScriptRunner can each reference the other
@@ -1650,147 +1638,30 @@ export async function startProductService(
   chat.setPromptDrafts(promptDrafts);
   const inputStaging = new InputStagingManager(store);
   tasks.setInputStaging(inputStaging);
-  // Morning review question: once per settled night window (deduped on
-  // the window key against the question store, so restarts and
-  // slept-through-window-end catch-ups never double-ask), summarize what
-  // the shift accomplished as a needs-input card with report links.
   // The nightly oversight task is ensured at boot; ensure it again as each
   // window opens, so a task deleted, renamed or stuck on an old prompt since
   // boot is repaired in time to run tonight.
   nightShift.setOnWindowOpened(async () => {
     await ensureNightShiftOversightTask(store, tasks);
   });
-  nightShift.setOnWindowSettled(async (windowKey) => {
-    const existing = await store.listProjectQuestions('default').catch(() => []);
-    if (
-      existing.some(
-        (q) => q.intent?.kind === 'night-shift-review' && q.intent.windowKey === windowKey,
-      )
-    ) {
-      return;
-    }
-    const review = await buildNightShiftReview(
-      { store, tasks, reportActions, diffpacks },
-      nightShift.currentWindow(),
-      // The shift's own clock, so the review and the settled window agree.
-      opts.nightShiftNow?.() ?? new Date(),
-    );
-    if (review.windowKey !== windowKey) return;
-    const outcome = nightShift.windowOutcome(windowKey);
-    // A paused review never re-arms on its own (its pause is meant for the
-    // person), so the morning card is where they hear about it.
-    const oversight = await findNightShiftOversightTask(store);
-    const pausedReview =
-      oversight?.status === 'paused' ? { projectId: 'default', num: oversight.num } : undefined;
-    // The sweep's own output: the only durable record of indexing volume.
-    const settledAt = opts.nightShiftNow?.() ?? new Date();
-    const tally = await buildNightShiftTally(
-      { history, store, contentIndex },
-      nightShiftTallyPeriod(settledAt, nightShift.currentWindow(), {
-        active: false,
-        startedAt: null,
-      }),
-    ).catch(() => null);
-    const indexing = tally
-      ? {
-          filesIndexed: tally.filesIndexed,
-          filesReviewed: tally.filesReviewed,
-          mediaDescribed: tally.mediaDescribed,
-        }
-      : undefined;
-    const swept = hasNightShiftIndexing(indexing);
-    const weeklyRecap = await writeWeeklyRecap({ store, history }, settledAt).catch(
-      (err: unknown) => {
-        log.warn(`[night-shift] weekly recap failed: ${String(err)}`);
-        return null;
+  // The morning review card; see tasks/night-review-card.ts.
+  nightShift.setOnWindowSettled((windowKey) =>
+    postNightShiftReviewCard(
+      {
+        store,
+        tasks,
+        history,
+        contentIndex,
+        reportActions,
+        diffpacks,
+        chatEvents,
+        nightShift,
+        hasNightSweepProject,
+        ...(opts.nightShiftNow ? { nightShiftNow: opts.nightShiftNow } : {}),
       },
-    );
-    const empty =
-      review.tasksCompleted.length === 0 &&
-      review.reports.length === 0 &&
-      review.diffpacks.length === 0 &&
-      !swept;
-    if (empty && !pausedReview && !weeklyRecap) {
-      // A night that produced nothing still gets a card saying why — but only
-      // when work was owed. An install with no folders and nothing queued
-      // shouldn't hear about every night it had nothing to do.
-      const owed =
-        (await hasNightSweepProject()) ||
-        (await tasks.list({ status: 'active' }).catch(() => [])).some(
-          (t) => t.nightShift?.enabled === true,
-        );
-      if (!owed) return;
-    }
-    const quiet = empty ? { reason: outcome.reason ?? ('no-work' as const) } : undefined;
-    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
-    // `suggested`, not `total`: the tally is a call to action, and an
-    // action already fired or dismissed is not one the user still owes
-    // a look. Same count Home's "Last night" panel names.
-    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
-    const card: Question = {
-      id: randomUUID(),
-      projectId: 'default',
-      gezelId: config.meesterGezelId ?? '',
-      // No live session — the answer route early-returns for this intent.
-      sessionId: '',
-      prompt: formatNightShiftSummary({
-        tasks: review.tasksCompleted.length,
-        reports: review.reports.length,
-        proposals: review.diffpacks.length,
-        actions: actionTotal,
-        ...(quiet ? { quiet } : {}),
-        ...(pausedReview ? { pausedReview: true } : {}),
-        ...(swept && indexing ? { indexing } : {}),
-      }),
-      choices: ['Dismiss'],
-      allowWriteIn: false,
-      multiSelect: false,
-      ...(review.reports[0]
-        ? { documentPath: nightShiftReportAttachmentPath(review.reports[0]) }
-        : {}),
-      intent: {
-        kind: 'night-shift-review',
-        windowKey: review.windowKey,
-        tasksCompleted: review.tasksCompleted.length,
-        reports: review.reports.map((r) => ({
-          projectId: r.projectId,
-          path: r.path,
-          title: r.title,
-          actionCount: r.actionCounts.total,
-        })),
-        ...(quiet ? { quiet } : {}),
-        ...(pausedReview ? { pausedReview } : {}),
-        ...(swept && indexing ? { indexing } : {}),
-        ...(weeklyRecap ? { weeklyRecap } : {}),
-      },
-      createdAt: new Date().toISOString(),
-    };
-    await store.writeQuestion(card);
-    // Announced like any card: the desktop app raises its one morning
-    // notification from this, and open windows fold the card in.
-    chatEvents.publishProjectEvent('default', { type: 'question_asked', question: card });
-    // One audit record per settled window, written under the same per-window
-    // dedupe as the card, so a restart replaying the settle can't double it.
-    await history
-      .log({
-        kind: 'night-shift.window-settled',
-        projectId: 'default',
-        summary: quiet
-          ? `Night shift ${windowKey}: nothing done (${quiet.reason})`
-          : `Night shift ${windowKey}: ${review.tasksCompleted.length} task(s), ${review.reports.length} report(s), ${review.diffpacks.length} proposal(s)`,
-        details: {
-          windowKey,
-          ran: outcome.ran,
-          ...(outcome.reason ? { reason: outcome.reason } : {}),
-          ...(outcome.startedAt ? { startedAt: outcome.startedAt } : {}),
-          ...(outcome.endedAt ? { endedAt: outcome.endedAt } : {}),
-          tasksCompleted: review.tasksCompleted.length,
-          reports: review.reports.length,
-          proposals: review.diffpacks.length,
-        },
-      })
-      .catch((err) => log.warn(`[night-shift] settle history event failed: ${String(err)}`));
-  });
+      windowKey,
+    ),
+  );
   // Paused-for-help fan-in: every pause-for-help path (gate exhausted /
   // plateau / unsatisfiable / infrastructure, stalled step, spent budget)
   // files ONE needs-input card so the pause is pushed to the user instead
@@ -2382,7 +2253,12 @@ export async function startProductService(
     memory,
     history,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
-    announce: (gezelId, toLevel) => chat.announceGrowth(gezelId, toLevel),
+    // Growth is on display only in social mode: off, the level-up waits in
+    // the Growth tab for whenever the person turns it on.
+    announce: async (gezelId, toLevel) => {
+      if (resolveSocialMode(await store.readConfig(), 'desktop'))
+        await chat.announceGrowth(gezelId, toLevel);
+    },
   });
   growthRef.engine = growth;
 
@@ -2414,124 +2290,19 @@ export async function startProductService(
     allowListener: distribution.allowOllamaEmulation,
   });
 
-  // Codex needs a stable plain-HTTP origin because the product daemon's port
-  // and self-signed certificate rotate. Unlike Ollama emulation this listener
-  // remains bearer-authenticated and exposes only inference. Its profile/file
-  // manager decides whether it should be running.
-  const codexBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
-  const codexBridge = createCodexBridgeController({
-    fetch: () => {
-      if (!codexBridgeFetchRef.value) {
-        throw new Error('Codex bridge cannot start before the HTTP app is ready');
-      }
-      return codexBridgeFetchRef.value;
-    },
-    port: opts.codexBridgePort ?? codexBridgePortForHome(home),
-  });
-  const listCodexSetupModels = createLocalHarnessModelSource({
+  // Codex, OpenCode, pi and VS Code; see local-harness/integrations.ts.
+  const localHarnesses = createLocalHarnessIntegrations({
+    home,
+    opts,
+    store,
+    chat,
     catalog,
-    listModels: (provider, signal) => chat.listModelsForProvider(provider, signal),
-    resolveNativeContextWindow: async (provider, modelId, signal) => {
-      if (resolveMachineEngineRemoteId()) {
-        const remoteProvider = await chat.getProviderForModel(provider, modelId);
-        return (
-          (await remoteProvider.prepareContextWindow?.(modelId, signal)) ??
-          remoteProvider.getContextWindow?.()
-        );
-      }
-      // Standalone, because this number is published to a Codex profile on
-      // disk and read back on every launch for days. Live pricing charged the
-      // model for whatever else was resident at setup time, so every entry
-      // came out at the 64K floor even on a host admitting 128K+ — Codex then
-      // compacted at 90% of the wrong figure, repeatedly, mid-task.
-      return chat.previewContextWindowForModel(provider, modelId, { standalone: true });
-    },
-  });
-  const codexSetup = createCodexSetupManager({
-    home,
-    ...(opts.codexHome !== undefined ? { codexHome: opts.codexHome } : {}),
     tokenStore,
-    bridge: codexBridge,
-    readConfig: () => store.readConfig(),
-    listGezels: () => store.listGezels(),
-    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
-    listModels: listCodexSetupModels,
+    resolveMachineEngineRemoteId,
   });
-
-  // OpenCode needs the same stable plain-HTTP origin as Codex, on its own port
-  // so neither integration's lifecycle can take the other's listener down. Its
-  // provider speaks chat completions rather than the Responses API, hence a
-  // separate app over the same authenticated route stack.
-  const opencodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
-  const opencodeBridge = createOpenCodeBridgeController({
-    fetch: () => {
-      if (!opencodeBridgeFetchRef.value) {
-        throw new Error('OpenCode bridge cannot start before the HTTP app is ready');
-      }
-      return opencodeBridgeFetchRef.value;
-    },
-    port: opts.opencodeBridgePort ?? opencodeBridgePortForHome(home),
-  });
-  const opencodeSetup = createOpenCodeSetupManager({
-    home,
-    tokenStore,
-    bridge: opencodeBridge,
-    readConfig: () => store.readConfig(),
-    listGezels: () => store.listGezels(),
-    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
-    // The same proven-capability model source Codex uses: a coding harness
-    // cannot fall back gracefully from a model that turns out not to do tools.
-    listModels: listCodexSetupModels,
-  });
-
-  // pi speaks the same chat-completions dialect as OpenCode, on its own port
-  // and credential so revoking one harness never disturbs the others.
-  const piBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
-  const piBridge = createPiBridgeController({
-    fetch: () => {
-      if (!piBridgeFetchRef.value) {
-        throw new Error('pi bridge cannot start before the HTTP app is ready');
-      }
-      return piBridgeFetchRef.value;
-    },
-    port: opts.piBridgePort ?? piBridgePortForHome(home),
-  });
-  const piSetup = createPiSetupManager({
-    home,
-    ...(opts.piAgentDir !== undefined ? { piAgentDir: opts.piAgentDir } : {}),
-    tokenStore,
-    bridge: piBridge,
-    readConfig: () => store.readConfig(),
-    listGezels: () => store.listGezels(),
-    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
-    listModels: listCodexSetupModels,
-  });
-
-  // VS Code's built-in custom-endpoint provider uses chat completions too.
-  // It gets an independent port and credential so its plaintext profile token
-  // can be revoked without disturbing any other connected app.
-  const vscodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
-  const vscodeBridge = createVSCodeBridgeController({
-    fetch: () => {
-      if (!vscodeBridgeFetchRef.value) {
-        throw new Error('VS Code bridge cannot start before the HTTP app is ready');
-      }
-      return vscodeBridgeFetchRef.value;
-    },
-    port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
-  });
+  const { codexSetup, opencodeSetup, piSetup, vscodeSetup } = localHarnesses;
   // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
   const officeIntegrations = createOfficeIntegrations(home, opts, firstPartyApps);
-  const vscodeSetup = createVSCodeSetupManager({
-    home,
-    ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
-    tokenStore,
-    bridge: vscodeBridge,
-    readConfig: () => store.readConfig(),
-    listGezels: () => store.listGezels(),
-    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
-    listModels: listCodexSetupModels,
-  });
 
   // The meester's occasional status report — dynamic Home greeting +
   // dashboard + follow-up draft tasks. Constructed before the context
@@ -2747,161 +2518,10 @@ export async function startProductService(
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
   const ollamaEmulationApp = buildOllamaEmulationApp(context);
   ollamaEmulationFetchRef.value = ollamaEmulationApp.fetch.bind(ollamaEmulationApp);
-  const codexBridgeApp = buildCodexBridgeApp(context, {
-    models: () => codexSetup.codexModelCatalog(),
-  });
-  codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
-  const opencodeBridgeApp = buildOpenCodeBridgeApp(context);
-  opencodeBridgeFetchRef.value = opencodeBridgeApp.fetch.bind(opencodeBridgeApp);
-  const piBridgeApp = buildPiBridgeApp(context);
-  piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
-  const vscodeBridgeApp = buildVSCodeBridgeApp(context);
-  vscodeBridgeFetchRef.value = vscodeBridgeApp.fetch.bind(vscodeBridgeApp);
+  localHarnesses.bindApps(context);
   officeIntegrations.bindFetch(app.fetch.bind(app));
 
-  // Port selection, by caller intent:
-  //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
-  //     that and FAIL on collision — a silently-relocated named port makes
-  //     the advertised base URL a lie.
-  //   - `preferCanonicalPort` (standalone daemon + embedded desktop): try
-  //     the canonical DEFAULT_PORT so third-party OpenAI-compatible clients
-  //     get a stable base URL, but fall back to an ephemeral port if it's
-  //     taken so we never fail to boot.
-  //   - neither (tests, library embedders): pure ephemeral — no contention
-  //     on a single fixed port across parallel suites.
-  let requestedPort = 0;
-  let allowEphemeralFallback = false;
-  if (opts.port !== undefined) {
-    requestedPort = opts.port;
-  } else if (opts.preferCanonicalPort) {
-    requestedPort = DEFAULT_PORT;
-    allowEphemeralFallback = true;
-  }
-
-  // Classify what answers on the canonical port when we lose the bind.
-  // A 200 with the health body or a 401 on exactly `/api/health` over
-  // loopback TLS is another gezeld (health sits behind bearerAuth, so an
-  // unauthenticated probe of a live daemon yields 401). TLS/socket
-  // failures and non-HTTP listeners classify as unknown/other. Never
-  // throws; bounded by a short timeout.
-  const identifyCanonicalPortOccupant = async (
-    occupiedPort: number,
-  ): Promise<'machine-engine' | 'gezeld' | 'other-http' | 'unknown'> => {
-    const { request: httpsRequest } = await import('node:https');
-    return new Promise((resolve) => {
-      const req = httpsRequest(
-        {
-          host: '127.0.0.1',
-          port: occupiedPort,
-          path: '/api/health',
-          method: 'GET',
-          timeout: 3_000,
-          // The occupant's loopback cert is self-signed by a different
-          // daemon; identification, not trust, is the goal here.
-          rejectUnauthorized: false,
-        },
-        (res) => {
-          const chunks: Buffer[] = [];
-          res.on('data', (c: Buffer) => {
-            if (chunks.reduce((n, b) => n + b.length, 0) < 4096) chunks.push(c);
-          });
-          res.on('end', () => {
-            if (res.statusCode === 401) return resolve('gezeld');
-            const body = Buffer.concat(chunks).toString('utf8');
-            if (res.statusCode === 200 && body.includes('"ok":true')) {
-              if (body.includes('"serviceRole":"machine-engine"')) {
-                return resolve('machine-engine');
-              }
-              return resolve('gezeld');
-            }
-            resolve('other-http');
-          });
-          res.on('error', () => resolve('other-http'));
-        },
-      );
-      req.on('timeout', () => {
-        req.destroy();
-        resolve('unknown');
-      });
-      req.on('error', () => resolve('unknown'));
-      req.end();
-    });
-  };
-  const bindOnce = (port: number) => listenLoopback(app.fetch, cert, port);
-
-  let server!: ServerType;
-  let port!: number;
-  try {
-    ({ server, port } = await bindOnce(requestedPort));
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException | null)?.code;
-    if (allowEphemeralFallback && code === 'EADDRINUSE') {
-      log.warn(
-        `[service] canonical port ${requestedPort} is in use; falling back to an ephemeral port. Third-party clients should read the bound port from ~/.gezel/runtime/port.`,
-      );
-      // Identify the occupant in the background. A machine-engine broker plus
-      // one per-user product daemon is the intended split: the former owns the
-      // canonical port and GPU, the latter uses its runtime-discovered port.
-      // Two FULL product daemons remain the dangerous case (duplicate
-      // schedulers + engine ownership), so keep the old tripwire for legacy
-      // occupants. Fire-and-forget so a slow listener cannot delay our boot.
-      void identifyCanonicalPortOccupant(requestedPort).then((occupant) => {
-        if (occupant === 'machine-engine') {
-          log.info(
-            `[service] the machine engine owns canonical port ${requestedPort}; this user daemon is using its runtime-discovered port as expected`,
-          );
-        } else if (occupant === 'gezeld') {
-          log.error(
-            `[service] another full gezeld daemon is already serving canonical port ${requestedPort}. Two product daemons may duplicate background work and contend for local engines. Upgrade the installed machine service to an engine-only build, or stop the stale service before continuing.`,
-          );
-        } else if (occupant === 'other-http') {
-          log.warn(
-            `[service] port ${requestedPort} is held by a non-Gezel local HTTP server; leaving it alone`,
-          );
-        }
-      });
-      ({ server, port } = await bindOnce(0));
-    } else {
-      throw err;
-    }
-  }
-  if (cert) {
-    log.info(`[service] serving HTTPS+HTTP/2 on 127.0.0.1:${port} (TLS 1.3)`);
-  } else {
-    log.info(`[service] serving HTTP/1.1 on 127.0.0.1:${port}`);
-  }
-
-  // Connection-level failure visibility. Every renderer SSE stream and
-  // poll multiplexes over ONE h2 connection (that's the point of the ALPN
-  // order above), so a single session-level error drops them all at once
-  // — the UI sees a burst of "network error" with no server-side trace.
-  // These handlers are the trace. `sessionError` is the h2 death that
-  // matters; `tlsClientError`/`clientError` are handshake noise (port
-  // scanners, curl without -k) kept at debug.
-  const describeSocketError = (err: unknown): string => {
-    if (!(err instanceof Error)) return String(err);
-    const code = (err as NodeJS.ErrnoException).code;
-    return code && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
-  };
-  const rawServer = server as unknown as NodeJS.EventEmitter;
-  if (cert) {
-    rawServer.on('sessionError', (err: unknown) => {
-      log.warn(
-        `[http] h2 session error — every stream multiplexed on that connection drops: ${describeSocketError(err)}`,
-      );
-    });
-    rawServer.on('tlsClientError', (err: unknown) => {
-      log.debug(`[http] TLS client error: ${describeSocketError(err)}`);
-    });
-  } else {
-    // Registering 'clientError' suppresses Node's default 400-and-destroy,
-    // so the listener must tear the socket down itself or bad connections
-    // leak.
-    rawServer.on('clientError', (err: unknown, socket: { destroy: () => void }) => {
-      log.debug(`[http] client connection error: ${describeSocketError(err)}`);
-      socket.destroy();
-    });
-  }
+  const { server, port } = await bindMainListener(app.fetch, cert, opts);
 
   // Plain-HTTP preview sidecar. It always gets a dedicated loopback origin,
   // even when the main transport is already HTTP: local-preview-only browser

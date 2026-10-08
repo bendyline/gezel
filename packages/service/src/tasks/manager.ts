@@ -2215,7 +2215,7 @@ export class TaskManager {
   }
 
   /**
-   * Idle-time twin of `ChatManager.maybeAutoAdvanceOnObservableProgress`.
+   * Idle-time twin of `maybeAutoAdvanceOnObservableProgress` (chat/observable-progress.ts).
    * That hook only fires when the assignee actually FINISHES a turn — so a
    * step whose deliverable already clears `advanceWhen` but whose assignee
    * went idle without ever calling `advance_task_step` (turn parked on a

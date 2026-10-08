@@ -1,18 +1,15 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type {
   BoekwachterIssue,
   BoekwachterIssueDismissalReason,
   BoekwachterIssueStatus,
   DescribeFolderResponse,
-  FileContextFinding,
   FileContextResponse,
   FileMapRequest,
   FileMapResponse,
-  FileReviewIssueSeverity,
   FileReviewResponse,
-  FileReviewWire,
   FindEntityResponse,
   FindSimilarImagesResponse,
   FindSymbolResponse,
@@ -41,13 +38,10 @@ import type {
   SearchImagesResponse,
   SecurityFindingWire,
   SecurityOverviewResponse,
-  SecurityScanProvenance,
   SecurityScanResponse,
-  SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
 import {
-  SecurityScanProvenanceSchema,
   createLogger,
   isSharedLibraryProject,
   nowIso,
@@ -63,17 +57,11 @@ import {
   projectLocalVillageFile,
   projectStorageScope,
 } from '@bendyline/gezel/paths';
-import {
-  resolveImportEdges,
-  resolveImportEdgesDetailed,
-  resolveSpecifier,
-} from '../filemap/affinity.js';
+import { resolveImportEdges } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
-import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
-import { resolveKnowledgeVectorFloors } from '../knowledge/vector-floors.js';
-import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
+import type { Store } from '../fs/store.js';
 import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
@@ -110,20 +98,38 @@ import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
 import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
+import { buildFileContext } from './file-context.js';
 import { refreshGitStats } from './git-stats.js';
 import {
-  type FileReviewRow,
-  IndexStore,
-  type MediaVectorModality,
-  type SecurityFindingRow,
-  type SecuritySeverity,
-  type SymbolHit,
-} from './index-store.js';
+  type SearchImagesOpts,
+  findSimilarIndexedImages,
+  searchIndexedMedia,
+} from './image-search.js';
+import type { SecuritySeverity, SymbolHit } from './index-store-types.js';
+import { IndexStore } from './index-store.js';
 import { listPhotos, onThisDay, photoGroups } from './photo-intel.js';
 import { searchTokens } from './query-terms.js';
 import { type DecodableRaster, canNormalizeRaster, toDecodableRaster } from './raster-normalize.js';
+import {
+  currentIndexedHash,
+  filterAndSortBoekwachterIssues,
+  tallyBoekwachterIssues,
+  toBoekwachterIssueWire,
+  toReviewWire,
+} from './review-wire.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { runPooled } from './run-pooled.js';
+import {
+  EMPTY_COUNTS,
+  SINK_CATEGORIES,
+  bfsReach,
+  computeAttackSurface,
+  maxSeverity,
+  maybeScanProvenance,
+  severityRank,
+  toWireFinding,
+} from './security-intel.js';
 import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
@@ -154,68 +160,6 @@ const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
 const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
-
-// file-context caps — keep worst-case responses small and bounded.
-const CTX_MAX_SYMBOLS = 200;
-const CTX_MAX_IMPORTED_BY_PER_SYMBOL = 25;
-const CTX_MAX_FILE_IMPORTED_BY = 100;
-const CTX_MAX_USES = 50;
-const CTX_MAX_USED_IN_FILE_BY = 50;
-
-/**
- * Run `fn` over a work source keeping up to `width()` calls in flight. The
- * source is either a fixed array or a pull supplier (`undefined` = no more
- * work) — the supplier form lets a caller re-query its work-list as slots
- * open, so the pool never drains to zero between what used to be fixed
- * batches. Width is re-read as slots free, so a lazily-initialized provider
- * (reporting 1 until its first call spins it up) widens mid-batch. `stop`
- * halts NEW dispatches; in-flight calls always finish. sqlite writes inside
- * `fn` stay safe under this interleaving: the driver is synchronous, so
- * statements never actually overlap — only the awaited model calls do.
- */
-async function runPooled<T>(
-  source: readonly T[] | (() => Promise<T | undefined> | T | undefined),
-  width: () => number,
-  fn: (item: T) => Promise<void>,
-  stop?: () => boolean,
-): Promise<void> {
-  let next: () => Promise<T | undefined> | T | undefined;
-  if (typeof source === 'function') {
-    next = source;
-  } else {
-    let i = 0;
-    next = () => (i < source.length ? (source[i++] as T) : undefined);
-  }
-  const state: { failure: { error: unknown } | null } = { failure: null };
-  const active = new Set<Promise<void>>();
-  let exhausted = false;
-  const dispatch = async () => {
-    while (
-      !exhausted &&
-      active.size < Math.max(1, width()) &&
-      !stop?.() &&
-      state.failure === null
-    ) {
-      const item = await next();
-      if (item === undefined) {
-        exhausted = true;
-        break;
-      }
-      const p: Promise<void> = fn(item)
-        .catch((error) => {
-          state.failure ??= { error };
-        })
-        .finally(() => active.delete(p));
-      active.add(p);
-    }
-  };
-  await dispatch();
-  while (active.size > 0) {
-    await Promise.race(active);
-    await dispatch();
-  }
-  if (state.failure) throw state.failure.error;
-}
 
 /**
  * Pool options for the AI passes. `concurrency` is the live width of the
@@ -446,14 +390,6 @@ export class ContentIndex {
     }
   }
 
-  /**
-   * Per-symbol intelligence for one file — the file viewer's context sections.
-   * Structured facts only (hosts compose markdown): inbound importers via
-   * named-binding matching, outbound `uses` + within-file `usedInFileBy` via a
-   * single lexical identifier pass (honest, same stance as find-references),
-   * findings assigned to the innermost containing symbol, and any LLM
-   * one-liners the enrichment pass has produced for this content hash.
-   */
   async fileContext(projectId: string, relPath: string): Promise<FileContextResponse> {
     const empty: FileContextResponse = {
       path: relPath,
@@ -472,173 +408,7 @@ export class ContentIndex {
     if (!opened) return empty;
     const { index, workspaceDir } = opened;
     try {
-      const abs = safeJoin(workspaceDir, relPath);
-      const content = abs ? await readFile(abs, 'utf8').catch(() => null) : null;
-      const lines = content ? content.split(/\r?\n/) : [];
-      const totalLines = lines.length;
-
-      const fileRec = index.getFile(relPath);
-      let lang = fileRec?.lang ?? null;
-      const summary = fileRec?.hash ? (index.getSummary(fileRec.hash) ?? null) : null;
-
-      let engine: 'index' | 'live' = 'index';
-      let symbolRows = index.symbolsForFile(relPath);
-      if (symbolRows.length === 0 && content != null) {
-        const cls = classifyFile(relPath, Buffer.byteLength(content));
-        lang = lang ?? cls.lang;
-        if (cls.kind === 'code' && isCodeLangSupported(cls.lang)) {
-          const live = await extractCodeSymbols(cls.lang!, content);
-          if (live?.length) {
-            symbolRows = live.map((s) => ({
-              ...s,
-              id: `${relPath}#${s.name}`,
-              filePath: relPath,
-              signature: s.signature ?? '',
-            }));
-            engine = 'live';
-          }
-        }
-      }
-      const symbolsTruncated = symbolRows.length > CTX_MAX_SYMBOLS;
-      const picked = symbolRows.slice(0, CTX_MAX_SYMBOLS);
-
-      // One identifier pass over the file: identifier → 1-based lines mentioning it.
-      const refLines = new Map<string, number[]>();
-      for (let i = 0; i < lines.length; i++) {
-        for (const m of lines[i]!.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
-          const arr = refLines.get(m[0]);
-          if (arr) arr.push(i + 1);
-          else refLines.set(m[0], [i + 1]);
-        }
-      }
-
-      // Innermost symbol containing a line (smallest range wins), memoized.
-      const containerCache = new Map<number, SymbolHit | null>();
-      const innermostAt = (line: number): SymbolHit | null => {
-        const hit = containerCache.get(line);
-        if (hit !== undefined) return hit;
-        let best: SymbolHit | null = null;
-        for (const s of picked) {
-          if (line < s.lineStart || line > s.lineEnd) continue;
-          if (!best || s.lineEnd - s.lineStart < best.lineEnd - best.lineStart) best = s;
-        }
-        containerCache.set(line, best);
-        return best;
-      };
-
-      // Dependency edges — inbound (who imports this file, with bindings) and
-      // this file's own outbound rows.
-      const allPaths = index.allFilePaths();
-      const pathSet = new Set(allPaths);
-      const inbound = resolveImportEdgesDetailed(allPaths, index.allImportsWithBindings()).filter(
-        (e) => e.dst === relPath,
-      );
-      inbound.sort((a, b) => a.src.localeCompare(b.src));
-
-      const outboundRows = index.importsForFile(relPath);
-      const imports = outboundRows
-        .map((r) => ({
-          specifier: r.raw,
-          resolvedPath: resolveSpecifier(relPath, r.raw, pathSet),
-          names: r.bindings?.filter((b) => b.kind === 'named').map((b) => b.name) ?? [],
-          default: r.bindings?.some((b) => b.kind === 'default') ?? false,
-          namespace: r.bindings === null || r.bindings.some((b) => b.kind === 'namespace'),
-        }))
-        .sort((a, b) => a.specifier.localeCompare(b.specifier));
-
-      // local identifier → where it comes from, for per-symbol `uses`.
-      const localOrigins = new Map<string, { from: string; inRepo: boolean }>();
-      for (const r of outboundRows) {
-        const resolved = resolveSpecifier(relPath, r.raw, pathSet);
-        for (const b of r.bindings ?? []) {
-          if (b.local === '*' || localOrigins.has(b.local)) continue;
-          localOrigins.set(b.local, { from: resolved ?? r.raw, inRepo: resolved != null });
-        }
-      }
-
-      const findings = index.securityFindingsForFile(relPath);
-      const summariesByName = fileRec?.hash
-        ? index.symbolSummariesFor(relPath, fileRec.hash)
-        : new Map<string, string>();
-
-      const inRange = (line: number, s: SymbolHit): boolean =>
-        line >= s.lineStart && line <= s.lineEnd;
-
-      const symbols: SymbolContext[] = picked.map((s) => {
-        const viaBinding: string[] = [];
-        const wholeFile: string[] = [];
-        for (const e of inbound) {
-          if (e.bindings?.some((b) => b.kind === 'named' && b.name === s.name)) {
-            viaBinding.push(e.src);
-          } else if (
-            e.bindings === null ||
-            e.bindings.some((b) => b.kind === 'default' || b.kind === 'namespace')
-          ) {
-            wholeFile.push(e.src);
-          }
-        }
-        const importers = [
-          ...viaBinding.map((path) => ({ path, viaBinding: true })),
-          ...wholeFile.map((path) => ({ path, viaBinding: false })),
-        ];
-
-        const uses: SymbolContext['uses'] = [];
-        for (const [local, origin] of localOrigins) {
-          if (uses.length >= CTX_MAX_USES) break;
-          if (refLines.get(local)?.some((line) => inRange(line, s))) {
-            uses.push({ name: local, from: origin.from, inRepo: origin.inRepo });
-          }
-        }
-
-        const usedBy = new Set<string>();
-        for (const line of refLines.get(s.name) ?? []) {
-          if (usedBy.size >= CTX_MAX_USED_IN_FILE_BY) break;
-          if (inRange(line, s)) continue;
-          const container = innermostAt(line);
-          if (container && container.name !== s.name) usedBy.add(container.name);
-        }
-
-        const own = findings.filter((f) => f.line != null && innermostAt(f.line) === s);
-        const oneLiner = summariesByName.get(s.name);
-        return {
-          name: s.name,
-          kind: s.kind,
-          lineStart: s.lineStart,
-          lineEnd: s.lineEnd,
-          ...(s.signature ? { signature: s.signature } : {}),
-          ...(s.parent ? { parent: s.parent } : {}),
-          importedBy: importers.slice(0, CTX_MAX_IMPORTED_BY_PER_SYMBOL),
-          importedByTruncated: importers.length > CTX_MAX_IMPORTED_BY_PER_SYMBOL,
-          uses,
-          usedInFileBy: [...usedBy],
-          findings: own.map(toContextFinding),
-          ...(oneLiner ? { summary: oneLiner } : {}),
-        };
-      });
-
-      const fileFindings = findings
-        .filter((f) => f.line == null || innermostAt(f.line) == null)
-        .map(toContextFinding);
-
-      const review = fileRec?.hash ? index.getFileReview(fileRec.hash) : undefined;
-
-      return {
-        path: relPath,
-        lang,
-        totalLines,
-        summary,
-        importedBy: inbound.slice(0, CTX_MAX_FILE_IMPORTED_BY).map((e) => ({
-          path: e.src,
-          names: e.bindings?.filter((b) => b.kind === 'named').map((b) => b.name) ?? [],
-        })),
-        importedByTruncated: inbound.length > CTX_MAX_FILE_IMPORTED_BY,
-        imports,
-        fileFindings,
-        symbols,
-        symbolsTruncated,
-        engine,
-        ...(review ? { review: toReviewWire(review) } : {}),
-      };
+      return await buildFileContext(index, workspaceDir, relPath);
     } finally {
       index.close();
     }
@@ -2464,122 +2234,17 @@ export class ContentIndex {
 
   // ── image-intel ──────────────────────────────────────────────────────────
 
-  /**
-   * Find workspace media by meaning and by name. The vector arm embeds the
-   * query with the media-search profile's text model (local files only; no
-   * model → keyword search alone) and scores every stored image, or audio and
-   * video window, exactly; a hit counts only above its modality's measured
-   * floor. The FTS arm matches filenames and captions/transcripts. The two
-   * fuse by reciprocal rank, keyed per file and window.
-   */
   async searchImages(
     projectId: string,
     query: string,
     maxResults = 20,
-    opts: {
-      kinds?: readonly MediaVectorModality[];
-      vector?: number[] | null;
-      /** Meaning only: unified search already matches filenames in its file arm. */
-      vectorOnly?: boolean;
-    } = {},
+    opts: SearchImagesOpts = {},
   ): Promise<SearchImagesResponse> {
-    const kinds = opts.kinds?.length ? opts.kinds : (['image'] as const);
     const opened = await this.open(projectId);
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      type Hit = SearchImagesResponse['results'][number];
-      const fused = new Map<string, { hit: Hit; score: number }>();
-      const add = (key: string, hit: Hit, weight: number, rank: number): void => {
-        const entry = fused.get(key) ?? { hit, score: 0 };
-        entry.score += weight / (MEDIA_RRF_K + rank);
-        if (hit.score > entry.hit.score) entry.hit = { ...entry.hit, ...hit };
-        fused.set(key, entry);
-      };
-      const describe = (path: string, kind: MediaVectorModality): Hit => {
-        const f = index.getFile(path);
-        const md = index.getMetadata(path);
-        const summary = f?.hash ? index.getSummary(f.hash) : undefined;
-        return {
-          path,
-          ...(kind !== 'image' ? { kind } : {}),
-          ...(md.width ? { width: Number(md.width) } : {}),
-          ...(md.height ? { height: Number(md.height) } : {}),
-          ...(md.format ? { format: md.format } : {}),
-          ...(summary ? { caption: summary } : {}),
-          score: 0.5,
-        };
-      };
-
-      let vectorHits = 0;
-      // A file's best-matching window: a filename hit on the same file joins
-      // it rather than listing the file a second time without a moment.
-      const bestKeyByPath = new Map<string, string>();
-      const vector = opts.vector === undefined ? await mediaQueryVector(query) : opts.vector;
-      if (vector) {
-        const floors = resolveKnowledgeVectorFloors();
-        const query32 = Float32Array.from(vector);
-        const scored = index
-          .allMediaVectors(kinds)
-          .filter((row) => row.vec.length === vector.length)
-          .map((row) => ({ row, cosine: cosine(query32, row.vec) }))
-          .filter(({ row, cosine: c }) => {
-            const floor = floors.floorFor({
-              catalogKey: 'workspace',
-              profileId: MEDIA_SEARCH_PROFILE.id,
-              modality: row.modality,
-            });
-            return floor !== null && c >= floor;
-          })
-          .sort((a, b) => b.cosine - a.cosine);
-        scored.slice(0, maxResults * 2).forEach(({ row, cosine: c }, rank) => {
-          const windowed = row.modality !== 'image';
-          const key = `${row.filePath}\u0000${windowed ? row.startMs : ''}`;
-          if (!bestKeyByPath.has(row.filePath)) bestKeyByPath.set(row.filePath, key);
-          add(
-            key,
-            {
-              ...describe(row.filePath, row.modality),
-              score: c,
-              ...(windowed ? { startMs: row.startMs } : {}),
-              ...(windowed && row.endMs !== null ? { endMs: row.endMs } : {}),
-            },
-            1,
-            rank,
-          );
-          vectorHits++;
-        });
-      }
-
-      let ftsHits = 0;
-      if (index.ftsAvailable && !opts.vectorOnly) {
-        // Over-fetch from the shared doc FTS, then keep only the asked-for media.
-        let rank = 0;
-        for (const h of index.searchDocs(query, maxResults * 4)) {
-          const f = index.getFile(h.filePath);
-          const kind = f?.modality as MediaVectorModality | undefined;
-          if (!kind || !kinds.includes(kind)) continue;
-          add(
-            bestKeyByPath.get(h.filePath) ?? `${h.filePath}\u0000`,
-            describe(h.filePath, kind),
-            0.5,
-            rank++,
-          );
-          ftsHits++;
-          if (rank > maxResults * 2) break;
-        }
-      }
-      if (vectorHits === 0 && ftsHits === 0) {
-        const engine = vector || index.ftsAvailable ? (vector ? 'vector' : 'fts') : 'unavailable';
-        return { results: [], engine, truncated: false };
-      }
-      const ordered = [...fused.values()].sort((a, b) => b.score - a.score).map((e) => e.hit);
-      const engine = vectorHits > 0 ? (ftsHits > 0 ? 'hybrid' : 'vector') : 'fts';
-      return {
-        results: ordered.slice(0, maxResults),
-        engine,
-        truncated: ordered.length > maxResults,
-      };
+      return await searchIndexedMedia(index, query, maxResults, opts);
     } finally {
       index.close();
     }
@@ -2594,24 +2259,7 @@ export class ContentIndex {
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      const hash = index.getFile(relPath)?.hash;
-      const target = hash ? index.imageVectorByHash(hash) : null;
-      // Mid-migration remnants with a different dim can't be compared.
-      const all = target
-        ? index.allImageVectors().filter((v) => v.vec.length === target.vec.length)
-        : [];
-      if (!target || all.length <= 1) {
-        // No image embeddings yet (the embed tier hasn't reached this file, or
-        // no embedder is available) → can't do visual similarity. Degrades
-        // honestly.
-        return { results: [], engine: 'unavailable', truncated: false };
-      }
-      const scored = all
-        .filter((v) => v.filePath !== relPath)
-        .map((v) => ({ path: v.filePath, score: cosine(target.vec, v.vec) }))
-        .sort((a, b) => b.score - a.score);
-      const truncated = scored.length > maxResults;
-      return { results: scored.slice(0, maxResults), engine: 'vector', truncated };
+      return findSimilarIndexedImages(index, relPath, maxResults);
     } finally {
       index.close();
     }
@@ -3020,7 +2668,6 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-/** Cosine similarity between two equal-length vectors. */
 /** Tolerant parse of a face_vectors/entity_mentions region JSON column. */
 function parseRegionJson(raw: string | null): ImageRegion | null {
   if (!raw) return null;
@@ -3041,271 +2688,8 @@ function parseRegionJson(raw: string | null): ImageRegion | null {
   return null;
 }
 
-/** Reciprocal-rank constant for the media search arms (the knowledge arm uses the same). */
-const MEDIA_RRF_K = 60;
-
-/**
- * The media-search profile's query vector, or null when its model is not
- * installed (local files only — a search never starts a download) or fails.
- */
-async function mediaQueryVector(query: string): Promise<number[] | null> {
-  try {
-    const { embedKnowledgeQuery } = await import('../memory/embeddings.js');
-    return await embedKnowledgeQuery(query, MEDIA_SEARCH_PROFILE, { localFilesOnly: true });
-  } catch {
-    return null;
-  }
-}
-
-function cosine(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < n; i++) {
-    dot += a[i]! * b[i]!;
-    na += a[i]! * a[i]!;
-    nb += b[i]! * b[i]!;
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom === 0 ? 0 : dot / denom;
-}
-
-// ── security-intel helpers ──────────────────────────────────────────────────
-
-const EMPTY_COUNTS = { total: 0, bySeverity: {}, byCategory: {}, bySource: {} };
-
-/**
- * The persisted provenance of the last security_scan, as a spreadable
- * optional field. Absent (empty object) on pre-provenance databases and on
- * unparseable values — the renderer treats absence as "provenance unknown".
- */
-function maybeScanProvenance(index: IndexStore): { provenance?: SecurityScanProvenance } {
-  const raw = index.getMeta('security_scan_provenance');
-  if (!raw) return {};
-  try {
-    return { provenance: SecurityScanProvenanceSchema.parse(JSON.parse(raw)) };
-  } catch {
-    return {};
-  }
-}
-
-const ENTRY_RE =
-  /(^|\/)(index|main|app|server|cli|worker|handler)\.(ts|tsx|js|mjs|cjs|py|go|rs|rb|php|java)$/i;
-const ROUTE_PATH_RE = /(^|\/)(routes?|controllers?|handlers?|endpoints?|api|resolvers?)\//i;
-const AUTH_PATH_RE =
-  /(^|\/)(auth|authn|authz|middleware|guards?|permissions?|rbac|acl|session|login|oauth)([./]|$)/i;
-const SECRET_PATH_RE = /(^|\/)(\.env|config|secrets?|credentials?|keys?)([./]|$)/i;
-const SINK_CATEGORIES = new Set([
-  'injection',
-  'command-injection',
-  'xss',
-  'ssrf',
-  'path-traversal',
-  'deserialization',
-  'crypto',
-]);
-
-interface AttackSurface {
-  entryPoints: string[];
-  routes: string[];
-  authBoundaries: string[];
-  secretTouchpoints: string[];
-  taintSources: Array<{ path: string; count: number }>;
-}
-
-/** Derive the attack surface from file paths + persisted findings (no content read). */
-function computeAttackSurface(files: string[], findings: SecurityFindingRow[]): AttackSurface {
-  const routes = new Set<string>();
-  const auth = new Set<string>();
-  const secrets = new Set<string>();
-  const entry: string[] = [];
-  for (const p of files) {
-    if (ENTRY_RE.test(p)) entry.push(p);
-    if (ROUTE_PATH_RE.test(p)) routes.add(p);
-    if (AUTH_PATH_RE.test(p)) auth.add(p);
-    if (SECRET_PATH_RE.test(p)) secrets.add(p);
-  }
-  const sourceCount = new Map<string, number>();
-  for (const f of findings) {
-    if (f.category === 'taint-source') {
-      if (f.ruleId === 'source.http-input') routes.add(f.filePath);
-      if (f.ruleId === 'source.process-env') secrets.add(f.filePath);
-      sourceCount.set(f.filePath, (sourceCount.get(f.filePath) ?? 0) + 1);
-    }
-    if (f.category === 'secret') secrets.add(f.filePath);
-    if (f.category === 'auth') auth.add(f.filePath);
-  }
-  const cap = (s: Iterable<string>) => [...s].sort().slice(0, 100);
-  return {
-    entryPoints: entry.sort().slice(0, 50),
-    routes: cap(routes),
-    authBoundaries: cap(auth),
-    secretTouchpoints: cap(secrets),
-    taintSources: [...sourceCount.entries()]
-      .map(([path, count]) => ({ path, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 100),
-  };
-}
-
-function toContextFinding(r: SecurityFindingRow): FileContextFinding {
-  return {
-    ruleId: r.ruleId,
-    category: r.category,
-    severity: r.severity,
-    line: r.line,
-    title: r.title,
-    source: r.source,
-  };
-}
-
-function toWireFinding(r: SecurityFindingRow): SecurityFindingWire {
-  return {
-    fingerprint: r.fingerprint,
-    path: r.filePath,
-    line: r.line,
-    ruleId: r.ruleId,
-    category: r.category,
-    severity: r.severity,
-    source: r.source,
-    title: r.title,
-    ...(r.evidence ? { evidence: r.evidence } : {}),
-    status: r.status,
-    ...(r.taskRef ? { taskRef: r.taskRef } : {}),
-  };
-}
-
-function toReviewWire(row: FileReviewRow): FileReviewWire {
-  return {
-    notesMd: row.notesMd,
-    issues: row.issues,
-    health: row.health,
-    healthReason: row.healthReason,
-    model: row.model,
-    provider: row.provider,
-    gezelId: row.gezelId,
-    gezelName: row.gezelName,
-    appVersion: row.appVersion,
-    reviewedAt: row.reviewedAt,
-  };
-}
-
-function toBoekwachterIssueWire(
-  record: ProjectBoekwachterIssueRecord,
-  currentContentHash: string | null,
-): BoekwachterIssue {
-  return {
-    id: record.id,
-    ref: record.ref,
-    fingerprint: record.fingerprint,
-    path: record.path,
-    severity: record.severity,
-    category: record.category,
-    message: record.message,
-    ...(record.line !== undefined ? { line: record.line } : {}),
-    status: record.status,
-    seen: record.seenAt !== undefined,
-    stale: currentContentHash === null || currentContentHash !== record.lastSeenContentHash,
-    ...(record.taskRef ? { taskRef: record.taskRef } : {}),
-    ...(record.dismissalReason ? { dismissalReason: record.dismissalReason } : {}),
-    createdAt: record.createdAt,
-    lastSeenAt: record.lastSeenAt,
-    ...(record.lastCheckedAt ? { lastCheckedAt: record.lastCheckedAt } : {}),
-    ...(record.seenAt ? { seenAt: record.seenAt } : {}),
-    ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}),
-    ...(record.dismissedAt ? { dismissedAt: record.dismissedAt } : {}),
-  };
-}
-
-/**
- * The indexer updates asynchronously after a save. Compare its cheap change
- * gate with the live file before trusting the indexed hash so a freshly edited
- * file marks old BW anchors stale immediately, not one index tick later.
- */
-async function currentIndexedHash(
-  index: IndexStore,
-  workspaceDir: string,
-  path: string,
-): Promise<string | null> {
-  const indexed = index.getFile(path);
-  if (!indexed?.hash) return null;
-  const absolute = safeJoin(workspaceDir, path);
-  if (!absolute) return null;
-  const live = await stat(absolute).catch(() => null);
-  if (!live || !live.isFile()) return null;
-  return live.size === indexed.size && live.mtimeMs === indexed.mtimeMs ? indexed.hash : null;
-}
-
-function issueSeverityRank(severity: FileReviewIssueSeverity): number {
-  return severity === 'major' ? 0 : severity === 'minor' ? 1 : 2;
-}
-
-function tallyBoekwachterIssues(
-  issues: readonly BoekwachterIssue[],
-  key: (issue: BoekwachterIssue) => string,
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const issue of issues) {
-    const value = key(issue);
-    counts[value] = (counts[value] ?? 0) + 1;
-  }
-  return counts;
-}
-
-function filterAndSortBoekwachterIssues(
-  issues: BoekwachterIssue[],
-  req: ListFileIssuesRequest,
-): BoekwachterIssue[] {
-  return issues
-    .filter((issue) => {
-      if (!req.includeClosed && issue.status !== 'open' && issue.status !== 'in_progress') {
-        return false;
-      }
-      if (req.status && issue.status !== req.status) return false;
-      if (req.severity && issue.severity !== req.severity) return false;
-      if (req.category && issue.category !== req.category) return false;
-      if (req.path && !issue.path.startsWith(req.path)) return false;
-      return true;
-    })
-    .sort(
-      (a, b) =>
-        issueSeverityRank(a.severity) - issueSeverityRank(b.severity) ||
-        a.ref.localeCompare(b.ref, undefined, { numeric: true }),
-    );
-}
-
 function rubricKeys(rubrics: Map<string, ResolvedRubric>): Array<{ kind: string; hash: string }> {
   return [...rubrics.values()].map((r) => ({ kind: r.kind, hash: r.hash }));
-}
-
-/** Breadth-first reachable set from `start` over `adj`, bounded by hops + a cap. */
-function bfsReach(adj: Map<string, string[]>, start: string, maxHops: number): string[] {
-  const seen = new Set<string>([start]);
-  let frontier = [start];
-  const out: string[] = [];
-  for (let hop = 0; hop < maxHops && frontier.length; hop++) {
-    const next: string[] = [];
-    for (const node of frontier) {
-      for (const nb of adj.get(node) ?? []) {
-        if (seen.has(nb)) continue;
-        seen.add(nb);
-        out.push(nb);
-        next.push(nb);
-        if (out.length >= 200) return out;
-      }
-    }
-    frontier = next;
-  }
-  return out;
-}
-
-const SEVERITY_ORDER: SecuritySeverity[] = ['info', 'low', 'medium', 'high', 'critical'];
-function severityRank(s: SecuritySeverity): number {
-  return SEVERITY_ORDER.indexOf(s);
-}
-function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
-  return severityRank(b) > severityRank(a) ? b : a;
 }
 
 /**

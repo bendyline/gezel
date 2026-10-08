@@ -23,12 +23,8 @@ import {
   resolveEnrichThroughput,
 } from './enrich-budget.js';
 import { parseFrontmatter } from './frontmatter.js';
-import {
-  type FileRecord,
-  type IndexProvenance,
-  type IndexStore,
-  MAX_ENRICH_ATTEMPTS,
-} from './index-store.js';
+import type { FileRecord, IndexProvenance } from './index-store-types.js';
+import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an

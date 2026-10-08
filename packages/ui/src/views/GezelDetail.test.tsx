@@ -489,7 +489,27 @@ describe('GezelDetail', () => {
     expect(api.updateGezelAbout).toHaveBeenLastCalledWith('gz-bob', { source: 'new about' });
   });
 
+  const setSocial = (social: boolean) =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: { social } }));
+    });
+
+  it('keeps growth out of sight when social mode is off', async () => {
+    setSocial(false);
+    vi.mocked(api.getGezel).mockResolvedValue({
+      ...DETAIL,
+      growth: { level: 3, pending: true },
+    } as GezelDetailData);
+    render(<GezelDetail gezelId="gz-maya" />);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Maya' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('tab', { name: /Growth/ })).toBeNull();
+    expect(screen.queryByText('Lv 3')).toBeNull();
+  });
+
   it('opens the Growth tab', async () => {
+    setSocial(true);
     render(<GezelDetail gezelId="gz-maya" />);
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Maya' })).toBeInTheDocument();
@@ -499,6 +519,7 @@ describe('GezelDetail', () => {
   });
 
   it('shows the pending dot on the Growth tab and the header level badge', async () => {
+    setSocial(true);
     vi.mocked(api.getGezel).mockResolvedValue({
       ...DETAIL,
       growth: { level: 3, pending: true },

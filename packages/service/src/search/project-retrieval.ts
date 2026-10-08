@@ -236,6 +236,16 @@ function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
 }
 
 /**
+ * The bar a catalog hit must clear when no relevance model judged it: the
+ * injection floor plus semantic evidence, as the knowledge branch of
+ * `retrieveProjectContext` applies. Connected apps retrieving without the
+ * model are held to the same bar as Gezel's own turns.
+ */
+export function admitsUnjudgedKnowledge(result: UnifiedSearchResult): boolean {
+  return result.arm === 'vector' && clearsInjectionFloor(result);
+}
+
+/**
  * Does a keyword hit actually contain what was searched for?
  *
  * The relevance floor above cannot answer this: relevance for every keyword
