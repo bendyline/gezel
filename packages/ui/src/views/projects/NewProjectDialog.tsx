@@ -11,6 +11,7 @@ import { GezelApiError } from '@bendyline/gezel-client';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { openAddFolder } from '../../components/AddFolderSheet.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelIcon } from '../../components/GezelIcon.js';
@@ -832,6 +833,13 @@ export function NewProjectDialog({
                               {...(item.soon ? { disabled: true, badge: 'Soon' } : {})}
                               onSelect={() => {
                                 if (item.soon) return;
+                                // An existing folder goes through the one add-folder
+                                // flow, which gives it its crew and its night work.
+                                if (item.id === 'folder') {
+                                  onClose();
+                                  openAddFolder();
+                                  return;
+                                }
                                 if (kind === 'github' && item.id !== 'github') cancelRepoPreview();
                                 setKind(item.id as ProjectKindId);
                                 setKindChosen(true);
@@ -1024,7 +1032,8 @@ export function NewProjectDialog({
                             )}
                           </div>
                           <small className="muted">
-                            Gezels read — and, with permission, write — files in this folder.
+                            Read-only: gezels read this folder and change nothing in it unless you
+                            allow it in the project's settings.
                           </small>
                         </label>
                       )}

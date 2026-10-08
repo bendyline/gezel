@@ -74,6 +74,9 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listGezels: { gezels: [] },
   // A project with no data tables is the common case for a view test.
   toolListTables: { tables: [] },
+  listPhotoAlbums: [],
+  getOnThisDay: null,
+  getFileSummary: null,
   listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },
   listProjectWorkspaceHtmlPages: { files: [] },
@@ -424,10 +427,13 @@ export function createMockApi(overrides: MockApi = {}): MockApi {
     get(target, prop: string) {
       if (prop in target) return target[prop as keyof MockApi];
       // Lazily create a vi.fn() that resolves with the default response
-      // for this method (or an empty object for unknown methods). The
+      // for this method (or an empty object for unknown methods; a listed
+      // `null` stays null, for "nothing yet" answers). The
       // first read installs it so subsequent reads return the same fn,
       // letting tests configure it after the fact via vi.mocked(api.x).
-      const fn = vi.fn().mockResolvedValue(DEFAULT_RESPONSES[prop] ?? {});
+      const fn = vi
+        .fn()
+        .mockResolvedValue(prop in DEFAULT_RESPONSES ? DEFAULT_RESPONSES[prop] : {});
       (target as Record<string, unknown>)[prop] = fn;
       return fn;
     },

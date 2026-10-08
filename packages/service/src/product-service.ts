@@ -12,10 +12,12 @@ import {
   GENERALIST_TEMPLATE_ID,
   type GezelConfig,
   type ProviderName,
+  type Question,
   createLogger,
   effectiveGeneralistModeSetting,
   formatNightShiftSummary,
   formatSuspension,
+  hasNightShiftIndexing,
   isSharedLibraryProject,
   isTaskWorkAllowed,
   nowIso,
@@ -23,6 +25,7 @@ import {
   parseTaskRef,
   projectAllowsAmbientWork,
   projectLeadGezelId,
+  projectNightWorkEnabled,
   resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
@@ -68,9 +71,15 @@ import {
   listGlobalCraftbookCandidates,
 } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
+import {
+  reopenIssuesForDismissedPack,
+  resolveIssuesForAppliedFiles,
+  settleIssuesForDraftingTask,
+} from './diffpack/issue-lifecycle.js';
 import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
+import { writeWeeklyRecap } from './digest/weekly-recap.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
@@ -120,13 +129,19 @@ import { invalidateModelsCache } from './http/routes/models.js';
 import { buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { buildVSCodeBridgeApp, createVSCodeBridgeController } from './http/vscode-bridge.js';
+import { VISION_RASTER_FORMATS } from './index-store/ai-shadow.js';
+import { writeNightlyCodebaseReport } from './index-store/codebase-report.js';
 import { ContentIndex } from './index-store/content-index.js';
+import { writeNightlyDocumentsReport } from './index-store/documents-report.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
 import { readImageStaticMeta } from './index-store/image-meta.js';
 import { migrateWorkspaceIndexes } from './index-store/index-placement.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
+import { albumMediaDeps, storeAllAlbumPhotos } from './index-store/photo-albums.js';
+import { writeNightlyPhotoReport } from './index-store/photo-report.js';
+import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
@@ -215,6 +230,7 @@ import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
+import { buildNightShiftTally, nightShiftTallyPeriod } from './tasks/night-tally.js';
 import { ownerStepQuestion } from './tasks/owner-step.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
@@ -769,6 +785,7 @@ export async function startProductService(
         Boolean(p.workingDir || p.github) &&
         p.indexingEnabled !== false &&
         projectAllowsAmbientWork(p) &&
+        projectNightWorkEnabled(p) &&
         !isSharedLibraryProject(p),
     );
   };
@@ -1605,7 +1622,23 @@ export async function startProductService(
   });
   // Diffpacks: change sets a gezel drafted into artifacts for the user to
   // review and apply. The workspace is never written by the drafting side.
-  const diffpacks = new DiffpackManager({ home, store, tasks, history });
+  // Issues follow the proposal that would fix them: applied → resolved,
+  // dismissed or never proposed → open again.
+  const proposalIssueDeps = {
+    store,
+    diffpacks: { list: (id: string) => diffpacks.listRecords(id) },
+    tasks,
+  };
+  const diffpacks: DiffpackManager = new DiffpackManager({
+    home,
+    store,
+    tasks,
+    history,
+    onApplied: (projectId, pack, paths) =>
+      resolveIssuesForAppliedFiles(proposalIssueDeps, projectId, pack, paths),
+    onDismissed: (projectId, pack) =>
+      reopenIssuesForDismissedPack(proposalIssueDeps, projectId, pack),
+  });
   // Gates, activation gates, and the advanceWhen watcher judge a drafting
   // task against the draft overlay (proposed tree), not the real workspace.
   tasks.setDraftReader(diffpacks.drafts);
@@ -1649,11 +1682,35 @@ export async function startProductService(
     const oversight = await findNightShiftOversightTask(store);
     const pausedReview =
       oversight?.status === 'paused' ? { projectId: 'default', num: oversight.num } : undefined;
+    // The sweep's own output: the only durable record of indexing volume.
+    const settledAt = opts.nightShiftNow?.() ?? new Date();
+    const tally = await buildNightShiftTally(
+      { history, store, contentIndex },
+      nightShiftTallyPeriod(settledAt, nightShift.currentWindow(), {
+        active: false,
+        startedAt: null,
+      }),
+    ).catch(() => null);
+    const indexing = tally
+      ? {
+          filesIndexed: tally.filesIndexed,
+          filesReviewed: tally.filesReviewed,
+          mediaDescribed: tally.mediaDescribed,
+        }
+      : undefined;
+    const swept = hasNightShiftIndexing(indexing);
+    const weeklyRecap = await writeWeeklyRecap({ store, history }, settledAt).catch(
+      (err: unknown) => {
+        log.warn(`[night-shift] weekly recap failed: ${String(err)}`);
+        return null;
+      },
+    );
     const empty =
       review.tasksCompleted.length === 0 &&
       review.reports.length === 0 &&
-      review.diffpacks.length === 0;
-    if (empty && !pausedReview) {
+      review.diffpacks.length === 0 &&
+      !swept;
+    if (empty && !pausedReview && !weeklyRecap) {
       // A night that produced nothing still gets a card saying why — but only
       // when work was owed. An install with no folders and nothing queued
       // shouldn't hear about every night it had nothing to do.
@@ -1670,7 +1727,7 @@ export async function startProductService(
     // action already fired or dismissed is not one the user still owes
     // a look. Same count Home's "Last night" panel names.
     const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
-    await store.writeQuestion({
+    const card: Question = {
       id: randomUUID(),
       projectId: 'default',
       gezelId: config.meesterGezelId ?? '',
@@ -1683,6 +1740,7 @@ export async function startProductService(
         actions: actionTotal,
         ...(quiet ? { quiet } : {}),
         ...(pausedReview ? { pausedReview: true } : {}),
+        ...(swept && indexing ? { indexing } : {}),
       }),
       choices: ['Dismiss'],
       allowWriteIn: false,
@@ -1702,9 +1760,15 @@ export async function startProductService(
         })),
         ...(quiet ? { quiet } : {}),
         ...(pausedReview ? { pausedReview } : {}),
+        ...(swept && indexing ? { indexing } : {}),
+        ...(weeklyRecap ? { weeklyRecap } : {}),
       },
       createdAt: new Date().toISOString(),
-    });
+    };
+    await store.writeQuestion(card);
+    // Announced like any card: the desktop app raises its one morning
+    // notification from this, and open windows fold the card in.
+    chatEvents.publishProjectEvent('default', { type: 'question_asked', question: card });
     // One audit record per settled window, written under the same per-window
     // dedupe as the card, so a restart replaying the settle can't double it.
     await history
@@ -1790,11 +1854,16 @@ export async function startProductService(
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
-    await contentIndex
-      .settleBoekwachterIssuesForTask(projectId, task.ref, outcome)
-      .catch((err) =>
-        log.warn(`[service] Boekwachter issue settle failed for ${task.ref}: ${String(err)}`),
-      );
+    // A drafting task that finished proposed a fix rather than making one:
+    // its issues settle against the proposal once it is sealed, below.
+    const draftedFix = outcome === 'complete' && Boolean(task.diffpackId);
+    if (!draftedFix) {
+      await contentIndex
+        .settleBoekwachterIssuesForTask(projectId, task.ref, outcome)
+        .catch((err) =>
+          log.warn(`[service] Boekwachter issue settle failed for ${task.ref}: ${String(err)}`),
+        );
+    }
     await codeReviews
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
@@ -1804,6 +1873,11 @@ export async function startProductService(
     await diffpacks
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] diffpack settle failed for ${task.ref}: ${String(err)}`));
+    if (draftedFix) {
+      await settleIssuesForDraftingTask(proposalIssueDeps, projectId, task.ref).catch((err) =>
+        log.warn(`[service] proposal issue settle failed for ${task.ref}: ${String(err)}`),
+      );
+    }
     // Report actions can live in a different project than their fired
     // task (the oversight report delegates cross-project), so this settle
     // scans records by taskRef rather than trusting projectId.
@@ -1940,13 +2014,16 @@ export async function startProductService(
     // gate's attempt cap stops per-file retries).
     shadowProducers: {
       describeImage: async (absPath) => {
+        // HEIC and RAW reach the model as a temporary JPEG, released below.
+        const raster = await toDecodableRaster(absPath, VISION_RASTER_FORMATS).catch(() => null);
+        if (!raster) return null;
         try {
           if (!(await recognition.isAvailable())) return null;
-          const bytes = await readFile(absPath);
+          const bytes = await readFile(raster.path);
           const meta = readImageStaticMeta(bytes);
           const result = await recognition.recognize({
             bytes,
-            mimeType: mimeTypeForFilename(absPath),
+            mimeType: raster.path === absPath ? mimeTypeForFilename(absPath) : raster.mimeType,
             mode: resolveAutoMode(meta, basename(absPath)),
           });
           if (result.status !== 'ok' && result.status !== 'partial') return null;
@@ -1960,6 +2037,8 @@ export async function startProductService(
           return { body: parts.join('\n\n'), model: result.modelId, provider: 'llama-cpp' };
         } catch {
           return null;
+        } finally {
+          await raster.release().catch(() => {});
         }
       },
       transcribeAudio: async (absPath) => {
@@ -2052,6 +2131,28 @@ export async function startProductService(
     await runProjectObservationNightly(observationDeps, projectId).catch((err) =>
       log.warn(`[observations] nightly maintenance failed for ${projectId}: ${String(err)}`),
     );
+    // Model-free, so it runs on any machine; writes nothing for a folder
+    // without photos.
+    await writeNightlyPhotoReport(
+      { store, contentIndex },
+      projectId,
+      opts.nightShiftNow?.() ?? new Date(),
+    ).catch((err) => log.warn(`[index] photo report failed for ${projectId}: ${String(err)}`));
+    // Albums the night's craftbook wrote link workspace photos; store the
+    // copies now so they play and export in the morning.
+    await storeAllAlbumPhotos(albumMediaDeps(store), projectId).catch((err) =>
+      log.warn(`[index] storing album photos failed for ${projectId}: ${String(err)}`),
+    );
+    await writeNightlyDocumentsReport(
+      { store, contentIndex },
+      projectId,
+      opts.nightShiftNow?.() ?? new Date(),
+    ).catch((err) => log.warn(`[index] documents report failed for ${projectId}: ${String(err)}`));
+    await writeNightlyCodebaseReport(
+      { store, contentIndex },
+      projectId,
+      opts.nightShiftNow?.() ?? new Date(),
+    ).catch((err) => log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`));
   };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
     if (!nightShift.isActive()) return;

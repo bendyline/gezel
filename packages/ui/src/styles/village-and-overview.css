@@ -927,6 +927,24 @@ button.filemap-review-issue:hover {
   color: var(--danger-text);
   border-color: var(--danger);
 }
+.people-card-count {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.people-card-count:hover,
+.people-card-count[aria-expanded="true"] {
+  color: var(--text);
+}
+.people-photos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
 .project-overview-open-digest {
   margin-top: 8px;
   font-size: 12px;
@@ -1020,4 +1038,158 @@ button.filemap-review-issue:hover {
     opacity: 1;
     transform: translate(-50%, calc(-100% - 8px));
   }
+}
+
+/* First look (FirstLookCard): the top of a folder project's Overview — what
+   the folder holds, what the crew does tonight, and the overnight switch. */
+.first-look {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.85rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.first-look-summary {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.first-look-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.first-look-eyebrow {
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.first-look-night {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
+}
+.first-look-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: var(--text-md);
+}
+
+/* Photos (PhotoThumb, PhotoGrid, PhotoAlbums): a photo folder's albums and
+   "On this day", on its Overview and in the morning view. The tile itself
+   (.photo-thumb) lives in app-shell.css because titlebar search draws it. */
+.photo-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.35rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.photo-grid.with-captions {
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.75rem 0.5rem;
+}
+.photo-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.photo-grid-tile {
+  display: block;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+}
+button.photo-grid-tile {
+  cursor: pointer;
+}
+button.photo-grid-tile:hover,
+button.photo-grid-tile:focus-visible {
+  border-color: var(--accent);
+}
+.photo-grid-caption {
+  overflow-wrap: anywhere;
+}
+.photo-album-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.photo-album-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.4rem;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+.photo-album-card:hover,
+.photo-album-card:focus-visible {
+  border-color: var(--accent);
+}
+.photo-album-card-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.photo-on-this-day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.photo-on-this-day-year {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.photo-album-card-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+.photo-album-card-copy {
+  padding: 0 0.4rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.photo-album-card-copy:hover {
+  color: var(--text);
+}
+.photo-album-copy-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+}
+.photo-album-copy-row {
+  display: flex;
+  gap: 0.4rem;
+}
+.photo-album-copy-row input {
+  flex: 1;
+  min-width: 0;
 }

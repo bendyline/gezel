@@ -250,3 +250,23 @@ describe('renderTaskContextBlock — stepwise handoffs', () => {
     expect(block.indexOf('### Task outline')).toBeLessThan(block.indexOf('#### Step procedure'));
   });
 });
+
+describe('authoring notes', () => {
+  it('teaches the Squisq format a step declares, from the one shared source', () => {
+    const slideshow = { ...step, authoring: 'squisq-slideshow' } as typeof step;
+    const block = renderTaskContextBlock({ task, step: slideshow });
+    expect(block).toContain('### Writing a Squisq slideshow');
+    expect(block).toContain('{[imageWithCaption caption=');
+    expect(block.indexOf('#### Step procedure')).toBeLessThan(
+      block.indexOf('### Writing a Squisq slideshow'),
+    );
+
+    const doc = renderTaskContextBlock({
+      task,
+      step: { ...step, authoring: 'squisq' } as typeof step,
+    });
+    expect(doc).toContain('### Squisq extended markdown');
+    expect(doc).toContain("The step's procedure decides heading levels, slide breaks and layout");
+    expect(renderTaskContextBlock({ task, step })).not.toContain('Squisq');
+  });
+});

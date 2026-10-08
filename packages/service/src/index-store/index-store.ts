@@ -2,6 +2,7 @@ import {
   type FileReviewIssue,
   type HistoryEvent,
   type HistoryFilter,
+  type ProjectIndexOverview,
   nowIso,
 } from '@bendyline/gezel';
 import { embedProfileId } from '../memory/embed-core.js';
@@ -27,6 +28,25 @@ import {
  * boekwachter enrichment read and write. It is a cache: callers fall back to
  * ripgrep/live-read when `IndexStore.open` returns null (sqlite unavailable).
  */
+
+/** A photo's file row with its metadata pivoted on (see `IndexStore.photoRows`). */
+export interface PhotoRow {
+  path: string;
+  hash: string | null;
+  size: number | null;
+  mtime_ms: number | null;
+  taken_at: string | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens: string | null;
+  gps_lat: string | null;
+  gps_lon: string | null;
+  width: string | null;
+  height: string | null;
+  format: string | null;
+  screenshot: string | null;
+  cloud_only: string | null;
+}
 
 export type Modality = 'text' | 'code' | 'doc' | 'image' | 'audio' | 'video' | 'email';
 /** The modalities the media tier embeds (one row per image, per window otherwise). */
@@ -524,6 +544,70 @@ export class IndexStore {
    * derived from `path`. HTML/CSS et al. aren't classified as a `lang`, so
    * extension is the reliable file-shape signal for project-type detection.
    */
+  /**
+   * What the folder holds, from rows the static pass already wrote: counts by
+   * modality, screenshots, cloud-only files, the photos' capture-date range,
+   * and byte-identical copies. One cheap read for the first-look card.
+   */
+  folderOverview(): ProjectIndexOverview {
+    const cid = this.collectionId;
+    const byModality: Record<string, number> = {};
+    let files = 0;
+    let totalBytes = 0;
+    for (const row of this.db
+      .prepare(
+        'SELECT modality, COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM files WHERE collection_id = ? GROUP BY modality',
+      )
+      .all<{ modality: string | null; n: number; bytes: number }>(cid)) {
+      byModality[row.modality ?? 'other'] = row.n;
+      files += row.n;
+      totalBytes += row.bytes;
+    }
+    const countKey = (key: string) =>
+      this.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM metadata WHERE collection_id = ? AND key = ? AND value = '1'",
+        )
+        .get<{ n: number }>(cid, key)?.n ?? 0;
+    const taken = this.db
+      .prepare(
+        "SELECT MIN(value) AS lo, MAX(value) AS hi FROM metadata WHERE collection_id = ? AND key = 'taken_at'",
+      )
+      .get<{ lo: string | null; hi: string | null }>(cid);
+    const mtime = this.db
+      .prepare('SELECT MIN(mtime_ms) AS lo, MAX(mtime_ms) AS hi FROM files WHERE collection_id = ?')
+      .get<{ lo: number | null; hi: number | null }>(cid);
+    const dupes = this.db
+      .prepare(
+        `SELECT COUNT(*) AS groups, COALESCE(SUM(n - 1), 0) AS extra, COALESCE(SUM((n - 1) * size), 0) AS bytes
+           FROM (SELECT COUNT(*) AS n, MAX(size) AS size FROM files
+                  WHERE collection_id = ? AND hash IS NOT NULL AND trivial = 0 AND size > 0
+                  GROUP BY hash HAVING COUNT(*) > 1)`,
+      )
+      .get<{ groups: number; extra: number; bytes: number }>(cid);
+    return {
+      files,
+      totalBytes,
+      byModality,
+      screenshots: countKey('screenshot'),
+      cloudOnly: countKey('cloud_only'),
+      ...(taken?.lo && taken.hi ? { takenRange: { from: taken.lo, to: taken.hi } } : {}),
+      ...(mtime?.lo != null && mtime.hi != null
+        ? {
+            modifiedRange: {
+              from: new Date(mtime.lo).toISOString(),
+              to: new Date(mtime.hi).toISOString(),
+            },
+          }
+        : {}),
+      duplicates: {
+        groups: dupes?.groups ?? 0,
+        extraCopies: dupes?.extra ?? 0,
+        bytes: dupes?.bytes ?? 0,
+      },
+    };
+  }
+
   extensionCounts(): Record<string, number> {
     const out: Record<string, number> = {};
     const rows = this.db
@@ -2251,6 +2335,29 @@ export class IndexStore {
   // ── images ───────────────────────────────────────────────────────────────
 
   /** Image files, optionally restricted to a folder prefix. */
+  /**
+   * Every photo with the metadata the photo tools read, in one query: the
+   * key/value metadata rows pivoted onto the file row. Newest capture first,
+   * then newest file.
+   */
+  photoRows(prefix?: string): PhotoRow[] {
+    const clause = prefix ? " AND f.path LIKE ? || '%'" : '';
+    const params: string[] = [this.collectionId];
+    if (prefix) params.push(prefix.endsWith('/') ? prefix : `${prefix}/`);
+    const pick = (key: string) => `MAX(CASE WHEN m.key = '${key}' THEN m.value END) AS ${key}`;
+    return this.db
+      .prepare(
+        `SELECT f.path, f.hash, f.size, f.mtime_ms,
+                ${['taken_at', 'camera_make', 'camera_model', 'lens', 'gps_lat', 'gps_lon', 'width', 'height', 'format', 'screenshot', 'cloud_only'].map(pick).join(', ')}
+           FROM files f
+           LEFT JOIN metadata m ON m.collection_id = f.collection_id AND m.path = f.path
+          WHERE f.collection_id = ? AND f.modality = 'image'${clause}
+          GROUP BY f.path
+          ORDER BY taken_at IS NULL, taken_at DESC, f.mtime_ms DESC`,
+      )
+      .all<PhotoRow>(...params);
+  }
+
   imageFiles(prefix?: string): FileRecord[] {
     const clause = prefix ? " AND path LIKE ? || '%'" : '';
     const params: string[] = [this.collectionId];

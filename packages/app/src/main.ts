@@ -67,6 +67,7 @@ import { createLoopbackCertificatePin } from './loopback-certificate-pin.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import { publishExportedBundle, verifyUnlessSkipped } from './model-bundle-export.js';
 import { findGezmodelArguments } from './model-bundle-files.js';
+import { morningNotificationFor } from './morning-notification.js';
 import {
   createOfficeVerifyScheduler,
   registerOfficeIntegrationIpc,
@@ -2163,6 +2164,45 @@ function startTrayActivityMonitoring(): void {
   void monitorTrayActivity(client, controller.signal);
 }
 
+let morningAbort: AbortController | null = null;
+const morningSeen = new Set<string>();
+
+/**
+ * One desktop notification when the night's review card lands, whether or not
+ * a window is open (the app runs hidden after a login launch). Clicking it
+ * opens Home, which opens on This morning. `nightShift.morningNotification`
+ * turns it off.
+ */
+function startMorningReviewMonitoring(): void {
+  morningAbort?.abort();
+  const client = apiClient;
+  if (!client || process.env.GEZEL_E2E === '1') return;
+  const controller = new AbortController();
+  morningAbort = controller;
+  void (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        for await (const envelope of streamAllChatEvents({
+          url: client.allEventsUrl(),
+          headers: client.authHeader(),
+          fetch: client.getFetch(),
+          signal: controller.signal,
+        })) {
+          const note = morningNotificationFor(envelope, morningSeen);
+          if (!note) continue;
+          const config = await client.getConfig().catch(() => null);
+          if (config?.nightShift?.morningNotification === false) continue;
+          notify({ ...note, view: 'home' });
+        }
+      } catch {
+        // Daemon or socket loss; retry against this connection until it rotates.
+      }
+      if (controller.signal.aborted) return;
+      await waitForTrayActivityRetry(controller.signal);
+    }
+  })();
+}
+
 function stopTrayActivityMonitoring(): void {
   trayActivityAbort?.abort();
   trayActivityAbort = null;
@@ -2933,6 +2973,21 @@ function installMenu(): void {
         ] as Electron.MenuItemConstructorOptions[])
       : []),
     {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Add Folder…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => {
+            void ensureWindow().then(() => navigateTo('add-folder'));
+          },
+        },
+        ...(!isMac
+          ? ([{ type: 'separator' }, { role: 'quit' }] as Electron.MenuItemConstructorOptions[])
+          : []),
+      ],
+    },
+    {
       label: 'Edit',
       submenu: [
         { role: 'undo' },
@@ -3263,6 +3318,7 @@ app.whenReady().then(async () => {
     invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     startAmbientMonitoring();
+    startMorningReviewMonitoring();
     scheduleOfficeIntegrationVerify();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
@@ -3349,6 +3405,7 @@ app.whenReady().then(async () => {
   // Best-effort: failures are swallowed (the daemon treats a missing report as
   // "unknown" and falls back to the session-idle gate).
   startIdleReporting();
+  startMorningReviewMonitoring();
 
   // Drive OS power for Night Shift: hold a power-save blocker while a shift
   // runs (if enabled), and pre-arm an OS wake at the window start (macOS).

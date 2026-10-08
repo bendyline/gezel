@@ -4,6 +4,7 @@ import {
   AppendToFileInputSchema,
   AskUserQuestionInputSchema,
   CreateTaskInputSchema,
+  type DiffpackDraftOperation,
   EmptyInputSchema,
   EnsureGezelInputSchema,
   FindFilesRequestSchema,
@@ -592,6 +593,27 @@ function editClient(target: ConcreteWorkspaceTarget): WorkspaceEditApi {
     );
   }
   return draftEditApi(client, diffpackId);
+}
+
+/**
+ * While drafting, a move, copy or new folder is proposed into the pack rather
+ * than done: the person sees it beside the edits and applies them together.
+ */
+async function proposeDraftOperation(
+  target: ConcreteWorkspaceTarget,
+  op: DiffpackDraftOperation,
+): Promise<string> {
+  if (target.kind === 'linked') {
+    throw new Error(
+      `Cannot change ${target.displayPath} while drafting a change proposal — a proposal covers one project.`,
+    );
+  }
+  const res = await workspaceClient(target).proposeDiffpackDraftOperation(
+    target.projectId,
+    diffpackId,
+    op,
+  );
+  return res.message;
 }
 
 async function readWorkspaceFile(path: string) {
@@ -2951,6 +2973,10 @@ server.tool(
     if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(target, { op: 'mkdir', to: target.path });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
       await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
         path: target.path,
         ...(gezelId ? { gezelId } : {}),
@@ -2990,6 +3016,14 @@ server.tool(
           'rename cannot move files across project roots; read the source, write the destination, then delete the source explicitly',
         );
       }
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(fromTarget, {
+          op: 'move',
+          from: fromTarget.path,
+          to: toTarget.path,
+        });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
       await workspaceClient(fromTarget).renameProjectWorkspacePath(fromTarget.projectId, {
         fromPath: fromTarget.path,
         toPath: toTarget.path,
@@ -2997,6 +3031,52 @@ server.tool(
         ...(sessionId ? { sessionId } : {}),
       });
       return { content: [{ type: 'text' as const, text: `Renamed ${fromPath} → ${toPath}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'copy_path',
+  'Copy a file or folder to a new path within the project with `copy_path({ fromPath, toPath })`. Never replaces an existing file: pick a destination nothing has.',
+  {
+    fromPath: z.string().describe('The file or folder to copy, relative to the project root.'),
+    toPath: z.string().describe('Where the copy goes, relative to the project root.'),
+  },
+  async ({ fromPath, toPath }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(toPath, 'workspace');
+    if (scoped) return scoped;
+    try {
+      const [fromTarget, toTarget] = await Promise.all([
+        concreteWorkspaceTarget(fromPath),
+        concreteWorkspaceTarget(toPath),
+      ]);
+      if (fromTarget.projectId !== toTarget.projectId) {
+        throw new Error(
+          'copy_path cannot copy across project roots; read the source and write the destination instead',
+        );
+      }
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(fromTarget, {
+          op: 'copy',
+          from: fromTarget.path,
+          to: toTarget.path,
+        });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
+      await workspaceClient(fromTarget).copyProjectWorkspacePath(fromTarget.projectId, {
+        fromPath: fromTarget.path,
+        toPath: toTarget.path,
+        ...(gezelId ? { gezelId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      });
+      return { content: [{ type: 'text' as const, text: `Copied ${fromPath} → ${toPath}` }] };
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
@@ -5152,6 +5232,8 @@ async function launchCraftbookTask(args: {
   params?: Record<string, string>;
   /** Durable continuation dedupe key for the explicit invoke_craftbook tool. */
   craftbookInvocationKey?: string;
+  /** Run in tonight's Night Shift instead of now. */
+  tonight?: boolean;
   /**
    * Ad-hoc binary handoffs join a live task of the same craftbook that is
    * already responsible for the same `params.outputPath`.
@@ -5228,6 +5310,7 @@ async function launchCraftbookTask(args: {
     ...(resolvedAssignee ? { assignee: resolvedAssignee } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
+    ...(args.tonight ? { nightShift: { enabled: true } } : {}),
     dispatchEntry: true,
   });
   return {
@@ -5506,8 +5589,24 @@ server.tool(
       .describe(
         'Convenience alias for params.outputPath. Preserves the requested project-workspace filename for document-production craftbooks.',
       ),
+    tonight: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run it in tonight's Night Shift instead of now. Use only when the user asks for it tonight or overnight.",
+      ),
   },
-  async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
+  async ({
+    craftbookId,
+    project,
+    title,
+    description,
+    version,
+    assignee,
+    params,
+    outputPath,
+    tonight,
+  }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
       const rootTurn = await currentRootTurnContext();
@@ -5521,6 +5620,7 @@ server.tool(
         version,
         assignee,
         params: invocationParams,
+        ...(tonight ? { tonight: true } : {}),
       };
       const rootTurnId = rootTurn?.rootTurnId ?? null;
       const launchInvocation = rootTurnId
@@ -8613,6 +8713,12 @@ server.tool(
       .describe(
         'Hand the entry step to its assignee immediately as a task-scoped handoff (single-channel kickoff). Invalid on drafts and cron/fanout hosts.',
       ),
+    tonight: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run it in tonight's Night Shift instead of now. Use only when the user asks for it tonight or overnight.",
+      ),
   }).shape,
   async ({
     project,
@@ -8630,11 +8736,13 @@ server.tool(
     cronOverlap,
     fanout,
     dispatch,
+    tonight,
   }) => {
     try {
       const projectId = await resolveProjectId(project);
       const resolvedAssignee = await resolveAssigneeArg(assignee);
       const created = await api.createTask(projectId, {
+        ...(tonight ? { nightShift: { enabled: true } } : {}),
         ...sessionTaskNamingMode,
         title,
         description,
@@ -11507,6 +11615,91 @@ server.tool(
       const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `describe_folder failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'list_photos',
+  'List photos in the workspace from the index, newest first, with when each was taken, the camera, size and a caption once described. Filter by folder, date range (YYYY, YYYY-MM or YYYY-MM-DD), camera, screenshots, or nearness to a place. Reads no files.',
+  {
+    path: z.string().optional().describe('Folder to scope to (optional).'),
+    from: z.string().optional().describe('Taken on or after: YYYY, YYYY-MM or YYYY-MM-DD.'),
+    to: z.string().optional().describe('Taken on or before: YYYY, YYYY-MM or YYYY-MM-DD.'),
+    camera: z.string().optional().describe('Camera make or model, any part.'),
+    screenshots: z
+      .boolean()
+      .optional()
+      .describe('true for only screenshots, false to leave them out.'),
+    near: z
+      .object({ lat: z.number(), lon: z.number(), km: z.number().optional() })
+      .optional()
+      .describe('Within km (default 5) of a place.'),
+    limit: z.number().int().positive().max(500).optional(),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolListPhotos(projectId, args);
+      const lines = res.photos.map((p) =>
+        [
+          p.path,
+          p.takenAt?.replace('T', ' ').slice(0, 16),
+          p.camera,
+          p.width && p.height ? `${p.width}x${p.height}` : undefined,
+          p.screenshot ? 'screenshot' : undefined,
+          p.cloudOnly ? 'in the cloud' : undefined,
+          p.location ? `${p.location.lat.toFixed(4)},${p.location.lon.toFixed(4)}` : undefined,
+          p.caption ? `"${p.caption.slice(0, 140)}"` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      );
+      const head = `${res.total} photo${res.total === 1 ? '' : 's'}${res.truncated ? ` (showing ${res.photos.length})` : ''}${res.locationWithheld ? '; locations withheld for this session' : ''}`;
+      return { content: [{ type: 'text' as const, text: [head, ...lines].join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `list_photos failed: ${unwrapApiError(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'photo_groups',
+  'Group the photos from the index: by "event" (taken together, apart from screenshots), "duplicate" (byte-identical copies, with the space the extra copies take) or "similar" (bursts and retakes that look alike; needs image embeddings). Use it to propose albums or clean-ups; it changes nothing.',
+  {
+    by: z.enum(['event', 'duplicate', 'similar']).describe('How to group.'),
+    path: z.string().optional().describe('Folder to scope to (optional).'),
+    limit: z.number().int().positive().max(200).optional(),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolPhotoGroups(projectId, args);
+      if (res.engine === 'unavailable') {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No lookalike groups yet: the photos have no image embeddings. Try by "event" or "duplicate".',
+            },
+          ],
+        };
+      }
+      const lines = res.groups.map((g, i) => {
+        const span = g.from
+          ? `${g.from.slice(0, 16).replace('T', ' ')} to ${g.to?.slice(0, 16).replace('T', ' ')}`
+          : '';
+        const bytes = g.bytes ? ` · ${(g.bytes / 1_048_576).toFixed(1)} MB in extra copies` : '';
+        return `${i + 1}. ${g.count} photos${span ? ` · ${span}` : ''}${bytes}\n   ${g.paths.join('\n   ')}`;
+      });
+      const head = `${res.groups.length} ${res.by} group${res.groups.length === 1 ? '' : 's'}${res.truncated ? ' (more not shown)' : ''}`;
+      return { content: [{ type: 'text' as const, text: [head, ...lines].join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `photo_groups failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }

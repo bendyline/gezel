@@ -15019,14 +15019,15 @@ export class ChatManager extends LocalEngineRuntime {
     // A drafting session composes its change through before/after edits and
     // the runtime derives the diff. Keep only operations implemented by the
     // draft adapter: apply_patch deliberately refuses hand-authored hunks,
-    // while mkdir/rename/binary-copy still target the real workspace. They
-    // must be withheld from BOTH surfaces so proposal mode can never leak a
-    // mutation into a writable checkout and never promises a tool that will
-    // merely hit the read-only project gate (ADR 0001).
+    // and binary copy-in still targets the real workspace. They must be
+    // withheld from BOTH surfaces so proposal mode can never leak a mutation
+    // into a writable checkout and never promises a tool that will merely hit
+    // the read-only project gate (ADR 0001). make_dir, rename and copy_path
+    // propose a file operation into the pack while drafting, so they stay.
     const withheldWhileDrafting = <T extends Set<string> | null | undefined>(allowlist: T): T => {
       if (!taskContext?.task.diffpackId || !allowlist) return allowlist;
       const next = new Set(allowlist);
-      for (const tool of ['apply_patch', 'copy_artifact_to_workspace', 'make_dir', 'rename']) {
+      for (const tool of ['apply_patch', 'copy_artifact_to_workspace']) {
         next.delete(tool);
       }
       return next as T;

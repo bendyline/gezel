@@ -2,18 +2,20 @@ import type {
   MeesterStatusReport,
   NightShiftReviewResponse,
   Poppetje as PoppetjeStruct,
+  Question,
 } from '@bendyline/gezel';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { Poppetje } from '../../poppetje/index.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
+import { MorningPanel } from './MorningPanel.js';
 import { NightReviewPanel } from './NightReviewPanel.js';
 import { StatusReportPanel } from './StatusReportPanel.js';
 import { TipOfDay } from './TipOfDay.js';
 import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
 
 /** Which panel the greeting band's tab strip is showing. */
-export type HomeGreetingTab = 'greeting' | 'status' | 'night' | 'tour';
+export type HomeGreetingTab = 'greeting' | 'status' | 'morning' | 'night' | 'tour';
 
 /** Symmetric SVG chevron for the greeting's collapse / expand toggle.
  *  The Unicode arrowhead glyphs (⌃ ⌄) render asymmetrically and off-center
@@ -118,6 +120,7 @@ export function GreetingBand({
   statusRunning,
   onRunStatusReport,
   nightReview,
+  morning,
   onNavigate,
 }: {
   chips: HomeChip[];
@@ -134,6 +137,12 @@ export function GreetingBand({
   onRunStatusReport?: () => void;
   /** Last night's review, when fresh and non-empty (parent applies decay). */
   nightReview?: NightShiftReviewResponse | null;
+  /** The unanswered morning card and its night, which replace the Last night tab. */
+  morning?: {
+    question: Question;
+    review: NightShiftReviewResponse | null;
+    onAnswered?: (q: Question) => void;
+  } | null;
   onNavigate?: (view: HomeNavView) => void;
 }) {
   const showPoppetjes = useShowPoppetjes();
@@ -215,7 +224,17 @@ export function GreetingBand({
               Status report
             </button>
           )}
-          {nightReview && (
+          {morning && (
+            <button
+              type="button"
+              aria-pressed={tab === 'morning'}
+              className={`home-workshop-tab${tab === 'morning' ? ' is-active' : ''}`}
+              onClick={() => onTabChange('morning')}
+            >
+              This morning
+            </button>
+          )}
+          {nightReview && !morning && (
             <button
               type="button"
               aria-pressed={tab === 'night'}
@@ -252,6 +271,12 @@ export function GreetingBand({
               report={report}
               running={statusRunning ?? false}
               {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
+            />
+          ) : tab === 'morning' && morning ? (
+            <MorningPanel
+              question={morning.question}
+              review={morning.review}
+              {...(morning.onAnswered ? { onAnswered: morning.onAnswered } : {})}
             />
           ) : tab === 'night' && nightReview ? (
             <NightReviewPanel review={nightReview} />

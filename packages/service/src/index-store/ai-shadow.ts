@@ -9,6 +9,7 @@ import {
   type IndexStore,
   MAX_ENRICH_ATTEMPTS,
 } from './index-store.js';
+import { canNormalizeRaster } from './raster-normalize.js';
 
 /**
  * AI-shadow producers: the second shadow-tree producer class. Office docs get
@@ -37,6 +38,8 @@ const log = createLogger('enrich');
  * is the follow-up if demand appears.
  */
 const VISION_RASTER_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
+/** The same set without dots, for `toDecodableRaster`. HEIC and RAW are converted first. */
+export const VISION_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
 
 function fileExtension(path: string): string {
   const base = path.slice(path.lastIndexOf('/') + 1);
@@ -101,7 +104,11 @@ export async function aiShadowFile(
   // mark them terminal without paying (and re-paying) a doomed engine call.
   // Counted as handled (skipped: false) so an all-unsupported batch doesn't
   // read as "no media work left" to the drive loop while real files wait.
-  if (file.modality === 'image' && !VISION_RASTER_EXTS.has(fileExtension(file.path))) {
+  if (
+    file.modality === 'image' &&
+    !VISION_RASTER_EXTS.has(fileExtension(file.path)) &&
+    !canNormalizeRaster(file.path)
+  ) {
     store.markAiShadowUnsupported(file.hash, file.path);
     log.info(`no vision support for ${file.path} (no raster decoder for this format) — skipped`);
     return { produced: false, skipped: false, called: false };

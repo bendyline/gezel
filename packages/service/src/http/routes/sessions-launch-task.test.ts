@@ -187,6 +187,17 @@ describe('POST /api/sessions/:id/launch-task', () => {
     expect(out.userMessage.content).toBe('');
   });
 
+  it('queues a task for tonight as a night task', async () => {
+    const session = await openSession();
+    const res = await launch(session.id, {
+      message: 'A short deck about Delft, overnight',
+      launch: { craftbookId: 'topic-deck', params: {}, tonight: true },
+    });
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as LaunchTaskFromSessionResponse;
+    expect(out.task.nightShift).toMatchObject({ enabled: true });
+  });
+
   it('previews a trigger-phrase proposal for a coordinator, and never a prelude for it', async () => {
     await svc.context.store.writeProjectCraftbook(projectId, {
       ...DECK_BOOK,

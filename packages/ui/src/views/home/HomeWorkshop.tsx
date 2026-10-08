@@ -15,6 +15,7 @@ import { useActivity } from '../../components/activity-context.js';
 import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
+import { FolderOnboardingStep, shouldOfferFolderStep } from './FolderOnboardingStep.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { MeesterConversation } from './MeesterConversation.js';
 import {
@@ -90,6 +91,10 @@ export function HomeWorkshop({
     reconciledCollapse.current = true;
     setCollapsed(true);
   }, []);
+  // First run: which folders the crew looks after. Hidden as soon as the
+  // person answers; the config stamp keeps it hidden across launches.
+  const [folderStepDone, setFolderStepDone] = useState(false);
+  const offerFolderStep = !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
   const [statusRunning, setStatusRunning] = useState(false);
@@ -205,6 +210,7 @@ export function HomeWorkshop({
   // Last night's review — the "Last night" tab appears only while the
   // window's end is recent (~12h) and the shift actually did something.
   const [nightReview, setNightReview] = useState<NightShiftReviewResponse | null>(null);
+  const [latestReview, setLatestReview] = useState<NightShiftReviewResponse | null>(null);
   useEffect(() => {
     if (!runtimeCapabilities().background) return;
     let cancelled = false;
@@ -212,6 +218,7 @@ export function HomeWorkshop({
       .getNightShiftReview()
       .then((review) => {
         if (cancelled) return;
+        setLatestReview(review);
         const endedMs = Date.parse(review.windowEnd);
         const fresh = Number.isFinite(endedMs) && Date.now() - endedMs < 12 * 60 * 60 * 1000;
         const hasContent = review.tasksCompleted.length > 0 || review.reports.length > 0;
@@ -222,6 +229,30 @@ export function HomeWorkshop({
       cancelled = true;
     };
   }, []);
+
+  // The unanswered morning card opens Home on "This morning", once per card,
+  // whatever the band's saved collapse. It stays until the person dismisses
+  // it: a night they have not looked at does not expire.
+  const morningQuestion = useMemo(
+    () => questions.find((q) => !q.answer && q.intent?.kind === 'night-shift-review') ?? null,
+    [questions],
+  );
+  const openedMorningFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!morningQuestion || openedMorningFor.current === morningQuestion.id) return;
+    openedMorningFor.current = morningQuestion.id;
+    reconciledCollapse.current = true;
+    setCollapsed(false);
+    setTab('morning');
+  }, [morningQuestion]);
+  useEffect(() => {
+    if (!morningQuestion && tab === 'morning') setTab('greeting');
+  }, [morningQuestion, tab]);
+  const morningReview =
+    morningQuestion?.intent?.kind === 'night-shift-review' &&
+    latestReview?.windowKey === morningQuestion.intent.windowKey
+      ? latestReview
+      : null;
 
   const runStatusReport = useCallback(() => {
     setStatusRunning(true);
@@ -296,10 +327,18 @@ export function HomeWorkshop({
         statusRunning={statusRunning}
         onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
         nightReview={nightReview}
+        morning={
+          morningQuestion
+            ? { question: morningQuestion, review: morningReview, onAnswered: refreshQuestions }
+            : null
+        }
         onNavigate={onNavigate}
       />
       <div className="home-workshop-body">
         <div className="home-workshop-main">
+          {offerFolderStep && (
+            <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
+          )}
           {meesterGezelId ? (
             <MeesterConversation
               meesterGezelId={meesterGezelId}

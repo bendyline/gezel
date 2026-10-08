@@ -134,6 +134,7 @@ import type {
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
+  DiffpackDraftOperation,
   DiffpackResponse,
   DismissDiffpackResponse,
   DismissReportActionRequest,
@@ -261,6 +262,8 @@ import type {
   ListMentionCandidatesResponse,
   ListModelsResponse,
   ListPeopleResponse,
+  ListPhotosRequest,
+  ListPhotosResponse,
   ListProjectsForGezelResponse,
   ListProjectsResponse,
   ListPromptDraftsResponse,
@@ -292,6 +295,7 @@ import type {
   NightShiftStatusResponse,
   NightShiftTallyResponse,
   NightShiftTasksResponse,
+  OnThisDayResponse,
   OpenCodeSetupStatusResponse,
   OutlineFileRequest,
   OutlineFileResponse,
@@ -302,6 +306,10 @@ import type {
   PatchPromptDraftRequest,
   PendingImports,
   PerfSnapshot,
+  PhotoAlbum,
+  PhotoAlbumSummary,
+  PhotoGroupsRequest,
+  PhotoGroupsResponse,
   PiSetupStatusResponse,
   Poppetje,
   PreviewLogEntry,
@@ -311,6 +319,7 @@ import type {
   ProjectCompletionRequest,
   ProjectCompletionResponse,
   ProjectFolderPreviewResponse,
+  ProjectIndexOverview,
   ProjectResponse,
   ProjectSearchRequest,
   ProjectSearchResponse,
@@ -1197,6 +1206,8 @@ export interface ConfigResponse {
    * `themePref`). Absent/false = expanded.
    */
   homeGreetingCollapsed?: boolean;
+  /** First-run onboarding steps finished or skipped; see `GezelConfig.onboarding`. */
+  onboarding?: { foldersStepDoneAt?: string; overnightStepDoneAt?: string };
   /**
    * Workshop tempo — how frenetic proactive behavior feels. Only
    * meaningful when `aiEngagementMode === 'proactive'`. Default
@@ -1215,6 +1226,8 @@ export interface ConfigResponse {
     wakeOnStart?: boolean;
     /** Stand the shift down on battery (absent = on). */
     pauseOnBattery?: boolean;
+    /** One desktop notification when the morning review is ready (absent = on). */
+    morningNotification?: boolean;
     /** Optional provider/model defaults used only by Night Shift work. */
     modelOverride?: {
       enabled?: boolean;
@@ -2405,6 +2418,15 @@ export class GezelClient {
       'DELETE',
       `${this.draftBase(projectId, packId)}/path?path=${encodeURIComponent(filePath)}`,
     );
+  }
+
+  /** Propose a move, copy or new folder in a change proposal; nothing moves until applied. */
+  proposeDiffpackDraftOperation(
+    projectId: string,
+    packId: string,
+    body: DiffpackDraftOperation,
+  ): Promise<{ op: DiffpackDraftOperation; message: string }> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/operation`, body);
   }
 
   private draftBase(projectId: string, packId: string): string {
@@ -5427,8 +5449,13 @@ export class GezelClient {
   }
 
   /** The user's Documents / Pictures / cloud folders, with any project that owns each. */
-  listWellKnownFolders(): Promise<WellKnownFoldersResponse> {
-    return this.request('GET', '/api/projects/well-known-folders');
+  /**
+   * The person's Documents, Pictures and cloud folders. `census` adds what each
+   * holds (a bounded walk: seconds on a big Pictures folder) and the git
+   * checkouts under the usual code folders.
+   */
+  listWellKnownFolders(opts: { census?: boolean } = {}): Promise<WellKnownFoldersResponse> {
+    return this.request('GET', `/api/projects/well-known-folders${opts.census ? '?census=1' : ''}`);
   }
 
   setProjectWorkingDir(id: string, workingDir?: string): Promise<ProjectResponse> {
@@ -6394,6 +6421,13 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/workspace/rename`, body);
   }
 
+  copyProjectWorkspacePath(
+    id: string,
+    body: { fromPath: string; toPath: string; gezelId?: string; sessionId?: string },
+  ): Promise<{ ok: true; fromPath: string; toPath: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/workspace/copy`, body);
+  }
+
   // ── tool-bridge endpoints (MCP tools delegate to these) ──
 
   toolFetchUrl(id: string, body: FetchUrlRequest): Promise<FetchUrlResponse> {
@@ -6674,6 +6708,83 @@ export class GezelClient {
       'POST',
       `/api/projects/${encodeURIComponent(id)}/tools/find-similar-images`,
       body,
+    );
+  }
+
+  toolListPhotos(id: string, body: ListPhotosRequest): Promise<ListPhotosResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/list-photos`, body);
+  }
+
+  toolPhotoGroups(id: string, body: PhotoGroupsRequest): Promise<PhotoGroupsResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/photo-groups`, body);
+  }
+
+  /** The Boekwachter's summary of one file; null until it has read the current version. */
+  async getFileSummary(id: string, path: string): Promise<string | null> {
+    const res = await this.request<{ path: string; summary: string | null }>(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/file-summary?path=${encodeURIComponent(path)}`,
+    );
+    return res.summary;
+  }
+
+  /** Photos taken on this calendar day in earlier years; null before the folder's first scan. */
+  async getOnThisDay(id: string): Promise<OnThisDayResponse | null> {
+    const res = await this.request<OnThisDayResponse | undefined>(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/on-this-day`,
+    );
+    return res ?? null;
+  }
+
+  /**
+   * A small JPEG of a workspace photo (`w` snaps to 160, 320 or 640), for
+   * grids and albums. A Blob because `<img src>` cannot carry the token.
+   */
+  fetchProjectThumbnail(
+    id: string,
+    path: string,
+    width = 320,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(id)}/index/thumb?path=${encodeURIComponent(path)}&w=${width}`,
+      'thumbnail fetch failed',
+      signal,
+    );
+  }
+
+  /** Album proposals a gezel left in the artifacts drawer, newest first. */
+  async listPhotoAlbums(id: string): Promise<PhotoAlbumSummary[]> {
+    const res = await this.request<{ albums: PhotoAlbumSummary[] }>(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/albums`,
+    );
+    return res.albums;
+  }
+
+  /** Copy an album's photos into a workspace folder, as the person. Never replaces a file. */
+  copyPhotoAlbumToFolder(
+    id: string,
+    body: { path: string; folder: string },
+  ): Promise<{ folder: string; copied: number; skipped: Array<{ path: string; reason: string }> }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/albums/copy`, body);
+  }
+
+  /** Store an album's photos with it (resized copies), so it plays and exports. */
+  preparePhotoAlbum(
+    id: string,
+    path: string,
+  ): Promise<{ stored: number; skipped: Array<{ src: string; reason: string }> }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/albums/prepare`, {
+      path,
+    });
+  }
+
+  getPhotoAlbum(id: string, path: string): Promise<PhotoAlbum> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/albums/read?path=${encodeURIComponent(path)}`,
     );
   }
 
@@ -7089,6 +7200,20 @@ export class GezelClient {
   }
 
   /** Lightweight status (state + meta). Cheap to poll. */
+  /** What an indexed folder holds (first-look card); null before its first scan. */
+  async getProjectIndexOverview(id: string): Promise<ProjectIndexOverview | null> {
+    const res = await this.request<ProjectIndexOverview | undefined>(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/overview`,
+    );
+    return res ?? null;
+  }
+
+  /** Turn a folder's overnight work on or off ("Work on this folder overnight"). */
+  setProjectNightWork(id: string, enabled: boolean): Promise<{ enabled: boolean }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/night-work`, { enabled });
+  }
+
   getProjectIndexStatus(id: string): Promise<WorkspaceIndexStatus> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/status`);
   }

@@ -1646,6 +1646,66 @@ answer for it all day, not only while the window is open. And when queued
 work genuinely *is* stuck, say which of the two it is — a busy engine
 resolves itself, an engagement switch set to Off does not.
 
+**Adding a folder says what will happen before anything does.** A folder a
+person hands the crew is the product's main promise, so every door to it —
+first-run onboarding (`FolderOnboardingStep`), the add-folder sheet
+(`AddFolderSheet`, opened by `openAddFolder()` from the New Project dialog's
+Existing Folder card, the File menu and the Home tip) — shows the same three
+things first: what the folder holds ("12,480 photos · 1,204 only in iCloud",
+counted without reading a file), the read-only promise in plain words, and
+"Tonight your crew will…" from `describeFolderNightWork`. Folder choices are
+checkbox cards, not keys, because several may be picked at once; the
+overnight question is a two-key tray. A folder gezel refuses (a home folder,
+a drive root) is explained with `forbiddenFolderPlainName`, never an error
+code, and the add key stays disabled.
+
+**A folder's Overview opens on a first look.** `FirstLookCard` sits above
+everything index-derived once the first scan lands: one line of what the
+folder holds, what was left in the cloud, what the crew does tonight with a
+first-night estimate when it runs to hours, and the "Work on this folder
+overnight" switch. That switch is the folder's one off-switch for night work;
+there is no second place to look for it.
+
+**The morning leads with decisions.** While the night's review card is
+unanswered, Home opens on **This morning** whatever the band's saved
+collapse, and the tab stays until the card is dismissed — an unread night
+does not expire. The card leads (proposals, then reports, then what finished,
+a paused review's Resume, the quiet night's reason with its one fix), then the
+main report reads in place, then what is already queued for tonight. One
+desktop notification announces it; the renderer never raises a second.
+
+**Photos are prints on a table.** A photo anywhere in the app is a
+`PhotoThumb`: a square-cropped tile with `--radius-sm`, loaded when it scrolls
+into view from the daemon's thumbnail cache, with the file's initial standing
+in when this machine cannot read the format (never the browser's broken-image
+glyph). Several photos are a `PhotoGrid`, an `auto-fill` grid that shows a
+page at a time behind a "Show N more" key rather than rendering a library at
+once; captions and a pick's reason go under the tile only where they were
+written for it. An album proposal is a `--radius-lg` card with its cover,
+title, span and count; the card opens the album's Squisq slideshow in the
+document editor (after its photos are stored with it), where the person plays
+it, edits it and exports video, and a quiet "Copy to a folder…" link under the
+card opens a small dialog that copies the full-size originals into a folder
+they name and says plainly nothing is replaced. A photo folder's Overview gains
+**Albums** and **On this day** below the first look, and the morning view
+shows last night's albums and this day in earlier years; a folder without
+either shows nothing extra. Titlebar search gives a workspace photo hit a 3rem
+tile beside its text, like Knowledge results.
+
+**A file says what it is, one line above it.** When the Boekwachter has
+summarized a file, its project viewer and the Documents area show that
+summary's first prose paragraph as one muted line above the file
+(`FileAboutLine`): "About this file · …", truncated to the line, the whole
+summary on hover. A file not yet read, or edited since, shows nothing rather
+than a stale description.
+
+**A proposal that moves files reads as where things go.** Moves, copies and
+new folders in a change proposal have no diff, so the review lists them after
+the edits as rows — "Move `from` → `to`", "Copy …", "New folder …" — under one
+header that says they apply after the edits and never replace a file. Past a
+dozen, the rows group by destination folder, each a disclosure row with its
+count, so a tidy-up of a thousand photos reads as a handful of folders.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that

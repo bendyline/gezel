@@ -84,6 +84,7 @@ export const HistoryEventKindSchema = z.enum([
   'workspace.delete',
   'workspace.mkdir',
   'workspace.move',
+  'workspace.copy',
   'workspace.npm.installed',
   'workspace.npm.declined',
   'workspace.script.run',

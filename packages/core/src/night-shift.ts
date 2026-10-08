@@ -153,7 +153,34 @@ export function nextNightShiftStart(now: Date, window: NightShiftWindow): Date {
 }
 
 function countOf(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
+  return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+}
+
+/** What the nightly sweep got through, from the night-shift tally. */
+export interface NightShiftIndexing {
+  filesIndexed: number;
+  filesReviewed: number;
+  mediaDescribed: number;
+}
+
+/** Whether the sweep did anything worth a line on the morning card. */
+export function hasNightShiftIndexing(indexing: NightShiftIndexing | undefined): boolean {
+  return indexingParts(indexing).length > 0;
+}
+
+function indexingParts(indexing: NightShiftIndexing | undefined): string[] {
+  if (!indexing) return [];
+  const parts: string[] = [];
+  if (indexing.filesIndexed > 0) parts.push(`read ${countOf(indexing.filesIndexed, 'file')}`);
+  if (indexing.filesReviewed > 0) {
+    parts.push(`reviewed ${countOf(indexing.filesReviewed, 'file')}`);
+  }
+  if (indexing.mediaDescribed > 0) {
+    parts.push(
+      `described ${countOf(indexing.mediaDescribed, 'photo or recording', 'photos and recordings')}`,
+    );
+  }
+  return parts;
 }
 
 /** "a", "a and b", "a, b and c". */
@@ -214,7 +241,10 @@ export function formatNightShiftSummary(counts: {
   quiet?: { reason: NightShiftQuietReason };
   /** The nightly oversight review is paused and won't run until resumed. */
   pausedReview?: boolean;
+  /** What the sweep got through: files summarized, files reviewed, photos and recordings described. */
+  indexing?: NightShiftIndexing;
 }): string {
+  const swept = indexingParts(counts.indexing);
   const leftBehind: string[] = [];
   if (counts.reports > 0) leftBehind.push(countOf(counts.reports, 'report'));
   if ((counts.proposals ?? 0) > 0) {
@@ -228,8 +258,13 @@ export function formatNightShiftSummary(counts: {
     summary = `The night shift finished ${countOf(counts.tasks, 'task')}.`;
   } else if (leftBehind.length > 0) {
     summary = `The night shift left ${joinList(leftBehind)} for you.`;
+  } else if (swept.length > 0) {
+    summary = `Overnight your crew ${joinList(swept)}.`;
   } else {
     summary = describeQuietNight(counts.quiet?.reason ?? 'no-work');
+  }
+  if (swept.length > 0 && (counts.tasks > 0 || leftBehind.length > 0)) {
+    summary = `${summary} Along the way it ${joinList(swept)}.`;
   }
 
   const actions = counts.actions ?? 0;

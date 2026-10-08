@@ -54,3 +54,46 @@ export function inferFolderKind(input: {
   if (share('doc', 'text', 'email') >= CONTENT_SHARE) return 'documents';
   return 'mixed';
 }
+
+/**
+ * Project property: `off` when the person switched this folder's overnight
+ * work off. One switch: the nightly sweep, fix planning and the folder's
+ * armed night work all stand down.
+ */
+export const NIGHT_WORK_PROPERTY = 'gezel.nightWork';
+
+/** When resident night work was armed for an added folder; arming runs once. */
+export const NIGHT_WORK_ARMED_AT_PROPERTY = 'gezel.nightWorkArmedAt';
+
+export function projectNightWorkEnabled(project: { properties?: Record<string, string> }): boolean {
+  return project.properties?.[NIGHT_WORK_PROPERTY] !== 'off';
+}
+
+/**
+ * What the crew does with a newly added folder overnight, in the person's
+ * words: the lines under "Tonight your crew will…" on the add-folder sheet and
+ * the onboarding cards. Only promises the nightly sweep keeps for every kind;
+ * armed night books add their own lines.
+ */
+export function describeFolderNightWork(kind: FolderKind): string[] {
+  const read = 'Read every file, so you and your crew can search it';
+  switch (kind) {
+    case 'pictures':
+      return [read, 'Describe your photos, so you can find one by what is in it'];
+    case 'documents':
+      return [read, 'Summarize your documents'];
+    case 'code':
+      return [
+        read,
+        'Summarize and review the code',
+        'Draft fixes for what it finds, for you to approve',
+      ];
+    case 'mixed':
+      return [read, 'Summarize documents and describe photos'];
+  }
+}
+
+/** The crew a folder of this kind gets, by role. */
+export function folderCrewRoles(kind: FolderKind): string[] {
+  return kind === 'code' ? ['Boekwachter', 'Builder'] : ['Boekwachter'];
+}

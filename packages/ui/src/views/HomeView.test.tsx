@@ -984,9 +984,9 @@ describe('HomeView', () => {
   it('cycles the tip of the day', async () => {
     render(<HomeView />);
     await waitFor(() => {
-      expect(screen.getByText(/Most of getting great work/)).toBeInTheDocument();
+      expect(screen.getByText(/Give your crew a folder to look after/)).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Show another tip' }));
-    expect(screen.getByText(/Teach a gezel once/)).toBeInTheDocument();
+    expect(screen.getByText(/Most of getting great work/)).toBeInTheDocument();
   });
 });

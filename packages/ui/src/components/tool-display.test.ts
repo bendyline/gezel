@@ -171,6 +171,7 @@ describe('toolActivityPhrase', () => {
     'Finding',
     'Generating',
     'Going',
+    'Grouping',
     'Handing',
     'Hovering',
     'Importing',

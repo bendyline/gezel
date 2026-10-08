@@ -85,6 +85,16 @@ const IMAGE_EXTS = new Set([
   'tif',
   'svg',
   'ico',
+  // Phone and camera photos: HEIC from iPhones, and camera RAW.
+  'heic',
+  'heif',
+  'dng',
+  'cr2',
+  'nef',
+  'arw',
+  'raf',
+  'orf',
+  'rw2',
 ]);
 const CONFIG_EXTS = new Set(['json', 'yaml', 'yml', 'toml', 'ini', 'env', 'xml', 'properties']);
 const DATA_EXTS = new Set(['csv', 'tsv']);

@@ -21,6 +21,12 @@ questions raised for you. During the day the same line tells you when
 the next window opens. You can start a shift manually too — stepping out
 for lunch is a perfectly good night.
 
+## Tonight, not now
+
+Some work is better done while you sleep. When you attach a task to a
+message, press **Tonight** on it and it waits for the night shift instead of
+starting now. You can also just ask the Meester to do something tonight.
+
 ## Roles that bring their own night work
 
 Some roles come with a standing suggestion for recurring work that suits
@@ -107,6 +113,14 @@ Proposed fixes are for code. A folder of documents or photos gets its
 summaries, descriptions and reviews, but never a developer drafting edits to
 your Word files or captions.
 
+A proposal can also move things: put photos into folders, copy a set of
+files, make a new folder. Those appear after the edits as plain rows ("Move
+`Camera/IMG_0042.jpg` → `Birthday/IMG_0042.jpg`"), grouped by the folder they
+land in when there are many, and they never replace a file that's already
+there. A problem the Boekwachter found is marked fixed when you apply the
+proposal that fixes it, not when the fix is drafted, and goes back to open if
+you dismiss it.
+
 If you'd rather your crew didn't do this, turn off nightly fixing in the
 project's settings. It's on by default only because you assembled a crew that
 can do it.
@@ -114,10 +128,32 @@ can do it.
 ## The morning review
 
 When the window closes, gezel gathers what the shift accomplished and
-puts it where you'll see it: the moon menu grows a **Done last night**
-list, the Home greeting gains a **Last night** tab, and a single
-question card summarizes the night with links to every report and every
-change proposal waiting on you.
+puts it where you'll see it: one notification on your desktop, Home opens on
+**This morning**, and the moon menu grows a **Done last night** list. This
+morning leads with what needs a decision (change proposals, then new
+reports), then what finished and how much your crew read and described, then
+what is already queued for tonight. It stays until you dismiss it. On the
+first morning of a new week it also links **Your crew's week**, a one-page
+recap of every night and every folder's weekly digest.
+
+Every folder also leaves a short report of its own, written straight from
+the index, so it costs nothing and needs no model:
+
+- **Photos:** recent outings, photos from this day in earlier years, and the
+  photos that are exact copies of each other (with how much space they take).
+  Where a photo was taken never appears in it.
+- **Documents:** what was added or changed, each with a line saying what it is.
+- **Code:** the hotspots (files that change often and carry problems), the
+  files everything else depends on, and the open issues by severity.
+
+A photo folder's **Curator** can also leave **albums**: for each recent
+outing, a slideshow of the frames that tell the day, in order, captioned,
+with gentle motion between them. Open one from the folder's Overview or the
+morning view to play it, change it — reorder photos, rewrite a caption, pick
+a theme — or export it as a video. The album keeps its own smaller copies of
+the photos, made without where they were taken; your originals stay exactly
+where they are. **Copy to a folder…** gathers the full-size originals in one
+place when you want them.
 
 Reports can go further than prose. A recommendation that is genuinely
 one click away — fire a craftbook, delegate a fix, apply a reviewed set

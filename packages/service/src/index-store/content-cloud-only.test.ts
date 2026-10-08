@@ -114,3 +114,28 @@ describe('cloud-only files', () => {
     expect(meta.width).toBe('800');
   });
 });
+
+describe('folder overview', () => {
+  it('counts photos, screenshots, cloud-only files and byte-identical copies', async () => {
+    await mkdir(join(dir, 'photos'), { recursive: true });
+    await writeFile(join(dir, 'photos', 'a.png'), PNG);
+    await writeFile(join(dir, 'photos', 'a-copy.png'), PNG);
+    await writeFile(join(dir, 'photos', 'a-copy-2.png'), PNG);
+    await placeholder(join(dir, 'photos', 'cloud.png'), PNG.length);
+    await writeFile(join(dir, 'notes.md'), '# notes\n');
+    await index();
+
+    const overview = await ci.overview('c');
+
+    expect(overview).toMatchObject({
+      files: 5,
+      byModality: { image: 4 },
+      cloudOnly: 1,
+      duplicates: { groups: 1, extraCopies: 2, bytes: PNG.length * 2 },
+    });
+  });
+
+  it('is null before the first scan', async () => {
+    expect(await ci.overview('c')).toBeNull();
+  });
+});

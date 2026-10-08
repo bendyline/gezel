@@ -19,6 +19,7 @@ import { normalizeScriptRefs } from '../schemas/script.js';
 import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
 import { stepCheckedArtifactPaths } from '../tools/results.js';
+import { squisqAuthoringNote } from '../transform/squisq-dialect.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
 import { earlierStepProducts, inferredStepInputs } from './inferred-step-inputs.js';
 
@@ -209,6 +210,13 @@ export function renderTaskContextBlock(
     const toolSentence = editToolsWired
       ? 'Use `read_file`, `write_file`, `replace_in_file`, and `replace_lines` exactly as you always do. They behave normally and you will read your own edits back — but they land in the proposal.'
       : 'Your file edits land in the proposal, and you will read your own edits back.';
+    const fileOps = ['rename', 'copy_path', 'make_dir'].filter(
+      (name) => availableToolNames?.has(name) ?? false,
+    );
+    const fileOpsSentence =
+      fileOps.length > 0
+        ? `${fileOps.map((name) => `\`${name}\``).join(', ')} propose moves, copies and new folders the same way, applied after your edits; they never replace an existing file.`
+        : null;
     lines.push(
       [
         '#### Change-proposal mode',
@@ -216,6 +224,7 @@ export function renderTaskContextBlock(
         `You are drafting CHANGE PROPOSAL DP-${t.diffpackId}, not editing this project.`,
         '',
         toolSentence,
+        ...(fileOpsSentence ? [fileOpsSentence] : []),
         'The project files do not change until a person reviews the proposal and clicks',
         'Apply. Never claim you "fixed" or "applied" anything; you proposed it.',
         '',
@@ -288,6 +297,8 @@ export function renderTaskContextBlock(
     if (step.prompt && step.prompt.trim().length > 0) {
       lines.push(`#### Step procedure\n\n${step.prompt.trim()}`);
     }
+    // The format notes live in one place in core, not in each book.
+    if (step.authoring) lines.push(squisqAuthoringNote(step.authoring));
     const handoffBlock = renderGateHandoffBlock(t, step.id);
     if (handoffBlock) lines.push(handoffBlock);
     const outputMedium = outputMediumForStep(step);

@@ -44,6 +44,7 @@ import { nightInTheLifeScenario } from './night-in-the-life.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
+import { photoAlbumScenarios } from './photo-albums.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
 import { powerpointSourceScenarios } from './powerpoint-sources.ts';
 import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflow.ts';
@@ -79,6 +80,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [molenStructureAssetsScenario.id]: molenStructureAssetsScenario,
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
+  ...Object.fromEntries(photoAlbumScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(annotatedDeckScenarios().map((scenario) => [scenario.id, scenario])),
   [annotatedChatPolicyScenario.id]: annotatedChatPolicyScenario,
   [annotatedChatPolicyClosedScenario.id]: annotatedChatPolicyClosedScenario,

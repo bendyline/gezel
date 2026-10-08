@@ -3286,6 +3286,44 @@ export class Store {
     });
   }
 
+  /**
+   * Proposal lifecycle for Boekwachter issues. A drafted fix is not a fix, so
+   * issues claimed by a drafting task stay in progress until the person acts
+   * on the proposal: applying a file resolves the issues on that file, and an
+   * issue no live proposal touches goes back to open. `taskRefs` is the
+   * drafting family — the task that claimed the issues and its shards.
+   */
+  async settleProjectBoekwachterIssuesForProposal(
+    id: string,
+    taskRefs: readonly string[],
+    change: { resolvePaths?: readonly string[]; reopenUnless?: ReadonlySet<string> },
+  ): Promise<{ resolved: number; reopened: number }> {
+    return this.withBoekwachterIssueLock(id, async () => {
+      const state = await this.readProjectBoekwachterIssuesFile(id);
+      const family = new Set(taskRefs);
+      const resolve = new Set(change.resolvePaths ?? []);
+      const at = nowIso();
+      let resolved = 0;
+      let reopened = 0;
+      for (const record of Object.values(state.issues)) {
+        if (record.status !== 'in_progress' || !record.taskRef || !family.has(record.taskRef)) {
+          continue;
+        }
+        if (resolve.has(record.path)) {
+          record.status = 'resolved';
+          record.resolvedAt = at;
+          resolved++;
+        } else if (change.reopenUnless && !change.reopenUnless.has(record.path)) {
+          record.status = 'open';
+          delete record.taskRef;
+          reopened++;
+        }
+      }
+      if (resolved + reopened > 0) await this.writeProjectBoekwachterIssuesFile(id, state);
+      return { resolved, reopened };
+    });
+  }
+
   private async readProjectBoekwachterIssuesFile(
     id: string,
   ): Promise<ProjectBoekwachterIssuesFile> {
@@ -3473,6 +3511,11 @@ export class Store {
         ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
         updatedAt: nowIso(),
       };
+      // A write grant was given for the old folder; a new one starts read-only.
+      if ((workingDir || undefined) !== meta.workingDir) {
+        delete updated.managedWorkspaceWritePolicy;
+        delete updated.allowGezelWrites;
+      }
       await this.writeProjectMeta(updated);
       const detail = await this.getProject(id);
       if (!detail) throw new Error(`project ${id} not found after update`);
@@ -5333,9 +5376,15 @@ export class Store {
     await this.touchProject(id);
   }
 
-  async mkdirProjectWorkspace(id: string, dirPath: string, ctx?: JournalContext): Promise<void> {
+  async mkdirProjectWorkspace(
+    id: string,
+    dirPath: string,
+    ctx?: JournalContext,
+    opts: { userInitiated?: boolean } = {},
+  ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: dirPath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -5352,19 +5401,29 @@ export class Store {
     await this.touchProject(id);
   }
 
+  /**
+   * `noReplace` refuses a destination that already exists: `fs.rename`
+   * replaces a file silently, which a proposal the person approved must never
+   * do to a file they did not name.
+   */
   async renameProjectWorkspacePath(
     id: string,
     fromPath: string,
     toPath: string,
     ctx?: JournalContext,
+    opts: { userInitiated?: boolean; noReplace?: boolean } = {},
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: [fromPath, toPath],
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
     const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
+    if (opts.noReplace && (await pathExists(toFull))) {
+      throw new Error(`${toPath} already exists`);
+    }
     await mkdir(dirname(toFull), { recursive: true });
     await rename(fromFull, toFull);
     await appendJournalEntry(this.home, id, 'rename', toPath, { fromPath, ctx });
@@ -5373,6 +5432,39 @@ export class Store {
       projectId: id,
       ...(ctx?.gezelId ? { gezelId: ctx.gezelId } : {}),
       summary: `Renamed ${fromPath} → ${toPath}`,
+      details: { fromPath, toPath },
+    });
+    await this.touchProject(id);
+  }
+
+  /**
+   * Copy a file or folder inside the workspace. Never replaces anything at
+   * the destination. Only a user-initiated apply calls this today.
+   */
+  async copyProjectWorkspacePath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+    ctx?: JournalContext,
+    opts: { userInitiated?: boolean } = {},
+  ): Promise<void> {
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
+      path: [fromPath, toPath],
+    });
+    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+    const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
+    const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
+    if (await pathExists(toFull)) throw new Error(`${toPath} already exists`);
+    await mkdir(dirname(toFull), { recursive: true });
+    await cp(fromFull, toFull, { recursive: true, errorOnExist: true, force: false });
+    await appendJournalEntry(this.home, id, 'copy', toPath, { fromPath, ctx });
+    await this.history?.log({
+      kind: 'workspace.copy',
+      projectId: id,
+      ...(ctx?.gezelId ? { gezelId: ctx.gezelId } : {}),
+      summary: `Copied ${fromPath} → ${toPath}`,
       details: { fromPath, toPath },
     });
     await this.touchProject(id);

@@ -44,9 +44,15 @@ describe('resolveKnowledgeVectorFloors', () => {
 
   it('keeps a media modality without a measured floor at null, never the text floor', () => {
     const floors = resolveKnowledgeVectorFloors({});
-    expect(floors.floorFor({ catalogKey: 'x/y', profileId: 'bge-small-en-v1.5@1', modality: 'image' })).toBeNull();
     expect(
-      floors.floorFor({ catalogKey: 'x/y', profileId: 'embeddinggemma-2-512@1', modality: 'image' }),
+      floors.floorFor({ catalogKey: 'x/y', profileId: 'bge-small-en-v1.5@1', modality: 'image' }),
+    ).toBeNull();
+    expect(
+      floors.floorFor({
+        catalogKey: 'x/y',
+        profileId: 'embeddinggemma-2-512@1',
+        modality: 'image',
+      }),
     ).toBe(KNOWLEDGE_VECTOR_FLOORS['embeddinggemma-2-512@1#image']);
   });
 

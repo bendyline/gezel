@@ -9,6 +9,7 @@ import {
   nightShiftDayKey,
   projectAllowsAmbientWork,
   projectAllowsNightlyFixes,
+  projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
@@ -112,7 +113,9 @@ export async function planProjectNightFixes(
   const project = await deps.store.getProject(projectId).catch(() => null);
   if (!project) return skip('inactive');
   if (!projectAllowsAmbientWork(project)) return skip('inactive');
-  if (!projectAllowsNightlyFixes(project)) return skip('opted-out');
+  if (!projectAllowsNightlyFixes(project) || !projectNightWorkEnabled(project)) {
+    return skip('opted-out');
+  }
   if (project.indexingEnabled === false) return skip('indexing-off');
   if (!projectHoldsCode(project)) return skip('not-code');
 

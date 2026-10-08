@@ -100,6 +100,7 @@ const STEP_FENCE_KEYS = [
   'suggestedRole',
   'capabilityFloor',
   'promptProfile',
+  'authoring',
   'retrieval',
   'toolPolicy',
   'assignee',

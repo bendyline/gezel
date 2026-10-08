@@ -1674,6 +1674,19 @@ export function ChatComposer({
           stale={taskLaunch.stale}
           onOpen={() => setTaskDialogOpen(true)}
           onDismiss={() => void taskLaunch.dismiss()}
+          {...(runtimeCapabilities().background
+            ? {
+                onToggleTonight: () => {
+                  const current = taskLaunch.attached;
+                  if (!current) return;
+                  void taskLaunch.attach({
+                    ...current,
+                    origin: 'user',
+                    tonight: !current.tonight,
+                  });
+                },
+              }
+            : {})}
         />
       )}
       <div className="chat-composer-to">

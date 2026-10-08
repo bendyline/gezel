@@ -2475,6 +2475,17 @@ export const GezelConfigSchema = z.object({
    */
   homeGreetingCollapsed: z.boolean().optional(),
   /**
+   * First-run onboarding steps the person finished or skipped: which folders
+   * the crew should look after, and whether to work while they sleep. A step
+   * with no stamp is offered on Home until it has one.
+   */
+  onboarding: z
+    .object({
+      foldersStepDoneAt: z.string().optional(),
+      overnightStepDoneAt: z.string().optional(),
+    })
+    .optional(),
+  /**
    * Workshop tempo — how frenetic the meester/voorman's proactive
    * behavior feels. Only has any effect when `aiEngagementMode` is
    * `proactive`; gated behaviors read intervals + prompt text from
@@ -2536,6 +2547,8 @@ export const GezelConfigSchema = z.object({
       keepAwakeWhileRunning: z.boolean().optional(),
       wakeOnStart: z.boolean().optional(),
       pauseOnBattery: z.boolean().optional(),
+      /** One desktop notification when the morning review is ready. Absent = on. */
+      morningNotification: z.boolean().optional(),
       modelOverride: z
         .object({
           enabled: z.boolean().optional(),
@@ -4088,6 +4101,11 @@ export const CreateProjectRequestSchema = z.object({
    * it from any caller but the app's own credential.
    */
   recruitCrew: z.boolean().optional(),
+  /**
+   * With `recruitCrew`: whether the folder's night work starts switched on
+   * (default) or off. The add-folder sheet's "Work on this folder overnight".
+   */
+  nightWork: z.boolean().optional(),
   /**
    * Opt out of structural and content indexing for this project's workspace.
    * Missing/true keeps the historical indexing behavior.

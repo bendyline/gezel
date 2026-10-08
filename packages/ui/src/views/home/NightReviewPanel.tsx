@@ -15,9 +15,15 @@ import { timeAgo } from './utils.js';
  * review's sort) renders inline with live gezel-action cards; the rest
  * are rows that open their project.
  */
-export function NightReviewPanel({ review }: { review: NightShiftReviewResponse }) {
-  const primary = review.reports[0];
-  const rest = review.reports.slice(1);
+/**
+ * A night report read in place, with its suggested actions live. Shared by
+ * the Last night panel and the This morning panel.
+ */
+export function NightPrimaryReport({
+  primary,
+}: {
+  primary: NightShiftReviewResponse['reports'][number] | undefined;
+}) {
   const [primaryContent, setPrimaryContent] = useState<string | null>(null);
   const [primaryError, setPrimaryError] = useState<string | null>(null);
 
@@ -59,6 +65,27 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
     [primary],
   );
 
+  if (!primary) return null;
+  return (
+    <div className="home-workshop-status-body">
+      {primaryDoc ? (
+        <LinearDocView
+          doc={primaryDoc}
+          theme={gezelChatTheme}
+          thinMargins
+          imageDisplayMode="thumbnail"
+          fenceRenderers={fenceRenderers}
+        />
+      ) : primaryError ? (
+        <p className="error small">{primaryError}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function NightReviewPanel({ review }: { review: NightShiftReviewResponse }) {
+  const primary = review.reports[0];
+  const rest = review.reports.slice(1);
   const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
   const proposals = review.diffpacks;
 
@@ -101,21 +128,7 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
           ))}
         </div>
       )}
-      {primary && (
-        <div className="home-workshop-status-body">
-          {primaryDoc ? (
-            <LinearDocView
-              doc={primaryDoc}
-              theme={gezelChatTheme}
-              thinMargins
-              imageDisplayMode="thumbnail"
-              fenceRenderers={fenceRenderers}
-            />
-          ) : primaryError ? (
-            <p className="error small">{primaryError}</p>
-          ) : null}
-        </div>
-      )}
+      <NightPrimaryReport primary={primary} />
       {rest.length > 0 && (
         <div className="home-workshop-night-reports">
           {rest.map((r) => (

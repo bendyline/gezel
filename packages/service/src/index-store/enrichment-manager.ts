@@ -5,6 +5,7 @@ import {
   createLogger,
   isSharedLibraryProject,
   isTaskWorkAllowed,
+  projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -556,7 +557,9 @@ export class IndexEnrichmentManager {
     };
     try {
       const projects = await this.store.listProjects().catch(() => []);
-      let queue = projects.filter((p) => p.indexingEnabled !== false).map((p) => p.id);
+      let queue = projects
+        .filter((p) => p.indexingEnabled !== false && projectNightWorkEnabled(p))
+        .map((p) => p.id);
       while (queue.length > 0) {
         const unfinished: string[] = [];
         for (const projectId of queue) {

@@ -42,6 +42,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'delete_path',
   'make_dir',
   'rename',
+  'copy_path',
   'copy_artifact_to_workspace',
   'validate',
 
@@ -208,6 +209,8 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'search_images',
   'find_similar_images',
   'describe_folder',
+  'list_photos',
+  'photo_groups',
 
   // Entity intelligence (meta-boekwachter: cross-file entities)
   'find_entity',

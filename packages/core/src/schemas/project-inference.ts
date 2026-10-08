@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FOLDER_KINDS } from '../folder-kind.js';
 import type {
   CloudProvider,
   ForbiddenReason,
@@ -82,12 +83,28 @@ export const InferProjectForPathRequestSchema = z.object({
    * from the app's own credential.
    */
   recruitCrew: z.boolean().optional(),
+  /** With `recruitCrew`: whether the folder's night work starts on (default) or off. */
+  nightWork: z.boolean().optional(),
   /** Used only when a project is created. */
   description: z.string().max(2000).optional(),
   about: z.string().max(20_000).optional(),
   missionObjectives: z.string().max(20_000).optional(),
 });
 export type InferProjectForPathRequest = z.input<typeof InferProjectForPathRequestSchema>;
+
+/** What a folder holds, counted without reading any file (see the service's `censusFolder`). */
+export const FolderCensusSchema = z.object({
+  files: z.number().int().nonnegative(),
+  images: z.number().int().nonnegative(),
+  videos: z.number().int().nonnegative(),
+  documents: z.number().int().nonnegative(),
+  /** Files whose bytes are only in the cloud (iCloud, OneDrive, …). */
+  cloudOnly: z.number().int().nonnegative(),
+  newestMtime: z.string().optional(),
+  /** False when the count stopped at its file or time budget: "12,000+". */
+  complete: z.boolean(),
+});
+export type FolderCensus = z.infer<typeof FolderCensusSchema>;
 
 export const InferProjectForPathResponseSchema = z.object({
   /** `null` only for a preview (`create: false`) whose answer is a new folder. */
@@ -111,6 +128,16 @@ export const InferProjectForPathResponseSchema = z.object({
   /** Why the Default project was used. */
   reason: z.union([ForbiddenRootReasonSchema, z.enum(['no-candidate', 'no-path'])]).optional(),
   warnings: z.array(z.string()),
+  /**
+   * For a folder preview (`kind: 'folder'`, `create: false`): what kind of
+   * folder it is and what it holds, for the add-folder sheet.
+   */
+  folder: z
+    .object({
+      kind: z.enum(FOLDER_KINDS),
+      census: FolderCensusSchema,
+    })
+    .optional(),
 });
 export type InferProjectForPathResponse = z.infer<typeof InferProjectForPathResponseSchema>;
 
@@ -129,10 +156,48 @@ export const WellKnownFolderInfoSchema = z.object({
   projectId: z.string().optional(),
   sharedLibrary: z.boolean().optional(),
   forbidden: ForbiddenRootReasonSchema.optional(),
+  /** Recursive counts; present when the request asked for a census. */
+  census: FolderCensusSchema.optional(),
 });
 export type WellKnownFolderInfo = z.infer<typeof WellKnownFolderInfoSchema>;
 
+/** A git checkout found under the home folder's usual code roots. */
+export const CodeFolderInfoSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  /** An existing project whose workingDir is exactly this folder. */
+  projectId: z.string().optional(),
+  census: FolderCensusSchema.optional(),
+});
+export type CodeFolderInfo = z.infer<typeof CodeFolderInfoSchema>;
+
 export const WellKnownFoldersResponseSchema = z.object({
   folders: z.array(WellKnownFolderInfoSchema),
+  /** Present when the request asked for a census. */
+  codeFolders: z.array(CodeFolderInfoSchema).optional(),
 });
 export type WellKnownFoldersResponse = z.infer<typeof WellKnownFoldersResponseSchema>;
+
+/**
+ * What an indexed folder holds, for the first-look card: "12,480 photos from
+ * 2009 to 2026 · about 3,100 look like duplicates · 840 screenshots".
+ */
+export const ProjectIndexOverviewSchema = z.object({
+  files: z.number().int().nonnegative(),
+  totalBytes: z.number().nonnegative(),
+  /** File counts by modality (`image`, `doc`, `code`, `video`, …). */
+  byModality: z.record(z.string(), z.number().int().nonnegative()),
+  screenshots: z.number().int().nonnegative(),
+  /** Files only in the cloud, indexed by name and date. */
+  cloudOnly: z.number().int().nonnegative(),
+  /** Photos' capture dates (camera local time, `YYYY-MM-DDTHH:MM:SS`). */
+  takenRange: z.object({ from: z.string(), to: z.string() }).optional(),
+  modifiedRange: z.object({ from: z.string(), to: z.string() }).optional(),
+  /** Byte-identical files: groups, copies beyond the first, and the bytes those take. */
+  duplicates: z.object({
+    groups: z.number().int().nonnegative(),
+    extraCopies: z.number().int().nonnegative(),
+    bytes: z.number().nonnegative(),
+  }),
+});
+export type ProjectIndexOverview = z.infer<typeof ProjectIndexOverviewSchema>;

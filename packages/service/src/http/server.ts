@@ -141,8 +141,8 @@ import {
   isOfficeListenerRequest,
   officeStaticRoutes,
 } from '../office-host/static-routes.js';
-import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { mediaSearchRoutes } from './routes/media-search.js';
+import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { relevanceModelRoutes } from './routes/relevance-model.js';
 import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';

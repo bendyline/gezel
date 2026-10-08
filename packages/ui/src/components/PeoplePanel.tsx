@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { BlobThumb } from './FindSimilarImages.js';
+import { PhotoGrid } from './PhotoGrid.js';
+import { openProjectFileActions, runNavActions } from './nav-actions.js';
 
 /**
  * People (face lane): the per-project list of person clusters — exemplar
@@ -16,6 +18,7 @@ export function PeoplePanel({ projectId }: { projectId: string }) {
   const [draft, setDraft] = useState('');
   const [forgetting, setForgetting] = useState<PersonSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showing, setShowing] = useState<{ person: PersonSummary; paths: string[] } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -28,6 +31,28 @@ export function PeoplePanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const showPhotosOf = useCallback(
+    async (person: PersonSummary) => {
+      if (showing?.person.entityId === person.entityId) {
+        setShowing(null);
+        return;
+      }
+      try {
+        const res = await api.toolListEntityMentions(projectId, {
+          entity: person.label,
+          maxResults: 500,
+        });
+        const newestFirst = [...res.mentions].sort((a, b) =>
+          (b.date ?? '').localeCompare(a.date ?? ''),
+        );
+        setShowing({ person, paths: [...new Set(newestFirst.map((m) => m.path))] });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [projectId, showing],
+  );
 
   const fetchBlob = useCallback(
     (path: string) => api.fetchProjectWorkspaceBlob(projectId, path),
@@ -107,9 +132,14 @@ export function PeoplePanel({ projectId }: { projectId: string }) {
                 {person.label}
               </button>
             )}
-            <span className="muted small">
+            <button
+              type="button"
+              className="people-card-count small"
+              aria-expanded={showing?.person.entityId === person.entityId}
+              onClick={() => void showPhotosOf(person)}
+            >
               {person.count} photo{person.count === 1 ? '' : 's'}
-            </span>
+            </button>
             <button
               type="button"
               className="people-card-forget"
@@ -120,6 +150,18 @@ export function PeoplePanel({ projectId }: { projectId: string }) {
           </div>
         ))}
       </div>
+      {showing && (
+        <div className="people-photos" data-testid="people-photos">
+          <div className="home-workshop-eyebrow">Photos of {showing.person.label}</div>
+          <PhotoGrid
+            projectId={projectId}
+            photos={showing.paths.map((path) => ({ path }))}
+            onOpen={(path) =>
+              runNavActions(openProjectFileActions({ projectId, path, source: 'workspace' }))
+            }
+          />
+        </div>
+      )}
       {error && <p className="error small">{error}</p>}
       <ConfirmDialog
         open={forgetting !== null}

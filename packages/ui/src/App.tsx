@@ -11,6 +11,7 @@ import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bend
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { ActivityControl } from './components/ActivityControl.js';
+import { AddFolderSheet, openAddFolder } from './components/AddFolderSheet.js';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
@@ -159,6 +160,7 @@ export function App() {
   return (
     <ActivityProvider>
       <FullApp />
+      <AddFolderSheet />
     </ActivityProvider>
   );
 }
@@ -716,6 +718,12 @@ function FullApp() {
         commitSelection(null);
         return;
       }
+      // The File menu's Add Folder…, and a folder opened from the Dock.
+      if (v === 'add-folder' || v.startsWith('add-folder:')) {
+        const path = v.slice('add-folder:'.length);
+        openAddFolder(v === 'add-folder' ? undefined : path);
+        return;
+      }
       if ((AREA_NAMES as string[]).includes(v)) {
         openArea(v as RecentTabArea);
       }
@@ -1228,6 +1236,11 @@ function TaskSpeedMenu({
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
             {periodLine && <span className="app-nightshift-period">{periodLine}</span>}
+            {status?.heldOnBattery && (
+              <span className="app-nightshift-quota-hold">
+                Paused while this computer runs on battery. It picks up when you plug in.
+              </span>
+            )}
             {status?.quotaHold && (
               <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
             )}

@@ -365,7 +365,8 @@ Each OpenAI or Mock session that has `mcpServer` set spawns the `@bendyline/geze
 Tool categories (`packages/mcp/src/server.ts`):
 
 - **Memory**: `search_memory`, `save_memory`, `list_memories`
-- **Workspace** (read-write workspace files): `list_dir`, `read_file`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`
+- **Workspace** (read-write workspace files): `list_dir`, `read_file`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`, `copy_path`
+- **Photos** (`image-intel`, read from the index): `list_photos`, `photo_groups` (events, byte-identical duplicates, lookalikes). Locations are returned only to the person's app and to sessions on an on-device provider
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`
@@ -487,12 +488,29 @@ Three pieces make it work:
   them would need a writer on every external edit — and the edit that matters
   is the one made outside gezel. Same call the Boekwachter issue's `stale` bit
   makes.
+- **Moves, copies and new folders are proposed too.** While drafting,
+  `rename`, `copy_path` and `make_dir` record an operation in the pack's
+  `operations.json` instead of touching the tree ([diffpack/draft-store.ts](packages/service/src/diffpack/draft-store.ts)'s
+  `proposeOperation`). They seal as `files` rows with `change` of `move`,
+  `copy` or `mkdir` and a `from`, carry a `stat:<size>:<mtime>` source
+  fingerprint rather than a hash (a photo tidy-up can name thousands of large
+  files), apply after every content edit in the order drafted, and never
+  replace an existing file whatever `allowDrifted` says. An edit to a path an
+  operation lands on is refused: edit the file where it is now.
 
 Applying passes `userInitiated` to `Store.assertWorkspaceWritable`, which
 waives **only** the external-consent branch: the gezel never wrote, so the
 user's click is the write. That flag must never be passed from an MCP tool or
 any other model-reachable surface — [http/routes/diffpacks.ts](packages/service/src/http/routes/diffpacks.ts)
 is its only caller.
+
+Boekwachter issues follow the proposal, not the task that drafted it
+([diffpack/issue-lifecycle.ts](packages/service/src/diffpack/issue-lifecycle.ts)):
+a drafting task that completes leaves its claimed issues in progress while a
+live proposal covers their file and reopens the rest; applying a file resolves
+the issues on it; dismissing a proposal reopens what no other live proposal
+from the same run covers. The link is the file path, because a pack records
+only the first issue that seeded it.
 
 Ids are always the drafting task's `num`, including a fanout shard's — nothing
 to mint, and no second numbering scheme beside `BW-n`. A shard addresses its
@@ -513,10 +531,59 @@ would make the gate meaningless. Crew is added only when the person adds a
 folder: `recruitCrewForFolder` ([projects/recruit-crew.ts](packages/service/src/projects/recruit-crew.ts))
 runs for a `recruitCrew: true` request from the app's own credential
 (`isFirstPartyCaller`; dropped from model, CLI and add-in callers), once per
-project, and gives a code folder the Builder and every other kind a
-Boekwachter lead ([ADR 0021](docs/decisions/0021-read-only-folders.md)). The
+project, and gives a code folder the Builder, a photo folder the **Curator**
+(gilde template `curator`, only where the catalog carries it), and every other
+kind a Boekwachter lead ([ADR 0021](docs/decisions/0021-read-only-folders.md)). The
 developer clusters the issues and the runtime fans out one shard, and
-therefore one proposal, per cluster.
+therefore one proposal, per cluster. Adding a folder also arms its resident
+night work ([suggested-work/arm.ts](packages/service/src/suggested-work/arm.ts)):
+only report- and proposal-only books on a per-kind allowlist, only where the
+sponsor runs on an on-device model (cloud ones come back as `needsOk` for the
+person to approve), once per project. The folder's one off-switch is the
+`gezel.nightWork` property (`setFolderNightWork`, `POST /api/projects/:id/night-work`,
+the Overview's "Work on this folder overnight"): off stands the nightly sweep,
+fix planning and the folder's night hosts down, and on resumes only the hosts
+the switch paused.
+
+Each project's drained night work also writes a **model-free report** by kind,
+read from the index so it runs on any machine and costs nothing: a photo
+folder gets `reports/photos-<date>.md` (recent outings, on this day, byte-for-byte
+duplicates; never a location), a documents or mixed folder
+`reports/documents-<date>.md` (what changed, each with its Boekwachter summary),
+a code folder `reports/codebase-<date>.md` (hotspots by churn × findings ×
+dependents, load-bearing files, open issues by severity). One per day, nothing
+written when there is nothing to say, never for the shared library; the
+morning review finds them under `reports/`.
+
+**Albums are Squisq slideshows.** The `photo-library-nightly` book writes
+`artifacts/albums/<date>-<slug>.md`: frontmatter (`title`, `squisq-theme`,
+`album-from`/`album-to`), the `#` title and story as the cover, then one slide
+per moment (`{[imageWithCaption]}` or `{[photoGrid]}` with `ambientMotion` and
+`transition`). The person plays it, edits it and exports it to video in the
+ordinary document editor, which reads images only from the document's
+companion folder — so the gezel links photos by their workspace path and
+[index-store/photo-albums.ts](packages/service/src/index-store/photo-albums.ts)'s
+`storeAlbumPhotos` replaces each link with a 2048px copy in `<stem>_files/`
+(`makePhotoRendition`: upright, re-encoded, no EXIF and so no location — `sips`
+alone keeps GPS) and records the copy's original under the
+`gezel-photo-originals` frontmatter key. It runs after a gezel writes an album
+(the artifact write route), when a listing finds one still linking the
+workspace, before the UI opens one (`POST /albums/prepare`), and in the
+night's drained work. "Copy to a folder…" copies the full-size *originals*
+into the workspace — a `userInitiated` write the scope guard closes to session
+tokens, which never replaces a file.
+
+**Squisq syntax is taught from one place.** A craftbook step that writes a
+Squisq document declares `authoring: 'squisq'` or `'squisq-slideshow'`, and
+the task prompt appends the matching note from
+[core transform/squisq-dialect.ts](packages/core/src/transform/squisq-dialect.ts)
+(`squisqAuthoringNote`) after the step's procedure, ending with a line that
+the procedure decides heading levels and slide breaks (a deck splits slides on
+`#`, a report uses `##` sections, and an example in the note must never
+override that). Books declare the format instead of copying syntax:
+`photo-library-nightly`, `narrated-slideshow`, `powerpoint-deck`, `report-pdf`
+and `research-to-document` do. A Squisq change is one edit here; verify any new
+syntax against squisq's `docs/SquigglySquare.md` and template registry first.
 
 ### Generalist mode
 
@@ -587,6 +654,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/projects/{id}/index/` — the project's content index (`index.db` + WAL), owned by [ContentIndex](packages/service/src/index-store/content-index.ts). Home-side for **every** project, so adding a folder writes nothing into it; earlier builds' `<workingDir>/.gezel/index/` is moved here once at boot by [index-placement.ts](packages/service/src/index-store/index-placement.ts) — moved, never rebuilt, because it holds hours of model output. Device-tier, excluded from backups. `~/.gezel/projects/{id}/quarantine/` beside it holds connector content the scanner refused (`Store.projectQuarantineDir`). See [ADR 0021](docs/decisions/0021-read-only-folders.md)
   - `~/.gezel/projects/{id}/artifacts/shadow/` — the reserved shadow-file cache: markdown twins of workspace content (sandboxed squisq conversions of office docs from the static index pass; vision descriptions and STT transcripts from the AI tier), laid out as `<parent>/<basename>_files/<stem>.md` and owned by the content indexer ([index-store/docs.ts](packages/service/src/index-store/docs.ts) + [index-store/ai-shadow.ts](packages/service/src/index-store/ai-shadow.ts)). Lives under artifacts — never the (possibly read-only) workspace — write-denied through the artifact store, hidden from listings, orphan-swept, regenerable, safe to delete. See [ADR 0005](docs/decisions/0005-indexing-3.0.md).
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
+  - `~/.gezel/projects/{id}/thumbs/` (`projectThumbnailsDir`, the per-account private sidecar) — small JPEG thumbnails of workspace photos for grids, albums, search and the morning view, owned by [index-store/thumbnails.ts](packages/service/src/index-store/thumbnails.ts) and served by `GET /api/projects/:id/index/thumb`. Keyed by path, size, mtime and width (160/320/640), least-recently-served pruned past 512 MB, made by `sips` on macOS and pure JS elsewhere. Deliberately not under `artifacts/shadow/` (orphan-swept, readable by gezels) nor the workspace. Regenerable, safe to delete
   - `~/.gezel/handboek/narration/` — content-hash-keyed TTS narration WAVs + duration sidecars for Handboek articles, owned by [handboek/narration.ts](packages/service/src/handboek/narration.ts); derived cache, safe to delete
   - `~/.gezel/gezels/{id}/poppetje.json` — the resolved Poppetje struct (body shape, skin, hair, hat, etc.) driving the parametric figure renderer, owned by [PoppetjeManager](packages/service/src/poppetje/manager.ts). Persisted explicitly so adding new catalog entries or tuning slot odds later never drifts existing characters.
   - `~/.gezel/system-toolsets/` — two classes of pinned entry. **Eager** ones (Playwright + its Chromium) install at boot via [system-toolsets/bootstrap.ts](packages/service/src/system-toolsets/bootstrap.ts). **On-demand** ones (`onDemand: true` in the manifest — today only `@github/copilot-sdk`) install only when the user asks, through [system-toolsets/install-registry.ts](packages/service/src/system-toolsets/install-registry.ts). Read them back with `resolveInstalledSystemLibrary`, not `resolveSystemLibraryPath`: the strict resolver returns `null` on a version mismatch, which is right for eager entries the bootstrap upgrades in place, and would un-install every existing user of an on-demand entry the moment its pin moved.

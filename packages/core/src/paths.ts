@@ -726,6 +726,16 @@ export function projectIndexDir(root: string, projectId: string): string {
 }
 
 /**
+ * Per-project thumbnail cache: small JPEGs of workspace photos for grids and
+ * the morning view. Per-account and derived — it lives in the private sidecar,
+ * never in the (possibly synced, possibly read-only) workspace or the
+ * artifacts drawer gezels read. Size-capped; safe to delete.
+ */
+export function projectThumbnailsDir(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'thumbs');
+}
+
+/**
  * Per-project terminal-threads folder. Holds `{threadId}.json` files,
  * one per (project, workingDir) pair. Always local: terminal output
  * is host-machine-specific and not interesting to sync across

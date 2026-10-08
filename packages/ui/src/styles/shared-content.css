@@ -2701,3 +2701,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
     flex-basis: 100%;
   }
 }
+
+/* The attached task's Tonight key: a latching key (gz-key) sized to the bar,
+   pressed while the task waits for tonight's night shift. */
+.chat-composer-task-bar-tonight {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.2rem 0.55rem;
+  font-size: var(--text-xs);
+}

@@ -11,6 +11,7 @@ import type {
 import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { openAddFolder } from './AddFolderSheet.js';
 import { PermissionIcon, WorkspacePermissionForm } from './WorkspacePermissionForm.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
@@ -432,7 +433,9 @@ function NightShiftReviewCard({
     actions: reports.reduce((n, r) => n + r.actionCount, 0),
     ...(intent.quiet ? { quiet: intent.quiet } : {}),
     ...(pausedReview && resume !== 'resumed' ? { pausedReview: true } : {}),
+    ...(intent.indexing ? { indexing: intent.indexing } : {}),
   });
+  const quietFix = intent.quiet ? quietNightFix(intent.quiet.reason) : null;
 
   // The lead report is already open in the column beside the card — a row
   // linking to what the reader is looking at is noise.
@@ -524,11 +527,42 @@ function NightShiftReviewCard({
           ))}
         </div>
       )}
+      {intent.weeklyRecap && (
+        <div className="pending-question-night-band">
+          <span className="pending-question-night-band-label">This week</span>
+          <button
+            type="button"
+            className="pending-question-night-row"
+            onClick={() =>
+              runNavActions(
+                openProjectFileActions({
+                  projectId: 'default',
+                  path: intent.weeklyRecap!.path,
+                  source: 'artifacts',
+                }),
+              )
+            }
+          >
+            <span className="pending-question-night-row-title">Your crew's week</span>
+            <span className="muted small">{intent.weeklyRecap.week}</span>
+          </button>
+        </div>
+      )}
       {resume === 'resumed' && (
         <p className="pending-question-hold muted">Your nightly review will run again tonight.</p>
       )}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
+        {quietFix && (
+          <button
+            type="button"
+            className="pending-question-skip subtle"
+            onClick={() => void quietFix.run()}
+            disabled={submitting}
+          >
+            {quietFix.label}
+          </button>
+        )}
         {pausedReview && resume !== 'resumed' && (
           <button
             type="button"
@@ -550,6 +584,39 @@ function NightShiftReviewCard({
       </div>
     </div>
   );
+}
+
+/**
+ * The one thing that would have let a quiet night run. Asleep: keep gezel
+ * running at login, plugged in and awake. Nothing to do: give the crew a
+ * folder. Quota held: the reserve lives in Settings. Battery and a deliberate
+ * stop need no fix.
+ */
+function quietNightFix(
+  reason: NonNullable<NightShiftReviewIntent['quiet']>['reason'],
+): { label: string; run: () => Promise<void> | void } | null {
+  if (reason === 'no-work') return { label: 'Add a folder', run: () => openAddFolder() };
+  if (reason === 'quota-held') {
+    return {
+      label: 'Night Shift settings',
+      run: () => navigateToTab({ kind: 'area', area: 'settings' }),
+    };
+  }
+  if (reason === 'asleep' && window.__GEZEL__?.startAtLogin) {
+    return {
+      label: 'Keep gezel running at night',
+      run: async () => {
+        await window.__GEZEL__?.startAtLogin?.set(true).catch(() => undefined);
+        const config = await api.getConfig().catch(() => null);
+        await api
+          .updateConfig({
+            nightShift: { ...(config?.nightShift ?? {}), keepAwakeWhileRunning: true },
+          })
+          .catch(() => undefined);
+      },
+    };
+  }
+  return null;
 }
 
 // ── Task paused for help ────────────────────────────────────────────

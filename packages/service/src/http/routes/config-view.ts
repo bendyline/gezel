@@ -63,6 +63,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     inlineGrammarChecking: config.inlineGrammarChecking !== false,
     sidebarSide: config.sidebarSide,
     homeGreetingCollapsed: config.homeGreetingCollapsed === true,
+    onboarding: config.onboarding,
     workshopTempo: config.workshopTempo ?? 'bedrijvig',
     nightShift: config.nightShift,
     toolFilterMode: config.toolFilterMode ?? 'always',

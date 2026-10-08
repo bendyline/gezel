@@ -428,6 +428,8 @@ const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
   'search_images',
   'find_similar_images',
   'describe_folder',
+  'list_photos',
+  'photo_groups',
   'find_entity',
   'list_entity_mentions',
   'list_archive',

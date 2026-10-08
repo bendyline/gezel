@@ -6,13 +6,13 @@ import {
   ensureFolderProjectBuilder,
   ensureProjectVoorman,
 } from '../workspace/import-sync.js';
-import { recruitCrewForFolder } from './recruit-crew.js';
+import { setUpAddedFolder } from './recruit-crew.js';
 
 const log = createLogger('projects');
 
 export type CreateProjectDeps = Pick<
   ServiceContext,
-  'store' | 'chat' | 'home' | 'catalog' | 'chatEvents' | 'git'
+  'store' | 'chat' | 'home' | 'catalog' | 'chatEvents' | 'git' | 'tasks' | 'history'
 >;
 
 /**
@@ -26,7 +26,7 @@ export async function createProjectWithLead(
   deps: CreateProjectDeps,
   body: CreateProjectRequest,
 ): Promise<ProjectDetail> {
-  const { recruitCrew: _recruitCrew, ...record } = body;
+  const { recruitCrew: _recruitCrew, nightWork: _nightWork, ...record } = body;
   const created = await deps.store.createProject(record);
   // A folder the person added picks its lead by what it holds, after the
   // folder has been classified; see recruitCrewForFolder.
@@ -64,11 +64,13 @@ export async function createProjectWithLead(
     await detectAndPersistProjectType({ store: deps.store }, created.id);
   }
   if (recruitCrew) {
-    const crew = await recruitCrewForFolder(deps, created.id).catch((err: unknown) => {
+    const setUp = await setUpAddedFolder(deps, created.id, {
+      ...(body.nightWork !== undefined ? { nightWork: body.nightWork } : {}),
+    }).catch((err: unknown) => {
       log.warn(`[projects] crew recruitment failed for ${created.id}: ${String(err)}`);
       return null;
     });
-    for (const gezel of crew?.createdGezels ?? []) {
+    for (const gezel of setUp?.crew.createdGezels ?? []) {
       deps.chatEvents.publishGlobalEvent({
         type: 'gezel_created',
         gezelId: gezel.id,

@@ -241,4 +241,14 @@ describe('formatNightShiftSummary', () => {
       "The night shift ran, but nothing came of it. Your nightly review paused and won't run again until you resume it.",
     );
   });
+
+  it('reports a night that only swept the folders as work, not a quiet night', () => {
+    const indexing = { filesIndexed: 1204, filesReviewed: 0, mediaDescribed: 312 };
+    expect(
+      formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'no-work' }, indexing }),
+    ).toBe('Overnight your crew read 1,204 files and described 312 photos and recordings.');
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, indexing })).toBe(
+      'The night shift finished 1 task. Along the way it read 1,204 files and described 312 photos and recordings.',
+    );
+  });
 });

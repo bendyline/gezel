@@ -35,6 +35,7 @@ export function ComposerTaskBar({
   stale,
   onOpen,
   onDismiss,
+  onToggleTonight,
 }: {
   launch: PromptDraftTaskLaunch;
   art: CraftbookCatalogArt | null;
@@ -42,6 +43,8 @@ export function ComposerTaskBar({
   stale: string[];
   onOpen: () => void;
   onDismiss: () => void;
+  /** Run the task in tonight's Night Shift instead of now. Absent where there is no night shift. */
+  onToggleTonight?: () => void;
 }) {
   const manifest = art?.manifest ?? null;
   const name = manifest?.name ?? launch.craftbookName ?? launch.craftbookId;
@@ -95,6 +98,21 @@ export function ComposerTaskBar({
         </span>
         {note && <span className="chat-composer-task-bar-note">{note}</span>}
       </button>
+      {onToggleTonight && (
+        <button
+          type="button"
+          className={`gz-key chat-composer-task-bar-tonight${launch.tonight ? ' gz-key-active' : ''}`}
+          aria-pressed={launch.tonight === true}
+          onClick={onToggleTonight}
+          title={
+            launch.tonight
+              ? "Runs in tonight's night shift. Click to run it now instead"
+              : "Run it in tonight's night shift instead of now"
+          }
+        >
+          Tonight
+        </button>
+      )}
       <button
         type="button"
         className="chat-composer-task-bar-dismiss"

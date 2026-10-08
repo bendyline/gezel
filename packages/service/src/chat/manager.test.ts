@@ -6646,12 +6646,14 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(allow.has('replace_in_file')).toBe(true);
     expect(allow.has('replace_lines')).toBe(true);
     expect(allow.has('delete_path')).toBe(true);
+    // File operations are proposed into the pack, applied with the edits.
+    expect(allow.has('make_dir')).toBe(true);
+    expect(allow.has('rename')).toBe(true);
+    expect(allow.has('copy_path')).toBe(true);
     // These operations have no draft-overlay implementation and must never
     // fall through to the real workspace during proposal mode.
     expect(allow.has('apply_patch')).toBe(false);
     expect(allow.has('copy_artifact_to_workspace')).toBe(false);
-    expect(allow.has('make_dir')).toBe(false);
-    expect(allow.has('rename')).toBe(false);
 
     const sys = create!.opts!.systemMessage!;
     expect(sys).toContain('#### Change-proposal mode');

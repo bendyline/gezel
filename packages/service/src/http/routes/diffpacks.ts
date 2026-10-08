@@ -1,6 +1,7 @@
 import {
   ApplyDiffpackRequestSchema,
   type ApplyDiffpackResponse,
+  DiffpackDraftOperationSchema,
   type DiffpackResponse,
   type DismissDiffpackResponse,
   type ListDiffpacksResponse,
@@ -211,6 +212,24 @@ export function diffpackRoutes(ctx: ServiceContext): Hono {
         ...(body.where === 'before' || body.where === 'after' ? { where: body.where } : {}),
       });
     });
+  });
+
+  /** Propose a move, copy or new folder; applied after the edits, never over a file. */
+  app.post('/:id/diffpacks/:packId/draft/operation', async (c) => {
+    const parsed = DiffpackDraftOperationSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: 'expected { op, from?, to }' }, 400);
+    try {
+      await ctx.diffpacks.ensureForDraft(c.req.param('id'), c.req.param('packId'));
+      return c.json(
+        await ctx.diffpacks.drafts.proposeOperation(
+          c.req.param('id'),
+          c.req.param('packId'),
+          parsed.data,
+        ),
+      );
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   app.delete('/:id/diffpacks/:packId/draft/path', async (c) => {

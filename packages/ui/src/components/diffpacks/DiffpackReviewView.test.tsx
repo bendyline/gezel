@@ -77,6 +77,45 @@ describe('DiffpackReviewView', () => {
     expect(screen.getByText(/BW-8/)).toBeInTheDocument();
   });
 
+  it('lists moves, copies and new folders without a diff, grouped by folder when many', async () => {
+    const op = (change: 'move' | 'copy' | 'mkdir', path: string, from?: string) => ({
+      path,
+      ...(from ? { from } : {}),
+      diffArtifact: '',
+      baseHash: '',
+      additions: 0,
+      deletions: 0,
+      change,
+    });
+    const few = pack({
+      files: [
+        op('mkdir', 'Albums/Beach'),
+        op('copy', 'Albums/Beach/IMG_1.jpg', 'Camera/IMG_1.jpg'),
+        op('move', 'Birthday/IMG_2.jpg', 'Camera/IMG_2.jpg'),
+      ],
+    });
+    vi.mocked(api.listDiffpacks).mockResolvedValue({ diffpacks: [few] });
+    const { unmount } = render(<DiffpackReviewView projectId="p1" />);
+
+    expect(await screen.findByText('3 file changes')).toBeInTheDocument();
+    expect(screen.getByTitle('Camera/IMG_2.jpg')).toBeInTheDocument();
+    expect(screen.getByTitle('Birthday/IMG_2.jpg')).toBeInTheDocument();
+    expect(screen.getByText('New folder')).toBeInTheDocument();
+    expect(screen.queryByTestId('diff')).toBeNull();
+    unmount();
+
+    const many = pack({
+      files: Array.from({ length: 14 }, (_, i) =>
+        op('move', `${i < 10 ? 'Beach' : 'Party'}/IMG_${i}.jpg`, `Camera/IMG_${i}.jpg`),
+      ),
+    });
+    vi.mocked(api.listDiffpacks).mockResolvedValue({ diffpacks: [many] });
+    render(<DiffpackReviewView projectId="p1" />);
+    expect(await screen.findByText('Beach/')).toBeInTheDocument();
+    expect(screen.getByText('Party/')).toBeInTheDocument();
+    expect(screen.getByText('10 items')).toBeInTheDocument();
+  });
+
   it('tells the user nothing is waiting when there are no proposals', async () => {
     vi.mocked(api.listDiffpacks).mockResolvedValue({ diffpacks: [] });
     render(<DiffpackReviewView projectId="p1" />);

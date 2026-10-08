@@ -338,6 +338,11 @@ async function isSessionRouteAllowed(
     if (/^\/diffpacks\/[^/]+\/(?:apply|dismiss)\/?$/.test(rest)) {
       return sessionDeny('reviewing a change proposal requires a first-party client');
     }
+    // Copying an album into the folder is the person's write, made with
+    // `userInitiated` so it reaches a read-only folder.
+    if (/^\/albums\/copy\/?$/.test(rest)) {
+      return sessionDeny('copying an album requires a first-party client');
+    }
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }

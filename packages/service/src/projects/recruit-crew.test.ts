@@ -47,6 +47,38 @@ async function folder(
   return project.id;
 }
 
+async function installCuratorTemplate(): Promise<void> {
+  const dir = join(home, 'gezel-templates', 'cu', 'curator');
+  await mkdir(join(dir, 'versions', '1.0.0'), { recursive: true });
+  await writeFile(
+    join(dir, 'manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: 'gezel-template',
+      id: 'curator',
+      name: 'Curator',
+      description: 'Looks after a photo library.',
+      tags: ['curator', 'photos'],
+      maintainer: { name: 'Gezel' },
+      license: 'MIT',
+      role: 'Curator',
+    }),
+  );
+  await writeFile(
+    join(dir, 'versions', '1.0.0', 'manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      version: '1.0.0',
+      releasedAt: '2026-10-08T00:00:00.000Z',
+      about: 'about.md',
+    }),
+  );
+  await writeFile(
+    join(dir, 'versions', '1.0.0', 'about.md'),
+    '# Curator\n\nYou look after photos.\n',
+  );
+}
+
 const photos = Object.fromEntries(
   Array.from({ length: 8 }, (_, i) => [`2026/IMG_${i}.jpg`, 'jpeg']),
 );
@@ -74,6 +106,29 @@ describe('recruitCrewForFolder', () => {
     expect(await resolveProjectDeveloper(store, id)).toBeNull();
     expect(project?.properties?.[FOLDER_KIND_PROPERTY]).toBe('pictures');
     expect(result.createdGezels.map((g) => g.id)).toEqual([boekwachter?.id]);
+  });
+
+  it('leads a Pictures folder with the Curator once the catalog carries the template', async () => {
+    await installCuratorTemplate();
+    const id = await folder('Pictures', photos, {
+      [INFERRED_PROJECT_WELL_KNOWN_PROPERTY]: 'pictures',
+    });
+
+    const result = await recruitCrewForFolder(deps(), id);
+
+    const project = await store.getProject(id);
+    const lead = (await store.getGezel(project!.voormanGezelId!))!;
+    expect(lead.templateId).toBe('curator');
+    expect(await resolveProjectBoekwachter(store, id)).not.toBeNull();
+    expect(project?.gezelIds).toContain(lead.id);
+    expect(result.createdGezels.map((g) => g.id)).toContain(lead.id);
+
+    const second = await folder('Camera', photos, {
+      [INFERRED_PROJECT_WELL_KNOWN_PROPERTY]: 'pictures',
+    });
+    const again = await recruitCrewForFolder(deps(), second);
+    expect((await store.getProject(second))?.voormanGezelId).toBe(lead.id);
+    expect(again.createdGezels.map((g) => g.id)).not.toContain(lead.id);
   });
 
   it('reads the file mix when the folder is not a well-known one', async () => {

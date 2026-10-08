@@ -2924,3 +2924,14 @@ button.tree-row-trailing-select {
   transform: translateY(1px);
   box-shadow: var(--key-pressed-shadow);
 }
+
+/* FileAboutLine: the Boekwachter's summary of the open file, one muted line
+   above it. The full summary is on hover. */
+.file-about {
+  margin: 0;
+  padding: 0.35rem 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}

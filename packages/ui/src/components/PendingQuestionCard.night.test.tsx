@@ -164,4 +164,30 @@ describe('night-shift review card', () => {
     expect(screen.queryByRole('button', { name: 'Resume nightly review' })).toBeNull();
     expect(screen.queryByText(/Your nightly review paused/)).toBeNull();
   });
+
+  it("gives a quiet night its fix, counts the sweep, and links the week's recap", async () => {
+    const base = nightCard();
+    const handler = vi.fn();
+    window.addEventListener('gezel:add-folder', handler);
+    render(
+      <PendingQuestionCard
+        question={nightCard({
+          intent: {
+            ...(base.intent as object),
+            windowKey: '2026-08-24',
+            tasksCompleted: 0,
+            reports: [],
+            quiet: { reason: 'no-work' },
+            weeklyRecap: { week: '2026-W35', path: 'reports/weekly-recap-2026-W35.md' },
+          } as unknown as Question['intent'],
+        })}
+      />,
+    );
+
+    await screen.findByText('The night shift ran, but nothing came of it.');
+    expect(screen.getByText("Your crew's week")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a folder' }));
+    expect(handler).toHaveBeenCalled();
+    window.removeEventListener('gezel:add-folder', handler);
+  });
 });

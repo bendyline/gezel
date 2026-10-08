@@ -22,9 +22,15 @@ import type {
   ListFileIssuesRequest,
   ListFileIssuesResponse,
   ListPeopleResponse,
+  ListPhotosRequest,
+  ListPhotosResponse,
   MapAttackSurfaceResponse,
   MapRepoResponse,
+  OnThisDayResponse,
   OutlineFileResponse,
+  PhotoGroupsRequest,
+  PhotoGroupsResponse,
+  ProjectIndexOverview,
   ReadDocAsMarkdownResponse,
   ReadSymbolResponse,
   ScanFindingsRequest,
@@ -113,7 +119,9 @@ import {
   type SecuritySeverity,
   type SymbolHit,
 } from './index-store.js';
+import { listPhotos, onThisDay, photoGroups } from './photo-intel.js';
 import { searchTokens } from './query-terms.js';
+import { type DecodableRaster, canNormalizeRaster, toDecodableRaster } from './raster-normalize.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
 import { isTransientIndexError } from './sqlite-driver.js';
@@ -1375,22 +1383,22 @@ export class ContentIndex {
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir } = opened;
+    const rasters: DecodableRaster[] = [];
     try {
       let files = 0;
       let embedded = 0;
       const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
       for (const f of index.filesNeedingImageEmbed(limit)) {
         if (!f.hash) continue;
-        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
-        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
-        if (!abs) {
+        const raster = await embeddableRaster(workspaceDir, f.path, rasters);
+        if (!raster) {
           // No pure-JS decoder for the format (or an unresolvable path):
           // terminal for this hash, cheap — the embedder never runs.
           index.markImageEmbedUnsupported(f.hash, f.path);
           files++;
           continue;
         }
-        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+        jobs.push({ path: raster, hash: f.hash, relPath: f.path });
       }
       if (jobs.length === 0) return { files, embedded, unavailable: false };
       const embedFn = embed ?? (await import('../memory/image-embeddings.js')).embedImageFiles;
@@ -1423,6 +1431,7 @@ export class ContentIndex {
       return { files, embedded, unavailable: false };
     } finally {
       index.close();
+      await Promise.all(rasters.map((r) => r.release().catch(() => {})));
     }
   }
 
@@ -1535,6 +1544,7 @@ export class ContentIndex {
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir } = opened;
+    const rasters: DecodableRaster[] = [];
     try {
       const candidates = index.filesNeedingFaceIndex(limit);
       if (candidates.length === 0) return { files: 0, faces: 0, unavailable: false };
@@ -1549,14 +1559,13 @@ export class ContentIndex {
       const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
       for (const f of candidates) {
         if (!f.hash) continue;
-        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
-        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
-        if (!abs) {
+        const raster = await embeddableRaster(workspaceDir, f.path, rasters);
+        if (!raster) {
           index.markFaceUnsupported(f.hash, f.path);
           files++;
           continue;
         }
-        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+        jobs.push({ path: raster, hash: f.hash, relPath: f.path });
       }
       if (jobs.length === 0) return { files, faces, unavailable: false };
 
@@ -1596,6 +1605,7 @@ export class ContentIndex {
       return { files, faces, unavailable: false };
     } finally {
       index.close();
+      await Promise.all(rasters.map((r) => r.release().catch(() => {})));
     }
   }
 
@@ -1629,6 +1639,73 @@ export class ContentIndex {
       return { files: handled, produced, called };
     } finally {
       index.close();
+    }
+  }
+
+  /** Photos matching a filter, newest first (`list_photos`). */
+  async listPhotos(
+    projectId: string,
+    req: ListPhotosRequest,
+    includeLocation: boolean,
+  ): Promise<ListPhotosResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { photos: [], total: 0, truncated: false };
+    try {
+      const { index } = opened;
+      return listPhotos(
+        {
+          rows: index.photoRows(req.path),
+          includeLocation,
+          caption: (h) => index.getSummary(h) ?? null,
+        },
+        req,
+      );
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Events, duplicates or lookalikes across the photos (`photo_groups`). */
+  async photoGroups(
+    projectId: string,
+    req: PhotoGroupsRequest,
+    includeLocation: boolean,
+  ): Promise<PhotoGroupsResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { by: req.by, groups: [], truncated: false, engine: 'unavailable' };
+    try {
+      const { index } = opened;
+      return photoGroups({ rows: index.photoRows(req.path), includeLocation }, req, () =>
+        index.allImageVectors(),
+      );
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Photos taken on this calendar day in earlier years; null before the first scan. */
+  async onThisDay(projectId: string, now = new Date()): Promise<OnThisDayResponse | null> {
+    if (!(await this.hasIndex(projectId))) return null;
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return onThisDay(opened.index.photoRows(), `${month}-${day}`, now.getFullYear());
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** What the indexed folder holds, for the first-look card; null before the first scan. */
+  async overview(projectId: string): Promise<ProjectIndexOverview | null> {
+    if (!(await this.hasIndex(projectId))) return null;
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return opened.index.folderOverview();
+    } finally {
+      opened.index.close();
     }
   }
 
@@ -2127,6 +2204,56 @@ export class ContentIndex {
       }),
       engine: code.engine,
     };
+  }
+
+  /**
+   * The Boekwachter's summary of one file, for the line above it in a file
+   * view. Keyed by the file's current content hash, so an edited file shows
+   * nothing until it is read again rather than describing what it used to say.
+   */
+  async fileSummary(projectId: string, relPath: string): Promise<string | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index } = opened;
+    try {
+      const hash = index.getFile(relPath)?.hash;
+      const summary = hash ? index.getSummary(hash) : undefined;
+      return summary?.trim() || null;
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Documents and notes changed since `sinceMs`, newest first, each with the
+   * Boekwachter's summary where it has one. Null before the first scan.
+   */
+  async recentDocuments(
+    projectId: string,
+    sinceMs: number,
+    limit = 500,
+  ): Promise<Array<{ path: string; mtimeMs: number; summary: string | null }> | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index } = opened;
+    try {
+      return index
+        .allFiles()
+        .filter(
+          (f) =>
+            f.mtimeMs >= sinceMs &&
+            (f.modality === 'doc' || f.modality === 'text' || f.modality === 'email'),
+        )
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, limit)
+        .map((f) => ({
+          path: f.path,
+          mtimeMs: f.mtimeMs,
+          summary: (f.hash ? index.getSummary(f.hash) : undefined)?.trim() || null,
+        }));
+    } finally {
+      index.close();
+    }
   }
 
   /**
@@ -3180,3 +3307,25 @@ function severityRank(s: SecuritySeverity): number {
 function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
   return severityRank(b) > severityRank(a) ? b : a;
 }
+
+/**
+ * A path the pure-JS image decoders can read for this workspace photo: the
+ * file itself, or a temporary JPEG for HEIC and RAW (pushed onto `rasters`
+ * for the caller to release). Null when there is no decoder for the format.
+ */
+async function embeddableRaster(
+  workspaceDir: string,
+  relPath: string,
+  rasters: DecodableRaster[],
+): Promise<string | null> {
+  const ext = relPath.slice(relPath.lastIndexOf('.')).toLowerCase();
+  if (!IMAGE_EMBED_EXTS.has(ext) && !canNormalizeRaster(relPath)) return null;
+  const abs = safeJoin(workspaceDir, relPath);
+  if (!abs) return null;
+  const raster = await toDecodableRaster(abs, EMBED_RASTER_FORMATS).catch(() => null);
+  if (!raster) return null;
+  if (raster.path !== abs) rasters.push(raster);
+  return raster.path;
+}
+
+const EMBED_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg']);

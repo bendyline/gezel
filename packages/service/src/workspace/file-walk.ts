@@ -27,7 +27,7 @@ const ALWAYS_SKIP_DIRS = new Set([
  */
 const SKIPPED_PACKAGE_SUFFIXES = ['.photoslibrary', '.photolibrary', '.aplibrary'];
 
-function isSkippedDir(name: string): boolean {
+export function isSkippedDir(name: string): boolean {
   if (ALWAYS_SKIP_DIRS.has(name)) return true;
   const lower = name.toLowerCase();
   return SKIPPED_PACKAGE_SUFFIXES.some((suffix) => lower.endsWith(suffix));

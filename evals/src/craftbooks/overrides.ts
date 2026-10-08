@@ -1672,6 +1672,16 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
   },
+  'photo-library-nightly': {
+    mode: 'workflow',
+    timeoutMs: 30 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'The test.json sidecar can seed only text, so it proves the honest empty pass. photo-albums-real-photos (scenarios/photo-albums.ts) seeds JPEGs with EXIF capture dates and checks the look-back window; neither has run on a local model yet.',
+    },
+    gaps: ['Run photo-albums-real-photos on a local model and record the result.'],
+  },
   'physics-toy': {
     coverage: {
       status: 'validated',

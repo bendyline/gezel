@@ -7,8 +7,10 @@ import type {
 import { getProjectType, resolveProjectTypeId } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { FirstLookCard } from '../components/FirstLookCard.js';
 import { MarkdownField } from '../components/MarkdownField.js';
 import { PeoplePanel } from '../components/PeoplePanel.js';
+import { PhotoAlbumsSection } from '../components/PhotoAlbums.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
 import { RailSection } from './home/RailSection.js';
@@ -127,6 +129,9 @@ export function ProjectOverviewView({
           )}
         </div>
       </div>
+
+      <FirstLookCard projectId={projectId} project={project} refreshKey={indexStatus?.state} />
+      <PhotoAlbumsSection projectId={projectId} />
 
       {!map?.indexed && indexingDisabled && (
         <p className="muted">
