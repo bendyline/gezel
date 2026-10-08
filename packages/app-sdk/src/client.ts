@@ -1,4 +1,5 @@
 import {
+  AppChatProgressSchema,
   AppEnsureEventSchema,
   AppEnsureResultSchema,
   AppModelListSchema,
@@ -258,7 +259,14 @@ async function* parseChatStream(
         ...(parsed.error.code ? { code: parsed.error.code } : {}),
       });
     }
-    yield parsed;
+    if (parsed.gezel_progress !== undefined) {
+      const { gezel_progress, ...content } = parsed;
+      const checked = AppChatProgressSchema.safeParse(gezel_progress);
+      // A malformed optional extension must not discard otherwise valid reply text.
+      yield checked.success ? { ...content, gezel_progress: checked.data } : content;
+    } else {
+      yield parsed;
+    }
   }
 }
 

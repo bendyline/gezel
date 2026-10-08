@@ -381,6 +381,31 @@ describe('LlamaCppProvider constructor', () => {
     expect(supervisorPhase?.phase).toBe('loading_model');
   });
 
+  it('never attributes unscoped prefill to concurrent requests or replays it to a later request', async () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    type Session = Parameters<LlamaCppProvider['_registerActiveSession']>[0];
+    const first = (await provider.createSession({ systemMessage: 'sys' })) as Session;
+    const second = (await provider.createSession({ systemMessage: 'sys' })) as Session;
+    const phases: [string[], string[]] = [[], []];
+    first.onEnginePhase((event) => phases[0].push(event.phase));
+    second.onEnginePhase((event) => phases[1].push(event.phase));
+    provider._registerActiveSession(first);
+    provider._registerActiveSession(second);
+    provider.onStdoutLine('[llama-server] loading weights into buffers 42%');
+    expect(phases).toEqual([['loading_model'], ['loading_model']]);
+    const line =
+      '[llama-server] slot update_slots: id 0 | task 1 | prompt processing progress, n_past = 2048, n_tokens = 13982, progress = 0.146474';
+    provider.onStdoutLine(line);
+    expect(phases).toEqual([['loading_model'], ['loading_model']]);
+    provider._deregisterActiveSession(second);
+    provider.onStdoutLine(line);
+    expect(phases[0]).toEqual(['loading_model', 'prefill']);
+    provider._registerActiveSession(second);
+    expect(phases[1]).toEqual(['loading_model']);
+    provider._deregisterActiveSession(first);
+    provider._deregisterActiveSession(second);
+  });
+
   it('strips trailing slashes from the explicit baseUrl', async () => {
     const seen: string[] = [];
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {

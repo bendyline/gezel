@@ -487,3 +487,20 @@ relevance model.
 Catalog and relevance-model downloads must follow an explicit user action.
 This surface grants no access to projects, sessions, arbitrary paths, URLs,
 machine-wide catalogs, or broader product administration.
+
+### Live inference progress
+
+Pass `stream_options: { include_progress: true, include_usage: true }` to `app.chat`
+with `stream: true`. Progress-only chunks have an empty `choices` array and a
+validated `gezel_progress` object: `phase` (`starting`, `queued`, `loading_model`,
+`prefill`, `reasoning`, or `generating`), `percent`, `outputTokens`, and
+`tokensPerSecond`. Read reply text with `chunk.choices[0]?.delta.content`.
+
+Percentages come from the engine and apply only to loading or prefill. Token
+counts and throughput are exact when reported; unknown values are `null`.
+Counts may include private reasoning, but progress never includes reasoning
+text, prompts, session identifiers, or engine log messages. Phase transitions
+are immediate and counter updates are throttled. Providers without telemetry
+still announce observed reasoning/response activity; older Gezel releases
+ignore the option and keep streaming content normally. This requires a Gezel
+service release containing the progress extension, not just an SDK update.

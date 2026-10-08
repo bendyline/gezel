@@ -1902,7 +1902,7 @@ export function ChatComposer({
                     onClick={() => setTaskDialogOpen(true)}
                     disabled={engagementOff || draftSubmissionPending}
                     aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
-                    title="Attach a craftbook task to this message"
+                    title="Attach a plan to this message"
                   >
                     Task
                   </button>

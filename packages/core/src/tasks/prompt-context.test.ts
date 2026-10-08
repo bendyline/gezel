@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '../schemas/task.js';
 import { isGatedStep, renderTaskContextBlock, renderTaskOutline } from './prompt-context.js';
+import { resolveNextStep } from './step-routing.js';
 
 const task = {
   ref: 'default/3',
@@ -109,6 +110,41 @@ describe('renderTaskContextBlock', () => {
     expect(block).toContain('Task tools wired this turn: `read_task_notes`.');
     expect(block).not.toContain('Task artifact folder');
     expect(block).toContain('finish and pass them before the next step is revealed');
+  });
+
+  it('explains the default repair loop and the explicit review branch', () => {
+    const steps = [
+      ...task.craftbook.steps,
+      { id: 'finish', name: 'Finish', terminal: true, createdAt: '2026-10-08T00:00:00Z' },
+    ];
+    const reviewTask = { ...task, craftbook: { ...task.craftbook, steps } };
+    const block = renderTaskContextBlock({ task: reviewTask, step });
+    expect(resolveNextStep({ steps, currentId: 'review' })).toEqual({
+      kind: 'advance',
+      to: 'build',
+    });
+    expect(resolveNextStep({ steps, currentId: 'review', override: 'next' })).toEqual({
+      kind: 'advance',
+      to: 'build',
+    });
+    expect(resolveNextStep({ steps, currentId: 'review', override: 'finish' })).toEqual({
+      kind: 'advance',
+      to: 'finish',
+    });
+    expect(block).toContain('declared default destination is `build`');
+    expect(block).toContain('include that exact step id in the `next` argument');
+    expect(block).toContain(
+      'Writing a PASS note or saying the review passed does not select a destination',
+    );
+    expect(
+      renderTaskContextBlock(
+        { task: reviewTask, step },
+        { availableToolNames: new Set(['write_task_note']) },
+      ),
+    ).not.toContain('#### Step routing');
+    expect(renderTaskContextBlock({ task: reviewTask, step: steps[2] })).not.toContain(
+      '#### Step routing',
+    );
   });
 
   it('names a checked file outside the task folder, and only then', () => {

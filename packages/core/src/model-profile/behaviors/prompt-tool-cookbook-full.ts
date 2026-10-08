@@ -92,7 +92,7 @@ const COOKBOOK_ROWS: ReadonlyArray<{ tools: readonly string[]; row: string }> = 
   },
   {
     tools: ['advance_task_step'],
-    row: `| "advance the step" / "move to the next step" / "this step is done, hand off" | \`advance_task_step({ ref: "<projectId>/<num>", stepId: "<id of the step being completed>" })\` — omit \`next\` to advance to the following step in order, or pass \`next: "<stepId>"\` to jump to a specific step. Auto-opens a session with the new step's assignee. Don't just say "ready to hand off" in chat — that does nothing. |`,
+    row: `| "advance the step" / "move to the next step" / "this step is done, hand off" | \`advance_task_step({ ref: "<projectId>/<num>", stepId: "<id of the step being completed>" })\` — omitting \`next\` follows the plan's configured routing, which can loop back. When the procedure chooses a branch, pass its destination explicitly as \`next: "<stepId>"\`. Auto-opens a session with the new step's assignee. Don't just say "ready to hand off" in chat — that does nothing. |`,
   },
 ];
 

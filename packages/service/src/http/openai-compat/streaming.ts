@@ -6,6 +6,7 @@ import type {
   SendAndWaitOpts,
   TurnUsage,
 } from '../../providers/types.js';
+import { createChatProgressReporter } from './chat-progress.js';
 import {
   type StreamingDiagnostics,
   type StreamingOutboundKind,
@@ -259,6 +260,8 @@ export interface RunStreamingOpts {
    * matching OpenAI's default.
    */
   includeUsage?: boolean;
+  /** Opt-in Gezel metadata. Never exposes reasoning or provider diagnostic text. */
+  includeProgress?: boolean;
   /** Effective output-token cap — reaching it reports `finish_reason: 'length'`. */
   lengthCapTokens?: number;
   /** Mirror hooks for an externally-owned conversation ledger. */
@@ -313,6 +316,7 @@ export async function runStreaming(
     diagnostics,
     suppressTextualToolCalls = false,
     includeUsage = false,
+    includeProgress = false,
     lengthCapTokens,
     onContentDelta,
     onReasoningDelta,
@@ -371,6 +375,27 @@ export async function runStreaming(
         /* stream closed by client */
       });
   };
+  const progress = includeProgress
+    ? createChatProgressReporter((gezel_progress) => {
+        enqueueSSE(
+          {
+            data: JSON.stringify({
+              id,
+              object: 'chat.completion.chunk',
+              created,
+              model: echoModel,
+              choices: [],
+              gezel_progress,
+              ...nullUsage,
+            }),
+          },
+          'progress',
+        );
+      })
+    : undefined;
+  const unsubPhase = progress
+    ? session.onEnginePhase?.((event) => progress.engine(event))
+    : undefined;
   const nextLiveToolIndex = (): number =>
     liveToolCalls.reduce((highest, call) => Math.max(highest, call.index), -1) + 1;
   const openLiveToolCall = (
@@ -484,6 +509,7 @@ export async function runStreaming(
     noteStreamingProviderActivity(diagnostics, 'content');
     const visibleChunk = toolCallFilter ? toolCallFilter.push(chunk) : chunk;
     if (!visibleChunk) return;
+    progress?.activity('generating');
     visibleContent += visibleChunk;
     onContentDelta?.(visibleChunk);
     // The callback is synchronous; enqueueSSE serializes the async writes.
@@ -508,9 +534,10 @@ export async function runStreaming(
     );
   });
   const unsubReasoning =
-    includeReasoning || diagnostics || onReasoningDelta
+    includeReasoning || includeProgress || diagnostics || onReasoningDelta
       ? session.onReasoningDelta?.((chunk) => {
           if (!chunk) return;
+          progress?.activity('reasoning');
           noteStreamingProviderActivity(diagnostics, 'reasoning');
           reasoningContent += chunk;
           onReasoningDelta?.(chunk);
@@ -639,6 +666,7 @@ export async function runStreaming(
       },
       'opener',
     );
+    progress?.start();
     startKeepalives();
 
     const sendOpts: SendAndWaitOpts | undefined =
@@ -649,6 +677,7 @@ export async function runStreaming(
           }
         : undefined;
     await session.sendAndWait(prompt, sendOpts);
+    progress?.flush();
     await callbackWrites;
 
     // A marker-like prefix is held across chunks so split tags cannot leak.
@@ -855,6 +884,7 @@ export async function runStreaming(
       finishReason,
     };
   } finally {
+    unsubPhase?.();
     if (keepaliveTimer) clearInterval(keepaliveTimer);
     unsubHeartbeat?.();
     unsubWirePulse?.();

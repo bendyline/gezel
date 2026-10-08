@@ -81,6 +81,7 @@ export type {
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,
+  AppChatProgress,
   ChatRequest,
   ChatTool,
   ChatToolCall,

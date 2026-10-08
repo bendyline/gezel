@@ -278,6 +278,37 @@ describe('POST /v1/chat/completions — streaming', () => {
     expect(send?.sendOpts?.timeoutMs).toBe(2 * 60 * 60 * 1000);
   });
 
+  it('opts into live phases without putting reasoning into completion text', async () => {
+    mockCopilot.scriptReasoning('Private model reasoning.');
+    mockCopilot.script('Visible response.');
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-reasoning',
+        messages: [{ role: 'user', content: 'report inference progress' }],
+        stream: true,
+        stream_options: { include_progress: true, include_usage: true },
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const frames = text
+      .split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice('data: '.length)));
+    expect(
+      frames.filter((frame) => frame.gezel_progress).map((frame) => frame.gezel_progress.phase),
+    ).toEqual(expect.arrayContaining(['starting', 'reasoning', 'generating']));
+    expect(
+      frames.filter((frame) => frame.gezel_progress).every((frame) => frame.choices.length === 0),
+    ).toBe(true);
+    expect(frames.map((frame) => frame.choices[0]?.delta?.content ?? '').join('')).toBe(
+      'Visible response.',
+    );
+    expect(text).not.toContain('Private model reasoning.');
+    expect(text).toContain('data: [DONE]');
+  });
+
   it('keeps private reasoning off the general OpenAI-compatible endpoint', async () => {
     mockCopilot.scriptReasoning('This stays private.');
     mockCopilot.script('This is visible.');

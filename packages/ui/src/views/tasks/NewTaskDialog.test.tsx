@@ -1,5 +1,5 @@
 import type { CatalogItemSummary, GezelSummary, Project, Task } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../../test-utils/mockApi.js';
@@ -148,7 +148,7 @@ describe('NewTaskDialog', () => {
     expect(screen.queryByRole('radio', { name: 'Blog Post' })).not.toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /Browse all 2 craftbooks/ }));
+    await user.click(screen.getByRole('button', { name: /Browse all 2 plans/ }));
     expect(screen.getByRole('radio', { name: 'Blog Post' })).toBeInTheDocument();
   });
 
@@ -224,12 +224,12 @@ describe('NewTaskDialog', () => {
     expect(screen.getByText('Business')).toBeInTheDocument();
 
     await user.click(starters);
-    expect(screen.getByRole('radio', { name: 'Branding Website' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Website' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Review & security/ }));
     expect(screen.getByRole('radio', { name: 'Code Review' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'Research Report' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Research report' })).not.toBeInTheDocument();
   });
 
   it('falls back to tag inference for a craftbook with no authored category', async () => {
@@ -264,7 +264,7 @@ describe('NewTaskDialog', () => {
 
     renderDialog();
     const user = userEvent.setup();
-    await user.type(await screen.findByRole('searchbox', { name: 'Search craftbooks' }), 'review');
+    await user.type(await screen.findByRole('searchbox', { name: 'Search plans' }), 'review');
 
     expect(screen.getAllByRole('radio').map((item) => item.getAttribute('aria-label'))).toEqual([
       'Code Review',
@@ -288,10 +288,10 @@ describe('NewTaskDialog', () => {
     expect(await screen.findByText('Code Review description')).toBeInTheDocument();
     expect(screen.getByText('Title')).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('searchbox', { name: 'Search craftbooks' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('searchbox', { name: 'Search plans' })).not.toBeInTheDocument();
 
     // Back returns to the catalog with the choice still lit.
-    await user.click(screen.getByRole('button', { name: /Craftbooks/ }));
+    await user.click(screen.getByRole('button', { name: 'Plans' }));
     const card = await screen.findByRole('radio', { name: 'Code Review' });
     expect(card).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByText('Title')).not.toBeInTheDocument();
@@ -360,7 +360,7 @@ describe('NewTaskDialog', () => {
     expect(api.createTask).not.toHaveBeenCalled();
   });
 
-  it('selecting a craftbook previews its steps and creates and starts it', async () => {
+  it('a plan with nothing to ask opens a single confirmation', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/2',
       projectId: 'pj-alpha',
@@ -377,10 +377,9 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
 
-    // The pane shows both steps with their role hints.
-    expect(await screen.findByText(/^2 steps$/)).toBeInTheDocument();
-    expect(screen.getByText('Build')).toBeInTheDocument();
-    expect(screen.getByText('reviewer')).toBeInTheDocument();
+    // Nothing to ask: keep the steps and crew inside More options.
+    expect(screen.queryByText(/^2 steps$/)).not.toBeInTheDocument();
+    expect(screen.getByText(/reviewer/).closest('details')).not.toHaveAttribute('open');
     expect(screen.getByRole('link', { name: 'Upstream review' })).toHaveAttribute(
       'href',
       'https://example.com/upstream-review',
@@ -388,8 +387,8 @@ describe('NewTaskDialog', () => {
     // No description/steps fields for a book — the recipe supplies them.
     expect(screen.queryByText(/^Description/)).not.toBeInTheDocument();
 
-    expect(screen.getByText(/Starts immediately/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    expect(screen.getByText(/Your crew can make this now/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -399,7 +398,7 @@ describe('NewTaskDialog', () => {
           craftbookId: 'code-review',
           craftbookSourceId: 'bundled',
           dispatchEntry: true,
-          description: expect.stringContaining('Run the "Code Review" craftbook'),
+          description: expect.stringContaining('Run the "Code Review" plan'),
         }),
       );
     });
@@ -436,7 +435,7 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
     await user.click(screen.getByTestId('json-editor'));
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -481,7 +480,7 @@ describe('NewTaskDialog', () => {
     });
     await userEvent.setup().click(screen.getByRole('radio', { name: 'Apply Review Findings' }));
 
-    expect(screen.getByRole('button', { name: 'Create & start' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeInTheDocument();
     expect(screen.queryByTestId('json-editor')).not.toBeInTheDocument();
   });
 
@@ -574,10 +573,13 @@ describe('NewTaskDialog', () => {
       />,
     );
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('radio', { name: 'PowerPoint from Content' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Start here/ })).toHaveClass('active'),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Slide deck' }));
 
     const form = screen.getByTestId('json-editor');
-    expect(form.dataset.fields).toBe('sourcePath,content,audience');
+    expect(form.dataset.fields).toBe('content,audience');
     expect(form.dataset.alternatives).toBe('no');
 
     const brief = screen.getByRole('textbox', { name: 'Brief' });
@@ -602,14 +604,15 @@ describe('NewTaskDialog', () => {
     } as never);
     renderDialog();
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('radio', { name: 'PowerPoint from Content' }));
-    expect(screen.getByTestId('json-editor').dataset.fields).toBe(
-      'sourcePath,topic,content,audience',
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Start here/ })).toHaveClass('active'),
     );
+    await user.click(screen.getByRole('radio', { name: 'Slide deck' }));
+    expect(screen.getByTestId('json-editor').dataset.fields).toBe('content,audience');
 
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
     expect(
-      await screen.findByText('Fill in Source file, Topic, or Source material.'),
+      await screen.findByText('Add a topic or a short description to start this plan.'),
     ).toBeInTheDocument();
     expect(api.createTask).not.toHaveBeenCalled();
   });
@@ -685,8 +688,8 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
     // The copy names the role instead of asking the user to choose.
-    expect(await screen.findByText(/Step 1 goes to the developer/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    expect(screen.getByText('Choose automatically').closest('details')).not.toHaveAttribute('open');
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalled();
@@ -714,7 +717,7 @@ describe('NewTaskDialog', () => {
       screen.getAllByTestId('mock-select')[0] as HTMLSelectElement,
       'gz-maya',
     );
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
       expect(api.createTask).toHaveBeenCalledWith(
@@ -724,7 +727,7 @@ describe('NewTaskDialog', () => {
     });
   });
 
-  it('falls back to the roster default for a craftbook whose entry step names no role', async () => {
+  it('lets the service choose the crew even when the entry step names no role', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [
         bookItem('blog-post', 'Blog Post', {
@@ -748,13 +751,11 @@ describe('NewTaskDialog', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Blog Post' }));
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
-      expect(api.createTask).toHaveBeenCalledWith(
-        'pj-alpha',
-        expect.objectContaining({ assignee: { kind: 'gezel', gezelId: 'gz-maya' } }),
-      );
+      expect(api.createTask).toHaveBeenCalled();
+      expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('assignee');
     });
   });
 
@@ -772,14 +773,14 @@ describe('NewTaskDialog', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
-    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     const message = await screen.findByRole('alert');
     expect(message).toHaveTextContent(/No open pull request for branch "qualityfixes"/);
     expect(message.closest('.gz-npd-pane-footer')).not.toBeNull();
     expect(message.closest('.gz-npd-pane-scroll')).toBeNull();
     // The reason replaces the footnote rather than stacking under it.
-    expect(screen.queryByText(/Starts immediately/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your crew can make this now/)).not.toBeInTheDocument();
   });
 
   it('warns before submit when no open pull request matches the checked-out branch', async () => {
@@ -812,7 +813,7 @@ describe('NewTaskDialog', () => {
     expect(
       await screen.findByText(/No open pull request for branch "qualityfixes"/),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create & start' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled();
 
     // Supplying the number answers the warning — the launch will resolve.
     await user.click(screen.getByTestId('json-editor-pr'));
@@ -845,7 +846,7 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
 
-    expect(await screen.findByText(/Starts immediately/)).toBeInTheDocument();
+    expect(await screen.findByText(/Your crew can make this now/)).toBeInTheDocument();
     expect(screen.queryByText(/No open pull request/)).not.toBeInTheDocument();
   });
 
@@ -893,7 +894,7 @@ describe('NewTaskDialog', () => {
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
 
     expect(screen.getByTestId('toolset-setup')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create & start' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeDisabled();
   });
 
   it('curates scheduling candidates and creates a recurring craftbook host', async () => {
@@ -916,7 +917,7 @@ describe('NewTaskDialog', () => {
     } as Task);
 
     renderDialog({ creationMode: 'scheduled' });
-    expect(await screen.findByText('Scheduled craftbooks')).toBeInTheDocument();
+    expect(await screen.findByText('Scheduled plans')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Weekly Review' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Launch Check' })).not.toBeInTheDocument();
 
@@ -963,7 +964,7 @@ describe('NewTaskDialog', () => {
     } as Task);
 
     renderDialog({ creationMode: 'night-shift' });
-    expect(await screen.findByText('Night Shift craftbooks')).toBeInTheDocument();
+    expect(await screen.findByText('Night Shift plans')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deep Audit' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Quick Note' })).not.toBeInTheDocument();
 
@@ -982,5 +983,160 @@ describe('NewTaskDialog', () => {
       );
     });
     expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('status');
+  });
+  it('quick launch focuses the brief, derives the title and keeps options collapsed', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('research-report', 'Cited Research Report', {
+          tags: ['starter'],
+          paramSchema: {
+            type: 'object',
+            properties: {
+              topic: { type: 'string', fromMessage: true, title: 'Topic' },
+              outputPath: { type: 'string', default: '{{task.dir}}/report.md' },
+            },
+          },
+          steps: [
+            { id: 'write', name: 'Write', advanceWhen: { file: '{{outputPath}}', exists: true } },
+          ],
+        }),
+      ],
+      starterIds: ['research-report'],
+      durationEstimatesMs: { 'research-report': 120_000 },
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/8',
+      projectId: 'pj-alpha',
+      num: 8,
+    } as Task);
+    renderDialog({ quickLaunch: true, initialCraftbookId: 'research-report', projectLocked: true });
+    const brief = await screen.findByRole('textbox', { name: 'Topic' });
+    expect(brief).toHaveFocus();
+    expect(screen.getByText('Title').closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByText('outputPath')).not.toBeInTheDocument();
+    expect(screen.getByText('A written report')).toBeInTheDocument();
+    expect(screen.getByText('Usually about 2 minutes here')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(brief, 'How to grow herbs on a balcony');
+    await user.click(screen.getByRole('button', { name: 'Start now' }));
+    await waitFor(() =>
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({
+          title: 'How to grow herbs on a balcony',
+          craftbookParams: { topic: 'How to grow herbs on a balcony' },
+          craftbookInvocationKey: expect.stringMatching(/^craftbook-root-v1:[a-f0-9]{64}$/),
+          dispatchEntry: true,
+        }),
+      ),
+    );
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('assignee');
+  });
+
+  it('retries the same launch key and changes it when the request changes', async () => {
+    vi.mocked(api.createTask).mockRejectedValue(new Error('Connection lost'));
+    renderDialog({ initialCraftbookId: 'code-review', quickLaunch: true });
+    const user = userEvent.setup();
+    const start = await screen.findByRole('button', { name: 'Start now' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    await screen.findByRole('alert');
+    await user.click(start);
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(2));
+    const key = vi.mocked(api.createTask).mock.calls[0]?.[1].craftbookInvocationKey;
+    expect(vi.mocked(api.createTask).mock.calls[1]?.[1].craftbookInvocationKey).toBe(key);
+    await user.click(screen.getByRole('button', { name: 'Tonight' }));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(api.createTask).mock.calls[2]?.[1]).toMatchObject({
+      nightShift: { enabled: true },
+    });
+    expect(vi.mocked(api.createTask).mock.calls[2]?.[1].craftbookInvocationKey).not.toBe(key);
+  });
+
+  it('waits for the destination project before seeding a quick launch', async () => {
+    type Offer = Awaited<ReturnType<typeof api.listProjectCraftbooks>>;
+    const offer = (topic: string) =>
+      ({
+        items: [
+          bookItem('research-report', 'Research report', {
+            tags: ['starter'],
+            paramSchema: {
+              type: 'object',
+              properties: {
+                topic: { type: 'string', title: 'Topic', fromMessage: true, default: topic },
+              },
+            },
+          }),
+        ],
+        starterIds: ['research-report'],
+        missingToolsets: {},
+        suggestedIds: [],
+        establishedCodebase: false,
+      }) as Offer;
+    let finishSecond!: (value: Offer) => void;
+    const second = new Promise<Offer>((resolve) => {
+      finishSecond = resolve;
+    });
+    vi.mocked(api.listProjectCraftbooks).mockImplementation((id) =>
+      id === 'pj-beta' ? second : Promise.resolve(offer('Alpha topic')),
+    );
+    const props = {
+      open: true,
+      defaultProjectId: 'pj-alpha',
+      projects: [...PROJECTS, { id: 'pj-beta', name: 'Beta' } as Project],
+      gezels: GEZELS,
+      initialCraftbookId: 'research-report',
+      quickLaunch: true,
+      projectLocked: true,
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<NewTaskDialog {...props} />);
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Topic' })).toHaveValue('Alpha topic'),
+    );
+    rerender(<NewTaskDialog {...props} defaultProjectId="pj-beta" />);
+    await waitFor(() => expect(api.listProjectCraftbooks).toHaveBeenCalledWith('pj-beta'));
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeDisabled();
+    await act(async () => {
+      finishSecond(offer('Beta topic'));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Topic' })).toHaveValue('Beta topic'),
+    );
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled();
+    expect(api.createTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plain brief in the task description with older starter content', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [bookItem('research-report', 'Cited Research Report')],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/9',
+      projectId: 'pj-alpha',
+      num: 9,
+    } as Task);
+    renderDialog({ initialCraftbookId: 'research-report', quickLaunch: true });
+    const user = userEvent.setup();
+    await user.type(
+      await screen.findByRole('textbox', { name: 'What should this be about?' }),
+      'Compare garden composters',
+    );
+    await user.click(screen.getByRole('button', { name: 'Tonight' }));
+    await waitFor(() =>
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({
+          description: expect.stringContaining('Compare garden composters'),
+          nightShift: { enabled: true },
+        }),
+      ),
+    );
   });
 });

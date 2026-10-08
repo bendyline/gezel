@@ -184,10 +184,7 @@ export function composeCraftbookDescription(
     .join(', ');
   const withClause = paramSummary ? ` with ${paramSummary}.` : '.';
   const tail = manifest.description ? ` ${manifest.description}` : '';
-  return `Run the "${manifest.name}" craftbook against this project${withClause}${tail}`.slice(
-    0,
-    2000,
-  );
+  return `Run the "${manifest.name}" plan against this project${withClause}${tail}`.slice(0, 2000);
 }
 
 /**

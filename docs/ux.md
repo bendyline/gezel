@@ -494,6 +494,44 @@ What lives where:
 
 ## Patterns
 
+### Pick a plan from Home
+
+Home's **Make something** tray offers six broad starting points: Research
+report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
+Each key has artwork, a plain name, and a short description of the declared
+output. **See all** opens the full plan gallery, whose **Start here** shelf
+uses the same starter set. Use the existing tray and radius tokens; these
+are square-ish keys, never pills.
+
+A Home key opens a compact launch sheet with the main field focused.
+The person adds a topic, then chooses **Start now** or **Tonight**. Use the
+most recently visited project, or Default when none has been chosen. Derive
+the title from the topic and choose the crew automatically. Required inputs
+stay visible; optional inputs, additional fields, Title, Assign to, and step
+roles live in a closed **More options** disclosure. Plans with nothing to
+ask show a single confirmation. Keep launch errors beside the action keys.
+
+Output summaries come from declared output files, including publishing steps
+before a final Finish step. **Usually about N minutes here** appears only
+when this install has completed runs of the same plan. Use the median elapsed
+time, ending at the last completed step; exclude overnight waits, recurring
+hosts, and child tasks. Do not infer time from a later task edit or collect
+telemetry. Example images and catalog-wide estimates are future work.
+
+Words we show on starter cards, launch forms, the composer strip, and task cards:
+
+| Internal term | Visible wording |
+| --- | --- |
+| craftbook | plan |
+| default assignee / entry-step role | Choose automatically |
+| voorman | crew lead, when relevant |
+| gezel | gezel |
+| Meester | Meester |
+
+Paths are implementation details. Derive output destinations from the task's
+working folder; use file pickers for source material. A starter's main field
+asks what the person wants made, never for a prompt, title, or filesystem path.
+
 ### Task progress: stops on a route
 
 The task bench, chat rail, craftbook receipts, and craftbook editor share
@@ -811,11 +849,12 @@ decides which craftbooks are applicable and recommended. Choosing a card —
 the blank card included — advances to step 2: what the starting point is and
 what it brings on the left, the properties form on the right, and one back
 key returning to the gallery with the choice still lit. Three rules keep it
-from reading as two different dialogs: the dialog keeps its size and its
-footer bar across both steps so the frame never jumps, the selection
+from reading as two different dialogs: the full gallery keeps its size and
+footer bar across both steps, the selection
 survives going back, and nothing is created until the second screen (the
 picker's footnote says so, and Enter in the search field must not submit the
-form).
+form). Home starts skip the gallery and use the compact sheet described
+above; a plan with nothing to ask also uses that single confirmation.
 
 **Step 2 goes to one centered column when there is nothing to read.** Two
 columns are for a selection whose brief earns one — a craftbook's steps, a
@@ -831,7 +870,8 @@ params come out of the generic parameter form and render above it, under a
 "Works on" eyebrow, as `CraftbookInputField`
 ([components/craftbook-input/](../packages/ui/src/components/craftbook-input/),
 `.gz-cbi-*` in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
-The source goes first because it is the thing the book works on. It is
+Required sources go first because they are what the book works on. Optional
+sources are inside More options. It is
 a keys-in-a-tray choice — **In this project** / **From your computer** —
 over one body:
 

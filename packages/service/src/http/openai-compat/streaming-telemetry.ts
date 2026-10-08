@@ -6,6 +6,7 @@ export type StreamingProviderActivity =
   | 'heartbeat';
 
 export type StreamingOutboundKind =
+  | 'progress'
   | 'opener'
   | 'content'
   | 'reasoning'

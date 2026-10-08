@@ -608,6 +608,9 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
                   ? { suppressTextualToolCalls: true }
                   : {}),
                 ...(parsed.stream_options?.include_usage === true ? { includeUsage: true } : {}),
+                ...(parsed.stream_options?.include_progress === true
+                  ? { includeProgress: true }
+                  : {}),
                 ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
                 ...(externalTurn
                   ? {

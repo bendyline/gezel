@@ -277,6 +277,10 @@ export interface LLMSession {
    * silently drop the attachments and proceed text-only.
    */
   sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string>;
+  /** Optional engine-measured phase/progress, scoped to this session. */
+  onEnginePhase?(
+    handler: (event: import('./streaming-session.js').EnginePhaseEvent) => void,
+  ): () => void;
   onDelta(handler: (chunk: string) => void): () => void;
   /**
    * Subscribe to live private-reasoning deltas, streamed separately from

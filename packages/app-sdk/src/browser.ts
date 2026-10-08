@@ -43,6 +43,7 @@ export type {
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,
+  AppChatProgress,
   ChatRequest,
   ChatStream,
   ChatTool,

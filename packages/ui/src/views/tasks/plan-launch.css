@@ -1,0 +1,33 @@
+.gz-dialog.gz-ntd.gz-ntd-quick {
+  width: min(560px, calc(100vw - 2rem));
+  height: auto;
+  max-height: calc(100dvh - 2rem);
+}
+.gz-ntd-quick .gz-npd-detail {
+  display: block;
+  overflow-y: auto;
+}
+.gz-ntd-quick .gz-npd-brief {
+  padding-bottom: 0.5rem;
+}
+.gz-ntd-quick .gz-npd-detail-footer {
+  flex-wrap: wrap;
+}
+.gz-ntd-quick .gz-dialog-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.gz-ntd-quick .gz-dialog-actions button {
+  white-space: nowrap;
+}
+.gz-ntd-more {
+  display: grid;
+  gap: 0.75rem;
+}
+.gz-ntd-more summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+}
+.gz-ntd-more[open] > :not(summary) {
+  margin-top: 0.75rem;
+}

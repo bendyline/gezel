@@ -29,8 +29,10 @@ import {
   getProjectType,
   isTaskWorkAllowed,
   isUserCreatedProject,
+  planDurationEstimates,
   resolveProjectTypeId,
   resolveSecurityPolicy,
+  starterCraftbookIds,
 } from '@bendyline/gezel';
 import { playwrightBrowsersDir, projectThumbnailsDir } from '@bendyline/gezel/paths';
 import { type Context, Hono } from 'hono';
@@ -460,6 +462,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       id,
       { git: ctx.git },
     );
+    // Select before project filtering: a tagged book hidden by this project's
+    // requirements must not turn the legacy fallback back on.
+    const catalogBooks = (await ctx.catalog.list('craftbook-template')).flatMap((item) =>
+      item.manifest.kind === 'craftbook-template' ? [item.manifest] : [],
+    );
+    const starterIds = starterCraftbookIds(catalogBooks).filter((id) =>
+      items.some((item) => item.manifest.id === id),
+    );
+    const durationEstimatesMs = planDurationEstimates(await ctx.tasks.list());
     const projectItems = items.filter((it) => it.sourceId === 'project');
     // Resolve the project's type (user override → auto-detected → none) and
     // compute the curated suggested subset. Additive fields: older clients
@@ -497,6 +508,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ? { id: applied.id, label: appliedName ?? applied.id }
           : null,
       suggestedIds: [...suggested],
+      starterIds,
+      durationEstimatesMs,
       establishedCodebase,
     });
   });

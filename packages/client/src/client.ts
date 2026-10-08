@@ -2543,6 +2543,10 @@ export class GezelClient {
     projectType?: { id: string; label: string } | null;
     /** Ids of craftbooks suggested for the project type (tag intersection). */
     suggestedIds?: string[];
+    /** Curated starters after project eligibility, with legacy catalog fallback. */
+    starterIds?: string[];
+    /** Median completed immediate-run durations on this install, in milliseconds. */
+    durationEstimatesMs?: Record<string, number>;
     /** True when the workspace already has codebase markers or source files. */
     establishedCodebase: boolean;
   }> {

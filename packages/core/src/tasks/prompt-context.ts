@@ -297,6 +297,11 @@ export function renderTaskContextBlock(
     if (step.prompt && step.prompt.trim().length > 0) {
       lines.push(`#### Step procedure\n\n${step.prompt.trim()}`);
     }
+    if (step.next && !step.terminal && wired('advance_task_step')) {
+      lines.push(
+        `#### Step routing\n\nThis step's declared default destination is \`${step.next}\`. Calling \`advance_task_step\` without \`next\` (or with \`next: "next"\`) follows the plan's configured routing, which can loop back; it does not necessarily move forward in the outline. When the procedure chooses a different destination, include that exact step id in the \`next\` argument of the same call. Writing a PASS note or saying the review passed does not select a destination.`,
+      );
+    }
     // The format notes live in one place in core, not in each book.
     if (step.authoring) lines.push(squisqAuthoringNote(step.authoring));
     const handoffBlock = renderGateHandoffBlock(t, step.id);

@@ -1,4 +1,5 @@
 import type { PromptDraftTaskLaunch } from '@bendyline/gezel';
+import { planDisplayName } from '@bendyline/gezel';
 import { ProjectGlyph } from '../views/projects/new-project-meta.js';
 import { craftbookGlyph } from '../views/tasks/new-task-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
@@ -47,7 +48,7 @@ export function ComposerTaskBar({
   onToggleTonight?: () => void;
 }) {
   const manifest = art?.manifest ?? null;
-  const name = manifest?.name ?? launch.craftbookName ?? launch.craftbookId;
+  const name = manifest ? planDisplayName(manifest) : (launch.craftbookName ?? launch.craftbookId);
   const preview = formatTaskLaunchPreview(launch, manifest);
   const suggested = launch.origin === 'suggested';
   const note = stale.length > 0 ? 'files need re-picking' : readiness.ready ? null : 'needs setup';

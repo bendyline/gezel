@@ -219,7 +219,13 @@ export const MockServiceSchema = z.discriminatedUnion('kind', [
                 .object({
                   surface: z.enum(['workspace', 'artifact']),
                   pathArgument: z.string().min(1),
-                  fixture: z.enum(['minimal-pptx', 'minimal-docx', 'minimal-pdf', 'minimal-png']),
+                  fixture: z.enum([
+                    'minimal-pptx',
+                    'minimal-docx',
+                    'minimal-pdf',
+                    'minimal-png',
+                    'minimal-media',
+                  ]),
                 })
                 .strict()
                 .optional(),

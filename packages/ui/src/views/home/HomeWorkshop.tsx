@@ -17,11 +17,13 @@ import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import { FolderOnboardingStep, shouldOfferFolderStep } from './FolderOnboardingStep.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
+import { MakeSomething } from './MakeSomething.js';
 import { MeesterConversation } from './MeesterConversation.js';
 import {
   type HomeChip,
   type HomeNavView,
   deriveActiveProjectId,
+  deriveLaunchProjectId,
   freshStatusReport,
 } from './utils.js';
 
@@ -336,6 +338,12 @@ export function HomeWorkshop({
       />
       <div className="home-workshop-body">
         <div className="home-workshop-main">
+          {runtimeCapabilities().tasks && (
+            <MakeSomething
+              projectId={deriveLaunchProjectId(config, projects)}
+              projects={projects}
+            />
+          )}
           {offerFolderStep && (
             <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
           )}
