@@ -8,7 +8,7 @@ import {
   SHARED_PROJECT_MARKER,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter, resolveProjectDeveloper } from '../gezels/autonomous-roles.js';
@@ -26,6 +26,7 @@ beforeEach(async () => {
   catalog = new CatalogService(undefined, { localRoot: home });
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(home, { recursive: true, force: true });
 });
 
@@ -91,7 +92,20 @@ const sources = {
 };
 
 describe('recruitCrewForFolder', () => {
-  it('leads a Pictures folder with the Boekwachter and seats no developer', async () => {
+  it('falls back to the Boekwachter when the catalog has no Curator, without a developer', async () => {
+    const get = catalog.get.bind(catalog);
+    const list = catalog.list.bind(catalog);
+    vi.spyOn(catalog, 'get').mockImplementation((kind, id, ...args) =>
+      kind === 'gezel-template' && id === 'curator'
+        ? Promise.resolve(null)
+        : get(kind, id, ...args),
+    );
+    vi.spyOn(catalog, 'list').mockImplementation(async (kind) => {
+      const items = await list(kind);
+      return kind === 'gezel-template'
+        ? items.filter((item) => item.manifest.id !== 'curator')
+        : items;
+    });
     const id = await folder('Pictures', photos, {
       [INFERRED_PROJECT_WELL_KNOWN_PROPERTY]: 'pictures',
     });
@@ -154,13 +168,16 @@ describe('recruitCrewForFolder', () => {
     });
     await recruitCrewForFolder(deps(), id);
     const boekwachter = await resolveProjectBoekwachter(store, id);
+    const remainingGezelIds = ((await store.getProject(id))?.gezelIds ?? []).filter(
+      (gezelId) => gezelId !== boekwachter!.id,
+    );
     await store.updateProject(id, { voormanGezelId: null });
     await store.removeGezelFromProject(id, boekwachter!.id);
 
     const again = await recruitCrewForFolder(deps(), id);
 
     expect(again.skipped).toBe('already-recruited');
-    expect((await store.getProject(id))?.gezelIds ?? []).toEqual([]);
+    expect((await store.getProject(id))?.gezelIds).toEqual(remainingGezelIds);
   });
 
   it('keeps a lead the person chose', async () => {

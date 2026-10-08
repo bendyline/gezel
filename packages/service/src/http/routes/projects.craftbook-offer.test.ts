@@ -38,9 +38,9 @@ describe('a typed project’s craftbook offer', () => {
       name: 'Training',
       projectType: { typeId: 'fitness-coach' },
     });
-    expect(applied.craftbooksInstalled).toContain('weekly-review');
+    expect(applied.craftbooksInstalled).toContain('training-recap');
     const offer = await client.listProjectCraftbooks(project.id);
-    expect(offer.suggestedIds).toContain('weekly-review');
+    expect(offer.suggestedIds).toContain('training-recap');
     expect(offer.projectType).toEqual({ id: 'fitness-coach', label: 'Fitness Coach' });
   }, 30_000);
 });

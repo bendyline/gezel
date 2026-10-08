@@ -165,7 +165,11 @@ describe('Flashcards bundled project type', () => {
     const detail = await catalog.get('project-type', 'flashcards');
     if (!detail || detail.manifest.kind !== 'project-type') throw new Error('did not resolve');
     expect(detail.manifest.category).toBe('growth');
-    expect(detail.manifest.pages?.tools).toEqual(['record_review', 'finish_session']);
+    expect(detail.manifest.pages?.tools).toEqual([
+      'record_review',
+      'finish_session',
+      'forge_from_notes',
+    ]);
     const finish = detail.manifest.tools.find((t) => t.name === 'finish_session');
     expect(finish?.reaction?.gezel).toBe('study-buddy');
     for (const tool of detail.manifest.tools) {
@@ -196,6 +200,10 @@ describe('Flashcards bundled project type', () => {
     const modelTools = await resolveProjectScriptTools(catalog, detail);
     expect(modelTools.map((t) => t.name)).toEqual(['add_cards', 'deck_status', 'list_deck']);
     const pageTools = await resolvePageTools(catalog, detail);
-    expect(pageTools?.tools.map((t) => t.name)).toEqual(['record_review', 'finish_session']);
+    expect(pageTools?.tools.map((t) => t.name)).toEqual([
+      'record_review',
+      'finish_session',
+      'forge_from_notes',
+    ]);
   });
 });

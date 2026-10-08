@@ -22,7 +22,6 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     installerVerifier,
     appPackage,
     rootPackage,
-    readme,
     nativeWorkflow,
     fixAsar,
     builderPatch,
@@ -39,7 +38,6 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     readFile(join(root, 'scripts', 'verify-installer-licenses.mjs'), 'utf8'),
     readFile(join(root, 'packages', 'app', 'package.json'), 'utf8'),
     readFile(join(root, 'package.json'), 'utf8'),
-    readFile(join(root, 'README.md'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'build-native.yml'), 'utf8'),
     readFile(join(root, 'packages', 'app', 'scripts', 'fix-asar.cjs'), 'utf8'),
     readFile(join(root, 'patches', 'app-builder-lib@26.15.3.patch'), 'utf8'),
@@ -212,6 +210,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   // release must also check the artifact itself.
   assert.match(workflow, /node scripts\/verify-deb-compression\.mjs/);
 
+  // Distributed package metadata shares this wording; README copy can evolve independently.
   const productTagline = 'Your team of AI craftsmen';
   const productDescription =
     'Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.';
@@ -229,11 +228,6 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     productDescription,
     'packages/app description is the Windows UAC program name, not marketing copy',
   );
-  assert.match(
-    readme,
-    /Gezel helps you build a crew of named AI companions with distinct roles and tools/,
-  );
-
   const rpmSection = builder.slice(builder.indexOf('\nrpm:'), builder.length);
   assert.match(rpmSection, /^\s{4}- gtk3$/m);
   assert.doesNotMatch(rpmSection, /^\s+- libgtk-3-0$/m);

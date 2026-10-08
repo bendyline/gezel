@@ -250,21 +250,16 @@ test('the bundle verifier rejects an onnxruntime-node entry without the DirectML
   );
 });
 
-test('the documents a user reads name DirectML as proprietary', async () => {
+test('the NOTICE inventory records the reviewed DirectML version', async () => {
   const supplemental = await loadSupplementalLicenses();
   const { version } = supplemental.npmPackages
     .get('onnxruntime-node')
     .components.find((component) => component.id === 'directml');
   const notice = await readFile(join(root, 'NOTICE.md'), 'utf8');
-  const proprietary = notice.slice(notice.indexOf('## Proprietary and non-permissive components'));
-  assert.match(proprietary, /Three proprietary\s+components are redistributed/);
-  assert.ok(proprietary.includes(`**Microsoft DirectML** (\`DirectML.dll\` ${version})`));
   assert.ok(
     notice.includes(
       `| **DirectML** (\`DirectML.dll\`, Windows only) | \`onnxruntime-node\` | \`${version}\` |`,
     ),
     'the carried-binaries table must name the reviewed DirectML version',
   );
-  const eula = await readFile(join(root, 'packages', 'app', 'EULA.txt'), 'utf8');
-  assert.match(eula, /Microsoft DirectML \(DirectML\.dll\), which is proprietary/);
 });

@@ -45,6 +45,7 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   { file: 'cache_seed_test.py', ranMarker: /all cache_seed tests passed/ },
   { file: 'cache_persist_test.py', ranMarker: /PASS / },
   { file: 'template_stability_test.py', ranMarker: /PASS / },
+  { file: 'prompt_reasoning_test.py', ranMarker: /PASS prompt reasoning controls/ },
   { file: 'spec_decode_test.py', ranMarker: /all spec_decode tests passed/ },
   { file: 'wave_policy_test.py', ranMarker: /all wave_policy tests passed/ },
 ];

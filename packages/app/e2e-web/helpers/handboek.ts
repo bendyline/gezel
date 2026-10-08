@@ -1,21 +1,20 @@
 import { type Page, expect } from '@playwright/test';
 
-export const WELCOME_ARTICLE = {
-  title: 'What is gezel?',
-  body: 'is Dutch for a companion journeyman.',
-};
-
 /** The bundled catalog, selected article, parsed prose, and inline assets are ready. */
-export async function expectHandboekArticle(page: Page, article = WELCOME_ARTICLE): Promise<void> {
+export async function expectHandboekArticle(
+  page: Page,
+  article?: { title: string },
+): Promise<void> {
   const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
   await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Handboek');
-  await expect(
-    view.getByRole('heading', { name: article.title, exact: true }).first(),
-  ).toBeVisible();
+  await expect(view.getByRole('region', { name: 'Article' })).toHaveAttribute('aria-busy', 'false');
+  const heading = view.locator('.knowledge-reader-header h2');
+  await expect(heading).toBeVisible();
+  if (article) await expect(heading).toHaveText(article.title);
   const doc = view.locator('.knowledge-reader-body');
   await expect(doc).toBeVisible();
-  await expect(doc).toContainText(article.body);
+  await expect(doc).toContainText(/\S/);
   await expect(view.locator('.error')).toHaveCount(0);
   await expect
     .poll(

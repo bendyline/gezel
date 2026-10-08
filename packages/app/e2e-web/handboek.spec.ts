@@ -46,25 +46,25 @@ test('Handboek navigation loads the newly selected article', async ({ page }) =>
   await gotoHome(page);
   await openArea(page, 'knowledge');
   await expectHandboekArticle(page);
-  const article = {
-    title: 'Local-first: your data stays on your disk',
-    body: 'your work belongs to you, on your machine, in files you can read.',
-  };
-  await page.getByRole('button', { name: 'Concepts', exact: false }).click();
-  await page.getByRole('button', { name: article.title, exact: false }).click();
+  const row = page.locator('.knowledge-doc-row:not([aria-current="true"])').first();
+  const article = { title: (await row.locator('.knowledge-doc-title').innerText()).trim() };
+  const previousBody = await page.locator('.knowledge-reader-body').innerText();
+  await row.click();
   await expectHandboekArticle(page, article);
-  await expect(page.locator('.knowledge-reader-body')).not.toContainText(
-    'is Dutch for a companion journeyman.',
-  );
+  await expect(page.locator('.knowledge-reader-body')).not.toHaveText(previousBody);
 });
 
 test('Handboek article links open catalog documents', async ({ page }) => {
   await gotoHome(page);
   await openArea(page, 'knowledge');
   await expectHandboekArticle(page);
-  await page.locator('.knowledge-reader-body').getByRole('link', { name: 'Your crew' }).click();
-  await expectHandboekArticle(page, {
-    title: 'Your crew: gezellen, the Meester, and the Voorman',
-    body: 'is a named AI companion with a role.',
-  });
+  const previousBody = await page.locator('.knowledge-reader-body').innerText();
+  await page
+    .locator('.knowledge-reader-body a[href="knowledge://bendyline/handboek/the-crew"]')
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('gezel:knowledge:document')))
+    .toBe('the-crew');
+  await expectHandboekArticle(page);
+  await expect(page.locator('.knowledge-reader-body')).not.toHaveText(previousBody);
 });

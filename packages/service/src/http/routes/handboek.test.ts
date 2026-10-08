@@ -63,8 +63,10 @@ describe('GET /api/handboek', () => {
     const res = await api('GET', '/api/handboek/article/the-crew');
     expect(res.status).toBe(200);
     const article = (await res.json()) as HandboekArticle;
-    expect(article.title).toBe('Your crew: gezellen, the Meester, and the Voorman');
-    expect(article.markdown).toContain('Your Meester is **');
+    expect(article.id).toBe('the-crew');
+    const config = await svc.context.store.readConfig();
+    const meester = await svc.context.store.getGezel(config.meesterGezelId!);
+    expect(article.markdown).toContain(meester!.name);
     expect(article.markdown).not.toContain('::handboek-');
     expect(article.figures.length).toBeGreaterThan(0);
     expect(article.figures[0]!.path).toMatch(/^poppetje\/.+\.headshot\.svg$/);
@@ -77,7 +79,7 @@ describe('GET /api/handboek', () => {
     expect(article.id).toBe('role/meester');
     expect(article.generated).toBe(false);
     expect(article.figures).toHaveLength(0);
-    expect(article.markdown).toContain('| Tool group | Purpose | Tools |');
+    expect(article.markdown).toContain('`create_gezel`');
   });
 
   it('404s unknown articles', async () => {
