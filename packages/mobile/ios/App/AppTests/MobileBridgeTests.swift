@@ -83,10 +83,13 @@ final class MobileBridgeTests: XCTestCase {
         }
     }
 
-    /// The fallback describer on this device: downloads Qwen 3.5 0.8B and its
-    /// projector into the model library if missing, then describes the photo
-    /// staged at Library/Caches/vision-probe.jpg through the native runtime.
+    /// Opt in with GEZEL_VISION_MODEL_PROBE=1 and stage Library/Caches/vision-probe.jpg.
+    /// Downloads Qwen 3.5 0.8B and its projector if missing, then describes the
+    /// staged photo through the native runtime.
     func testVisionModelDescribesPhoto() async throws {
+        guard ProcessInfo.processInfo.environment["GEZEL_VISION_MODEL_PROBE"] == "1" else {
+            throw XCTSkip("Vision model probes are opt-in; set GEZEL_VISION_MODEL_PROBE=1 and stage a photo")
+        }
         let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
         let photo = try XCTUnwrap(try? Data(contentsOf: caches.appendingPathComponent("vision-probe.jpg")), "Stage a photo first")
         let runtime = try GezelNativeRuntime.shared()

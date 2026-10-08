@@ -53,7 +53,7 @@ class BuildValidationTest(unittest.TestCase):
 
     def test_android_rejects_unbundled_or_versioned_shared_libraries(self):
         build.verify_elf_dependencies("0x1 (NEEDED) Shared library: [libc.so]\n0x1 (NEEDED) Shared library: [libggml.so]", ["libggml.so"])
-        for name in ("libomp.so", "libggml.so.0", "libc++_shared.so"):
+        for name in ("libomp.so", "libggml.so.0", "libc++_shared.so", "libz.so.1", "libgui.so"):
             with self.assertRaisesRegex(ValueError, "unbundled dependencies"):
                 build.verify_elf_dependencies(f"0x1 (NEEDED) Shared library: [{name}]", ["libggml.so"])
 

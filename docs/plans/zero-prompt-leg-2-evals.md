@@ -1,6 +1,6 @@
 # Zero-prompt leg 2: eval evidence
 
-Updated 2026-10-08T21:50:20+00:00.
+Updated 2026-10-08T21:58:05+00:00.
 
 The reliability gate is **not yet met** until every starter records at least 2 passes in 3 trials on both reference models. Diagnostic trials are excluded. This report records measured results only; a running or unrun cell is not a pass.
 
