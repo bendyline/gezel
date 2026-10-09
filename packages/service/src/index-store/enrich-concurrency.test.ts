@@ -7,6 +7,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
@@ -30,7 +31,9 @@ beforeEach(async () => {
   for (let i = 0; i < 6; i++) {
     await writeFile(join(dir, `note-${i}.md`), `# Note ${i}\n\nSome prose about topic ${i}.\n`);
   }
-  await runWorkspaceContentIndex(dir, 'c', join(home, 'artifacts'));
+  await runWorkspaceContentIndex(dir, 'c', join(home, 'artifacts'), {
+    dbPath: projectContentIndexDbFile(home, 'c', dir),
+  });
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });

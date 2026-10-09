@@ -38,11 +38,26 @@ export type StepRoute =
   /** A route to a step the task does not declare: a craftbook bug, not a transition. */
   | { kind: 'invalid'; to: string };
 
+/**
+ * The step a caller's explicit jump names, if it names one. A blank jump, or
+ * one a model wrapped in its own quotes (`next: ""`), means "whatever comes
+ * next", as an omitted one does: an argument whose every value has a sane
+ * default should not be able to fail.
+ */
+export function explicitStepJump(override: string | undefined): string | undefined {
+  const id = override
+    ?.trim()
+    .replace(/^(["'`])(.*)\1$/, '$2')
+    .trim();
+  return id && id !== 'next' ? id : undefined;
+}
+
 export function resolveNextStep(input: StepRouteInput): StepRoute {
   const exists = (id: string) => input.steps.some((step) => step.id === id);
   const route = (to: string): StepRoute =>
     exists(to) ? { kind: 'advance', to } : { kind: 'invalid', to };
-  if (input.override !== undefined && input.override !== 'next') return route(input.override);
+  const jump = explicitStepJump(input.override);
+  if (jump !== undefined) return route(jump);
   if (input.gateGoto !== undefined) return route(input.gateGoto);
   if (input.gateOnApprove !== undefined) return route(input.gateOnApprove);
   if (input.advanceWhenGoto !== undefined) return route(input.advanceWhenGoto);
@@ -57,4 +72,20 @@ export function resolveNextStep(input: StepRouteInput): StepRoute {
   if (current.next !== undefined) return route(current.next);
   const following = input.steps[index + 1];
   return following ? { kind: 'advance', to: following.id } : { kind: 'terminate' };
+}
+
+/**
+ * What a model is told when it names a step its task does not have: the step
+ * ids that exist. A bare "no such step" left small models resending the same
+ * invented id (`plan_menu` for `plan`) until the turn died.
+ */
+export function unknownTaskStepText(
+  field: 'next' | 'stepId',
+  id: string,
+  steps: ReadonlyArray<{ id: string; name?: string }>,
+): string {
+  const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
+  return field === 'next'
+    ? `This task has no step "${id}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to follow the plan's configured routing, which can loop back.`
+    : `This task has no step "${id}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
 }

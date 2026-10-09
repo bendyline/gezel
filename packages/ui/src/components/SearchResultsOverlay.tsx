@@ -1,7 +1,8 @@
-import type { UnifiedSearchResult } from '@bendyline/gezel';
+import { type UnifiedSearchResult, mediaSpanLabel } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
+import { PhotoThumb } from './PhotoThumb.js';
 import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdownSnippet.js';
 import { highlightTokens } from './highlight-tokens.js';
 import { runNavActions } from './nav-actions.js';
@@ -122,14 +123,27 @@ export function SearchResultsOverlay() {
                     <li key={item.id}>
                       <button
                         type="button"
-                        className="search-results-row"
+                        className={`search-results-row${photoHit(item) ? ' with-thumb' : ''}`}
                         onClick={() => pick(item)}
                       >
+                        {photoHit(item) && item.projectId && item.path && (
+                          <PhotoThumb
+                            projectId={item.projectId}
+                            path={item.path}
+                            width={160}
+                            alt={item.title}
+                            className="search-results-thumb"
+                          />
+                        )}
                         <span className="search-results-title">
                           {highlightTokens(item.title, query)}
                         </span>
                         {item.subtitle && (
-                          <span className="search-results-subtitle muted">{item.subtitle}</span>
+                          <span className="search-results-subtitle muted">
+                            {item.media
+                              ? `${mediaSpanLabel(item.media)} · ${item.subtitle}`
+                              : item.subtitle}
+                          </span>
                         )}
                         {item.snippet && (
                           <span className="search-results-snippet">
@@ -153,5 +167,15 @@ export function SearchResultsOverlay() {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** A workspace photo the thumbnail route can draw: a 3rem tile beside the text. */
+function photoHit(item: UnifiedSearchResult): boolean {
+  return (
+    item.media?.modality === 'image' &&
+    item.source === 'workspace' &&
+    Boolean(item.projectId) &&
+    Boolean(item.path)
   );
 }

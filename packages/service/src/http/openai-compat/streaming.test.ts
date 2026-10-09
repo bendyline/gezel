@@ -1,3 +1,4 @@
+import type { EnginePhaseEvent } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ExternalToolCall,
@@ -11,12 +12,14 @@ import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
 
 function fakeSession(input: {
   chunks: string[];
+  phases?: EnginePhaseEvent[];
   reasoningChunks?: string[];
   toolArgChunks?: Array<{ name: string; chunk: string; meta?: ToolArgsDeltaMeta }>;
   calls?: ExternalToolCall[];
   sendGate?: Promise<void>;
   lifecycle?: { activeReasoningSubscriptions: number; reasoningSubscribeCalls: number };
 }): LLMSession {
+  const phaseHandlers = new Set<(event: EnginePhaseEvent) => void>();
   const deltaHandlers = new Set<(chunk: string) => void>();
   const reasoningHandlers = new Set<(chunk: string) => void>();
   const toolArgHandlers = new Set<
@@ -27,6 +30,7 @@ function fakeSession(input: {
   return {
     async sendAndWait(): Promise<string> {
       await input.sendGate;
+      for (const phase of input.phases ?? []) for (const handler of phaseHandlers) handler(phase);
       for (const chunk of input.reasoningChunks ?? []) {
         for (const handler of reasoningHandlers) handler(chunk);
       }
@@ -37,6 +41,10 @@ function fakeSession(input: {
         for (const handler of deltaHandlers) handler(chunk);
       }
       return input.chunks.join('');
+    },
+    onEnginePhase(handler: (event: EnginePhaseEvent) => void): () => void {
+      phaseHandlers.add(handler);
+      return () => phaseHandlers.delete(handler);
     },
     onDelta(handler: (chunk: string) => void): () => void {
       deltaHandlers.add(handler);
@@ -451,5 +459,61 @@ describe('runStreaming idle keepalive and diagnostics', () => {
     });
     expect(snapshot.responseId).toMatch(/^chatcmpl-/);
     expect(snapshot.maxOutboundSilenceMs).toBeGreaterThanOrEqual(1_000);
+  });
+});
+
+describe('opt-in app progress stream', () => {
+  it('sends measured metadata before reply text while keeping private reasoning out', async () => {
+    const { sink, frames } = collectingSink();
+    const session = fakeSession({
+      phases: [
+        {
+          provider: 'llama-cpp',
+          phase: 'prefill',
+          progress: 0.25,
+          detail: 'secret prompt',
+          cacheId: 'secret session',
+        },
+      ],
+      reasoningChunks: ['private reasoning'],
+      chunks: ['Visible answer.'],
+    });
+    await runStreaming(session, 'hello', 'test', sink, () => 0, { includeProgress: true });
+    const progress = frames.flatMap((frame) =>
+      frame.gezel_progress ? [frame.gezel_progress] : [],
+    );
+    expect(progress).toEqual([
+      { phase: 'starting', percent: null, outputTokens: null, tokensPerSecond: null },
+      { phase: 'prefill', percent: 25, outputTokens: null, tokensPerSecond: null },
+      { phase: 'reasoning', percent: null, outputTokens: null, tokensPerSecond: null },
+      { phase: 'generating', percent: null, outputTokens: null, tokensPerSecond: null },
+    ]);
+    expect(
+      frames
+        .filter((frame) => frame.gezel_progress)
+        .every((frame) => JSON.stringify(frame.choices) === '[]'),
+    ).toBe(true);
+    expect(frames.map((frame) => choice(frame)?.delta?.content ?? '').join('')).toBe(
+      'Visible answer.',
+    );
+    expect(JSON.stringify(frames)).not.toMatch(/secret|private reasoning/);
+    const before = frames.length;
+    await session.sendAndWait('later');
+    await Promise.resolve();
+    expect(frames).toHaveLength(before);
+  });
+  it('keeps ordinary OpenAI streams unchanged when progress is not requested', async () => {
+    const { sink, frames } = collectingSink();
+    await runStreaming(
+      fakeSession({
+        chunks: ['Reply'],
+        phases: [{ provider: 'mlx', phase: 'prefill', progress: 0.5 }],
+      }),
+      'hi',
+      'test',
+      sink,
+      () => 0,
+    );
+    expect(frames.some((frame) => 'gezel_progress' in frame)).toBe(false);
   });
 });

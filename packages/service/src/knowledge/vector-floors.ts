@@ -39,11 +39,36 @@ export const KNOWLEDGE_VECTOR_FLOORS: Readonly<Record<string, number>> = {
   // Revision 1 has the same model, instructions and int8 vectors — only its
   // stage-1 sign bits differ — so its rerank cosine is on the same scale.
   'multilingual-e5-small@1': 0.865,
+  // Handboek 1.2.2 + a Food & Drink sample re-embedded in this profile (the
+  // labelled calibration queries): answers ≥ 0.762 in both, off-topic ≤ 0.706,
+  // a query's best chunk in the OTHER catalog ≤ 0.715. A wide gap; the scale
+  // is far less compressed than e5's.
+  'embeddinggemma-2-512@1': 0.735,
+  // Media rows of the same profile, workspace and catalogs alike
+  // (evals/src/retrieval-bench/MEDIA-BENCH-2026-10-07.md). Each sits a step
+  // above the lowest floor no off-topic prompt reached on the bench corpus,
+  // because a real library is larger and its off-topic maximum higher.
+  // COCO photos: no off-topic hit from 0.66; 293 of 300 answers keep their photo.
+  'embeddinggemma-2-512@1#image': 0.67,
+  // MSR-VTT clips: no off-topic hit from 0.65; 54 of 60 answers clear 0.65 and 0.66.
+  'embeddinggemma-2-512@1#video': 0.66,
+  // ESC-50 sounds: scores bunch (a wrong clip clears 0.66 for most queries),
+  // so the floor does less here than ranking; 47 of 50 answers clear 0.68.
+  'embeddinggemma-2-512@1#audio': 0.68,
 };
 
 export interface KnowledgeVectorFloors {
-  /** The floor for a catalog, or null when its scale was never measured. */
-  floorFor(catalog: { catalogKey: string; profileId: string }): number | null;
+  /**
+   * The floor for a catalog, or null when its scale was never measured. With
+   * a `modality`, the floor for that kind of media row (`<key>#image`, …):
+   * a text query sits further from a matching image than from a matching
+   * passage, so media rows need their own scale.
+   */
+  floorFor(catalog: {
+    catalogKey: string;
+    profileId: string;
+    modality?: 'image' | 'video' | 'audio';
+  }): number | null;
 }
 
 const warnedUnmeasured = new Set<string>();
@@ -69,7 +94,12 @@ export function resolveKnowledgeVectorFloors(
     floors.set(pair.slice(0, at).trim(), value);
   }
   return {
-    floorFor({ catalogKey, profileId }) {
+    floorFor({ catalogKey, profileId, modality }) {
+      if (modality) {
+        return (
+          floors.get(`${catalogKey}#${modality}`) ?? floors.get(`${profileId}#${modality}`) ?? null
+        );
+      }
       const floor = floors.get(catalogKey) ?? floors.get(profileId);
       if (floor !== undefined) return floor;
       if (!warnedUnmeasured.has(profileId)) {

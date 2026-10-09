@@ -13,7 +13,34 @@
  * way.
  */
 
-import { type KnowledgeEmbeddingProfile, embeddingProfileCenter } from '../schemas/profiles.js';
+import {
+  type KnowledgeEmbeddingProfile,
+  embeddingProfileCenter,
+  embeddingProfileSourceDimensions,
+} from '../schemas/profiles.js';
+
+/**
+ * The unit vector a profile stores or queries with, from the model's raw
+ * output: checked against the width the model emits, cut to the stored
+ * width when the profile truncates (Matryoshka prefix), then normalized.
+ * The compiler (passages and media) and every query embedder call this, so
+ * truncation has exactly one definition. The norm is taken over the raw
+ * values as given, never over a float32 copy, so a profile without
+ * truncation produces bit-for-bit what `l2Normalize` always did.
+ */
+export function profileUnitVector(
+  profile: KnowledgeEmbeddingProfile,
+  raw: ArrayLike<number>,
+): Float32Array {
+  const source = embeddingProfileSourceDimensions(profile);
+  if (raw.length !== source) {
+    throw new Error(
+      `embedding has ${raw.length} dimensions, profile ${profile.id} expects ${source}`,
+    );
+  }
+  if (source === profile.dimensions) return l2Normalize(raw);
+  return l2Normalize(Array.prototype.slice.call(raw, 0, profile.dimensions) as number[]);
+}
 
 /** int8: symmetric linear, scale 127, −128 never produced. */
 export function quantizeInt8(unitVector: ArrayLike<number>): Int8Array {
@@ -63,11 +90,17 @@ export function quantizeBinary(unitVector: ArrayLike<number>): Uint8Array {
 /**
  * Rerank score: dot(float32 unit query, dequantized int8 passage). Passages
  * were unit vectors, so this approximates cosine; the query is not quantized.
+ * Widths must match: a query from an untruncated model scored against a
+ * truncated catalog would otherwise rank plausibly over a silent prefix.
  */
 export function rerankScore(query: ArrayLike<number>, passageInt8: Int8Array): number {
+  if (query.length !== passageInt8.length) {
+    throw new Error(`query has ${query.length} dimensions, passage has ${passageInt8.length}`);
+  }
   let dot = 0;
-  const n = Math.min(query.length, passageInt8.length);
-  for (let i = 0; i < n; i++) dot += (query[i] as number) * ((passageInt8[i] as number) / 127);
+  for (let i = 0; i < query.length; i++) {
+    dot += (query[i] as number) * ((passageInt8[i] as number) / 127);
+  }
   return dot;
 }
 

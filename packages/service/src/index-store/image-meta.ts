@@ -119,6 +119,8 @@ export interface ReadImageStaticMetaOptions {
    * can be forwarded to a cloud provider.
    */
   includeLocation?: boolean;
+  /** The file's name, which tells a DNG/NEF/ARW from a plain TIFF with the same header. */
+  fileName?: string;
 }
 
 /**
@@ -140,11 +142,35 @@ export function readImageStaticMeta(
     meta.height = dims.height;
   }
 
+  let exifSource: TiffExif | null = null;
+  if (meta.format === 'unknown') {
+    const heif = readHeifHeader(buf);
+    if (heif) {
+      meta.format = 'heic';
+      if (heif.width && heif.height) {
+        meta.width = heif.width;
+        meta.height = heif.height;
+      }
+      const at = heif.exif;
+      if (at && at.offset + at.length <= buf.length) {
+        exifSource = exifFromHeifItem(buf.subarray(at.offset, at.offset + at.length));
+      }
+    } else if (isRawHeader(buf, opts?.fileName)) {
+      meta.format = 'raw';
+      const parsed = buf.toString('ascii', 0, 15) === RAF_MAGIC ? rafExif(buf) : parseTiff(buf, 0);
+      if (parsed?.pixels) {
+        meta.width = parsed.pixels.width;
+        meta.height = parsed.pixels.height;
+      }
+      exifSource = parsed;
+    }
+  }
+
   if (meta.format === 'png') {
     const text = readPngText(buf);
     if (Object.keys(text).length > 0) meta.pngText = text;
-  } else if (meta.format === 'jpeg') {
-    const exif = readJpegExif(buf);
+  } else if (meta.format === 'jpeg' || exifSource) {
+    const exif = exifSource ?? readJpegExif(buf);
     if (exif) {
       if (Object.keys(exif.exif).length > 0) meta.exif = exif.exif;
       // Parsed but withheld by default. See ImageStaticMetaSchema's doc
@@ -266,7 +292,7 @@ interface TiffCursor {
  * Minimal APP1/Exif reader. Reuses the same segment walk the SOF scanner in
  * {@link readImageMeta} does — APP1 is just another marker with a length field.
  */
-function readJpegExif(buf: Buffer): { exif: ImageExif; gps?: { lat: number; lon: number } } | null {
+function readJpegExif(buf: Buffer): TiffExif | null {
   let off = 2;
   while (off + 4 <= buf.length) {
     if (buf[off] !== 0xff) {
@@ -287,10 +313,14 @@ function readJpegExif(buf: Buffer): { exif: ImageExif; gps?: { lat: number; lon:
   return null;
 }
 
-function parseTiff(
-  buf: Buffer,
-  base: number,
-): { exif: ImageExif; gps?: { lat: number; lon: number } } | null {
+interface TiffExif {
+  exif: ImageExif;
+  gps?: { lat: number; lon: number };
+  /** EXIF PixelX/YDimension: the photo's size, where IFD0 may describe a thumbnail. */
+  pixels?: { width: number; height: number };
+}
+
+function parseTiff(buf: Buffer, base: number): TiffExif | null {
   if (base + 8 > buf.length) return null;
   const bom = buf.toString('ascii', base, base + 2);
   if (bom !== 'II' && bom !== 'MM') return null;
@@ -317,9 +347,15 @@ function parseTiff(
     exif.orientation = orientation;
   }
 
+  let pixels: TiffExif['pixels'];
   const exifPtr = entries.get(EXIF_TAGS.exifIfd);
   if (typeof exifPtr === 'number') {
     const sub = readIfd(cur, base + exifPtr, true);
+    const width = sub?.get(0xa002);
+    const height = sub?.get(0xa003);
+    if (typeof width === 'number' && typeof height === 'number' && width > 0 && height > 0) {
+      pixels = { width, height };
+    }
     if (sub) {
       for (const [key, tag] of Object.entries(EXIF_SUB_TAGS)) {
         const value = str(sub, tag);
@@ -360,7 +396,7 @@ function parseTiff(
     }
   }
 
-  return gps ? { exif, gps } : { exif };
+  return { exif, ...(gps ? { gps } : {}), ...(pixels ? { pixels } : {}) };
 }
 
 function dmsToDecimal(parts: number[]): number {
@@ -465,4 +501,281 @@ function looksLikeScreenshot(meta: ImageStaticMeta): boolean {
   if (meta.width < 1024) return false;
   const aspect = meta.width / meta.height;
   return aspect >= 1.2 && aspect <= 2.2;
+}
+
+// ── HEIC / HEIF (ISOBMFF) ──────────────────────────────────────────────
+
+const HEIF_BRANDS = new Set([
+  'heic',
+  'heix',
+  'heim',
+  'heis',
+  'hevc',
+  'hevx',
+  'mif1',
+  'msf1',
+  'heif',
+]);
+
+/** Where the Exif item sits in a HEIF file, and the primary image's size. */
+export interface HeifHeader {
+  width?: number;
+  height?: number;
+  /** Absolute file range of the Exif item's payload, when the file has one. */
+  exif?: { offset: number; length: number };
+}
+
+interface Box {
+  type: string;
+  /** Payload start (after the header) and end, absolute. */
+  start: number;
+  end: number;
+}
+
+function* boxes(buf: Buffer, start: number, end: number): Generator<Box> {
+  let off = start;
+  while (off + 8 <= end) {
+    let size = buf.readUInt32BE(off);
+    const type = buf.toString('latin1', off + 4, off + 8);
+    let header = 8;
+    if (size === 1) {
+      if (off + 16 > end) return;
+      size = Number(buf.readBigUInt64BE(off + 8));
+      header = 16;
+    } else if (size === 0) {
+      size = end - off;
+    }
+    if (size < header || off + size > end) return;
+    yield { type, start: off + header, end: off + size };
+    off += size;
+  }
+}
+
+/**
+ * Read a HEIF/HEIC header: the `ftyp` brand, then `meta`'s item info, item
+ * locations and image-size properties. Only reads `buf` (the file's head);
+ * the Exif payload usually sits in `mdat` further on, so callers fetch
+ * `exif` themselves when it falls outside. Null when this is not HEIF.
+ */
+export function readHeifHeader(buf: Buffer): HeifHeader | null {
+  if (buf.length < 16 || buf.toString('latin1', 4, 8) !== 'ftyp') return null;
+  const ftypSize = buf.readUInt32BE(0);
+  const brands: string[] = [];
+  for (let o = 8; o + 4 <= Math.min(ftypSize, buf.length); o += 4) {
+    if (o === 12) continue;
+    brands.push(buf.toString('latin1', o, o + 4));
+  }
+  if (!brands.some((b) => HEIF_BRANDS.has(b))) return null;
+
+  const out: HeifHeader = {};
+  for (const top of boxes(buf, 0, buf.length)) {
+    if (top.type !== 'meta') continue;
+    const metaStart = top.start + 4;
+    let exifItem: number | null = null;
+    const locations = new Map<number, { offset: number; length: number }>();
+    let largest = 0;
+    for (const box of boxes(buf, metaStart, top.end)) {
+      if (box.type === 'iinf') exifItem = heifExifItemId(buf, box);
+      else if (box.type === 'iloc') readIloc(buf, box, locations);
+      else if (box.type === 'iprp') {
+        for (const ipco of boxes(buf, box.start, box.end)) {
+          if (ipco.type !== 'ipco') continue;
+          for (const prop of boxes(buf, ipco.start, ipco.end)) {
+            if (prop.type !== 'ispe' || prop.start + 12 > prop.end) continue;
+            const width = buf.readUInt32BE(prop.start + 4);
+            const height = buf.readUInt32BE(prop.start + 8);
+            // The primary image is the largest; tiles and thumbnails are smaller.
+            if (width * height > largest) {
+              largest = width * height;
+              out.width = width;
+              out.height = height;
+            }
+          }
+        }
+      }
+    }
+    if (exifItem !== null) {
+      const at = locations.get(exifItem);
+      if (at) out.exif = at;
+    }
+    break;
+  }
+  return out;
+}
+
+function heifExifItemId(buf: Buffer, iinf: Box): number | null {
+  const version = buf[iinf.start]!;
+  const entriesAt = iinf.start + 4 + (version === 0 ? 2 : 4);
+  for (const infe of boxes(buf, entriesAt, iinf.end)) {
+    if (infe.type !== 'infe') continue;
+    const v = buf[infe.start]!;
+    if (v < 2) continue;
+    const idSize = v === 2 ? 2 : 4;
+    const id = idSize === 2 ? buf.readUInt16BE(infe.start + 4) : buf.readUInt32BE(infe.start + 4);
+    const typeAt = infe.start + 4 + idSize + 2;
+    if (typeAt + 4 > infe.end) continue;
+    if (buf.toString('latin1', typeAt, typeAt + 4) === 'Exif') return id;
+  }
+  return null;
+}
+
+function readUInt(buf: Buffer, at: number, size: number): number {
+  if (size === 0) return 0;
+  if (size === 4) return buf.readUInt32BE(at);
+  if (size === 8) return Number(buf.readBigUInt64BE(at));
+  return buf.readUInt16BE(at);
+}
+
+function readIloc(
+  buf: Buffer,
+  iloc: Box,
+  out: Map<number, { offset: number; length: number }>,
+): void {
+  const version = buf[iloc.start]!;
+  let at = iloc.start + 4;
+  const sizes = buf.readUInt16BE(at);
+  at += 2;
+  const offsetSize = (sizes >> 12) & 0xf;
+  const lengthSize = (sizes >> 8) & 0xf;
+  const baseOffsetSize = (sizes >> 4) & 0xf;
+  const indexSize = version === 1 || version === 2 ? sizes & 0xf : 0;
+  const idSize = version < 2 ? 2 : 4;
+  const count = version < 2 ? buf.readUInt16BE(at) : buf.readUInt32BE(at);
+  at += version < 2 ? 2 : 4;
+  for (let i = 0; i < count && at < iloc.end; i++) {
+    const id = readUInt(buf, at, idSize);
+    at += idSize;
+    let method = 0;
+    if (version === 1 || version === 2) {
+      method = buf.readUInt16BE(at) & 0xf;
+      at += 2;
+    }
+    at += 2; // data_reference_index
+    const base = readUInt(buf, at, baseOffsetSize);
+    at += baseOffsetSize;
+    const extents = buf.readUInt16BE(at);
+    at += 2;
+    for (let e = 0; e < extents; e++) {
+      at += indexSize;
+      const offset = readUInt(buf, at, offsetSize);
+      at += offsetSize;
+      const length = readUInt(buf, at, lengthSize);
+      at += lengthSize;
+      // File-offset items with one extent: the only layout Exif uses in practice.
+      if (e === 0 && method === 0) out.set(id, { offset: base + offset, length });
+    }
+  }
+}
+
+/** A HEIF Exif item: a 4-byte offset to the TIFF header, then the Exif block. */
+export function exifFromHeifItem(item: Buffer): TiffExif | null {
+  if (item.length < 12) return null;
+  const tiffAt = 4 + item.readUInt32BE(0);
+  return tiffAt < item.length ? parseTiff(item, tiffAt) : null;
+}
+
+// ── Camera RAW ───────────────────────────────────────────────────────────
+
+const RAF_MAGIC = 'FUJIFILMCCD-RAW';
+
+/** Camera RAW extensions gezel reads; CR3 is ISOBMFF and not among them yet. */
+export const RAW_EXTS = new Set(['dng', 'cr2', 'nef', 'arw', 'raf', 'orf', 'rw2']);
+
+/**
+ * A camera RAW: Fujifilm RAF, Olympus ORF, Panasonic RW2 and Canon CR2 by
+ * their own magic; DNG, NEF and ARW share a plain TIFF header, so those count
+ * only when `fileName` carries a RAW extension. A TIFF is not a RAW.
+ */
+export function isRawHeader(buf: Buffer, fileName?: string): boolean {
+  if (buf.length < 16) return false;
+  if (buf.toString('ascii', 0, 15) === RAF_MAGIC) return true;
+  const head = buf.toString('latin1', 0, 4);
+  if (head === 'IIRO' || head === 'IIRS' || head === 'MMOR' || head === 'IIU\0') return true;
+  if (head !== 'II*\0' && head !== 'MM\0*') return false;
+  if (buf.toString('latin1', 8, 10) === 'CR') return true;
+  const ext = fileName?.slice(fileName.lastIndexOf('.') + 1).toLowerCase();
+  return ext !== undefined && RAW_EXTS.has(ext);
+}
+
+/** RAF keeps its metadata in the JPEG preview's APP1 segment. */
+function rafExif(buf: Buffer): TiffExif | null {
+  const preview = rafPreview(buf);
+  return preview ? readJpegExif(preview) : null;
+}
+
+function rafPreview(buf: Buffer): Buffer | null {
+  if (buf.length < 92) return null;
+  return jpegAt(buf, buf.readUInt32BE(84), buf.readUInt32BE(88));
+}
+
+function jpegAt(buf: Buffer, offset: number, length: number): Buffer | null {
+  if (offset <= 0 || length < 4 || offset + length > buf.length) return null;
+  if (buf[offset] !== 0xff || buf[offset + 1] !== 0xd8) return null;
+  return buf.subarray(offset, offset + length);
+}
+
+/**
+ * The largest JPEG preview a RAW file carries: what a camera shows on its own
+ * screen, and plenty to describe or embed. Walks IFD0, the next-IFD chain and
+ * SubIFDs for JPEGInterchangeFormat pairs and old-style JPEG strips, plus the
+ * RAF header and RW2's JpgFromRaw. Needs the whole file. Null when none.
+ */
+export function rawPreviewJpeg(buf: Buffer): Buffer | null {
+  if (buf.toString('ascii', 0, 15) === RAF_MAGIC) return rafPreview(buf);
+  const head = buf.toString('latin1', 0, 4);
+  if (!['II*\0', 'MM\0*', 'IIRO', 'IIRS', 'MMOR', 'IIU\0'].includes(head)) return null;
+  const le = buf[0] === 0x49;
+  const cur: TiffCursor = { buf, base: 0, le };
+  const found: Buffer[] = [];
+  const seen = new Set<number>();
+  const visit = (at: number, depth: number): void => {
+    if (depth > 6 || at <= 0 || at + 2 > buf.length || seen.has(at)) return;
+    seen.add(at);
+    const count = readU16(cur, at);
+    if (count === 0 || count > 512) return;
+    let jpegOffset = 0;
+    let jpegLength = 0;
+    let stripOffset = 0;
+    let stripLength = 0;
+    let compression = 0;
+    const subIfds: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const e = at + 2 + i * 12;
+      if (e + 12 > buf.length) break;
+      const tag = readU16(cur, e);
+      const type = readU16(cur, e + 2);
+      const num = readU32(cur, e + 4);
+      const inline = (type === 3 ? 2 : 4) * num <= 4;
+      const value = type === 3 && inline ? readU16(cur, e + 8) : readU32(cur, e + 8);
+      if (tag === 0x0201) jpegOffset = value;
+      else if (tag === 0x0202) jpegLength = value;
+      else if (tag === 0x0103) compression = value;
+      else if (tag === 0x0111 && num === 1) stripOffset = value;
+      else if (tag === 0x0117 && num === 1) stripLength = value;
+      else if (tag === 0x002e && type === 7) {
+        const jpeg = jpegAt(buf, value, num);
+        if (jpeg) found.push(jpeg);
+      } else if (tag === 0x014a) {
+        if (num === 1) subIfds.push(value);
+        else {
+          for (let n = 0; n < num && value + n * 4 + 4 <= buf.length; n++) {
+            subIfds.push(readU32(cur, value + n * 4));
+          }
+        }
+      }
+    }
+    const preview = jpegAt(buf, jpegOffset, jpegLength);
+    if (preview) found.push(preview);
+    // Compression 6 is a displayable JPEG (CR2's full-size preview); 7 is a
+    // DNG's lossless sensor data, which no viewer can show.
+    if (compression === 6) {
+      const strip = jpegAt(buf, stripOffset, stripLength);
+      if (strip) found.push(strip);
+    }
+    for (const sub of subIfds) visit(sub, depth + 1);
+    const nextAt = at + 2 + count * 12;
+    if (nextAt + 4 <= buf.length) visit(readU32(cur, nextAt), depth + 1);
+  };
+  visit(readU32(cur, 4), 0);
+  return found.sort((a, b) => b.length - a.length)[0] ?? null;
 }

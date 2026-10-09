@@ -375,15 +375,15 @@ const GITHUB_REMOTE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * True when a role's default toolset groups contain neither
- * `workspace-fs-write` nor `code-execution` — i.e. the role is "pure
- * delegation": meant to coordinate other gezels rather than do work
+ * True when the role's contract is pure coordination: it is meant to
+ * route work to other gezels rather than produce the role's deliverable
  * itself. Today: Meester, Voorman, Planner.
  *
- * Note we check the *write* split, not read. Voorman gets
- * `workspace-fs-read` so they can investigate a bug before delegating
- * the fix; that doesn't make them a builder. The "do you build?"
- * marker is whether you can mutate the workspace.
+ * This must be an intent classification, not an inference from missing
+ * `workspace-fs-write` / `code-execution` groups. Curator and the media
+ * generators intentionally lack those groups too, but they are still
+ * executors: Curator produces photo-library proposals, while the media
+ * tools persist their own outputs.
  *
  * Used by the system-prompt builder to decide whether to inject the
  * "you route, you don't build" guardrail prose. Per-gezel toolset
@@ -393,9 +393,8 @@ const GITHUB_REMOTE_TOOLS: ReadonlySet<string> = new Set([
  * something's off" as good guidance.
  */
 export function isPureDelegationRole(role: string | undefined): boolean {
-  if (canonicalRoleKey(role) === 'conversationalist') return false;
-  const groups = roleToolsetGroups(role);
-  return !groups.includes('workspace-fs-write') && !groups.includes('code-execution');
+  const canonical = canonicalRoleKey(role);
+  return canonical !== null && DELEGATION_ORCHESTRATOR_ROLES.has(canonical);
 }
 
 /**
@@ -930,6 +929,20 @@ function fileRepairToolsWithExplicitDirectives(
   return tools;
 }
 
+/**
+ * A data file is rebuilt from its sources by a script, not retyped: the
+ * data-wrangle repair message itself says "do not hand-edit the JSON … use a
+ * real CSV parse". With no file runner on the repair surface, gemma4-e4b
+ * wrote `scripts/clean_data.mjs` and called `run_installed_script` on it 10-18
+ * times per failed trial (2026-10-07). Same reasoning as FILE_WORK_SCRIPT_TOOLS.
+ */
+const DATA_FILE_REPAIR_RUNNERS: readonly string[] = ['run_nodejs_script', 'derive_file'];
+const DATA_FILE_EXTENSION = /\.(?:json|jsonl|ndjson|csv|tsv|ya?ml|xml)$/i;
+
+function scenarioCheckedFile(text: string): string | undefined {
+  return /\[scenario check\][^`\n]*`([^`\n]+)`/i.exec(text)?.[1];
+}
+
 export function constrainAllowlistForScenarioFileRepair(
   allowlist: Set<string> | null,
   opts: {
@@ -946,6 +959,9 @@ export function constrainAllowlistForScenarioFileRepair(
       ? REVIEW_FILE_REPAIR_TOOLS
       : SCENARIO_FILE_REPAIR_TOOLS;
   const toolSet = fileRepairToolsWithExplicitDirectives(baseToolSet, text);
+  if (DATA_FILE_EXTENSION.test(scenarioCheckedFile(text) ?? '')) {
+    for (const name of DATA_FILE_REPAIR_RUNNERS) toolSet.add(name);
+  }
   const next = new Set<string>();
   for (const name of toolSet) {
     if (allowlist.has(name)) next.add(name);
@@ -1236,6 +1252,10 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_post',
   'queue_post',
   'publish_post',
+  // A Playwright script drives a real browser with unrestricted network and
+  // runs outside the script sandbox, so it is open-web egress. Before this,
+  // lockdown stripped `fetch_url` yet left this tool reaching the same web.
+  'run_playwright_script',
 ]);
 
 /**

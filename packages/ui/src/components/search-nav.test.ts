@@ -119,6 +119,46 @@ describe('resultToActions', () => {
     ]);
   });
 
+  it('opens a video or sound hit at the moment that matched', () => {
+    const media = {
+      modality: 'video' as const,
+      assetPath: 'clips/demo.mp4',
+      startMs: 90_000,
+      endMs: 120_000,
+    };
+    const fileActions = resultToActions(
+      result({
+        kind: 'file',
+        id: 'file:p1:clips/demo.mp4#90000',
+        projectId: 'p1',
+        path: 'clips/demo.mp4',
+        source: 'workspace',
+        media,
+      }),
+    );
+    expect(fileActions[0]).toEqual({
+      kind: 'open-file',
+      intent: { projectId: 'p1', path: 'clips/demo.mp4', source: 'workspace', startMs: 90_000 },
+    });
+    const knowledgeActions = resultToActions(
+      result({
+        kind: 'knowledge',
+        id: 'knowledge:shop-notes:m1',
+        catalogId: 'shop-notes',
+        documentId: 'dovetails',
+        media: { ...media, assetPath: 'assets/clips/demo.mp4' },
+      }),
+    );
+    expect(knowledgeActions[0]).toEqual({
+      kind: 'open-knowledge',
+      intent: {
+        catalogId: 'shop-notes',
+        documentId: 'dovetails',
+        media: { ...media, assetPath: 'assets/clips/demo.mp4' },
+      },
+    });
+  });
+
   it('drops a knowledge result without a catalogId', () => {
     expect(resultToActions(result({ kind: 'knowledge', id: 'knowledge:x' }))).toEqual([]);
   });

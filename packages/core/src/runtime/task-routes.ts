@@ -65,6 +65,8 @@ export interface PortableTaskRunnerOptions {
     id: string,
     sourceId?: string,
     version?: string,
+    /** The project the task is for: its project type may carry its own books. */
+    projectId?: string,
   ): Promise<Craftbook | undefined>;
   onChange?(task: Task): void;
   resolveStepRole?(projectId: string, role: string): Promise<string>;
@@ -132,6 +134,37 @@ export class PortableTaskRunner {
     } finally {
       this.admitting = false;
     }
+  }
+  /**
+   * Pick a task back up after a step turn the runner did not start: the owner
+   * answering a question the person just answered. A drive stops while a
+   * question is open, so without this a step completed in that turn, or one
+   * left to its automatic check, waited for good. Same rules as after a
+   * driven turn: the automatic check runs on an unmoved step, and a task that
+   * moved is driven on.
+   */
+  async continueAfterTurn(ref: string, activationId: string | undefined): Promise<void> {
+    if (this.isBusy()) return;
+    const store = this.options.store;
+    const settled = async () => {
+      const task = await store.getTask(ref);
+      return task?.status === 'active' && task.activeStepId && !(await this.awaitingAnswer(task))
+        ? task
+        : undefined;
+    };
+    let task = await settled();
+    if (!task) return;
+    if ((await store.getTaskLifecycle(ref))?.activationId === activationId) {
+      const step = task.craftbook.steps.find((item) => item.id === task!.activeStepId);
+      if (!step?.advanceWhen) return;
+      await this.complete(ref, step.id);
+      task = await settled();
+      if (!task || (await store.getTaskLifecycle(ref))?.activationId === activationId) return;
+    }
+    if (this.options.shouldContinue && !(await this.options.shouldContinue(task))) return;
+    const next = await this.resolveActiveRole(task);
+    if (taskActiveAssignee(next).kind === 'user' && !this.hasEntryHooks(next)) return;
+    await this.run(ref);
   }
   private async drive(
     first: Awaited<ReturnType<PortableStore['beginTaskRun']>>,
@@ -399,6 +432,7 @@ export class PortableTaskRunner {
           request.craftbookId,
           request.craftbookSourceId,
           request.craftbookVersion,
+          projectId,
         )
       : undefined;
     const entry =

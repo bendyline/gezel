@@ -84,9 +84,8 @@ pickup code; it does not access projects, change settings, or run MCP tools.
 These are live integration checks, not a quality or throughput benchmark, and
 they do not establish signed-app, App Store sandbox, or physical iOS parity.
 
-See the [macOS Apple AI investigation](../../../docs/apple-native-ai.md) for
-measured results, remaining release validation, and the distinction between the
-system model, Core AI, and MLX.
+See [service boundaries](../../../docs/service-boundaries.md) for provider
+ownership and the limits of service-account and logged-out access.
 
 ## Shipping
 

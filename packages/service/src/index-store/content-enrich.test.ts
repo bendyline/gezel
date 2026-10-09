@@ -13,6 +13,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const priorEmbedModel = process.env.GEZEL_EMBED_MODEL;
@@ -72,7 +73,9 @@ describe('embed-only tier (semantic search without a Boekwachter)', () => {
       'export function guard(req: Request) { /* limits how many API requests per second a client may make */ return true; }\n',
     );
     await writeFile(join(dir, 'src', 'colors.ts'), 'export const palette = ["#fff", "#000"];\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     // Embed-only: vectors from signatures/windows alone — no summarizer runs.
     const r = await ci.embedOnly('c', 10);
@@ -125,7 +128,9 @@ describe('enrichment + search_code', () => {
       join(dir, 'src', 'limiter.ts'),
       'export function rateLimit(n: number) { return n; }\n',
     );
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const res = await ci.searchCode('c', 'rateLimit', { mode: 'keyword' });
     expect(res.engine).toBe('fts');
@@ -147,7 +152,9 @@ describe('enrichment + search_code', () => {
       'export function guard(req: Request) { /* limits how many API requests per second a client may make */ return true; }\n',
     );
     await writeFile(join(dir, 'src', 'colors.ts'), 'export const palette = ["#fff", "#000"];\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const deps: EnrichDeps = {
       // Content-aware so the two files get distinct vectors.
@@ -185,7 +192,9 @@ describe('enrichment + search_code', () => {
       join(dir, 'src', 'bigfn.ts'),
       `export function processDocument(input: string): string {\n${filler}\n  const marker = "zqBuriedCaptionToken";\n  return marker + input;\n}\n`,
     );
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     const deps: EnrichDeps = {
       summarize: async () => 'Processes a document and returns a transformed string.',
       embed,
@@ -224,7 +233,9 @@ describe('per-symbol summaries', () => {
         '}',
       ].join('\n'),
     );
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
   };
 
   const dispatchingDeps = (prompts: string[], activities: string[] = []): EnrichDeps => ({
@@ -272,7 +283,9 @@ describe('per-symbol summaries', () => {
         '}',
       ].join('\n'),
     );
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const stale = await ci.fileContext('c', 'src/b.ts');
     for (const s of stale.symbols) expect(s.summary).toBeUndefined();
@@ -306,7 +319,9 @@ describe('summary retry gate (markEnrichAttempt)', () => {
   const seed = async () => {
     await mkdir(join(dir, 'src'), { recursive: true });
     await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1;\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
   };
 
   it('readmits a failed summarize on later sweeps until it succeeds', async () => {
@@ -463,7 +478,9 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect((await ci.enrich('c', blockedDeps, 10))!.files).toBe(1);
     expect((await ci.enrich('c', blockedDeps, 10))!.files).toBe(0);
     await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1; // now benign\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     const okDeps: EnrichDeps = {
       summarize: async () => 'Defines the number one.',
       embed: fakeEmbed,

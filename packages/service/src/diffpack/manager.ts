@@ -11,6 +11,7 @@ import {
   KeyedLock,
   createLogger,
   isActiveDiffpackStatus,
+  isDiffpackFileOperation,
   nowIso,
 } from '@bendyline/gezel';
 import { projectDiffpacksFile } from '@bendyline/gezel/paths';
@@ -32,6 +33,10 @@ export interface DiffpackManagerDeps {
   store: Store;
   tasks: TaskManager;
   history?: HistoryManager;
+  /** After an apply, with the paths that landed; settles the issues on them. */
+  onApplied?: (projectId: string, pack: DiffpackRecord, appliedPaths: string[]) => Promise<void>;
+  /** After a dismiss; reopens the issues the proposal held. */
+  onDismissed?: (projectId: string, pack: DiffpackRecord) => Promise<void>;
 }
 
 interface DiffpacksFile {
@@ -191,9 +196,10 @@ export class DiffpackManager {
     if (!record) throw new DiffpackNotFoundError(packId);
     if (record.status !== 'drafting') return record;
 
-    const [drafted, deletions] = await Promise.all([
+    const [drafted, deletions, operations] = await Promise.all([
       this.drafts.listDraftedPaths(projectId, packId),
       this.drafts.listDeletions(projectId, packId),
+      this.drafts.listOperations(projectId, packId),
     ]);
 
     await this.drafts.clearSidecars(projectId, packId);
@@ -229,6 +235,22 @@ export class DiffpackManager {
         additions: 0,
         deletions: before.split('\n').length,
         change: 'delete',
+      });
+    }
+
+    for (const op of operations) {
+      const source = op.from
+        ? await this.deps.store.statProjectWorkspacePath(projectId, op.from)
+        : null;
+      if (op.from && (!source || source.kind === 'missing')) continue;
+      files.push({
+        path: op.to,
+        ...(op.from ? { from: op.from } : {}),
+        diffArtifact: '',
+        baseHash: source ? sourceFingerprint(source) : '',
+        additions: 0,
+        deletions: 0,
+        change: op.op,
       });
     }
 
@@ -303,6 +325,11 @@ export class DiffpackManager {
     return (await this.readRecords(projectId)).find((p) => p.packId === packId) ?? null;
   }
 
+  /** The stored rows, without the read-time drift and overlap projections. */
+  async listRecords(projectId: string): Promise<DiffpackRecord[]> {
+    return this.readRecords(projectId);
+  }
+
   async list(projectId: string): Promise<Diffpack[]> {
     const records = await this.readRecords(projectId);
     return Promise.all(records.map((record) => this.enrich(projectId, record, records)));
@@ -347,6 +374,10 @@ export class DiffpackManager {
     if (record.status === 'applied' || record.status === 'dismissed') return [];
     const out: string[] = [];
     for (const file of pendingFiles(record)) {
+      if (isDiffpackFileOperation(file.change)) {
+        if (await this.operationDrifted(projectId, file)) out.push(file.path);
+        continue;
+      }
       const current = await this.deps.store
         .readProjectWorkspaceFile(projectId, file.path)
         .catch(() => null);
@@ -357,6 +388,23 @@ export class DiffpackManager {
       if (current === null || sha256(current) !== file.baseHash) out.push(file.path);
     }
     return out;
+  }
+
+  /**
+   * A file operation no longer fits when its source is gone or changed since
+   * the pack was sealed, or something now sits where it would land. A new
+   * folder that already exists is fine; a file by that name is not.
+   */
+  private async operationDrifted(projectId: string, file: DiffpackFile): Promise<boolean> {
+    const target = await this.deps.store
+      .statProjectWorkspacePath(projectId, file.path)
+      .catch(() => ({ kind: 'missing' as const }));
+    if (file.change === 'mkdir') return target.kind === 'file';
+    if (target.kind !== 'missing' || !file.from) return true;
+    const source = await this.deps.store
+      .statProjectWorkspacePath(projectId, file.from)
+      .catch(() => ({ kind: 'missing' as const }));
+    return source.kind === 'missing' || sourceFingerprint(source) !== file.baseHash;
   }
 
   /* ─── Apply / dismiss ────────────────────────────────────────────── */
@@ -411,9 +459,14 @@ export class DiffpackManager {
     const adds: Array<{ path: string; content: string }> = [];
     const results: Array<{ path: string; ok: boolean; error?: string }> = [];
     const deletions: string[] = [];
+    const operations: DiffpackFile[] = [];
     for (const file of selected) {
       if (file.change === 'delete') {
         deletions.push(file.path);
+        continue;
+      }
+      if (isDiffpackFileOperation(file.change)) {
+        operations.push(file);
         continue;
       }
       const diff = await this.deps.store
@@ -454,6 +507,7 @@ export class DiffpackManager {
           ...patches.map((p) => skipped(p.path)),
           ...adds.map((a) => skipped(a.path)),
           ...deletions.map(skipped),
+          ...operations.map((o) => skipped(o.path)),
         ],
       };
       await this.recordApplyOutcome(projectId, packId, failed);
@@ -495,13 +549,31 @@ export class DiffpackManager {
           this.deps.store.rmProjectWorkspacePath(projectId, path, { userInitiated: true }),
         );
       }
+      // In the order drafted, after every edit, and never over an existing
+      // file, whatever `allowDrifted` says: drift there means someone put a
+      // file where this one would land.
+      for (const op of operations) {
+        await run(op.path, () => this.applyOperation(projectId, op));
+      }
     } else {
-      for (const path of [...adds.map((a) => a.path), ...deletions]) {
+      for (const path of [
+        ...adds.map((a) => a.path),
+        ...deletions,
+        ...operations.map((o) => o.path),
+      ]) {
         applied.results.push({ path, ok: false, error: 'skipped — proposal validation failed' });
       }
     }
 
     await this.recordApplyOutcome(projectId, packId, applied);
+    const landed = applied.results.filter((r) => r.ok).map((r) => r.path);
+    if (landed.length > 0 && this.deps.onApplied) {
+      await this.deps
+        .onApplied(projectId, record, landed)
+        .catch((err) =>
+          log.warn(`[diffpack] post-apply settle failed for DP-${packId}: ${String(err)}`),
+        );
+    }
     this.deps.history
       ?.log({
         kind: 'project.diffpack.applied',
@@ -516,6 +588,25 @@ export class DiffpackManager {
       })
       .catch(() => {});
     return applied;
+  }
+
+  private async applyOperation(projectId: string, op: DiffpackFile): Promise<void> {
+    const store = this.deps.store;
+    if (op.change === 'mkdir') {
+      await store.mkdirProjectWorkspace(projectId, op.path, undefined, { userInitiated: true });
+      return;
+    }
+    if (!op.from) throw new Error('the proposal does not say where this comes from');
+    if (op.change === 'move') {
+      await store.renameProjectWorkspacePath(projectId, op.from, op.path, undefined, {
+        userInitiated: true,
+        noReplace: true,
+      });
+      return;
+    }
+    await store.copyProjectWorkspacePath(projectId, op.from, op.path, undefined, {
+      userInitiated: true,
+    });
   }
 
   private async recordApplyOutcome(
@@ -557,6 +648,13 @@ export class DiffpackManager {
       return { record: { ...row }, changed: true };
     });
     await this.drafts.discard(projectId, packId);
+    if (this.deps.onDismissed) {
+      await this.deps
+        .onDismissed(projectId, record)
+        .catch((err) =>
+          log.warn(`[diffpack] post-dismiss settle failed for DP-${packId}: ${String(err)}`),
+        );
+    }
     return record;
   }
 
@@ -702,6 +800,11 @@ export function overlapsFor(record: DiffpackRecord, siblings: DiffpackRecord[]):
 }
 
 /** Path → a short, filesystem-safe slug for the diff sidecar's basename. */
+/** A move or copy's source as sealed: size and modification time, not a hash. */
+function sourceFingerprint(stat: { kind: string; size?: number; mtime?: string }): string {
+  return `stat:${stat.kind === 'dir' ? 'dir' : (stat.size ?? 0)}:${stat.mtime ?? ''}`;
+}
+
 export function slugify(path: string): string {
   return (
     path

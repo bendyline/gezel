@@ -911,17 +911,20 @@ export class LlamaCppProvider implements LLMProvider {
       this.accumulatedRamBytes = 0;
     }
 
-    // Dedupe against the last seen phase so a burst of `load_tensors:`
-    // lines doesn't flood the event bus. Same phase + same detail =
-    // don't republish. A counter-carrying line (ds4's decode ticker) has
-    // no detail at all, so the token count joins the key — otherwise
-    // every tick after the first would dedupe away and the live counter
-    // would freeze at its opening value.
+    // These logs have no request identity. Only attribute inference progress
+    // when one session owns the engine; concurrent sessions get their own
+    // stream's counters instead. Never replay one request's prefill to another.
+    if (phase.phase === 'prefill' || phase.phase === 'generating') {
+      this.lastStartupPhase = null;
+      if (this.activeSessions.size !== 1) return;
+    }
+
+    // Suppress identical engine startup lines, retaining measured progress.
     if (
       this.lastStartupPhase &&
       this.lastStartupPhase.phase === phase.phase &&
       this.lastStartupPhase.detail === phase.detail &&
-      this.lastStartupPhase.outputTokens === phase.outputTokens
+      this.lastStartupPhase.progress === phase.progress
     ) {
       return;
     }
@@ -933,7 +936,8 @@ export class LlamaCppProvider implements LLMProvider {
       ...(typeof phase.outputTokens === 'number' ? { outputTokens: phase.outputTokens } : {}),
       ...(typeof phase.tokensPerSec === 'number' ? { tokensPerSec: phase.tokensPerSec } : {}),
     };
-    this.lastStartupPhase = phase.phase === 'ready' ? null : phaseEvent;
+    this.lastStartupPhase =
+      phase.phase === 'starting' || phase.phase === 'loading_model' ? phaseEvent : null;
     for (const s of this.activeSessions) s.publishEnginePhase(phaseEvent);
   }
 

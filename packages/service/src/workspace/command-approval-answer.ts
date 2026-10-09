@@ -1,5 +1,9 @@
 import type { CommandApprovalIntent, QuestionAnswer } from '@bendyline/gezel';
-import { hashCommandInvocation, recordApproval } from './command-approvals.js';
+import {
+  describeApprovalCommand,
+  hashCommandInvocation,
+  recordApproval,
+} from './command-approvals.js';
 
 /**
  * Translate an answered `command-approval` question into:
@@ -21,10 +25,7 @@ export interface ApplyCommandApprovalAnswerOptions {
 export async function applyCommandApprovalAnswer(
   opts: ApplyCommandApprovalAnswerOptions,
 ): Promise<string> {
-  const verb =
-    opts.intent.scope === 'script'
-      ? `\`npm run ${opts.intent.name}\``
-      : `\`npx ${opts.intent.name}\``;
+  const verb = describeApprovalCommand(opts.intent.scope, opts.intent.name);
   // Pin the approval to the exact body/path and argument vector the user
   // saw, so neither can be changed on replay without a fresh prompt.
   const invocationHash = hashCommandInvocation(

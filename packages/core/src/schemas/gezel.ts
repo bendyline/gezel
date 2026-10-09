@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
+import { GezelCharacterSchema } from './character.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
@@ -281,6 +282,13 @@ export const GezelFrontmatterSchema = z.object({
    */
   traits: z.array(GezelTraitSchema).max(8).optional(),
   /**
+   * Who this gezel is to talk to — temperament, quirk, style, sociability —
+   * seeded from the id at creation and persisted, like the poppetje. Shown
+   * to the model only in social mode. An unreadable hand edit reads as
+   * absent (and is re-seeded) rather than hiding the whole gezel.
+   */
+  character: GezelCharacterSchema.optional().catch(undefined),
+  /**
    * Overrides `config.recognition.mode` for this gezel. A gezel whose job is
    * reading screenshots sets `always`; everyone else inherits.
    *
@@ -393,6 +401,8 @@ export const GezelSummarySchema = z.object({
   storageScope: z.enum(['user', 'machine-shared']).optional(),
   /** Mirrors `GezelFrontmatter.traits`. */
   traits: z.array(GezelTraitSchema).optional(),
+  /** Mirrors `GezelFrontmatter.character`. */
+  character: GezelCharacterSchema.optional(),
   /**
    * Lightweight growth summary (level + pending level-up flag),
    * hydrated from growth.json and inlined on list/detail responses —
@@ -1658,6 +1668,16 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     outcome: z.enum(['complete', 'canceled']),
     /** The thread holding the wrap-up, so a click can land on it. */
     sessionId: z.string().optional(),
+    /** The gezel who did the work, so a social-mode notification can name them. */
+    gezelId: z.string().optional(),
+  }),
+  /**
+   * A project's script set or cleared its reminder. Global; the notifiers
+   * re-read `/api/reminders` and reschedule.
+   */
+  z.object({
+    type: z.literal('reminders_updated'),
+    projectId: z.string(),
   }),
   /**
    * A new shared gezel joined the global roster. Emitted on the global

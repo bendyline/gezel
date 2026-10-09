@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isGitInstalled, runGit } from '../git/git.js';
 import { classifyFile } from './classify.js';
-import { runWorkspaceContentIndex } from './content-indexer.js';
+import { exifTakenAt, runWorkspaceContentIndex } from './content-indexer.js';
 import { IndexStore } from './index-store.js';
 import { extractCodeSymbols, extractMarkdownOutline } from './symbols.js';
 
@@ -339,5 +339,14 @@ describe('capped walk', () => {
     expect(settled!.removed).toBe(0);
     expect(existsSync(companion)).toBe(true);
     expect(existsSync(orphan)).toBe(false);
+  });
+});
+
+describe('exifTakenAt', () => {
+  it('reads the camera time and refuses the all-zero placeholder', () => {
+    expect(exifTakenAt('2019:07:04 18:22:01')).toBe('2019-07-04T18:22:01');
+    expect(exifTakenAt('0000:00:00 00:00:00')).toBeUndefined();
+    expect(exifTakenAt('2019:13:04 18:22:01')).toBeUndefined();
+    expect(exifTakenAt(undefined)).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import {
   AppendToFileInputSchema,
   AskUserQuestionInputSchema,
   CreateTaskInputSchema,
+  type DiffpackDraftOperation,
   EmptyInputSchema,
   EnsureGezelInputSchema,
   FindFilesRequestSchema,
@@ -38,6 +39,7 @@ import {
   WriteTaskNoteInputSchema,
   findGezelInRoster,
   findProjectByReference,
+  formatMediaClock,
   gezelNotFoundMessage,
   gezelRosterHint,
   normalizeArtifactPath,
@@ -86,6 +88,7 @@ import {
   NpmRegistryVersionSchema,
   type Outcome,
   ProviderNameSchema,
+  RETRIEVAL_SOURCES,
   type ReadWorkspaceFilesResponse,
   type StepDeliverable,
   StepGateUnionSchema,
@@ -151,6 +154,7 @@ import {
   taskOwnedPrefixes,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
+  unknownTaskStepText,
   workspaceDrawerPrefix,
   writeTaskNoteText,
 } from '@bendyline/gezel';
@@ -197,6 +201,11 @@ import {
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import {
+  installedScriptMissHint,
+  isPathShapedScriptName,
+  scriptFileCandidates,
+} from './installed-script-miss.js';
+import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
   inferSourceDeliverablePath,
@@ -232,7 +241,11 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
-import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
+import {
+  sessionReboundToCurrentPass,
+  staleTaskStepRefusal,
+  taskStepMutationRejection,
+} from './task-step-authority.js';
 import {
   ActionToolOutputSchema,
   ExecutionToolOutputSchema,
@@ -365,10 +378,31 @@ let sessionStepCompleted = false;
 let sessionStepCompletion: 'automatic' | 'manual' | 'unknown' = 'unknown';
 let sessionStepCheckedArtifacts: string[] = [];
 
+async function reboundToCurrentPass(): Promise<boolean> {
+  if (!sessionId) return false;
+  try {
+    const parsed = await parseRef(sessionTaskRef);
+    const [task, session] = await Promise.all([
+      api.getTask(parsed.projectId, parsed.num),
+      api.getChatSession(sessionId),
+    ]);
+    return sessionReboundToCurrentPass({
+      sessionStepId,
+      activeStepId: task.activeStepId,
+      activeStepActivation: task.craftbook.steps.find((s) => s.id === task.activeStepId)
+        ?.lastActivatedAt,
+      sessionActivation: session.stepActivationId,
+    });
+  } catch {
+    return false;
+  }
+}
+
 async function staleStepMutationResult() {
   if (!sessionTaskRef || !sessionStepId) return null;
   sessionStepCompletion = 'unknown';
   sessionStepCheckedArtifacts = [];
+  if (sessionStepCompleted && (await reboundToCurrentPass())) sessionStepCompleted = false;
 
   let activeStepId: string | undefined;
   let activeStepOwnedBySession = false;
@@ -584,6 +618,27 @@ function editClient(target: ConcreteWorkspaceTarget): WorkspaceEditApi {
     );
   }
   return draftEditApi(client, diffpackId);
+}
+
+/**
+ * While drafting, a move, copy or new folder is proposed into the pack rather
+ * than done: the person sees it beside the edits and applies them together.
+ */
+async function proposeDraftOperation(
+  target: ConcreteWorkspaceTarget,
+  op: DiffpackDraftOperation,
+): Promise<string> {
+  if (target.kind === 'linked') {
+    throw new Error(
+      `Cannot change ${target.displayPath} while drafting a change proposal — a proposal covers one project.`,
+    );
+  }
+  const res = await workspaceClient(target).proposeDiffpackDraftOperation(
+    target.projectId,
+    diffpackId,
+    op,
+  );
+  return res.message;
 }
 
 async function readWorkspaceFile(path: string) {
@@ -979,6 +1034,11 @@ server.tool(
   },
 );
 
+/** The id a memory scope is addressed by from this session. */
+function memoryScopeId(scope: 'gezel' | 'project' | 'user'): string {
+  return scope === 'gezel' ? gezelId : scope === 'project' ? projectId : 'user';
+}
+
 server.tool(
   'save_memory',
   GEZEL_TOOL_DESCRIPTIONS.save_memory,
@@ -993,9 +1053,10 @@ server.tool(
         },
         body: JSON.stringify({
           scope,
-          id: scope === 'gezel' ? gezelId : projectId,
+          id: memoryScopeId(scope),
           text: normalizeMarkdown(text),
           ...(kind ? { kind } : {}),
+          source: { project: projectId, gezel: gezelId },
         }),
       });
       if (!res.ok) {
@@ -1030,14 +1091,16 @@ server.tool(
 
 server.tool(
   'list_memories',
-  'List recent memory entries for the current agent or project.',
+  'List recent memory entries: yours, the project’s, or what you know about the person you work for.',
   {
-    scope: z.enum(['gezel', 'project']).describe('Which memory to list'),
+    scope: z
+      .enum(['gezel', 'project', 'user'])
+      .describe('Which memory to list: "gezel" (yours), "project", or "user" (about the person)'),
     days: z.number().int().positive().optional().describe('How many days back to look (default 7)'),
   },
   async ({ scope, days }) => {
     try {
-      const id = scope === 'gezel' ? gezelId : projectId;
+      const id = memoryScopeId(scope);
       const res = await fetchImpl(
         `${baseUrl}/api/memory/recent?scope=${scope}&id=${encodeURIComponent(id)}&days=${days ?? 7}`,
         { headers: { Authorization: `Bearer ${token}` } },
@@ -2935,6 +2998,10 @@ server.tool(
     if (scoped) return scoped;
     try {
       const target = await concreteWorkspaceTarget(path);
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(target, { op: 'mkdir', to: target.path });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
       await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
         path: target.path,
         ...(gezelId ? { gezelId } : {}),
@@ -2974,6 +3041,14 @@ server.tool(
           'rename cannot move files across project roots; read the source, write the destination, then delete the source explicitly',
         );
       }
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(fromTarget, {
+          op: 'move',
+          from: fromTarget.path,
+          to: toTarget.path,
+        });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
       await workspaceClient(fromTarget).renameProjectWorkspacePath(fromTarget.projectId, {
         fromPath: fromTarget.path,
         toPath: toTarget.path,
@@ -2981,6 +3056,52 @@ server.tool(
         ...(sessionId ? { sessionId } : {}),
       });
       return { content: [{ type: 'text' as const, text: `Renamed ${fromPath} → ${toPath}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'copy_path',
+  'Copy a file or folder to a new path within the project with `copy_path({ fromPath, toPath })`. Never replaces an existing file: pick a destination nothing has.',
+  {
+    fromPath: z.string().describe('The file or folder to copy, relative to the project root.'),
+    toPath: z.string().describe('Where the copy goes, relative to the project root.'),
+  },
+  async ({ fromPath, toPath }) => {
+    const stale = await staleStepMutationResult();
+    if (stale) return stale;
+    const scoped = await taskScopedWriteRefusal(toPath, 'workspace');
+    if (scoped) return scoped;
+    try {
+      const [fromTarget, toTarget] = await Promise.all([
+        concreteWorkspaceTarget(fromPath),
+        concreteWorkspaceTarget(toPath),
+      ]);
+      if (fromTarget.projectId !== toTarget.projectId) {
+        throw new Error(
+          'copy_path cannot copy across project roots; read the source and write the destination instead',
+        );
+      }
+      if (isDrafting) {
+        const proposed = await proposeDraftOperation(fromTarget, {
+          op: 'copy',
+          from: fromTarget.path,
+          to: toTarget.path,
+        });
+        return { content: [{ type: 'text' as const, text: proposed }] };
+      }
+      await workspaceClient(fromTarget).copyProjectWorkspacePath(fromTarget.projectId, {
+        fromPath: fromTarget.path,
+        toPath: toTarget.path,
+        ...(gezelId ? { gezelId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      });
+      return { content: [{ type: 'text' as const, text: `Copied ${fromPath} → ${toPath}` }] };
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
@@ -4360,7 +4481,7 @@ server.tool(
 
 server.tool(
   'run_playwright_script',
-  "Run a Playwright script from the project's artifacts. **This is the main way gezels automate the browser.** The shape: call `write_artifact` to save a `.ts` file under `tests/` (test-runner mode, `*.spec.ts`) or `scripts/` (bare-script mode via Node's strip-types), then call this tool with the same path to run it. Use it for end-to-end tests, data extraction, multi-step automation, anything you'd want to re-run or tweak. The live `browser_navigate` / `browser_snapshot` tools exist too for quick interactive reads, but writing a short script and running it is usually the better shape — it leaves an artifact the team can build on.",
+  "Run a Playwright script from the project's artifacts. **This is the main way gezels automate the browser.** The shape: call `write_artifact` to save a `.ts` file under `tests/` (test-runner mode, `*.spec.ts`) or `scripts/` (bare-script mode via Node's strip-types), then call this tool with the same path to run it. Use it for end-to-end tests, data extraction, multi-step automation, anything you'd want to re-run or tweak. The live `browser_navigate` / `browser_snapshot` tools exist too for quick interactive reads, but writing a short script and running it is usually the better shape — it leaves an artifact the team can build on. SECURITY: the script runs outside the script sandbox (it drives a real browser with network access), so the user approves each new or edited script before it runs; the approval covers that exact script and the local files it imports.",
   {
     path: z
       .string()
@@ -4375,7 +4496,28 @@ server.tool(
       ),
   },
   async ({ path, mode }) => {
-    const res = await api.runPlaywrightScript(projectId, { path, ...(mode ? { mode } : {}) });
+    const res = await api.runPlaywrightScript(projectId, {
+      path,
+      ...(mode ? { mode } : {}),
+      ...(gezelId ? { gezelId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    if (res.approvalPending) {
+      const text = `Running ${path} needs user approval. Your turn ends here; a follow-up message arrives once the user answers. Don't retry in the meantime.`;
+      return okResult(
+        ExecutionToolOutputSchema,
+        {
+          summary: text,
+          state: 'approval_pending',
+          ok: false,
+          approvalPending: true,
+          ...(res.questionId ? { questionId: res.questionId } : {}),
+          output: { path, ...(mode ? { mode } : {}) },
+        },
+        { text },
+      );
+    }
+    if (res.declined) return errorResult(res.declined);
     const heading = res.ok
       ? `✓ ${path} completed successfully.`
       : `✗ ${path} failed${res.error ? ` (${res.error})` : ''}.`;
@@ -5115,6 +5257,8 @@ async function launchCraftbookTask(args: {
   params?: Record<string, string>;
   /** Durable continuation dedupe key for the explicit invoke_craftbook tool. */
   craftbookInvocationKey?: string;
+  /** Run in tonight's Night Shift instead of now. */
+  tonight?: boolean;
   /**
    * Ad-hoc binary handoffs join a live task of the same craftbook that is
    * already responsible for the same `params.outputPath`.
@@ -5191,6 +5335,7 @@ async function launchCraftbookTask(args: {
     ...(resolvedAssignee ? { assignee: resolvedAssignee } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
+    ...(args.tonight ? { nightShift: { enabled: true } } : {}),
     dispatchEntry: true,
   });
   return {
@@ -5469,8 +5614,24 @@ server.tool(
       .describe(
         'Convenience alias for params.outputPath. Preserves the requested project-workspace filename for document-production craftbooks.',
       ),
+    tonight: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run it in tonight's Night Shift instead of now. Use only when the user asks for it tonight or overnight.",
+      ),
   },
-  async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
+  async ({
+    craftbookId,
+    project,
+    title,
+    description,
+    version,
+    assignee,
+    params,
+    outputPath,
+    tonight,
+  }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
       const rootTurn = await currentRootTurnContext();
@@ -5484,6 +5645,7 @@ server.tool(
         version,
         assignee,
         params: invocationParams,
+        ...(tonight ? { tonight: true } : {}),
       };
       const rootTurnId = rootTurn?.rootTurnId ?? null;
       const launchInvocation = rootTurnId
@@ -7043,6 +7205,10 @@ server.tool(
         ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
+      // Nobody can answer this asker (the unattended nightly review): the
+      // runtime posted nothing, and its text is the instruction. Not an
+      // error, so the model does not retry with reworded arguments.
+      if (res.declined) return { content: [{ type: 'text' as const, text: res.declined }] };
       const colleague = toolIsAuthorizedForThisSession('message_gezel')
         ? await questionColleague(body)
         : undefined;
@@ -8576,6 +8742,12 @@ server.tool(
       .describe(
         'Hand the entry step to its assignee immediately as a task-scoped handoff (single-channel kickoff). Invalid on drafts and cron/fanout hosts.',
       ),
+    tonight: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run it in tonight's Night Shift instead of now. Use only when the user asks for it tonight or overnight.",
+      ),
   }).shape,
   async ({
     project,
@@ -8593,11 +8765,13 @@ server.tool(
     cronOverlap,
     fanout,
     dispatch,
+    tonight,
   }) => {
     try {
       const projectId = await resolveProjectId(project);
       const resolvedAssignee = await resolveAssigneeArg(assignee);
       const created = await api.createTask(projectId, {
+        ...(tonight ? { nightShift: { enabled: true } } : {}),
         ...sessionTaskNamingMode,
         title,
         description,
@@ -9283,13 +9457,10 @@ async function explainAdvanceFailure(
   }
   if (steps.length === 0) return base;
   const ids = steps.map((s) => s.id);
+  if (next && next !== 'next' && !ids.includes(next))
+    return `${base}\n${unknownTaskStepText('next', next, steps)}`;
+  if (!ids.includes(stepId)) return `${base}\n${unknownTaskStepText('stepId', stepId, steps)}`;
   const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
-  if (next && next !== 'next' && !ids.includes(next)) {
-    return `${base}\nThis task has no step "${next}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to advance to the following step in order.`;
-  }
-  if (!ids.includes(stepId)) {
-    return `${base}\nThis task has no step "${stepId}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
-  }
   return `${base}\nThe task's steps are: ${roster}.`;
 }
 
@@ -10903,9 +11074,7 @@ server.tool(
         'Search only these knowledge catalogs. Implies sources: ["knowledge"] unless sources is given.',
       ),
     sources: z
-      .array(
-        z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
-      )
+      .array(z.enum(RETRIEVAL_SOURCES))
       .optional()
       .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
     maxResults: z
@@ -11371,19 +11540,29 @@ server.tool(
 
 server.tool(
   'search_images',
-  'Find images in the workspace by filename, caption, or dimensions. Returns matching image paths with width/height/format and a caption when the index has one. Use describe_folder for a folder overview, find_similar_images for visual lookalikes.',
+  'Find images in the workspace by what they show (e.g. "whiteboard with a sprint plan", "red bicycle"), or by filename or caption. Set kinds to also find moments in audio and video files. Returns paths with width/height/format, a caption when the index has one, and for audio/video the matching time window. Use describe_folder for a folder overview, find_similar_images for visual lookalikes.',
   {
-    query: z.string().min(1).describe('Keywords — filename words, caption terms, or format.'),
+    query: z
+      .string()
+      .min(1)
+      .describe('What to find — a description of the content, or filename/caption words.'),
     maxResults: z.number().int().positive().max(100).optional(),
+    kinds: z
+      .array(z.enum(['image', 'audio', 'video']))
+      .min(1)
+      .optional()
+      .describe('Media to search (default ["image"]).'),
   },
   async (args) => {
     try {
       const res = await api.toolSearchImages(projectId, args);
+      const clock = formatMediaClock;
       const lines = res.results.map(
         (r) =>
-          `${r.path}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
+          `${r.path}${r.kind && r.kind !== 'image' ? ` [${r.kind}${r.startMs !== undefined ? ` ${clock(r.startMs)}${r.endMs !== undefined ? `–${clock(r.endMs)}` : ''}` : ''}]` : ''}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
       );
-      const summary = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      const noun = args.kinds?.some((k) => k !== 'image') ? 'match' : 'image';
+      const summary = `${res.results.length} ${noun}${res.results.length === 1 ? '' : noun === 'match' ? 'es' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
       return okResult(
         SearchToolOutputSchema,
         {
@@ -11404,7 +11583,7 @@ server.tool(
 
 server.tool(
   'find_similar_images',
-  'Find images visually similar to a given image (by CLIP embedding). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
+  'Find images visually similar to a given image (on-device image embeddings). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
   {
     path: z.string().min(1).describe('Workspace-relative path of the reference image.'),
     maxResults: z.number().int().positive().max(100).optional(),
@@ -11465,6 +11644,91 @@ server.tool(
       const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `describe_folder failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'list_photos',
+  'List photos in the workspace from the index, newest first, with when each was taken, the camera, size and a caption once described. Filter by folder, date range (YYYY, YYYY-MM or YYYY-MM-DD), camera, screenshots, or nearness to a place. Reads no files.',
+  {
+    path: z.string().optional().describe('Folder to scope to (optional).'),
+    from: z.string().optional().describe('Taken on or after: YYYY, YYYY-MM or YYYY-MM-DD.'),
+    to: z.string().optional().describe('Taken on or before: YYYY, YYYY-MM or YYYY-MM-DD.'),
+    camera: z.string().optional().describe('Camera make or model, any part.'),
+    screenshots: z
+      .boolean()
+      .optional()
+      .describe('true for only screenshots, false to leave them out.'),
+    near: z
+      .object({ lat: z.number(), lon: z.number(), km: z.number().optional() })
+      .optional()
+      .describe('Within km (default 5) of a place.'),
+    limit: z.number().int().positive().max(500).optional(),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolListPhotos(projectId, args);
+      const lines = res.photos.map((p) =>
+        [
+          p.path,
+          p.takenAt?.replace('T', ' ').slice(0, 16),
+          p.camera,
+          p.width && p.height ? `${p.width}x${p.height}` : undefined,
+          p.screenshot ? 'screenshot' : undefined,
+          p.cloudOnly ? 'in the cloud' : undefined,
+          p.location ? `${p.location.lat.toFixed(4)},${p.location.lon.toFixed(4)}` : undefined,
+          p.caption ? `"${p.caption.slice(0, 140)}"` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      );
+      const head = `${res.total} photo${res.total === 1 ? '' : 's'}${res.truncated ? ` (showing ${res.photos.length})` : ''}${res.locationWithheld ? '; locations withheld for this session' : ''}`;
+      return { content: [{ type: 'text' as const, text: [head, ...lines].join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `list_photos failed: ${unwrapApiError(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'photo_groups',
+  'Group the photos from the index: by "event" (taken together, apart from screenshots), "duplicate" (byte-identical copies, with the space the extra copies take) or "similar" (bursts and retakes that look alike; needs image embeddings). Use it to propose albums or clean-ups; it changes nothing.',
+  {
+    by: z.enum(['event', 'duplicate', 'similar']).describe('How to group.'),
+    path: z.string().optional().describe('Folder to scope to (optional).'),
+    limit: z.number().int().positive().max(200).optional(),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolPhotoGroups(projectId, args);
+      if (res.engine === 'unavailable') {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'No lookalike groups yet: the photos have no image embeddings. Try by "event" or "duplicate".',
+            },
+          ],
+        };
+      }
+      const lines = res.groups.map((g, i) => {
+        const span = g.from
+          ? `${g.from.slice(0, 16).replace('T', ' ')} to ${g.to?.slice(0, 16).replace('T', ' ')}`
+          : '';
+        const bytes = g.bytes ? ` · ${(g.bytes / 1_048_576).toFixed(1)} MB in extra copies` : '';
+        return `${i + 1}. ${g.count} photos${span ? ` · ${span}` : ''}${bytes}\n   ${g.paths.join('\n   ')}`;
+      });
+      const head = `${res.groups.length} ${res.by} group${res.groups.length === 1 ? '' : 's'}${res.truncated ? ' (more not shown)' : ''}`;
+      return { content: [{ type: 'text' as const, text: [head, ...lines].join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `photo_groups failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }
@@ -11837,7 +12101,7 @@ server.tool(
 
 server.tool(
   'run_git',
-  'Run a restricted git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Most are inspections, but `branch` arguments can create, rename, or delete local refs; use `branch` with no args for inspection, and only pass mutation args when the user explicitly requested that change. Args use a structured argv array rather than a shell and reject `-c`, `--exec`, and `--upload-pack`.',
+  'Run a restricted git subcommand in the project workspace. Allowed subcommands: `status`, `log`, `diff`, `show`, `blame`, `branch`, `rev-parse`, `ls-files`. Most are inspections, but `branch` arguments can create, rename, or delete local refs; use `branch` with no args for inspection, and only pass mutation args when the user explicitly requested that change. Args use a structured argv array rather than a shell. Each subcommand accepts only its common inspection options (e.g. `--oneline`, `-n`, `--stat`, `--format=`, `--short`, `--porcelain`), spelled out in full; options that write or read files outside the repository are refused, and paths must be relative to the workspace without `..`.',
   {
     subcommand: z.enum([
       'status',
@@ -11919,15 +12183,17 @@ server.tool(
     // in the 2026-08-02 core suite (six failed calls, then hand-authored
     // output). A generic "script not found" left it concluding the platform
     // was broken, so name the right tool at the moment of the mistake.
-    const looksLikePath = /[/\\]/.test(name) || /\.(mjs|cjs|js|ts|py|sh)$/i.test(name);
-    if (looksLikePath) {
+    const hintFor = (written?: string) =>
+      installedScriptMissHint({
+        name,
+        ...(written ? { written } : {}),
+        canRunFiles: toolIsAuthorizedForThisSession('run_nodejs_script'),
+        canDerive: toolIsAuthorizedForThisSession('derive_file'),
+        canWriteFiles: toolIsAuthorizedForThisSession('write_file'),
+      });
+    if (isPathShapedScriptName(name)) {
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `"${name}" looks like a file path, but run_installed_script takes the NAME of a script already installed in the project (see list_scripts). To run a script file you wrote yourself, use run_nodejs_script instead. To build a derived data file from other files, derive_file is usually better still.`,
-          },
-        ],
+        content: [{ type: 'text' as const, text: hintFor() }],
         isError: true as const,
       };
     }
@@ -11942,6 +12208,17 @@ server.tool(
       return formatScriptRunResult(res);
     } catch (err) {
       const msg = unwrapApiError(err);
+      if (/not found/i.test(msg)) {
+        let written: string | undefined;
+        for (const candidate of scriptFileCandidates(name)) {
+          const stat = await statWorkspacePath(candidate).catch(() => null);
+          if (stat?.kind === 'file') {
+            written = candidate;
+            break;
+          }
+        }
+        return errorResult(`run_installed_script failed: ${msg}\n${hintFor(written)}`);
+      }
       return errorResult(`run_installed_script failed: ${msg}`);
     }
   },

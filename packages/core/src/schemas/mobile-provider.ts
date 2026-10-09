@@ -157,6 +157,8 @@ export type MobileModelInventory = z.infer<typeof MobileModelInventorySchema>;
 
 /** Host admission limits, separate from the model's trained window. Native
  * inference still validates the actual tokenized prompt before generation. */
+const MOBILE_PROMPT_RESERVE = 128;
+
 export const MobileInferenceBudgetSchema = z
   .object({
     // The native bridge's ceiling (gezel_llama.cpp max_context_tokens).
@@ -164,10 +166,24 @@ export const MobileInferenceBudgetSchema = z
     maxTokens: z.number().int().min(1).max(4096),
   })
   .strict()
-  .refine(({ contextSize, maxTokens }) => maxTokens + 128 < contextSize, {
+  .refine(({ contextSize, maxTokens }) => maxTokens + MOBILE_PROMPT_RESERVE < contextSize, {
     message: 'Leave room for conversation and instructions before the reply budget',
   });
 export type MobileInferenceBudget = z.infer<typeof MobileInferenceBudgetSchema>;
+
+/** Reply ceiling admitted by the same contract as native generation. */
+export function resolveMobileInferenceLimits(
+  provider: Pick<MobileProvider, 'contextTokens' | 'maxOutputTokens'>,
+  contextSize = Math.min(4096, provider.contextTokens),
+): MobileInferenceBudget {
+  const limits = MobileInferenceBudgetSchema.parse({
+    contextSize,
+    maxTokens: Math.min(4096, provider.maxOutputTokens, contextSize - MOBILE_PROMPT_RESERVE - 1),
+  });
+  if (limits.contextSize > provider.contextTokens)
+    throw new Error('These token limits exceed what this on-device provider supports');
+  return limits;
+}
 
 /**
  * Explicit choices fail instead of being silently replaced by defaults.
@@ -182,13 +198,13 @@ export function resolveMobileInferenceBudget(
   provider: Pick<MobileProvider, 'contextTokens' | 'maxOutputTokens'>,
   requested: Partial<MobileInferenceBudget> = {},
 ): MobileInferenceBudget {
-  const contextSize = requested.contextSize ?? Math.min(4096, provider.contextTokens);
+  const limits = resolveMobileInferenceLimits(provider, requested.contextSize);
   const budget = MobileInferenceBudgetSchema.parse({
-    contextSize,
+    contextSize: limits.contextSize,
     maxTokens:
-      requested.maxTokens ?? Math.min(provider.maxOutputTokens, Math.floor(contextSize / 2)),
+      requested.maxTokens ?? Math.min(limits.maxTokens, Math.floor(limits.contextSize / 2)),
   });
-  if (budget.contextSize > provider.contextTokens || budget.maxTokens > provider.maxOutputTokens)
+  if (budget.maxTokens > limits.maxTokens)
     throw new Error('These token limits exceed what this on-device provider supports');
   return budget;
 }

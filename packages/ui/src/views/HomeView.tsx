@@ -12,6 +12,7 @@ import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
+import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
@@ -170,16 +171,18 @@ export function HomeView({
       ? Boolean(config?.hasGithubToken)
       : provider === 'openai'
         ? Boolean(config?.hasOpenaiApiKey)
-        : // Ollama has no credential — the base URL is its "connection".
-          // Treat it as always configured; the probe tells us if the server
-          // is actually reachable.
-          true;
+        : provider === 'anthropic'
+          ? Boolean(config?.hasAnthropicApiKey)
+          : // Ollama has no credential — the base URL is its "connection".
+            // Treat it as always configured; the probe tells us if the server
+            // is actually reachable.
+            true;
 
   // Auto-probe once config loads — gives the user a green checkmark
   // without clicking. Copilot can authenticate via the SDK's own flow
   // (gh auth / device code) without a stored token. Ollama has no
-  // credential at all. Both can be probed immediately. OpenAI strictly
-  // needs an API key, so wait until one is saved.
+  // credential at all. Both can be probed immediately. OpenAI and Anthropic
+  // strictly need an API key, so wait until one is saved.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-probe only when the specific config fields change — not on every probe-state or derived-hasCreds tick.
   useEffect(() => {
     if (!config) return;
@@ -187,7 +190,13 @@ export function HomeView({
     if (provider === 'copilot' || provider === 'ollama' || hasCreds) {
       void runProbe(provider);
     }
-  }, [config?.provider, config?.hasGithubToken, config?.hasOpenaiApiKey, config?.ollamaBaseUrl]);
+  }, [
+    config?.provider,
+    config?.hasGithubToken,
+    config?.hasOpenaiApiKey,
+    config?.hasAnthropicApiKey,
+    config?.ollamaBaseUrl,
+  ]);
 
   // Retry timer for Ollama's cold-start window. Held in a ref so provider
   // changes / unmounts cancel it cleanly.
@@ -536,6 +545,12 @@ export function HomeView({
               <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
                 A small model on this device (about 24 MB) keeps unrelated articles out of your
                 conversations.
+              </p>
+              <div style={{ marginTop: '0.6rem' }}>
+                <SocialModeToggle describe={false} />
+              </div>
+              <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
+                Gezels show their own character, and their growth is on display.
               </p>
               <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
                 Adjustable any time in Settings.

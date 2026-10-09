@@ -38,6 +38,7 @@ import {
   taskRef as buildTaskRef,
   createLogger,
   expandStepDeliverable,
+  explicitStepJump,
   gateHandoffNoteText,
   isEngagementAllowed,
   nightShiftDayKey,
@@ -666,6 +667,11 @@ export class TaskManager {
     reason: TaskNeedsHelpReason;
     detail: string;
   }): Promise<void> {
+    // A stable line for anything reading the log after the fact: evals class
+    // an unrecovered pause from it rather than burying it in "model-default".
+    log.info(
+      `[tasks] ${ctx.task.ref} paused for help (${ctx.reason})${ctx.stepId ? ` at step "${ctx.stepId}"` : ''}`,
+    );
     if (!this.onTaskNeedsHelp) return;
     try {
       await this.onTaskNeedsHelp(ctx);
@@ -2209,7 +2215,7 @@ export class TaskManager {
   }
 
   /**
-   * Idle-time twin of `ChatManager.maybeAutoAdvanceOnObservableProgress`.
+   * Idle-time twin of `maybeAutoAdvanceOnObservableProgress` (chat/observable-progress.ts).
    * That hook only fires when the assignee actually FINISHES a turn — so a
    * step whose deliverable already clears `advanceWhen` but whose assignee
    * went idle without ever calling `advance_task_step` (turn parked on a
@@ -2611,7 +2617,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         ...(gateOnApprove !== undefined ? { gateOnApprove } : {}),
         branchOutput: exitRun?.output,
       });
-      if (route.kind === 'invalid' && nextArg && nextArg !== 'next')
+      if (route.kind === 'invalid' && explicitStepJump(nextArg) !== undefined)
         throw new Error(`task ${current.ref}: no step "${nextArg}" to activate`);
       const terminating = route.kind === 'terminate';
       const newActive = route.kind === 'terminate' ? undefined : route.to;

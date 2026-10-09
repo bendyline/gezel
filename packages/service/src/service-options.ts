@@ -120,6 +120,8 @@ export interface StartServiceOptions {
   officeHostPort?: number;
   /** Office task-pane pages. Defaults to `office/` beside `uiDir`, then the build/dev locations. */
   officeDir?: string;
+  /** Test seam: the Night Shift's clock, so a test can run a whole night. Production passes none. */
+  nightShiftNow?: () => Date;
 }
 
 export interface RunningService<C extends EngineContext = ServiceContext> {

@@ -254,3 +254,28 @@ describe('childHostEnvironment', () => {
     }
   });
 });
+
+it('clears inherited model borrowing and native backend overrides for an isolated store host, then restores them', () => {
+  const env = {
+    GEZEL_READONLY_MODEL_HOMES: '/outside',
+    GGML_BACKEND_PATH: '/developer',
+    GEZEL_HOME: '/personal',
+  };
+  const original = { ...env };
+  const applied = applyHostEnvironment(
+    'editor',
+    {
+      home: '/private',
+      mode: 'in-process',
+      inferenceOnly: true,
+      distributionProfile: 'store',
+      nativeBinDir: '/signed',
+      readOnlyModelHomes: [],
+    },
+    env,
+  );
+  expect(env.GEZEL_READONLY_MODEL_HOMES).toBeUndefined();
+  expect(env.GGML_BACKEND_PATH).toBeUndefined();
+  applied.restore();
+  expect(env).toEqual(original);
+});

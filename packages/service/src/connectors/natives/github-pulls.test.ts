@@ -216,6 +216,23 @@ describe('GitHubPullsAdapter', () => {
     expect(patchLimits).toEqual([Number.POSITIVE_INFINITY]);
   });
 
+  // GitHub refuses a diff past its file limit every time. Every sync pass
+  // asked again and warned again, 10-23 times an hour (2026-10-09).
+  it('asks GitHub once for a diff it refused as too large', async () => {
+    let asked = 0;
+    const rt = runtime();
+    rt.prs.getPullRequestDiff = async () => {
+      asked++;
+      throw new Error('HttpError: Sorry, the diff exceeded the maximum number of files (300).');
+    };
+    for (let pass = 0; pass < 3; pass++) {
+      const adapter = new GitHubPullsAdapter(binding(), deps(), rt);
+      await adapter.ensureAuth();
+      await adapter.listChangesSince('pr-901', undefined);
+    }
+    expect(asked).toBe(1);
+  });
+
   it('replaces a list-files patch prefix with the complete full-diff segment', async () => {
     const adapter = new GitHubPullsAdapter(
       binding(),

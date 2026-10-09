@@ -30,6 +30,14 @@ export function writeFileOnlyTools(
   return writeFile ? [writeFile] : [];
 }
 
+/** Narrow the surface to the one tool a turn must call. Empty when it is absent. */
+export function requiredToolOnly(
+  tools: LocalChatCompletionTool[] | undefined,
+  name: string,
+): LocalChatCompletionTool[] {
+  return tools?.filter((tool) => chatCompletionToolName(tool) === name) ?? [];
+}
+
 /** Narrow the surface to `read_file` alone. Empty when the tool is absent. */
 export function readFileOnlyTools(
   tools: LocalChatCompletionTool[] | undefined,
@@ -204,6 +212,11 @@ export function applyConstrainedTurnShape(body: Record<string, unknown>): Constr
   body.max_tokens = Math.max(currentMax, CONSTRAINED_WRITE_MIN_TOKENS);
   body.temperature = 0.2;
   body.top_p = 0.8;
+  return disableTemplateThinking(body);
+}
+
+/** Turn the chat template's thinking off and its reasoning depth down, sampling untouched. */
+export function disableTemplateThinking(body: Record<string, unknown>): ConstrainedTurnShape {
   const existing = body.chat_template_kwargs;
   if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
     (existing as Record<string, unknown>).enable_thinking = false;

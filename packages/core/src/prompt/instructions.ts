@@ -12,6 +12,7 @@ import {
   capAboutForFootprint,
   renderProjectBrief,
 } from '../prompt-footprint.js';
+import { estimateTokens } from '../retrieval-budget.js';
 import { normalizeStepGate } from '../schemas/gate.js';
 import type { GezelGender } from '../schemas/gezel.js';
 import type { ProjectFileEntry } from '../schemas/project.js';
@@ -29,8 +30,11 @@ import { NATIVE_TOOL_NOTE } from '../tools/native-tools.js';
 
 export type { PromptTaskContext };
 export { renderTaskOutline };
+import { renderCharacterBlock } from '../character/index.js';
+import { renderPersonNotesBlock } from '../memory-notes.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
+import type { GezelCharacter } from '../schemas/character.js';
 import type { ProviderName } from '../schemas/gezel.js';
 import { canonicalToolName } from '../tools/tool-names.js';
 import {
@@ -108,6 +112,30 @@ export interface BuiltInstructions {
    * Only returned on the flat path. Layered mode has its own `layers`.
    */
   sharedPrefix?: string;
+  /**
+   * What fills the system prompt, section by section in prompt order (empty
+   * sections left out), at ~4 characters a token. The record a host keeps of
+   * each compiled prompt (`prompt.compiled`), and the measure a budget is
+   * checked against.
+   */
+  sections: PromptSectionSize[];
+}
+
+/** One section of a compiled system prompt and its estimated size. */
+export interface PromptSectionSize {
+  name: string;
+  tokens: number;
+  /** `stable` sections key the prompt cache; `volatile` ones change per session or turn. */
+  band: 'stable' | 'volatile';
+}
+
+type PromptSection = readonly [name: string, text: string, band: PromptSectionSize['band']];
+
+/** The sizes of the sections a prompt was built from, in order, empty ones left out. */
+function promptSectionSizes(sections: readonly PromptSection[]): PromptSectionSize[] {
+  return sections
+    .filter(([, text]) => text.length > 0)
+    .map(([name, text, band]) => ({ name, tokens: estimateTokens(text), band }));
 }
 
 export interface BuildInstructionsOptions {
@@ -137,6 +165,21 @@ export interface BuildInstructionsOptions {
    */
   lessons?: string;
   /**
+   * What the crew knows about the person (the "About you" memory scope),
+   * already selected for this footprint (`selectPersonNotes`). Rendered as a
+   * `### About the person` block in the STABLE prefix right after lessons:
+   * every gezel shares it, and it changes only when a note about the person
+   * is saved.
+   */
+  personNotes?: readonly string[];
+  /**
+   * The gezel's character, passed only in social mode (`resolveSocialMode`).
+   * Rendered as a `### Character` block of 60 tokens or fewer in the STABLE
+   * prefix right after traits, and kept in the minimal footprint: absent,
+   * the prompt is byte for byte what it was before characters existed.
+   */
+  character?: GezelCharacter;
+  /**
    * Standing behavior traits (frontmatter `traits[].text`), adopted via
    * the growth system's level-up flow. Rendered as a `### Traits` block
    * in the STABLE prefix between the about body and lessons — traits
@@ -146,13 +189,12 @@ export interface BuildInstructionsOptions {
   /**
    * Gezel's role from frontmatter (e.g. `'Meester'`, `'Voorman'`,
    * `'Developer'`). Drives the delegation-guardrail decision: roles
-   * whose tool groups exclude `workspace-fs-write`/`code-execution`
-   * (i.e. Meester, Voorman, Planner) get an explicit "don't try to
-   * write code or run shells — delegate" block prepended to the
-   * system prompt. Voorman is unusual — they have `workspace-fs-read`
-   * for diagnostic browsing but still don't *build*, so the
-   * orientation prose for "where work belongs" still treats them as
-   * a delegator.
+   * with an explicit coordination contract (Meester, Voorman, Planner)
+   * get a "don't try to write code or run shells — delegate" block
+   * prepended to the system prompt. Voorman is unusual — they have
+   * `workspace-fs-read` for diagnostic browsing but still don't *build*,
+   * so the orientation prose for "where work belongs" still treats them
+   * as a delegator.
    */
   role?: string;
   /**
@@ -680,18 +722,21 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // accumulated cross-project knowledge read as part of who it is, not
   // as volatile per-turn context.
   const traitsBlock = renderTraitsBlock(opts.traits ?? []);
+  const characterBlock = renderCharacterBlock(opts.character);
   const lessonsBlock = opts.lessons
     ? `\n\n---\n\n### Lessons from past work\n\n(accumulated by you across projects — preferences and practices that have proven out)\n\n${opts.lessons}`
     : '';
+  const personBlock = renderPersonNotesBlock(opts.personNotes ?? []);
 
-  // Delegation guardrail. Roles whose tool groups don't include
-  // `workspace-fs-write`/`code-execution` (Meester, Voorman, Planner)
-  // get explicit prose telling them what they CAN'T do — otherwise the
-  // model reads its (still-rich) about.md and assumes it should
-  // build the thing the user asked for. The tool-denial layer
-  // (`--disallowedTools` for Claude CLI, MCP exclude env for
-  // gezel-mcp) is the hard guardrail; this prose is the soft one
-  // telling the model how to think when it hits a denial.
+  // Delegation guardrail. Explicit coordinator roles (Meester, Voorman,
+  // Planner) get prose telling them what they CAN'T do — otherwise the
+  // model reads its (still-rich) about.md and assumes it should build the
+  // thing the user asked for. Missing workspace/code tools alone are not
+  // enough to classify a role: Curator and media generators are executors
+  // whose output tools do not require generic workspace writes. The
+  // tool-denial layer (`--disallowedTools` for Claude CLI, MCP exclude env
+  // for gezel-mcp) is the hard guardrail; this prose is the soft one telling
+  // the model how to think when it hits a denial.
   //
   // Provider gate: we've only observed denial-spelunking on Claude
   // CLI so far (the model dives into `ToolSearch` looking for any
@@ -1064,7 +1109,10 @@ ${artifactsLine}
 
 - **Workspace writes** (\`write_file\`) — create the source or deliverable file named by the task directly in the project workspace. Put the complete contents in the tool call; do not paste the file into chat or save it as an artifact.
 - **Workspace reads are not available this turn.** Use the task context and any exact paths already supplied${workspaceListingRendered ? ', plus the role-scoped workspace listing below' : ''}. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
-    } else {
+    } else if (!leanProfile || hasArtifactTools) {
+      // A lean session (a game, the chat room) with no drawers has nothing to
+      // place, and this section spent ~500 tokens of a phone's window telling
+      // it so.
       const listedArtifactWarning = workspaceListingRendered
         ? `; do not treat a path shown in \`### Workspace files\` as an artifact${hasListArtifacts ? ' unless `list_artifacts` returned it too' : ''}`
         : '';
@@ -1663,9 +1711,23 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const fileEditsDisabledNote = fileEditsDisabled
     ? `\n\n---\n\n## ⚠️ Built-in file tools are read-only for this session\n\nThis project does not currently allow Gezel-managed workspace writes. **This session cannot create or edit workspace files** — \`write_file\`, \`replace_in_file\`, \`append_to_file\`, \`generate_image\`, and the other managed write tools are not on your roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a workspace file** — you can't, and the runtime flags the false claim.\n- **Do not call unavailable workspace-write tools.** Reading, reviewing, analysis, and planning still work.\n- If the request needs a file change, **say so plainly**: this session's built-in tools are read-only, and the user can enable them via **"${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings**.\n- **Do not generalize this to every gezel.** Provider-native sessions such as Codex may have separate project access.`
     : '';
-  const freshProjectAddendum = isFreshProject
-    ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
-    : '';
+  // Only a session that could survey the drawers needs telling not to.
+  const canSurvey =
+    availableTools === undefined ||
+    toolsFrom([
+      'list_artifacts',
+      'list_memories',
+      'list_packages',
+      'list_scripts',
+      'list_craftbooks',
+      'list_tasks',
+      'list_dir',
+      'read_file',
+    ]).length > 0;
+  const freshProjectAddendum =
+    isFreshProject && canSurvey
+      ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
+      : '';
 
   const operationalGuidance = [actDontNarrate, decisionGuidance, browsingForRole.trim()]
     .filter(Boolean)
@@ -1676,43 +1738,45 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const aboutIntro =
     '\n\nThe section below is your "about" document — it describes your role, what you know, and how you should behave.\n\n---\n\n';
 
-  // Per-section size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). Prints what
-  // actually fills the system prefix so we can see where the prefill tokens go
-  // and trim with data instead of guessing. Token counts are a ~4-chars/token
-  // estimate — fine for relative comparison; the engine's own counts are exact.
-  // NOTE: this is only the system TEXT; the tool JSON schemas are a separate
-  // `tools` array (logged at the send site) and are NOT counted here.
+  // Every section of the standard path, in prompt order. Sizes ride the
+  // result (`sections`); GEZEL_PROMPT_BREAKDOWN=1 also prints them, largest
+  // first, so prefill can be trimmed with data instead of guesses. Token
+  // counts are a ~4-chars/token estimate — fine for relative comparison; the
+  // engine's own counts are exact. This is the system TEXT only: the tool JSON
+  // schemas are a separate `tools` array the local engines report themselves.
+  const sections: PromptSection[] = [
+    ['header', header, 'stable'],
+    ['delegationGuardrail', delegationGuardrail, 'stable'],
+    ['exactFormatGuidance', exactFormatGuidance, 'stable'],
+    ['aboutIntro', aboutIntro, 'stable'],
+    ['about (persona body)', body, 'stable'],
+    ['traits', traitsBlock, 'stable'],
+    ['character', characterBlock, 'stable'],
+    ['lessons', lessonsBlock, 'stable'],
+    ['aboutPerson', personBlock, 'stable'],
+    ['projectContext (about+mission+github)', projectContext, 'stable'],
+    ['actDontNarrate', actDontNarrate, 'stable'],
+    ['decisionGuidance', decisionGuidance, 'stable'],
+    ['browsingForRole', browsingForRole, 'stable'],
+    ['markdownGuidance', markdownGuidance, 'stable'],
+    ['untrustedContent', untrustedContentBlock, 'stable'],
+    ['factualWriting', factualWritingBlock, 'stable'],
+    ['localHints', localHints, 'stable'],
+    ['verboseModelHints', verboseModelHints, 'stable'],
+    ['availableTools (text block)', availableToolsBlock, 'stable'],
+    ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
+    ['workspaceGestalt', workspaceGestaltBlock, 'volatile'],
+    ['workspaceFiles', workspaceFilesBlock, 'volatile'],
+    ['documents', documentsContext, 'volatile'],
+    ['taskContext', taskContext, 'volatile'],
+    ['assignedTasks', assignedTasksContext, 'volatile'],
+    ['recall (memory)', recall, 'volatile'],
+    ['consultationAddendum', consultationAddendum, 'volatile'],
+    ['freshProjectAddendum', freshProjectAddendum, 'volatile'],
+    ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+  ];
   if (process.env.GEZEL_PROMPT_BREAKDOWN === '1') {
     const estTok = (s: string) => Math.round((s?.length ?? 0) / 4);
-    const sections: Array<readonly [string, string, 'stable' | 'volatile']> = [
-      ['header', header, 'stable'],
-      ['delegationGuardrail', delegationGuardrail, 'stable'],
-      ['exactFormatGuidance', exactFormatGuidance, 'stable'],
-      ['aboutIntro', aboutIntro, 'stable'],
-      ['about (persona body)', body, 'stable'],
-      ['traits', traitsBlock, 'stable'],
-      ['lessons', lessonsBlock, 'stable'],
-      ['projectContext (about+mission+github)', projectContext, 'stable'],
-      ['actDontNarrate', actDontNarrate, 'stable'],
-      ['decisionGuidance', decisionGuidance, 'stable'],
-      ['browsingForRole', browsingForRole, 'stable'],
-      ['markdownGuidance', markdownGuidance, 'stable'],
-      ['untrustedContent', untrustedContentBlock, 'stable'],
-      ['factualWriting', factualWritingBlock, 'stable'],
-      ['localHints', localHints, 'stable'],
-      ['verboseModelHints', verboseModelHints, 'stable'],
-      ['availableTools (text block)', availableToolsBlock, 'stable'],
-      ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
-      ['workspaceGestalt', workspaceGestaltBlock, 'volatile'],
-      ['workspaceFiles', workspaceFilesBlock, 'volatile'],
-      ['documents', documentsContext, 'volatile'],
-      ['taskContext', taskContext, 'volatile'],
-      ['assignedTasks', assignedTasksContext, 'volatile'],
-      ['recall (memory)', recall, 'volatile'],
-      ['consultationAddendum', consultationAddendum, 'volatile'],
-      ['freshProjectAddendum', freshProjectAddendum, 'volatile'],
-      ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
-    ];
     const totalTok = sections.reduce((n, [, s]) => n + estTok(s), 0);
     const rows = sections
       .filter(([, s]) => (s?.length ?? 0) > 0)
@@ -1750,11 +1814,32 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       ? `\n\n---\n\nYou are working in the project "${project.name}".${brief ? `\n\n${brief}` : ''}`
       : '';
     const minimalFull = minimalContextNativeTools
-      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
-      : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
+      ? `${header}${aboutIntro}${cappedBody}${characterBlock}${personBlock}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
+      : `${header}${aboutIntro}${cappedBody}${characterBlock}${personBlock}${MINIMAL_CONTEXT_CONDUCT}`;
+    const minimalSections: PromptSection[] = minimalContextNativeTools
+      ? [
+          ['header', header, 'stable'],
+          ['aboutIntro', aboutIntro, 'stable'],
+          ['about (persona body)', cappedBody, 'stable'],
+          ['character', characterBlock, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
+          ['minimalConduct', MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT, 'stable'],
+          ['projectBrief', minimalProject, 'stable'],
+          ['taskContext', taskContext, 'volatile'],
+          ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+        ]
+      : [
+          ['header', header, 'stable'],
+          ['aboutIntro', aboutIntro, 'stable'],
+          ['about (persona body)', cappedBody, 'stable'],
+          ['character', characterBlock, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
+          ['minimalConduct', MINIMAL_CONTEXT_CONDUCT, 'stable'],
+        ];
     return {
       full: minimalFull,
       ...(layeredPrefixCache ? { layers: { gezel: minimalFull, project: minimalFull } } : {}),
+      sections: promptSectionSizes(minimalSections),
     };
   }
 
@@ -1766,19 +1851,34 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // model-specific tool syntax, and the late recency anchor.
   if (focusedTaskContext && task?.step?.prompt) {
     const actionGuidance = actDontNarrate ? `\n\n${actDontNarrate}` : '';
-    const stable = `${header}\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
+    const focusedIntro = `\n\nYou are executing a focused craftbook step. The active step procedure below overrides standing role habits; use only the tools listed for this turn.${actionGuidance}\n\n`;
+    const stable = `${header}${focusedIntro}${markdownGuidance}${untrustedContentBlock}${factualWritingBlock}${localHints}${availableToolsBlock}${fileEditsDisabledNote}`;
     const volatile = `${taskContext}${consultationAddendum}${activeTaskAnchor}`
       .replace(/^\n+(?:---\n+)?/, '')
       .trim();
+    const focusedSections = promptSectionSizes([
+      ['header', header, 'stable'],
+      ['focusedStepIntro', focusedIntro, 'stable'],
+      ['markdownGuidance', markdownGuidance, 'stable'],
+      ['untrustedContent', untrustedContentBlock, 'stable'],
+      ['factualWriting', factualWritingBlock, 'stable'],
+      ['localHints', localHints, 'stable'],
+      ['availableTools (text block)', availableToolsBlock, 'stable'],
+      ['fileEditsDisabledNote', fileEditsDisabledNote, 'stable'],
+      ['taskContext', taskContext, 'volatile'],
+      ['consultationAddendum', consultationAddendum, 'volatile'],
+      ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
+    ]);
     if (layeredPrefixCache) {
       return {
         full: stable,
         layers: { gezel: stable, project: stable },
         ...(volatile ? { volatileContext: volatile } : {}),
+        sections: focusedSections,
       };
     }
     const full = `${stable}${taskContext}${consultationAddendum}${activeTaskAnchor}`;
-    return { full, sharedPrefix: stable };
+    return { full, sharedPrefix: stable, sections: focusedSections };
   }
 
   // Legacy single-band ordering (flag OFF) — byte-identical to before.
@@ -1787,9 +1887,13 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     // byte-prefix of `full` — siblings of the same (gezel, project) render
     // everything up to `taskContext` identically. Concatenation order is
     // unchanged, so `full` stays byte-identical to the single-string form.
-    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
+    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${characterBlock}${lessonsBlock}${personBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
     const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
-    return { full: `${sharedPrefix}${sessionTail}`, sharedPrefix };
+    return {
+      full: `${sharedPrefix}${sessionTail}`,
+      sharedPrefix,
+      sections: promptSectionSizes(sections),
+    };
   }
 
   // Layered ordering (flag ON). The stable system message keeps every
@@ -1798,7 +1902,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // above) — and ONLY removes the volatile band. The gezel-identity
   // prefix (everything before projectContext) is a true byte-prefix of
   // the full stable message, so adapters key `prefix-gezel` ⊂ `prefix-gp`.
-  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
+  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${characterBlock}${lessonsBlock}${personBlock}`;
   const stableSystem = `${gezelPrefix}${projectContext}${operationalGuidanceSection}${responseGuidanceSection}`;
 
   // Volatile band → a frozen message injected after the tool block. The
@@ -1815,5 +1919,6 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     full: stableSystem,
     layers: { gezel: gezelPrefix, project: stableSystem },
     ...(volatileContext ? { volatileContext } : {}),
+    sections: promptSectionSizes(sections),
   };
 }

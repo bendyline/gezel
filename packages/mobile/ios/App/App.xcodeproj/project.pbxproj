@@ -20,6 +20,7 @@
 		A10000000000000000000003 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* MainViewController.swift */; };
 		A10000000000000000000005 /* MobileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* MobileStore.swift */; };
 		A10000000000000000000031 /* GezelSpeechPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* GezelSpeechPlugin.swift */; };
+		A10000000000000000000041 /* GezelVisionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000040 /* GezelVisionPlugin.swift */; };
 		A10000000000000000000033 /* GezelSpeech.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* GezelSpeech.xcframework */; };
 		A10000000000000000000034 /* GezelSpeech.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* GezelSpeech.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000037 /* speech in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* speech */; };
@@ -76,6 +77,7 @@
 		A10000000000000000000004 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MainViewController.swift; path = ../../native/ios/Plugin/MainViewController.swift; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000006 /* MobileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MobileStore.swift; path = ../../native/ios/Sources/GezelMobileStorage/MobileStore.swift; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000030 /* GezelSpeechPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GezelSpeechPlugin.swift; path = ../../native/ios/Plugin/GezelSpeechPlugin.swift; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000040 /* GezelVisionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GezelVisionPlugin.swift; path = ../../native/ios/Plugin/GezelVisionPlugin.swift; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000032 /* GezelSpeech.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GezelSpeech.xcframework; path = "../../../../native/mobile/.build/speech-ios/payload/GezelSpeech.xcframework"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000036 /* speech */ = {isa = PBXFileReference; lastKnownFileType = folder; name = speech; path = ../../.build/speech/assets/speech; sourceTree = SOURCE_ROOT; };
 		B10000000000000000000002 /* AppTests/MobileBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTests/MobileBridgeTests.swift; sourceTree = SOURCE_ROOT; };
@@ -116,6 +118,7 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				A10000000000000000000030 /* GezelSpeechPlugin.swift */,
+				A10000000000000000000040 /* GezelVisionPlugin.swift */,
 				B10000000000000000000002 /* AppTests/MobileBridgeTests.swift */,
 				E20000000000000000000002 /* AppTests/MobileProductEvalTests.swift */,
 				F50000000000000000000002 /* ../../native/ios/Tests/GezelMobileStorageTests/EvalDataPreservation.swift */,
@@ -280,6 +283,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				A10000000000000000000031 /* GezelSpeechPlugin.swift in Sources */,
+				A10000000000000000000041 /* GezelVisionPlugin.swift in Sources */,
 				A10000000000000000000005 /* MobileStore.swift in Sources */,
 				F18000000000000000000001 /* ProductFiles.swift in Sources */,
 				A10000000000000000000003 /* MainViewController.swift in Sources */,

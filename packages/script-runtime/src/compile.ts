@@ -9,7 +9,11 @@ export interface PortableScriptCompilation {
   diagnostics: ScriptDiagnostic[];
 }
 export const PORTABLE_SCRIPT_MAX_SOURCE_CHARS = 256_000;
-const modules = new Set(['@bendyline/gezel-sdk', '@bendyline/gezel-sdk/checks']);
+const modules = new Set([
+  '@bendyline/gezel-sdk',
+  '@bendyline/gezel-sdk/checks',
+  '@bendyline/gezel-sdk/stores',
+]);
 /** A trusted compiler, run in a dedicated Worker. It never evaluates source or resolves imports. */
 export function compilePortableScript(source: string, name: string): PortableScriptCompilation {
   if (source.length > PORTABLE_SCRIPT_MAX_SOURCE_CHARS)
@@ -36,7 +40,7 @@ export function compilePortableScript(source: string, name: string): PortableScr
     if (specifier && (!ts.isStringLiteralLike(specifier) || !modules.has(specifier.text)))
       reject(
         specifier,
-        'This device permits only the bundled @bendyline/gezel-sdk and @bendyline/gezel-sdk/checks imports.',
+        'This device permits only the bundled @bendyline/gezel-sdk, @bendyline/gezel-sdk/checks and @bendyline/gezel-sdk/stores imports.',
       );
     if (
       ts.isCallExpression(node) &&

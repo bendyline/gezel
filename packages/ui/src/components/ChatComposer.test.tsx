@@ -461,7 +461,7 @@ describe('ChatComposer attached task', () => {
       target: { value: 'Please make a PowerPoint about Mongolia.' },
     });
 
-    const strip = await screen.findByRole('group', { name: /attached task: powerpoint/i });
+    const strip = await screen.findByRole('group', { name: 'Attached task: Slide deck' });
     expect(strip).toHaveAttribute('data-origin', 'suggested');
     expect(strip).toHaveTextContent('Suggested task');
     expect(strip).toHaveTextContent('topic: Mongolia');
@@ -505,12 +505,63 @@ describe('ChatComposer attached task', () => {
     expect(await screen.findByRole('group', { name: /attached task/i })).toBeVisible();
 
     fireEvent.change(editor, { target: { value: 'Can you create a PowerPoint about Mongolia' } });
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
     await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('group', { name: /attached task/i })).toBeVisible();
+    expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
 
     latestPreview.resolve(quietPlan);
     await waitFor(() => expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull());
   });
+
+  it.each(['pending', 'failed'] as const)(
+    'sends the edited message as chat while its new preview is %s',
+    async (previewState) => {
+      const latestPreview = deferred<TurnIntentPlan>();
+      vi.mocked(api.previewTurnIntent)
+        .mockResolvedValueOnce(powerpointPlan)
+        .mockReturnValueOnce(latestPreview.promise);
+      vi.mocked(api.createChatSession).mockResolvedValue({ id: 'session-1' } as never);
+      vi.mocked(api.sendToChatSession).mockResolvedValue({
+        accepted: true,
+        sessionId: 'session-1',
+      });
+      vi.mocked(streamChatEvents).mockImplementation(async function* () {
+        yield { type: 'done' } as never;
+      });
+      render(
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId={undefined}
+          taskLaunch={taskLaunch}
+        />,
+      );
+      const editor = screen.getByLabelText('Message');
+      fireEvent.change(editor, { target: { value: 'Please make a PowerPoint about Mongolia.' } });
+      await screen.findByRole('group', { name: /attached task/i });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Start the task' })).toBeEnabled(),
+      );
+
+      fireEvent.change(editor, { target: { value: 'Ping from the write-flow spec' } });
+      await waitFor(() => expect(api.previewTurnIntent).toHaveBeenCalledTimes(2));
+      if (previewState === 'failed') {
+        await act(async () => latestPreview.reject(new Error('preview unavailable')));
+      }
+      pressSendShortcut();
+
+      await waitFor(() =>
+        expect(api.sendToChatSession).toHaveBeenCalledWith(
+          'session-1',
+          expect.objectContaining({ message: 'Ping from the write-flow spec' }),
+        ),
+      );
+      expect(api.launchTaskFromChatSession).not.toHaveBeenCalled();
+      expect(screen.queryByRole('group', { name: /attached task/i })).toBeNull();
+      await act(async () => latestPreview.resolve(quietPlan));
+    },
+  );
 
   it('dismissing a suggestion keeps it away while the message is edited, and opts the send out of the route', async () => {
     vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
@@ -1482,6 +1533,38 @@ describe('ChatComposer recipient picker', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to Ada' }));
 
     expect(onPrimaryRecipientChange).toHaveBeenCalledWith('ada');
+  });
+
+  it('keeps the live editor when a late placeholder update arrives for the same recipient', () => {
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        placeholder="Ask Tomas a question."
+      />,
+    );
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Message');
+    fireEvent.change(editor, { target: { value: 'Keep this draft while the crew loads' } });
+    editor.focus();
+    editor.setSelectionRange(5, 15);
+
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        placeholder="Talk with Tomas about project ideas."
+      />,
+    );
+
+    expect(screen.getByLabelText('Message')).toBe(editor);
+    expect(editor).toHaveFocus();
+    expect(editor).toHaveValue('Keep this draft while the crew loads');
+    expect(editor.selectionStart).toBe(5);
+    expect(editor.selectionEnd).toBe(15);
   });
 
   it('refreshes the recipient placeholder without losing the current draft', () => {

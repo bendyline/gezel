@@ -28,11 +28,15 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
     {project}/
       project.json    name, working folder, crew settings
       documents/      About + Mission Objectives
+      index/          the project's search index: summaries, descriptions,
+                      reviews (rebuildable; kept here, not in your folder)
       artifacts/      everything the crew produces
         shadow/       machine-made markdown twins of workspace documents,
                       pictures, and recordings (rebuilt automatically —
                       safe to delete, not a place to put your own files)
   documents/          the shared library
+  memories/           what your gezels have learned about you ("About you"),
+                      shared by all of them
   ambient/            ambient dashboard images (dated PNGs + latest.png),
                       made to be shown as wallpaper or lock screen
   integrations/
@@ -44,6 +48,10 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
   history.jsonl       the audit log
   logs/               service logs (rolling)
 ```
+
+## Folders you add
+
+A folder you add to gezel — Pictures, Documents, a code repository — stays where it is. Gezel reads it in place and writes nothing into it: the search index, photo descriptions and summaries for that folder live under `projects/{project}/` in the gezel home. A file in your folder changes only when you apply a change you approved. Earlier versions kept the index in a hidden `.gezel` folder inside yours; gezel moves it out the first time it starts.
 
 ## What you can safely do
 

@@ -119,6 +119,14 @@ export interface MoeOffloadDecision {
   nCpuMoe?: number;
   /** `--n-cpu-ffn N` — keep blocks `0..N-1`'s dense FFN weights in RAM. */
   nCpuFfn?: number;
+  /**
+   * Set only when every weight fits the GPU pool. The engine-flag builder
+   * reads it as positive evidence that no model compute runs on the CPU,
+   * which is what licenses its GPU-resident thread default. Decisions that
+   * leave placement to the engine omit it on purpose: llama.cpp's own fit
+   * may then put layers on the CPU, where every thread counts.
+   */
+  fullGpuResidency?: true;
   /** Human-readable rationale for the decision log (never emitted as a flag). */
   reason?: string;
 }
@@ -156,6 +164,7 @@ export function planDenseFfnOffload(input: DenseFfnOffloadInput): MoeOffloadDeci
   const weightsTotal = input.split.nonFfnBytes + ffnTotal;
   if (weightsTotal + reserves <= input.vramBytes) {
     return {
+      fullGpuResidency: true,
       reason: `dense model fits VRAM (weights ${gib(weightsTotal)} + reserves ${gib(reserves)} ≤ ${gib(input.vramBytes)}) — full GPU residency`,
     };
   }
@@ -180,6 +189,7 @@ export function planDenseFfnOffload(input: DenseFfnOffloadInput): MoeOffloadDeci
   const nCpuFfn = Math.max(0, blockCount - gpuLayers);
   if (nCpuFfn === 0) {
     return {
+      fullGpuResidency: true,
       reason: `all ${blockCount} dense FFN layers fit the ${gib(ffnBudget)} FFN budget — full GPU residency`,
     };
   }
@@ -235,6 +245,7 @@ export function planMoeOffload(input: MoeOffloadInput): MoeOffloadDecision {
   if (input.split) return planFromSplit(input, input.split, margin);
   if (input.residentBytes + margin <= input.vramBytes) {
     return {
+      fullGpuResidency: true,
       reason: `MoE fits VRAM (~${gib(input.residentBytes)} + ${gib(margin)} ≤ ${gib(input.vramBytes)}) — full GPU residency`,
     };
   }
@@ -257,6 +268,7 @@ function planFromSplit(
 
   if (weightsTotal + reserves <= input.vramBytes) {
     return {
+      fullGpuResidency: true,
       reason: `MoE fits VRAM (weights ${gib(weightsTotal)} + reserves ${gib(reserves)} ≤ ${gib(input.vramBytes)}) — full GPU residency`,
     };
   }
@@ -296,6 +308,7 @@ function planFromSplit(
   const nCpuMoe = Math.max(0, blockCount - gpuLayers);
   if (nCpuMoe === 0) {
     return {
+      fullGpuResidency: true,
       reason: `all ${blockCount} expert layers fit the ${gib(expertBudget)} expert budget — full GPU residency`,
     };
   }

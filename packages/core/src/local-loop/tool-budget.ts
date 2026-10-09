@@ -1,3 +1,6 @@
+import { estimateTokens } from '../retrieval-budget.js';
+import type { ToolSurfaceSize } from './provider-contract.js';
+
 /**
  * Fraction of `numCtx` reserved for the running transcript + tool
  * outputs. The remaining 25% covers the assistant's response plus
@@ -165,4 +168,9 @@ export function capToolOutput(
     ? 'only a small slice fit this tool call — re-run with a narrower request, or save the output and inspect it in smaller chunks'
     : 'tool output limit applied — re-run with a more specific request if you need the rest';
   return `${text.slice(0, clamped)}\n\n…[tool output truncated: ${dropped.toLocaleString('en-US')} additional chars dropped; ${guidance}]`;
+}
+
+/** The advertised tool roster, sized as the prompt tokens its schemas cost. */
+export function toolSurfaceSize(tools: readonly unknown[]): ToolSurfaceSize {
+  return { count: tools.length, tokens: estimateTokens(JSON.stringify(tools)) };
 }

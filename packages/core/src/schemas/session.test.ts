@@ -45,6 +45,23 @@ describe('ChatSessionSchema', () => {
     expect(() => ChatSessionSchema.parse({ ...validSession, providerName: 'bedrock' })).toThrow();
   });
 
+  it('round-trips OpenAI tool outputs that must be submitted after a handoff', () => {
+    const providerState = {
+      openaiPreviousResponseId: 'resp-handoff',
+      openaiPendingToolOutputs: [
+        { type: 'function_call_output', call_id: 'advance-1', output: 'Step completed' },
+      ],
+    };
+    const out = ChatSessionSchema.parse({ ...validSession, providerName: 'openai', providerState });
+    expect(out.providerState).toEqual(providerState);
+    expect(() =>
+      ChatSessionSchema.parse({
+        ...validSession,
+        providerState: { ...providerState, openaiPendingToolOutputs: [{ call_id: 'advance-1' }] },
+      }),
+    ).toThrow();
+  });
+
   it('requires version: 1', () => {
     expect(() => ChatSessionSchema.parse({ ...validSession, version: 2 })).toThrow();
   });

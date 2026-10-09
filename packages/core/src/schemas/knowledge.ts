@@ -27,6 +27,8 @@ export {
   CatalogDocumentSchema,
   DEFAULT_EMBEDDING_ONNX_FILE,
   DEFAULT_EMBEDDING_TOKENIZER_FILE,
+  EmbeddingMediaSchema,
+  EmbeddingModelFileSchema,
   GEZK_APPLICATION_ID,
   GEZK_FORMAT_GENERATIONS,
   GEZK_FORMAT_VERSION,
@@ -39,6 +41,7 @@ export {
   KNOWLEDGE_ASSET_PATH_PATTERN,
   KNOWLEDGE_ASSET_TYPES,
   KNOWLEDGE_ID_PATTERN,
+  KNOWLEDGE_MEDIA_ASSET_TYPES,
   KNOWLEDGE_MANIFEST_INDEX_SCHEMA_VERSIONS,
   KNOWLEDGE_VERSION_PATTERN,
   KnowledgeAssetPathSchema,
@@ -81,11 +84,19 @@ export {
   assetContentType,
   assetExtension,
   assetKindForExtension,
+  assetModality,
   embeddingProfileArtifacts,
   embeddingProfileCenter,
   embeddingProfileCenterProblem,
+  embeddingProfileMinimumFormat,
+  embeddingProfileSourceDimensions,
+  embeddingProfileTruncationProblem,
+  formatAtLeast,
   formatKnowledgeUri,
   isKnowledgeAssetPath,
+  isKnowledgeMediaAssetPath,
+  knowledgeAssetLimitsProblem,
+  maxKnowledgeAssetBytes,
   isSupportedFormatVersion,
   isSupportedIndexSchemaVersion,
   parseKnowledgeUri,
@@ -94,10 +105,13 @@ export {
 } from '@bendyline/gezk';
 export type {
   CatalogDocument,
+  EmbeddingMedia,
+  EmbeddingModelFile,
   GezkFormatVersion,
   GezkIndexSchemaVersion,
   KnowledgeAssetExtension,
   KnowledgeAssetKind,
+  KnowledgeAssetModality,
   KnowledgeCatalogManifest,
   KnowledgeChunkingProfile,
   KnowledgeDocumentMeta,
@@ -121,6 +135,7 @@ export type {
  * package's profile registry test asserts the two lists stay identical.
  */
 export const KNOWLEDGE_EMBEDDING_PROFILE_IDS = [
+  'embeddinggemma-2-512@1',
   'multilingual-e5-small@2',
   'multilingual-e5-small@1',
   'bge-small-en-v1.5@1',
@@ -274,6 +289,12 @@ export const KnowledgeCatalogStatusSchema = z.object({
   /** A strictly newer version exists in the shipped catalog content. */
   updateAvailable: z.boolean(),
   availableVersion: z.string().optional(),
+  /**
+   * The gilde entry's Reference Mark, as a bearer-gated catalog route
+   * (`/api/catalog/knowledge-catalog/{id}/file/logo.webp`). Absent for
+   * catalogs gilde does not list or that ship no artwork.
+   */
+  logoUrl: z.string().optional(),
 });
 export type KnowledgeCatalogStatus = z.infer<typeof KnowledgeCatalogStatusSchema>;
 

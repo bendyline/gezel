@@ -11,6 +11,7 @@ export interface ModelDescriptor extends ModelListEntry {
 }
 export interface ModelProgress {
   phase: 'resolving' | 'engine' | 'downloading' | 'verifying' | 'preparing';
+  percent?: number;
   message: string;
   bytesWritten?: number;
   totalBytes?: number;
@@ -26,6 +27,8 @@ export interface ModelAdapter {
   prepare(id: string, options: PrepareModelOptions & { signal: AbortSignal }): Promise<string>;
   /** HTTP jobs can be shared with other apps; aborting their observation does not cancel them. */
   cancellation: 'observation' | 'download';
+  /** Hosted engines can require preparation even when their weights are already present. */
+  prepareAvailable?: boolean;
 }
 export interface ModelWatch {
   ready: Promise<void>;
@@ -192,12 +195,12 @@ export function createModelManager(adapter: ModelAdapter): ModelManager {
           preparing = true;
           try {
             const before = await manager.inspect(id, { signal });
-            if (before?.availability === 'available') return before;
-            if (!options.allowDownload)
+            if (before?.availability === 'available' && !adapter.prepareAvailable) return before;
+            if (before?.availability !== 'available' && !options.allowDownload)
               throw new GezelSdkError('Model preparation requires an explicit download action', {
                 code: 'model_download_required',
               });
-            const installedId = await adapter.prepare(id, {
+            const installedId = await adapter.prepare(before?.id ?? id, {
               ...options,
               signal,
               onProgress: (event) => notify(options.onProgress, event),

@@ -167,6 +167,27 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
     expect(c.rule).toBe('model-default');
   });
 
+  it('a gate script the sandbox refused to start → infra sandbox-unavailable', () => {
+    const log =
+      '2026-10-02T03:00:00Z WARN [tasks] gate script failed: [sandbox error] denyNet requires an enforceable OS network boundary. This platform has no supported boundary, so the script was not started.';
+    const c = classifyTrial({ ...stall, daemonLog: log });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'sandbox-unavailable' });
+  });
+
+  it('a gate the runtime could not evaluate → infra gate-unevaluable', () => {
+    const log =
+      '2026-09-23T03:00:00Z WARN [gate] p/4 step "verify" could not be evaluated — pausing without consuming an attempt: unresolved {{reviewId}}';
+    const c = classifyTrial({ ...stall, daemonLog: log });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'gate-unevaluable' });
+  });
+
+  it('a pause nothing recovered → model task-paused-unrecovered, not model-default', () => {
+    const log =
+      '2026-10-06T03:00:00Z INFO [tasks] p/4 paused for help (gate_exhausted) at step "evaluate"';
+    const c = classifyTrial({ ...stall, daemonLog: log });
+    expect(c).toMatchObject({ failureClass: 'model', rule: 'task-paused-unrecovered' });
+  });
+
   it('repeated Jinja role-alternation 500s → infra chat-template-500', () => {
     const line =
       'ERROR Jinja Exception: Conversation roles must alternate user/assistant/user/assistant/...';

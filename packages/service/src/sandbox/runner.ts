@@ -543,6 +543,51 @@ export function sandboxEnv(src: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
+const BROWSER_SCRIPT_EXTRA_ENV = new Set([
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'USER',
+  'LOGNAME',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'XDG_RUNTIME_DIR',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'PROGRAMFILES(X86)',
+]);
+
+/**
+ * Environment for a user-approved Playwright script. It runs outside the
+ * sandbox — it has to start a browser and reach the network — but it never
+ * needs the daemon's credentials, and it used to inherit all of them.
+ *
+ * Starts from {@link sandboxEnv}, then drops its `NODE_*` passthrough
+ * (`NODE_AUTH_TOKEN` is an npm credential) except the CA bundle a
+ * corporate proxy needs, and adds what pnpm and Chromium read: proxy
+ * settings, display and XDG locations, and the Windows app-data roots.
+ */
+export function browserScriptEnv(src: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(sandboxEnv(src))) {
+    const ku = k.toUpperCase();
+    if (ku.startsWith('NODE_') && ku !== 'NODE_EXTRA_CA_CERTS') continue;
+    out[k] = v;
+  }
+  for (const [k, v] of Object.entries(src)) {
+    if (v == null) continue;
+    if (BROWSER_SCRIPT_EXTRA_ENV.has(k.toUpperCase())) out[k] = v;
+  }
+  return out;
+}
+
 export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'unavailable';
 
 /** Whether this host can enforce `denyNet` for ordinary (non-RPC) script work. */

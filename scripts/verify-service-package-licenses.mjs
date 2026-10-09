@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-/** Verify that npm's authoritative service payload includes its UI legal bundle. */
+/** Verify that npm's authoritative service payload includes its UI and Office legal bundles. */
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { npmPackFiles } from './npm-pack-output.mjs';
+import { verifyServiceBundledLicenses } from './service-bundled-licenses.mjs';
 import {
   SERVICE_FONT_LEGAL_ROOT,
   SERVICE_NOTICE_PATH,
@@ -73,12 +74,29 @@ export async function verifyServicePackageLicenses() {
       `Font Awesome Free ${staged.fontAwesomeVersion}`,
       'Visual Studio Code icons',
       'Microsoft Corporation',
+      'Mediabunny',
     ]) {
       if (!notice.includes(attribution)) {
         throw new Error(`service npm notice is missing attribution: ${attribution}`);
       }
     }
-    return { fontAssets: fontAssets.length, legalFiles: legalNames.length };
+
+    const { packages } = await verifyServiceBundledLicenses();
+    if (packages.length === 0) {
+      throw new Error('service build staged no browser-bundle licenses; build the UI first');
+    }
+    for (const path of [
+      'dist/licenses/npm/manifest.json',
+      'dist/kokoro-lexicon/LICENSE',
+      ...packages.flatMap((record) => record.texts.map((text) => `dist/licenses/npm/${text.file}`)),
+    ]) {
+      if (!packed.has(path)) throw new Error(`service npm tarball is missing ${path}`);
+    }
+    return {
+      fontAssets: fontAssets.length,
+      legalFiles: legalNames.length,
+      bundledPackages: packages.length,
+    };
   } finally {
     await rm(cache, { recursive: true, force: true });
   }
@@ -88,7 +106,8 @@ async function main() {
   const result = await verifyServicePackageLicenses();
   console.log(
     `\u2713 verified service npm payload carries ${result.fontAssets} built font assets, ` +
-      `NOTICE.md, and ${result.legalFiles} font-license files.`,
+      `NOTICE.md, ${result.legalFiles} font-license files, and license texts for ` +
+      `${result.bundledPackages} browser-bundle packages.`,
   );
 }
 

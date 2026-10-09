@@ -23,4 +23,5 @@ transformation, authored TypeScript compilation/execution, source conflicts and
 reopen persistence, lifecycle hooks, task notes, completion gates, policy denial,
 audit recovery, UI responsiveness, cancellation and absence of external requests.
 Run it after the SDK, core and script-runtime builds. See
-[docs/mobile-plan.md](../../docs/mobile-plan.md) for the remaining mobile work.
+the [mobile host's remaining scope](../mobile/README.md#remaining-scope) for the
+current limitations.

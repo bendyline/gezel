@@ -41,6 +41,7 @@ import {
   withLineNumbers,
   writeTaskNoteText,
 } from '../tools/results.js';
+import { isMemoryScope } from './memory-markdown.js';
 import type { PortableStore } from './store.js';
 
 type Value = Record<string, unknown>;
@@ -128,7 +129,7 @@ export async function portableToolResultText(
       return ok(
         saveMemoryText(
           value.status === 'duplicate' ? 'duplicate' : 'saved',
-          args.scope === 'project' ? 'project' : 'gezel',
+          isMemoryScope(args.scope as string) ? (args.scope as string) : 'gezel',
         ),
       );
     case 'read_task_notes': {
@@ -178,21 +179,8 @@ export async function portableToolResultText(
       if (typeof value.toGezelName !== 'string') return undefined;
       // The phone parks a handoff until this turn releases the engine.
       return ok(messageGezelText({ recipientName: value.toGezelName, deliveryState: 'parked' }));
-    case 'run_installed_script': {
-      if (typeof value.runId !== 'string') return undefined;
-      const calls = (value.calls ?? []) as { kind: string; durationMs?: number; error?: string }[];
-      return scriptRunText({
-        runId: value.runId,
-        status: String(value.status),
-        ...(typeof value.error === 'string' ? { error: value.error } : {}),
-        ...(value.output !== undefined ? { output: value.output } : {}),
-        callsSummary: calls.map((call) => ({
-          kind: call.kind,
-          durationMs: call.durationMs ?? 0,
-          ...(call.error ? { error: call.error } : {}),
-        })),
-      });
-    }
+    case 'run_installed_script':
+      return scriptRunValueText(value);
     case 'list_gezels':
       return ok(
         listGezelsText((value.items ?? []) as { id: string; name: string; role?: string }[]),
@@ -254,6 +242,24 @@ export async function portableToolResultText(
         ? ok(getScriptRunText(value as { id: string; status: string }))
         : undefined;
     default:
-      return undefined;
+      // A project type's named tool is a script run, rendered the way the
+      // desktop's MCP server renders it.
+      return scriptRunValueText(value);
   }
+}
+
+function scriptRunValueText(value: Value): { text: string; isError: boolean } | undefined {
+  if (typeof value.runId !== 'string' || typeof value.status !== 'string') return undefined;
+  const calls = (value.calls ?? []) as { kind: string; durationMs?: number; error?: string }[];
+  return scriptRunText({
+    runId: value.runId,
+    status: value.status,
+    ...(typeof value.error === 'string' ? { error: value.error } : {}),
+    ...(value.output !== undefined ? { output: value.output } : {}),
+    callsSummary: calls.map((call) => ({
+      kind: call.kind,
+      durationMs: call.durationMs ?? 0,
+      ...(call.error ? { error: call.error } : {}),
+    })),
+  });
 }

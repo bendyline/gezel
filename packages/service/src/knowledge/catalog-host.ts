@@ -9,6 +9,7 @@
  */
 
 import type {
+  CatalogAssetFile,
   CatalogAssetInfo,
   CatalogAssetRead,
   CatalogChunkHit,
@@ -60,6 +61,12 @@ export interface GlobalSearchRequest {
   /** Chunk-body FTS hits per shard (default 8). */
   chunkFtsLimit?: number;
   spatial?: KnowledgeRadius;
+  /**
+   * Media rows to return per modality per catalog from the exact media lane
+   * (`CatalogHandle.searchMedia`). Needs `vector`; default 0, so proactive
+   * retrieval stays text-only unless it asks.
+   */
+  mediaK?: number;
 }
 
 export interface GlobalSearchResponse {
@@ -105,6 +112,8 @@ export interface KnowledgeCatalogHost {
   assets(key: string): Promise<CatalogAssetInfo[]>;
   /** One declared asset's bytes, or null when the catalog ships no such asset. */
   readAsset(key: string, path: string): Promise<CatalogAssetRead | null>;
+  /** A declared asset's verified file on disk, for range-streaming large media. */
+  assetFile(key: string, path: string): Promise<CatalogAssetFile | null>;
   search(request: GlobalSearchRequest): Promise<GlobalSearchResponse>;
   dispose(): Promise<void>;
 }
@@ -207,6 +216,21 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
         }
       }
     }
+    if (request.vector && (request.mediaK ?? 0) > 0) {
+      for (const { key, handle } of active) {
+        for (const hit of handle.searchMedia(request.vector, {
+          perModality: request.mediaK,
+          ...(request.spatial ? { allowedDocumentIds: allowed(key) } : {}),
+        })) {
+          chunks.push({
+            ...hit,
+            catalogKey: key,
+            catalogId: handle.catalogId,
+            ...spatial.get(key)?.get(hit.documentId),
+          });
+        }
+      }
+    }
     if (request.includeChunkFts) {
       for (const { key, handle } of active) {
         const shardIds = routed.get(key) ?? handle.shards.map((s) => s.id);
@@ -268,6 +292,7 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
       mustGet(handles, key).getChunk(documentId, chunkUid),
     assets: async (key) => mustGet(handles, key).assets(),
     readAsset: async (key, path) => mustGet(handles, key).readAsset(path),
+    assetFile: async (key, path) => mustGet(handles, key).assetFile(path),
     search: async (request) => searchImpl(request),
     dispose: async () => {
       for (const handle of handles.values()) handle.close();

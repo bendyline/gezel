@@ -3,6 +3,7 @@ import type { KnowledgeEmbeddingProfile } from '../schemas/profiles.js';
 import {
   centerVector,
   l2Normalize,
+  profileUnitVector,
   quantizeBinary,
   quantizeBinaryForProfile,
   quantizeInt8,
@@ -84,5 +85,35 @@ describe('profile-aware sign bits', () => {
       },
     };
     expect(() => quantizeBinaryForProfile(broken, vector)).toThrow(/center/);
+  });
+});
+
+describe('profileUnitVector', () => {
+  const truncated: KnowledgeEmbeddingProfile = {
+    ...PLAIN,
+    id: 'truncated@1',
+    dimensions: 2,
+    truncation: { method: 'prefix', sourceDimensions: 4 },
+  };
+
+  it('keeps the prefix of a truncating profile and normalizes it again', () => {
+    expect(Array.from(profileUnitVector(truncated, [3, 4, 12, 84]))).toEqual([
+      expect.closeTo(0.6, 6),
+      expect.closeTo(0.8, 6),
+    ]);
+  });
+
+  it('normalizes a non-truncating profile at its own width', () => {
+    const raw = [2, 0, 0, 0, 0, 0, 0, 0];
+    expect(Array.from(profileUnitVector(PLAIN, raw))).toEqual([1, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it('refuses a vector of the wrong source width', () => {
+    expect(() => profileUnitVector(truncated, [1, 0])).toThrow(/expects 4/);
+    expect(() => profileUnitVector(PLAIN, [1, 0, 0])).toThrow(/expects 8/);
+  });
+
+  it('rerank refuses a query whose width differs from the passage', () => {
+    expect(() => rerankScore([1, 0, 0], quantizeInt8([1, 0]))).toThrow(/dimensions/);
   });
 });

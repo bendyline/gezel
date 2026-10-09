@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import type { ImportBinding, ImportEdgeInput, SymbolInput } from './index-store.js';
+import type { ImportBinding, ImportEdgeInput, SymbolInput } from './index-store-types.js';
 
 /**
  * Deterministic symbol extraction. Code goes through web-tree-sitter

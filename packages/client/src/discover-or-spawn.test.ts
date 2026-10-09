@@ -1,7 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from './client.js';
-import { type SpawnLike, discoverOrSpawn, stopOwnedDaemon } from './discover-or-spawn.js';
+import {
+  type SpawnLike,
+  SpawnedDaemonExitedError,
+  discoverOrSpawn,
+  stopOwnedDaemon,
+} from './discover-or-spawn.js';
 import type { RuntimeInfo } from './discovery.js';
 
 function makeFakeChild() {
@@ -49,6 +54,9 @@ const sampleRuntime: RuntimeInfo = {
   baseUrl: 'http://127.0.0.1:45678',
   cert: null,
 };
+
+/** The runtime files a fake child (pid 9999) writes once it is up. */
+const childRuntime: RuntimeInfo = { ...sampleRuntime, pid: 9999 };
 
 function fakeClient() {
   return new GezelClient({
@@ -156,7 +164,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => sampleRuntime,
+        readRuntimeFn: async () => childRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -203,7 +211,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => sampleRuntime,
+        readRuntimeFn: async () => childRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -222,7 +230,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => sampleRuntime,
+        readRuntimeFn: async () => childRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -503,7 +511,7 @@ describe('discoverOrSpawn', () => {
     // this would be adopted; WITH it we must spawn anew and then detect the
     // fresh daemon via the poll (the poll uses the same readRuntimeFn, which
     // is exactly why a null override would have blinded it and timed out).
-    const readRuntimeFn = vi.fn(async () => sampleRuntime);
+    const readRuntimeFn = vi.fn(async () => childRuntime);
     const result = await discoverOrSpawn({
       daemonEntry: '/fake/gezeld.js',
       forceSpawn: true,
@@ -516,6 +524,42 @@ describe('discoverOrSpawn', () => {
     });
     expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(result.outcome).toBe('spawned');
+  });
+
+  it("forceSpawn never mistakes another daemon's runtime files for its own", async () => {
+    // One daemon is already running for this home. The forced spawn loses
+    // the home lock and exits; it must not report the old daemon as started.
+    const child = makeFakeChild();
+    const spawnFn = vi.fn(() => {
+      setTimeout(() => child.emit('exit', 1, null), 10);
+      return child;
+    });
+    await expect(
+      discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        forceSpawn: true,
+        pollIntervalMs: 2,
+        timeoutMs: 2_000,
+        spawnFn,
+        readRuntimeFn: async () => sampleRuntime,
+        isProcessAliveFn: () => true,
+        clientFactory: fakeClient,
+      }),
+    ).rejects.toThrow(SpawnedDaemonExitedError);
+  });
+
+  it('an unforced spawn still adopts the daemon that won a concurrent start', async () => {
+    let reads = 0;
+    const result = await discoverOrSpawn({
+      daemonEntry: '/fake/gezeld.js',
+      pollIntervalMs: 2,
+      timeoutMs: 200,
+      spawnFn: vi.fn(() => makeFakeChild()),
+      readRuntimeFn: async () => (reads++ === 0 ? null : sampleRuntime),
+      isProcessAliveFn: () => true,
+      clientFactory: fakeClient,
+    });
+    expect(result).toMatchObject({ outcome: 'spawned', pid: sampleRuntime.pid });
   });
 
   it('times out when the daemon never writes its runtime files', async () => {
@@ -592,7 +636,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 40,
         healthTimeoutMs: 8,
         spawnFn,
-        readRuntimeFn: async () => sampleRuntime,
+        readRuntimeFn: async () => childRuntime,
         isProcessAliveFn: () => true,
         clientFactory,
       }),

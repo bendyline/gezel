@@ -21,9 +21,11 @@ whose terms its `package.json` does not describe:
   linux-x64 its install script also downloads ONNX Runtime's CUDA and TensorRT
   execution providers from NuGet; they are declared `optional` because no other
   host has them.
-- **onnxruntime-web**, and the copy of its WebAssembly build inside
-  **@huggingface/transformers**, compile in the same libraries at an earlier
-  ONNX Runtime commit, so they carry that commit's notices.
+- **onnxruntime-web**'s WebAssembly builds compile in the same libraries at
+  the ONNX Runtime commit its `__commit.txt` names, so they carry that commit's
+  notices (for the current build, byte-identical to v1.30.0's).
+  **@huggingface/transformers** 3.x copied one of those builds into its own
+  dist; 4.x loads them from onnxruntime-web and carries none itself.
 
 `installerBinaries` covers files a build tool adds to an installer outside any
 npm package: electron-builder's `elevate.exe` in the Windows build.

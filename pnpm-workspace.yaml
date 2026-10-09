@@ -55,6 +55,9 @@ minimumReleaseAgeExclude:
   - "@csstools/css-calc@3.3.0"
   - "@csstools/css-color-parser@4.1.10"
   - "@csstools/css-syntax-patches-for-csstree@1.1.7"
+  # First release with EmbeddingGemma 2 (embedding_gemma2); published
+  # 2026-10-06, taken before the hold expires by explicit decision.
+  - "@huggingface/transformers@4.3.1"
   - "@vitejs/plugin-react@6.0.4"
   - "dompurify@3.4.13"
   - "electron@43.7.7"
@@ -74,7 +77,8 @@ allowBuilds:
   "node-pty": true
   "onnxruntime-node": true
   "protobufjs": true
-  sharp: set this to true or false
+  # The sharp slot holds the private no-image stub, which has no build step.
+  sharp: false
 
 ignoredOptionalDependencies:
   - "@napi-rs/canvas"
@@ -104,9 +108,14 @@ overrides:
   # the override keeps one copy that carries the addressparser fixes. 10.0.6
   # fixed GHSA-v53p-9fqp-m79j; 9.x has no backport.
   "nodemailer": "10.0.12"
-  # Keep the single Transformers.js 3.x line on the reviewed native runtime;
+  # kokoro-js 1.2.1 (the latest release) still declares Transformers.js ^3.5.1.
+  # Its whole surface (StyleTextToSpeech2Model, AutoTokenizer, Tensor, RawAudio,
+  # env.backends) is unchanged in 4.x, and the service hands it Tensors built
+  # from its own copy, so both must resolve to the one 4.x install.
+  "kokoro-js>@huggingface/transformers": "^4.3.1"
+  # Keep the single Transformers.js 4.x line on the native runtime it pins;
   # the matching adm-zip override closes its transitive advisory.
-  "onnxruntime-node": "1.24.3"
+  "onnxruntime-node": "1.30.0"
   "protobufjs": "7.6.5"
   # express 5 still locks 2.0.7; 2.0.8 fixes GHSA-jqcg-44mw-7w3h.
   "proxy-addr": "2.0.8"

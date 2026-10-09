@@ -41,6 +41,8 @@ export const BACKUP_ROLE_CONFIG_KEYS = [
 export const BACKUP_RESTORABLE_CONFIG_KEYS = [
   ...BACKUP_ROLE_CONFIG_KEYS,
   'roleBasedNameOnlyMode',
+  'social',
+  'notifications',
 ] as const;
 
 export interface BackupItemRef {
@@ -55,6 +57,7 @@ export function backupEntryPrefix(item: BackupItemRef): string {
     return `${item.kind === 'project' ? 'projects' : 'gezels'}/${item.id}`;
   }
   if (item.kind === 'document-root' && item.id === 'documents') return 'documents';
+  if (item.kind === 'memory-root' && item.id === 'memories') return 'memories';
   if (item.kind === 'settings-file' && isBackupSettingsFileId(item.id))
     return `settings/${item.id}`;
   throw new Error('This backup item is not supported');
@@ -93,9 +96,11 @@ const DERIVED_PROJECT = new RegExp(
   `^projects/[^/]+/(?:${BACKUP_DERIVED_SUBPATHS.project.map(escapeRegExp).join('|')})(?:/|$)`,
 );
 
+const DERIVED_MEMORIES = /^memories\/index(?:\/|$)/;
+
 /** Whether an archive-relative path is derived state that a backup leaves out. */
 export function isBackupDerivedPath(path: string): boolean {
-  return DERIVED_GEZEL.test(path) || DERIVED_PROJECT.test(path);
+  return DERIVED_GEZEL.test(path) || DERIVED_PROJECT.test(path) || DERIVED_MEMORIES.test(path);
 }
 
 /** Whether a request's include list asks for this item. No list means everything. */
@@ -107,6 +112,7 @@ export function isBackupItemRequested(
   if (item.kind === 'gezel') return include.gezels?.includes(item.id) ?? true;
   if (item.kind === 'project') return include.projects?.includes(item.id) ?? true;
   if (item.kind === 'document-root') return include.documents !== false;
+  if (item.kind === 'memory-root') return include.memories !== false;
   return include.settings !== false;
 }
 

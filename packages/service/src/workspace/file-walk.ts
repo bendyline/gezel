@@ -1,5 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { isSyncJunkName, isSyncJunkPath } from '@bendyline/gezel';
 import { runGit } from '../git/git.js';
 
 /** Directories that are never useful to either workspace index. */
@@ -20,12 +21,42 @@ const ALWAYS_SKIP_DIRS = new Set([
   '.DS_Store',
 ]);
 
+/**
+ * Library packages a photo app owns. Reading inside one is reading the app's
+ * database and derivatives, not the person's folder, and a change there is
+ * the app's to make.
+ */
+const SKIPPED_PACKAGE_SUFFIXES = ['.photoslibrary', '.photolibrary', '.aplibrary'];
+
+export function isSkippedDir(name: string): boolean {
+  if (ALWAYS_SKIP_DIRS.has(name)) return true;
+  const lower = name.toLowerCase();
+  return SKIPPED_PACKAGE_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+}
+
+/** Below this, fetching a placeholder costs little, and some filesystems store tiny files with no blocks. */
+const PLACEHOLDER_MIN_BYTES = 8 * 1024;
+
+/**
+ * Whether a file's bytes live only in the cloud: an iCloud "Optimize Storage"
+ * or File Provider dataless file, or a OneDrive Files On-Demand placeholder.
+ * They report their full size but allocate nothing on disk (on Windows, libuv
+ * derives `blocks` from the allocation size). Reading one downloads it, so
+ * the indexer records it by name, size and date only. Stat alone never
+ * triggers the download.
+ */
+export function looksCloudOnly(st: { size: number; blocks?: number }): boolean {
+  return st.size > PLACEHOLDER_MIN_BYTES && st.blocks === 0;
+}
+
 export interface DiscoveredWorkspaceFile {
   /** Forward-slashed relative path from the requested workspace root. */
   path: string;
   abs: string;
   size: number;
   mtimeMs: number;
+  /** The bytes are not on this machine; see {@link looksCloudOnly}. */
+  cloudOnly?: true;
 }
 
 export interface DiscoveredWorkspaceFiles {
@@ -121,7 +152,9 @@ async function listGitVisiblePaths(
     for (const raw of stdout.split('\0')) {
       if (!raw) continue;
       const path = raw.replaceAll('\\', '/').replace(/^\.\//, '');
-      if (!path || seen.has(path) || containsAlwaysSkippedDir(path)) continue;
+      if (!path || seen.has(path) || containsAlwaysSkippedDir(path) || isSyncJunkPath(path)) {
+        continue;
+      }
       if (ignorePath?.(path)) continue;
       seen.add(path);
       paths.push(path);
@@ -152,7 +185,13 @@ async function statListedFiles(
           // Match the fallback walk: do not follow symlinks outside the
           // workspace merely because Git tracks the link itself.
           if (!st.isFile()) return null;
-          return { path, abs, size: st.size, mtimeMs: st.mtimeMs };
+          return {
+            path,
+            abs,
+            size: st.size,
+            mtimeMs: st.mtimeMs,
+            ...(looksCloudOnly(st) ? { cloudOnly: true as const } : {}),
+          };
         } catch {
           // A file can disappear between `git ls-files` and lstat.
           return null;
@@ -183,7 +222,11 @@ async function walkFilesystem(
   }
   for (const entry of entries) {
     if (out.length >= maxFiles) return;
-    if (entry.isDirectory() && ALWAYS_SKIP_DIRS.has(entry.name)) continue;
+    if (entry.isDirectory() && isSkippedDir(entry.name)) continue;
+    // OS and sync droppings (`.DS_Store`, `._IMG_0001.JPEG`, `~$draft.docx`)
+    // are never a person's files, and an image extension on one sent it to
+    // the vision engine.
+    if (isSyncJunkName(entry.name)) continue;
     const abs = join(dir, entry.name);
     const rel = relative(root, abs).replaceAll('\\', '/');
     if (ignorePath?.(rel)) continue;
@@ -197,6 +240,7 @@ async function walkFilesystem(
           abs,
           size: st.size,
           mtimeMs: st.mtimeMs,
+          ...(looksCloudOnly(st) ? { cloudOnly: true as const } : {}),
         });
       } catch {
         /* unreadable or removed mid-walk — skip */
@@ -208,5 +252,5 @@ async function walkFilesystem(
 function containsAlwaysSkippedDir(path: string): boolean {
   const parts = path.split('/');
   // The last part is a filename; only directory segments apply here.
-  return parts.slice(0, -1).some((part) => ALWAYS_SKIP_DIRS.has(part));
+  return parts.slice(0, -1).some(isSkippedDir);
 }

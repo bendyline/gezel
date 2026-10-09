@@ -37,4 +37,4 @@ A tier says what a size class *should* manage. For what individual models actual
 
 You don't have to get this right up front. Set a default provider in Settings, and override it per gezel only when a companion needs something different — a big cloud model for your reviewer, a fast local one for day-to-day chat. Gezel checks each new model's fitness on your hardware before recommending it.
 
-The public [Gezel Gilde model catalog](https://gezelgilde.com/models/) lists the local chat, image, and video models Gezel knows about, including their download size, context, license, supported engines, and hardware tier. Once you have a shortlist that fits, the [Model scorecard](../technical/model-scorecard.md) shows how those models actually performed.
+[Every model](https://gezel.com/docs/model-catalog/) on gezel.com lists the local chat, image, and video models Gezel knows about, including their download size, context window, license, and the engines they run on. Once you have a shortlist that fits, the [Model scorecard](../technical/model-scorecard.md) shows how those models actually performed.

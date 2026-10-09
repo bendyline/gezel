@@ -11,6 +11,7 @@ import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bend
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { ActivityControl } from './components/ActivityControl.js';
+import { AddFolderSheet, openAddFolder } from './components/AddFolderSheet.js';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
@@ -38,6 +39,7 @@ import {
 } from './components/output-pane-maximize.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
@@ -159,11 +161,13 @@ export function App() {
   return (
     <ActivityProvider>
       <FullApp />
+      <AddFolderSheet />
     </ActivityProvider>
   );
 }
 
 function FullApp() {
+  useHostNotifications();
   const { compact, preview, exitPreview } = useResponsiveLayout();
   const firstRun = useIsFirstRun();
   const setupOpened = useRef(false);
@@ -644,40 +648,9 @@ function FullApp() {
               }),
             );
           }
-          // Surface a "Gezel needs your input" OS notification when a new
-          // question arrives and the window is backgrounded — the tray is
-          // the locus, so the user can be elsewhere and still get pulled
-          // back. Gated on visibility to avoid notifying the active window.
-          if (
-            ev.type === 'question_asked' &&
-            ev.question.intent?.kind !== 'task-finished' &&
-            document.visibilityState === 'hidden'
-          ) {
-            const prompt = ev.question.prompt.split('\n')[0]?.slice(0, 140) ?? '';
-            void window.__GEZEL__?.notify?.({
-              title: 'Gezel needs your input',
-              body: prompt,
-              view: 'chat',
-            });
-          }
-          // Work the owner launched from a chat finished and its wrap-up
-          // landed in that thread. Same calm, hidden-window-only rule as
-          // questions: an owner watching the thread already sees it.
-          if (
-            ev.type === 'task_settled' &&
-            ev.outcome === 'complete' &&
-            document.visibilityState === 'hidden'
-          ) {
-            void window.__GEZEL__?.notify?.({
-              title: 'Your work is ready',
-              body: `${ev.title} is finished.`,
-              view: env.projectId === 'default' ? 'home' : 'projects',
-            });
-          }
-          // Level-ups: fan out to the roster badge / Growth-tab surfaces,
-          // and nudge via OS notification only when the window is hidden —
-          // one calm notification, never a foreground interruption.
-          // XP recomputed after finished work: the growth surfaces reload.
+          // Level-ups and recomputed XP reload the growth surfaces. OS
+          // notifications are not raised here: Electron's main process and
+          // the phone's host notifier own them (core `notifications`).
           if (ev.type === 'growth_updated') {
             window.dispatchEvent(
               new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
@@ -687,13 +660,6 @@ function FullApp() {
             window.dispatchEvent(
               new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
             );
-            if (document.visibilityState === 'hidden') {
-              void window.__GEZEL__?.notify?.({
-                title: `${ev.gezelName} reached level ${ev.toLevel}`,
-                body: 'Growth choices are waiting — open the Growth tab when you have a minute.',
-                view: 'gezels',
-              });
-            }
           }
         }
       } catch {
@@ -714,6 +680,12 @@ function FullApp() {
       // the Meester chat now lives).
       if (v === 'chat' || v === 'home') {
         commitSelection(null);
+        return;
+      }
+      // The File menu's Add Folder…, and a folder opened from the Dock.
+      if (v === 'add-folder' || v.startsWith('add-folder:')) {
+        const path = v.slice('add-folder:'.length);
+        openAddFolder(v === 'add-folder' ? undefined : path);
         return;
       }
       if ((AREA_NAMES as string[]).includes(v)) {
@@ -1228,6 +1200,11 @@ function TaskSpeedMenu({
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
             {periodLine && <span className="app-nightshift-period">{periodLine}</span>}
+            {status?.heldOnBattery && (
+              <span className="app-nightshift-quota-hold">
+                Paused while this computer runs on battery. It picks up when you plug in.
+              </span>
+            )}
             {status?.quotaHold && (
               <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
             )}

@@ -82,6 +82,18 @@
     <key>com.apple.security.device.audio-input</key>
     <true/>
 
+    <!-- The chat composer's Take photo key opens an in-app viewfinder that
+         captures one still from the camera. Hardened runtime refuses the
+         camera without this key the same way it refused the microphone
+         above: no prompt, no Privacy & Security entry, just a NotAllowed
+         error. Inherited by the helpers for the same reason as audio-input —
+         Chromium opens capture devices in its utility process, while TCC
+         still attributes the request to Gezel.app and the user decides.
+         The renderer policy (src/electron-boundaries.ts) only admits a
+         video-only request from the trusted main frame. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
     <!-- The ambient wallpaper (src/ambient-display/darwin.ts) runs
          /usr/bin/osascript so System Events can read and set the desktop
          picture. TCC attributes that Apple Event to Gezel as the responsible

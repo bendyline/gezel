@@ -43,9 +43,16 @@ function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function writeGildeEntry(id: string, versions: Array<{ version: string; bytes: Buffer }>) {
+async function writeGildeEntry(
+  id: string,
+  versions: Array<{ version: string; bytes: Buffer }>,
+  opts: { logo?: boolean } = {},
+) {
   const itemDir = join(gildeRoot, 'knowledge-catalogs', id.slice(0, 2), id);
   await mkdir(itemDir, { recursive: true });
+  if (opts.logo) {
+    await writeFile(join(itemDir, 'logo.webp'), Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  }
   await writeFile(
     join(itemDir, 'manifest.json'),
     JSON.stringify({
@@ -56,6 +63,7 @@ async function writeGildeEntry(id: string, versions: Array<{ version: string; by
       description: 'Fixture catalog served from a local Hugging Face stand-in.',
       tags: ['test'],
       maintainer: { name: 'Gezel Tests' },
+      ...(opts.logo ? { logo: 'logo.webp' } : {}),
       license: 'MIT',
       publisherId: 'gezel-tests',
       language: 'en',
@@ -112,7 +120,7 @@ beforeAll(async () => {
   await buildTestCatalog({ outputPath: v1, workDir: join(dir, 'work-1') });
   await buildTestCatalog({ outputPath: v2, workDir: join(dir, 'work-2'), version: '2.0.0' });
   const v1Bytes = await readFile(v1);
-  await writeGildeEntry('test-notes', [{ version: '1.0.0', bytes: v1Bytes }]);
+  await writeGildeEntry('test-notes', [{ version: '1.0.0', bytes: v1Bytes }], { logo: true });
   // A second entry that pins test-notes' bytes under another id: the digest
   // matches, the identity does not.
   await writeGildeEntry('other-notes', [{ version: '1.0.0', bytes: v1Bytes }]);
@@ -211,6 +219,9 @@ describe('KnowledgeManager — gilde catalog installs', () => {
 
     const [status] = await manager.list();
     expect(status).toMatchObject({ source: 'gilde', updateAvailable: false, mounted: true });
+    expect(status?.logoUrl).toMatch(
+      /^\/api\/catalog\/knowledge-catalog\/test-notes\/file\/logo\.webp\?/,
+    );
     const available = await manager.available();
     expect(available.find((c) => c.id === 'test-notes')?.installed).toMatchObject({
       version: '1.0.0',

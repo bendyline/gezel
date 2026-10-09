@@ -79,6 +79,50 @@ try {
         (await run('checkJsonValid', { file: 'notes.json' })).output.decision === 'approve',
         'shared gate failed',
       );
+      // A craftbook's declarative regex checks run here, in the bounded
+      // runtime: the artifacts drawer, a named label, and forbidden content.
+      await store.writeFile(
+        'artifacts',
+        'default',
+        'tasks/1/report.md',
+        '# Month close\n\nAll paid.',
+      );
+      const heading = await run('checkContains', {
+        file: 'tasks/1/report.md',
+        pattern: '(?:^|\\n)#{1,3}\\s+\\S',
+        flags: 'i',
+        label: 'at least one markdown heading',
+        artifact: true,
+      });
+      check(
+        heading.status === 'ok' &&
+          heading.output.decision === 'approve' &&
+          heading.output.message.includes('at least one markdown heading'),
+        `artifact regex gate failed: ${heading.error ?? JSON.stringify(heading.output)}`,
+      );
+      const forbidden = await run('checkContains', {
+        file: 'tasks/1/report.md',
+        pattern: 'paid',
+        flags: '',
+        artifact: true,
+        absent: true,
+      });
+      check(
+        forbidden.output.decision === 'reject' &&
+          forbidden.output.message.includes('forbidden content'),
+        `absent regex gate passed: ${JSON.stringify(forbidden.output)}`,
+      );
+      check(
+        (
+          await run('checkContains', {
+            file: 'tasks/1/report.md',
+            pattern: 'PAID',
+            flags: '',
+            artifact: true,
+          })
+        ).output.decision === 'reject',
+        'empty flags were replaced by the case-insensitive default',
+      );
       await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
       const denied = await run('storeRecords', {
         action: 'create',

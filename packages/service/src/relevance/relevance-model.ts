@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
   type RelevanceScoreOutcome,
@@ -101,6 +102,8 @@ class RelevanceModelHost implements RelevanceScorer {
 
   private worker: Worker | null = null;
   private workerUsable = true;
+  /** Set by service shutdown: no new worker or request until reopened. */
+  private closed = false;
   private crashCount = 0;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
@@ -116,6 +119,8 @@ class RelevanceModelHost implements RelevanceScorer {
   }
 
   async warm(model: ResolvedRelevanceModel): Promise<boolean> {
+    // During shutdown a warm-up would start (or load) a worker as the process exits.
+    if (this.closed) return false;
     if (this.status(model.id) === 'ready') return true;
     const running = this.warming.get(model.id);
     if (running) return running;
@@ -148,6 +153,7 @@ class RelevanceModelHost implements RelevanceScorer {
       ms: Math.round(performance.now() - started),
       modelId,
     });
+    if (this.closed) return done({ status: 'unavailable', reason: 'the service is shutting down' });
     const status = this.status(modelId);
     if (status === 'disabled') return done({ status: 'disabled' });
     if (status === 'unavailable') {
@@ -265,7 +271,7 @@ class RelevanceModelHost implements RelevanceScorer {
   }
 
   private ensureWorker(): Worker | null {
-    if (process.env.VITEST || !this.workerUsable) return null;
+    if (this.closed || process.env.VITEST || !this.workerUsable) return null;
     if (this.worker) return this.worker;
     const entry = findServiceWorkerEntry(import.meta.url, 'relevance-model');
     if (!entry) {
@@ -321,6 +327,31 @@ class RelevanceModelHost implements RelevanceScorer {
     this.idleTimer.unref();
   }
 
+  /**
+   * Close for service shutdown: refuse new work, then terminate the worker once
+   * its in-flight warm-up or scoring has finished, waiting at most `drainMs`
+   * (see retire-model-worker.ts for why it must never be torn down mid-run).
+   */
+  async shutdown(drainMs: number): Promise<void> {
+    this.closed = true;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    const worker = this.worker;
+    if (!worker) return;
+    if (await retireModelWorker(worker, () => this.pending.size === 0, drainMs)) {
+      if (this.worker === worker) this.worker = null;
+      this.readiness.clear();
+      this.warming.clear();
+      return;
+    }
+    log.warn('[relevance] scoring was still running at shutdown; leaving its worker to exit');
+  }
+
+  /** Reopen after shutdown — an embedded service can be started again in the same process. */
+  open(): void {
+    this.closed = false;
+  }
+
   dispose(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
@@ -341,9 +372,21 @@ export function relevanceScorer(): RelevanceScorer & { dispose(): void } {
   return host;
 }
 
+/** Shut the process-wide scorer down for service shutdown; see `RelevanceModelHost.shutdown`. */
+export async function shutdownRelevanceScorer(drainMs: number): Promise<void> {
+  await host?.shutdown(drainMs);
+}
+
+/** Reopen the process-wide scorer when a service starts. */
+export function openRelevanceScorer(): void {
+  host?.open();
+}
+
 /** A private scorer over an explicit backend — tests, and nothing else. */
-export function createRelevanceScorer(
-  backend: RelevanceBackend,
-): RelevanceScorer & { dispose(): void } {
+export function createRelevanceScorer(backend: RelevanceBackend): RelevanceScorer & {
+  dispose(): void;
+  shutdown(drainMs: number): Promise<void>;
+  open(): void;
+} {
   return new RelevanceModelHost(backend);
 }

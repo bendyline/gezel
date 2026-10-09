@@ -930,6 +930,10 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(factual.allowlist!.has('write_file')).toBe(true);
     expect(factual.allowlist!.has('wikipedia_search')).toBe(true);
     expect(factual.allowlist!.has('wikipedia_read')).toBe(true);
+    // Sources already in the project stay readable too: `read_document`
+    // cannot open a workspace memo, so a synthesis needs `read_file`.
+    expect(factual.allowlist!.has('read_file')).toBe(true);
+    expect(plain.allowlist!.has('read_file')).toBe(false);
   });
 });
 

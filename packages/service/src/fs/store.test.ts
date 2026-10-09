@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Project, TaskSchema, isSharedLibraryProject } from '@bendyline/gezel';
+import { type Project, TaskSchema, isSharedLibraryProject, seedCharacter } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigCorruptionError, Store, pickRoleBasedName } from './store.js';
 
@@ -269,6 +269,58 @@ describe('pickRoleBasedName (pure)', () => {
 
   it('uses gezel-N when role slugifies to empty', () => {
     expect(pickRoleBasedName('!!!', new Set())).toBe('gezel-1');
+  });
+});
+
+describe('agents — character', () => {
+  it('seeds a character from the id at creation, and lets a template set one', async () => {
+    const created = await store.createGezel({ name: 'Wren' });
+    expect(created.character).toEqual(seedCharacter(created.id));
+    const templated = await store.createGezel({
+      name: 'Pia',
+      frontmatter: {
+        character: { temperament: 'calm', quirk: 'tidy', style: 'formal', sociability: 1 },
+      },
+    });
+    expect(templated.character).toEqual({
+      temperament: 'calm',
+      quirk: 'tidy',
+      style: 'formal',
+      sociability: 1,
+    });
+  });
+
+  it('backfills the seeded character once for a gezel made before characters', async () => {
+    const created = await store.createGezel({ name: 'Old Timer' });
+    const path = join(home, 'gezels', created.id, 'gezel.md');
+    await writeFile(path, (await readFile(path, 'utf8')).replace(/^character:.*\n/m, ''));
+    expect((await store.getGezel(created.id))!.character).toBeUndefined();
+    await new Store({ home }).ensureLayout();
+    expect((await store.getGezel(created.id))!.character).toEqual(seedCharacter(created.id));
+  });
+
+  it('saves an edited character and reads an unreadable one as absent', async () => {
+    const created = await store.createGezel({ name: 'Mira' });
+    const edited = {
+      temperament: 'wry',
+      quirk: 'planner',
+      style: 'playful',
+      sociability: 4,
+    } as const;
+    expect((await store.updateGezelSettings(created.id, { character: edited })).character).toEqual(
+      edited,
+    );
+    const path = join(home, 'gezels', created.id, 'gezel.md');
+    await writeFile(
+      path,
+      (await readFile(path, 'utf8')).replace(
+        /^character:.*\n(?:[ \t]+.*\n)*/m,
+        'character: {temperament: grumpy}\n',
+      ),
+    );
+    const reread = await store.getGezel(created.id);
+    expect(reread?.name).toBe('Mira');
+    expect(reread?.character).toBeUndefined();
   });
 });
 

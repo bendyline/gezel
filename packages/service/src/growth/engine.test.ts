@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Task } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -129,6 +130,15 @@ describe('GrowthEngine.refresh', () => {
     expect(state.signals.memoryXp).toBe(102);
   });
 
+  it('credits a gezel for what it saved about the person, and no one else for it', async () => {
+    await store.appendMemory('user', 'user', 'Prefers metric units.', 'pref', { gezel: 'sprout' });
+    await store.appendMemory('user', 'user', 'Lives in Utrecht.', 'fact', {
+      gezel: 'someone-else',
+    });
+    const state = await engine().refresh('sprout', { allowKlerk: false });
+    expect(state.signals.memoryXp).toBe(6);
+  });
+
   it('no-ops when growth is disabled', async () => {
     await store.writeConfig({ growth: { enabled: false } });
     await seedPrefs(17);
@@ -156,4 +166,27 @@ describe('GrowthEngine.refresh', () => {
     const trait = state.pendingLevelUp?.proposals.find((p) => p.kind === 'trait');
     expect(trait?.kind === 'trait' && trait.evidence[0]?.day).toBe(today);
   });
+});
+
+// Large histories must affect tally time, not the number of retained task bodies.
+it('streams completed work without loading the entire task corpus', async () => {
+  const bulk = vi
+    .spyOn(store, 'listAllTasks')
+    .mockRejectedValue(new Error('full listing forbidden'));
+  let yielded = 0;
+  vi.spyOn(store, 'iterateAllTasks').mockImplementation(async function* () {
+    for (let i = 0; i < 20_000; i++) {
+      yielded++;
+      yield {
+        status: i % 2 === 0 ? 'complete' : 'active',
+        assignee: { kind: 'gezel', gezelId: 'sprout' },
+        craftbook: { steps: [{ completedAt: '2026-10-06T00:00:00Z', suggestedGezelId: 'sprout' }] },
+      } as Task;
+    }
+  });
+  const state = await engine().refresh('sprout', { allowKlerk: false, createPending: false });
+  expect(yielded).toBe(20_000);
+  expect(bulk).not.toHaveBeenCalled();
+  expect(state.signals.taskXp).toBe(450_000);
+  expect(state.pendingLevelUp).toBeUndefined();
 });

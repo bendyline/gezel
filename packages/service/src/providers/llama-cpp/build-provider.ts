@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
@@ -1430,6 +1431,8 @@ export async function buildLlamaCppProvider(opts: {
         architecture: modelCatalogInfo?.architecture,
         modelId: defaultModelId ?? undefined,
         swaFullAutoFits,
+        backend: llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND,
+        hostCpuCount: availableParallelism(),
       });
       return {
         command: binary,
@@ -1559,6 +1562,7 @@ export async function buildLlamaCppProvider(opts: {
           batchSize: lastArgValue(resolvedAdvancedArgs, '--batch-size') ?? 'default',
           ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
           flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
+          threads: lastArgValue(resolvedAdvancedArgs, '--threads') ?? 'default',
           reasoningBudgetTokens: reasoningBudgetTokens ?? 'unbounded',
           reasoningBudgetSource,
           reasoningPreserve,

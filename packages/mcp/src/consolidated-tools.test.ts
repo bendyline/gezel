@@ -259,7 +259,7 @@ describe('consolidated MCP tools', () => {
     });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual({
-      summary: 'Memory already existed (project); no duplicate was added.',
+      summary: 'Already in the project’s notes; nothing was added.',
       status: 'duplicate',
       scope: 'project',
     });
@@ -929,7 +929,11 @@ describe('consolidated MCP tools', () => {
     handler = (url, method, body) => {
       expect(url.pathname).toBe('/api/projects/project-a/run-playwright');
       expect(method).toBe('POST');
-      expect(body).toEqual({ path: 'tests/failing.spec.ts' });
+      expect(body).toEqual({
+        path: 'tests/failing.spec.ts',
+        gezelId: 'meester',
+        sessionId: 'session-a',
+      });
       return { ok: false, log: '1 test failed', error: 'exit 1' };
     };
 
@@ -941,6 +945,39 @@ describe('consolidated MCP tools', () => {
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toBeUndefined();
     expect(JSON.stringify(result.content)).toContain('1 test failed');
+  });
+
+  it('ends the turn on a pending Playwright approval instead of reporting a failure', async () => {
+    handler = () => ({ ok: false, log: '', approvalPending: true, questionId: 'q-playwright' });
+
+    const result = await client.callTool({
+      name: 'run_playwright_script',
+      arguments: { path: 'scripts/scrape.ts' },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      state: 'approval_pending',
+      approvalPending: true,
+      questionId: 'q-playwright',
+    });
+    expect(JSON.stringify(result.content)).toContain('needs user approval');
+  });
+
+  it('reports a declined Playwright script as an execution error', async () => {
+    handler = () => ({
+      ok: false,
+      log: '',
+      declined: 'User previously declined to run the Playwright script `scripts/scrape.ts`.',
+    });
+
+    const result = await client.callTool({
+      name: 'run_playwright_script',
+      arguments: { path: 'scripts/scrape.ts' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('previously declined');
   });
 
   it('marks an entirely declined npm install batch as an execution error', async () => {

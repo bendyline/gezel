@@ -11,6 +11,7 @@ catalogs published under an earlier one point at.
 | Version | Served at |
 | --- | --- |
 | [`0.7/`](0.7/) | <https://bendyline.com/gezk/0.7/schemas/> |
+| [`0.8/`](0.8/) | <https://bendyline.com/gezk/0.8/schemas/> |
 
-The current line is `0.7`. An earlier directory is frozen once its line
+The current line is `0.8`. An earlier directory is frozen once its line
 stops being written; the specification for each lives in `spec/`.

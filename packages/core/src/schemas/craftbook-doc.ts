@@ -6,10 +6,12 @@ import {
   CraftbookCliWorkflowSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookModelNeedSchema,
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
+  CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
   CraftbookToolsetNeedSchema,
   ModelTierSchema,
@@ -55,6 +57,10 @@ export const CraftbookDocSchema = zod.object({
   /** Commands the book's commandEvidence gates verify — approval asked at kickoff. */
   commands: zod.array(CraftbookCommandNeedSchema).optional(),
   connectors: zod.array(CraftbookConnectorNeedSchema).optional(),
+  /** Chat models the book runs on — offered as a download before the run. */
+  models: zod.array(CraftbookModelNeedSchema).optional(),
+  /** Capabilities the book cannot run without (external services, web search). */
+  services: zod.array(CraftbookServiceNeedSchema).optional(),
   paramSchema: zod.record(zod.string(), zod.unknown()).optional(),
   cliWorkflow: CraftbookCliWorkflowSchema.optional(),
   /**

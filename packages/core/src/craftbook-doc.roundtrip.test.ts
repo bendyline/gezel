@@ -41,6 +41,8 @@ const FULL_BOOK: Craftbook = {
   toolsets: [{ toolsetId: 'builtin.workspace-fs-read' }],
   commands: [{ scope: 'script', name: 'test' }],
   connectors: [{ typeId: 'github' }],
+  models: [{ id: '{{writerModel}}', provider: 'llama-cpp', reason: 'Writes the draft' }],
+  services: [{ kind: 'web-search', reason: 'Checks facts against independent pages' }],
   paramSchema: { type: 'object', properties: { region: { type: 'string' } } },
   cliWorkflow: { module: '.gezel/workflows/batch.mjs' },
   hooks: [{ phase: 'PreToolUse', matcher: 'write_file', script: { name: 'guard' } }],
@@ -65,6 +67,7 @@ const FULL_BOOK: Craftbook = {
       name: 'Fan out',
       prompt: 'Read the item list.',
       promptProfile: 'focused',
+      authoring: 'squisq-slideshow',
       spawnFanout: true,
       next: 'done',
     },
@@ -131,9 +134,12 @@ describe('markdown codec round-trip', () => {
     // than the JSON arm's silent drop: it tells the author they were wrong.
     expect(parsed.doc.spawn).toEqual(FULL_BOOK.spawn);
     expect(parsed.doc.commands).toEqual(FULL_BOOK.commands);
+    expect(parsed.doc.models).toEqual(FULL_BOOK.models);
+    expect(parsed.doc.services).toEqual(FULL_BOOK.services);
     expect(parsed.doc.diffpackCapable).toBe(true);
     expect(parsed.doc.capabilityFloor).toBe('medium');
     expect(parsed.doc.steps.find((s) => s.id === 'host')?.promptProfile).toBe('focused');
+    expect(parsed.doc.steps.find((s) => s.id === 'host')?.authoring).toBe('squisq-slideshow');
     expect(parsed.doc.steps.find((s) => s.id === 'host')?.spawnFanout).toBe(true);
   });
 

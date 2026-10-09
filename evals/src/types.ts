@@ -65,6 +65,8 @@ export interface EvalContext {
    * without touching the book's `test.json`.
    */
   repairPolicy?: 'harness' | 'runtime';
+  /** When explicit, only the runner's user simulator may answer questions. */
+  userSimulation?: import('./qualification/config.ts').UserSimulation;
   /**
    * Live mock-service runtime for this trial, present when the scenario
    * declared `mockServices`. The runner boots the fake HTTPS services
@@ -226,11 +228,25 @@ export interface EvalScenario {
    */
   requiresEmbeddings?: boolean;
   /**
+   * Run with the Night Shift on, its window placed around the trial
+   * (`trialNightWindow`). Every other trial forces it off, because the bundled
+   * oversight task would otherwise spend the model under test whenever the
+   * wall clock is inside the default window.
+   */
+  nightShift?: true;
+  /**
    * Golden and decoy documents for retrieval exposure facts. The runner
    * writes it to `<runDir>/retrieval-oracle.json`; `facts.retrieval.exposure`
    * reports which channel (reference list, injection, tool read) reached each.
    */
   retrievalOracle?: import('./retrieval-facts.ts').RetrievalOracle;
+  /**
+   * The retrieval arm this scenario needs when the run names none. Trials
+   * otherwise run with per-turn retrieval off, so a scenario about recall
+   * would measure nothing (the first memory-tutor A/B did exactly that).
+   * `--retrieval` still overrides it.
+   */
+  retrieval?: TrialRetrievalArm;
   /**
    * Grader-lint contract: for every signal the scenario's grader hard-
    * REQUIRES, the pattern that must be satisfiable from the prompt text
@@ -383,6 +399,8 @@ export interface EvalScenario {
 }
 
 export interface TrialOptions {
+  /** Opt-in API harness measurement; legacy trials keep their existing semantics. */
+  qualification?: import('./qualification/config.ts').QualificationOptions;
   /** Catalog id of the chat model to use (e.g. `gemma4-e4b-q4`). */
   modelId: string;
   /**
@@ -622,6 +640,7 @@ export interface NativeEngineIncidentSummary {
 }
 
 export interface TrialResult {
+  qualification?: import('./qualification/report.ts').QualificationReport;
   trialId: string;
   scenarioId: string;
   modelId: string;
@@ -849,7 +868,14 @@ export interface BatchSummary {
   perTrial: Array<
     Pick<
       TrialResult,
-      'trialId' | 'success' | 'durationMs' | 'reason' | 'failureMode' | 'engineContext'
+      | 'trialId'
+      | 'success'
+      | 'durationMs'
+      | 'reason'
+      | 'failureMode'
+      | 'engineContext'
+      | 'qualification'
+      | 'repairPolicy'
     >
   >;
   /** Set when auto-triage detected a consecutive-failure cluster (Theme E / E2). */

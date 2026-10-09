@@ -1,6 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { createLogger } from '@bendyline/gezel';
-import { ANTHROPIC_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
+import {
+  anthropicDefaultReasoningEffort,
+  anthropicReasoningEfforts,
+  buildAnthropicGenerationOptions,
+} from './anthropic-options.js';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
@@ -28,37 +33,14 @@ const log = createLogger('anthropic');
  * on the system prompt + the last block of the last persisted turn) to keep
  * per-turn cost on par with OpenAI's `previous_response_id` continuation.
  *
- * Reasoning is exposed via Anthropic's `thinking` config rather than
- * OpenAI's `reasoning.effort`. We map the same `low|medium|high` tags to
- * `budget_tokens` values, so a gezel pinned to `reasoningEffort: 'medium'`
- * works under either provider without re-configuration.
+ * Reasoning settings follow the model's thinking contract; signed thinking
+ * blocks stay in the wire history separately from the visible reply.
  */
-
-/** Anthropic enforces a minimum of 1024 budget tokens for thinking. */
-const ANTHROPIC_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
-const REASONING_BUDGET_TOKENS: Record<string, number> = {
-  low: 1024,
-  medium: 4096,
-  high: 16384,
-};
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
-/**
- * Required by the Messages API on every request. 16384 covers reasoning
- * turns that chew thousands of tokens on visible thinking before the
- * reply. Anthropic still bills only for tokens generated, so this is a
- * ceiling, not a target — the model stops cleanly at its natural
- * finish when the answer is short. Lowered from 32k after observing
- * verbose local models loop within the larger budget; 16k is roomy
- * enough for healthy turns while keeping pathological loops bounded.
- */
-const DEFAULT_MAX_TOKENS = 16384;
-
-/** Reasoning-capable model families. Anthropic doesn't return this on /v1/models, so we whitelist. */
-const REASONING_MODEL_PREFIXES = ['claude-opus-4', 'claude-sonnet-4', 'claude-mythos'];
 
 function isReasoningModel(id: string): boolean {
-  return REASONING_MODEL_PREFIXES.some((p) => id.startsWith(p));
+  return anthropicReasoningEfforts(id) !== undefined;
 }
 
 interface AnthropicMessage {
@@ -68,6 +50,8 @@ interface AnthropicMessage {
 
 type AnthropicContentBlock =
   | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'redacted_thinking'; data: string }
   | {
       type: 'image';
       source: { type: 'base64'; media_type: string; data: string };
@@ -128,6 +112,7 @@ export class AnthropicProvider implements LLMProvider {
     return new AnthropicSession({
       anthropic: this.anthropic,
       model: opts.model ?? this.defaultModel,
+      observationContext: opts.observationContext,
       reasoningEffort: opts.reasoningEffort,
       systemMessage: opts.systemMessage,
       bridges,
@@ -158,8 +143,8 @@ export class AnthropicProvider implements LLMProvider {
         id: m.id,
         name: m.display_name ?? m.id,
         supportsReasoning: reasoning,
-        reasoningEfforts: reasoning ? [...ANTHROPIC_REASONING_EFFORTS] : undefined,
-        defaultReasoningEffort: reasoning ? 'medium' : undefined,
+        reasoningEfforts: anthropicReasoningEfforts(m.id),
+        defaultReasoningEffort: anthropicDefaultReasoningEffort(m.id),
       });
     }
     models.sort((a, b) => a.id.localeCompare(b.id));
@@ -169,6 +154,7 @@ export class AnthropicProvider implements LLMProvider {
 
 /** @internal Exported alongside {@link AnthropicSession} for unit tests. */
 export interface AnthropicSessionDeps {
+  observationContext?: ApiObservationContext;
   anthropic: Anthropic;
   model: string;
   reasoningEffort?: string;
@@ -188,11 +174,8 @@ export interface AnthropicSessionDeps {
   externalTools?: ExternalToolSpec[];
   queue: ProviderQueue;
   /**
-   * Resolved per-model tuning. Applied to the request body via
-   * `ANTHROPIC_TUNING_MAP` after the legacy `reasoningEffort` → budget
-   * mapping fires, so `tuning.reasoning.thinkingBudget` (and an
-   * effort override on the tuning block) wins over the constructor's
-   * `reasoningEffort` when both are set.
+   * Resolved per-model tuning, normalized to the model's supported request
+   * parameters. Adaptive thinking uses effort rather than a token budget.
    */
   tuning?: import('../model-profile/index.js').ResolvedTuning;
 }
@@ -205,6 +188,10 @@ export interface AnthropicSessionDeps {
  * @internal
  */
 export class AnthropicSession extends StreamingSessionBase implements LLMSession {
+  private toolSurface: ReturnType<typeof apiToolSurface> | undefined;
+  getToolSurface() {
+    return this.toolSurface;
+  }
   /**
    * Running message array. Seeded from `priorMessages` on construction;
    * grown across multi-turn tool loops. Persistence is handled by
@@ -314,6 +301,11 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
       bridgeTools.length + externalToolsAsAnthropic.length > 0
         ? [...bridgeTools, ...externalToolsAsAnthropic]
         : undefined;
+    const generationOptions = buildAnthropicGenerationOptions(
+      this.deps.model,
+      this.deps.reasoningEffort,
+      this.deps.tuning,
+    );
 
     // Append the new user prompt (with any pasted images), but ONLY
     // when there's actually a prompt or attachments. A multi-turn tool
@@ -340,33 +332,23 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
       }
 
       const request: Record<string, unknown> = {
-        model: this.deps.model,
-        max_tokens: DEFAULT_MAX_TOKENS,
+        ...generationOptions,
         system: buildSystem(this.deps.systemMessage),
         messages: applyCacheBreakpoints(this.messages),
         stream: true,
       };
       if (tools && tools.length > 0) request.tools = tools;
-      if (this.deps.reasoningEffort && isReasoningModel(this.deps.model)) {
-        const budget =
-          REASONING_BUDGET_TOKENS[this.deps.reasoningEffort] ?? REASONING_BUDGET_TOKENS.medium;
-        request.thinking = { type: 'enabled', budget_tokens: budget };
-      }
-      // Per-model tuning. Layers on top of the reasoningEffort → budget
-      // mapping above: a `tuning.reasoning.thinkingBudget` direct value
-      // overwrites the effort-derived value; an effort on the tuning
-      // block is skipped when a budget is already set (the map's
-      // `writeAnthropicEffort` checks for that). Sampling
-      // (temperature/top_p/top_k/max_tokens) lands directly on `request`.
-      if (this.deps.tuning) {
-        applyTuning(request, this.deps.tuning, ANTHROPIC_TUNING_MAP);
-      }
 
-      const stream = (await (
-        this.deps.anthropic as unknown as {
-          messages: { create: (r: unknown) => Promise<AsyncIterable<AnthropicStreamEvent>> };
-        }
-      ).messages.create(request)) as AsyncIterable<AnthropicStreamEvent>;
+      this.toolSurface = apiToolSurface(tools ?? []);
+      const stream = observeApiStream(
+        () =>
+          (
+            this.deps.anthropic as unknown as {
+              messages: { create: (r: unknown) => Promise<AsyncIterable<AnthropicStreamEvent>> };
+            }
+          ).messages.create(request),
+        { provider: 'anthropic', request, round: turn + 1, context: this.deps.observationContext },
+      );
 
       const turnTextParts: string[] = [];
       const blocks: AnthropicContentBlock[] = [];
@@ -396,15 +378,17 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
               input: {},
             });
             toolInputBuffers.set(event.index, '');
+          } else if (block?.type === 'thinking') {
+            if (this.lastTurnReasoning.length > 0) this.lastTurnReasoning += '\n\n';
+            blocks.push({
+              type: 'thinking',
+              thinking: block.thinking ?? '',
+              signature: block.signature ?? '',
+            });
+          } else if (block?.type === 'redacted_thinking') {
+            blocks.push({ type: 'redacted_thinking', data: block.data ?? '' });
           } else {
-            // thinking / redacted_thinking / future block types: round-trip
-            // them as a placeholder so the index alignment with content_block_stop
-            // stays correct, but skip in fullText.
-            if (block?.type === 'thinking' && this.lastTurnReasoning.length > 0) {
-              // A new thinking block in a multi-round tool loop — separate
-              // it from the previous round's captured trace.
-              this.lastTurnReasoning += '\n\n';
-            }
+            // Preserve stream index alignment for unrecognized content blocks.
             blocks.push({ type: 'text', text: '' });
           }
         } else if (event.type === 'content_block_delta') {
@@ -422,14 +406,13 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
             const buf = toolInputBuffers.get(event.index) ?? '';
             toolInputBuffers.set(event.index, buf + delta.partial_json);
           } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-            // Stream the thinking inline so the user sees forward motion
-            // instead of silent dots, and capture it separately for
-            // `getLastTurnReasoning()`. It stays out of `turnTextParts`,
-            // so the final reply (and the round-tripped transcript) never
-            // contains the trace — it persists only as
-            // `ChatMessage.reasoning` behind the collapsed expander.
+            const slot = blocks[event.index];
+            if (slot?.type === 'thinking') slot.thinking += delta.thinking;
             this.lastTurnReasoning += delta.thinking;
             this.emitDelta(delta.thinking);
+          } else if (delta.type === 'signature_delta' && typeof delta.signature === 'string') {
+            const slot = blocks[event.index];
+            if (slot?.type === 'thinking') slot.signature += delta.signature;
           }
         } else if (event.type === 'content_block_stop') {
           const buf = toolInputBuffers.get(event.index);
@@ -457,9 +440,7 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
       // Persist this assistant turn into our running message array. Even if
       // stop_reason is `end_turn`, keeping it here means a subsequent
       // `sendAndWait` call sees a coherent transcript.
-      const assistantBlocks = blocks.filter(
-        (b) => b.type === 'tool_use' || (b.type === 'text' && b.text.length > 0),
-      );
+      const assistantBlocks = blocks.filter((b) => b.type !== 'text' || b.text.length > 0);
       this.messages.push({
         role: 'assistant',
         content:
@@ -668,11 +649,19 @@ interface AnthropicStreamEvent {
   type: string;
   index: number;
   message?: { usage?: AnthropicUsage };
-  content_block?: { type: string; id?: string; name?: string };
+  content_block?: {
+    type: string;
+    id?: string;
+    name?: string;
+    thinking?: string;
+    signature?: string;
+    data?: string;
+  };
   delta?: {
     type?: string;
     text?: string;
     thinking?: string;
+    signature?: string;
     partial_json?: string;
     stop_reason?: string;
   };

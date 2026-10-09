@@ -46,6 +46,7 @@ export interface ChatModelSources {
 export interface ChatModelInstallIdentity {
   catalogVersion?: string;
   sha256?: string;
+  fileSha256?: Record<string, string>;
   huggingfaceRepo?: string;
   weightsFilename?: string;
   draftFilename?: string;
@@ -53,6 +54,7 @@ export interface ChatModelInstallIdentity {
 }
 
 interface EngineBlock {
+  files?: Array<{ name: string; sha256?: string }>;
   huggingfaceRepo?: string;
   filename?: string;
   sha256?: string;
@@ -147,6 +149,9 @@ export function chatModelInstallIdentity(
   if (!block) return undefined;
   return {
     ...(model.version ? { catalogVersion: model.version } : {}),
+    ...(block.files?.length && block.files.every((file) => file.sha256)
+      ? { fileSha256: Object.fromEntries(block.files.map((file) => [file.name, file.sha256!])) }
+      : {}),
     ...(block.sha256 ? { sha256: block.sha256 } : {}),
     ...(block.huggingfaceRepo ? { huggingfaceRepo: block.huggingfaceRepo } : {}),
     ...(block.filename ? { weightsFilename: block.filename } : {}),

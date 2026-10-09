@@ -1,3 +1,4 @@
+import { parseReminderRequest } from '../notifications/index.js';
 import type { GezelConfig } from '../schemas/api.js';
 import type {
   GetScriptSourceResponse,
@@ -9,6 +10,7 @@ import type {
   ScriptTemplateId,
   SdkTypesResponse,
 } from '../schemas/script.js';
+import { resolveScriptMemorySave } from '../scripts/memory.js';
 import { toScriptTaskStep } from '../scripts/task-step.js';
 import { projectManagedWorkspaceWritable, resolveSecurityPolicy } from '../security/policy.js';
 import { validatePortablePath } from './files.js';
@@ -19,6 +21,8 @@ import { assertPortableTaskSessionActive } from './task-authority.js';
 
 export interface PortableScriptTaskContext {
   projectId: string;
+  /** The running script, when the runner knows it; recorded on reminders it sets. */
+  scriptName?: string;
   signal: AbortSignal;
   trigger?: ScriptRunTrigger;
   /** Recheck the runner's live admission ceiling before a delayed host effect. */
@@ -36,6 +40,8 @@ export interface PortableScriptTaskContext {
 /** Host-facing contract; the core never imports an execution engine. */
 export interface PortableScripts {
   setTaskActions?(actions: PortableScriptTaskActions): void;
+  /** Called after a script sets or clears its project's reminder. */
+  setRemindersChanged?(listener: (projectId: string) => void): void;
   authoring?: {
     inspect(
       source: string,
@@ -70,9 +76,13 @@ export interface PortableScripts {
 
 export class PortableScriptHost {
   private taskActions: PortableScriptTaskActions | undefined;
+  private remindersChanged: ((projectId: string) => void) | undefined;
   constructor(private readonly store: PortableStore) {}
   setTaskActions(actions: PortableScriptTaskActions) {
     this.taskActions = actions;
+  }
+  setRemindersChanged(listener: (projectId: string) => void) {
+    this.remindersChanged = listener;
   }
   readConfig = (): Promise<GezelConfig> => this.store.readConfig();
   persistRun = (run: ScriptRun) => this.store.writeScriptRun(run);
@@ -177,6 +187,31 @@ export class PortableScriptHost {
         return method === 'task.appendNote' ? note : undefined;
       }
       throw new Error(`SDK method "${method}" is unavailable on this device`);
+    }
+    if (method === 'memory.search')
+      return (await this.store.searchMemoryScope('project', context.projectId, text('query')))
+        .results;
+    if (method === 'reminder.set' || method === 'reminder.clear') {
+      const reminder =
+        method === 'reminder.set'
+          ? parseReminderRequest(p, {
+              projectId: context.projectId,
+              ...(context.scriptName ? { source: context.scriptName } : {}),
+              now: new Date(),
+            })
+          : null;
+      check();
+      await this.store.setProjectReminder(context.projectId, reminder);
+      this.remindersChanged?.(context.projectId);
+      return undefined;
+    }
+    if (method === 'memory.save') {
+      const save = resolveScriptMemorySave(p, {
+        projectId: context.projectId,
+        ...(context.trigger?.kind === 'chat' ? { gezelId: context.trigger.gezelId } : {}),
+      });
+      check();
+      return this.store.saveMemory(save);
     }
     const area: PortableFileArea = method.startsWith('fs.')
       ? 'workspace'

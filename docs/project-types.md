@@ -129,6 +129,9 @@ Version manifest (composition payload):
     { "name": "advance_level", "description": "…", "script": "progress-store", "inputs": { },
       "bind": { "action": "advance" },                 // static args merged over the caller's input
       "reaction": { "gezel": "…", "prompt": "…" } },   // page-invoke only: summon a gezel turn
+    { "name": "make_move", "…": "…",
+      "turn": { "say": "moveThought" } },              // a successful call ends the turn; `say` is the reply
+    { "name": "get_board", "…": "…", "state": true },   // a person's message is answered from its output
   ],
   "pages": { "entry": "dashboard/index.html",         // pinned Output page (new primitive)
              "reads": [ { "source": "workspace", "path": "…" } ],
@@ -337,6 +340,65 @@ first-party parent:
   params, and lands as a system-authored `[<Type name> page]: …` seed in the
   target's live project session — background lane, coalescable (rapid events
   merge into one turn), engagement-gated, `page.reaction.sent` in history.
+- **Standalone reactions.** A reaction whose seed carries the whole current state
+  (a board game's position and legal moves) declares `standalone: true`. Its turn
+  is answered from the gezel's instructions and the seed alone; the transcript
+  still records every turn. Two reasons, both measured on Gemini Nano on a Galaxy
+  S26+: earlier turns cost the window a 4K model needs for the state (a checkers
+  seed and its move receipt are about 1,400 tokens, so the second move did not
+  fit), and a small model handed its own earlier replies copies one ("Alright,
+  alright! That was a bold move!" verbatim, no move) instead of acting on the new
+  board. Both hosts honor it: `send(..., { standalone })` on the desktop reaches
+  the shared llama.cpp loop and MLX as `SendAndWaitOpts.standalone`; the phone
+  leaves the history out of both its loops. Checkers, chess and go declare it.
+- **Turn tools.** A tool whose successful call is a turn's whole job (a game's
+  move, a tutor's reply) declares `turn: { say, fallback }`: the call ends the
+  turn, and its `say` argument is the reply (`fallback` when it was left empty).
+  A tool that reads the activity's state declares `state: true`: a message a
+  person sends is answered from its output, read just before the turn and put
+  ahead of their words for the model only. A reaction may then require its turn
+  to be that call: `turn: { tool, when }` makes the summoned turn's first request
+  offer only `tool` and, where the engine can, require the call (llama.cpp
+  `tool_choice: required`, thinking off like every constrained turn; MLX and the
+  phone's system models get the narrowed surface). `when` is a script-output
+  predicate over the reacting tool's output, so a move is required only while
+  one is due (checkers, chess and go: `status` is `playing`); otherwise the turn
+  is an ordinary one, free to say something instead. The rules live once in core
+  (`projectTypeTurnRules`, `reactionRequiredTool`), and `projectTypeTurnProblems`
+  (checked over every bundled version by a catalog contract test) catches a
+  reaction naming a tool that is missing, page-only, or not a turn tool. Board
+  games published before these declarations get the same rules from their tool
+  names (`get_board`, `make_move`), a fallback to drop once the pin moves past
+  them.
+  A person's own message can be held to the same rule: the `state` tool may
+  declare `answer: { tool, when }`, and while its fresh output matches `when`
+  the person's turn requires `tool` exactly as a reaction's `turn` does
+  (`stateAnswerTool` in core). The language trainer uses it so every line the
+  student writes during a scene is answered, and graded, through `reply`.
+  A turn tool may also declare `show`: an output field its script fills with
+  the reply to display instead of `say`. The app composes that text from what
+  it scored (the tutor's line plus the corrections it recorded, a clue plus
+  its count), so feedback never depends on the model writing it out. Shown
+  text is bounded at 800 characters and is not held to the sociability cap.
+  In social mode a turn tool's `say` is also held to the gezel's sociability
+  (`withCharacterChatCap` in [core character/](../packages/core/src/character/index.ts):
+  60 characters for a quiet gezel up to 440 for a talkative one, scaled down
+  for a calm temperament or a frugal quirk), on both hosts.
+- **Reminders.** A type whose state says when the person should come back
+  (a flashcard deck's next due card) sets the project's one reminder from its
+  script: `gezel.reminder.set({ at, title, body })`, which needs the
+  `reminders` capability, and `gezel.reminder.clear()` when nothing is due.
+  The time must come from the type's own data, never a schedule picked to
+  bring the person back. The app schedules it on both hosts (with the OS on a
+  phone, so it fires with the app closed), and it counts against the
+  person's daily allowance. Flashcards 1.1.2 is the example: `deck-store`
+  sets it after every change, from the Leitner boxes.
+- **Personality from character.** A game's `personality` param defaults to
+  `in-character`, so its templates ask for "in-character" table talk and the
+  gezel's `### Character` block (social mode) supplies the persona. Picking `peppy`,
+  `cheeky`, `zen` or `gracious` still overrides it for that table. Params are
+  filled before the crew exists, so the default cannot be computed from a
+  gezel; deferring to the character block is what makes it follow the gezel.
 
 Platform note: sandboxed scripts deny network egress by design, and untrusted
 scripts require an enforceable OS boundary for that deny (macOS Seatbelt; a
@@ -352,6 +414,100 @@ JS network-API neutralizer). One edited byte drops a script back to the
 fail-closed path. Net effect: bundled interactive types (Checkers, the
 dashboards' page tools) work on every platform; user-edited and model-authored
 scripts still execute only where the OS fence exists.
+
+## On phones
+
+A project type is one manifest on every platform. The phone has no catalog
+service, so the mobile build bundles the pinned catalog's project types it can
+run into a lazily loaded chunk (`virtual:gezel-portable-project-types`,
+[portable-content.ts](../packages/mobile/scripts/portable-content.ts)): every
+script must pass the phone's script runtime (which bundles
+`@bendyline/gezel-sdk/stores` beside `/checks`, so the log, roster and ledger
+helpers type scripts are built on work there), and a type that exists only to
+run craftbooks needs at least one the phone can run. The phone runtime then answers
+the same API the desktop does
+([runtime/project-type-routes.ts](../packages/core/src/runtime/project-type-routes.ts)):
+
+- `GET /api/catalog/project-type[/:id]` feeds the New Project gallery
+  (`RuntimeCapabilities.projectTypes`), and `POST /api/projects/typed` creates
+  a typed project **in one transaction**: project, hired crew, scripts (with
+  the `// @gezel-project-type:` provenance header) and seeds become visible
+  together or not at all.
+- A session's tool surface gains the type's model tools (never `pages.tools`),
+  run as project scripts with `bind` merged last; a `leanProfile` type's
+  conversations keep only its own tools and `ask_user_question`, as on the
+  desktop. A task step in a lean project keeps the kit its step needs
+  (`leanSession` in core): narrowed to the type's own tools, a craftbook's
+  steps could not write what they owe. That is what lets an activity with a
+  craftbook (the fitness coach's weekly review) be lean.
+- `GET /api/projects/:id/craftbooks` offers the type's craftbooks the phone
+  can run as suggested, under the type's name, as the desktop does with the
+  books it copied in. A book the type embeds in `craftbooks/<id>.json` is
+  compiled into the bundle and listed first; a declared catalog book comes
+  from the bundled catalog. A gate's `contains` / `notContains` checks run in
+  the bounded `checkContains` standard script rather than on the UI thread,
+  so books gated on a heading or a verdict run on phones too.
+- `page-invoke` / `page-read` and reactions follow the desktop's rules; a
+  reaction seed runs in the background lane in the gezel's latest project
+  conversation, hidden when the tool says `hideSeed` and without the earlier
+  turns when it says `standalone`.
+- Turn tools run by one rule on both hosts (see **Turn tools** above). Ending
+  the turn on the call stops a small model writing it again after acting
+  (Gemini Nano did on six of twelve checkers moves, escaped, shown raw); reading
+  the state before a person's message lets "It is your move" resume a game whose
+  last seed failed, since a chat message carries no board. Seeds, crew handoffs
+  and nudges never get the state (`turnStateWanted`); they carry their own or
+  need none.
+- A lean project (a game, the chat room) on a system model (Android's or
+  Apple's on-device AI) holds back 512 tokens for the reply instead of the
+  provider's 1,024 (`LEAN_PROFILE_REPLY_MAX_TOKENS`): there, every token held for
+  the reply is one the prompt cannot use.
+
+The rules both hosts must agree on — template rendering and param defaults,
+crew reuse, the model/page tool split, page-read scopes, reaction seeds and the
+script provenance header — live once in
+[core/project-types/composition.ts](../packages/core/src/project-types/composition.ts).
+
+What a phone cannot do is said, never faked:
+
+- **Schedules** are not materialized (the phone runs nothing while closed);
+  `applied.deferred.schedules` counts them and the gallery says they are run by
+  the desktop app.
+- **Toolsets** are not installed; a type that declares one is offered disabled.
+- **`capabilityFloor`** (a `ModelTier`) is the smallest model a type's sessions
+  work on. A host whose selected model sits below it lists the type with
+  `unavailableReason` and refuses to create it (`projectTypeHostGap`). System
+  models count as tiny.
+- **v0 pages** do not run in a phone's snapshot preview (see
+  [output-pane-api.md](output-pane-api.md), "Pages on phones"); the Output pane
+  says so instead of showing the page's demo data.
+
+## Authoring activities for small models
+
+A type that runs as an activity (a tutor, a coach, a game) should work on the
+phone's on-device model, which means the app does the thinking that small
+models do badly and the model does the one thing it does well.
+
+**State over prose; the app scores, the model narrates.** Keep the activity's
+truth in a data file its script owns (`progress.json`, `game.json`), read it
+through a `state` tool, and let the script decide every outcome: legality,
+scores, streaks, review intervals, what is due. The model's turn is one typed
+call (`reply`, `make_move`, `give_clue`) whose arguments the script validates
+and whose rejection lists what would be valid. Never ask the model to keep
+count, remember the board, or report numbers the script could compute.
+
+**The small-model fit rubric.** A proposed activity needs at least three of
+these five, or it targets a larger model through `capabilityFloor`:
+
+1. Each model turn is under 300 output tokens.
+2. The model's output is typed (a turn tool's schema, not free prose).
+3. The app owns the scoring.
+4. The input is data on the device (the person's log, deck or board).
+5. The compiled context is under 2K tokens (`prompt-budget.ts --project-types`).
+
+Prefer one model call per person's action. A cast of gezels takes turns
+(Word Clues alternates its two clue-givers) rather than talking in one round,
+because each extra call is seconds on a phone.
 
 ## Detection never triggers side effects
 
@@ -490,17 +646,23 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
    summon a gezel turn from a page action. See "Page-invoke bridge and reactions"
    above. Exemplars: Checkers (`game` rail — the board IS the dashboard) and
    Flashcards (`growth` — review page + coaching reaction).
-9. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
+9. **Phones** ✅ — bundled project types, typed creation, script tools, page bridge
+   and reactions on the phone runtime, with the composition rules shared from core.
+   See "On phones" above.
+10. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
    download/upload affordance for `.gezapp` files (the flow is fully available to the
    Meester via MCP today), and a Windows denyNet boundary so scripts (and therefore
    interactive pages) run there.
 
 ### Exemplars (the forcing functions)
 
-- **Language Trainer**: trainer gezel (converse in the target language, gently correct,
-  track progress) + `progress.json` seed + `progress-store.ts` script + script-tools
-  `record_session` / `advance_level` + a dashboard page reading progress via preview
-  fetch + a `language` param.
+- **Language Trainer**: the growth loop. Role-play scenes from a `scenarios.json` seed
+  (a café, lost luggage, a pharmacy); the tutor plays the counterpart through the
+  `reply` turn tool, whose `errors` the script turns into corrections shown under the
+  reply (`show`), review cards on three Leitner boxes (`reviews.json`), `correction`
+  memories for the tutor, and the review reminder. `practice_state` answers a
+  student's line through `reply` while a scene is active (`answer`). The dashboard
+  shows the level, day streak, reviews due, a review deck and the scenes.
 - **Design Scheme**: palette/prototype script-tools writing into `artifacts/`, a gallery
   page over artifacts, a Designer-gilde gezel. Validates the artifacts-oriented output
   path.
@@ -523,4 +685,13 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
   style adds light teaching observations.
 - **Flashcards**: the reactions-generalize proof (review page + Leitner `deck-store`;
   the `finish_session` reaction has the Studiemaat respond to the session's misses —
-  coaching, not turn-taking).
+  coaching, not turn-taking). The quiz forge (1.2.0) turns pasted notes into at most
+  eight cards: `forge_from_notes` stages them and requires one `add_cards` call.
+- **Fitness Coach**: logging from the page on every platform, a personal best flagged
+  by the script, and a weekly recap whose numbers the script computes; the coach's
+  `save_recap` adds one suggestion, and the embedded `training-recap` craftbook gates
+  `recaps/latest.json` as valid JSON with a suggestion in it.
+- **Word Clues**: the cast game. A board of sixteen words dealt and scored by
+  `clue-store`; two clue-givers with preset characters (the Woordsmid and the
+  Puzzelaar, from their templates' `frontmatter.character`) alternate, each turn one
+  `give_clue` call the script checks against the board.

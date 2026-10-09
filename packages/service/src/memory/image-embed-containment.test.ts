@@ -21,6 +21,7 @@ const ENTRY_MODULES = [
   'memory/image-embeddings.ts',
   'memory/image-embed-worker.ts',
   'memory/image-embed-core.ts',
+  'memory/media-embed-core.ts',
   'memory/image-pixels.ts',
 ];
 

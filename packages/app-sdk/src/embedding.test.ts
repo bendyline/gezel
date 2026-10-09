@@ -116,3 +116,80 @@ it('still closes the transport if model cleanup fails, and reports the failure',
   await expect(host.close()).rejects.toMatchObject({ code: 'cleanup_failed' });
   expect(close).toHaveBeenCalledOnce();
 });
+
+it('carries progress, tuning, final model and usage without treating metadata as text', async () => {
+  const { connection } = fixture();
+  const progress = { phase: 'prefill', percent: 50, outputTokens: null, tokensPerSecond: null };
+  const usage = { prompt_tokens: 12, completion_tokens: 2, total_tokens: 14 };
+  const chat = vi.spyOn(connection.app, 'chat').mockResolvedValue(
+    (async function* () {
+      yield { choices: [], gezel_progress: progress };
+      yield {
+        model: 'actual',
+        choices: [{ delta: { content: 'draft' }, finish_reason: 'length' }],
+      };
+      yield { choices: [], usage };
+    })() as never,
+  );
+  const host = createEmbedding({ connect: async () => connection });
+  await host.setEnabled(true);
+  const events: TextEvent[] = [];
+  const result = await host.streamText(
+    { model: 'fixture', messages: [], temperature: 0.35, reasoningEffort: 'none', maxTokens: 100 },
+    { onEvent: (event) => events.push(event) },
+  );
+  expect(chat).toHaveBeenCalledWith(
+    expect.objectContaining({
+      temperature: 0.35,
+      reasoning_effort: 'none',
+      max_tokens: 100,
+      stream_options: { include_usage: true, include_progress: true },
+    }),
+    expect.anything(),
+  );
+  expect(events.map((event) => event.type)).toEqual(['progress', 'delta', 'done']);
+  expect(result).toMatchObject({ text: 'draft', finishReason: 'length', model: 'actual', usage });
+  await host.close();
+});
+
+it('rejects explicitly unsupported sampling options before generation', async () => {
+  const { connection } = fixture();
+  vi.spyOn(connection.models, 'inspect').mockResolvedValue({
+    id: 'fixture',
+    availability: 'available',
+    supported_options: ['max_tokens'],
+  } as never);
+  const chat = vi.spyOn(connection.app, 'chat');
+  const host = createEmbedding({ connect: async () => connection });
+  await host.setEnabled(true);
+  await expect(
+    host.streamText({ model: 'fixture', messages: [], temperature: 0.7 }),
+  ).rejects.toMatchObject({ code: 'unsupported_option' });
+  expect(chat).not.toHaveBeenCalled();
+  await host.close();
+});
+
+it('tracks knowledge operations through opt-out and discards late retrieval', async () => {
+  const { connection } = fixture();
+  let signal: AbortSignal | undefined;
+  connection.knowledge = {
+    state: vi.fn(),
+    update: vi.fn(),
+    retrieve: vi.fn(async (_query, opts) => {
+      signal = opts?.signal;
+      await new Promise<void>((resolve) =>
+        signal?.addEventListener('abort', () => resolve(), { once: true }),
+      );
+      signal?.throwIfAborted();
+      return { reranked: false, passages: [] };
+    }),
+  };
+  const host = createEmbedding({ connect: async () => connection });
+  await host.setEnabled(true);
+  const pending = host.knowledge.retrieve({ query: 'test', maxResults: 1, maxCharacters: 100 });
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'aborted' });
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  await host.setEnabled(false);
+  await rejected;
+  await host.close();
+});

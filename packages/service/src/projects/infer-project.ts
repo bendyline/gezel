@@ -1,10 +1,13 @@
 import { opendir, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir as osHomedir, tmpdir as osTmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
+  type CodeFolderInfo,
   type CreateProjectRequest,
   DEFAULT_INFERENCE_POLICY,
   type ExistingProjectRef,
+  type FolderCensus,
+  type FolderKind,
   type ForbiddenContext,
   type FsEntry,
   type FsProbe,
@@ -25,6 +28,7 @@ import {
   compareKey,
   createLogger,
   forbiddenRootReason,
+  inferFolderKind,
   inferProjectRoot,
   isAbsolutePath,
   isDocumentFileName,
@@ -40,6 +44,8 @@ import { activeMachineSharedHome } from '@bendyline/gezel/paths';
 import { realpathNearest } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
+import { scanFolderProfile } from '../project-type/scan-folder.js';
+import { censusFolder, findCodeFolders } from './folder-census.js';
 
 const log = createLogger('projects');
 
@@ -74,6 +80,8 @@ export interface InferProjectDeps {
   home: string;
   /** Creates a project exactly as `POST /api/projects` does. */
   createProject: (body: CreateProjectRequest) => Promise<ProjectDetail>;
+  /** Recruits an existing folder project's crew when the request asks (see `recruitCrewForFolder`). */
+  recruitCrew?: (projectId: string) => Promise<void>;
   history?: HistoryManager;
   // Test seams. Production passes none of these; the daemon's own view of
   // the machine is the only authority, never a client-supplied home.
@@ -298,6 +306,7 @@ export async function inferProjectForPath(
   );
 
   if (outcome.matchedBy === 'existing') {
+    if (create && request.recruitCrew) await recruitExistingCrew(deps, outcome.projectId);
     const project = (await deps.store.getProject(outcome.projectId)) ?? null;
     if (!project) throw new Error(`project ${outcome.projectId} disappeared during inference`);
     return {
@@ -348,6 +357,7 @@ export async function inferProjectForPath(
       readOnly: true,
       ...(summary ? { wellKnown: summary } : {}),
       warnings: outcome.warnings,
+      ...(kind === 'folder' ? { folder: await previewFolderKind(outcome.root, folder?.kind) } : {}),
     };
   }
 
@@ -362,6 +372,7 @@ export async function inferProjectForPath(
           pathsEqual(p.workingDir, root, view.platform)),
     );
     if (raced) {
+      if (request.recruitCrew) await recruitExistingCrew(deps, raced.id);
       const project = (await deps.store.getProject(raced.id)) ?? null;
       if (project) {
         return {
@@ -409,6 +420,8 @@ export async function inferProjectForPath(
         mode: request.mode ?? 'solo',
         workingDir: root,
         ...(folder?.kind === 'downloads' ? { indexingEnabled: false } : {}),
+        // The crew recruiter below seats the lead that suits the folder.
+        ...(request.recruitCrew && deps.recruitCrew ? { lead: 'none' as const } : {}),
       });
     }
     project = await deps.store.updateProject(project.id, {
@@ -418,6 +431,12 @@ export async function inferProjectForPath(
         ...(folder ? { [INFERRED_PROJECT_WELL_KNOWN_PROPERTY]: folder.kind } : {}),
       },
     });
+    // After the well-known kind is stamped: it decides a Pictures or
+    // Documents folder's crew ahead of the file mix.
+    if (request.recruitCrew) {
+      await recruitExistingCrew(deps, project.id);
+      project = (await deps.store.getProject(project.id)) ?? project;
+    }
     await deps.history
       ?.log({
         kind: 'project.inferred',
@@ -449,9 +468,70 @@ export async function inferProjectForPath(
   });
 }
 
+/** What a folder about to be added is, for the add-folder sheet's preview. */
+async function previewFolderKind(
+  root: string,
+  wellKnownKind: string | undefined,
+): Promise<{ kind: FolderKind; census: FolderCensus }> {
+  const [census, profile] = await Promise.all([censusFolder(root), scanFolderProfile(root)]);
+  return {
+    kind: inferFolderKind({ wellKnownKind, modalities: profile?.modalities }),
+    census,
+  };
+}
+
+/**
+ * Why `POST /api/projects` must not create a project on `workingDir`: a folder
+ * gezel never owns (home, a drive root, temp), or one a project already has.
+ * Null when it may. The same forbidden-root rule as inference, so naming a
+ * folder through either door gets the same answer.
+ */
+export async function checkNewProjectFolder(
+  deps: InferProjectDeps,
+  workingDir: string,
+): Promise<{
+  status: 403 | 409;
+  body: { error: string; code: string; reason?: string; projectId?: string };
+} | null> {
+  const view = await machineView(deps);
+  const real = normalizePath(await realpathOrSelf(workingDir), view.platform);
+  // The caller named this folder, so only the roots themselves are refused.
+  const forbidden = forbiddenRootReason(real, view.ctx, { explicit: true });
+  if (forbidden) {
+    return {
+      status: 403,
+      body: {
+        error: 'gezel does not create a project for this folder',
+        code: 'forbidden_root',
+        reason: forbidden,
+      },
+    };
+  }
+  const refs = await existingProjectRefs(await deps.store.listProjects(), view.platform);
+  const owner = refs.find((r) => pathsEqual(r.workingDir, real, view.platform));
+  if (owner) {
+    return {
+      status: 409,
+      body: {
+        error: 'a project already looks after this folder',
+        code: 'folder_in_use',
+        projectId: owner.id,
+      },
+    };
+  }
+  return null;
+}
+
+async function recruitExistingCrew(deps: InferProjectDeps, projectId: string): Promise<void> {
+  await deps.recruitCrew?.(projectId).catch((err: unknown) => {
+    log.warn(`[projects] crew recruitment failed for ${projectId}: ${String(err)}`);
+  });
+}
+
 /** Well-known folders for a first-run "add a project for Documents / Pictures" offer. */
 export async function listWellKnownFolders(
   deps: InferProjectDeps,
+  opts: { census?: boolean } = {},
 ): Promise<WellKnownFoldersResponse> {
   const view = await machineView(deps);
   const projects = await deps.store.listProjects();
@@ -495,7 +575,19 @@ export async function listWellKnownFolders(
     }
     const forbidden = forbiddenRootReason(path, view.ctx);
     if (forbidden) info.forbidden = forbidden;
+    if (opts.census && exists && !forbidden) info.census = await censusFolder(path);
     folders.push(info);
   }
-  return { folders };
+  if (!opts.census) return { folders };
+  const codeFolders: CodeFolderInfo[] = [];
+  for (const path of await findCodeFolders(view.ctx.homedir)) {
+    const match = refs.find((r) => pathsEqual(r.workingDir, path, view.platform));
+    codeFolders.push({
+      path,
+      name: basename(path),
+      ...(match ? { projectId: match.id } : {}),
+      census: await censusFolder(path, { budgetMs: 500 }),
+    });
+  }
+  return { folders, codeFolders };
 }

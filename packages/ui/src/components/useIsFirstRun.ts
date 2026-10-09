@@ -36,6 +36,7 @@ async function estimateFirstRun(): Promise<boolean> {
       return status ? !status.available : !cfg.hasGithubToken;
     }
     if (p === 'openai') return !cfg.hasOpenaiApiKey;
+    if (p === 'anthropic') return !cfg.hasAnthropicApiKey;
     if (p === 'mlx') {
       const { models } = await api.listMlxModels().catch(() => ({ models: [] }));
       return models.length === 0;

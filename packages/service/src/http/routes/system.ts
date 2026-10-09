@@ -71,9 +71,18 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * only runs when the user is actually away. Headless runs never call this.
    */
   app.post('/idle', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { idleSeconds?: number };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      idleSeconds?: number;
+      onBattery?: unknown;
+    };
     const idle = Number(body.idleSeconds);
-    if (Number.isFinite(idle)) ctx.systemIdle.report(idle);
+    const onBattery = typeof body.onBattery === 'boolean' ? body.onBattery : undefined;
+    const powerChanged = onBattery !== undefined && ctx.systemIdle.onBatteryPower() !== onBattery;
+    if (Number.isFinite(idle)) ctx.systemIdle.report(idle, onBattery);
+    else if (onBattery !== undefined) ctx.systemIdle.reportPower(onBattery);
+    // Unplugging stands the night shift down now, so the shell's next
+    // power-intent read already releases keep-awake.
+    if (powerChanged) await ctx.nightShift.tick().catch(() => {});
     return c.json({ ok: true });
   });
 

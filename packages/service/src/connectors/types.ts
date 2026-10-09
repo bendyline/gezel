@@ -92,7 +92,7 @@ export interface NormalizedRecord {
   /** Content-scanner origin (mail: `email`). Widened to string for non-mail
    *  sources; the scanner input is cast at the call site until it's widened. */
   scanOrigin: string;
-  /** Subdir under `.gezel/quarantine/` for a diverted body (mail: `mail`). */
+  /** Subdir of the project's quarantine folder for a diverted body (mail: `mail`). */
   quarantineNamespace: string;
   /** Human prefix for the quarantine stub (mail: `Message from <sender>`). */
   quarantineLabel: string;

@@ -26,6 +26,7 @@ import {
   isFileRepairPrompt as isScenarioFileRepairPrompt,
   isSourceFileRepairPrompt as isSourceFileScenarioRepairPrompt,
   readFileOnlyTools,
+  requiredToolOnly,
   fileRepairTargetPath as scenarioRepairTargetPath,
   writeFileOnlyTools,
 } from './constrained-turn.js';
@@ -120,6 +121,7 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   TerminalToolPolicy,
+  ToolSurfaceSize,
 } from './provider-contract.js';
 import { runOnLiveProvider } from './provider-disposal.js';
 import { buildRambleAbortMessage } from './ramble-abort-message.js';
@@ -138,6 +140,7 @@ import {
   unreadRequiredInputs,
 } from './required-input-reads.js';
 import { isSseComment, readSseEvents } from './sse.js';
+import { standaloneTurnMessages } from './standalone-turn.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from './streaming-session.js';
 import {
   DeliverableReadySteer,
@@ -145,7 +148,7 @@ import {
   terminalToolClosingText,
 } from './terminal-tool-policy.js';
 import { coerceToolCallArgs } from './tool-arg-schema-coercion.js';
-import { computeToolBudgetChars } from './tool-budget.js';
+import { computeToolBudgetChars, toolSurfaceSize } from './tool-budget.js';
 import { type ToolFailureLoop, ToolFailureTracker } from './tool-failure-tracker.js';
 import {
   isLlamaCppForcedToolChoiceError,
@@ -1359,11 +1362,12 @@ export function compactSuccessfulWriteToolCallForTranscript(
   if (typeof content !== 'string' || content.length < WRITE_TRANSCRIPT_COMPACT_MIN_CHARS) {
     return false;
   }
-  const path = typeof args.path === 'string' && args.path.trim() ? args.path : '(unknown path)';
-  call.function.arguments = JSON.stringify({
-    ...args,
-    [fieldName]: `[omitted from future model transcript after successful ${call.function.name}; ${content.length} chars were written to ${path}. Use read_file to inspect current contents.]`,
-  });
+  // Drop the field rather than leave a note in it: a note where content was
+  // is text a model can copy, and qwen3.8 resent it as the next file
+  // (conflict-synthesis, 2026-10-06). A bare count gives nothing to copy, and
+  // a reused call without content fails validation in plain words.
+  const { [fieldName]: _omitted, ...rest } = args;
+  call.function.arguments = JSON.stringify({ ...rest, omittedChars: content.length });
   return true;
 }
 
@@ -1578,6 +1582,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
    * the trace on the assistant message.
    */
   private lastTurnReasoning = '';
+  private toolSurface: ToolSurfaceSize | undefined;
   /**
    * Active in-turn handle the provider's stdout pipeline writes to
    * when it detects engine-level reasoning-budget transitions. Set on
@@ -1690,6 +1695,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       }
       this.messages.push({ role: m.role, content: m.content });
     }
+  }
+
+  getToolSurface(): ToolSurfaceSize | undefined {
+    return this.toolSurface;
   }
 
   capturedToolCalls(): ExternalToolCall[] {
@@ -2067,10 +2076,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       bridgeTools.length + externalAsChatCompletions.length > 0
         ? [...bridgeTools, ...externalAsChatCompletions]
         : undefined;
+    // Schemas are templated into the prompt by llama-server, so their JSON
+    // size is prompt tokens. Pairs with the system prompt's section sizes for
+    // full accounting.
+    this.toolSurface = toolSurfaceSize(tools ?? []);
     if (tools) {
-      // Wire-cost diagnostic: schemas are templated into the prompt by
-      // llama-server, so their JSON size is prompt tokens. Pairs with
-      // GEZEL_PROMPT_BREAKDOWN's text-section table for full accounting.
       log.debug(
         `wire tools=${tools.length} schemaChars=${tools.reduce((n, t) => n + JSON.stringify(t).length, 0)}`,
       );
@@ -2302,9 +2312,14 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           releaseEngineRequestOnce();
           throw err;
         }
-        let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
-          ? flattenToolMessagesForStrictAlternation(this.messages)
+        // A standalone turn's seed carries the whole state: earlier turns
+        // stay in the transcript but not in the request.
+        const transcript = opts?.standalone
+          ? standaloneTurnMessages(this.messages, this.currentTurnStartIdx)
           : this.messages;
+        let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
+          ? flattenToolMessagesForStrictAlternation(transcript)
+          : transcript;
         if (this.mergeSystemMessages) {
           wireMessages = mergeSystemMessagesIntoFirst(wireMessages);
         }
@@ -2590,6 +2605,22 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           this.messages.push({ role: 'user', content: nudge });
         };
         let requestTools = tools;
+        // A turn whose whole job is one call (a game reaction's move): the
+        // first request offers that tool alone and requires it, terse like
+        // every other constrained turn here.
+        if (turn === 0 && opts?.requiredTool) {
+          const required = requiredToolOnly(tools, opts.requiredTool);
+          if (required.length) {
+            requestTools = required;
+            this.forceToolChoice(body);
+            disableThinkingForConstrainedTurn(
+              body,
+              this.deps.disableThinkingRequestShape,
+              this.deps.model,
+            );
+            log.debug(`[llama-cpp] required-call turn: ${opts.requiredTool} only`);
+          }
+        }
         if (immediateFileWriteTurn) {
           if (
             typeof userMsg.content === 'string' &&

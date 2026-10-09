@@ -400,6 +400,32 @@ describe('craftbook generic scenario adapter', () => {
     );
   });
 
+  it.each(['disabled', 'scripted', 'heuristic'] as const)(
+    'leaves command consent to an explicit %s user simulator',
+    async (userSimulation) => {
+      const client = {
+        listProjects: vi.fn().mockResolvedValue({
+          projects: [{ id: 'project-1', name: 'Sample Project' }],
+        }),
+        listQuestions: vi.fn().mockResolvedValue({
+          questions: [{ id: 'question-1', intent: { kind: 'command-approval' } }],
+        }),
+        answerQuestion: vi.fn(),
+      };
+      const scenario = craftbookScenarioFromSpec(directWorkerSpec());
+      await scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        userSimulation,
+        repairPolicy: 'runtime',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext);
+      expect(client.listQuestions).not.toHaveBeenCalled();
+      expect(client.answerQuestion).not.toHaveBeenCalled();
+    },
+  );
+
   it('seeds modelInput:false fixtures without exposing them as model source inputs', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),
@@ -702,6 +728,61 @@ describe('craftbook generic scenario adapter', () => {
       reason: 'craftbook-sample-book passed 2 deterministic craftbook checks',
     });
   });
+
+  it.each([
+    { readBrief: true, helper: 'unchanged helper', pass: true },
+    { readBrief: false, helper: 'unchanged helper', pass: false },
+    { readBrief: true, helper: 'changed helper', pass: false },
+  ])(
+    'grades supporting fixtures separately from source reads: %j',
+    async ({ readBrief, helper, pass }) => {
+      const client = {
+        listProjects: vi
+          .fn()
+          .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+        fetchProjectWorkspaceBlob: vi
+          .fn()
+          .mockImplementation(
+            async (_id, path) => new Blob([path === 'src/helper.js' ? helper : 'complete output']),
+          ),
+        listChatSessions: vi.fn().mockResolvedValue({ sessions: [{ id: 'session-1' }] }),
+        getChatSession: vi.fn().mockResolvedValue({
+          id: 'session-1',
+          messages: [
+            {
+              toolCalls: readBrief
+                ? [{ name: 'read_file', success: true, path: 'source/brief.md' }]
+                : [],
+            },
+          ],
+        }),
+      };
+      const scenario = craftbookScenarioFromSpec({
+        ...directWorkerSpec(),
+        setup: {
+          ...directWorkerSpec().setup!,
+          files: [
+            { path: 'source/brief.md', content: 'Required source facts.' },
+            { path: 'src/helper.js', content: 'unchanged helper', modelInput: false },
+          ],
+        },
+        success: {
+          summary: 'Grounded output, with supporting code untouched.',
+          deliverables: [{ path: 'out.md', kind: 'generic-file', minBytes: 10 }],
+          unchangedFixtures: ['src/helper.js'],
+        },
+      });
+      const result = await scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        repairPolicy: 'runtime',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+        recordSniff: vi.fn(),
+      } as unknown as EvalContext);
+      expect(result.done && result.success).toBe(pass);
+    },
+  );
 
   it('does not hand the worker a workspace file contract for an artifact deliverable', async () => {
     // expectedDeliverable is workspace-relative, and the MCP server redirects

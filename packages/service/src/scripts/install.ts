@@ -1,7 +1,15 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { type CraftbookTemplateManifest, createLogger } from '@bendyline/gezel';
-export { craftbookScriptHeader, craftbookScriptProvenance } from '@bendyline/gezel';
+import {
+  type CraftbookTemplateManifest,
+  createLogger,
+  projectTypeScriptHeader,
+} from '@bendyline/gezel';
+export {
+  craftbookScriptHeader,
+  craftbookScriptProvenance,
+  projectTypeScriptProvenance,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   craftbookShardPrefix,
@@ -12,7 +20,6 @@ import {
 const log = createLogger('scripts');
 
 const PROVENANCE_MARKER = '// @gezel-craftbook:';
-const PROJECT_TYPE_MARKER = '// @gezel-project-type:';
 
 /**
  * Write one script file into a project prefixed with a provenance line,
@@ -104,7 +111,7 @@ export async function installProjectTypeScripts(
 ): Promise<{ installed: string[]; skipped: string[] }> {
   const installed: string[] = [];
   const skipped: string[] = [];
-  const provenance = `${PROJECT_TYPE_MARKER} ${typeId}@${version}\n`;
+  const provenance = projectTypeScriptHeader(typeId, version);
   for (const [name, body] of Object.entries(scripts ?? {})) {
     if (await installOneScript(home, projectId, provenance, name, body)) installed.push(name);
     else skipped.push(name);
@@ -115,18 +122,6 @@ export async function installProjectTypeScripts(
     );
   }
   return { installed, skipped };
-}
-
-/**
- * Provenance (`<typeId>@<version>`) of a script installed by a project type,
- * or null when the content doesn't carry the project-type marker. Mirrors
- * {@link craftbookScriptProvenance}.
- */
-export function projectTypeScriptProvenance(content: string): string | null {
-  if (!content.startsWith(PROJECT_TYPE_MARKER)) return null;
-  const newlineIdx = content.indexOf('\n');
-  const line = newlineIdx === -1 ? content : content.slice(0, newlineIdx);
-  return line.slice(PROJECT_TYPE_MARKER.length).trim();
 }
 
 /**

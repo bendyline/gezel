@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(new URL('../../ui/package.json', import.meta.url));
-const { chromium } = require('playwright');
+const { chromium, webkit } = require('playwright');
 const { createServer } = await import(require.resolve('vite'));
 const root = fileURLToPath(new URL('..', import.meta.url));
 const policy = (await readFile(new URL('../index.html', import.meta.url), 'utf8')).match(
@@ -284,8 +285,255 @@ try {
     window.previewLease.dispose();
     document.querySelector('iframe').remove();
   });
-  console.log(JSON.stringify({ ok: true, checks: 20, reads: result.reads }, null, 2));
+  // A project type's page, as a phone serves it: the catalog's own checkers
+  // board in a snapshot, with window.gezel relayed by its parent. WebKit too,
+  // because iOS runs it.
+  const port = server.httpServer.address().port;
+  const typePage = [];
+  for (const type of [chromium, webkit]) typePage.push(await checkTypePage(type, port));
+  // Media a page names with gezel.data.url(): a snapshot has no server, so the
+  // bytes arrive over the relay and replace a blank image.
+  const media = [];
+  for (const type of [chromium, webkit]) media.push(await checkTypeMedia(type, port));
+  console.log(
+    JSON.stringify({ ok: true, checks: 22, reads: result.reads, typePage, media }, null, 2),
+  );
 } finally {
   await browser?.close();
   await server.close();
+}
+
+async function checkTypePage(type, port) {
+  const gilde = join(
+    dirname(
+      createRequire(new URL('../../catalog/package.json', import.meta.url)).resolve(
+        '@bendyline/gilde/package.json',
+      ),
+    ),
+    'data/project-types/ch/checkers/versions/1.2.0',
+  );
+  const board = await readFile(join(gilde, 'pages/board/index.html'), 'utf8');
+  const game = await readFile(join(gilde, 'game.json'), 'utf8');
+  const engine = await type.launch({ headless: true });
+  try {
+    const tab = await engine.newPage();
+    const errors = [];
+    tab.on('pageerror', (error) => errors.push(error.message));
+    await tab.goto(`http://127.0.0.1:${port}/__html_test`);
+    const url = await tab.evaluate(
+      async ({ board, game }) => {
+        const { createOfflineHtmlPreview } = await import('/src/html-preview.ts');
+        const fetcher = async (input) => {
+          const target = new URL(input);
+          if (target.pathname === '/api/projects/game/type/bootstrap')
+            return Response.json({
+              apiV1: true,
+              bootstrap: {
+                api: 1,
+                projectId: 'game',
+                source: 'type',
+                entry: target.searchParams.get('path'),
+                typeName: 'Checkers',
+                params: { personality: 'peppy', playStyle: 'Opponent' },
+                tools: ['user_move', 'new_game'],
+              },
+            });
+          if (
+            target.pathname === '/api/projects/game/type/read' &&
+            target.searchParams.get('path') === 'board/index.html'
+          )
+            return new Response(board);
+          return new Response('missing', { status: 404 });
+        };
+        const publish = async (html) => {
+          const reply = await fetch('/__publish', { method: 'POST', body: html });
+          return { url: new URL((await reply.json()).url, location.href).href, dispose() {} };
+        };
+        const preview = createOfflineHtmlPreview(fetcher, 'token', publish);
+        const lease = await preview({
+          projectId: 'game',
+          source: 'type',
+          path: 'board/index.html',
+        });
+        window.bridge = [];
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        const reply = (data) => frame.contentWindow.postMessage({ __gezelPage: 1, ...data }, '*');
+        // The relay HtmlPreviewFrame runs, cut down to what the board uses.
+        window.addEventListener('message', (event) => {
+          if (event.source !== frame.contentWindow || event.data?.__gezelPage !== 1) return;
+          const message = event.data;
+          window.bridge.push({ kind: message.kind, path: message.path, tool: message.tool });
+          if (message.kind === 'hello')
+            reply({ kind: 'init', api: 1, theme: { mode: 'light' }, limits: { maxInflight: 4 } });
+          if (message.kind === 'read')
+            reply({
+              kind: 'read-result',
+              id: message.id,
+              ok: true,
+              op: 'read',
+              content: game,
+              encoding: 'utf8',
+              etag: 'e1',
+            });
+          if (message.kind === 'invoke')
+            reply({
+              kind: 'result',
+              id: message.id,
+              ok: true,
+              output: { status: 'playing' },
+              runId: 'run-1',
+            });
+        });
+        frame.src = lease.url;
+        document.body.append(frame);
+        await new Promise((resolve, reject) => {
+          frame.onload = resolve;
+          setTimeout(() => reject(Error('Type page failed to load')), 5000);
+        });
+        return lease.url;
+      },
+      { board, game },
+    );
+    const frame = tab.frames().find((candidate) => candidate.url() === url);
+    assert.ok(frame, 'type page snapshot loaded');
+    await tab.waitForFunction(() => window.bridge.some((message) => message.kind === 'read'));
+    assert.equal(await frame.evaluate(() => window.gezel.page.mode), 'embedded');
+    assert.equal(
+      await frame.evaluate(() =>
+        [...document.querySelectorAll('[data-gezel-demo-banner]')].every(
+          (element) => element.hidden || getComputedStyle(element).display === 'none',
+        ),
+      ),
+      true,
+      'a live page hides its demo banner',
+    );
+    const invoked = await frame.evaluate(() =>
+      window.gezel.tools
+        .invoke('user_move', { from: 'c3', to: 'd4' })
+        .then((result) => result.runId),
+    );
+    assert.equal(invoked, 'run-1');
+    const bridge = await tab.evaluate(() => window.bridge);
+    assert.deepEqual(
+      bridge.filter((message) => message.kind === 'read').map((message) => message.path),
+      ['game.json'],
+    );
+    assert.deepEqual(errors, []);
+    return { engine: type.name(), messages: [...new Set(bridge.map((message) => message.kind))] };
+  } finally {
+    await engine.close();
+  }
+}
+
+async function checkTypeMedia(type, port) {
+  // A 2x3 red PNG.
+  const png =
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAEUlEQVR4nGP4z8DwnwGMERQARNAF+7BYSawAAAAASUVORK5CYII=';
+  const page = `<!doctype html><body><div id="grid"></div><div id="hero"></div><script>
+var grid = document.getElementById('grid');
+grid.innerHTML = '<img id="cover" alt="cover" src="' + gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' }) + '">';
+document.getElementById('hero').style.backgroundImage = 'url(' + gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' }) + ')';
+</script></body>`;
+  const engine = await type.launch({ headless: true });
+  try {
+    const tab = await engine.newPage();
+    const errors = [];
+    tab.on('pageerror', (error) => errors.push(error.message));
+    await tab.goto(`http://127.0.0.1:${port}/__html_test`);
+    const url = await tab.evaluate(
+      async ({ page, png }) => {
+        const { createOfflineHtmlPreview } = await import('/src/html-preview.ts');
+        const fetcher = async (input) => {
+          const target = new URL(input);
+          if (target.pathname === '/api/projects/feed/type/bootstrap')
+            return Response.json({
+              apiV1: true,
+              bootstrap: {
+                api: 1,
+                projectId: 'feed',
+                source: 'type',
+                entry: target.searchParams.get('path'),
+                typeName: 'Image feed',
+                params: {},
+                tools: [],
+              },
+            });
+          if (target.pathname === '/api/projects/feed/type/read') return new Response(page);
+          return new Response('missing', { status: 404 });
+        };
+        const publish = async (html) => {
+          const reply = await fetch('/__publish', { method: 'POST', body: html });
+          return { url: new URL((await reply.json()).url, location.href).href, dispose() {} };
+        };
+        const lease = await createOfflineHtmlPreview(
+          fetcher,
+          'token',
+          publish,
+        )({ projectId: 'feed', source: 'type', path: 'gallery/index.html' });
+        window.mediaReads = [];
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        window.addEventListener('message', (event) => {
+          if (event.source !== frame.contentWindow || event.data?.__gezelPage !== 1) return;
+          const message = event.data;
+          if (message.kind !== 'read') return;
+          window.mediaReads.push({ source: message.source, path: message.path, as: message.as });
+          frame.contentWindow.postMessage(
+            {
+              __gezelPage: 1,
+              kind: 'read-result',
+              id: message.id,
+              ok: true,
+              op: 'read',
+              content: png,
+              encoding: 'base64',
+              etag: 'e1',
+            },
+            '*',
+          );
+        });
+        frame.src = lease.url;
+        document.body.append(frame);
+        await new Promise((resolve, reject) => {
+          frame.onload = resolve;
+          setTimeout(() => reject(Error('Media page failed to load')), 5000);
+        });
+        return lease.url;
+      },
+      { page, png },
+    );
+    const frame = tab.frames().find((candidate) => candidate.url() === url);
+    assert.ok(frame, 'media page snapshot loaded');
+    await frame.waitForFunction(
+      () => {
+        const img = document.getElementById('cover');
+        return img?.complete && img.naturalWidth === 2;
+      },
+      undefined,
+      { timeout: 5000 },
+    );
+    const shown = await frame.evaluate(() => ({
+      src: document.getElementById('cover').getAttribute('src'),
+      size: [
+        document.getElementById('cover').naturalWidth,
+        document.getElementById('cover').naturalHeight,
+      ],
+      background: document.getElementById('hero').style.backgroundImage,
+    }));
+    assert.ok(
+      shown.src.startsWith('data:image/png;base64,'),
+      'the relayed bytes replaced the blank',
+    );
+    assert.deepEqual(shown.size, [2, 3]);
+    assert.ok(shown.background.includes('data:image/png;base64,'), 'a style url is replaced too');
+    const reads = await tab.evaluate(() => window.mediaReads);
+    assert.deepEqual(reads, [
+      { source: 'artifacts', path: 'posts/a/media/cover.png', as: 'bytes' },
+    ]);
+    assert.deepEqual(errors, []);
+    return { engine: type.name(), reads: reads.length };
+  } finally {
+    await engine.close();
+  }
 }

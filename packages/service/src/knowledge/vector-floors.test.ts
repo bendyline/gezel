@@ -28,6 +28,34 @@ describe('resolveKnowledgeVectorFloors', () => {
     }
   });
 
+  it('measures every media modality of every profile that describes media encoders', async () => {
+    const { KNOWLEDGE_EMBEDDING_PROFILES } = await import('@bendyline/gezel-knowledge');
+    const floors = resolveKnowledgeVectorFloors({});
+    for (const profile of KNOWLEDGE_EMBEDDING_PROFILES) {
+      for (const modality of ['image', 'video', 'audio'] as const) {
+        if (!profile.media?.[modality]) continue;
+        expect(
+          floors.floorFor({ catalogKey: 'workspace', profileId: profile.id, modality }),
+          `${profile.id}#${modality}`,
+        ).not.toBeNull();
+      }
+    }
+  });
+
+  it('keeps a media modality without a measured floor at null, never the text floor', () => {
+    const floors = resolveKnowledgeVectorFloors({});
+    expect(
+      floors.floorFor({ catalogKey: 'x/y', profileId: 'bge-small-en-v1.5@1', modality: 'image' }),
+    ).toBeNull();
+    expect(
+      floors.floorFor({
+        catalogKey: 'x/y',
+        profileId: 'embeddinggemma-2-512@1',
+        modality: 'image',
+      }),
+    ).toBe(KNOWLEDGE_VECTOR_FLOORS['embeddinggemma-2-512@1#image']);
+  });
+
   it('reports an unmeasured embedder as null rather than guessing a scale', () => {
     const floors = resolveKnowledgeVectorFloors({});
     expect(floors.floorFor({ catalogKey: 'x/y', profileId: 'some-new-embedder@1' })).toBeNull();

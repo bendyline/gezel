@@ -408,6 +408,25 @@ describe('runRestore', () => {
     expect(await readFile(join(home, 'documents', 'mission.md'), 'utf8')).toBe('# Mission');
   });
 
+  it('adds the backup’s memories about the person to the ones here, removing none', async () => {
+    await store.appendMemory('user', 'user', 'Lives in Utrecht.', 'fact');
+    const file = await makeBackup();
+    const day = (await store.listMemoryDays('user', 'user'))[0]!;
+    await writeFile(
+      join(home, 'memories', 'daily', `${day}.md`),
+      '\n## 09:00 [pref]\n\nCycles to work.\n',
+    );
+
+    const review = await scanRestore(deps(), file);
+    expect(review.items.find((i) => i.kind === 'memory-root')?.conflict).toBe('none');
+    const { job } = await restore(review, addAll(review));
+
+    expect(job.status).toBe('done');
+    const merged = await store.readMemoryDay('user', 'user', day);
+    expect(merged).toContain('Cycles to work.');
+    expect(merged).toContain('Lives in Utrecht.');
+  });
+
   it('keeps the live version of a changed document and saves the backup’s beside it', async () => {
     const mission = join(home, 'documents', 'mission.md');
     await writeFile(mission, 'AS BACKED UP');

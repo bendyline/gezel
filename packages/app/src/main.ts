@@ -8,11 +8,11 @@
 // `createRequire` so we go through Electron's patched CJS loader.
 const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
-const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, session, shell } = require('electron') as typeof import('electron');
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { realpath, rename, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -37,19 +37,16 @@ import {
   streamAllChatEvents,
   writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
-import { ambientDir } from '@bendyline/gezel/paths';
-import { ambientDashboardDisplayTarget } from './ambient-display/display-target.js';
-import { ambientDisplay } from './ambient-display/index.js';
 import {
-  disable as ambientDisable,
-  enable as ambientEnable,
-  applyLatest,
-  newestDatedImage,
-  readDisplayState,
-} from './ambient-display/runtime.js';
+  registerAmbientDisplayIpc,
+  setAmbientApplyEnabled,
+  startAmbientMonitoring,
+  stopAmbientMonitoring,
+} from './ambient-display/host.js';
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
 import { devToolsAllowed } from './devtools-policy.js';
+import { resumeEarnedNotifications, startEarnedNotifications } from './earned-notifications.js';
 import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
@@ -76,10 +73,11 @@ import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { splashStage } from './splash-stage.js';
+import { getStartAtLogin, launchedAtLogin, setStartAtLogin } from './start-at-login.js';
 import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
-import { updateActiveTraySessions } from './tray-activity.js';
+import { updateActiveTraySessions, waitForTrayActivityRetry } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
 import { parseMacUninstallSelection, scheduleMacUninstall } from './uninstaller/macos.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
@@ -611,8 +609,9 @@ async function createWindow(): Promise<void> {
     title: 'Gezel',
     backgroundColor: '#667f62',
     // Auto-show activates the window on creation (→ focus theft). In E2E we
-    // suppress it and call `showInactive()` after construction instead.
-    show: !e2e,
+    // suppress it and call `showInactive()` after construction instead. A
+    // login launch stays hidden until the person opens it from the tray.
+    show: !e2e && !launchHidden,
     // Park the window off every display in E2E so it's never visible.
     ...(e2e ? { x: -32000, y: -32000 } : {}),
     ...(icon ? { icon } : {}),
@@ -1181,6 +1180,40 @@ ipcMain.handle('gezel:update:install', async () => {
     message: result.error ?? 'The verified installer could not be opened.',
   });
   return { ok: false as const, error: result.error };
+});
+
+/**
+ * Launched by the login item: the first window is created hidden and the app
+ * stays in the tray, so the night shift has a running app without a window
+ * appearing at every login. Cleared once that window exists.
+ */
+let launchHidden = false;
+
+function startAtLoginDeps() {
+  return {
+    platform: process.platform,
+    app,
+    execPath: process.env.APPIMAGE ?? process.execPath,
+    configDir: process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+  };
+}
+
+// Start at login. Packaged only: in dev the login item would point at the
+// development Electron binary.
+ipcMain.handle('gezel:start-at-login:get', () => {
+  if (!app.isPackaged) return { supported: false as const, enabled: false };
+  try {
+    return { supported: true as const, enabled: getStartAtLogin(startAtLoginDeps()) };
+  } catch {
+    return { supported: false as const, enabled: false };
+  }
+});
+ipcMain.handle('gezel:start-at-login:set', async (_event, enabled: unknown) => {
+  if (!app.isPackaged || typeof enabled !== 'boolean') {
+    return { supported: false as const, enabled: false };
+  }
+  await setStartAtLogin(startAtLoginDeps(), enabled);
+  return { supported: true as const, enabled: getStartAtLogin(startAtLoginDeps()) };
 });
 
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
@@ -1891,82 +1924,7 @@ ipcMain.handle('gezel:open-path', async (_event, target: string): Promise<string
   }
 });
 
-// ── Ambient display IPC ─────────────────────────────────────────────
-// Paths are computed main-side from GEZEL_HOME — the renderer never
-// supplies one (same posture as gezel:open-logs-folder).
-
-ipcMain.handle('gezel:ambient:status', async () => {
-  try {
-    const home = gezelHomeDir();
-    const [capability, state, newest] = await Promise.all([
-      ambientDisplay.capability(),
-      readDisplayState(home),
-      newestDatedImage(home),
-    ]);
-    let enabled = ambientApplyEnabled;
-    try {
-      const cfg = await apiClient?.getConfig();
-      if (cfg) enabled = cfg.ambientDisplay?.applyWallpaper === true;
-    } catch {
-      /* fall back to the mirrored flag */
-    }
-    return {
-      ok: true,
-      capability,
-      enabled,
-      folder: ambientDir(home),
-      lastApplied: state.lastApplied ?? null,
-      latestImageAt: newest ? new Date(newest.mtimeMs).toISOString() : null,
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
-ipcMain.handle('gezel:ambient:enable', async () => {
-  if (!apiClient) return { ok: false, error: 'service is unavailable' };
-  try {
-    // OS action first: the macOS Automation (TCC) prompt then fires in
-    // the context of the user's click, not from a background timer.
-    const result = await ambientEnable(ambientRuntimeDeps());
-    await apiClient.updateConfig({ ambientDisplay: { applyWallpaper: true } });
-    setAmbientApplyEnabled(true);
-    return { ok: true, ...result };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
-ipcMain.handle('gezel:ambient:disable', async () => {
-  if (!apiClient) return { ok: false, error: 'service is unavailable' };
-  try {
-    const result = await ambientDisable(ambientRuntimeDeps());
-    await apiClient.updateConfig({ ambientDisplay: { applyWallpaper: false } });
-    setAmbientApplyEnabled(false);
-    return { ok: true, ...result };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
-ipcMain.handle('gezel:ambient:apply-now', async () => {
-  try {
-    const result = await applyLatest(ambientRuntimeDeps(), { force: true });
-    return { ok: true, ...result };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
-ipcMain.handle('gezel:ambient:open-folder', async (): Promise<string> => {
-  const dir = ambientDir(gezelHomeDir());
-  try {
-    await mkdir(dir, { recursive: true });
-    return await shell.openPath(dir);
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-});
+registerAmbientDisplayIpc(ipcMain, () => apiClient);
 
 /**
  * Theme sync: hand the user's Light/Dark/System choice to Chromium itself.
@@ -2157,173 +2115,8 @@ async function monitorTrayActivity(client: GezelClient, signal: AbortSignal): Pr
   }
 }
 
-function waitForTrayActivityRetry(signal: AbortSignal): Promise<void> {
-  return new Promise((resolveRetry) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', finish);
-      resolveRetry();
-    };
-    const timer = setTimeout(finish, 1_500);
-    signal.addEventListener('abort', finish, { once: true });
-  });
-}
-
 function syncTrayActivity(): void {
   tray?.setWorking(trayActiveSessions.size > 0);
-}
-
-// ── Ambient display (wallpaper) ──────────────────────────────────────
-//
-// The daemon's AmbientDashboardGenerator writes PNGs under
-// `~/.gezel/ambient/`; when the user opts in
-// (`config.ambientDisplay.applyWallpaper`), the main process keeps the
-// desktop wallpaper set to the newest one. Wallpaper APIs are
-// user-session-only, which is why this lives here and not in gezeld
-// (docs/service-boundaries.md).
-
-let ambientMonitorAbort: AbortController | null = null;
-let ambientApplyEnabled = false;
-let ambientDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let ambientResumeHooked = false;
-let ambientDisplayTargetTimer: ReturnType<typeof setTimeout> | null = null;
-let ambientDisplayTargetHooksInstalled = false;
-
-function gezelHomeDir(): string {
-  return process.env.GEZEL_HOME || join(homedir(), '.gezel');
-}
-
-function ambientRuntimeDeps(): { home: string; module: typeof ambientDisplay } {
-  return { home: gezelHomeDir(), module: ambientDisplay };
-}
-
-/**
- * Debounced so the SSE `ended` event and any catch-up check that fire
- * together produce one apply, not two.
- */
-function scheduleAmbientApply(): void {
-  if (!ambientApplyEnabled) return;
-  if (ambientDebounceTimer) clearTimeout(ambientDebounceTimer);
-  ambientDebounceTimer = setTimeout(() => {
-    ambientDebounceTimer = null;
-    void applyLatest(ambientRuntimeDeps()).catch((err) => {
-      console.warn(`[ambient] wallpaper apply failed: ${err instanceof Error ? err.message : err}`);
-    });
-  }, 2_000);
-}
-
-function setAmbientApplyEnabled(next: boolean): void {
-  const was = ambientApplyEnabled;
-  ambientApplyEnabled = next;
-  if (!was && next) scheduleAmbientApply();
-  if (was && !next && ambientDebounceTimer) {
-    clearTimeout(ambientDebounceTimer);
-    ambientDebounceTimer = null;
-  }
-}
-
-async function syncPrimaryDisplayTarget(): Promise<void> {
-  const client = apiClient;
-  if (!client || process.env.GEZEL_E2E === '1') return;
-  try {
-    const displayTarget = ambientDashboardDisplayTarget(screen.getPrimaryDisplay());
-    await client.setAmbientDashboardDisplayTarget(displayTarget);
-  } catch (err) {
-    console.warn(
-      `[ambient] primary display sync failed: ${err instanceof Error ? err.message : err}`,
-    );
-  }
-}
-
-function schedulePrimaryDisplayTargetSync(delayMs = 300): void {
-  if (process.env.GEZEL_E2E === '1') return;
-  if (ambientDisplayTargetTimer) clearTimeout(ambientDisplayTargetTimer);
-  ambientDisplayTargetTimer = setTimeout(() => {
-    ambientDisplayTargetTimer = null;
-    void syncPrimaryDisplayTarget();
-  }, delayMs);
-}
-
-/**
- * Persist the primary monitor's physical canvas + work-area-safe rectangle.
- * Hooks live for the app lifetime; daemon reconnects merely replace the API
- * client, and startAmbientMonitoring schedules a fresh sync for that client.
- */
-function startPrimaryDisplayTargetSync(): void {
-  if (process.env.GEZEL_E2E === '1') return;
-  if (!ambientDisplayTargetHooksInstalled) {
-    ambientDisplayTargetHooksInstalled = true;
-    screen.on('display-added', () => schedulePrimaryDisplayTargetSync());
-    screen.on('display-removed', () => schedulePrimaryDisplayTargetSync());
-    screen.on('display-metrics-changed', () => schedulePrimaryDisplayTargetSync());
-  }
-  schedulePrimaryDisplayTargetSync(0);
-}
-
-function startAmbientMonitoring(): void {
-  stopAmbientMonitoring();
-  const client = apiClient;
-  if (!client || process.env.GEZEL_E2E === '1') return;
-  startPrimaryDisplayTargetSync();
-  const controller = new AbortController();
-  ambientMonitorAbort = controller;
-  if (!ambientResumeHooked) {
-    ambientResumeHooked = true;
-    try {
-      // A sleeping machine misses SSE events; check on wake.
-      powerMonitor.on('resume', () => scheduleAmbientApply());
-    } catch {
-      /* powerMonitor unavailable (headless/test) */
-    }
-  }
-  void (async () => {
-    try {
-      const cfg = await client.getConfig();
-      setAmbientApplyEnabled(cfg?.ambientDisplay?.applyWallpaper === true);
-    } catch {
-      /* config unreadable — keep the current toggle state */
-    }
-    // Catch-up: a render may have landed while the app was closed.
-    scheduleAmbientApply();
-    await monitorAmbientEvents(client, controller.signal);
-  })();
-}
-
-function stopAmbientMonitoring(): void {
-  ambientMonitorAbort?.abort();
-  ambientMonitorAbort = null;
-  if (ambientDebounceTimer) {
-    clearTimeout(ambientDebounceTimer);
-    ambientDebounceTimer = null;
-  }
-  if (ambientDisplayTargetTimer) {
-    clearTimeout(ambientDisplayTargetTimer);
-    ambientDisplayTargetTimer = null;
-  }
-}
-
-async function monitorAmbientEvents(client: GezelClient, signal: AbortSignal): Promise<void> {
-  while (!signal.aborted) {
-    try {
-      for await (const envelope of streamAllChatEvents({
-        url: client.allEventsUrl(),
-        headers: client.authHeader(),
-        fetch: client.getFetch(),
-        signal,
-      })) {
-        const event = envelope.event;
-        if (event.type === 'ambient_dashboard' && event.state === 'ended') {
-          scheduleAmbientApply();
-        }
-      }
-    } catch {
-      // SSE reader rejects on daemon/socket loss; retry against this
-      // connection until it rotates, at which point startAmbientMonitoring
-      // aborts us.
-    }
-    if (signal.aborted) return;
-    await waitForTrayActivityRetry(signal);
-  }
 }
 
 let idleReportTimer: ReturnType<typeof setInterval> | null = null;
@@ -2335,16 +2128,40 @@ let idleReportTimer: ReturnType<typeof setInterval> | null = null;
  */
 function startIdleReporting(): void {
   if (idleReportTimer) clearInterval(idleReportTimer);
+  hookPowerSourceChanges();
   const report = () => {
     try {
       const idleSeconds = powerMonitor.getSystemIdleTime();
-      void apiClient?.reportSystemIdle(idleSeconds).catch(() => {});
+      // Rides along so the daemon's reading never goes stale while the app
+      // runs; the Night Shift stands down on battery.
+      const onBattery = powerMonitor.isOnBatteryPower();
+      void apiClient?.reportSystemIdle(idleSeconds, onBattery).catch(() => {});
     } catch {
       /* powerMonitor unavailable (headless/test) — ignore */
     }
   };
   report();
   idleReportTimer = setInterval(report, 60_000);
+}
+
+let powerSourceHooked = false;
+
+/** Tell the daemon about an unplug or replug now, not at the next idle report. */
+function hookPowerSourceChanges(): void {
+  if (powerSourceHooked) return;
+  powerSourceHooked = true;
+  const push = (onBattery: boolean) => {
+    void apiClient
+      ?.reportSystemPower(onBattery)
+      .then(() => repollPowerIntent?.())
+      .catch(() => {});
+  };
+  try {
+    powerMonitor.on('on-battery', () => push(true));
+    powerMonitor.on('on-ac', () => push(false));
+  } catch {
+    /* powerMonitor unavailable (headless/test) — ignore */
+  }
 }
 
 let nightShiftPowerTimer: ReturnType<typeof setInterval> | null = null;
@@ -2395,8 +2212,14 @@ function startNightShiftPowerControl(): void {
       console.log('[night-shift] wakeOnStart is only supported on macOS; skipping');
       return;
     }
-    // `pmset schedule wake "MM/dd/yy HH:mm:ss"` (local time). Requires the
-    // app to be allowed; failures are non-fatal (logged).
+    // pmset modifies settings only as root, and the app runs as the person
+    // who logged in; Settings says so instead of offering the toggle.
+    if (process.getuid?.() !== 0) {
+      console.log('[night-shift] wakeOnStart needs root on macOS; skipping');
+      return;
+    }
+    // `pmset schedule wake "MM/dd/yy HH:mm:ss"` (local time). Failures are
+    // non-fatal (logged).
     const d = new Date(wakeAtIso);
     const pad = (n: number) => String(n).padStart(2, '0');
     const stamp = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
@@ -2462,6 +2285,7 @@ function hookHostPowerTransitions(): void {
       );
       connection?.noteHostResumed();
       repollPowerIntent?.();
+      resumeEarnedNotifications();
     });
   } catch {
     /* powerMonitor unavailable (headless/test) — the daemon still self-detects */
@@ -2867,6 +2691,21 @@ function installMenu(): void {
         ] as Electron.MenuItemConstructorOptions[])
       : []),
     {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Add Folder…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => {
+            void ensureWindow().then(() => navigateTo('add-folder'));
+          },
+        },
+        ...(!isMac
+          ? ([{ type: 'separator' }, { role: 'quit' }] as Electron.MenuItemConstructorOptions[])
+          : []),
+      ],
+    },
+    {
       label: 'Edit',
       submenu: [
         { role: 'undo' },
@@ -3123,7 +2962,10 @@ app.whenReady().then(async () => {
   // the service bundle and provisions the bundled runtimes on first launch,
   // which is minutes of work on a cold machine; doing this afterwards is what
   // made a fresh install look like it had failed to launch.
+  launchHidden = app.isPackaged && launchedAtLogin(startAtLoginDeps(), process.argv);
   await createWindow();
+  const startedHidden = launchHidden;
+  launchHidden = false;
 
   try {
     connection = await connectOrStart({
@@ -3194,6 +3036,7 @@ app.whenReady().then(async () => {
     invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
     startAmbientMonitoring();
+    startEarnedNotifications(apiClient, notify);
     scheduleOfficeIntegrationVerify();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
@@ -3280,6 +3123,7 @@ app.whenReady().then(async () => {
   // Best-effort: failures are swallowed (the daemon treats a missing report as
   // "unknown" and falls back to the session-idle gate).
   startIdleReporting();
+  startEarnedNotifications(apiClient, notify);
 
   // Drive OS power for Night Shift: hold a power-save blocker while a shift
   // runs (if enabled), and pre-arm an OS wake at the window start (macOS).
@@ -3289,6 +3133,9 @@ app.whenReady().then(async () => {
   // Reads `showSystemTray` (default on); skipped under the E2E harness so
   // its window-close specs keep quitting. Non-fatal if it fails.
   await initTray();
+  // A hidden launch with no tray to open it from (Windows/Linux, tray turned
+  // off) would leave no way in: show the window after all.
+  if (startedHidden && !tray?.active && process.platform !== 'darwin') void ensureWindow();
 
   // Resolve the latest exact `v<semver>` app release, then point
   // electron-updater at that immutable release's metadata. This deliberately
@@ -3298,6 +3145,10 @@ app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    // The Dock icon of an app launched hidden at login opens its window.
+    else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      void ensureWindow();
+    }
   });
 });
 

@@ -8,6 +8,15 @@ describe('embedded script packaging eligibility', () => {
       true,
     );
   });
+  it('packages memory and reminder calls, which the phone host serves', () => {
+    const remembering = source
+      .replace("['artifacts.write']", "['memory.write', 'reminders']")
+      .replace(
+        "await gezel.artifacts.write('note.md','Prepared');",
+        "await gezel.memory.save('Said x; it is y', {kind:'correction', scope:'gezel'}); await gezel.reminder.set({at:'2026-10-08T09:00:00Z', title:'Due'}); await gezel.reminder.clear();",
+      );
+    expect(supportsPortableScriptSource('prepare', remembering)).toBe(true);
+  });
   it('admits nested calls only when the bundled helper name is known', () => {
     const nested = `${source} await gezel.script.run('child', {});`;
     expect(supportsPortableScriptSource('prepare', nested, new Set(['child']))).toBe(true);

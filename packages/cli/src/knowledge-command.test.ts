@@ -40,8 +40,7 @@ const FAKE_PROFILE: KnowledgeEmbeddingProfile = {
   },
 };
 
-function hashVector(text: string): number[] {
-  const dims = 384;
+function hashVector(text: string, dims = 384): number[] {
   const out = new Array<number>(dims);
   let hash = createHash('sha256').update(text, 'utf8').digest();
   let offset = 0;
@@ -59,7 +58,7 @@ function hashVector(text: string): number[] {
 const fakeEmbedder: ProfileEmbedder = {
   profile: FAKE_PROFILE,
   verification: { status: 'unpinned', checks: [] },
-  embed: async (texts) => texts.map(hashVector),
+  embed: async (texts) => texts.map((t) => hashVector(t)),
   embedQuery: async (text) => Float32Array.from(hashVector(text)),
   countTokens: (text) => (text.trim() ? text.trim().split(/\s+/).length : 0),
   dispose: async () => {},
@@ -230,6 +229,88 @@ describe('gezel knowledge (offline)', () => {
     expect(await readFile(join(root, 'content', 'pictures.md'), 'utf8')).toBe(markdown);
   });
 
+  it('build embeds referenced audio for a multimodal profile and records per-asset attribution', async () => {
+    const root = join(dir, 'media-catalog');
+    await runKnowledgeInit(root);
+    const config = JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'));
+    config.profile = 'embeddinggemma-2-512@1';
+    config.assets = {
+      'sounds/chime.wav': {
+        license: 'CC0-1.0',
+        author: 'Field recordist',
+        source: 'https://example.org/chime',
+      },
+    };
+    await writeFile(join(root, 'catalog.json'), JSON.stringify(config, null, 2));
+    await mkdir(join(root, 'content', 'sounds'), { recursive: true });
+    const wav = Buffer.concat([
+      Buffer.from('RIFF'),
+      Buffer.from([36, 0, 0, 0]),
+      Buffer.from('WAVEfmt '),
+      Buffer.from([16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 2, 0, 16, 0]),
+      Buffer.from('data'),
+      Buffer.from([0, 0, 0, 0]),
+    ]);
+    await writeFile(join(root, 'content', 'sounds', 'chime.wav'), wav);
+    await writeFile(
+      join(root, 'content', 'bells.md'),
+      '# Bells\n\nA brass bell rings once.\n\n![A brass bell chiming](sounds/chime.wav)\n',
+    );
+    const { knowledgeEmbeddingProfile } = await import('@bendyline/gezel-knowledge');
+    const gemma = knowledgeEmbeddingProfile('embeddinggemma-2-512@1');
+    if (!gemma) throw new Error('embeddinggemma-2-512@1 is not registered');
+    const media: Array<{ path: string; modality: string }> = [];
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const outputPath = join(root, 'output.gezk');
+    await runKnowledgeBuild(
+      root,
+      { out: outputPath },
+      {
+        createEmbedder: async () => ({
+          ...fakeEmbedder,
+          profile: gemma,
+          embed: async (texts) => texts.map((t) => hashVector(t, 768)),
+        }),
+        createMediaEmbedder: async () => ({
+          embedMedia: async (request) => {
+            media.push({ path: request.path, modality: request.modality });
+            return [{ vector: hashVector(request.path, 768), startMs: 0, endMs: 1000 }];
+          },
+          dispose: async () => {},
+        }),
+      },
+    );
+    expect(media).toEqual([{ path: 'assets/sounds/chime.wav', modality: 'audio' }]);
+    expect(log.mock.calls.flat().join('\n')).toContain('1 media rows');
+    const manifest = await readGezkManifest(outputPath);
+    expect(manifest.formatVersion).toBe('0.8');
+    expect(manifest.counts.media).toEqual({ image: 0, video: 0, audio: 1 });
+    const extracted = join(root, 'extracted');
+    await extractGezkVerified(outputPath, extracted);
+    const handle = CatalogHandle.open(extracted);
+    try {
+      const [hit] = handle.searchMedia(
+        Float32Array.from(hashVector('assets/sounds/chime.wav', 768)).slice(0, 512),
+        {
+          perModality: 1,
+        },
+      );
+      expect(hit?.media).toMatchObject({
+        modality: 'audio',
+        assetPath: 'assets/sounds/chime.wav',
+        startMs: 0,
+        endMs: 1000,
+        attribution: { license: 'CC0-1.0', author: 'Field recordist' },
+      });
+      const asset = handle.assetFile('assets/sounds/chime.wav');
+      expect(asset).toMatchObject({ contentType: 'audio/wav', sizeBytes: wav.byteLength });
+    } finally {
+      handle.close();
+    }
+    await expect(runKnowledgeValidate(outputPath, { deep: true })).resolves.toBeUndefined();
+  });
+
   it('validate --deep passes on the built archive', async () => {
     await expect(runKnowledgeValidate(archivePath, { deep: true })).resolves.toBeUndefined();
   });
@@ -366,8 +447,8 @@ describe('gezel knowledge build reads the outline a documentation tree already h
 describe('embeddingRuntimeMissingMessage', () => {
   it('gives the exact install command for both kinds of npm install', () => {
     const message = embeddingRuntimeMissingMessage();
-    expect(message).toContain('npm install -g @huggingface/transformers@^3.8.1');
-    expect(message).toMatch(/^ {2}npm install @huggingface\/transformers@\^3\.8\.1 /m);
+    expect(message).toContain('npm install -g @huggingface/transformers@^4.3.1');
+    expect(message).toMatch(/^ {2}npm install @huggingface\/transformers@\^4\.3\.1 /m);
     expect(message).toContain('full-text search works without it');
   });
 });

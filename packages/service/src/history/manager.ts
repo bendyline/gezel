@@ -10,6 +10,7 @@ import {
   type HistoryFilter,
   type HistorySessionEntry,
   createLogger,
+  isSafeEntityId,
 } from '@bendyline/gezel';
 import {
   gezelPaths,
@@ -148,14 +149,22 @@ export class HistoryManager {
       files.push(projectHistoryFile(this.home, projectId));
       return files;
     }
-    let ids: string[] = [];
-    try {
-      ids = await readdir(gezelPaths(this.home).projects);
-    } catch {
-      /* no projects */
-    }
-    files.push(...ids.map((id) => projectHistoryFile(this.home, id)));
+    files.push(...(await this.projectIds()).map((id) => projectHistoryFile(this.home, id)));
     return files;
+  }
+
+  /**
+   * Every project folder's id. Finder's `.DS_Store` sits beside them, and
+   * the path helper refuses a name that is not an id, which threw the whole
+   * scan and left the history search mirror unbuilt (2026-10-08).
+   */
+  private async projectIds(): Promise<string[]> {
+    try {
+      const entries = await readdir(gezelPaths(this.home).projects, { withFileTypes: true });
+      return entries.filter((e) => e.isDirectory() && isSafeEntityId(e.name)).map((e) => e.name);
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -212,22 +221,7 @@ export class HistoryManager {
       }
     }
     const events: HistoryEvent[] = [];
-    const files: string[] = [];
-    // Always scan the global file.
-    files.push(globalHistoryFile(this.home));
-    // Scan the requested project, or every project if unfiltered.
-    if (filter.projectId) {
-      files.push(projectHistoryFile(this.home, filter.projectId));
-    } else {
-      const projectsDir = gezelPaths(this.home).projects;
-      let ids: string[] = [];
-      try {
-        ids = await readdir(projectsDir);
-      } catch {
-        /* none */
-      }
-      for (const id of ids) files.push(projectHistoryFile(this.home, id));
-    }
+    const files = await this.eventFiles(filter.projectId);
     for (const path of files) {
       let stream: ReturnType<typeof createReadStream>;
       try {

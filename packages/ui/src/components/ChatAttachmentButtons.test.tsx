@@ -11,7 +11,39 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
   useEditorContext: () => ({ bumpMediaRevision, insertAtCursor }),
 }));
 
+const cameraDialogProps = vi.hoisted(() => ({
+  current: null as null | { onCapture: (photo: File) => Promise<void>; onClose: () => void },
+}));
+
+vi.mock('./CameraCaptureDialog.js', () => ({
+  CameraCaptureDialog: (props: {
+    onCapture: (photo: File) => Promise<void>;
+    onClose: () => void;
+  }) => {
+    cameraDialogProps.current = props;
+    return <div data-testid="camera-dialog" />;
+  },
+}));
+
 const { ChatAttachmentButtons } = await import('./ChatAttachmentButtons.js');
+
+function setPlatform(platform: string | undefined) {
+  (window as { __GEZEL__?: unknown }).__GEZEL__ = platform ? { platform } : undefined;
+}
+
+function setMediaDevices(devices: Array<{ kind: string; deviceId: string }> | null) {
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: devices
+      ? {
+          getUserMedia: vi.fn(),
+          enumerateDevices: vi.fn().mockResolvedValue(devices),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }
+      : undefined,
+  });
+}
 
 function mediaProvider(relativePath: string): MediaProvider {
   return {
@@ -36,10 +68,15 @@ function selectableFile(name: string, type: string): File {
 describe('ChatAttachmentButtons', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cameraDialogProps.current = null;
+    setPlatform(undefined);
+    setMediaDevices(null);
   });
 
   afterEach(() => {
     cleanup();
+    setPlatform(undefined);
+    setMediaDevices(null);
   });
 
   it('uploads and inserts an image through the direct image action', async () => {
@@ -117,5 +154,56 @@ describe('ChatAttachmentButtons', () => {
     await waitFor(() => expect(onError).toHaveBeenCalledWith('Upload failed'));
     expect(bumpMediaRevision).not.toHaveBeenCalled();
     expect(insertAtCursor).not.toHaveBeenCalled();
+  });
+
+  it('opens the phone camera through a capture input and inserts the photo', async () => {
+    setPlatform('mobile');
+    const provider = mediaProvider('attachments/photo.jpg');
+    render(<ChatAttachmentButtons mediaProvider={provider} onError={vi.fn()} />);
+
+    const input = screen.getByTestId('chat-camera-input') as HTMLInputElement;
+    expect(input.getAttribute('accept')).toBe('image/*');
+    expect(input.getAttribute('capture')).toBe('environment');
+    const click = vi.spyOn(input, 'click');
+    fireEvent.click(screen.getByRole('button', { name: 'Take photo' }));
+    expect(click).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(input, {
+      target: { files: [selectableFile('IMG_4021.jpg', 'image/jpeg')] },
+    });
+    await waitFor(() =>
+      expect(insertAtCursor).toHaveBeenCalledWith('![Photo](attachments/photo.jpg)'),
+    );
+    expect(screen.queryByTestId('camera-dialog')).toBeNull();
+  });
+
+  it('offers the desktop viewfinder only when a camera is attached', async () => {
+    setMediaDevices([{ kind: 'audioinput', deviceId: '' }]);
+    const { unmount } = render(
+      <ChatAttachmentButtons mediaProvider={mediaProvider('unused')} onError={vi.fn()} />,
+    );
+    await waitFor(() => expect(navigator.mediaDevices.enumerateDevices).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Take photo' })).toBeNull();
+    unmount();
+
+    setMediaDevices([{ kind: 'videoinput', deviceId: '' }]);
+    render(<ChatAttachmentButtons mediaProvider={mediaProvider('unused')} onError={vi.fn()} />);
+    expect(await screen.findByRole('button', { name: 'Take photo' })).toBeTruthy();
+    expect(screen.queryByTestId('chat-camera-input')).toBeNull();
+  });
+
+  it('inserts a viewfinder photo and lets the dialog report a failed upload', async () => {
+    setMediaDevices([{ kind: 'videoinput', deviceId: 'cam-1' }]);
+    const provider = mediaProvider('attachments/photo-2026.jpg');
+    render(<ChatAttachmentButtons mediaProvider={provider} onError={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Take photo' }));
+    await screen.findByTestId('camera-dialog');
+    const photo = selectableFile('photo-2026-10-06-101500.jpg', 'image/jpeg');
+    await cameraDialogProps.current!.onCapture(photo);
+    expect(insertAtCursor).toHaveBeenCalledWith('![Photo](attachments/photo-2026.jpg)');
+
+    vi.mocked(provider.addMedia).mockRejectedValueOnce(new Error('Disk full'));
+    await expect(cameraDialogProps.current!.onCapture(photo)).rejects.toThrow('Disk full');
   });
 });

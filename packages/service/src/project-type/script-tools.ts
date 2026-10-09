@@ -1,5 +1,11 @@
 import type { Project, ProjectTypeManifest, ProjectTypeTool } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import {
+  type ProjectTypePageReadScope,
+  createLogger,
+  projectTypeModelTools,
+  projectTypePageReads,
+  projectTypePageTools,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 
 const log = createLogger('project-type');
@@ -54,8 +60,7 @@ export async function resolveProjectScriptTools(
 ): Promise<ProjectTypeTool[]> {
   const manifest = await resolveProjectTypeManifest(catalog, project);
   if (!manifest) return [];
-  const pageOnly = new Set(manifest.pages?.tools ?? []);
-  return (manifest.tools ?? []).filter((t) => !pageOnly.has(t.name));
+  return projectTypeModelTools(manifest);
 }
 
 export interface ScriptToolReconciliation {
@@ -120,20 +125,15 @@ export async function resolvePageTools(
 ): Promise<ResolvedPageTools | null> {
   const manifest = await resolveProjectTypeManifest(catalog, project);
   if (!manifest) return null;
-  const listed = new Set(manifest.pages?.tools ?? []);
   const params = project?.projectType?.params;
   return {
     typeName: manifest.name,
     ...(params ? { params } : {}),
-    tools: (manifest.tools ?? []).filter((t) => listed.has(t.name)),
+    tools: projectTypePageTools(manifest),
   };
 }
 
-export interface ResolvedPageReadScope {
-  source: 'workspace' | 'artifacts';
-  path: string;
-  subtree: boolean;
-}
+export type ResolvedPageReadScope = ProjectTypePageReadScope;
 
 /**
  * The declared read surface for a project's applied type pages — the
@@ -150,16 +150,7 @@ export async function resolvePageReads(
 ): Promise<ResolvedPageReadScope[] | null> {
   const manifest = await resolveProjectTypeManifest(catalog, project);
   if (!manifest) return null;
-  return (manifest.pages?.reads ?? [])
-    .filter(
-      (read): read is typeof read & { source: 'workspace' | 'artifacts' } =>
-        read.source === 'workspace' || read.source === 'artifacts',
-    )
-    .map((read) => ({
-      source: read.source,
-      path: read.path,
-      subtree: read.subtree === true,
-    }));
+  return projectTypePageReads(manifest);
 }
 
 /**

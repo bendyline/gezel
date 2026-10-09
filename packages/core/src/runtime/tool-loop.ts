@@ -1,11 +1,17 @@
 import { isEngagementAllowed } from '../engagement.js';
+import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import { terminalToolClosingText } from '../local-loop/terminal-tool-policy.js';
 import { createLogger } from '../log.js';
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { isContextOverflowError } from '../task-execution.js';
-import { parseToolEnvelopeReply } from '../tools/envelope.js';
+import {
+  parseToolEnvelopeReply,
+  trailingToolCallStart,
+  withoutToolCallText,
+} from '../tools/envelope.js';
 import {
   NATIVE_TOOL_LISTINGS,
   NATIVE_TOOL_NOTE,
@@ -20,6 +26,7 @@ import {
 import { buildToolReceipt, summarizeToolResult } from '../tools/receipt.js';
 import { extractReasoning } from '../transform/reasoning.js';
 import type { ResolvedTuning } from '../tuning-resolve.js';
+import { type HistoryMessage, historyExchanges, latestExchanges } from './conversation-history.js';
 import { PORTABLE_TOOL_RESULT_MODEL_CAP } from './inference-limits.js';
 import { portableInputLimitError } from './inference-limits.js';
 import { portableToolResultText } from './portable-tool-results.js';
@@ -34,6 +41,8 @@ export interface PortableToolSpec {
   name: string;
   description: string;
   parameters: unknown;
+  /** Survives the narrowest native listing (a project type's own tools). */
+  core?: boolean;
 }
 
 /**
@@ -55,7 +64,10 @@ export function toolProtocol(
 ): string {
   if (listing === 'none')
     return `${TOOLS_HEADING}\nNone: the tool list does not fit in this model's context. Answer in normal text.`;
-  if (listing === 'full') return `${TOOLS_HEADING}\n${TOOL_PROTOCOL}\n${JSON.stringify(inventory)}`;
+  if (listing === 'full')
+    return `${TOOLS_HEADING}\n${TOOL_PROTOCOL}\n${JSON.stringify(
+      inventory.map(({ name, description, parameters }) => ({ name, description, parameters })),
+    )}`;
   const lines = inventory.map((tool) => {
     const summary = listing === 'compact' ? firstSentence(tool.description) : '';
     return `- ${tool.name}(${renderFields(tool.parameters as JsonSchema, 0)})${summary ? `: ${summary}` : ''}`;
@@ -147,9 +159,12 @@ const ACTION_LIMIT =
 export const PORTABLE_TURN_ACTION_LIMIT = 24;
 
 /** A reply that set out to be a JSON tool call, whether or not it parses. */
-const CALL_SHAPED = /^\s*(?:```[A-Za-z]*\s*)?\{\s*"name"\s*:/;
+const CALL_SHAPED = /^\s*(?:```[A-Za-z]*\s*)?\{\s*\\?"name\\?"\s*:/;
 const UNPARSED_CALL_NOTE =
   'That tool call is not valid JSON, so it did not run. Reply with only the call as one JSON object, every key with a value: {"name": "tool_name", "arguments": {"key": "value"}}. Leave out keys you have no value for.';
+/** Prose with a call after it: the call never runs from inside a reply. */
+const MIXED_CALL_NOTE =
+  'Your reply put a tool call after some text, so the call did not run. To act, reply with only the call as one JSON object; to answer, reply with only text.';
 
 function withNativeToolNote(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
@@ -291,6 +306,20 @@ export async function recordPortableToolCall(
   return { call, value, serialized, ...(failure === undefined ? {} : { error: failure }) };
 }
 
+/**
+ * How much of a conversation's history a small model was last given:
+ * whether older tool results were left out, and how many of the newest
+ * exchanges were kept (all of them when absent).
+ */
+export interface PortableHistoryFit {
+  lean: boolean;
+  keep?: number;
+}
+
+/** Tells the model why the conversation starts partway through. */
+export const HISTORY_TRIMMED_NOTE =
+  'Earlier turns of this conversation are left out so it fits this model. The most recent ones follow; anything the work keeps lives in its files, so read them rather than guess.';
+
 /** Host-neutral bounded loop. A durable started record precedes every effect;
  * incomplete calls are never replayed after an OS kill or a persistence error.
  * With `nativeTools`, the provider's own tool loop calls back into the same
@@ -310,6 +339,19 @@ export async function runPortableToolLoop(options: {
   nativeTools?: NativeToolBinding;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   /**
+   * The conversation so far, oldest first, given separately so the loop can
+   * fit it: when the provider refuses the prompt's size, older tool results
+   * and then the oldest exchanges go before any tool does. `messages` then
+   * holds the system message and the turn itself. Start at `fit` (where this
+   * conversation last fitted); `fitted` hears only what the conversation
+   * itself forced, on the turn's first request.
+   */
+  history?: {
+    messages: readonly HistoryMessage[];
+    fit?: PortableHistoryFit;
+    fitted?(fit: PortableHistoryFit): void;
+  };
+  /**
    * Appended to the system message at the size the provider accepts. Start at
    * `listing` (where this conversation last fitted). `narrowed` hears only the
    * steps down the conversation itself forced, on the turn's first request; a
@@ -321,6 +363,17 @@ export async function runPortableToolLoop(options: {
     narrowed?(listing: PortableToolListing): void;
   };
   actions: PortableToolActions;
+  /**
+   * Tools whose success is the turn's whole job (a game's move): the turn ends
+   * on it with the closing line the policy names, as on the desktop.
+   */
+  terminalToolPolicy?: TerminalToolPolicy;
+  /**
+   * The turn's first request offers only this tool (a reaction's `turn`):
+   * these engines cannot be made to call it, but a listing of one leaves
+   * nothing else to reach for.
+   */
+  requiredTool?: string;
   cancelled(): boolean;
   checkpoint(message: ChatMessage): Promise<void>;
   tool(call: ChatMessageToolCall): void;
@@ -350,6 +403,41 @@ export async function runPortableToolLoop(options: {
   const ladder: readonly PortableToolListing[] = native ? NATIVE_TOOL_LISTINGS : TOOL_LISTINGS;
   let listing: PortableToolListing =
     tools?.listing && ladder.includes(tools.listing) ? tools.listing : 'full';
+  const { history } = options;
+  const exchanges = history ? historyExchanges(history.messages) : 0;
+  let fit: PortableHistoryFit = history?.fit ?? { lean: false };
+  /** The system message, the history that fits, then the turn so far. */
+  const conversation = (): typeof messages => {
+    if (!history) return messages;
+    const kept =
+      fit.keep === undefined ? history.messages : latestExchanges(history.messages, fit.keep);
+    const [system, ...turn] = messages;
+    const trimmed = fit.keep !== undefined && fit.keep < exchanges;
+    return [
+      ...(system
+        ? [
+            trimmed
+              ? { ...system, content: `${system.content}\n\n${HISTORY_TRIMMED_NOTE}` }
+              : system,
+          ]
+        : []),
+      ...kept.map((message) => ({
+        role: message.role,
+        content: fit.lean ? (message.leanContent ?? message.content) : message.content,
+      })),
+      ...turn,
+    ];
+  };
+  /** One step smaller: older results first, then half the remaining exchanges. */
+  const narrowerHistory = (): PortableHistoryFit | undefined => {
+    if (!history) return undefined;
+    const kept =
+      fit.keep === undefined ? history.messages : latestExchanges(history.messages, fit.keep);
+    if (!fit.lean && kept.some((message) => message.leanContent !== undefined))
+      return { ...fit, lean: true };
+    const count = fit.keep ?? exchanges;
+    return count > 0 ? { lean: true, keep: Math.floor(count / 2) } : undefined;
+  };
   let actionCount = 0;
   // Greedy decoding re-emits the same rejected call; Apple's model repeated one
   // invalid run_installed_script seven times, spending the whole action budget.
@@ -440,6 +528,14 @@ export async function runPortableToolLoop(options: {
         };
     }
 
+    // Only the tools this turn's policy names: this loop settles a task step
+    // its own way below, whatever the shared policy says about advancing.
+    const closing =
+      call.success && options.terminalToolPolicy?.toolNames.includes(name)
+        ? terminalToolClosingText(options.terminalToolPolicy, name, args, serialized)
+        : null;
+    if (closing !== null) return { end: { text: closing, stopReason: 'stop' } };
+
     if (call.success && ['message_gezel', 'start_project'].includes(name))
       return {
         end: {
@@ -473,6 +569,10 @@ export async function runPortableToolLoop(options: {
   };
 
   let retriedUnparsedCall = false;
+  const required =
+    options.requiredTool && tools?.inventory.some((tool) => tool.name === options.requiredTool)
+      ? options.requiredTool
+      : undefined;
   for (let iteration = 0; iteration <= PORTABLE_TURN_ACTION_LIMIT; iteration++) {
     await check();
     await assertPortableTaskSessionActive(options.store, session);
@@ -482,15 +582,27 @@ export async function runPortableToolLoop(options: {
     let result!: Awaited<ReturnType<PortableInference['generate']>>;
     let ended: Omit<LoopResult, 'message'> | undefined;
     for (;;) {
+      const base = conversation();
+      const offered =
+        iteration === 0 && required
+          ? tools!.inventory.filter((tool) => tool.name === required)
+          : tools?.inventory;
       const prompt = !tools
-        ? messages
+        ? base
         : native
-          ? withNativeToolNote(messages, listing)
-          : withToolListing(messages, tools.inventory, listing);
+          ? withNativeToolNote(base, listing)
+          : withToolListing(base, offered!, listing);
       const inputError = portableInputLimitError(prompt);
-      if (inputError) throw new Error(inputError);
+      if (inputError) {
+        // This host's own ceiling on a request: the oldest turns give way.
+        const smaller = narrowerHistory();
+        if (!smaller) throw new Error(inputError);
+        fit = smaller;
+        if (iteration === 0) history?.fitted?.(fit);
+        continue;
+      }
       const nativeSpecs = binding
-        ? nativeToolSpecs(tools!.inventory, listing as NativeToolListing, binding)
+        ? nativeToolSpecs(offered!, listing as NativeToolListing, binding)
         : [];
       let nativeCalls = 0;
       let limited = false;
@@ -578,11 +690,25 @@ export async function runPortableToolLoop(options: {
         if (ended) break;
         if (limited) throw new Error(ACTION_LIMIT);
         // Only the provider's tokenizer knows whether a prompt fits, and it
-        // refuses before generating anything. Retry that refusal with a smaller
-        // tool listing; a failure after output or after a native tool call
-        // (whose effect is already committed), or of any other kind, stands.
+        // refuses before generating anything. Retry that refusal with less of
+        // the conversation's past first: an old turn matters less than a tool
+        // the work needs now, and a game whose state lives in its files loses
+        // nothing by it. Only then shrink the tool listing. A failure after
+        // output or after a native tool call (whose effect is already
+        // committed), or of any other kind, stands.
+        const refused = !buffered && !nativeCalls && isContextOverflowError(error);
+        const smaller = refused ? narrowerHistory() : undefined;
+        if (smaller) {
+          await check();
+          log.info(
+            `session=${session.id} ${options.providerId}:${options.modelId} context=${options.contextSize} history ${fit.lean ? 'lean' : 'full'}/${fit.keep ?? exchanges} -> lean/${smaller.keep ?? exchanges} of ${exchanges} exchanges`,
+          );
+          fit = smaller;
+          if (iteration === 0) history?.fitted?.(fit);
+          continue;
+        }
         const next =
-          tools && !buffered && !nativeCalls && isContextOverflowError(error)
+          tools && refused
             ? binding
               ? narrowerNativeListing(tools.inventory, listing as NativeToolListing, binding)
               : narrowerToolListing(tools.inventory, listing)
@@ -604,20 +730,24 @@ export async function runPortableToolLoop(options: {
     // A call that will not parse was never streamed, so a second try costs the
     // person nothing. Shown instead, it reached them as the reply: Gemini Nano
     // answered a question with its own broken JSON (Galaxy S26+, 2026-10-02).
+    const unparsedCall = CALL_SHAPED.test(visibleText);
+    const mixedCall = !unparsedCall && trailingToolCallStart(visibleText) > 0;
     if (
       !envelope &&
       !retriedUnparsedCall &&
       result.stopReason === 'stop' &&
-      CALL_SHAPED.test(visibleText)
+      (unparsedCall || mixedCall)
     ) {
       retriedUnparsedCall = true;
       messages.push(
         { role: 'assistant', content: visibleText.trim() },
-        { role: 'user', content: UNPARSED_CALL_NOTE },
+        { role: 'user', content: unparsedCall ? UNPARSED_CALL_NOTE : MIXED_CALL_NOTE },
       );
       continue;
     }
-    if (!envelope) return { ...result, text: visibleText, message, streamed: prose };
+    // A call that did not run is never the reply a person reads.
+    if (!envelope)
+      return { ...result, text: withoutToolCallText(visibleText), message, streamed: prose };
     if (++actionCount > PORTABLE_TURN_ACTION_LIMIT) break;
     const outcome = await perform(envelope.name, envelope.arguments);
     if ('end' in outcome) return { ...outcome.end, message };

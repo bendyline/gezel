@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NIGHT_SHIFT_QUIET_REASONS } from '../night-shift.js';
 import { NpmPackageNameSchema, NpmRegistryVersionSchema } from './npm-package.js';
 
 /**
@@ -85,13 +86,17 @@ export const NpmInstallApprovalPackageSchema = z.object({
 export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackageSchema>;
 
 /**
- * First-use approval for `run_package_script` / `run_npx`. The gezel
- * calling one of those MCP tools against an unapproved entry creates
- * this intent; the answer handler (questions route) flips the entry in
- * the project's `command-approvals.json` and emits a follow-up seed.
+ * First-use approval for `run_package_script` / `run_npx` /
+ * `run_playwright_script`. The gezel calling one of those MCP tools against
+ * an unapproved entry creates this intent; the answer handler (questions
+ * route) flips the entry in the project's `command-approvals.json` and
+ * emits a follow-up seed.
  *
- *   - `scope: 'script'` — a `package.json` script key.
- *   - `scope: 'npx'`    — a binary in the workspace's `node_modules/.bin`.
+ *   - `scope: 'script'`     — a `package.json` script key.
+ *   - `scope: 'npx'`        — a binary in the workspace's `node_modules/.bin`.
+ *   - `scope: 'playwright'` — an artifact-relative Playwright script path;
+ *     `body` is the script source and `inputFiles` pin it plus its relative
+ *     imports, because the script runs outside the script sandbox.
  *
  * `body` carries the script body (or resolved bin path) verbatim so the
  * approval UI can show the user what they're consenting to. `args` are
@@ -100,7 +105,7 @@ export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackage
  * `inputFiles` content snapshot, so a persisted approval cannot be replayed
  * with different arguments or modified identifiable input files.
  */
-export const CommandApprovalScopeSchema = z.enum(['script', 'npx']);
+export const CommandApprovalScopeSchema = z.enum(['script', 'npx', 'playwright']);
 export type CommandApprovalScope = z.infer<typeof CommandApprovalScopeSchema>;
 
 export const CommandApprovalInputFileSchema = z.object({
@@ -318,6 +323,20 @@ export const NightShiftReviewIntentSchema = z.object({
       actionCount: z.number(),
     }),
   ),
+  /** Why the window produced nothing; absent when it produced something. */
+  quiet: z.object({ reason: z.enum(NIGHT_SHIFT_QUIET_REASONS) }).optional(),
+  /** The nightly oversight task, when it is paused waiting for the person. */
+  pausedReview: z.object({ projectId: z.string(), num: z.number() }).optional(),
+  /** The week's recap, written the first morning of a new week (Default project artifacts). */
+  weeklyRecap: z.object({ week: z.string(), path: z.string() }).optional(),
+  /** What the nightly sweep got through (see `NightShiftIndexing`). */
+  indexing: z
+    .object({
+      filesIndexed: z.number(),
+      filesReviewed: z.number(),
+      mediaDescribed: z.number(),
+    })
+    .optional(),
 });
 export type NightShiftReviewIntent = z.infer<typeof NightShiftReviewIntentSchema>;
 

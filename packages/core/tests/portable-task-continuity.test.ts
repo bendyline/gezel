@@ -105,3 +105,113 @@ describe('task transcript continuity through the shared client', () => {
     expect(f.inputs[1]?.messages.filter((m) => m.role === 'assistant')).toEqual([]);
   });
 });
+
+async function questionFixture(replies: Array<object | string>) {
+  const f = portableFixture();
+  const service = new PortableProductService(
+    f.store,
+    {
+      providers: async () => [
+        {
+          id: 'llama-cpp',
+          name: 'Offline',
+          locality: 'on-device',
+          availability: 'available',
+          contextTokens: 8192,
+          maxOutputTokens: 1024,
+          capabilities: {
+            text: true,
+            tools: false,
+            images: false,
+            structuredOutput: false,
+            foregroundOnly: true,
+          },
+        },
+      ],
+      generate: async () => {
+        const reply = replies.shift() ?? 'Done.';
+        return {
+          text: typeof reply === 'string' ? reply : JSON.stringify(reply),
+          stopReason: 'stop' as const,
+        };
+      },
+      cancel: async () => {},
+    },
+    'token',
+  );
+  await service.initialize();
+  const client = new GezelClient({
+    baseUrl: 'https://gezel.local',
+    token: 'token',
+    fetch: service.fetch,
+  });
+  await f.store.writeConfig({ generalistMode: 'on' });
+  return { ...f, service, client };
+}
+
+describe('a task step that asks the person a question', () => {
+  it('carries on once the answer arrives, without another Try again', async () => {
+    // A question ends its turn, and so does a call that moves the task.
+    const replies = [
+      { name: 'ask_user_question', arguments: { question: 'How many people are eating?' } },
+      { name: 'advance_task_step', arguments: { ref: 'default/1', stepId: 'scope' } },
+      { name: 'advance_task_step', arguments: { ref: 'default/1', stepId: 'plan' } },
+    ];
+    const { client, service } = await questionFixture(replies);
+    const task = await client.createTask('default', {
+      title: 'Plan the dinners',
+      description: 'Plan the week of dinners for the household and write the plan down.',
+      steps: [
+        { id: 'scope', name: 'Scope', suggestedRole: 'Planner' },
+        { id: 'plan', name: 'Plan', suggestedRole: 'Planner', terminal: true },
+      ],
+    });
+    await client.retryTask('default', task.num);
+    await vi.waitFor(async () =>
+      expect((await client.listQuestions({ projectId: 'default' })).questions).toHaveLength(1),
+    );
+    await vi.waitFor(() => expect(service.busy).toBe(false));
+    const [question] = (await client.listQuestions({ projectId: 'default' })).questions;
+    expect((await client.getTask('default', task.num)).activeStepId).toBe('scope');
+
+    await client.answerQuestion(question!.id, { writeIn: 'Two adults.' });
+    await vi.waitFor(async () =>
+      expect((await client.getTask('default', task.num)).status).toBe('complete'),
+    );
+    expect(replies).toHaveLength(0);
+  });
+
+  it('runs the step’s automatic check when the owner stops after answering', async () => {
+    const replies = [
+      { name: 'ask_user_question', arguments: { question: 'How many people are eating?' } },
+      { name: 'write_file', arguments: { path: 'plan.md', content: '# Plan\n\nTwo adults.' } },
+      'Saved the plan.',
+      { name: 'advance_task_step', arguments: { ref: 'default/1', stepId: 'plan' } },
+    ];
+    const { client, service } = await questionFixture(replies);
+    const task = await client.createTask('default', {
+      title: 'Plan the dinners',
+      description: 'Plan the week of dinners for the household and write the plan down.',
+      steps: [
+        {
+          id: 'scope',
+          name: 'Scope',
+          suggestedRole: 'Planner',
+          advanceWhen: { file: 'plan.md', minBytes: 8 },
+        },
+        { id: 'plan', name: 'Plan', suggestedRole: 'Planner', terminal: true },
+      ],
+    });
+    await client.retryTask('default', task.num);
+    await vi.waitFor(async () =>
+      expect((await client.listQuestions({ projectId: 'default' })).questions).toHaveLength(1),
+    );
+    await vi.waitFor(() => expect(service.busy).toBe(false));
+    const [question] = (await client.listQuestions({ projectId: 'default' })).questions;
+    await client.answerQuestion(question!.id, { writeIn: 'Two adults.' });
+    await vi.waitFor(async () =>
+      expect((await client.getTask('default', task.num)).status).toBe('complete'),
+    );
+    expect(replies).toHaveLength(0);
+  });
+});

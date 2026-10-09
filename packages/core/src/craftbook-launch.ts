@@ -61,9 +61,10 @@ export function mainContentParamKey(paramSchema: unknown): string | null {
 
 /**
  * Fill the main content parameter from the request when the caller supplied
- * no source form at all. An explicit `sourcePath`, `topic`, or `content` is
- * always left alone: a person who pointed the book at a file did not also
- * mean to paste their sentence into `topic`.
+ * no source form at all. An explicit `sourcePath`, `topic`, `content`, or
+ * main parameter is always left alone: a person who pointed the book at a
+ * file did not also mean to paste their sentence into `topic`, and one who
+ * wrote the brief themselves did not mean the request to replace it.
  */
 export function fillMainContentParam(args: {
   paramSchema: unknown;
@@ -75,7 +76,7 @@ export function fillMainContentParam(args: {
   if (!message) return params;
   const key = mainContentParamKey(args.paramSchema);
   if (!key) return params;
-  const suppliedSource = SOURCE_FORM_KEYS.some(
+  const suppliedSource = [...SOURCE_FORM_KEYS, key].some(
     (candidate) => typeof params[candidate] === 'string' && params[candidate]!.trim().length > 0,
   );
   return suppliedSource ? params : { ...params, [key]: message };

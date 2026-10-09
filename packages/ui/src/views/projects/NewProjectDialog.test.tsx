@@ -218,39 +218,19 @@ describe('NewProjectDialog GitHub repository drafting', () => {
     expect(screen.getByRole('radio', { name: 'E-Mail' })).toBeInTheDocument();
   });
 
-  it('creates an existing-folder project with the folder on the initial request', async () => {
-    const folder = 'D:\\work\\sample-workspace';
-    vi.mocked(api.previewFolder).mockResolvedValue({
-      name: 'sample-workspace',
-    } as never);
-    vi.mocked(api.createProject).mockResolvedValue({
-      id: 'sample-workspace',
-      name: 'sample-workspace',
-      workingDir: folder,
-      nudgeConfig: { enabled: false },
-    } as never);
-
-    render(
-      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
-    );
-    fireEvent.click(await screen.findByRole('radio', { name: 'Existing Folder' }));
-    const folderInput = screen.getByRole('textbox', { name: /^Folder/ });
-    fireEvent.change(folderInput, { target: { value: folder } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
-      target: { value: 'sample-workspace' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-
-    await waitFor(() =>
-      expect(api.createProject).toHaveBeenCalledWith({
-        name: 'sample-workspace',
-        about: '',
-        missionObjectives: '',
-        mode: 'solo',
-        workingDir: folder,
-      }),
-    );
-    expect(api.setProjectWorkingDir).not.toHaveBeenCalled();
+  it('hands an existing folder to the add-folder sheet, which gives it its crew', async () => {
+    const onClose = vi.fn();
+    const addFolder = vi.fn();
+    window.addEventListener('gezel:add-folder', addFolder);
+    try {
+      render(<NewProjectDialog open mode="crew" onClose={onClose} onCreated={() => undefined} />);
+      fireEvent.click(await screen.findByRole('radio', { name: 'Existing Folder' }));
+      expect(onClose).toHaveBeenCalled();
+      expect(addFolder).toHaveBeenCalled();
+      expect(api.createProject).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('gezel:add-folder', addFolder);
+    }
   });
 });
 
@@ -268,6 +248,53 @@ it('offers the existing general project workflow without unsupported host choice
     const general = screen.getByRole('radio', { name: 'General' });
     fireEvent.click(general);
     expect(screen.getByRole('textbox', { name: /Name/i })).toBeInTheDocument();
+    view.unmount();
+  } finally {
+    window.__GEZEL__ = bridge;
+  }
+});
+
+it("offers a phone's bundled project types, and shows one the device cannot run as unavailable", async () => {
+  const bridge = window.__GEZEL__;
+  window.__GEZEL__ = {
+    token: 'test-token',
+    capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, projectTypes: true },
+  };
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'checkers',
+                  name: 'Checkers',
+                  category: 'game',
+                }),
+                {
+                  ...catalogItem({
+                    kind: 'project-type',
+                    id: 'chess',
+                    name: 'Chess',
+                    category: 'game',
+                  }),
+                  unavailableReason: 'Needs a larger model than the one this device runs.',
+                },
+              ]
+            : [],
+      }) as never,
+  );
+  try {
+    const view = render(
+      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+    );
+    expect(await screen.findByRole('radio', { name: 'Checkers' })).toBeEnabled();
+    const chess = screen.getByRole('radio', {
+      name: 'Chess (Needs a larger model than the one this device runs.)',
+    });
+    expect(chess).toBeDisabled();
+    expect(chess).toHaveTextContent('Needs a larger model');
     view.unmount();
   } finally {
     window.__GEZEL__ = bridge;

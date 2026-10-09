@@ -1,11 +1,15 @@
 import {
   type BoekwachterIssue,
   type NightShiftWindow,
+  type Project,
   createLogger,
+  folderKindOf,
   isActiveDiffpackStatus,
+  isCodingProject,
   nightShiftDayKey,
   projectAllowsAmbientWork,
   projectAllowsNightlyFixes,
+  projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
@@ -15,6 +19,7 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import { dispatchTaskEntry } from '../tasks/entry-dispatch.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
+import { unattendedNightWork } from '../tasks/unattended.js';
 import type { DiffpackManager } from './manager.js';
 import { FIX_CRAFTBOOK_ID, createNightFixTask } from './night-fix-task.js';
 
@@ -49,10 +54,51 @@ export interface NightFixPlanResult {
     | 'inactive'
     | 'opted-out'
     | 'indexing-off'
+    | 'not-code'
     | 'no-boekwachter'
     | 'no-developer'
     | 'nothing-open'
     | 'already-planned';
+}
+
+/**
+ * Cancel the night fix sweeps that paused on an earlier night. Cancelling hands
+ * their claimed issues back (the settle hook reopens them), so tonight's
+ * planning can take them up again. A paused sweep otherwise holds its issues
+ * forever: gezel-site/5 sat on 40 of them, and the planner skips claimed
+ * issues (2026-10-09). A sweep that paused tonight keeps its claim until the
+ * next night. One whose shards already finished a proposal is left for the
+ * person, because cancelling would reopen issues that proposal covers.
+ */
+export async function releasePausedNightFixes(
+  deps: {
+    store: Pick<Store, 'listProjects' | 'listProjectTasks'>;
+    tasks: Pick<TaskManager, 'setStatus'>;
+  },
+  windowStartMs: number,
+): Promise<string[]> {
+  const released: string[] = [];
+  for (const project of await deps.store.listProjects()) {
+    const projectTasks = await deps.store.listProjectTasks(project.id).catch(() => []);
+    for (const host of projectTasks) {
+      if (host.status !== 'paused' || host.parentTaskRef) continue;
+      if (unattendedNightWork(host) !== 'night-fix') continue;
+      if (Date.parse(host.updatedAt) >= windowStartMs) continue;
+      const proposed = projectTasks.some(
+        (child) => child.parentTaskRef === host.ref && child.status === 'complete',
+      );
+      if (proposed) {
+        log.info(`[diffpack] ${host.ref}: paused with a finished proposal; left for the person`);
+        continue;
+      }
+      await deps.tasks.setStatus(project.id, host.num, 'canceled');
+      released.push(host.ref);
+      log.info(
+        `[diffpack] ${host.ref}: paused since an earlier night; canceled to release its issues`,
+      );
+    }
+  }
+  return released;
 }
 
 /**
@@ -67,8 +113,14 @@ export interface NightFixPlanResult {
  *
  * The gate is crew composition, per the product rule that a role on the
  * roster is what switches autonomous work on: a Boekwachter (who found the
- * issues) plus a developer (who can fix them). Nothing recruits — conjuring
- * the gezel that unlocks the feature would make the gate meaningless.
+ * issues) plus a developer (who can fix them). The planner never recruits —
+ * conjuring the gezel that unlocks the feature would make the gate
+ * meaningless. Crew arrives only when the person adds a folder
+ * (`recruitCrewForFolder`), and only a code folder gets a developer.
+ *
+ * Only code folders qualify. Boekwachter reviews cover documents and text
+ * too, and a fix proposal against a Word file or a photo caption is not a
+ * fix anyone asked for.
  */
 export async function planNightFixes(deps: NightFixPlannerDeps): Promise<NightFixPlanResult[]> {
   const projects = await deps.store.listProjects().catch(() => []);
@@ -102,8 +154,11 @@ export async function planProjectNightFixes(
   const project = await deps.store.getProject(projectId).catch(() => null);
   if (!project) return skip('inactive');
   if (!projectAllowsAmbientWork(project)) return skip('inactive');
-  if (!projectAllowsNightlyFixes(project)) return skip('opted-out');
+  if (!projectAllowsNightlyFixes(project) || !projectNightWorkEnabled(project)) {
+    return skip('opted-out');
+  }
   if (project.indexingEnabled === false) return skip('indexing-off');
+  if (!projectHoldsCode(project)) return skip('not-code');
 
   const [boekwachter, developer] = await Promise.all([
     resolveProjectBoekwachter(deps.store, projectId),
@@ -236,4 +291,14 @@ async function claimedPaths(
     for (const file of pack.files) out.add(file.path);
   }
   return out;
+}
+
+/**
+ * A code folder: the kind recorded when its crew was recruited, else a
+ * detected coding type or a linked GitHub repository.
+ */
+function projectHoldsCode(project: Project): boolean {
+  const kind = folderKindOf(project);
+  if (kind) return kind === 'code';
+  return isCodingProject(project) || Boolean(project.github?.url);
 }

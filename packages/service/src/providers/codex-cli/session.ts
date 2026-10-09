@@ -1,3 +1,10 @@
+/**
+ * Adapts Gezel sessions to resumable Codex CLI turns. Each managed home carries
+ * its task instructions and tool allowlist; Codex starts the MCP subprocess on
+ * every invocation. The primary Gezel bridge is required, so startup failures
+ * enter normal provider recovery instead of producing tool-less model replies.
+ * Related: runtime-files.ts (config), invoker.ts (errors), session.test.ts.
+ */
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -228,6 +235,12 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
         command: this.deps.mcpServer.command,
         args: this.deps.mcpServer.args,
         env: this.deps.mcpServer.env,
+        // A missing bridge makes task work impossible. Codex otherwise treats
+        // MCP startup as optional and can "succeed" with no artifact/task tools.
+        // Allow cold starts during concurrent builds, then fail before inference
+        // so the task runner can retry the actual connection failure.
+        required: true,
+        startupTimeoutSec: 60,
         // `codex exec` is non-interactive. Its process-level
         // `--ask-for-approval never` policy rejects (rather than approves)
         // an MCP call whose server policy still asks for review. The primary

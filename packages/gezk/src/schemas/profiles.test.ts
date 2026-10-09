@@ -7,6 +7,8 @@ import {
   embeddingProfileArtifacts,
   embeddingProfileCenter,
   embeddingProfileCenterProblem,
+  embeddingProfileMinimumFormat,
+  embeddingProfileSourceDimensions,
   sameVectorSpace,
 } from './profiles.js';
 
@@ -64,12 +66,14 @@ describe('artifact pins', () => {
       onnxDigest: null,
       tokenizerFile: 'tokenizer.json',
       tokenizerDigest: null,
+      files: [],
     });
     expect(embeddingProfileArtifacts(pinned)).toEqual({
       onnxFile: 'onnx/model.onnx',
       onnxDigest: DIGEST_A,
       tokenizerFile: 'tokenizer.json',
       tokenizerDigest: DIGEST_B,
+      files: [],
     });
   });
 
@@ -196,5 +200,84 @@ describe('centered-sign', () => {
   it('shares the vector space of the plain revision: only the bit scan differs', () => {
     expect(sameVectorSpace(BASE, centered)).toBe(true);
     expect(sameVectorSpace(centered, BASE)).toBe(true);
+  });
+});
+
+describe('0.8 vocabulary', () => {
+  const truncated = variant({
+    dimensions: 256,
+    truncation: { method: 'prefix', sourceDimensions: 384 },
+  });
+  const sidecar = { path: 'onnx/model_quantized.onnx_data', digest: DIGEST_A };
+  const withFiles = variant({ model: { ...BASE.model, files: [sidecar] } });
+  const encoder = { onnxFile: 'onnx/vision_encoder_quantized.onnx' };
+  const image = {
+    encoder,
+    tokenBudget: 280,
+    resample: 'bicubic',
+    alpha: 'composite-white',
+  } as const;
+
+  it('parses truncation and reports the width the model emits', () => {
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(truncated).success).toBe(true);
+    expect(embeddingProfileSourceDimensions(truncated)).toBe(384);
+    expect(embeddingProfileSourceDimensions(BASE)).toBe(384);
+  });
+
+  it('refuses a truncation that does not narrow, or on an unnormalized profile', () => {
+    for (const bad of [
+      variant({ truncation: { method: 'prefix', sourceDimensions: 384 } }),
+      variant({ dimensions: 512, truncation: { method: 'prefix', sourceDimensions: 384 } }),
+      variant({
+        dimensions: 256,
+        normalized: false,
+        truncation: { method: 'prefix', sourceDimensions: 384 },
+      }),
+    ]) {
+      expect(KnowledgeEmbeddingProfileSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('lists pinned extra files as artifacts', () => {
+    expect(embeddingProfileArtifacts(withFiles).files).toEqual([sidecar]);
+    const undigested = variant({ model: { ...BASE.model, files: [{ path: 'config.json' }] } });
+    expect(embeddingProfileArtifacts(undigested).files).toEqual([
+      { path: 'config.json', digest: null },
+    ]);
+  });
+
+  it('requires an image block before a video block, and at least one modality', () => {
+    const ok = variant({
+      media: { image, video: { framesPerSecond: 1, maxFrames: 32, tokenBudgetPerFrame: 140 } },
+    });
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(ok).success).toBe(true);
+    const videoOnly = variant({
+      media: { video: { framesPerSecond: 1, maxFrames: 32, tokenBudgetPerFrame: 140 } },
+    });
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(videoOnly).success).toBe(false);
+    expect(KnowledgeEmbeddingProfileSchema.safeParse(variant({ media: {} })).success).toBe(false);
+  });
+
+  it('names 0.8 as the minimum format for any new field, and 0.5 otherwise', () => {
+    expect(embeddingProfileMinimumFormat(BASE)).toBe('0.5');
+    expect(embeddingProfileMinimumFormat(truncated)).toBe('0.8');
+    expect(embeddingProfileMinimumFormat(withFiles)).toBe('0.8');
+    expect(embeddingProfileMinimumFormat(variant({ media: { image } }))).toBe('0.8');
+  });
+
+  it('separates spaces on truncation and on disagreeing file digests, not on media', () => {
+    expect(sameVectorSpace(BASE, truncated)).toBe(false);
+    const wider = variant({
+      dimensions: 256,
+      truncation: { method: 'prefix', sourceDimensions: 512 },
+    });
+    expect(sameVectorSpace(truncated, wider)).toBe(false);
+    expect(sameVectorSpace(truncated, { ...truncated, id: 'other@1' })).toBe(true);
+    const otherWeights = variant({
+      model: { ...BASE.model, files: [{ ...sidecar, digest: DIGEST_B }] },
+    });
+    expect(sameVectorSpace(withFiles, otherWeights)).toBe(false);
+    expect(sameVectorSpace(withFiles, BASE)).toBe(true);
+    expect(sameVectorSpace(BASE, variant({ media: { image } }))).toBe(true);
   });
 });

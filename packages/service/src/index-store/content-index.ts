@@ -1,18 +1,15 @@
 import { existsSync } from 'node:fs';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type {
   BoekwachterIssue,
   BoekwachterIssueDismissalReason,
   BoekwachterIssueStatus,
   DescribeFolderResponse,
-  FileContextFinding,
   FileContextResponse,
   FileMapRequest,
   FileMapResponse,
-  FileReviewIssueSeverity,
   FileReviewResponse,
-  FileReviewWire,
   FindEntityResponse,
   FindSimilarImagesResponse,
   FindSymbolResponse,
@@ -22,9 +19,15 @@ import type {
   ListFileIssuesRequest,
   ListFileIssuesResponse,
   ListPeopleResponse,
+  ListPhotosRequest,
+  ListPhotosResponse,
   MapAttackSurfaceResponse,
   MapRepoResponse,
+  OnThisDayResponse,
   OutlineFileResponse,
+  PhotoGroupsRequest,
+  PhotoGroupsResponse,
+  ProjectIndexOverview,
   ReadDocAsMarkdownResponse,
   ReadSymbolResponse,
   ScanFindingsRequest,
@@ -35,17 +38,15 @@ import type {
   SearchImagesResponse,
   SecurityFindingWire,
   SecurityOverviewResponse,
-  SecurityScanProvenance,
   SecurityScanResponse,
-  SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
 import {
-  SecurityScanProvenanceSchema,
   createLogger,
   isSharedLibraryProject,
   nowIso,
   projectAllowsWorkspaceTables,
+  projectManagedWorkspaceWritable,
 } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
@@ -53,19 +54,15 @@ import {
   projectArtifactsIndexDbFile,
   projectContentIndexDbFile,
   projectLocalFilesDir,
-  projectLocalIndexDbFile,
   projectLocalVillageFile,
   projectStorageScope,
 } from '@bendyline/gezel/paths';
-import {
-  resolveImportEdges,
-  resolveImportEdgesDetailed,
-  resolveSpecifier,
-} from '../filemap/affinity.js';
+import { resolveImportEdges } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
-import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
+import type { Store } from '../fs/store.js';
+import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
   FaceModelPaths,
@@ -101,18 +98,38 @@ import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
 import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
+import { buildFileContext } from './file-context.js';
 import { refreshGitStats } from './git-stats.js';
-import { ensureIndexGitignore } from './gitignore.js';
 import {
-  type FileReviewRow,
-  IndexStore,
-  type SecurityFindingRow,
-  type SecuritySeverity,
-  type SymbolHit,
-} from './index-store.js';
+  type SearchImagesOpts,
+  findSimilarIndexedImages,
+  searchIndexedMedia,
+} from './image-search.js';
+import type { SecuritySeverity, SymbolHit } from './index-store-types.js';
+import { IndexStore } from './index-store.js';
+import { listPhotos, onThisDay, photoGroups } from './photo-intel.js';
 import { searchTokens } from './query-terms.js';
+import { type DecodableRaster, canNormalizeRaster, toDecodableRaster } from './raster-normalize.js';
+import {
+  currentIndexedHash,
+  filterAndSortBoekwachterIssues,
+  tallyBoekwachterIssues,
+  toBoekwachterIssueWire,
+  toReviewWire,
+} from './review-wire.js';
 import { MAX_REVIEW_ATTEMPTS, reviewFile } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { runPooled } from './run-pooled.js';
+import {
+  EMPTY_COUNTS,
+  SINK_CATEGORIES,
+  bfsReach,
+  computeAttackSurface,
+  maxSeverity,
+  maybeScanProvenance,
+  severityRank,
+  toWireFinding,
+} from './security-intel.js';
 import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
@@ -143,68 +160,6 @@ const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
 const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
-
-// file-context caps — keep worst-case responses small and bounded.
-const CTX_MAX_SYMBOLS = 200;
-const CTX_MAX_IMPORTED_BY_PER_SYMBOL = 25;
-const CTX_MAX_FILE_IMPORTED_BY = 100;
-const CTX_MAX_USES = 50;
-const CTX_MAX_USED_IN_FILE_BY = 50;
-
-/**
- * Run `fn` over a work source keeping up to `width()` calls in flight. The
- * source is either a fixed array or a pull supplier (`undefined` = no more
- * work) — the supplier form lets a caller re-query its work-list as slots
- * open, so the pool never drains to zero between what used to be fixed
- * batches. Width is re-read as slots free, so a lazily-initialized provider
- * (reporting 1 until its first call spins it up) widens mid-batch. `stop`
- * halts NEW dispatches; in-flight calls always finish. sqlite writes inside
- * `fn` stay safe under this interleaving: the driver is synchronous, so
- * statements never actually overlap — only the awaited model calls do.
- */
-async function runPooled<T>(
-  source: readonly T[] | (() => Promise<T | undefined> | T | undefined),
-  width: () => number,
-  fn: (item: T) => Promise<void>,
-  stop?: () => boolean,
-): Promise<void> {
-  let next: () => Promise<T | undefined> | T | undefined;
-  if (typeof source === 'function') {
-    next = source;
-  } else {
-    let i = 0;
-    next = () => (i < source.length ? (source[i++] as T) : undefined);
-  }
-  const state: { failure: { error: unknown } | null } = { failure: null };
-  const active = new Set<Promise<void>>();
-  let exhausted = false;
-  const dispatch = async () => {
-    while (
-      !exhausted &&
-      active.size < Math.max(1, width()) &&
-      !stop?.() &&
-      state.failure === null
-    ) {
-      const item = await next();
-      if (item === undefined) {
-        exhausted = true;
-        break;
-      }
-      const p: Promise<void> = fn(item)
-        .catch((error) => {
-          state.failure ??= { error };
-        })
-        .finally(() => active.delete(p));
-      active.add(p);
-    }
-  };
-  await dispatch();
-  while (active.size > 0) {
-    await Promise.race(active);
-    await dispatch();
-  }
-  if (state.failure) throw state.failure.error;
-}
 
 /**
  * Pool options for the AI passes. `concurrency` is the live width of the
@@ -255,15 +210,26 @@ export class ContentIndex {
     this.duck = duck;
   }
 
-  private cityStoreFor(projectId: string, workspaceDir: string | null): VillageFileStore {
-    let cs = this.cityStores.get(projectId);
+  /**
+   * The village file lives in the workspace (where it can be committed) only
+   * when gezel may write there; otherwise in gezel's own folder. Viewing the
+   * map of a read-only folder must not write into it.
+   */
+  private cityStoreFor(
+    projectId: string,
+    workspaceDir: string | null,
+    workspaceWritable: boolean,
+  ): VillageFileStore {
+    const key = `${projectId}\u0000${workspaceWritable ? 'w' : 'r'}`;
+    let cs = this.cityStores.get(key);
     if (!cs) {
+      const inWorkspace = workspaceWritable ? workspaceDir : null;
       cs = new VillageFileStore({
-        workspaceDir,
-        primaryPath: workspaceDir ? projectLocalVillageFile(workspaceDir) : null,
+        workspaceDir: inWorkspace,
+        primaryPath: inWorkspace ? projectLocalVillageFile(inWorkspace) : null,
         fallbackPath: fallbackProjectVillageFile(this.home, projectId),
       });
-      this.cityStores.set(projectId, cs);
+      this.cityStores.set(key, cs);
     }
     return cs;
   }
@@ -273,20 +239,12 @@ export class ContentIndex {
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
-    const { workspaceDir, artifactsDir, dbPath, isLibrary } = opened;
-    try {
-      // The library keeps its database home-side, so there is no in-workspace
-      // `.gezel/` to ignore — and writing one into the user's documents
-      // folder is exactly what that placement avoids.
-      if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
-        await ensureIndexGitignore(workspaceDir);
-      }
-    } finally {
-      // The worker owns the only open connection while it writes. Keeping a
-      // parent connection alive is unnecessary and makes SQLite lock behavior
-      // platform-dependent.
-      opened.index.close();
-    }
+    const { workspaceDir, artifactsDir, dbPath, isLibrary, workspaceWritable } = opened;
+    // The worker owns the only open connection while it writes. Keeping a
+    // parent connection alive is unnecessary and makes SQLite lock behavior
+    // platform-dependent. (No `.gezel/` gitignore to write any more: the
+    // database is home-side, so nothing lands in the workspace.)
+    opened.index.close();
 
     const stats = await runStaticIndex({
       dbPath,
@@ -295,12 +253,18 @@ export class ContentIndex {
       collectionId: projectId,
       ...(isLibrary ? { scope: 'library' as const } : {}),
     });
-    if (!isLibrary && projectStorageScope(this.home, projectId) !== 'machine-shared') {
+    if (
+      !isLibrary &&
+      workspaceWritable &&
+      projectStorageScope(this.home, projectId) !== 'machine-shared'
+    ) {
       // Conversions now live under artifacts/shadow; the old in-workspace
       // cache is stranded stale content and doubled disk. Regenerable and
-      // deny-all-gitignored, so removal is safe. Machine-shared workspaces are
-      // skipped: an older daemon on another account would recreate the tree,
-      // and cross-daemon churn is worse than a stale cache.
+      // deny-all-gitignored, so removal is safe — but only where gezel may
+      // write: a read-only folder is left exactly as the person has it.
+      // Machine-shared workspaces are skipped: an older daemon on another
+      // account would recreate the tree, and cross-daemon churn is worse than
+      // a stale cache.
       await rm(projectLocalFilesDir(workspaceDir), { recursive: true, force: true }).catch(
         () => {},
       );
@@ -356,7 +320,7 @@ export class ContentIndex {
       try {
         await buildFileMap(post.index, workspaceDir, {
           persist: true,
-          villageFile: this.cityStoreFor(projectId, workspaceDir),
+          villageFile: this.cityStoreFor(projectId, workspaceDir, post.workspaceWritable),
           userFacing: false,
         });
       } catch {
@@ -426,14 +390,6 @@ export class ContentIndex {
     }
   }
 
-  /**
-   * Per-symbol intelligence for one file — the file viewer's context sections.
-   * Structured facts only (hosts compose markdown): inbound importers via
-   * named-binding matching, outbound `uses` + within-file `usedInFileBy` via a
-   * single lexical identifier pass (honest, same stance as find-references),
-   * findings assigned to the innermost containing symbol, and any LLM
-   * one-liners the enrichment pass has produced for this content hash.
-   */
   async fileContext(projectId: string, relPath: string): Promise<FileContextResponse> {
     const empty: FileContextResponse = {
       path: relPath,
@@ -452,173 +408,7 @@ export class ContentIndex {
     if (!opened) return empty;
     const { index, workspaceDir } = opened;
     try {
-      const abs = safeJoin(workspaceDir, relPath);
-      const content = abs ? await readFile(abs, 'utf8').catch(() => null) : null;
-      const lines = content ? content.split(/\r?\n/) : [];
-      const totalLines = lines.length;
-
-      const fileRec = index.getFile(relPath);
-      let lang = fileRec?.lang ?? null;
-      const summary = fileRec?.hash ? (index.getSummary(fileRec.hash) ?? null) : null;
-
-      let engine: 'index' | 'live' = 'index';
-      let symbolRows = index.symbolsForFile(relPath);
-      if (symbolRows.length === 0 && content != null) {
-        const cls = classifyFile(relPath, Buffer.byteLength(content));
-        lang = lang ?? cls.lang;
-        if (cls.kind === 'code' && isCodeLangSupported(cls.lang)) {
-          const live = await extractCodeSymbols(cls.lang!, content);
-          if (live?.length) {
-            symbolRows = live.map((s) => ({
-              ...s,
-              id: `${relPath}#${s.name}`,
-              filePath: relPath,
-              signature: s.signature ?? '',
-            }));
-            engine = 'live';
-          }
-        }
-      }
-      const symbolsTruncated = symbolRows.length > CTX_MAX_SYMBOLS;
-      const picked = symbolRows.slice(0, CTX_MAX_SYMBOLS);
-
-      // One identifier pass over the file: identifier → 1-based lines mentioning it.
-      const refLines = new Map<string, number[]>();
-      for (let i = 0; i < lines.length; i++) {
-        for (const m of lines[i]!.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
-          const arr = refLines.get(m[0]);
-          if (arr) arr.push(i + 1);
-          else refLines.set(m[0], [i + 1]);
-        }
-      }
-
-      // Innermost symbol containing a line (smallest range wins), memoized.
-      const containerCache = new Map<number, SymbolHit | null>();
-      const innermostAt = (line: number): SymbolHit | null => {
-        const hit = containerCache.get(line);
-        if (hit !== undefined) return hit;
-        let best: SymbolHit | null = null;
-        for (const s of picked) {
-          if (line < s.lineStart || line > s.lineEnd) continue;
-          if (!best || s.lineEnd - s.lineStart < best.lineEnd - best.lineStart) best = s;
-        }
-        containerCache.set(line, best);
-        return best;
-      };
-
-      // Dependency edges — inbound (who imports this file, with bindings) and
-      // this file's own outbound rows.
-      const allPaths = index.allFilePaths();
-      const pathSet = new Set(allPaths);
-      const inbound = resolveImportEdgesDetailed(allPaths, index.allImportsWithBindings()).filter(
-        (e) => e.dst === relPath,
-      );
-      inbound.sort((a, b) => a.src.localeCompare(b.src));
-
-      const outboundRows = index.importsForFile(relPath);
-      const imports = outboundRows
-        .map((r) => ({
-          specifier: r.raw,
-          resolvedPath: resolveSpecifier(relPath, r.raw, pathSet),
-          names: r.bindings?.filter((b) => b.kind === 'named').map((b) => b.name) ?? [],
-          default: r.bindings?.some((b) => b.kind === 'default') ?? false,
-          namespace: r.bindings === null || r.bindings.some((b) => b.kind === 'namespace'),
-        }))
-        .sort((a, b) => a.specifier.localeCompare(b.specifier));
-
-      // local identifier → where it comes from, for per-symbol `uses`.
-      const localOrigins = new Map<string, { from: string; inRepo: boolean }>();
-      for (const r of outboundRows) {
-        const resolved = resolveSpecifier(relPath, r.raw, pathSet);
-        for (const b of r.bindings ?? []) {
-          if (b.local === '*' || localOrigins.has(b.local)) continue;
-          localOrigins.set(b.local, { from: resolved ?? r.raw, inRepo: resolved != null });
-        }
-      }
-
-      const findings = index.securityFindingsForFile(relPath);
-      const summariesByName = fileRec?.hash
-        ? index.symbolSummariesFor(relPath, fileRec.hash)
-        : new Map<string, string>();
-
-      const inRange = (line: number, s: SymbolHit): boolean =>
-        line >= s.lineStart && line <= s.lineEnd;
-
-      const symbols: SymbolContext[] = picked.map((s) => {
-        const viaBinding: string[] = [];
-        const wholeFile: string[] = [];
-        for (const e of inbound) {
-          if (e.bindings?.some((b) => b.kind === 'named' && b.name === s.name)) {
-            viaBinding.push(e.src);
-          } else if (
-            e.bindings === null ||
-            e.bindings.some((b) => b.kind === 'default' || b.kind === 'namespace')
-          ) {
-            wholeFile.push(e.src);
-          }
-        }
-        const importers = [
-          ...viaBinding.map((path) => ({ path, viaBinding: true })),
-          ...wholeFile.map((path) => ({ path, viaBinding: false })),
-        ];
-
-        const uses: SymbolContext['uses'] = [];
-        for (const [local, origin] of localOrigins) {
-          if (uses.length >= CTX_MAX_USES) break;
-          if (refLines.get(local)?.some((line) => inRange(line, s))) {
-            uses.push({ name: local, from: origin.from, inRepo: origin.inRepo });
-          }
-        }
-
-        const usedBy = new Set<string>();
-        for (const line of refLines.get(s.name) ?? []) {
-          if (usedBy.size >= CTX_MAX_USED_IN_FILE_BY) break;
-          if (inRange(line, s)) continue;
-          const container = innermostAt(line);
-          if (container && container.name !== s.name) usedBy.add(container.name);
-        }
-
-        const own = findings.filter((f) => f.line != null && innermostAt(f.line) === s);
-        const oneLiner = summariesByName.get(s.name);
-        return {
-          name: s.name,
-          kind: s.kind,
-          lineStart: s.lineStart,
-          lineEnd: s.lineEnd,
-          ...(s.signature ? { signature: s.signature } : {}),
-          ...(s.parent ? { parent: s.parent } : {}),
-          importedBy: importers.slice(0, CTX_MAX_IMPORTED_BY_PER_SYMBOL),
-          importedByTruncated: importers.length > CTX_MAX_IMPORTED_BY_PER_SYMBOL,
-          uses,
-          usedInFileBy: [...usedBy],
-          findings: own.map(toContextFinding),
-          ...(oneLiner ? { summary: oneLiner } : {}),
-        };
-      });
-
-      const fileFindings = findings
-        .filter((f) => f.line == null || innermostAt(f.line) == null)
-        .map(toContextFinding);
-
-      const review = fileRec?.hash ? index.getFileReview(fileRec.hash) : undefined;
-
-      return {
-        path: relPath,
-        lang,
-        totalLines,
-        summary,
-        importedBy: inbound.slice(0, CTX_MAX_FILE_IMPORTED_BY).map((e) => ({
-          path: e.src,
-          names: e.bindings?.filter((b) => b.kind === 'named').map((b) => b.name) ?? [],
-        })),
-        importedByTruncated: inbound.length > CTX_MAX_FILE_IMPORTED_BY,
-        imports,
-        fileFindings,
-        symbols,
-        symbolsTruncated,
-        engine,
-        ...(review ? { review: toReviewWire(review) } : {}),
-      };
+      return await buildFileContext(index, workspaceDir, relPath);
     } finally {
       index.close();
     }
@@ -1112,7 +902,7 @@ export class ContentIndex {
       return await buildFileMap(opened.index, opened.workspaceDir, {
         scope: req.scope,
         persist: true,
-        villageFile: this.cityStoreFor(projectId, opened.workspaceDir),
+        villageFile: this.cityStoreFor(projectId, opened.workspaceDir, opened.workspaceWritable),
         userFacing: true,
       });
     } finally {
@@ -1347,7 +1137,7 @@ export class ContentIndex {
 
   /**
    * Run one batch of the always-on IMAGE-embed tier (lane A of image search):
-   * CLIP vectors into the hash-keyed image_vectors table, no LLM involved.
+   * media-search vectors into the hash-keyed media_vectors table, no LLM involved.
    * Same pre-Boekwachter placement discipline as {@link embedOnly}; unlike it,
    * this does NOT require sqlite-vec — image vectors are plain BLOBs. Per-image
    * outcomes consume the gate (ok / terminal unsupported / capped attempt); a
@@ -1363,22 +1153,22 @@ export class ContentIndex {
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir } = opened;
+    const rasters: DecodableRaster[] = [];
     try {
       let files = 0;
       let embedded = 0;
       const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
       for (const f of index.filesNeedingImageEmbed(limit)) {
         if (!f.hash) continue;
-        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
-        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
-        if (!abs) {
+        const raster = await embeddableRaster(workspaceDir, f.path, rasters);
+        if (!raster) {
           // No pure-JS decoder for the format (or an unresolvable path):
           // terminal for this hash, cheap — the embedder never runs.
           index.markImageEmbedUnsupported(f.hash, f.path);
           files++;
           continue;
         }
-        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+        jobs.push({ path: raster, hash: f.hash, relPath: f.path });
       }
       if (jobs.length === 0) return { files, embedded, unavailable: false };
       const embedFn = embed ?? (await import('../memory/image-embeddings.js')).embedImageFiles;
@@ -1411,6 +1201,89 @@ export class ContentIndex {
       return { files, embedded, unavailable: false };
     } finally {
       index.close();
+      await Promise.all(rasters.map((r) => r.release().catch(() => {})));
+    }
+  }
+
+  /**
+   * The media tier for audio and video: each file cut into windows by the
+   * system ffmpeg and embedded window by window, in the same space as images
+   * and text queries. Same gate and capped retries as images; a file ffmpeg
+   * cannot decode is terminal for its hash.
+   */
+  async embedAudioVideo(
+    projectId: string,
+    limit = 2,
+    embed?: (jobs: MediaEmbedJob[]) => Promise<MediaEmbedOutcome[]>,
+  ): Promise<{ files: number; embedded: number; unavailable: boolean } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir } = opened;
+    try {
+      let files = 0;
+      let embedded = 0;
+      const jobs: Array<MediaEmbedJob & { relPath: string }> = [];
+      for (const f of index.filesNeedingImageEmbed(limit, ['audio', 'video'])) {
+        if (!f.hash) continue;
+        const abs = safeJoin(workspaceDir, f.path);
+        if (!abs) {
+          index.markImageEmbedUnsupported(f.hash, f.path);
+          files++;
+          continue;
+        }
+        jobs.push({
+          path: abs,
+          hash: f.hash,
+          modality: f.modality === 'video' ? 'video' : 'audio',
+          relPath: f.path,
+        });
+      }
+      if (jobs.length === 0) return { files, embedded, unavailable: false };
+      const embedFn = embed ?? (await import('../memory/image-embeddings.js')).embedMediaFiles;
+      let outcomes: MediaEmbedOutcome[];
+      try {
+        outcomes = await embedFn(
+          jobs.map(({ path, hash, modality }) => ({ path, hash, modality })),
+        );
+      } catch {
+        const first = jobs[0]!;
+        index.markImageEmbedAttempt(first.hash, first.relPath);
+        return { files, embedded, unavailable: true };
+      }
+      const byHash = new Map(jobs.map((j) => [j.hash, j]));
+      for (const outcome of outcomes) {
+        const job = byHash.get(outcome.hash);
+        if (!job) continue;
+        files++;
+        if ('windows' in outcome) {
+          index.putMediaVectors(
+            job.hash,
+            job.relPath,
+            job.modality,
+            outcome.windows.map((w) => ({ startMs: w.startMs, endMs: w.endMs, vec: w.vector })),
+          );
+          index.markImageEmbedOk(job.hash, job.relPath);
+          embedded++;
+        } else if ('skip' in outcome) {
+          index.markImageEmbedUnsupported(job.hash, job.relPath);
+        } else {
+          index.markImageEmbedAttempt(job.hash, job.relPath);
+        }
+      }
+      return { files, embedded, unavailable: false };
+    } finally {
+      index.close();
+    }
+  }
+
+  /** Audio and video files the media tier still owes windows (for the drain's gate). */
+  async countAudioVideoPending(projectId: string): Promise<number> {
+    const opened = await this.open(projectId);
+    if (!opened) return 0;
+    try {
+      return opened.index.countNeedingImageEmbed(['audio', 'video']);
+    } finally {
+      opened.index.close();
     }
   }
 
@@ -1441,6 +1314,7 @@ export class ContentIndex {
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir } = opened;
+    const rasters: DecodableRaster[] = [];
     try {
       const candidates = index.filesNeedingFaceIndex(limit);
       if (candidates.length === 0) return { files: 0, faces: 0, unavailable: false };
@@ -1455,14 +1329,13 @@ export class ContentIndex {
       const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
       for (const f of candidates) {
         if (!f.hash) continue;
-        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
-        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
-        if (!abs) {
+        const raster = await embeddableRaster(workspaceDir, f.path, rasters);
+        if (!raster) {
           index.markFaceUnsupported(f.hash, f.path);
           files++;
           continue;
         }
-        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+        jobs.push({ path: raster, hash: f.hash, relPath: f.path });
       }
       if (jobs.length === 0) return { files, faces, unavailable: false };
 
@@ -1502,6 +1375,7 @@ export class ContentIndex {
       return { files, faces, unavailable: false };
     } finally {
       index.close();
+      await Promise.all(rasters.map((r) => r.release().catch(() => {})));
     }
   }
 
@@ -1516,7 +1390,20 @@ export class ContentIndex {
     deps: AiShadowDeps,
     limit = 3,
   ): Promise<{ files: number; produced: number; called: number } | null> {
-    if (!deps.describeImage && !deps.transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const ready = async (probe?: () => Promise<boolean>) =>
+      probe ? await probe().catch(() => false) : true;
+    const describeImage =
+      deps.describeImage && (await ready(deps.describeAvailable)) ? deps.describeImage : undefined;
+    const transcribeAudio =
+      deps.transcribeAudio && (await ready(deps.transcribeAvailable))
+        ? deps.transcribeAudio
+        : undefined;
+    if (!describeImage && !transcribeAudio) return { files: 0, produced: 0, called: 0 };
+    const live: AiShadowDeps = {
+      ...(describeImage ? { describeImage } : {}),
+      ...(transcribeAudio ? { transcribeAudio } : {}),
+      ...(deps.provenance ? { provenance: deps.provenance } : {}),
+    };
     const opened = await this.open(projectId);
     if (!opened) return null;
     const { index, workspaceDir, artifactsDir } = opened;
@@ -1526,7 +1413,7 @@ export class ContentIndex {
       let called = 0;
       let handled = 0;
       for (const file of files) {
-        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, deps);
+        const r = await aiShadowFile(index, workspaceDir, artifactsDir, file, live);
         if (r.skipped) continue;
         handled++;
         if (r.produced) produced++;
@@ -1538,20 +1425,79 @@ export class ContentIndex {
     }
   }
 
+  /** Photos matching a filter, newest first (`list_photos`). */
+  async listPhotos(
+    projectId: string,
+    req: ListPhotosRequest,
+    includeLocation: boolean,
+  ): Promise<ListPhotosResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { photos: [], total: 0, truncated: false };
+    try {
+      const { index } = opened;
+      return listPhotos(
+        {
+          rows: index.photoRows(req.path),
+          includeLocation,
+          caption: (h) => index.getSummary(h) ?? null,
+        },
+        req,
+      );
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Events, duplicates or lookalikes across the photos (`photo_groups`). */
+  async photoGroups(
+    projectId: string,
+    req: PhotoGroupsRequest,
+    includeLocation: boolean,
+  ): Promise<PhotoGroupsResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { by: req.by, groups: [], truncated: false, engine: 'unavailable' };
+    try {
+      const { index } = opened;
+      return photoGroups({ rows: index.photoRows(req.path), includeLocation }, req, () =>
+        index.allImageVectors(),
+      );
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Photos taken on this calendar day in earlier years; null before the first scan. */
+  async onThisDay(projectId: string, now = new Date()): Promise<OnThisDayResponse | null> {
+    if (!(await this.hasIndex(projectId))) return null;
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return onThisDay(opened.index.photoRows(), `${month}-${day}`, now.getFullYear());
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** What the indexed folder holds, for the first-look card; null before the first scan. */
+  async overview(projectId: string): Promise<ProjectIndexOverview | null> {
+    if (!(await this.hasIndex(projectId))) return null;
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return opened.index.folderOverview();
+    } finally {
+      opened.index.close();
+    }
+  }
+
   /**
    * Cheap existence probe — true when a content index db is on disk for
    * this project. File-stat only; never opens (an open would CREATE the
    * db). Recall consults it before paying the query-embed cost.
    */
   async hasIndex(projectId: string): Promise<boolean> {
-    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
-      try {
-        const workspaceDir = await this.store.projectWorkspaceDir(projectId);
-        if (existsSync(projectLocalIndexDbFile(workspaceDir))) return true;
-      } catch {
-        /* fall through to the home-scoped fallback */
-      }
-    }
     return existsSync(join(fallbackProjectIndexDir(this.home, projectId), 'index.db'));
   }
 
@@ -2044,6 +1990,56 @@ export class ContentIndex {
   }
 
   /**
+   * The Boekwachter's summary of one file, for the line above it in a file
+   * view. Keyed by the file's current content hash, so an edited file shows
+   * nothing until it is read again rather than describing what it used to say.
+   */
+  async fileSummary(projectId: string, relPath: string): Promise<string | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index } = opened;
+    try {
+      const hash = index.getFile(relPath)?.hash;
+      const summary = hash ? index.getSummary(hash) : undefined;
+      return summary?.trim() || null;
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Documents and notes changed since `sinceMs`, newest first, each with the
+   * Boekwachter's summary where it has one. Null before the first scan.
+   */
+  async recentDocuments(
+    projectId: string,
+    sinceMs: number,
+    limit = 500,
+  ): Promise<Array<{ path: string; mtimeMs: number; summary: string | null }> | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index } = opened;
+    try {
+      return index
+        .allFiles()
+        .filter(
+          (f) =>
+            f.mtimeMs >= sinceMs &&
+            (f.modality === 'doc' || f.modality === 'text' || f.modality === 'email'),
+        )
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, limit)
+        .map((f) => ({
+          path: f.path,
+          mtimeMs: f.mtimeMs,
+          summary: (f.hash ? index.getSummary(f.hash) : undefined)?.trim() || null,
+        }));
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
    * One-line descriptions for library documents, keyed by path.
    *
    * Two sources, in precedence order: the document's own frontmatter
@@ -2255,32 +2251,13 @@ export class ContentIndex {
     projectId: string,
     query: string,
     maxResults = 20,
+    opts: SearchImagesOpts = {},
   ): Promise<SearchImagesResponse> {
     const opened = await this.open(projectId);
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      if (!index.ftsAvailable) return { results: [], engine: 'unavailable', truncated: false };
-      // Over-fetch from the shared doc FTS, then keep only image-modality hits.
-      const hits = index.searchDocs(query, maxResults * 4);
-      const results: SearchImagesResponse['results'] = [];
-      for (const h of hits) {
-        const f = index.getFile(h.filePath);
-        if (f?.modality !== 'image') continue;
-        const md = index.getMetadata(h.filePath);
-        const summary = f.hash ? index.getSummary(f.hash) : undefined;
-        results.push({
-          path: h.filePath,
-          ...(md.width ? { width: Number(md.width) } : {}),
-          ...(md.height ? { height: Number(md.height) } : {}),
-          ...(md.format ? { format: md.format } : {}),
-          ...(summary ? { caption: summary } : {}),
-          score: 0.5,
-        });
-        if (results.length >= maxResults + 1) break;
-      }
-      const truncated = results.length > maxResults;
-      return { results: results.slice(0, maxResults), engine: 'fts', truncated };
+      return await searchIndexedMedia(index, query, maxResults, opts);
     } finally {
       index.close();
     }
@@ -2295,24 +2272,7 @@ export class ContentIndex {
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      const hash = index.getFile(relPath)?.hash;
-      const target = hash ? index.imageVectorByHash(hash) : null;
-      // Mid-migration remnants with a different dim can't be compared.
-      const all = target
-        ? index.allImageVectors().filter((v) => v.vec.length === target.vec.length)
-        : [];
-      if (!target || all.length <= 1) {
-        // No image embeddings yet (the embed tier hasn't reached this file, or
-        // no embedder is available) → can't do visual similarity. Degrades
-        // honestly.
-        return { results: [], engine: 'unavailable', truncated: false };
-      }
-      const scored = all
-        .filter((v) => v.filePath !== relPath)
-        .map((v) => ({ path: v.filePath, score: cosine(target.vec, v.vec) }))
-        .sort((a, b) => b.score - a.score);
-      const truncated = scored.length > maxResults;
-      return { results: scored.slice(0, maxResults), engine: 'vector', truncated };
+      return findSimilarIndexedImages(index, relPath, maxResults);
     } finally {
       index.close();
     }
@@ -2593,6 +2553,8 @@ export class ContentIndex {
     artifactsDir: string;
     dbPath: string;
     isLibrary: boolean;
+    /** Whether gezel may write into the workspace itself (see `projectManagedWorkspaceWritable`). */
+    workspaceWritable: boolean;
   } | null> {
     let workspaceDir: string;
     try {
@@ -2622,27 +2584,23 @@ export class ContentIndex {
         ? await this.store.getProject(projectId).catch(() => null)
         : null;
     const isLibrary = meta ? isSharedLibraryProject(meta) : false;
-    let dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir, {
-      ...(isLibrary ? { forceHomeSide: true } : {}),
-    });
+    const workspaceWritable = projectManagedWorkspaceWritable(meta);
+    // Home-side for every project: adding a folder writes nothing into it.
+    const dbPath = projectContentIndexDbFile(this.home, projectId, workspaceDir);
     let index: IndexStore | null;
     try {
       index = await open(dbPath);
     } catch (error) {
-      // A busy/locked primary EXISTS and is mid-write (the static worker
-      // holds long transactions during a full pass). Falling back would mint
-      // an empty home-side db whose zero counts masquerade as real status —
-      // report "unavailable this call" and let the next poll succeed.
+      // A busy/locked index EXISTS and is mid-write (the static worker holds
+      // long transactions during a full pass) — report "unavailable this
+      // call" and let the next poll succeed.
       if (isTransientIndexError(error)) return null;
       index = null;
     }
-    if (!index) {
-      // Workspace `.gezel/` not writable — fall back to the home-local dir.
-      dbPath = join(fallbackProjectIndexDir(this.home, projectId), 'index.db');
-      index = await open(dbPath).catch(() => null);
-    }
     if (index) await this.syncFindingLifecycle(projectId, index, false);
-    return index ? { index, workspaceDir, artifactsDir, dbPath, isLibrary } : null;
+    return index
+      ? { index, workspaceDir, artifactsDir, dbPath, isLibrary, workspaceWritable }
+      : null;
   }
 
   private async syncFindingLifecycle(
@@ -2723,7 +2681,6 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-/** Cosine similarity between two equal-length vectors. */
 /** Tolerant parse of a face_vectors/entity_mentions region JSON column. */
 function parseRegionJson(raw: string | null): ImageRegion | null {
   if (!raw) return null;
@@ -2744,253 +2701,28 @@ function parseRegionJson(raw: string | null): ImageRegion | null {
   return null;
 }
 
-function cosine(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < n; i++) {
-    dot += a[i]! * b[i]!;
-    na += a[i]! * a[i]!;
-    nb += b[i]! * b[i]!;
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom === 0 ? 0 : dot / denom;
-}
-
-// ── security-intel helpers ──────────────────────────────────────────────────
-
-const EMPTY_COUNTS = { total: 0, bySeverity: {}, byCategory: {}, bySource: {} };
-
-/**
- * The persisted provenance of the last security_scan, as a spreadable
- * optional field. Absent (empty object) on pre-provenance databases and on
- * unparseable values — the renderer treats absence as "provenance unknown".
- */
-function maybeScanProvenance(index: IndexStore): { provenance?: SecurityScanProvenance } {
-  const raw = index.getMeta('security_scan_provenance');
-  if (!raw) return {};
-  try {
-    return { provenance: SecurityScanProvenanceSchema.parse(JSON.parse(raw)) };
-  } catch {
-    return {};
-  }
-}
-
-const ENTRY_RE =
-  /(^|\/)(index|main|app|server|cli|worker|handler)\.(ts|tsx|js|mjs|cjs|py|go|rs|rb|php|java)$/i;
-const ROUTE_PATH_RE = /(^|\/)(routes?|controllers?|handlers?|endpoints?|api|resolvers?)\//i;
-const AUTH_PATH_RE =
-  /(^|\/)(auth|authn|authz|middleware|guards?|permissions?|rbac|acl|session|login|oauth)([./]|$)/i;
-const SECRET_PATH_RE = /(^|\/)(\.env|config|secrets?|credentials?|keys?)([./]|$)/i;
-const SINK_CATEGORIES = new Set([
-  'injection',
-  'command-injection',
-  'xss',
-  'ssrf',
-  'path-traversal',
-  'deserialization',
-  'crypto',
-]);
-
-interface AttackSurface {
-  entryPoints: string[];
-  routes: string[];
-  authBoundaries: string[];
-  secretTouchpoints: string[];
-  taintSources: Array<{ path: string; count: number }>;
-}
-
-/** Derive the attack surface from file paths + persisted findings (no content read). */
-function computeAttackSurface(files: string[], findings: SecurityFindingRow[]): AttackSurface {
-  const routes = new Set<string>();
-  const auth = new Set<string>();
-  const secrets = new Set<string>();
-  const entry: string[] = [];
-  for (const p of files) {
-    if (ENTRY_RE.test(p)) entry.push(p);
-    if (ROUTE_PATH_RE.test(p)) routes.add(p);
-    if (AUTH_PATH_RE.test(p)) auth.add(p);
-    if (SECRET_PATH_RE.test(p)) secrets.add(p);
-  }
-  const sourceCount = new Map<string, number>();
-  for (const f of findings) {
-    if (f.category === 'taint-source') {
-      if (f.ruleId === 'source.http-input') routes.add(f.filePath);
-      if (f.ruleId === 'source.process-env') secrets.add(f.filePath);
-      sourceCount.set(f.filePath, (sourceCount.get(f.filePath) ?? 0) + 1);
-    }
-    if (f.category === 'secret') secrets.add(f.filePath);
-    if (f.category === 'auth') auth.add(f.filePath);
-  }
-  const cap = (s: Iterable<string>) => [...s].sort().slice(0, 100);
-  return {
-    entryPoints: entry.sort().slice(0, 50),
-    routes: cap(routes),
-    authBoundaries: cap(auth),
-    secretTouchpoints: cap(secrets),
-    taintSources: [...sourceCount.entries()]
-      .map(([path, count]) => ({ path, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 100),
-  };
-}
-
-function toContextFinding(r: SecurityFindingRow): FileContextFinding {
-  return {
-    ruleId: r.ruleId,
-    category: r.category,
-    severity: r.severity,
-    line: r.line,
-    title: r.title,
-    source: r.source,
-  };
-}
-
-function toWireFinding(r: SecurityFindingRow): SecurityFindingWire {
-  return {
-    fingerprint: r.fingerprint,
-    path: r.filePath,
-    line: r.line,
-    ruleId: r.ruleId,
-    category: r.category,
-    severity: r.severity,
-    source: r.source,
-    title: r.title,
-    ...(r.evidence ? { evidence: r.evidence } : {}),
-    status: r.status,
-    ...(r.taskRef ? { taskRef: r.taskRef } : {}),
-  };
-}
-
-function toReviewWire(row: FileReviewRow): FileReviewWire {
-  return {
-    notesMd: row.notesMd,
-    issues: row.issues,
-    health: row.health,
-    healthReason: row.healthReason,
-    model: row.model,
-    provider: row.provider,
-    gezelId: row.gezelId,
-    gezelName: row.gezelName,
-    appVersion: row.appVersion,
-    reviewedAt: row.reviewedAt,
-  };
-}
-
-function toBoekwachterIssueWire(
-  record: ProjectBoekwachterIssueRecord,
-  currentContentHash: string | null,
-): BoekwachterIssue {
-  return {
-    id: record.id,
-    ref: record.ref,
-    fingerprint: record.fingerprint,
-    path: record.path,
-    severity: record.severity,
-    category: record.category,
-    message: record.message,
-    ...(record.line !== undefined ? { line: record.line } : {}),
-    status: record.status,
-    seen: record.seenAt !== undefined,
-    stale: currentContentHash === null || currentContentHash !== record.lastSeenContentHash,
-    ...(record.taskRef ? { taskRef: record.taskRef } : {}),
-    ...(record.dismissalReason ? { dismissalReason: record.dismissalReason } : {}),
-    createdAt: record.createdAt,
-    lastSeenAt: record.lastSeenAt,
-    ...(record.lastCheckedAt ? { lastCheckedAt: record.lastCheckedAt } : {}),
-    ...(record.seenAt ? { seenAt: record.seenAt } : {}),
-    ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}),
-    ...(record.dismissedAt ? { dismissedAt: record.dismissedAt } : {}),
-  };
-}
-
-/**
- * The indexer updates asynchronously after a save. Compare its cheap change
- * gate with the live file before trusting the indexed hash so a freshly edited
- * file marks old BW anchors stale immediately, not one index tick later.
- */
-async function currentIndexedHash(
-  index: IndexStore,
-  workspaceDir: string,
-  path: string,
-): Promise<string | null> {
-  const indexed = index.getFile(path);
-  if (!indexed?.hash) return null;
-  const absolute = safeJoin(workspaceDir, path);
-  if (!absolute) return null;
-  const live = await stat(absolute).catch(() => null);
-  if (!live || !live.isFile()) return null;
-  return live.size === indexed.size && live.mtimeMs === indexed.mtimeMs ? indexed.hash : null;
-}
-
-function issueSeverityRank(severity: FileReviewIssueSeverity): number {
-  return severity === 'major' ? 0 : severity === 'minor' ? 1 : 2;
-}
-
-function tallyBoekwachterIssues(
-  issues: readonly BoekwachterIssue[],
-  key: (issue: BoekwachterIssue) => string,
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const issue of issues) {
-    const value = key(issue);
-    counts[value] = (counts[value] ?? 0) + 1;
-  }
-  return counts;
-}
-
-function filterAndSortBoekwachterIssues(
-  issues: BoekwachterIssue[],
-  req: ListFileIssuesRequest,
-): BoekwachterIssue[] {
-  return issues
-    .filter((issue) => {
-      if (!req.includeClosed && issue.status !== 'open' && issue.status !== 'in_progress') {
-        return false;
-      }
-      if (req.status && issue.status !== req.status) return false;
-      if (req.severity && issue.severity !== req.severity) return false;
-      if (req.category && issue.category !== req.category) return false;
-      if (req.path && !issue.path.startsWith(req.path)) return false;
-      return true;
-    })
-    .sort(
-      (a, b) =>
-        issueSeverityRank(a.severity) - issueSeverityRank(b.severity) ||
-        a.ref.localeCompare(b.ref, undefined, { numeric: true }),
-    );
-}
-
 function rubricKeys(rubrics: Map<string, ResolvedRubric>): Array<{ kind: string; hash: string }> {
   return [...rubrics.values()].map((r) => ({ kind: r.kind, hash: r.hash }));
 }
 
-/** Breadth-first reachable set from `start` over `adj`, bounded by hops + a cap. */
-function bfsReach(adj: Map<string, string[]>, start: string, maxHops: number): string[] {
-  const seen = new Set<string>([start]);
-  let frontier = [start];
-  const out: string[] = [];
-  for (let hop = 0; hop < maxHops && frontier.length; hop++) {
-    const next: string[] = [];
-    for (const node of frontier) {
-      for (const nb of adj.get(node) ?? []) {
-        if (seen.has(nb)) continue;
-        seen.add(nb);
-        out.push(nb);
-        next.push(nb);
-        if (out.length >= 200) return out;
-      }
-    }
-    frontier = next;
-  }
-  return out;
+/**
+ * A path the pure-JS image decoders can read for this workspace photo: the
+ * file itself, or a temporary JPEG for HEIC and RAW (pushed onto `rasters`
+ * for the caller to release). Null when there is no decoder for the format.
+ */
+async function embeddableRaster(
+  workspaceDir: string,
+  relPath: string,
+  rasters: DecodableRaster[],
+): Promise<string | null> {
+  const ext = relPath.slice(relPath.lastIndexOf('.')).toLowerCase();
+  if (!IMAGE_EMBED_EXTS.has(ext) && !canNormalizeRaster(relPath)) return null;
+  const abs = safeJoin(workspaceDir, relPath);
+  if (!abs) return null;
+  const raster = await toDecodableRaster(abs, EMBED_RASTER_FORMATS).catch(() => null);
+  if (!raster) return null;
+  if (raster.path !== abs) rasters.push(raster);
+  return raster.path;
 }
 
-const SEVERITY_ORDER: SecuritySeverity[] = ['info', 'low', 'medium', 'high', 'critical'];
-function severityRank(s: SecuritySeverity): number {
-  return SEVERITY_ORDER.indexOf(s);
-}
-function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
-  return severityRank(b) > severityRank(a) ? b : a;
-}
+const EMBED_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg']);

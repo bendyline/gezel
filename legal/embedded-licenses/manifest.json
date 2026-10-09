@@ -1,0 +1,221 @@
+{
+  "$comment": "License texts for third-party code that a package bundled into the service's browser UI had already compiled into its own published dist, without shipping that code's license. scripts/service-bundled-licenses.mjs finds these through the carrier's own source maps and fails the build when a carrier inlines a package not listed here for its exact version. Texts are copied verbatim from each component's npm tarball. Run `node scripts/service-bundled-licenses.mjs --embedded` to list what the current carriers inline.",
+  "schemaVersion": 1,
+  "carriers": {
+    "mermaid": {
+      "version": "11.16.1",
+      "components": [
+        {
+          "name": "js-yaml",
+          "version": "4.1.1",
+          "license": "MIT",
+          "texts": ["js-yaml@4.1.1-LICENSE"]
+        }
+      ]
+    },
+    "@mermaid-js/parser": {
+      "version": "1.2.1",
+      "components": [
+        {
+          "name": "chevrotain",
+          "version": "11.1.2",
+          "license": "Apache-2.0",
+          "texts": ["chevrotain@11.1.2-LICENSE.txt"]
+        },
+        {
+          "name": "@chevrotain/gast",
+          "version": "11.1.2",
+          "license": "Apache-2.0",
+          "texts": ["@chevrotain+gast@11.1.2-LICENSE.txt"]
+        },
+        {
+          "name": "@chevrotain/regexp-to-ast",
+          "version": "11.1.2",
+          "license": "Apache-2.0",
+          "texts": ["@chevrotain+regexp-to-ast@11.1.2-LICENSE.txt"]
+        },
+        {
+          "name": "@chevrotain/utils",
+          "version": "11.1.2",
+          "license": "Apache-2.0",
+          "texts": ["@chevrotain+utils@11.1.2-LICENSE.txt"]
+        },
+        {
+          "name": "chevrotain-allstar",
+          "version": "0.3.1",
+          "license": "MIT",
+          "texts": ["chevrotain-allstar@0.3.1-LICENSE"]
+        },
+        {
+          "name": "langium",
+          "version": "4.2.1",
+          "license": "MIT",
+          "texts": ["langium@4.2.1-LICENSE"]
+        },
+        {
+          "name": "vscode-jsonrpc",
+          "version": "8.2.0",
+          "license": "MIT",
+          "texts": [
+            "vscode-jsonrpc@8.2.0-License.txt",
+            "vscode-jsonrpc@8.2.0-thirdpartynotices.txt"
+          ]
+        },
+        {
+          "name": "vscode-languageserver-protocol",
+          "version": "3.17.5",
+          "license": "MIT",
+          "texts": [
+            "vscode-languageserver-protocol@3.17.5-License.txt",
+            "vscode-languageserver-protocol@3.17.5-thirdpartynotices.txt"
+          ]
+        },
+        {
+          "name": "vscode-languageserver-textdocument",
+          "version": "1.0.12",
+          "license": "MIT",
+          "texts": [
+            "vscode-languageserver-textdocument@1.0.12-License.txt",
+            "vscode-languageserver-textdocument@1.0.12-thirdpartynotices.txt"
+          ]
+        },
+        {
+          "name": "vscode-languageserver-types",
+          "version": "3.17.5",
+          "license": "MIT",
+          "texts": [
+            "vscode-languageserver-types@3.17.5-License.txt",
+            "vscode-languageserver-types@3.17.5-thirdpartynotices.txt"
+          ]
+        }
+      ]
+    },
+    "html2canvas": {
+      "version": "1.4.1",
+      "$note": "The map records no versions; these are the releases html2canvas's declared ranges (css-line-break ^2.1.0, text-segmentation ^1.0.3, utrie ^1.0.2) resolve to, all published before html2canvas 1.4.1.",
+      "unattributedReferences": {
+        "src": "html2canvas's map renders nested sources as node_modules/src/...; that code is css-line-break, text-segmentation and utrie, listed here."
+      },
+      "components": [
+        {
+          "name": "css-line-break",
+          "version": "2.1.0",
+          "license": "MIT",
+          "texts": ["css-line-break@2.1.0-LICENSE"]
+        },
+        {
+          "name": "text-segmentation",
+          "version": "1.0.3",
+          "license": "MIT",
+          "texts": ["text-segmentation@1.0.3-LICENSE"]
+        },
+        {
+          "name": "utrie",
+          "version": "1.0.2",
+          "license": "MIT",
+          "texts": ["utrie@1.0.2-LICENSE"]
+        }
+      ]
+    },
+    "@tiptap/react": {
+      "version": "2.27.3",
+      "$note": "The map records no versions; the texts come from the releases @tiptap/react's declared ranges (fast-deep-equal ^3, use-sync-external-store ^1) resolve to. Each package's license is unchanged across that major line.",
+      "components": [
+        {
+          "name": "fast-deep-equal",
+          "version": "3.1.3",
+          "license": "MIT",
+          "texts": ["fast-deep-equal@3.1.3-LICENSE"]
+        },
+        {
+          "name": "use-sync-external-store",
+          "version": "1.6.0",
+          "license": "MIT",
+          "texts": ["use-sync-external-store@1.6.0-LICENSE"]
+        }
+      ]
+    }
+  },
+  "texts": {
+    "@chevrotain+gast@11.1.2-LICENSE.txt": {
+      "source": "npm:@chevrotain/gast@11.1.2/LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "@chevrotain+regexp-to-ast@11.1.2-LICENSE.txt": {
+      "source": "npm:@chevrotain/regexp-to-ast@11.1.2/LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "@chevrotain+utils@11.1.2-LICENSE.txt": {
+      "source": "npm:@chevrotain/utils@11.1.2/LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "chevrotain-allstar@0.3.1-LICENSE": {
+      "source": "npm:chevrotain-allstar@0.3.1/LICENSE",
+      "sha256": "1db2cfbc7ce5fa3b82699b4ac4badce8984084d25b5308ece00f5c9b1381a0a5"
+    },
+    "chevrotain@11.1.2-LICENSE.txt": {
+      "source": "npm:chevrotain@11.1.2/LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "css-line-break@2.1.0-LICENSE": {
+      "source": "npm:css-line-break@2.1.0/LICENSE",
+      "sha256": "ce1ee0539f7fe1f7b75b76d121e674cb897c709c3e24ddba7f9a10fe2d0d88a5"
+    },
+    "fast-deep-equal@3.1.3-LICENSE": {
+      "source": "npm:fast-deep-equal@3.1.3/LICENSE",
+      "sha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+    },
+    "js-yaml@4.1.1-LICENSE": {
+      "source": "npm:js-yaml@4.1.1/LICENSE",
+      "sha256": "a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550"
+    },
+    "langium@4.2.1-LICENSE": {
+      "source": "npm:langium@4.2.1/LICENSE",
+      "sha256": "599bf70b4e55f06250571d103dbd8441e0c47cb7f858c0147ca312ce38e9ef2a"
+    },
+    "text-segmentation@1.0.3-LICENSE": {
+      "source": "npm:text-segmentation@1.0.3/LICENSE",
+      "sha256": "8b00952cd8d0f5cbbefb13576778e1185dc963943151353d90c4e14a5a4caf40"
+    },
+    "use-sync-external-store@1.6.0-LICENSE": {
+      "source": "npm:use-sync-external-store@1.6.0/LICENSE",
+      "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+    },
+    "utrie@1.0.2-LICENSE": {
+      "source": "npm:utrie@1.0.2/LICENSE",
+      "sha256": "8b00952cd8d0f5cbbefb13576778e1185dc963943151353d90c4e14a5a4caf40"
+    },
+    "vscode-jsonrpc@8.2.0-License.txt": {
+      "source": "npm:vscode-jsonrpc@8.2.0/License.txt",
+      "sha256": "ec9ee83580841e8eb687aca9867f221503809ba6426c7f876ede17d91b9fcfd0"
+    },
+    "vscode-jsonrpc@8.2.0-thirdpartynotices.txt": {
+      "source": "npm:vscode-jsonrpc@8.2.0/thirdpartynotices.txt",
+      "sha256": "a89123562fe364dc8e969e85614eb6c1f8452afe131d6e42bd1314bb2d092b04"
+    },
+    "vscode-languageserver-protocol@3.17.5-License.txt": {
+      "source": "npm:vscode-languageserver-protocol@3.17.5/License.txt",
+      "sha256": "ec9ee83580841e8eb687aca9867f221503809ba6426c7f876ede17d91b9fcfd0"
+    },
+    "vscode-languageserver-protocol@3.17.5-thirdpartynotices.txt": {
+      "source": "npm:vscode-languageserver-protocol@3.17.5/thirdpartynotices.txt",
+      "sha256": "9265d27cf75775aa5ae19c5ba01846fb70ecd5121f8c39c81bef7e03f007072c"
+    },
+    "vscode-languageserver-textdocument@1.0.12-License.txt": {
+      "source": "npm:vscode-languageserver-textdocument@1.0.12/License.txt",
+      "sha256": "ec9ee83580841e8eb687aca9867f221503809ba6426c7f876ede17d91b9fcfd0"
+    },
+    "vscode-languageserver-textdocument@1.0.12-thirdpartynotices.txt": {
+      "source": "npm:vscode-languageserver-textdocument@1.0.12/thirdpartynotices.txt",
+      "sha256": "a89123562fe364dc8e969e85614eb6c1f8452afe131d6e42bd1314bb2d092b04"
+    },
+    "vscode-languageserver-types@3.17.5-License.txt": {
+      "source": "npm:vscode-languageserver-types@3.17.5/License.txt",
+      "sha256": "ec9ee83580841e8eb687aca9867f221503809ba6426c7f876ede17d91b9fcfd0"
+    },
+    "vscode-languageserver-types@3.17.5-thirdpartynotices.txt": {
+      "source": "npm:vscode-languageserver-types@3.17.5/thirdpartynotices.txt",
+      "sha256": "a89123562fe364dc8e969e85614eb6c1f8452afe131d6e42bd1314bb2d092b04"
+    }
+  }
+}

@@ -112,9 +112,11 @@ page → host: { __gezelPage: 1, kind: 'hello' | 'invoke' | 'read' | 'watch' | '
 host → page: { __gezelPage: 1, kind: 'init' | 'result' | 'read-result' | 'change' | 'theme', ... }
 ```
 
-- The shim (`packages/service/src/http/routes/page-api-shim.ts`) is
-  injected by `preparePreviewHtml` for `source === 'type'` responses only,
-  with a server-authoritative bootstrap (identity, params, declared tools).
+- The shim (`pageApiShimSource` / `buildPageApiShim` in
+  `packages/core/src/project-types/page-api-shim.ts`) is injected by
+  `preparePreviewHtml` for `source === 'type'` responses only, with a
+  server-authoritative bootstrap (identity, params, declared tools). The
+  phone embeds the same shim; see "Pages on phones" below.
 - The host relay lives in the UI's `HtmlPreviewFrame`. Reads relay to
   `POST /api/projects/:id/page-read` (first-party auth; scopes re-derived
   via `resolvePageReads`); invokes relay to the existing
@@ -146,6 +148,46 @@ HTTP status → error-code mapping matches the desktop relay: 400/413/422 →
 anything else `unavailable`. No credential ever reaches the page; the
 visitor cookie is HttpOnly and means nothing to the daemon's `/api/*`
 surface.
+
+## Pages on phones
+
+A phone has no preview server. Its Output pane shows a type's page as a
+**snapshot**: one document with every script and asset embedded as `data:`
+URLs, served by the native host from `https://localhost/__gezel_preview/<id>/`
+under a CSP with no network (`connect-src 'none'`) and a sandbox
+([html-preview.ts](../packages/mobile/src/html-preview.ts)). For a type's
+page the snapshot builder reads the page tree from the bundled type
+(`/api/projects/:id/type/read`), takes the bootstrap from
+`/api/projects/:id/type/bootstrap`, and embeds `pageApiShimSource` after the
+log shim and before any page script, so `window.gezel` behaves exactly as on
+the desktop. The parent relay in `HtmlPreviewFrame` answers it through the
+phone's own `page-invoke` / `page-read` routes
+([runtime/project-type-routes.ts](../packages/core/src/runtime/project-type-routes.ts)),
+which enforce `pages.tools` and `pages.reads` with the same core rules as the
+desktop (`projectTypePageTools`, `pageReadIsDeclared`). Workspace and
+artifact snapshots stay closed to the bridge.
+
+What this means for authors:
+
+- **Only v1 pages run on phones.** A v0 page reads its project from the
+  preview URL, which a snapshot does not have; WebKit refuses the URL rewrite
+  that could fake one. The phone says the page has not been updated rather
+  than showing its demo data as if it were the project's.
+- **`data.url()` works, a moment late.** There is no capability URL, and the
+  snapshot CSP allows only `data:` media, so on a phone the call returns a
+  blank image tagged with the file. The shim reads the bytes over the relay
+  and swaps a `data:` URL in wherever the tag sits in a `src`, `poster`,
+  `href` or `style` attribute, and later calls for the same file return the
+  `data:` URL directly. An element never attached to the document (a bare
+  `new Image()`) is not swapped, and a file over the relay's read cap (2 MiB)
+  stays blank and logs an error. Use `data.read(path, { as: 'bytes' })` when
+  the page needs the bytes themselves.
+- **Design for 320px.** The phone viewport is 320–400 CSS px wide. A page must
+  not scroll sideways, and controls should be at least 44px tall.
+  `pnpm mobile:test:pages` opens every type's page at 320px and 390px in
+  Chromium and WebKit, fails on horizontal overflow, script errors and v0
+  pages, and reports small touch targets (`--strict` fails on them).
+  `GEZEL_GILDE_DATA_DIR` points it at a gilde checkout under review.
 
 ## Compatibility
 

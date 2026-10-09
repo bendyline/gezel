@@ -52,6 +52,7 @@ export type RoleId =
   | 'developer'
   | 'web-developer'
   | 'planner'
+  | 'curator'
   | 'generalist';
 
 /**
@@ -271,6 +272,26 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'fact-check',
     ],
     capabilityFloor: 'medium',
+  },
+  curator: {
+    id: 'curator',
+    label: 'Curator',
+    summary:
+      'Looks after a photo library: describes, groups and proposes albums. Changes arrive as proposals.',
+    // No workspace writes: a curator proposes moves and albums for the
+    // person to apply (diffpack file operations), never edits a library.
+    toolsetGroups: [
+      'workspace-fs-read',
+      'image-intel',
+      'tasks',
+      'artifacts',
+      'memory',
+      'interaction',
+      'handboek',
+    ],
+    gateAffinity: [],
+    defaultBooks: ['album-curate', 'photo-cull', 'year-in-review'],
+    capabilityFloor: 'small',
   },
   copywriter: {
     id: 'copywriter',
@@ -564,6 +585,11 @@ export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }
   // gezel `ensureGezel` creates for the step can never call render_image /
   // generate_image (cbmx-20260720: image books shipped .json stubs).
   { contains: 'tekenaar', canonical: 'designer' },
+  // Photo-library roles. After design, so a "Photo Designer" keeps the
+  // designer kit; `photo` also covers photographer and photo editor.
+  { contains: 'curator', canonical: 'curator' },
+  { contains: 'picture', canonical: 'curator' },
+  { contains: 'photo', canonical: 'curator' },
   { contains: 'assetsmid', canonical: 'designer' },
   { contains: 'copywriter', canonical: 'copywriter' },
   { contains: 'writer', canonical: 'copywriter' },

@@ -71,7 +71,7 @@ node binary instead of Gezel.app — a trust-destroying dialog.
 - Retention in `AmbientDashboardGenerator.prune` must keep matching only
   `dashboard-*.png`; deleting `applied-*.png` yanks the live wallpaper file.
 - The TCC prompt must originate from a user click (the enable IPC), not a
-  background timer; see `gezel:ambient:enable` in main.ts.
+  background timer; see `gezel:ambient:enable` in ambient-display/host.ts.
 - The generator never starts in the machine-engine role, and no wallpaper
   code may move into the daemon without revisiting the session/TCC caveats
   above (docs/service-boundaries.md rows).

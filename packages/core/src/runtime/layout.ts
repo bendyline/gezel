@@ -1,6 +1,9 @@
+import { seedCharacter } from '../character/index.js';
+import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
 import { ProjectSchema } from '../schemas/project.js';
 import { SHARED_PROJECT_MARKER, isSharedLibraryProject } from '../shared-project.js';
 import { slugifyEntityName } from './entities.js';
+import { boundedText } from './files.js';
 import { gezelRoot, gezelWrites, listGezels } from './gezels.js';
 import { MEESTER_ABOUT_MD, randomMeesterName } from './meester.js';
 import { getProject, listProjects, projectRoot, projectWrites, readConfig } from './projects.js';
@@ -45,6 +48,24 @@ export async function ensureLayout(repo: PortableRepository): Promise<void> {
       directories.push(`${gezelRoot(id)}/sessions`);
       config.meesterGezelId = id;
     }
+  }
+  // Gezels made before characters existed get the one their id seeds, once.
+  for (const gezel of gezels) {
+    if (gezel.character) continue;
+    const path = `${gezelRoot(gezel.id)}/gezel.md`;
+    const source = await repo.text(path);
+    if (source === null) continue;
+    const parsed = parseGezelMarkdown(source);
+    if (parsed.frontmatter.character) continue;
+    writes.set(
+      path,
+      boundedText(
+        serializeGezelMarkdown({
+          ...parsed,
+          frontmatter: { ...parsed.frontmatter, character: seedCharacter(gezel.id) },
+        }),
+      ),
+    );
   }
   config.provider ??= 'llama-cpp';
   const configBytes = repo.json(config);

@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs';
-import { readFile, readdir, rm, stat } from 'node:fs/promises';
+import { open, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { createLogger, nowIso } from '@bendyline/gezel';
 import { PROJECT_SHADOW_DIR_NAME, projectLocalIndexDbFile } from '@bendyline/gezel/paths';
@@ -14,9 +14,8 @@ import {
   shadowDocFilesPaths,
 } from './docs.js';
 import { parseFrontmatter } from './frontmatter.js';
-import { ensureIndexGitignore } from './gitignore.js';
-import { sha256 } from './hash.js';
-import { readImageStaticMeta } from './image-meta.js';
+import { sha256, sha256File } from './hash.js';
+import { exifFromHeifItem, readHeifHeader, readImageStaticMeta } from './image-meta.js';
 import { IndexStore } from './index-store.js';
 import {
   extractCodeSymbols,
@@ -34,8 +33,13 @@ import {
 
 const log = createLogger('index:content');
 
-/** Generous safety cap so a runaway tree can't index forever. */
-const MAX_FILES = 50_000;
+/**
+ * Files one pass looks at. A photo library runs past 100,000, so this is
+ * generous; past it, the walk is capped and removal sweeps stand down.
+ */
+const MAX_FILES = 200_000;
+/** Metadata key on a file whose bytes were only in the cloud when last indexed. */
+export const CLOUD_ONLY_META_KEY = 'cloud_only';
 
 /**
  * Bump when the structural extraction OUTPUT SHAPE changes (new columns, new
@@ -53,6 +57,18 @@ const MAX_FILES = 50_000;
  *     specifiers — flushes the stale findings and template-literal imports.
  */
 const EXTRACTOR_VERSION = 4;
+/**
+ * Bump when the image tier stores new metadata, so photos indexed before it
+ * are re-read once. 2: capture date and camera (`taken_at`, `camera_*`).
+ * 3: HEIC and camera RAW, lens and location (`lens`, `gps_lat`, `gps_lon`).
+ */
+const IMAGE_META_VERSION = 3;
+/** Past this, an image is hashed in a stream and only its head is read. */
+const STREAM_IMAGE_BYTES = 8 * 1024 * 1024;
+/** Enough for every header gezel parses: TIFF IFDs, HEIF `meta`, JPEG APP1. */
+const IMAGE_HEAD_BYTES = 2 * 1024 * 1024;
+/** A HEIF Exif item is a few KB; a larger one is not worth a read. */
+const MAX_EXIF_BYTES = 1024 * 1024;
 
 /**
  * PNG text keys worth putting in the search index, in priority order. Skips
@@ -107,6 +123,7 @@ export async function indexWorkspaceContent(
   const seen = new Set<string>();
   const indexedAt = nowIso();
   const forceCode = store.getMeta('extractor_version') !== String(EXTRACTOR_VERSION);
+  const forceImages = store.getMeta('image_meta_version') !== String(IMAGE_META_VERSION);
 
   const maxFiles = opts.maxFiles ?? MAX_FILES;
   const { files: walkedFiles, capped } = await discoverWorkspaceFiles(workspaceDir, {
@@ -118,17 +135,57 @@ export async function indexWorkspaceContent(
     // same document.
     ...(opts.scope === 'library' ? { ignorePath: isLibraryInternalPath } : {}),
   });
-  for (const file of walkedFiles) {
+  // Newest first: a pass stopped part-way (window end, a big first scan)
+  // has covered the photos and documents the person touched last.
+  const ordered = [...walkedFiles].sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const file of ordered) {
     stats.scanned++;
     seen.add(file.path);
 
     const cls = classifyFile(file.path, file.size);
-    const forceThis = forceCode && cls.kind === 'code';
+    const forceThis =
+      (forceCode && cls.kind === 'code') || (forceImages && cls.modality === 'image');
 
     const existing = store.getFile(file.path);
+    if (file.cloudOnly && !cls.trivial) {
+      // Only in the cloud: reading it would download it. Record it by name,
+      // size and date, and drop the hash so no AI tier reads it either. The
+      // tiers key their output by content hash, so whatever an earlier pass
+      // made for this file is reused once it is local again.
+      const recorded =
+        existing !== undefined &&
+        existing.hash == null &&
+        existing.mtimeMs === file.mtimeMs &&
+        existing.size === file.size;
+      if (!recorded) {
+        store.upsertFile({
+          path: file.path,
+          hash: null,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+          lang: cls.lang,
+          kind: cls.kind,
+          modality: cls.modality,
+          trivial: cls.trivial,
+          indexedAt,
+          loc: existing?.loc ?? null,
+        });
+        store.mergeMetadata(file.path, [{ key: CLOUD_ONLY_META_KEY, value: '1' }]);
+      }
+      stats.skipped++;
+      continue;
+    }
+    // A file that came back from the cloud keeps the size and date it had as
+    // a placeholder, so the change gate below would never read it.
+    const backFromCloud =
+      existing?.hash == null &&
+      !cls.trivial &&
+      existing !== undefined &&
+      store.getMetadata(file.path)[CLOUD_ONLY_META_KEY] === '1';
     // Cheap change gate: same mtime + size ⇒ unchanged, no read/hash.
     if (
       !forceThis &&
+      !backFromCloud &&
       existing &&
       existing.mtimeMs === file.mtimeMs &&
       existing.size === file.size
@@ -136,6 +193,7 @@ export async function indexWorkspaceContent(
       stats.skipped++;
       continue;
     }
+    if (backFromCloud) store.deleteMetadataKey(file.path, CLOUD_ONLY_META_KEY);
 
     if (cls.trivial) {
       // Record the file (so deletions/later phases see it) but do no content work.
@@ -157,15 +215,24 @@ export async function indexWorkspaceContent(
     if (cls.modality === 'image') {
       // Deterministic image tier (Phase 5): hash, read dimensions, and index a
       // filename-derived chunk so images are searchable by name immediately.
-      // Captions + CLIP vectors are added later by the boekwachter when idle.
+      // Captions and media-search vectors are added later, when idle.
+      // A RAW or a big photo is hashed in a stream and only its head is
+      // kept: the metadata sits at the front, and a library of 50 MB RAWs
+      // must not be buffered whole, one after another.
       let bytes: Buffer;
+      let hash: string;
       try {
-        bytes = await readFile(file.abs);
+        if (file.size > STREAM_IMAGE_BYTES) {
+          hash = await sha256File(file.abs);
+          bytes = await readRange(file.abs, 0, IMAGE_HEAD_BYTES);
+        } else {
+          bytes = await readFile(file.abs);
+          hash = sha256(bytes);
+        }
       } catch {
         stats.skipped++;
         continue;
       }
-      const hash = sha256(bytes);
       const record = {
         path: file.path,
         hash,
@@ -178,13 +245,26 @@ export async function indexWorkspaceContent(
         indexedAt,
         loc: null,
       };
-      if (existing && existing.hash === hash) {
+      if (!forceThis && existing && existing.hash === hash) {
         store.upsertFile(record);
         continue;
       }
       stats.changed++;
       store.upsertFile(record);
-      const meta = readImageStaticMeta(bytes);
+      // Location stays in this index, on this computer; tools strip it for
+      // a session on a cloud model.
+      const meta = readImageStaticMeta(bytes, { fileName: file.path, includeLocation: true });
+      if (meta.format === 'heic' && !meta.exif) {
+        const at = readHeifHeader(bytes)?.exif;
+        if (at && at.length <= MAX_EXIF_BYTES) {
+          const item = await readRange(file.abs, at.offset, at.length).catch(() => null);
+          const parsed = item ? exifFromHeifItem(item) : null;
+          if (parsed) {
+            meta.exif = parsed.exif;
+            if (parsed.gps) meta.gps = parsed.gps;
+          }
+        }
+      }
       const metaRows: Array<{ key: string; value: string }> = [
         { key: 'format', value: meta.format },
       ];
@@ -193,6 +273,15 @@ export async function indexWorkspaceContent(
       if (meta.likelyScreenshot) metaRows.push({ key: 'screenshot', value: '1' });
       const software = meta.pngText?.Software ?? meta.exif?.software;
       if (software) metaRows.push({ key: 'software', value: software });
+      const takenAt = exifTakenAt(meta.exif?.dateTimeOriginal ?? meta.exif?.dateTimeDigitized);
+      if (takenAt) metaRows.push({ key: 'taken_at', value: takenAt });
+      if (meta.exif?.make) metaRows.push({ key: 'camera_make', value: meta.exif.make });
+      if (meta.exif?.model) metaRows.push({ key: 'camera_model', value: meta.exif.model });
+      if (meta.exif?.lensModel) metaRows.push({ key: 'lens', value: meta.exif.lensModel });
+      if (meta.gps) {
+        metaRows.push({ key: 'gps_lat', value: meta.gps.lat.toFixed(6) });
+        metaRows.push({ key: 'gps_lon', value: meta.gps.lon.toFixed(6) });
+      }
       store.setMetadata(file.path, metaRows);
       const nameWords = file.path
         .replace(/\.[^.]+$/, '')
@@ -255,6 +344,46 @@ export async function indexWorkspaceContent(
         .join(' ');
       store.putChunks(file.path, hash, [
         { kind: 'audio', lineStart: 1, lineEnd: 1, text: `${nameWords} audio recording` },
+      ]);
+      continue;
+    }
+
+    if (cls.modality === 'video') {
+      // Video: hash by stream (a recording can be gigabytes) and index a
+      // filename-derived chunk so it is findable by name at once. The media
+      // tier embeds its windows later, when the model and ffmpeg are there.
+      let hash: string;
+      try {
+        hash = await sha256File(file.abs);
+      } catch {
+        stats.skipped++;
+        continue;
+      }
+      const record = {
+        path: file.path,
+        hash,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        lang: cls.lang,
+        kind: cls.kind,
+        modality: cls.modality,
+        trivial: cls.trivial,
+        indexedAt,
+        loc: null,
+      };
+      if (existing && existing.hash === hash) {
+        store.upsertFile(record);
+        continue;
+      }
+      stats.changed++;
+      store.upsertFile(record);
+      const nameWords = file.path
+        .replace(/\.[^.]+$/, '')
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .join(' ');
+      store.putChunks(file.path, hash, [
+        { kind: 'video', lineStart: 1, lineEnd: 1, text: `${nameWords} video recording` },
       ]);
       continue;
     }
@@ -462,6 +591,7 @@ export async function indexWorkspaceContent(
   // Stamp only after a complete walk so an interrupted (or capped) forced
   // pass retries — rows past a cap may hold old-version extractions.
   if (forceCode && !capped) store.setMeta('extractor_version', String(EXTRACTOR_VERSION));
+  if (forceImages && !capped) store.setMeta('image_meta_version', String(IMAGE_META_VERSION));
 
   return stats;
 }
@@ -514,17 +644,18 @@ function convState(conv: { markdown: string | null; blocked?: string } | null): 
 }
 
 /**
- * Convenience: open the workspace collection store, index, and close. Used by
- * tests and one-shot callers. Returns null stats when sqlite is unavailable.
+ * Convenience for tests: open a workspace collection store, index, and close.
+ * The database defaults to the workspace's legacy `.gezel/index/` path, which
+ * only fixtures use; the daemon goes through `ContentIndex`, whose database is
+ * always home-side. Returns null stats when sqlite is unavailable.
  */
 export async function runWorkspaceContentIndex(
   workspaceDir: string,
   collectionId: string,
   artifactsDir: string,
-  opts: { maxFiles?: number } = {},
+  opts: { maxFiles?: number; dbPath?: string } = {},
 ): Promise<ContentIndexStats | null> {
-  await ensureIndexGitignore(workspaceDir);
-  const store = await IndexStore.open(projectLocalIndexDbFile(workspaceDir), {
+  const store = await IndexStore.open(opts.dbPath ?? projectLocalIndexDbFile(workspaceDir), {
     collectionId,
     kind: 'workspace',
     rootPath: workspaceDir,
@@ -534,5 +665,30 @@ export async function runWorkspaceContentIndex(
     return await indexWorkspaceContent(store, workspaceDir, artifactsDir, opts);
   } finally {
     store.close();
+  }
+}
+
+/**
+ * EXIF's `YYYY:MM:DD HH:MM:SS` capture time as `YYYY-MM-DDTHH:MM:SS`: camera
+ * local time with no zone, which EXIF does not record reliably. Sorts and
+ * compares as text. Undefined for the all-zero placeholder cameras write.
+ */
+export function exifTakenAt(raw: string | undefined): string | undefined {
+  const m = raw?.trim().match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!m || m[1] === '0000') return undefined;
+  const [, y, mo, d, h, mi, sec] = m;
+  if (Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > 31) return undefined;
+  return `${y}-${mo}-${d}T${h}:${mi}:${sec}`;
+}
+
+/** `length` bytes of a file from `offset` (fewer at the end of the file). */
+async function readRange(path: string, offset: number, length: number): Promise<Buffer> {
+  const handle = await open(path, 'r');
+  try {
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buf, 0, length, offset);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
   }
 }

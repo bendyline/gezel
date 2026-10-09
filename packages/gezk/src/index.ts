@@ -18,3 +18,4 @@ export * from './format/quantize.js';
 export * from './jcs.js';
 export * from './slug.js';
 export * from './spatial.js';
+export * from './query-stopwords.js';

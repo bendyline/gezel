@@ -54,7 +54,7 @@ describe('archetypeToCraftbook', () => {
     expect(result.success).toBe(true);
   });
 
-  it('wires design → … → evaluate → (loop back to build) → finish, preserving per-phase roles', () => {
+  it('wires design → … → evaluate → finish, with a verdict gate looping back to build', () => {
     const { steps, entryStepId } = archetypeToCraftbook(arcade);
     expect(entryStepId).toBe('game-design');
     const byId = new Map(steps.map((s) => [s.id, s]));
@@ -62,9 +62,16 @@ describe('archetypeToCraftbook', () => {
     expect(byId.get('visual-design')?.suggestedRole).toBe('visual-designer');
     expect(byId.get('game-design')?.next).toBe('visual-design');
     expect(byId.get('build')?.next).toBe('evaluate');
-    // Default loop-back target is the last build phase — the safe failure
-    // mode is "keep improving", never advance to finish half-done.
-    expect(byId.get('evaluate')?.next).toBe('build');
+    // The forward edge is the default; a FAIL in the written verdict is what
+    // loops back, so finishing never depends on the model remembering `next`.
+    expect(byId.get('evaluate')?.next).toBe('finish');
+    expect(byId.get('evaluate')?.gate).toMatchObject({ onReject: 'build', maxAttempts: 3 });
+    expect(byId.get('evaluate')?.advanceWhen).toMatchObject({
+      file: '{{task.dir}}/verdict.md',
+      artifact: true,
+    });
+    expect(byId.get('evaluate')?.prompt).toContain('{{task.dir}}/verdict.md');
+    expect(byId.get('evaluate')?.prompt).not.toContain('next: "finish"');
     expect(byId.get('finish')?.terminal).toBe(true);
   });
 
@@ -73,9 +80,9 @@ describe('archetypeToCraftbook', () => {
       ...arcade,
       evaluate: { ...arcade.evaluate, loopBackTo: 'visual-design' },
     };
-    expect(archetypeToCraftbook(spec).steps.find((s) => s.id === 'evaluate')?.next).toBe(
-      'visual-design',
-    );
+    const evaluate = archetypeToCraftbook(spec).steps.find((s) => s.id === 'evaluate');
+    expect(evaluate?.gate).toMatchObject({ onReject: 'visual-design' });
+    expect(evaluate?.prompt).toContain('back to `visual-design`');
   });
 
   it('rejects reserved ids, empty phases, and an unknown loopBackTo', () => {
@@ -140,9 +147,14 @@ describe('archetypeToCraftbook', () => {
     const checks = buildGate && 'checks' in buildGate ? (buildGate.checks ?? []) : [];
     expect(checks[0]).toMatchObject({ kind: 'minBytes', file: 'index.html', bytes: 1500 });
 
-    // Evaluate keeps the Layer-2 judgment with no runtime gate.
-    expect(byId.get('evaluate')?.gate).toBeUndefined();
-    expect(byId.get('evaluate')?.next).toBe('build');
+    // Evaluate keeps the Layer-2 judgment; its gate only reads the written
+    // verdict (PASS present, no FAIL) and routes a FAIL back to the build.
+    const evaluateGate = byId.get('evaluate')?.gate;
+    const verdictChecks =
+      evaluateGate && 'checks' in evaluateGate ? (evaluateGate.checks ?? []) : [];
+    expect(verdictChecks.map((c) => c.kind)).toEqual(['contains', 'notContains']);
+    expect(evaluateGate).toMatchObject({ onReject: 'build' });
+    expect(byId.get('evaluate')?.next).toBe('finish');
   });
 
   const disciplineSpec: ArchetypeSpec = {

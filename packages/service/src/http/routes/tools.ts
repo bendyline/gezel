@@ -43,8 +43,10 @@ import {
   KnowledgeNearbyRequestSchema,
   ListEntityMentionsRequestSchema,
   ListFileIssuesRequestSchema,
+  ListPhotosRequestSchema,
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
+  PhotoGroupsRequestSchema,
   ProjectSearchRequestSchema,
   QueryTableRequestSchema,
   ReadDocAsMarkdownRequestSchema,
@@ -70,6 +72,7 @@ import {
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   createLogger,
+  isLocalProvider,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -80,6 +83,7 @@ import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/su
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
+import { restrictedGitArgv, restrictedGitEnv } from '../../git/restricted-args.js';
 import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
 import { embedQuery } from '../../memory/embeddings.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
@@ -950,6 +954,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         projectId: id,
         spatial: body.spatial,
         catalogs: body.catalogs,
+        media: true,
       });
       return c.json({
         results: results.slice(0, limit),
@@ -971,6 +976,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         // A weak lead is still a lead to a model that asked: reorder, and
         // drop only what a calibrated model calls plainly off-topic.
         relevance: { surface: 'search', mode: 'reorder' },
+        media: true,
       }),
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
@@ -1178,7 +1184,11 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = SearchImagesRequestSchema.parse(await c.req.json());
-    return c.json(await ctx.contentIndex.searchImages(id, body.query, body.maxResults));
+    return c.json(
+      await ctx.contentIndex.searchImages(id, body.query, body.maxResults, {
+        ...(body.kinds ? { kinds: body.kinds } : {}),
+      }),
+    );
   });
 
   app.post('/:id/tools/find-similar-images', async (c) => {
@@ -1186,6 +1196,31 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = FindSimilarImagesRequestSchema.parse(await c.req.json());
     return c.json(await ctx.contentIndex.findSimilarImages(id, body.path, body.maxResults));
+  });
+
+  // A photo's coordinates say where someone lives: the person's own app and
+  // an on-device session see them; a session on a cloud model does not.
+  const callerMaySeeLocation = async (c: Context): Promise<boolean> => {
+    const auth = c.get('auth');
+    if (!auth?.appId.startsWith('session:')) return true;
+    const session = await ctx.chat
+      .getSessionRecord(auth.appId.slice('session:'.length))
+      .catch(() => null);
+    return session?.providerName ? isLocalProvider(session.providerName) : false;
+  };
+
+  app.post('/:id/tools/list-photos', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = ListPhotosRequestSchema.parse(await c.req.json());
+    return c.json(await ctx.contentIndex.listPhotos(id, body, await callerMaySeeLocation(c)));
+  });
+
+  app.post('/:id/tools/photo-groups', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = PhotoGroupsRequestSchema.parse(await c.req.json());
+    return c.json(await ctx.contentIndex.photoGroups(id, body, await callerMaySeeLocation(c)));
   });
 
   app.post('/:id/tools/describe-folder', async (c) => {
@@ -1381,10 +1416,10 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!project) return c.json({ error: 'project not found' }, 404);
     const baseDir = await ctx.store.projectWorkspaceDir(id);
     const body = RunGitRequestSchema.parse(await c.req.json());
-    const allowedArgs = gitArgsForSubcommand(body.subcommand, body.args ?? []);
-    if ('error' in allowedArgs) return c.json({ error: allowedArgs.error }, 400);
+    const plan = restrictedGitArgv(body.subcommand, body.args ?? []);
+    if ('error' in plan) return c.json({ error: plan.error }, 400);
     try {
-      const result = await runGit(baseDir, [body.subcommand, ...allowedArgs.args], {
+      const result = await runGit(baseDir, plan.argv, {
         timeoutMs: body.timeoutMs ?? 60_000,
       });
       const response: RunGitResponse = result;
@@ -1773,27 +1808,17 @@ function assertArchiveEntryBudget(opts: {
   }
 }
 
-function gitArgsForSubcommand(
-  subcommand: string,
-  args: string[],
-): { args: string[] } | { error: string } {
-  for (const arg of args) {
-    if (typeof arg !== 'string') return { error: 'git args must be strings' };
-    if (/[\n\r]/.test(arg)) return { error: 'git args cannot contain newlines' };
-    if (arg.startsWith('-c') || arg === '--exec' || arg === '--upload-pack') {
-      return { error: `git arg "${arg}" is not allowed` };
-    }
-  }
-  return { args };
-}
-
 async function runGit(
   cwd: string,
   args: string[],
   opts: { timeoutMs: number },
 ): Promise<RunGitResponse> {
   return new Promise((resolvePromise) => {
-    const child = spawn('git', args, { cwd, ...windowsHeadlessSpawnOptions() });
+    const child = spawn('git', args, {
+      cwd,
+      env: restrictedGitEnv(process.env),
+      ...windowsHeadlessSpawnOptions(),
+    });
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;

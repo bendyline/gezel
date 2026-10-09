@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '../schemas/task.js';
 import { isGatedStep, renderTaskContextBlock, renderTaskOutline } from './prompt-context.js';
+import { resolveNextStep } from './step-routing.js';
 
 const task = {
   ref: 'default/3',
@@ -111,6 +112,41 @@ describe('renderTaskContextBlock', () => {
     expect(block).toContain('finish and pass them before the next step is revealed');
   });
 
+  it('explains the default repair loop and the explicit review branch', () => {
+    const steps = [
+      ...task.craftbook.steps,
+      { id: 'finish', name: 'Finish', terminal: true, createdAt: '2026-10-08T00:00:00Z' },
+    ];
+    const reviewTask = { ...task, craftbook: { ...task.craftbook, steps } };
+    const block = renderTaskContextBlock({ task: reviewTask, step });
+    expect(resolveNextStep({ steps, currentId: 'review' })).toEqual({
+      kind: 'advance',
+      to: 'build',
+    });
+    expect(resolveNextStep({ steps, currentId: 'review', override: 'next' })).toEqual({
+      kind: 'advance',
+      to: 'build',
+    });
+    expect(resolveNextStep({ steps, currentId: 'review', override: 'finish' })).toEqual({
+      kind: 'advance',
+      to: 'finish',
+    });
+    expect(block).toContain('declared default destination is `build`');
+    expect(block).toContain('include that exact step id in the `next` argument');
+    expect(block).toContain(
+      'Writing a PASS note or saying the review passed does not select a destination',
+    );
+    expect(
+      renderTaskContextBlock(
+        { task: reviewTask, step },
+        { availableToolNames: new Set(['write_task_note']) },
+      ),
+    ).not.toContain('#### Step routing');
+    expect(renderTaskContextBlock({ task: reviewTask, step: steps[2] })).not.toContain(
+      '#### Step routing',
+    );
+  });
+
   it('names a checked file outside the task folder, and only then', () => {
     const handover = {
       ...task,
@@ -183,5 +219,90 @@ describe('renderTaskContextBlock', () => {
     expect(renderTaskOutline(task, step, { advanceWired: true })).toContain('`advance_task_step`');
     expect(isGatedStep(step, task.craftbook.steps)).toBe(true);
     expect(isGatedStep(task.craftbook.steps[0]!, task.craftbook.steps)).toBe(false);
+  });
+});
+
+describe('renderTaskContextBlock — stepwise handoffs', () => {
+  const steps = [
+    {
+      id: 'scope',
+      name: 'Scope the run',
+      completedAt: 't',
+      advanceWhen: { file: 'tasks/3/scope.md', artifact: true },
+    },
+    {
+      id: 'billables',
+      name: 'List billables',
+      completedAt: 't',
+      advanceWhen: { file: 'tasks/3/billables.json', artifact: true },
+    },
+    {
+      id: 'collect',
+      name: 'Collect',
+      prompt: 'Name any client skipped this month, as recorded in scope.md.',
+      advanceWhen: { file: 'tasks/3/collect.md', artifact: true },
+    },
+  ];
+  const invoiceTask = (executionMode: 'generalist' | 'stepwise') =>
+    ({
+      ...task,
+      activeStepId: 'collect',
+      executionMode,
+      craftbook: { id: 'invoice-run', steps },
+    }) as unknown as Task;
+
+  it('gives a stepwise step the earlier files its procedure names, and the rest as a list', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('stepwise'),
+      step: steps[2] as never,
+    });
+    expect(block).toContain(
+      '`tasks/3/scope.md` — written by the earlier step **Scope the run**, and this procedure uses it. Open it with `read_artifact({ path: "tasks/3/scope.md" })`.',
+    );
+    expect(block).toContain("#### Earlier steps' files");
+    expect(block).toContain('**List billables** → `tasks/3/billables.json` (artifacts drawer)');
+  });
+
+  it('adds neither for a generalist owner, who wrote those files itself', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('generalist'),
+      step: steps[2] as never,
+    });
+    expect(block).not.toContain('written by the earlier step');
+    expect(block).not.toContain("Earlier steps' files");
+  });
+
+  it('shows a stepwise session the outline, scoped to its own step', () => {
+    const block = renderTaskContextBlock({
+      task: invoiceTask('stepwise'),
+      step: steps[2] as never,
+    });
+    expect(block).toContain('### Task outline');
+    expect(block).toContain(
+      '1. Scope the run (done)\n2. List billables (done)\n3. Collect (active)',
+    );
+    expect(block).toContain('Only the active step is yours.');
+    expect(block).not.toContain('You own every step');
+    expect(block.indexOf('### Task outline')).toBeLessThan(block.indexOf('#### Step procedure'));
+  });
+});
+
+describe('authoring notes', () => {
+  it('teaches the Squisq format a step declares, from the one shared source', () => {
+    const slideshow = { ...step, authoring: 'squisq-slideshow' } as typeof step;
+    const block = renderTaskContextBlock({ task, step: slideshow });
+    expect(block).toContain('### Writing a Squisq slideshow');
+    expect(block).toContain('{[imageWithCaption caption=');
+    expect(block.indexOf('#### Step procedure')).toBeLessThan(
+      block.indexOf('### Writing a Squisq slideshow'),
+    );
+
+    const doc = renderTaskContextBlock({
+      task,
+      step: { ...step, authoring: 'squisq' } as typeof step,
+    });
+    expect(doc).toContain('### Squisq extended markdown');
+    expect(doc).toContain("The step's procedure decides heading levels, slide breaks and layout");
+    expect(renderTaskContextBlock({ task, step })).not.toContain('Squisq');
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { findNightShiftOversightTask } from '../../meester/night-shift-oversight.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -107,6 +108,70 @@ describe('POST /api/questions — cross-turn dedup', () => {
     expect(second.status).toBe(201);
     expect(((await second.json()) as { deduped?: boolean }).deduped).toBeUndefined();
     expect(await pendingFor(project)).toHaveLength(1);
+  });
+});
+
+// The nightly review runs unattended. A re-driven run asked the person how to
+// settle a mismatch between two runtime guards (2026-10-08).
+describe('POST /api/questions — the unattended nightly review', () => {
+  it('declines its questions with what to do instead, and files no card', async () => {
+    const review = await findNightShiftOversightTask(svc.context.store);
+    expect(review).not.toBeNull();
+
+    const res = await api('POST', '/api/questions', {
+      projectId: 'default',
+      gezelId: 'imara',
+      sessionId: 'review-session',
+      prompt: 'The recurring re-arm is generating false re-nudges. How should I handle it?',
+      taskRef: review!.ref,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { questionId: string; declined?: string };
+    expect(body.declined).toMatch(/Nobody is awake/);
+    expect((await pendingFor('default')).some((q) => q.sessionId === 'review-session')).toBe(false);
+  });
+});
+
+describe('POST /api/questions — a night fix sweep', () => {
+  it("declines its questions too, and still posts a person's own night task", async () => {
+    const tasks = svc.context.tasks;
+    const sweep = await tasks.create(
+      'default',
+      {
+        title: 'Nightly fixes — 3 open issues',
+        assignee: { kind: 'user' },
+        steps: [{ id: 'triage', name: 'Triage', prompt: 'Triage the leads.' }],
+        entryStepId: 'triage',
+        nightShift: { enabled: true, onceADay: true },
+      },
+      { origin: { kind: 'boekwachter-issue', issueRef: 'BW-531', path: 'src/a.ts' } },
+    );
+    const own = await tasks.create('default', {
+      title: 'Research tonight',
+      assignee: { kind: 'user' },
+      steps: [{ id: 'research', name: 'Research', prompt: 'Research it.' }],
+      entryStepId: 'research',
+      nightShift: { enabled: true },
+    });
+    const askFrom = (taskRef: string, sessionId: string) =>
+      api('POST', '/api/questions', {
+        projectId: 'default',
+        gezelId: 'imara',
+        sessionId,
+        prompt: 'Should I enable project file edits to read the issue store?',
+        taskRef,
+      });
+
+    const declined = (await (await askFrom(sweep.ref, 'sweep-session')).json()) as {
+      declined?: string;
+    };
+    expect(declined.declined).toMatch(/Nobody is awake/);
+    const posted = (await (await askFrom(own.ref, 'own-session')).json()) as {
+      questionId: string;
+      declined?: string;
+    };
+    expect(posted.declined).toBeUndefined();
+    expect(posted.questionId).not.toBe('');
   });
 });
 
@@ -230,6 +295,55 @@ describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
     // Answer persisted so the card collapses and re-apply never re-asks.
     const questions = await svc.context.store.listProjectQuestions(projectId);
     expect(questions.find((q) => q.id === questionId)?.answer?.declined).toBe(true);
+  });
+});
+
+describe('POST /api/questions/:id/answer — task-paused card', () => {
+  async function pausedTaskCard(name: string) {
+    const project = await svc.context.store.createProject({ name });
+    const task = await svc.context.tasks.create(project.id, {
+      title: 'Monthly Invoice Run',
+      description: 'A two-step run that paused on its first step.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'collect', name: 'Collect' },
+        { id: 'finish', name: 'Finish', terminal: true },
+      ],
+    });
+    await svc.context.tasks.setStatus(project.id, task.num, 'paused');
+    const questionId = crypto.randomUUID();
+    await svc.context.store.writeQuestion({
+      id: questionId,
+      projectId: project.id,
+      gezelId: '',
+      sessionId: '',
+      prompt: `Task ${task.ref} paused for help at step \`collect\`.`,
+      choices: ['Dismiss', 'Try again'],
+      allowWriteIn: false,
+      taskRef: task.ref,
+      intent: {
+        kind: 'task-paused',
+        taskRef: task.ref,
+        stepId: 'collect',
+        reason: 'gate_exhausted',
+      },
+      createdAt: new Date().toISOString(),
+    });
+    return { project, task, questionId };
+  }
+
+  it('restarts the task when the answer is "Try again"', async () => {
+    const { project, task, questionId } = await pausedTaskCard('Try Again Card');
+    const res = await api('POST', `/api/questions/${questionId}/answer`, { selectedChoices: [1] });
+    expect(res.status).toBe(200);
+    expect((await svc.context.tasks.get(project.id, task.num))?.status).toBe('active');
+  });
+
+  it('leaves the task paused when the card is dismissed', async () => {
+    const { project, task, questionId } = await pausedTaskCard('Dismiss Card');
+    const res = await api('POST', `/api/questions/${questionId}/answer`, { selectedChoices: [0] });
+    expect(res.status).toBe(200);
+    expect((await svc.context.tasks.get(project.id, task.num))?.status).toBe('paused');
   });
 });
 

@@ -64,6 +64,15 @@ test.afterAll(async () => {
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
+test.beforeEach(async () => {
+  // Each case must also work alone or after a failure restarts the worker.
+  const crewToggle = page.getByTestId('sidebar-group-toggle-gezels');
+  if ((await crewToggle.getAttribute('aria-expanded')) !== 'true') {
+    await crewToggle.click();
+  }
+  await expect(crewToggle).toHaveAttribute('aria-expanded', 'true');
+});
+
 test('gallery lists the Language Trainer type and creates a project with a pinned dashboard', async () => {
   // Open the Projects area, then the New Project dialog via its canonical event.
   await page.evaluate(() => {
@@ -97,19 +106,18 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
 
   // After creation the project view shows the Output pane pinned to the
   // type's dashboard (served from the type source). The dashboard renders
-  // "Level" / "Sessions" / "Day streak" tiles inside the sandboxed iframe.
+  // "Level" / "Day streak" tiles inside the sandboxed iframe.
   const outputFrame = page.frameLocator('iframe.project-output-iframe');
-  await expect(outputFrame.getByText('Level')).toBeVisible({ timeout: 20_000 });
+  await expect(outputFrame.getByText('Level', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(outputFrame.getByText('Day streak')).toBeVisible();
   // The `language` param default ("Spanish") is substituted into the seeded
   // progress.json the dashboard reads — no literal `{{language}}` leaks.
-  await expect(outputFrame.getByText('Learning Spanish')).toBeVisible();
+  await expect(outputFrame.getByRole('heading', { level: 1 })).toContainText('Spanish');
   await expect(outputFrame.getByText('{{')).toHaveCount(0);
 
   // Applying the type also creates its Language Trainer gezel. The global
   // sidebar must invalidate its roster after apply (the earlier
   // project-created event fires before this gezel exists).
-  await page.getByTestId('sidebar-group-toggle-gezels').click();
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Language Trainer');
   await captureScreenshot(page, { path: '/tmp/gezel-project-type-dashboard.png', fullPage: false });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseToolEnvelopeReply } from './envelope.js';
+import { parseToolEnvelopeReply, trailingToolCallStart, withoutToolCallText } from './envelope.js';
 
 describe('whole-reply tool envelopes', () => {
   it('closes the call a small model left open at the end', () => {
@@ -56,5 +56,32 @@ describe('whole-reply tool envelopes', () => {
       '{"name":"write_file","arguments":{"path":"a.md","content":"x"},"extra":1',
     ])
       expect(parseToolEnvelopeReply(reply)).toBeNull();
+  });
+});
+
+describe('calls a small model writes around its prose', () => {
+  const escaped =
+    '{\\"name\\":\\"make_move\\",\\"arguments\\":{\\"from\\":\\"d6\\",\\"to\\":\\"c5\\",\\"moveThought\\":\\"A little shift!\\"}}';
+
+  it('reads a whole reply whose quotes are escaped one level too many', () => {
+    expect(parseToolEnvelopeReply(escaped)).toEqual({
+      name: 'make_move',
+      arguments: { from: 'd6', to: 'c5', moveThought: 'A little shift!' },
+    });
+  });
+
+  it('finds a call after prose without ever treating it as the reply', () => {
+    const reply = `Alright, a bold move!\n\n${escaped}`;
+    expect(parseToolEnvelopeReply(reply)).toBeNull();
+    expect(trailingToolCallStart(reply)).toBe(reply.indexOf('{'));
+    expect(withoutToolCallText(reply)).toBe('Alright, a bold move!');
+    expect(withoutToolCallText(escaped)).toBe('');
+  });
+
+  it('leaves JSON that is not a call alone', () => {
+    const json = '{"name": "Alice", "age": 3}';
+    expect(withoutToolCallText(json)).toBe(json);
+    expect(withoutToolCallText(`Here it is:\n${json}`)).toBe(`Here it is:\n${json}`);
+    expect(trailingToolCallStart('Just text.')).toBe(-1);
   });
 });

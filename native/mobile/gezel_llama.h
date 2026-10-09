@@ -236,6 +236,47 @@ int32_t gezel_llama_chat(gezel_llama_engine * engine, const char * request_json,
     const gezel_llama_chat_options * options, gezel_llama_json_callback on_event, void * user_data,
     gezel_llama_result * result, gezel_llama_error * error);
 
+/*
+ * Describe one picture with the loaded model's vision projector.
+ *
+ * Added after ABI 1 shipped; hosts that must run against older libraries
+ * check the symbol. The engine must hold the text model the projector was
+ * made for (gezel_llama_load); the projector (an mmproj GGUF) is opened on
+ * first use and kept with that model until it unloads or a different
+ * projector path is given. A call starts from empty memory and leaves it
+ * empty, so the next chat request reads its prompt from the start.
+ */
+typedef struct gezel_llama_image_options {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    uint64_t request_id;
+    /** Covers projector loading, image encoding, and decoding; at most 600000. */
+    uint32_t timeout_ms;
+    /** Ceiling on the description, 1-1024 tokens. */
+    uint32_t max_tokens;
+    uint32_t max_output_bytes;
+    /** Zero uses greedy decoding. */
+    float temperature;
+    uint32_t seed;
+    /** Cap on the picture's tokens for dynamic-resolution projectors; 0 keeps the projector's own. */
+    uint32_t image_max_tokens;
+    /** Projector file size limit. */
+    uint64_t max_projector_bytes;
+} gezel_llama_image_options;
+
+gezel_llama_image_options gezel_llama_default_image_options(void);
+
+/** Blocking. rgb holds width*height*3 bytes, row-major, no padding; both sides
+ * 1-4096. system_prompt may be NULL; user_prompt is the instruction that
+ * follows the picture. on_chunk receives the description as it is generated,
+ * under the same rules as gezel_llama_generate's callback. */
+int32_t gezel_llama_describe_image(gezel_llama_engine * engine, const char * projector_path,
+    const uint8_t * rgb, uint32_t width, uint32_t height,
+    const char * system_prompt, const char * user_prompt,
+    const gezel_llama_image_options * options,
+    gezel_llama_chunk_callback on_chunk, void * user_data,
+    gezel_llama_result * result, gezel_llama_error * error);
+
 /** Thread-safe cooperative cancellation of the matching CURRENT request only.
  * A late cancellation with an older request_id cannot cancel a later request.
  * Native loading/Metal kernels can delay observation until their next safe point.

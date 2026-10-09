@@ -1,4 +1,5 @@
 import type { CraftbookTestSpec } from '@bendyline/gezel';
+import { evalFixtureInputs } from './fixture-inputs.ts';
 import type { CraftbookEvalOverride } from './overrides.ts';
 import type { LoadedCraftbookTestSpec } from './test-spec-loader.ts';
 import type {
@@ -55,7 +56,7 @@ export function evalSpecFromTestSpec(
       ...(spec.setup.managedWorkspaceWritePolicy
         ? { managedWorkspaceWritePolicy: spec.setup.managedWorkspaceWritePolicy }
         : {}),
-      files: spec.setup.files,
+      files: evalFixtureInputs(loaded),
       ...(spec.setup.craftbookParams ? { craftbookParams: spec.setup.craftbookParams } : {}),
       ...(legacySimulators.length > 0 ? { simulators: legacySimulators } : {}),
       ...(spec.setup.worker ? { worker: spec.setup.worker } : {}),

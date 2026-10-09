@@ -50,6 +50,10 @@ export function runtimeCraftbookFromTemplate(
     // Command needs ride in so kickoff can raise their first-use approval
     // questions and the tools block can say what is pre-approved.
     ...(m.commands ? { commands: m.commands } : {}),
+    // Model and service needs ride in so `gezel do` can offer the setup
+    // (downloads, External services, a search key) before the run starts.
+    ...(m.models ? { models: m.models } : {}),
+    ...(m.services ? { services: m.services } : {}),
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),

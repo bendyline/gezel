@@ -4,6 +4,8 @@ import {
   EngagementDeniedError,
   assertScriptMethodAllowed,
   isEngagementAllowed,
+  parseReminderRequest,
+  resolveScriptMemorySave,
   toScriptTaskStep as toTaskStep,
 } from '@bendyline/gezel';
 export { CapabilityDeniedError, EngagementDeniedError } from '@bendyline/gezel';
@@ -17,7 +19,6 @@ import type {
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
-import { isMemoryKind } from '../memory/daily-markdown.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { resolveCredentialOriginPolicy } from '../secrets/origins.js';
 import type { CredentialRegistry } from '../secrets/registry.js';
@@ -67,6 +68,8 @@ export interface DispatcherContext {
    * denials as `write_artifact`: a script must not be the way around them.
    */
   initiatedByGezel?: boolean;
+  /** The gezel whose chat called the script, when one did. */
+  gezelId?: string;
 }
 
 /**
@@ -118,6 +121,8 @@ export interface DispatcherDeps {
    * constructed (they come up later in boot than the runner); until then
    * those calls return a typed error.
    */
+  /** Told when a script sets or clears its project's reminder, so notifiers reschedule. */
+  remindersChanged?: (projectId: string) => void;
   index?: {
     status(projectId: string): Promise<WorkspaceIndexStatus>;
     ensureFresh(
@@ -439,14 +444,33 @@ export function buildDispatcher(deps: DispatcherDeps): {
       capability: 'memory.write',
       handler: async (ctx, params) => {
         if (!deps.memory) throw new Error('memory.save is not available (no memory manager wired)');
-        const text = requireParam<string>(params, 'text');
-        // The SDK passes free-form `meta`; the only field the memory
-        // store understands is `kind`. Honor it when it's a valid kind,
-        // otherwise fall back to the manager's default.
-        const meta = param<Record<string, unknown>>(params, 'meta');
-        const kindRaw = typeof meta?.kind === 'string' ? meta.kind : undefined;
-        const kind = isMemoryKind(kindRaw) ? kindRaw : undefined;
-        return deps.memory.save('project', ctx.projectId, text, kind);
+        const save = resolveScriptMemorySave(params, {
+          projectId: ctx.projectId,
+          ...(ctx.gezelId ? { gezelId: ctx.gezelId } : {}),
+        });
+        return deps.memory.save(save.scope, save.id, save.text, save.kind, save.source);
+      },
+    },
+
+    'reminder.set': {
+      capability: 'reminders',
+      handler: async (ctx, params) => {
+        const reminder = parseReminderRequest(params, {
+          projectId: ctx.projectId,
+          source: ctx.scriptName,
+          now: new Date(),
+        });
+        await store.setProjectReminder(ctx.projectId, reminder);
+        deps.remindersChanged?.(ctx.projectId);
+        return undefined;
+      },
+    },
+    'reminder.clear': {
+      capability: 'reminders',
+      handler: async (ctx) => {
+        await store.setProjectReminder(ctx.projectId, null);
+        deps.remindersChanged?.(ctx.projectId);
+        return undefined;
       },
     },
 

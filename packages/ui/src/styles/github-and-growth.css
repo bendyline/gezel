@@ -1249,3 +1249,43 @@
     animation: none;
   }
 }
+
+/* ── Visit card ── */
+
+/* The one thing a gezel has waiting when its chat opens in social mode
+   (VisitCard.tsx). Sits above the timeline, never inside it: it is not a
+   message and must not scroll away with the thread. */
+.visit-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: var(--space-sm) var(--space-sm) 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.visit-card-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.visit-card-dismiss {
+  appearance: none;
+  flex: 0 0 auto;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.visit-card-dismiss:hover {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}

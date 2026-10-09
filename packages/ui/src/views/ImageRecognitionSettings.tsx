@@ -239,6 +239,7 @@ export function ImageRecognitionSettings() {
                   <button
                     type="button"
                     onClick={() => {
+                      void api.cancelRecognitionModelPull(entry.id).catch(() => undefined);
                       pull.controller.abort();
                       setPulls((prev) => {
                         const next = new Map(prev);

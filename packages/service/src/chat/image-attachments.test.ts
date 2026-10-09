@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rewritePromptDraftFileRefs } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { extractImageAttachments, findImageRefs } from './image-attachments.js';
@@ -72,6 +73,27 @@ describe('extractImageAttachments', () => {
     const atts = await extractImageAttachments(store, 'default', 'sess-1', md);
     expect(atts).toHaveLength(1);
     expect(atts[0]!.mimeType).toBe('image/png');
+  });
+
+  it('resolves a composer photo stored in its prompt draft', async () => {
+    const draftId = '2026-10-06-0007';
+    const name = 'photo-2026-10-06-101500.jpg';
+    await store.writeProjectArtifactBinary(
+      'default',
+      `prompts/${draftId}/message_files/${name}`,
+      Buffer.from('fake-jpeg-bytes'),
+    );
+    const md = rewritePromptDraftFileRefs(
+      `What is this?\n\n![Photo](message_files/${name})`,
+      draftId,
+    );
+    expect(findImageRefs(md)).toEqual([
+      { scope: 'artifacts', filename: `prompts/${draftId}/message_files/${name}` },
+    ]);
+    const atts = await extractImageAttachments(store, 'default', 'sess-1', md);
+    expect(atts).toHaveLength(1);
+    expect(atts[0]!.mimeType).toBe('image/jpeg');
+    expect(Buffer.from(atts[0]!.base64, 'base64').toString()).toBe('fake-jpeg-bytes');
   });
 
   it('silently drops refs that do not resolve', async () => {

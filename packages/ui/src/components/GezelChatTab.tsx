@@ -13,6 +13,7 @@ import { ChatReferences } from './ChatReferences.js';
 import { GezelTimeline } from './GezelTimeline.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
+import { VisitCard } from './VisitCard.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
 import {
   gezelAllProjectsThreadKey,
@@ -398,6 +399,12 @@ function GezelChatBody({
         onTaskReference,
       }) => (
         <>
+          <VisitCard
+            gezelId={gezel.id}
+            gezelName={gezelDisplayName}
+            projectId={project.projectId}
+            onOpenTask={onTaskReference}
+          />
           <ProjectTimeline
             projectId={project.projectId}
             gezelId={gezel.id}

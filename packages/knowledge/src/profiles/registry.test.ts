@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   BGE_SMALL_EN_V15_1,
+  EMBEDDINGGEMMA_2_512_1,
   KNOWLEDGE_EMBEDDING_PROFILES,
   MARKDOWN_CHUNKS_2,
   MULTILINGUAL_E5_SMALL_1,
@@ -34,8 +35,10 @@ describe('embedding profile registry', () => {
     for (const profile of KNOWLEDGE_EMBEDDING_PROFILES) {
       expect(profile.model.revision).toMatch(/^[0-9a-f]{40}$/);
       expect(profile.vectorEncoding).toBe('bit+int8');
-      expect(profile.dimensions).toBe(384);
       expect(profile.id.startsWith('gezel-')).toBe(false);
+    }
+    for (const profile of [MULTILINGUAL_E5_SMALL_1, MULTILINGUAL_E5_SMALL_2, BGE_SMALL_EN_V15_1]) {
+      expect(profile.dimensions).toBe(384);
     }
   });
 
@@ -44,10 +47,12 @@ describe('embedding profile registry', () => {
     // profile, not whatever the runtime defaults to, and the digests are the
     // Hub's LFS object ids at the pinned revisions (2026-09-03).
     for (const profile of KNOWLEDGE_EMBEDDING_PROFILES) {
-      expect(profile.model.onnxFile).toBe('onnx/model.onnx');
       expect(profile.model.onnxDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
       expect(profile.tokenizer.file).toBe('tokenizer.json');
       expect(profile.tokenizer.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    }
+    for (const profile of [MULTILINGUAL_E5_SMALL_1, BGE_SMALL_EN_V15_1]) {
+      expect(profile.model.onnxFile).toBe('onnx/model.onnx');
     }
     expect(MULTILINGUAL_E5_SMALL_1.model.onnxDigest).toBe(
       'sha256:4aa845c27760e06e9a686b9d8b5d440eae4b6612cd09e5b522b716d3941f77ff',
@@ -82,6 +87,33 @@ describe('embedding profile registry', () => {
     ).toBe(MULTILINGUAL_E5_SMALL_2);
     expect(knowledgeEmbeddingProfile('multilingual-e5-small@2')).toBe(MULTILINGUAL_E5_SMALL_2);
     expect(knowledgeEmbeddingProfile('multilingual-e5-small@1')).toBe(MULTILINGUAL_E5_SMALL_1);
+  });
+
+  it('pins EmbeddingGemma 2: q8 text graph and its weights, 768 → 512, centered bits, media encoders', () => {
+    const gemma = EMBEDDINGGEMMA_2_512_1;
+    expect(gemma.id).toBe('embeddinggemma-2-512@1');
+    expect(gemma.model.onnxFile).toBe('onnx/model_quantized.onnx');
+    expect(gemma.model.files?.map((f) => f.path)).toContain('onnx/model_quantized.onnx_data');
+    for (const file of gemma.model.files ?? []) {
+      expect(file.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    }
+    expect(gemma.dimensions).toBe(512);
+    expect(gemma.truncation).toEqual({ method: 'prefix', sourceDimensions: 768 });
+    expect(gemma.quantization.binary.method).toBe('centered-sign');
+    const center = embeddingProfileCenter(gemma);
+    expect(center?.length).toBe(512);
+    const norm = Math.sqrt(Array.from(center ?? []).reduce((sum, x) => sum + x * x, 0));
+    expect(norm).toBeGreaterThan(0.5);
+    expect(norm).toBeLessThan(0.95);
+    expect(gemma.media?.image?.tokenBudget).toBe(280);
+    expect(gemma.media?.image?.encoder.files?.map((f) => f.path)).toContain(
+      'onnx/vision_encoder_quantized.onnx_data',
+    );
+    expect(gemma.media?.audio?.encoder.files?.map((f) => f.path)).toContain(
+      'onnx/audio_encoder_quantized.onnx_data',
+    );
+    // A new vector space: it shares nothing with the 384-d profiles.
+    expect(sameVectorSpace(gemma, BGE_SMALL_EN_V15_1)).toBe(false);
   });
 
   it('resolves by id and rejects unknown ids', () => {

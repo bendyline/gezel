@@ -1,21 +1,25 @@
 /** Container-level constants of the `.gezk` format. */
 
 /**
- * Public format version this implementation writes. `0.x` is preliminary:
- * breaking changes may land in any minor until 1.0, and a reader supports
- * exactly the versions it names (see {@link GEZK_FORMAT_GENERATIONS}).
+ * Newest public format version this implementation writes. `0.x` is
+ * preliminary: breaking changes may land in any minor until 1.0, and a reader
+ * supports exactly the versions it names (see {@link GEZK_FORMAT_GENERATIONS}).
+ * The compiler writes the OLDEST generation that can express a catalog (0.7
+ * unless it uses 0.8 vocabulary), so catalog updates keep reaching readers
+ * that predate the newest generation.
  */
-export const GEZK_FORMAT_VERSION = '0.7';
-/** SQLite schema generation this implementation writes (`PRAGMA user_version`). */
-export const GEZK_INDEX_SCHEMA_VERSION = 4;
+export const GEZK_FORMAT_VERSION = '0.8';
+/** SQLite schema generation paired with {@link GEZK_FORMAT_VERSION} (`PRAGMA user_version`). */
+export const GEZK_INDEX_SCHEMA_VERSION = 5;
 
 /**
  * Every (formatVersion, indexSchemaVersion) pairing this implementation
- * reads. The writer always emits the current pair; older generations stay
- * readable so a catalog published under an earlier 0.x keeps opening after
- * a reader upgrade. A manifest that pairs the two differently is corrupt.
+ * reads. The writer emits the oldest pair that can express a catalog; older
+ * generations stay readable so a catalog published under an earlier 0.x
+ * keeps opening after a reader upgrade. A manifest that pairs the two
+ * differently is corrupt.
  */
-export const GEZK_FORMAT_GENERATIONS = { '0.5': 2, '0.6': 3, '0.7': 4 } as const;
+export const GEZK_FORMAT_GENERATIONS = { '0.5': 2, '0.6': 3, '0.7': 4, '0.8': 5 } as const;
 export type GezkFormatVersion = keyof typeof GEZK_FORMAT_GENERATIONS;
 export type GezkIndexSchemaVersion = (typeof GEZK_FORMAT_GENERATIONS)[GezkFormatVersion];
 export const GEZK_SUPPORTED_FORMAT_VERSIONS = Object.keys(GEZK_FORMAT_GENERATIONS) as [
@@ -29,6 +33,14 @@ export const GEZK_SUPPORTED_INDEX_SCHEMA_VERSIONS = Object.values(GEZK_FORMAT_GE
 
 export function isSupportedFormatVersion(value: unknown): value is GezkFormatVersion {
   return typeof value === 'string' && Object.hasOwn(GEZK_FORMAT_GENERATIONS, value);
+}
+
+/**
+ * Whether `version` is `minimum` or a later generation. Generations are
+ * ordered by their index schema, so this never parses version strings.
+ */
+export function formatAtLeast(version: GezkFormatVersion, minimum: GezkFormatVersion): boolean {
+  return GEZK_FORMAT_GENERATIONS[version] >= GEZK_FORMAT_GENERATIONS[minimum];
 }
 
 export function isSupportedIndexSchemaVersion(value: unknown): value is GezkIndexSchemaVersion {

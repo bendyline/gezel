@@ -8,12 +8,22 @@ add_subdirectory("${GEZEL_LLAMA_SOURCE_DIR}" llama)
 find_package(Threads REQUIRED)
 include(common-chat.cmake)
 
-add_library(gezel-llama gezel_llama.cpp gezel_chat.cpp $<TARGET_OBJECTS:gezel-common-chat>)
+# mtmd (vision projectors) is linked into gezel-llama rather than shipped as
+# its own library, so Android packages the same .so set it always has. Video
+# needs an ffmpeg process a phone does not have.
+set(GEZEL_SHARED_LIBS ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+set(MTMD_VIDEO OFF CACHE BOOL "" FORCE)
+add_subdirectory("${GEZEL_LLAMA_SOURCE_DIR}/tools/mtmd" mtmd)
+set(BUILD_SHARED_LIBS ${GEZEL_SHARED_LIBS})
+set_target_properties(mtmd PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_library(gezel-llama gezel_llama.cpp gezel_chat.cpp gezel_vision.cpp $<TARGET_OBJECTS:gezel-common-chat>)
 target_compile_features(gezel-llama PUBLIC cxx_std_17)
 target_include_directories(gezel-llama PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 # llama-ext.h (llama_get_memory_breakdown, for gezel_llama_estimate_memory).
 target_include_directories(gezel-llama PRIVATE "${GEZEL_LLAMA_SOURCE_DIR}/src" "${GEZEL_COMMON_DIR}")
-target_link_libraries(gezel-llama PUBLIC llama PRIVATE vendor::nlohmann Threads::Threads)
+target_link_libraries(gezel-llama PUBLIC llama PRIVATE mtmd vendor::nlohmann Threads::Threads)
 set_target_properties(gezel-llama PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

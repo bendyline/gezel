@@ -179,6 +179,17 @@ const VOORMAN_SCHEDULER_SKIP = /skip meester nudge — voorman is the Meester/;
 const DRAFT_ACTIVATION_SCHEDULER_SKIP =
   /skip meester nudge — only draft task\(s\) await activation/;
 const PRE_PROVIDER_STALL_REASON = /pre-provider stall/i;
+/**
+ * The Linux gate-script sandbox could not start a script that needs both a
+ * network-deny boundary and its RPC channel (sandbox/runner.ts). No model can
+ * pass a gate that never runs: 17 author-gate-script trials booked as model
+ * failures before this rule (2026-10-06 review).
+ */
+const SANDBOX_UNAVAILABLE = /denyNet requires an enforceable OS network boundary/;
+/** A gate the runtime could not evaluate at all (unfilled placeholders, missing inputs). */
+const GATE_UNEVALUABLE = /could not be evaluated — pausing without consuming an attempt/;
+/** The task paused for help and nothing brought it back. */
+const TASK_PAUSED_FOR_HELP = /\[tasks\] \S+ paused for help \(/;
 
 /** Minimum repeats before a log signature counts as the cause: a single
  * Jinja 500 can be recovered from; a single scheduler skip is routine. */
@@ -213,6 +224,21 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
 
   if (input.failureMode === 'interrupted' || /interrupted \(SIG(INT|TERM)/.test(reason)) {
     return { failureClass: 'operator', rule: 'operator-interrupt', evidence: reason.slice(0, 140) };
+  }
+
+  if (
+    /Qualification (?:failed:|blocked evaluator|blocked provider|blocked an undeclared evaluator)/.test(
+      reason,
+    ) &&
+    /(?:measurement|provenance|observation|unobservable|not be observed|not observed|lifecycle evidence|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
+      reason,
+    )
+  ) {
+    return {
+      failureClass: 'grader',
+      rule: 'qualification-evidence',
+      evidence: reason.slice(0, 240),
+    };
   }
 
   const ungraded = reason.match(GRADER_UNAVAILABLE_PATTERN);
@@ -290,6 +316,14 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
 
   if (isStallish(input) && input.daemonLog) {
+    const sandbox = findInReasonOrLog(input, SANDBOX_UNAVAILABLE);
+    if (sandbox) {
+      return { failureClass: 'infra', rule: 'sandbox-unavailable', evidence: sandbox };
+    }
+    const unevaluable = findInReasonOrLog(input, GATE_UNEVALUABLE);
+    if (unevaluable) {
+      return { failureClass: 'infra', rule: 'gate-unevaluable', evidence: unevaluable };
+    }
     // A render that opened and never completed at kill time means the
     // trial died waiting on (or was killed holding) a native image job —
     // the June 1-2 GPU-arbiter-vs-watchdog class.
@@ -370,6 +404,10 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
         rule: 'tool-repeat-abort-storm',
         evidence: `${readAborts}× read-tool repeat aborts in one trial`,
       };
+    }
+    const paused = findInReasonOrLog(input, TASK_PAUSED_FOR_HELP);
+    if (paused) {
+      return { failureClass: 'model', rule: 'task-paused-unrecovered', evidence: paused };
     }
   }
 

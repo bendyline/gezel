@@ -376,3 +376,43 @@ describe('GezelApp cancellation', () => {
     expect((error as Error).name).toBe('AbortError');
   });
 });
+
+describe('GezelApp.chat progress extension', () => {
+  it('requests and validates phase metadata separately from content', async () => {
+    const progress = { phase: 'prefill', percent: 50, outputTokens: null, tokensPerSecond: null };
+    const frame = {
+      id: 'test',
+      object: 'chat.completion.chunk',
+      model: 'test',
+      created: 0,
+      choices: [],
+    };
+    const { fetch, calls } = recordingFetch(
+      sseResponse(
+        `${[
+          { ...frame, gezel_progress: progress },
+          { ...frame, gezel_progress: { ...progress, percent: 101 } },
+          { ...frame, choices: [{ index: 0, delta: { content: 'Reply' }, finish_reason: null }] },
+        ]
+          .map((value) => `data: ${JSON.stringify(value)}\n\n`)
+          .join('')}data: [DONE]\n\n`,
+      ),
+    );
+    const app = new GezelApp({ baseUrl: 'http://x', token: 'tk', fetch });
+    const stream = await app.chat({
+      model: 'test',
+      messages: [{ role: 'user', content: 'Hi' }],
+      stream: true,
+      stream_options: { include_progress: true, include_usage: true },
+    });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    expect(JSON.parse(String(calls[0]?.init.body)).stream_options).toEqual({
+      include_progress: true,
+      include_usage: true,
+    });
+    expect(chunks[0]?.gezel_progress).toEqual(progress);
+    expect(chunks[1]?.gezel_progress).toBeUndefined();
+    expect(chunks[2]?.choices[0]?.delta.content).toBe('Reply');
+  });
+});

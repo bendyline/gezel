@@ -11,12 +11,20 @@
 
 export { parseKokoroLexicon, type KokoroLexicon } from './lexicon.js';
 export { soundOutWord } from './letter-to-sound.js';
-export { normalizeForSpeech, spellNumber, spellOrdinal } from './normalize.js';
-export { phonemizeForKokoro, type KokoroPhonemizeOptions } from './phonemize.js';
-export { splitForKokoro, tokenizeKokoroPhonemes, type KokoroTokens } from './tokenize.js';
 export {
-  KOKORO_MAX_PHONEMES,
-  KOKORO_PAD_TOKEN,
-  kokoroSymbols,
-  kokoroTokenFor,
-} from './vocab.js';
+  normalizeForSpeech,
+  normalizeForSpeechWithMapping,
+  spellNumber,
+  spellOrdinal,
+} from './normalize.js';
+export {
+  phonemizeForKokoro,
+  phonemizeForKokoroWithMapping,
+  type KokoroPhonemizeOptions,
+  type KokoroMappedPhonemes,
+} from './phonemize.js';
+export { splitForKokoro, tokenizeKokoroPhonemes, type KokoroTokens } from './tokenize.js';
+export { KOKORO_MAX_PHONEMES, KOKORO_PAD_TOKEN, kokoroSymbols, kokoroTokenFor } from './vocab.js';
+
+export { planKokoroSpeech, type KokoroPlannedUtterance, type KokoroWordTokens } from './plan.js';
+export type { KokoroSourceRange } from './source-map.js';

@@ -17,7 +17,7 @@ import {
   isSharedLibraryProject,
   selectBackupItems,
 } from '@bendyline/gezel';
-import { gezelDir, gezelPaths, projectStorageDir } from '@bendyline/gezel/paths';
+import { gezelDir, gezelPaths, projectStorageDir, userMemoriesDir } from '@bendyline/gezel/paths';
 import * as yazl from 'yazl';
 import { isPathInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -173,6 +173,27 @@ async function collectItems(deps: BackupDeps, excludeWorkspaces: boolean): Promi
       sourcePath: documentsRoot,
       entryPrefix: 'documents',
       exclude: [],
+    });
+  }
+
+  // The person's own memories: their daily files only. The index is derived,
+  // and compaction's archive and state belong to this machine.
+  const memoriesRoot = userMemoriesDir(home);
+  const memoryExclude = ['index', 'archive', 'compaction-state.json', 'summary.md'].map((name) =>
+    join(memoriesRoot, name),
+  );
+  const memoriesSize = await measureTree(memoriesRoot, memoryExclude);
+  if (memoriesSize.fileCount > 0) {
+    items.push({
+      kind: 'memory-root',
+      id: 'memories',
+      label: 'About you',
+      bytes: memoriesSize.bytes,
+      fileCount: memoriesSize.fileCount,
+      external: false,
+      sourcePath: memoriesRoot,
+      entryPrefix: 'memories',
+      exclude: memoryExclude,
     });
   }
 

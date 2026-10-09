@@ -77,7 +77,7 @@ export const AdvanceTaskStepInputSchema = z
       .string()
       .optional()
       .describe(
-        'Id of the step to activate next, or "next" / omit to advance to the following step in order.',
+        'Explicit destination step id. Omit or use "next" to follow the plan\'s configured routing, which can loop back. For a branch chosen by the step procedure, pass that destination id explicitly.',
       ),
   })
   .strict();

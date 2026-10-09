@@ -26,4 +26,19 @@ export interface GezelRuntimePlugin extends NativeInferencePlugin {
   resumeModelDownload(options: { id: string }): Promise<{ download: MobileModelDownload }>;
   cancelModelDownload(options: { id: string }): Promise<void>;
   removeModelDownload(options: { id: string }): Promise<void>;
+  /**
+   * Describe one photo with an installed llama.cpp vision model and the
+   * projector downloaded beside it as its own library entry. Builds that
+   * predate the vision bridge do not have it.
+   */
+  describeImage?(options: {
+    requestId: string;
+    modelId: string;
+    projectorId: string;
+    /** Base64 image bytes; the native side decodes, orients, and sizes them. */
+    image: string;
+    system?: string;
+    user: string;
+    maxTokens?: number;
+  }): Promise<{ status: 'ok' | 'cancelled'; description?: string }>;
 }

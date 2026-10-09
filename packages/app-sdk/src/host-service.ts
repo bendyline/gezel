@@ -38,6 +38,11 @@ export async function hostInProcess(
     );
   }
 
+  if (opts.distributionProfile === 'store' && !opts.nativeBinDir)
+    throw new GezelSdkError('A store embedding requires a bundled native engine directory', {
+      code: 'native_payload_required',
+    });
+
   // Resolve the home WITHOUT touching the environment yet: adoption below may
   // return someone else's daemon, and applying (then restoring) the env around
   // that would leave this process's variables briefly wrong for no reason.
@@ -51,7 +56,7 @@ export async function hostInProcess(
   active = true;
   try {
     const service = await loadService(opts);
-    if (opts.distributionProfile === 'store' && opts.nativeBinDir) {
+    if (opts.nativeBinDir) {
       if (!service.verifyNativeBinaries)
         throw new GezelSdkError('This service cannot verify bundled native engines', {
           code: 'native_verification_unavailable',

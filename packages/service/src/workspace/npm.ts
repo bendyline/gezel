@@ -102,6 +102,37 @@ async function writeProjectAllowlist(
   await writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org/';
+
+/**
+ * The registry to install from, read where a gezel cannot write. pnpm also
+ * takes `registry` from a workspace `.npmrc`, so an install that inherited
+ * the workspace's config could fetch an allowlisted name such as `zod` from
+ * a registry the gezel chose — code that later runs under an approved
+ * `npm run test`, with no prompt naming the substitution. Asking pnpm from
+ * the daemon-owned project sidecar keeps the user's own setting (`~/.npmrc`
+ * or pnpm's global config, so corporate mirrors still work), and the caller
+ * pins it on the command line, which outranks every config file. Scoped
+ * `@scope:registry` entries are not pinned; no shipped allowlist entry is
+ * scoped.
+ */
+async function resolveTrustedRegistry(home: string, projectId: string): Promise<string> {
+  try {
+    const cwd = projectPrivateDir(home, projectId);
+    await mkdir(cwd, { recursive: true });
+    const res = await runPnpm(['config', 'get', 'registry'], {
+      cwd,
+      lifecycle: 'allow',
+      timeoutMs: 15_000,
+    });
+    const value = res.stdout.trim().split(/\r?\n/).pop()?.trim() ?? '';
+    if (res.ok && /^https?:\/\/\S+$/i.test(value)) return value;
+  } catch {
+    // Fall through to the public registry.
+  }
+  return DEFAULT_NPM_REGISTRY;
+}
+
 function matchesAllowlist(pkg: string, version: string): boolean {
   for (const entry of SHIPPED_ALLOWLIST) {
     if (entry.package !== pkg) continue;
@@ -260,6 +291,7 @@ export async function requestNpmInstalls(
 
   const projectAllow = await readProjectAllowlist(opts.home, opts.projectId);
   const pendingApprovals = await loadPendingApprovalIndex(opts.store, opts.projectId);
+  let registry: string | undefined;
 
   const results: NpmInstallPackageOutcome[] = [];
   const needsApproval: NpmInstallApprovalPackage[] = [];
@@ -279,7 +311,15 @@ export async function requestNpmInstalls(
     }
 
     if (matchesAllowlist(pkg, version) || matchesProjectApproval(projectAllow, pkg, version)) {
-      const outcome = await installNow(opts.store, gate.workspaceDir, pkg, version, opts.projectId);
+      registry ??= await resolveTrustedRegistry(opts.home, opts.projectId);
+      const outcome = await installNow(
+        opts.store,
+        gate.workspaceDir,
+        pkg,
+        version,
+        opts.projectId,
+        registry,
+      );
       results.push(outcome);
       continue;
     }
@@ -413,12 +453,15 @@ async function installNow(
   pkg: string,
   version: string,
   projectId: string,
+  registry: string,
 ): Promise<NpmInstallPackageOutcome> {
   const spec =
     version === 'latest' || version === '*'
       ? formatNpmRegistrySpec(pkg)
       : formatNpmRegistrySpec(pkg, version);
-  const res = await runPnpm(['add', '--', spec], { cwd: workspaceDir });
+  const res = await runPnpm(['add', `--config.registry=${registry}`, '--', spec], {
+    cwd: workspaceDir,
+  });
   if (!res.ok) {
     return {
       kind: 'failed',
@@ -472,6 +515,7 @@ export async function applyNpmInstallApprovals(
       : `[npm_install follow-up: workspace not writable (${gate.reason}). The user's external workingDir needs managed workspace writes enabled before packages can be installed.]`;
   }
   const workspaceDir = gate.workspaceDir;
+  let registry: string | undefined;
 
   for (const d of decisions) {
     const entry: AllowlistedEntry = {
@@ -492,7 +536,8 @@ export async function applyNpmInstallApprovals(
       ...allow.approved.filter((e) => !(e.package === d.package && e.version === d.version)),
       entry,
     ];
-    const result = await installNow(store, workspaceDir, d.package, d.version, projectId);
+    registry ??= await resolveTrustedRegistry(home, projectId);
+    const result = await installNow(store, workspaceDir, d.package, d.version, projectId, registry);
     if (result.kind === 'installed') {
       installed.push(`${d.package}@${d.version}`);
     } else if (result.kind === 'failed') {

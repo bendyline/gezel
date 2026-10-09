@@ -580,6 +580,7 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 
 ### Testing patterns
 
+- **Test documentation behavior, not editorial wording.** Do not pin README or handbook prose, article titles, or section labels to exact strings or required phrases. Keep checks for parsers, rendering, links, executable examples, generated data, and structured license inventories; use fixtures or current source metadata when testing how content flows through the app.
 - **Isolation**: `await mkdtemp(join(tmpdir(), 'gezel-…'))` + `GEZEL_HOME=<dir>`. Always `rm` on cleanup. The Store is instantiated per-test.
 - **No real credentials in tests.** Use `MockProvider` directly (injected via `ChatManager({ providers: [['copilot', mock]] })`) or set `GEZEL_MOCK_PROVIDER=1` for integration tests that boot the full service.
 - **Memory is stubbed** in unit tests via a no-op `MemoryManager`-shaped object — the real one pulls in a sentence-transformer model on first use.

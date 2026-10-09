@@ -84,6 +84,7 @@ export const HistoryEventKindSchema = z.enum([
   'workspace.delete',
   'workspace.mkdir',
   'workspace.move',
+  'workspace.copy',
   'workspace.npm.installed',
   'workspace.npm.declined',
   'workspace.script.run',
@@ -167,6 +168,12 @@ export const HistoryEventKindSchema = z.enum([
    */
   'keurmeester.intervention',
   'keurmeester.digest.generated',
+  /**
+   * A Night Shift window closed. `details` carries `{ windowKey, ran,
+   * reason?, startedAt?, endedAt?, tasksCompleted, reports, proposals }`;
+   * `reason` says why a window that produced nothing produced nothing.
+   */
+  'night-shift.window-settled',
   'task.created',
   'task.activated',
   'task.updated',
@@ -223,6 +230,11 @@ export const HistoryEventKindSchema = z.enum([
   'memory.auto-recalled',
   /** Per-turn indexed context injected on the user-message channel. */
   'retrieval.context-injected',
+  /**
+   * A session's system prompt, sized by section, logged once per distinct
+   * prompt. Sizes only; the text itself is kept only in debug mode.
+   */
+  'prompt.compiled',
   'memory.auto-summarized',
   'memory.compacted',
   'memory.lessons-updated',

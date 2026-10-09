@@ -67,6 +67,13 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
       'src/host-service.ts loadService() — the dynamic import that starts a daemon inside a connected app',
   },
   {
+    specifier: '@bendyline/gezel-service/media',
+    from: 'cli',
+    mode: 'import',
+    usedBy:
+      'src/knowledge-command.ts defaultCreateMediaEmbedder() — how `gezel knowledge build` embeds the photos, video and audio of a multimodal catalog',
+  },
+  {
     specifier: '@bendyline/gezel-mcp/dist/server.js',
     from: 'service',
     mode: 'require',

@@ -1070,9 +1070,12 @@ describe('generalist task outline', () => {
     expect(rendered).not.toContain('### About this project');
   });
 
-  it('is absent for a stepwise task, whose anchor keeps the old wording', () => {
+  it('is scoped to the active step for a stepwise task, whose anchor keeps the old wording', () => {
     const rendered = render({});
-    expect(rendered).not.toContain('### Task outline');
+    expect(rendered).toContain('### Task outline');
+    expect(rendered).toContain('3. Draft chapters (pending)');
+    expect(rendered).not.toContain('[fanout:');
+    expect(rendered).toContain('Only the active step is yours.');
     expect(rendered).not.toContain('You own every step of this task');
     expect(rendered).toContain('#### Step procedure');
   });

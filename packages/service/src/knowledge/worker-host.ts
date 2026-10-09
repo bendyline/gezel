@@ -166,6 +166,9 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
     readAsset: async (key, path) =>
       // biome-ignore lint/suspicious/noExplicitAny: structured-clone copies the bytes across the port
       (await call('readAsset', [key, path])) as any,
+    assetFile: async (key, path) =>
+      // biome-ignore lint/suspicious/noExplicitAny: structured-clone round trip preserves the shape
+      (await call('assetFile', [key, path])) as any,
     search: async (request) =>
       // biome-ignore lint/suspicious/noExplicitAny: structured-clone round trip preserves the shape
       (await call('search', [request])) as any,

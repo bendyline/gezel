@@ -2,6 +2,7 @@ import type { CatalogItemSummary } from '@bendyline/gezel';
 import { initialPoppetjeForGezel } from '@bendyline/gezel';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { Poppetje } from '../../poppetje/index.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import {
   ProjectGlyph,
   type ProjectGlyphId,
@@ -125,7 +126,12 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
     }
     const scheduleCount = (catalogType.schedules ?? []).length;
     if (scheduleCount > 0) {
-      rows.push({ glyph: 'calendar', text: plural(scheduleCount, 'scheduled routine') });
+      // A host that runs nothing while it is closed must not promise a routine.
+      const runsHere = runtimeCapabilities().background;
+      rows.push({
+        glyph: 'calendar',
+        text: `${plural(scheduleCount, 'scheduled routine')}${runsHere ? '' : ', run by the desktop app'}`,
+      });
     }
     const toolsetCount = (catalogType.toolsets ?? []).length;
     if (toolsetCount > 0) rows.push({ glyph: 'dots', text: plural(toolsetCount, 'toolset') });

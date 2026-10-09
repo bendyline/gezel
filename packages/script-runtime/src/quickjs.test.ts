@@ -92,6 +92,48 @@ describe('QuickJS script execution', () => {
     });
   });
 
+  it('runs a project-type script that keeps its log through the SDK store helpers', async () => {
+    const files = new Map<string, string>();
+    const options = runOptions(
+      `
+      import { gezel } from '@bendyline/gezel-sdk';
+      import { logStore } from '@bendyline/gezel-sdk/stores';
+      const log = logStore(gezel.fs, 'training.json');
+      await log.append({ kind: 'workout', data: { minutes: 30 } });
+      await log.append({ kind: 'workout', data: { minutes: 20 } });
+      gezel.output({ count: (await log.list()).length });
+    `,
+      {
+        onRequest: vi.fn(async (method, params) => {
+          const frame = params as { path: string; content: string };
+          if (method === 'fs.write') files.set(frame.path, frame.content);
+          else if (method === 'fs.read') {
+            if (!files.has(frame.path)) throw new Error('missing');
+            return files.get(frame.path);
+          } else throw new Error(`Unexpected method ${method}`);
+        }),
+      },
+    );
+    const stores = new QuickJSScriptExecutor({
+      sdkModuleSource,
+      modules: {
+        '@bendyline/gezel-sdk/stores': readFileSync(
+          new URL('../../sdk/dist/stores.js', import.meta.url),
+          'utf8',
+        ),
+      },
+      compile: (source, fileName) =>
+        transpileModule(source, {
+          fileName,
+          compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
+        }).outputText,
+      now: () => performance.now(),
+    });
+    expect(await stores.execute(options)).toMatchObject({ exitCode: 0, stderr: '' });
+    expect(options.onNotification).toHaveBeenCalledWith('script.output', { value: { count: 2 } });
+    expect(JSON.parse(files.get('training.json')!).events).toHaveLength(2);
+  });
+
   it('lets scripts recover from structured capability denials', async () => {
     const options = runOptions(
       `

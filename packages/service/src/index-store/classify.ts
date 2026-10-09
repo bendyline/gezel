@@ -1,5 +1,5 @@
 import { basename, extname } from 'node:path';
-import type { Modality } from './index-store.js';
+import type { Modality } from './index-store-types.js';
 
 /**
  * Cheap, deterministic file classification — language, a coarse `kind`, the
@@ -85,6 +85,16 @@ const IMAGE_EXTS = new Set([
   'tif',
   'svg',
   'ico',
+  // Phone and camera photos: HEIC from iPhones, and camera RAW.
+  'heic',
+  'heif',
+  'dng',
+  'cr2',
+  'nef',
+  'arw',
+  'raf',
+  'orf',
+  'rw2',
 ]);
 const CONFIG_EXTS = new Set(['json', 'yaml', 'yml', 'toml', 'ini', 'env', 'xml', 'properties']);
 const DATA_EXTS = new Set(['csv', 'tsv']);
@@ -119,11 +129,6 @@ const BINARY_EXTS = new Set([
   'ttf',
   'otf',
   'eot',
-  'mp4',
-  'mov',
-  'avi',
-  'mkv',
-  'webm',
   'db',
   'sqlite',
   'lock',
@@ -135,6 +140,13 @@ const BINARY_EXTS = new Set([
  * searchable and summarizable like any document.
  */
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'flac', 'ogg', 'oga', 'm4a', 'aac', 'opus']);
+
+/**
+ * Video gets its own modality: the media tier embeds it window by window
+ * (frames through the multimodal model, decoded by the system ffmpeg), so a
+ * moment in a recording is findable by what it shows.
+ */
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi']);
 
 /** Anything larger than this in the text/code tiers is treated as trivial. */
 export const MAX_INDEXABLE_BYTES = 512 * 1024;
@@ -175,6 +187,7 @@ export function classifyFile(path: string, size: number): FileClass {
   if (DOC_EXTS.has(ext)) return { lang: null, kind: 'doc', modality: 'doc', trivial: false };
   if (IMAGE_EXTS.has(ext)) return { lang: null, kind: 'image', modality: 'image', trivial: false };
   if (AUDIO_EXTS.has(ext)) return { lang: null, kind: 'audio', modality: 'audio', trivial: false };
+  if (VIDEO_EXTS.has(ext)) return { lang: null, kind: 'video', modality: 'video', trivial: false };
   if (CONFIG_EXTS.has(ext)) {
     return { lang: ext, kind: 'config', modality: 'text', trivial: size > MAX_INDEXABLE_BYTES };
   }
@@ -204,7 +217,7 @@ function triv(kind: string): FileClass {
  * UTF-8 — the exact defect that put 1155 bytes of JPEG mojibake into a chat
  * prompt above the turn's system route.
  */
-const DERIVED_INDEX_KINDS = new Set(['image', 'audio', 'doc', 'binary']);
+const DERIVED_INDEX_KINDS = new Set(['image', 'audio', 'video', 'doc', 'binary']);
 
 export function hasDerivedIndexText(path: string): boolean {
   return DERIVED_INDEX_KINDS.has(classifyFile(path, 0).kind);

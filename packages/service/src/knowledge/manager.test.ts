@@ -344,6 +344,21 @@ describe('KnowledgeManager — per-profile query embedding', () => {
     expect(dovetails?.relevance).toBe(1);
   });
 
+  it('falls back to the keyword arms when the catalog refuses the query vector', async () => {
+    // A query one dimension short is what an embedder that ignored a
+    // profile's truncation looks like from the catalog's side.
+    embedOverride = () => new Array<number>(383).fill(1 / Math.sqrt(383));
+    try {
+      const results = await profileManager.searchUnified('Shellac', {
+        vector: null,
+        maxResults: 5,
+      });
+      expect(results.map((r) => r.documentId)).toContain('shellac');
+    } finally {
+      embedOverride = null;
+    }
+  });
+
   it('propagates the app retrieval policy to catalog embedding models', async () => {
     await profileManager.searchUnified('dovetail', {
       vector: null,

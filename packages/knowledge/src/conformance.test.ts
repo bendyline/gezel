@@ -13,20 +13,25 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  type GezkFormatVersion,
   type KnowledgeCatalogManifest,
+  type KnowledgeEmbeddingProfile,
   canonicalizeJson,
+  formatAtLeast,
   formatKnowledgeUri,
   parseKnowledgeUri,
+  profileUnitVector,
   quantizeBinary,
+  quantizeBinaryForProfile,
   quantizeInt8,
 } from '@bendyline/gezk';
 import { chunkContentHash, chunkUid, verifyManifestSignature } from '@bendyline/gezk/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extractGezkVerified, readGezkManifest } from './archive/read.js';
-import { hammingTopK } from './reader/bit-scan.js';
+import { asymmetricTopK, hammingTopK } from './reader/bit-scan.js';
 import { CatalogHandle } from './reader/catalog-handle.js';
 import { validateExtractedCatalog } from './reader/validate.js';
-import { fakeEmbed } from './test/fixture.js';
+import { FIXTURE_EMBEDDING_PROFILE_08, fakeEmbed } from './test/fixture.js';
 
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'conformance');
 
@@ -45,6 +50,20 @@ interface Vectors {
     k: number;
     expected: Array<{ chunkId: number; distance: number }>;
   };
+  asymmetric: {
+    rows: number[];
+    bytesPerRow: number;
+    query: number[];
+    k: number;
+    expected: Array<{ chunkId: number; score: number }>;
+  };
+  truncation: Array<{
+    dimensions: number;
+    sourceDimensions: number;
+    input: number[];
+    expected: number[];
+  }>;
+  centeredBits: Array<{ input: number[]; center: number[]; bits: number[]; int8: number[] }>;
   signature: { publicKeyPem: string; keyId: string; tamperedField: string };
   fixture: {
     path: string;
@@ -71,6 +90,17 @@ interface Vectors {
     metaSample: { documentId: string; meta: Record<string, unknown> };
     assets: Array<{ path: string; contentType: string; sizeBytes: number; sha256: string }>;
     assetDocument: { documentId: string; path: string };
+    /** 0.8: media rows by modality. */
+    media?: { image: number; video: number; audio: number };
+    /** 0.8: a media window the exact media scan must return first. */
+    mediaProbe?: {
+      modality: 'image' | 'video' | 'audio';
+      assetPath: string;
+      embedInput: string;
+      documentId: string;
+      startMs?: number;
+      endMs?: number;
+    };
   };
   legacy: Array<
     { formatVersion: string } & Pick<
@@ -140,6 +170,52 @@ describe('conformance vectors', () => {
     );
     expect(hits).toEqual(h.expected);
   });
+
+  it('selects the same asymmetric top-K', () => {
+    const a = vectors.asymmetric;
+    const hits = asymmetricTopK(
+      {
+        bits: Uint8Array.from(a.rows),
+        bytesPerRow: a.bytesPerRow,
+        rows: a.rows.length / a.bytesPerRow,
+      },
+      a.query,
+      a.k,
+    );
+    expect(hits.map((hit) => hit.chunkId)).toEqual(a.expected.map((hit) => hit.chunkId));
+    hits.forEach((hit, i) => expect(hit.score).toBeCloseTo(a.expected[i]?.score ?? Number.NaN, 5));
+  });
+
+  it('reproduces Matryoshka truncation', () => {
+    for (const c of vectors.truncation) {
+      const profile: KnowledgeEmbeddingProfile = {
+        ...FIXTURE_EMBEDDING_PROFILE_08,
+        dimensions: c.dimensions,
+        truncation: { method: 'prefix', sourceDimensions: c.sourceDimensions },
+        quantization: {
+          int8: { method: 'symmetric-linear', scale: 127 },
+          binary: { method: 'sign', threshold: 0, packing: 'lsb-first' },
+        },
+      };
+      expect(Array.from(profileUnitVector(profile, c.input))).toEqual(c.expected);
+    }
+  });
+
+  it('reproduces centered-sign bits and leaves int8 uncentered', () => {
+    const { truncation: _truncation, ...untruncated } = FIXTURE_EMBEDDING_PROFILE_08;
+    for (const c of vectors.centeredBits) {
+      const profile: KnowledgeEmbeddingProfile = {
+        ...untruncated,
+        dimensions: c.center.length,
+        quantization: {
+          int8: { method: 'symmetric-linear', scale: 127 },
+          binary: { method: 'centered-sign', threshold: 0, packing: 'lsb-first', center: c.center },
+        },
+      };
+      expect(Array.from(quantizeBinaryForProfile(profile, c.input))).toEqual(c.bits);
+      expect(Array.from(quantizeInt8(c.input))).toEqual(c.int8);
+    }
+  });
 });
 
 describe('conformance fixture', () => {
@@ -165,6 +241,7 @@ describe('conformance fixture', () => {
       chunks: vectors.fixture.chunks,
       shards: vectors.fixture.shards,
       assets: vectors.fixture.assets.length,
+      ...(vectors.fixture.media ? { media: vectors.fixture.media } : {}),
     });
   });
 
@@ -259,10 +336,27 @@ describe('conformance fixture', () => {
           .update(doc?.markdown ?? '', 'utf8')
           .digest('hex'),
       ).toBe(vectors.fixture.documentRoundTrip.markdownSha256);
+      // Project the raw embedding through the catalog's own profile (0.8 truncates).
       const [vector] = await fakeEmbed([vectors.fixture.semanticProbe.embedInput]);
-      const hits = handle.searchSemantic(Float32Array.from(vector as number[]), { finalK: 5 });
+      const query = profileUnitVector(manifest.embedding, vector as number[]);
+      const hits = handle.searchSemantic(query, { finalK: 5 });
       expect(hits[0]?.chunkUid).toBe(vectors.fixture.semanticProbe.chunkUid);
       expect(hits[0]?.documentId).toBe(vectors.fixture.semanticProbe.documentId);
+      const probe = vectors.fixture.mediaProbe;
+      if (probe) {
+        expect(handle.mediaCounts()).toEqual(vectors.fixture.media);
+        const [raw] = await fakeEmbed([probe.embedInput]);
+        const media = handle.searchMedia(profileUnitVector(manifest.embedding, raw as number[]), {
+          perModality: 1,
+        });
+        const top = media.find((m) => m.media?.modality === probe.modality);
+        expect(top?.documentId).toBe(probe.documentId);
+        expect(top?.media).toMatchObject({
+          assetPath: probe.assetPath,
+          ...(probe.startMs !== undefined ? { startMs: probe.startMs } : {}),
+          ...(probe.endMs !== undefined ? { endMs: probe.endMs } : {}),
+        });
+      }
     } finally {
       handle.close();
     }
@@ -296,7 +390,14 @@ describe('legacy fixtures', () => {
       const handle = CatalogHandle.open(extracted);
       try {
         expect(handle.documentsPage({ limit: 1 }).total).toBe(entry.documents);
-        expect(handle.topics().reduce((sum, t) => sum + t.documentCount, 0)).toBe(entry.documents);
+        // From 0.7 a topic's count includes shared TOC placements, so the
+        // per-topic sum can exceed the distinct document count.
+        const placements = handle.topics().reduce((sum, t) => sum + t.documentCount, 0);
+        if (formatAtLeast(entry.formatVersion as GezkFormatVersion, '0.7')) {
+          expect(placements).toBeGreaterThanOrEqual(entry.documents);
+        } else {
+          expect(placements).toBe(entry.documents);
+        }
         for (const q of entry.ftsQueries) {
           const ids = handle.searchDocumentsFts(q.query, 5).map((h) => h.documentId);
           expect(ids, `${entry.formatVersion}: ${q.query}`).toContain(q.expectedDocumentId);

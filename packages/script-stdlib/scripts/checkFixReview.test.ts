@@ -153,6 +153,27 @@ describe('checkFixReview', () => {
     expect(res.decision).toBe('approve');
   });
 
+  it('does not read code identifiers, numbers or globs in backticks as cited files', async () => {
+    h.workspace.set('src/cart.js', 'fixed');
+    h.artifacts.set(
+      REVIEW,
+      `${reviewDoc({ verdict: 'PASS', rows: ['| minor | src/cart.js | 12 | style nit | rename |'] })}\nThe fix calls \`JSON.parse\` and \`USERS.get\`, reads \`order.giftNote\`, totals \`68.00\`, and touches \`src/{a,b}.js\`.\n`,
+    );
+    const res = await run({});
+    expect(res.decision).toBe('approve');
+  });
+
+  it('still rejects a backticked file that does not exist', async () => {
+    h.workspace.set('src/cart.js', 'fixed');
+    h.artifacts.set(
+      REVIEW,
+      `${reviewDoc({ verdict: 'PASS', rows: ['| minor | src/cart.js | 12 | style nit | rename |'] })}\nSee \`src/ghost.ts:4\`.\n`,
+    );
+    const res = await run({});
+    expect(res.decision).toBe('reject');
+    expect(res.message).toContain('src/ghost.ts');
+  });
+
   it('rejects fabricated citations, naming them', async () => {
     h.artifacts.set(
       REVIEW,

@@ -6,6 +6,7 @@
  */
 
 import type { FileTurnIntent } from '../schemas/file-turn-intent.js';
+import type { OpenAIPendingToolOutput } from '../schemas/session.js';
 
 export interface QuotaBucket {
   /** Bucket identifier from the provider (e.g. "premium_interactions"). */
@@ -22,6 +23,7 @@ export interface QuotaBucket {
 export interface ProviderSessionState {
   copilotSessionId?: string;
   openaiPreviousResponseId?: string;
+  openaiPendingToolOutputs?: OpenAIPendingToolOutput[];
   claudeCliSessionId?: string;
   codexCliThreadId?: string;
 }
@@ -121,6 +123,20 @@ export interface SendAndWaitOpts {
    * replies keep the model's normal output budget.
    */
   continuationMaxTokens?: number;
+  /**
+   * Answer this turn from the system messages and the turn's own message
+   * alone, leaving the earlier conversation out of the request. For a seed
+   * that carries the whole current state (a game reaction); the transcript
+   * still records the turn.
+   */
+  standalone?: boolean;
+  /**
+   * The turn's first request must call this tool: it is the only tool that
+   * request offers, and the engine is asked to require a call where it can.
+   * Later requests in the turn see the full surface. A page reaction whose
+   * whole job is one move sets it (`ProjectTypeToolReaction.turn`).
+   */
+  requiredTool?: string;
   queue?: {
     lane: 'interactive' | 'background';
     /**
@@ -235,6 +251,13 @@ export interface LLMSession {
    */
   getWireTranscript?(): WireTranscriptEntry[] | undefined;
   /**
+   * The tool roster the latest turn advertised, sized. Engines template the
+   * JSON schemas into the prompt, so they cost prompt tokens the system text
+   * does not show. `undefined` before the first turn, or where the engine
+   * keeps the schemas out of reach.
+   */
+  getToolSurface?(): ToolSurfaceSize | undefined;
+  /**
    * Best-effort prompt-cache prefill for the session's current exact prompt.
    * Remote sessions use this to send their A-owned prompt/transcript/tool
    * surface to B's inference-only warm endpoint. Implementations must not
@@ -256,6 +279,10 @@ export interface LLMSession {
    * silently drop the attachments and proceed text-only.
    */
   sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string>;
+  /** Optional engine-measured phase/progress, scoped to this session. */
+  onEnginePhase?(
+    handler: (event: import('./streaming-session.js').EnginePhaseEvent) => void,
+  ): () => void;
   onDelta(handler: (chunk: string) => void): () => void;
   /**
    * Subscribe to live private-reasoning deltas, streamed separately from
@@ -435,6 +462,13 @@ export interface ExternalToolCall {
   arguments: string;
 }
 
+/** Size of an advertised tool roster. See {@link LLMSession.getToolSurface}. */
+export interface ToolSurfaceSize {
+  count: number;
+  /** ~4 characters a token over the serialized schemas. */
+  tokens: number;
+}
+
 /**
  * One message of a stateless session's live transcript — everything after its
  * system bands — in exactly the shape `SessionOpts.priorMessages` takes back.
@@ -469,6 +503,14 @@ export type CompactionRequester = (params: {
 export interface TerminalToolPolicy {
   toolNames: string[];
   closingArg?: string;
+  /** Per-tool `closingArg`, for a policy over tools whose replies sit in different arguments. */
+  closingArgByTool?: Record<string, string>;
+  /**
+   * Per-tool output field that, when the script returns it, is the reply in
+   * place of the argument: text the app composed (a tutor's line plus the
+   * corrections it graded). Held to its own bound, not the sociability cap.
+   */
+  closingOutputByTool?: Record<string, string>;
   fallbackText: string;
   maxClosingChars?: number;
   /**

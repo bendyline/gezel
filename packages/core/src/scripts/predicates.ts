@@ -19,6 +19,11 @@ export function scriptShouldAutoAdvance(ref: ScriptRef, output: unknown): boolea
   return evaluatePredicate(predicate, output);
 }
 
+/** Whether a script's output satisfies an output predicate. */
+export function scriptOutputMatches(predicate: ScriptOutputPredicate, output: unknown): boolean {
+  return evaluatePredicate(predicate, output);
+}
+
 function evaluatePredicate(predicate: ScriptOutputPredicate, output: unknown): boolean {
   switch (predicate.op) {
     case 'always':

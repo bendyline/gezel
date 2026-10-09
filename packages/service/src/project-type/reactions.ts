@@ -3,11 +3,13 @@ import {
   type ProjectTypeTool,
   type ScriptRun,
   createLogger,
+  flattenRunOutput,
   projectAllowsAmbientWork,
+  reactionRequiredTool,
+  renderProjectTypeReactionSeed,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import { renderProjectTypeTemplate } from './apply.js';
 
 const log = createLogger('project-type');
 
@@ -18,6 +20,9 @@ export interface ReactionChatPort {
     gezelId: string;
     seed: string;
     hidden?: boolean;
+    standalone?: boolean;
+    /** The turn's first request must call this tool (the reaction's `turn`). */
+    requiredTool?: string;
   }): Promise<{ sessionId: string } | null>;
 }
 
@@ -28,36 +33,7 @@ export interface ReactionDispatchResult {
   reason?: string;
 }
 
-/**
- * Flatten a script run's output into dot-path template keys (depth ≤ 2):
- * `{board, stats: {moves}}` → `output.board`, `output.stats.moves`, plus a
- * JSON `output.stats` for the object itself. Non-strings stringify;
- * objects/arrays JSON-stringify — templates pick whichever form reads
- * best.
- */
-export function flattenRunOutput(output: unknown): Record<string, unknown> {
-  const map: Record<string, unknown> = {};
-  if (output === null || output === undefined || typeof output !== 'object') {
-    if (output !== undefined) map.output = output;
-    return map;
-  }
-  map.output = JSON.stringify(output);
-  for (const [key, value] of Object.entries(output as Record<string, unknown>)) {
-    if (value !== null && typeof value === 'object') {
-      map[`output.${key}`] = JSON.stringify(value);
-      for (const [inner, innerValue] of Object.entries(value as Record<string, unknown>)) {
-        if (innerValue !== null && typeof innerValue === 'object') {
-          map[`output.${key}.${inner}`] = JSON.stringify(innerValue);
-        } else {
-          map[`output.${key}.${inner}`] = innerValue;
-        }
-      }
-    } else {
-      map[`output.${key}`] = value;
-    }
-  }
-  return map;
-}
+export { flattenRunOutput };
 
 /**
  * Summon the declared gezel's turn after a page-invoked tool completed.
@@ -73,6 +49,8 @@ export async function dispatchToolReaction(
     params?: Record<string, unknown>;
     tool: ProjectTypeTool;
     run: ScriptRun;
+    /** The type's model tools, which a reaction's `turn` names its call among. */
+    modelTools?: readonly ProjectTypeTool[];
   },
 ): Promise<ReactionDispatchResult> {
   const reaction = args.tool.reaction;
@@ -99,19 +77,28 @@ export async function dispatchToolReaction(
     return { delivered: false, reason: 'no-target' };
   }
 
-  const renderMap: Record<string, unknown> = {
-    ...(args.params ?? {}),
-    ...flattenRunOutput(args.run.output),
+  const seed = renderProjectTypeReactionSeed({
+    typeName: args.typeName,
+    prompt: reaction.prompt,
     tool: args.tool.name,
-  };
-  const seed = `[${args.typeName} page]: ${renderProjectTypeTemplate(reaction.prompt, renderMap)}`;
+    ...(args.params ? { params: args.params } : {}),
+    output: args.run.output,
+  });
 
+  const requiredTool = reactionRequiredTool(
+    reaction,
+    args.run.output,
+    args.modelTools ?? [],
+    args.project,
+  );
   try {
     const delivered = await deps.chat.deliverReaction({
       projectId: args.project.id,
       gezelId: targetGezelId,
       seed,
       ...(reaction.hideSeed ? { hidden: true } : {}),
+      ...(reaction.standalone ? { standalone: true } : {}),
+      ...(requiredTool ? { requiredTool } : {}),
     });
     if (!delivered) return { delivered: false, gezelId: targetGezelId, reason: 'engagement-off' };
 

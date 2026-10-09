@@ -18,7 +18,7 @@
  * and tests call it directly.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { brotliDecompressSync } from 'node:zlib';
@@ -27,10 +27,10 @@ import {
   KnowledgeEmbeddingProfileSchema,
   type KnowledgeLocation,
   type KnowledgeRadius,
-  MAX_KNOWLEDGE_ASSET_BYTES,
   assetContentType,
   embeddingProfileCenter,
   isKnowledgeAssetPath,
+  maxKnowledgeAssetBytes,
 } from '@bendyline/gezk';
 import {
   MANIFEST_PATH,
@@ -48,7 +48,12 @@ import {
   namedTitleMatches,
   selectiveFtsQuery,
 } from './fts-query.js';
-import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
+import {
+  type CatalogDb,
+  CatalogOpenError,
+  CatalogQueryError,
+  openCatalogDatabase,
+} from './open.js';
 import { DocumentSpatialIndex, type SpatialMatch } from './spatial-index.js';
 
 export interface CatalogTopic {
@@ -90,6 +95,11 @@ export interface CatalogAssetInfo {
   sha256: string;
 }
 
+/** A declared asset's file on disk, for streaming (extraction already verified its hash). */
+export interface CatalogAssetFile extends CatalogAssetInfo {
+  absPath: string;
+}
+
 export interface CatalogAssetRead extends CatalogAssetInfo {
   bytes: Uint8Array;
 }
@@ -99,6 +109,19 @@ export interface CatalogAssetRead extends CatalogAssetInfo {
  * the validator refuses cycles and depth beyond MAX_KNOWLEDGE_TOPIC_DEPTH.
  */
 const TOPIC_WALK_MAX_DEPTH = 32;
+
+/** What a media row (0.8) carries beyond its text: the asset, its kind, and the span. */
+export interface CatalogChunkMedia {
+  modality: 'image' | 'video' | 'audio';
+  assetPath: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  startMs?: number;
+  endMs?: number;
+  thumbnailAssetPath?: string;
+  attribution?: Record<string, unknown>;
+}
 
 export interface CatalogChunkHit {
   chunkUid: string;
@@ -112,6 +135,55 @@ export interface CatalogChunkHit {
   cosine?: number;
   source: 'vector' | 'fts';
   shardId: number;
+  /** Present on a media row (index schema 5). */
+  media?: CatalogChunkMedia;
+}
+
+/** Media rows one shard holds: ids, kinds and int8 vectors, loaded once for the exact media scan. */
+interface ShardMediaIndex {
+  ids: number[];
+  modalities: Array<CatalogChunkMedia['modality']>;
+  int8: Int8Array;
+  idSet: ReadonlySet<number>;
+}
+
+const CHUNK_COLUMNS = 'chunk_uid, document_id, title, heading_path, line_start, line_end, text';
+const MEDIA_COLUMNS =
+  'modality, asset_path, mime_type, width, height, start_ms, end_ms, thumbnail_path, attribution_json';
+
+/** The media facts of a schema-5 chunk row, or undefined for a text row. */
+function mediaOf(row: Record<string, unknown>): CatalogChunkMedia | undefined {
+  const modality = row.modality as string | undefined;
+  if (!modality || modality === 'text') return undefined;
+  const num = (v: unknown): number | undefined =>
+    v === null || v === undefined ? undefined : Number(v);
+  let attribution: Record<string, unknown> | undefined;
+  if (typeof row.attribution_json === 'string') {
+    try {
+      const parsed = JSON.parse(row.attribution_json) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        attribution = parsed as Record<string, unknown>;
+      }
+    } catch {
+      attribution = undefined;
+    }
+  }
+  const media: CatalogChunkMedia = {
+    modality: modality as CatalogChunkMedia['modality'],
+    assetPath: row.asset_path as string,
+    mimeType: row.mime_type as string,
+  };
+  const width = num(row.width);
+  const height = num(row.height);
+  const startMs = num(row.start_ms);
+  const endMs = num(row.end_ms);
+  if (width !== undefined) media.width = width;
+  if (height !== undefined) media.height = height;
+  if (startMs !== undefined) media.startMs = startMs;
+  if (endMs !== undefined) media.endMs = endMs;
+  if (typeof row.thumbnail_path === 'string') media.thumbnailAssetPath = row.thumbnail_path;
+  if (attribution) media.attribution = attribution;
+  return media;
 }
 
 interface ShardInfo {
@@ -133,6 +205,7 @@ export const TITLE_ROUTE_SHARDS = 1;
 export class CatalogHandle {
   private readonly connections = new Map<string, CatalogDb>();
   private readonly bitIndexes = new Map<string, ShardBitIndex>();
+  private readonly mediaIndexes = new Map<string, ShardMediaIndex>();
   /** `shard path \0 phrase` → rows the phrase matches in that shard's `fts_chunks`. */
   private readonly chunkTermRows = new Map<string, number>();
   private readonly spatial: DocumentSpatialIndex;
@@ -310,6 +383,146 @@ export class CatalogHandle {
     }
     this.binaryCenterCache = embeddingProfileCenter(profile.data);
     return this.binaryCenterCache;
+  }
+
+  /** The chunk columns this catalog's schema has. */
+  private chunkColumns(): string {
+    return this.schemaVersion >= 5 ? `${CHUNK_COLUMNS}, ${MEDIA_COLUMNS}` : CHUNK_COLUMNS;
+  }
+
+  /** A shard's media rows with their int8 vectors (empty before index schema 5). */
+  private shardMedia(shard: ShardInfo): ShardMediaIndex {
+    const cached = this.mediaIndexes.get(shard.path);
+    if (cached) return cached;
+    const empty: ShardMediaIndex = {
+      ids: [],
+      modalities: [],
+      int8: new Int8Array(0),
+      idSet: new Set(),
+    };
+    if (this.schemaVersion < 5) {
+      this.mediaIndexes.set(shard.path, empty);
+      return empty;
+    }
+    const dims = this.dimensions();
+    const rows = this.shardDb(shard)
+      .prepare(
+        `SELECT c.id, c.modality, v.v FROM chunks c JOIN chunk_vectors_int8 v ON v.chunk_id = c.id
+         WHERE c.modality <> 'text' ORDER BY c.id`,
+      )
+      .all() as Array<{ id: number | bigint; modality: string; v: Uint8Array }>;
+    const int8 = new Int8Array(rows.length * dims);
+    rows.forEach((row, i) => {
+      if (row.v.byteLength !== dims) {
+        throw new CatalogOpenError(`int8 vector width ${row.v.byteLength} != ${dims}`, 'corrupt');
+      }
+      int8.set(new Int8Array(row.v.buffer, row.v.byteOffset, dims), i * dims);
+    });
+    const ids = rows.map((r) => Number(r.id));
+    const index: ShardMediaIndex = {
+      ids,
+      modalities: rows.map((r) => r.modality as CatalogChunkMedia['modality']),
+      int8,
+      idSet: new Set(ids),
+    };
+    this.mediaIndexes.set(shard.path, index);
+    return index;
+  }
+
+  /** Media rows this catalog holds, by modality (all zero before index schema 5). */
+  mediaCounts(): { image: number; video: number; audio: number } {
+    const counts = { image: 0, video: 0, audio: 0 };
+    for (const shard of this.shards) {
+      for (const modality of this.shardMedia(shard).modalities) counts[modality] += 1;
+    }
+    return counts;
+  }
+
+  /**
+   * The media lane: every media row of every shard scored exactly against
+   * the query (int8 rerank), keeping the best `perModality` of each kind.
+   * Images sit at a lower cosine than text in a shared space, so in the text
+   * lane's sign-bit pre-filter they would rarely survive the cut; media rows
+   * are few enough (capped per catalog) to score them all.
+   */
+  searchMedia(
+    queryVector: Float32Array,
+    opts: { perModality?: number; allowedDocumentIds?: ReadonlySet<string> } = {},
+  ): CatalogChunkHit[] {
+    this.assertQueryWidth(queryVector);
+    const perModality = opts.perModality ?? 4;
+    const dims = this.dimensions();
+    const best = new Map<
+      CatalogChunkMedia['modality'],
+      Array<{ shard: ShardInfo; id: number; cosine: number }>
+    >();
+    for (const shard of this.shards) {
+      const index = this.shardMedia(shard);
+      for (let i = 0; i < index.ids.length; i++) {
+        let dot = 0;
+        const base = i * dims;
+        for (let d = 0; d < dims; d++)
+          dot += (queryVector[d] as number) * ((index.int8[base + d] as number) / 127);
+        const modality = index.modalities[i] as CatalogChunkMedia['modality'];
+        const list = best.get(modality) ?? [];
+        list.push({ shard, id: index.ids[i] as number, cosine: dot });
+        best.set(modality, list);
+      }
+    }
+    const hits: CatalogChunkHit[] = [];
+    for (const list of best.values()) {
+      list.sort((a, b) => b.cosine - a.cosine || a.id - b.id);
+      let kept = 0;
+      for (const candidate of list) {
+        if (kept >= perModality) break;
+        const row = this.shardDb(candidate.shard)
+          .prepare(`SELECT ${this.chunkColumns()} FROM chunks WHERE id = ?`)
+          .get(BigInt(candidate.id)) as Record<string, unknown> | undefined;
+        if (!row) continue;
+        if (opts.allowedDocumentIds && !opts.allowedDocumentIds.has(row.document_id as string))
+          continue;
+        kept++;
+        hits.push({
+          ...this.hitFromRow(row, candidate.shard.id),
+          cosine: candidate.cosine,
+          source: 'vector',
+        });
+      }
+    }
+    return hits.sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0));
+  }
+
+  private hitFromRow(
+    row: Record<string, unknown>,
+    shardId: number,
+  ): Omit<CatalogChunkHit, 'cosine' | 'source'> {
+    const media = mediaOf(row);
+    return {
+      chunkUid: row.chunk_uid as string,
+      documentId: row.document_id as string,
+      title: row.title as string,
+      headingPath: parseHeadingPath(row.heading_path as string),
+      lineStart: Number(row.line_start),
+      lineEnd: Number(row.line_end),
+      text: row.text as string,
+      shardId,
+      ...(media ? { media } : {}),
+    };
+  }
+
+  /**
+   * Refuse a query vector whose width is not the catalog's stored width,
+   * before any scan: routing and rerank would otherwise score a silent
+   * prefix or fail deep inside a shard with an untyped error.
+   */
+  private assertQueryWidth(queryVector: ArrayLike<number>): void {
+    const dims = this.dimensions();
+    if (queryVector.length !== dims) {
+      throw new CatalogQueryError(
+        `query vector has ${queryVector.length} dimensions, the catalog stores ${dims}`,
+        'dimension',
+      );
+    }
   }
 
   /** The embedding dimension from the router's profile echo. */
@@ -575,22 +788,10 @@ export class CatalogHandle {
     const shard = this.shards.find((s) => s.id === shardId);
     if (!shard) return null;
     const row = this.shardDb(shard)
-      .prepare(
-        `SELECT chunk_uid, document_id, title, heading_path, line_start, line_end, text
-         FROM chunks WHERE chunk_uid = ? AND document_id = ?`,
-      )
+      .prepare(`SELECT ${this.chunkColumns()} FROM chunks WHERE chunk_uid = ? AND document_id = ?`)
       .get(chunkUid, documentId) as Record<string, unknown> | undefined;
     if (!row) return null;
-    return {
-      chunkUid: row.chunk_uid as string,
-      documentId: row.document_id as string,
-      title: row.title as string,
-      headingPath: parseHeadingPath(row.heading_path as string),
-      lineStart: Number(row.line_start),
-      lineEnd: Number(row.line_end),
-      text: row.text as string,
-      shardId,
-    };
+    return this.hitFromRow(row, shardId);
   }
 
   /** Documents whose `topic_id` names no declared topic (a validator check). */
@@ -709,11 +910,38 @@ export class CatalogHandle {
     return [...this.assetIndex().values()].sort((a, b) => (a.path < b.path ? -1 : 1));
   }
 
+  /**
+   * Where a declared asset lives on disk, so a large one (video, audio) can be
+   * streamed with byte ranges instead of read whole. Checks containment and
+   * the manifest size; the content hash was verified once, at extraction.
+   */
+  assetFile(path: string): CatalogAssetFile | null {
+    const info = this.assetIndex().get(path);
+    if (!info) return null;
+    if (info.sizeBytes > maxKnowledgeAssetBytes(path)) {
+      throw new CatalogOpenError(`asset exceeds the size limit: ${path}`, 'corrupt');
+    }
+    const absPath = this.resolveCatalogPath(path);
+    let size: number;
+    try {
+      size = statSync(absPath).size;
+    } catch (error) {
+      throw new CatalogOpenError(
+        `cannot read asset ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        'corrupt',
+      );
+    }
+    if (size !== info.sizeBytes) {
+      throw new CatalogOpenError(`asset size differs from the manifest: ${path}`, 'corrupt');
+    }
+    return { ...info, absPath };
+  }
+
   /** One declared asset's bytes, or null when the catalog declares no such asset. */
   readAsset(path: string): CatalogAssetRead | null {
     const info = this.assetIndex().get(path);
     if (!info) return null;
-    if (info.sizeBytes > MAX_KNOWLEDGE_ASSET_BYTES) {
+    if (info.sizeBytes > maxKnowledgeAssetBytes(path)) {
       throw new CatalogOpenError(`asset exceeds the size limit: ${path}`, 'corrupt');
     }
     let bytes: Buffer;
@@ -833,6 +1061,7 @@ export class CatalogHandle {
    * takes the top-S GLOBALLY, so multiple catalogs share one scan budget.
    */
   scoreShards(queryVector: Float32Array): Array<{ shardId: number; score: number }> {
+    this.assertQueryWidth(queryVector);
     const rows = this.router.db
       .prepare('SELECT shard_id, embedding FROM route_centroids')
       .all() as Array<{ shard_id: number | bigint; embedding: Uint8Array }>;
@@ -844,8 +1073,7 @@ export class CatalogHandle {
         Math.floor(row.embedding.byteLength / 4),
       );
       let dot = 0;
-      const n = Math.min(centroid.length, queryVector.length);
-      for (let i = 0; i < n; i++) dot += centroid[i]! * queryVector[i]!;
+      for (let i = 0; i < queryVector.length; i++) dot += centroid[i]! * queryVector[i]!;
       const id = Number(row.shard_id);
       if (dot > (best.get(id) ?? Number.NEGATIVE_INFINITY)) best.set(id, dot);
     }
@@ -942,6 +1170,7 @@ export class CatalogHandle {
     finalK: number,
     allowedDocumentIds?: ReadonlySet<string>,
   ): CatalogChunkHit[] {
+    this.assertQueryWidth(queryVector);
     // Centered bits need a centered query; the int8 rerank below always
     // uses the raw unit query, since int8 vectors are never centered.
     const center = this.binaryCenter();
@@ -961,12 +1190,18 @@ export class CatalogHandle {
               .map((row) => Number(row.id)),
           )
         : undefined;
-      const k = rerankK(finalK, eligible?.size ?? shard.chunkCount);
-      const candidates = asymmetricTopK(this.shardBits(shard), scanQuery, k, eligible).map(
-        (hit) => ({
-          chunk_id: hit.chunkId,
-        }),
-      );
+      const media = this.shardMedia(shard);
+      const k = rerankK(finalK, eligible?.size ?? shard.chunkCount - media.ids.length);
+      const excluded = media.ids.length > 0 ? media.idSet : undefined;
+      const candidates = asymmetricTopK(
+        this.shardBits(shard),
+        scanQuery,
+        k,
+        eligible,
+        excluded,
+      ).map((hit) => ({
+        chunk_id: hit.chunkId,
+      }));
       if (candidates.length === 0) continue;
       const getInt8 = db.prepare('SELECT v FROM chunk_vectors_int8 WHERE chunk_id = ?');
       const reranked = candidates
@@ -979,25 +1214,11 @@ export class CatalogHandle {
         .filter((r): r is { chunkId: number; cosine: number } => r !== null)
         .sort((a, b) => b.cosine - a.cosine)
         .slice(0, finalK);
-      const getChunk = db.prepare(
-        `SELECT chunk_uid, document_id, title, heading_path, line_start, line_end, text
-         FROM chunks WHERE id = ?`,
-      );
+      const getChunk = db.prepare(`SELECT ${this.chunkColumns()} FROM chunks WHERE id = ?`);
       for (const r of reranked) {
         const row = getChunk.get(BigInt(r.chunkId)) as Record<string, unknown> | undefined;
         if (!row) continue;
-        hits.push({
-          chunkUid: row.chunk_uid as string,
-          documentId: row.document_id as string,
-          title: row.title as string,
-          headingPath: parseHeadingPath(row.heading_path as string),
-          lineStart: Number(row.line_start),
-          lineEnd: Number(row.line_end),
-          text: row.text as string,
-          cosine: r.cosine,
-          source: 'vector',
-          shardId,
-        });
+        hits.push({ ...this.hitFromRow(row, shardId), cosine: r.cosine, source: 'vector' });
       }
     }
     hits.sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0));
@@ -1023,7 +1244,10 @@ export class CatalogHandle {
         if (!match) return hits;
         const rows = db
           .prepare(
-            `SELECT c.chunk_uid, c.document_id, c.title, c.heading_path, c.line_start, c.line_end, c.text
+            `SELECT ${this.chunkColumns()
+              .split(', ')
+              .map((column) => `c.${column}`)
+              .join(', ')}
              FROM fts_chunks f JOIN chunks c ON c.id = f.rowid
              WHERE fts_chunks MATCH ? ${allowedDocumentIds ? 'AND c.document_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY f.rank LIMIT ?`,
           )
@@ -1033,17 +1257,7 @@ export class CatalogHandle {
               : [match, limitPerShard]),
           ) as Array<Record<string, unknown>>;
         for (const row of rows) {
-          hits.push({
-            chunkUid: row.chunk_uid as string,
-            documentId: row.document_id as string,
-            title: row.title as string,
-            headingPath: parseHeadingPath(row.heading_path as string),
-            lineStart: Number(row.line_start),
-            lineEnd: Number(row.line_end),
-            text: row.text as string,
-            source: 'fts',
-            shardId,
-          });
+          hits.push({ ...this.hitFromRow(row, shardId), source: 'fts' });
         }
       } catch {
         /* malformed FTS query after escaping — treat as no hits */

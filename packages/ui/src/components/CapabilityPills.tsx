@@ -22,6 +22,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   'memory.write': 'Saves memory',
   'index.read': 'Reads the index',
   'index.refresh': 'Refreshes the index',
+  reminders: 'Sets reminders',
 };
 
 export function capabilityLabel(cap: string): string {

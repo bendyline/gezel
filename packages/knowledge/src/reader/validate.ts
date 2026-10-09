@@ -7,18 +7,19 @@
  * catalog; every failure is a named check, not an exception.
  */
 
-import { readFile } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezk';
 import {
   KnowledgeCatalogManifestSchema,
-  MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
-  MAX_KNOWLEDGE_ASSET_BYTES,
-  MAX_KNOWLEDGE_ASSET_COUNT,
   assetExtension,
   assetKindForExtension,
+  assetModality,
   canonicalizeJson,
+  formatAtLeast,
   isKnowledgeAssetPath,
+  isKnowledgeMediaAssetPath,
+  knowledgeAssetLimitsProblem,
   sniffAssetType,
   svgInertnessProblem,
 } from '@bendyline/gezk';
@@ -136,7 +137,7 @@ export async function validateExtractedCatalog(
     );
 
     // counts
-    if (manifest.formatVersion === '0.7') {
+    if (formatAtLeast(manifest.formatVersion, '0.7')) {
       try {
         const spatial = handle.spatialIntegrity();
         check('document-locations-table', spatial.hasTable);
@@ -173,15 +174,16 @@ export async function validateExtractedCatalog(
     } else {
       const badPaths = assetFiles.filter((f) => !isKnowledgeAssetPath(f.path)).map((f) => f.path);
       check('assets-paths', badPaths.length === 0, `invalid asset paths: ${badPaths.join(', ')}`);
-      const oversize = assetFiles.filter((f) => f.sizeBytes > MAX_KNOWLEDGE_ASSET_BYTES);
-      const totalBytes = assetFiles.reduce((sum, f) => sum + f.sizeBytes, 0);
-      check(
-        'assets-limits',
-        assetFiles.length <= MAX_KNOWLEDGE_ASSET_COUNT &&
-          oversize.length === 0 &&
-          totalBytes <= MAX_KNOWLEDGE_ASSETS_TOTAL_BYTES,
-        `${assetFiles.length} assets, ${totalBytes} bytes, ${oversize.length} over the per-asset limit`,
-      );
+      if (!formatAtLeast(manifest.formatVersion, '0.8')) {
+        const media = assetFiles.filter((f) => isKnowledgeMediaAssetPath(f.path));
+        check(
+          'assets-media-in-0.8',
+          media.length === 0,
+          `audio/video assets need format 0.8: ${media.map((f) => f.path).join(', ')}`,
+        );
+      }
+      const limits = knowledgeAssetLimitsProblem(assetFiles);
+      check('assets-limits', limits === null, limits ?? '');
       check(
         'counts-assets',
         (manifest.counts.assets ?? 0) === assetFiles.length,
@@ -242,6 +244,7 @@ export async function validateExtractedCatalog(
         bodies.maxCompressedBytes <= MAX_KNOWLEDGE_DOCUMENT_BYTES + 1024,
         `largest compressed body is ${bodies.maxCompressedBytes} bytes`,
       );
+      const mediaRowCounts = { image: 0, video: 0, audio: 0 };
       for (const shard of handle.shards) {
         // A dedicated read-only connection per shard (immutable files share
         // fine), closed here — the handle's own connections are its to close.
@@ -296,6 +299,35 @@ export async function validateExtractedCatalog(
             badBit === 0 && badInt8 === 0,
             `${badBit} bit rows and ${badInt8} int8 rows have the wrong width for ${dims} dimensions`,
           );
+          if (handle.schemaVersion >= 5) {
+            const rows = db
+              .prepare(
+                `SELECT modality, asset_path, thumbnail_path FROM chunks WHERE modality <> 'text'`,
+              )
+              .all() as Array<{
+              modality: 'image' | 'video' | 'audio';
+              asset_path: string;
+              thumbnail_path: string | null;
+            }>;
+            const declaredAssets = new Set(assetFiles.map((f) => f.path));
+            const wrong = rows
+              .filter(
+                (r) =>
+                  !declaredAssets.has(r.asset_path) ||
+                  assetModality(r.asset_path) !== r.modality ||
+                  (r.thumbnail_path !== null &&
+                    (!declaredAssets.has(r.thumbnail_path) ||
+                      assetModality(r.thumbnail_path) !== 'image')),
+              )
+              .slice(0, 5)
+              .map((r) => `${r.modality} ${r.asset_path}`);
+            check(
+              `media-rows:${shard.path}`,
+              wrong.length === 0,
+              `media rows naming an undeclared or mismatched asset: ${wrong.join(', ')}`,
+            );
+            for (const r of rows) mediaRowCounts[r.modality] += 1;
+          }
           const span = db.prepare('SELECT MIN(id) AS lo, MAX(id) AS hi FROM chunks').get() as {
             lo: number | bigint | null;
             hi: number | bigint | null;
@@ -310,6 +342,16 @@ export async function validateExtractedCatalog(
         }
         check(`self-knn:${shard.id}`, handle.selfKnnSmoke(shard.id));
       }
+      if (handle.schemaVersion >= 5) {
+        const counted = manifest.counts.media ?? { image: 0, video: 0, audio: 0 };
+        check(
+          'counts-media',
+          counted.image === mediaRowCounts.image &&
+            counted.video === mediaRowCounts.video &&
+            counted.audio === mediaRowCounts.audio,
+          `manifest counts ${JSON.stringify(counted)}, shards hold ${JSON.stringify(mediaRowCounts)}`,
+        );
+      }
 
       if (handle.schemaVersion >= 3) {
         const meta = handle.checkDocumentMeta(MAX_KNOWLEDGE_DOCUMENT_META_BYTES);
@@ -322,7 +364,10 @@ export async function validateExtractedCatalog(
         for (const file of assetFiles) {
           const ext = assetExtension(file.path);
           if (!ext) continue;
-          const bytes = await readFile(join(rootDir, file.path));
+          // Audio and video can be hundreds of MB; their magic numbers sit in the first bytes.
+          const bytes = isKnowledgeMediaAssetPath(file.path)
+            ? await readLeadingBytes(join(rootDir, file.path), 64)
+            : await readFile(join(rootDir, file.path));
           const kind = sniffAssetType(bytes);
           check(
             `asset-type:${file.path}`,
@@ -414,4 +459,16 @@ function topicTreeProblem(
     depthOf.set(topic.id, depth);
   }
   return [true, `${topics.length} topics, max depth ${Math.max(0, ...depthOf.values())}`];
+}
+
+/** The first `length` bytes of a file, without reading the rest. */
+async function readLeadingBytes(path: string, length: number): Promise<Uint8Array> {
+  const handle = await open(path, 'r');
+  try {
+    const buffer = new Uint8Array(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }

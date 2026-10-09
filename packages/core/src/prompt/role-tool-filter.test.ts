@@ -99,6 +99,20 @@ describe('roleToolsetGroups', () => {
     expect(groups).not.toContain('code-execution');
   });
 
+  it.each(['Meester', 'Voorman', 'Planner', 'Fitness Coach'])(
+    'classifies the coordinator role %s as pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(true);
+    },
+  );
+
+  it.each(['Curator', 'Image Generator', 'Video Generator', 'Conversationalist'])(
+    'does not mistake the non-writing executor role %s for pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(false);
+    },
+  );
+
   it('gives the voorman read-only workspace access (so they can investigate before delegating)', () => {
     const groups = roleToolsetGroups('voorman');
     expect(groups).toContain('workspace-fs-read');
@@ -593,6 +607,25 @@ describe('computeToolAllowlist', () => {
       });
       expect(roleToolAllowlist('researcher').has('run_playwright_script')).toBe(true);
       expect(allow!.has('run_playwright_script')).toBe(false);
+    });
+
+    it('strips scripted Playwright under lockdown, where scripts run but the open web is off', () => {
+      const lockdown = resolveSecurityPolicy({
+        securityPolicy: securityPolicyForLevel('lockdown'),
+      });
+      expect(lockdown.allowScriptExecution).toBe(true);
+      expect(lockdown.allowExternalServices).toBe(false);
+      for (const role of ['researcher', 'generalist']) {
+        const allow = computeToolAllowlist({
+          role,
+          mode: 'always',
+          provider: 'mlx',
+          modelId: 'meta-llama/Llama-3-70B',
+          securityPolicy: lockdown,
+        });
+        expect(roleToolAllowlist(role).has('run_playwright_script'), role).toBe(true);
+        expect(allow!.has('run_playwright_script'), role).toBe(false);
+      }
     });
 
     it('strips workspace-write when the project is not writable, regardless of policy', () => {
@@ -1386,6 +1419,34 @@ describe('computeToolAllowlist', () => {
         latestUserMessage: repair,
       }),
     ).toBe(false);
+  });
+
+  it('keeps the script runner on a scenario repair of a data file, not of a page', () => {
+    const repairOf = (file: string) =>
+      [
+        `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.`,
+        "Signals that didn't fire: **dates-iso**.",
+        'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.',
+      ].join('\n');
+    const allow = computeToolAllowlist({
+      role: 'Developer',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-e4b-q4',
+      webSearchProvider: 'brave',
+    });
+    expect(allow!.has('run_nodejs_script')).toBe(true);
+    const data = constrainAllowlistForScenarioFileRepair(allow, {
+      role: 'Developer',
+      latestUserMessage: repairOf('out/customers.json'),
+    });
+    expect(data!.has('run_nodejs_script')).toBe(true);
+    expect(data!.has('write_file')).toBe(true);
+    const page = constrainAllowlistForScenarioFileRepair(allow, {
+      role: 'Developer',
+      latestUserMessage: repairOf('index.html'),
+    });
+    expect(page!.has('run_nodejs_script')).toBe(false);
   });
 
   it('does not collapse source-parse repair nudges to immediate write_file only', () => {

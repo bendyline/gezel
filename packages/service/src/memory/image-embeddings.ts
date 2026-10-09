@@ -15,10 +15,19 @@
 
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { PipelineLoadError } from './embed-core.js';
 import { type FaceDetectOutcome, type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
-import { type ImageEmbedJob, type ImageEmbedOutcome, runImageEmbed } from './image-embed-core.js';
+import {
+  type ImageEmbedJob,
+  type ImageEmbedOutcome,
+  type MediaEmbedJob,
+  type MediaEmbedOutcome,
+  imageTokenBudget,
+  runImageEmbed,
+  runMediaEmbed,
+} from './image-embed-core.js';
 
 export type { ImageEmbedJob, ImageEmbedOutcome } from './image-embed-core.js';
 export type { DetectedFaceResult, FaceDetectOutcome, FaceModelPaths } from './face-embed-core.js';
@@ -71,12 +80,48 @@ export function imageEmbeddingsDisabledReason(): string | null {
 }
 
 /**
+ * Why the media-search manager keeps the media tier closed (setting off,
+ * model not installed), or null. Null by default, so a daemon or test that
+ * never constructs the manager behaves as before.
+ */
+let mediaSearchGateReason: string | null = null;
+
+export function setMediaSearchGate(reason: string | null): void {
+  mediaSearchGateReason = reason;
+}
+
+/**
  * Cheap per-batch gate for the enrichment tier: flags only, no model load.
  * The first real embed classifies a missing peer / unloadable model and makes
  * this report it from then on.
  */
 export function imageEmbedAvailability(): { ok: boolean; reason?: string } {
-  const reason = imageEmbeddingsDisabledReason();
+  const reason = mediaSearchGateReason ?? imageEmbeddingsDisabledReason();
+  return reason ? { ok: false, reason } : { ok: true };
+}
+
+/**
+ * Video and audio (the media tier's windows) need more than images do: the
+ * audio encoder on disk and a system ffmpeg. Closed until the media-search
+ * manager has checked both; failures here never close the image lane.
+ */
+let audioVideoGateReason: string | null = 'video and audio indexing has not been checked yet';
+let audioVideoUnavailableReason: string | null = null;
+let audioVideoUnavailableUntil = 0;
+
+export function setAudioVideoGate(reason: string | null): void {
+  audioVideoGateReason = reason;
+}
+
+export function audioVideoEmbedAvailability(): { ok: boolean; reason?: string } {
+  if (audioVideoUnavailableReason && Date.now() >= audioVideoUnavailableUntil) {
+    audioVideoUnavailableReason = null;
+  }
+  const reason =
+    audioVideoGateReason ??
+    mediaSearchGateReason ??
+    imageEmbeddingsDisabledReason() ??
+    audioVideoUnavailableReason;
   return reason ? { ok: false, reason } : { ok: true };
 }
 
@@ -88,10 +133,10 @@ export function faceEmbedAvailability(): { ok: boolean; reason?: string } {
 
 // ── worker plumbing (mirror of embeddings.ts) ─────────────────────────────
 
-type AnyOutcomes = ImageEmbedOutcome[] | FaceDetectOutcome[];
+type AnyOutcomes = ImageEmbedOutcome[] | FaceDetectOutcome[] | MediaEmbedOutcome[];
 
 interface Pending {
-  kind: 'clip' | 'faces';
+  kind: 'image' | 'faces' | 'media';
   resolve: (results: AnyOutcomes) => void;
   reject: (err: unknown) => void;
 }
@@ -107,6 +152,8 @@ interface WorkerReply {
 
 let worker: Worker | null = null;
 let workerUsable = true;
+/** Set by service shutdown: no new worker or request until reopened. */
+let closed = false;
 const allowTestFallback = Boolean(process.env.VITEST);
 let workerFailureReason: string | null = null;
 let crashCount = 0;
@@ -119,7 +166,7 @@ function workerEntry(): string | null {
 }
 
 function ensureWorker(): Worker | null {
-  if (!workerUsable) return null;
+  if (closed || !workerUsable) return null;
   if (worker) return worker;
   const entry = workerEntry();
   if (!entry) {
@@ -152,6 +199,18 @@ function onMessage(msg: WorkerReply): void {
   if (!p) return;
   pending.delete(msg.id);
   if (msg.error) {
+    if (p.kind === 'media') {
+      // Video/audio failures (no ffmpeg, a missing audio encoder) cool down
+      // their own lane; the image lane keeps working.
+      if (msg.retryable || msg.fatal) {
+        audioVideoUnavailableReason = firstLine(msg.error);
+        audioVideoUnavailableUntil = Date.now() + RETRY_COOLDOWN_MS;
+        p.reject(new ImageEmbeddingsUnavailableError(audioVideoUnavailableReason));
+      } else {
+        p.reject(new Error(msg.error));
+      }
+      return;
+    }
     if (p.kind === 'faces') {
       // Attribute the failure to the face lane only.
       if (msg.fatal) markFaceDisabled(msg.error, msg.optionalPeerMissing ?? false);
@@ -192,12 +251,64 @@ function onWorkerDown(reason: string): void {
   }
 }
 
+const SHUTTING_DOWN = 'the service is shutting down';
+
+/**
+ * Close for service shutdown: refuse new work, then terminate the worker once
+ * its in-flight work has finished, waiting at most `drainMs` (see
+ * retire-model-worker.ts for why it must never be torn down mid-run).
+ */
+export async function shutdownImageEmbeddings(drainMs: number): Promise<void> {
+  closed = true;
+  const w = worker;
+  if (!w) return;
+  if (await retireModelWorker(w, () => pending.size === 0, drainMs)) {
+    if (worker === w) worker = null;
+    return;
+  }
+  log.warn('[memory] an image analysis was still running at shutdown; leaving its worker to exit');
+}
+
+/** Reopen after shutdown — an embedded service can be started again in the same process. */
+export function openImageEmbeddings(): void {
+  closed = false;
+}
+
 function sendToWorker(w: Worker, images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   const id = nextId++;
   return new Promise<AnyOutcomes>((resolve, reject) => {
-    pending.set(id, { kind: 'clip', resolve, reject });
-    w.postMessage({ id, kind: 'clip', images });
+    pending.set(id, { kind: 'image', resolve, reject });
+    w.postMessage({ id, kind: 'image', images, budget: imageTokenBudget() });
   }) as Promise<ImageEmbedOutcome[]>;
+}
+
+function sendMediaToWorker(w: Worker, media: MediaEmbedJob[]): Promise<MediaEmbedOutcome[]> {
+  const id = nextId++;
+  return new Promise<AnyOutcomes>((resolve, reject) => {
+    pending.set(id, { kind: 'media', resolve, reject });
+    w.postMessage({ id, kind: 'media', media, budget: imageTokenBudget() });
+  }) as Promise<MediaEmbedOutcome[]>;
+}
+
+/**
+ * Embed audio and video files window by window (the media tier). Same
+ * worker as images; the direct path is test-only.
+ */
+export async function embedMediaFiles(media: MediaEmbedJob[]): Promise<MediaEmbedOutcome[]> {
+  if (media.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
+  const availability = audioVideoEmbedAvailability();
+  if (!availability.ok) {
+    throw new ImageEmbeddingsUnavailableError(availability.reason ?? 'unavailable');
+  }
+  const w = ensureWorker();
+  if (w) return sendMediaToWorker(w, media);
+  if (!allowTestFallback) {
+    throw new ImageEmbeddingsUnavailableError(
+      workerFailureReason ?? 'image-embedding worker is unavailable',
+    );
+  }
+  return runMediaEmbed(media);
 }
 
 function sendFacesToWorker(
@@ -304,6 +415,7 @@ function describe(err: unknown): string {
  */
 export async function embedImageFiles(images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   if (images.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
   if (disabledByEnv()) throw new ImageEmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new ImageEmbeddingsDisabledError(disabledReason);
   if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
@@ -341,6 +453,7 @@ export async function detectFaces(
   models: FaceModelPaths,
 ): Promise<FaceDetectOutcome[]> {
   if (images.length === 0) return [];
+  if (closed) throw new ImageEmbeddingsUnavailableError(SHUTTING_DOWN);
   if (faceDisabledReason) throw new ImageEmbeddingsDisabledError(faceDisabledReason);
   if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
   const temporaryReason = currentFaceUnavailableReason();

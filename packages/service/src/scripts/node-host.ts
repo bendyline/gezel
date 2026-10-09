@@ -139,6 +139,7 @@ export class NodeScriptHost {
         // The same set, so a secret a handler resolves reaches the runner's redaction.
         knownSecretValues: context.secrets,
         initiatedByGezel: scriptRunActsForGezel(context.trigger),
+        ...(context.trigger.kind === 'chat' ? { gezelId: context.trigger.gezelId } : {}),
       },
       method,
       params,

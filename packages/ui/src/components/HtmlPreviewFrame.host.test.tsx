@@ -72,6 +72,60 @@ describe('portable host snapshots in the shared preview frame', () => {
     unmount();
     expect(second).toHaveBeenCalledOnce();
   });
+  it("relays a project type page's v1 bridge, and only that, on a snapshot host", async () => {
+    window.__GEZEL__ = {
+      token: 'private',
+      createHtmlPreview: vi.fn().mockResolvedValue({ url: 'blob:type', dispose: vi.fn() }),
+    };
+    vi.mocked(api.invokeProjectPageRead).mockResolvedValue({
+      op: 'read',
+      content: '{}',
+      encoding: 'utf8',
+      etag: 'e1',
+    } as never);
+    vi.mocked(api.invokeProjectPageTool).mockResolvedValue({
+      runId: 'run-1',
+      status: 'ok',
+      output: {},
+      callsSummary: [],
+    } as never);
+    render(
+      <HtmlPreviewFrame
+        projectId="project"
+        path="board/index.html"
+        source="type"
+        title="Board"
+        pageTools={['user_move']}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTitle('Board')).toHaveAttribute('src', 'blob:type'));
+    const frame = screen.getByTitle('Board') as HTMLIFrameElement;
+    const post = (data: Record<string, unknown>) =>
+      fireEvent(window, new MessageEvent('message', { source: frame.contentWindow!, data }));
+    post({
+      __gezelPage: 1,
+      kind: 'read',
+      id: 'r1',
+      op: 'read',
+      source: 'workspace',
+      path: 'game.json',
+    });
+    post({ __gezelPage: 1, kind: 'invoke', id: 'i1', tool: 'user_move', input: { from: 'c3' } });
+    post({ __gezelPage: 1, kind: 'invoke', id: 'i2', tool: 'new_game' });
+    post({ __gezelPageInvoke: true, id: 'legacy', tool: 'user_move' });
+    await waitFor(() =>
+      expect(api.invokeProjectPageRead).toHaveBeenCalledWith('project', {
+        op: 'read',
+        source: 'workspace',
+        path: 'game.json',
+      }),
+    );
+    expect(api.invokeProjectPageTool).toHaveBeenCalledTimes(1);
+    expect(api.invokeProjectPageTool).toHaveBeenCalledWith('project', {
+      tool: 'user_move',
+      input: { from: 'c3' },
+    });
+  });
   it('disposes snapshots that finish loading after unmount', async () => {
     let resolve!: (lease: HostHtmlPreview) => void;
     const dispose = vi.fn();

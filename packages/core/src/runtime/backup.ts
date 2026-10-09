@@ -35,6 +35,7 @@ import { PORTABLE_BACKUP_LIMITS, readBackupZip, writeBackupZip } from './backup-
 import { boundedText, decodeText } from './files.js';
 import { listGezels } from './gezels.js';
 import { validateMemoryDay } from './memories.js';
+import { mergeMemoryDay } from './memory-markdown.js';
 import { getProject, listProjects, readConfig, sharedProjectId } from './projects.js';
 import type { PortableRepository } from './repository.js';
 
@@ -100,6 +101,8 @@ async function collect(
       await item('project', project.id, project.name, `projects/${project.id}`);
   if (requested('document-root', 'documents'))
     await item('document-root', 'documents', 'Shared documents', 'documents');
+  if (requested('memory-root', 'memories') && (await repo.tree('memories')).length > 0)
+    await item('memory-root', 'memories', 'About you', 'memories');
   if (requested('settings-file', 'config.json')) {
     const content = boundedText(JSON.stringify(portableConfig(await readConfig(repo))));
     entries.set('settings/config.json', content);
@@ -164,6 +167,13 @@ function validateFile(path: string, bytes: Uint8Array): void {
     return;
   }
   if (segments[0] === 'documents') return;
+  if (segments[0] === 'memories') {
+    if (!/^memories\/daily\/\d{4}-\d{2}-\d{2}\.md$/.test(path))
+      throw new Error('Invalid memory day in backup');
+    validateMemoryDay(path.slice('memories/daily/'.length, -3));
+    decodeText(bytes);
+    return;
+  }
   const id = segments[1]!;
   const relative = segments.slice(2).join('/');
   if (relative === 'project.json' && segments[0] === 'projects') {
@@ -278,6 +288,8 @@ async function targetExists(
   repo: PortableRepository,
   item: BackupManifest['items'][number],
 ): Promise<boolean> {
+  // The person's memories merge into the ones here, so they never collide.
+  if (item.kind === 'memory-root') return false;
   return repo.exists(
     item.kind === 'settings-file' && isBackupSettingsFileId(item.id)
       ? backupSettingsTarget(item.id)
@@ -360,6 +372,7 @@ export async function confirmRestore(
   const writes = new Map<string, Uint8Array>();
   const clears: string[] = [];
   const directories: string[] = [];
+  let mergedMemories = 0;
   const selected = new Set<string>();
   const config = await readConfig(repo);
   const importedConfig = entries.has('settings/config.json')
@@ -377,6 +390,21 @@ export async function confirmRestore(
     );
     if (!item) throw new Error('Restore selection is not present in the reviewed backup');
     if (item.kind === 'settings-file') continue;
+    if (item.kind === 'memory-root') {
+      directories.push('memories/daily');
+      for (const [path, incoming] of entries) {
+        if (!path.startsWith('memories/')) continue;
+        const existing = await repo.files.read(path);
+        writes.set(
+          path,
+          existing
+            ? boundedText(mergeMemoryDay(decodeText(existing), decodeText(incoming)))
+            : incoming,
+        );
+      }
+      mergedMemories++;
+      continue;
+    }
     const target = backupEntryPrefix(item);
     if ((await targetExists(repo, item)) && requested.action !== 'replace')
       throw new Error(`Choose replace to restore ${item.label}`);
@@ -458,7 +486,8 @@ export async function confirmRestore(
       )
         throw new Error('Restore the projects used by these conversations as well');
     }
-  if (!clears.length && !input.settings) throw new Error('Choose content to restore');
+  if (!clears.length && !mergedMemories && !input.settings)
+    throw new Error('Choose content to restore');
   if (
     writes.size > PORTABLE_BACKUP_LIMITS.files ||
     [...writes.values()].reduce((total, data) => total + data.length, 0) >
@@ -466,5 +495,5 @@ export async function confirmRestore(
   )
     throw new Error('Restored content and retained working files exceed portable restore limits');
   await repo.transactions.commit(writes, [root], directories, clears);
-  return { restored: clears.length + Number(!!input.settings) };
+  return { restored: clears.length + mergedMemories + Number(!!input.settings) };
 }

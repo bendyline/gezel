@@ -2,7 +2,8 @@
 
 Status: written after the Craftbooks V2 round. Measured sizes below are from
 that review — re-measure with `GEZEL_PROMPT_BREAKDOWN=1` (per-section token table printed by
-`buildInstructions`) rather than trusting this doc or any docblock.
+`buildInstructions`) or read a session's `prompt.compiled` history event (see
+[The prompt record](#the-prompt-record)) rather than trusting this doc or any docblock.
 
 ## The mental model
 
@@ -39,7 +40,9 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); with generalist kickoff off it is emitted only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); with generalist kickoff on (`config.generalistMode`, see docs/generalist-mode.md) it is emitted for any delegation role | ~2.3K ch |
 | 3 | About intro + **the gezel's `about.md`, verbatim** | always | meester template ~4.6K ch |
 | 4 | `### Traits` | frontmatter traits present | varies |
+| 4b | `### Character` — the gezel's style + temperament, quirk, and a small-talk word cap, rendered from its persisted `character` record by `renderCharacterBlock` ([core character/](../packages/core/src/character/index.ts)); kept at every footprint, including `minimal` | **social mode on** (`resolveSocialMode`: `config.social`, else on for phones, off for the desktop) | ≤ 60 tok |
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
+| 5b | `### About the person` — what the crew has learned about the person (the "About you" memory scope), durable kinds only, newest first (`selectPersonNotes` in [memory-notes.ts](../packages/core/src/memory-notes.ts)); kept at every footprint, never in a visitor session | notes about the person exist | ≤ 700 / 450 / 260 ch (standard / compact / minimal) |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
 | 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large), the deep pass has produced summaries, AND the role gets specialist workspace orientation | ≤ ~300 tok |
 | 7 | Role-scoped `### Workspace files` listing (cap 100): developer-family roles see code/config, writers see prose sources, researchers see prose/text data, designers see editable design sources, and reviewers see their union. Coordinators, generalists, generators, and unknown roles get no standing inventory. Dependency/build/cache directories, lockfiles, minified/source-map output, and binary formats are removed before the cap. With `prompt.retrieval-first` on the profile (tier-default tiny/small/medium), a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface. | project has relevant files and role is eligible | varies |
@@ -96,7 +99,7 @@ Tier-default prompt text:
 
 | Tier | promptAppend behaviors | Other defaults |
 |---|---|---|
-| tiny | `prompt.tool-cookbook-full` (~2.3K tok — tool-use rules table + "what NOT to do") | schema relaxation, missing-field defaulting, fabrication detector, continuation budget 4 |
+| tiny | `prompt.tool-cookbook-full` (~2.3K tok with a full roster — tool-use rules table + "what NOT to do"; rows, the file-editing section and examples follow the turn's roster, so a lean game's turn carries ~850) | schema relaxation, missing-field defaulting, fabrication detector, continuation budget 4 |
 | small | `prompt.tool-cookbook-condensed` (~690 tok — 10 anti-fabrication rules) | fabrication detector |
 | medium | **none** | fabrication detector |
 | large | **none** | fabrication detector |
@@ -166,6 +169,20 @@ Across the mobile prompt-budget audit's cases
 system message fell from 12.6–18.9 KB to 3.8–6.2 KB, most of it the tool listing
 (9.7–13.8 KB of JSON down to 2.4–3.4 KB of signatures).
 
+The audit's `--project-types` mode measures the activities the same way, on both phone
+loops (the shared llama.cpp loop's OpenAI-shaped request and a system model's text
+loop) at 4K and 8K, and fails a case whose system prompt plus tools take more than half
+the window. Three roster rules brought every case under that line (2026-10-07): the full
+cookbook names only tools the turn has; `### Where work belongs` is left out of a lean
+session with no drawers; and `## Fresh project — skip the survey` needs a tool to survey
+with. A lean checkers turn at 8K went from ~3,350 tokens of standing prompt to ~2,290,
+and the language tutor, made lean in its catalog type, from ~6,480 to ~2,220.
+
+```
+GEZEL_GILDE_DATA_DIR=../gilde/data node --import ./evals/node_modules/tsx/dist/esm/index.mjs \
+  evals/src/mobile/prompt-budget.ts --project-types /tmp/typed-budget.json
+```
+
 A phone's window is the device's to size. The native runtime measures what each window
 would take with llama.cpp's own dry-run accounting (`gezel_llama_estimate_memory`) and
 reports 16K or 8K when that fits with room to spare, else 4K, on the selected model
@@ -180,8 +197,8 @@ even "hi there" before generating a token. On the desktop,
 the provider's reported window for native-tool providers) and, when it is `minimal`,
 early-returns a stripped prompt instead of the layer stack. There are two forms:
 
-- **Text-only** (talkie): header + capped about.md + one "you have no tools, just
-  converse" line. Everything else is dropped: guardrail, project context,
+- **Text-only** (talkie): header + capped about.md + the character block (social mode
+  only) + one "you have no tools, just converse" line. Everything else is dropped: guardrail, project context,
   workspace/documents, task blocks, recall, the full conduct core, and the tools block.
   The floor falls from ~2.7K tokens to ~350. This is deliberately lossy; pair it with the
   `just-chat` project type, which hides the work-oriented tabs to match.
@@ -260,8 +277,32 @@ while they stream.
   skips the plan, the prelude, and the `invoke_craftbook` clamp for that one turn. The
   prelude path remains for the CLI, evals, and older clients, which send neither.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
-  evidence block from the active project, current gezel memory, and shared
-  library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.
+  evidence block from the active project, current gezel memory, the person's
+  own memory ("About you"), and shared library. Off/Lean/Balanced/Deep plus a
+  context-window ceiling bound its size. Memory arms answer by keyword when the
+  embedder is cold, under the same grounding rule as every other keyword arm.
+  The phone has no embedder: a person's message there gets a lexical memory
+  block instead (`recallPortableMemories` in
+  [runtime/memory-recall.ts](../packages/core/src/runtime/memory-recall.ts)),
+  within the same `contextBudgetCeiling`.
+- **Memories are notes, not evidence.** Every memory a model sees — recalled
+  with a turn on either host, or returned by `search`, `search_memory` or
+  `save_memory` — goes through one renderer,
+  [memory-notes.ts](../packages/core/src/memory-notes.ts): a
+  `[Your notes from earlier sessions …]` header and lines like
+  `- Your note (correction, 2026-10-01): …` / `- About the person: …`. On the
+  desktop they come after the indexed evidence, nearest the person's words,
+  and never under its "untrusted evidence" warning. Under that warning a 4B
+  tutor recalled the learner's exact recurring mistake and still let it pass,
+  in every trial (memory-tutor A/B, 2026-10-07). A correction note quotes the
+  wrong form first; when the person's message contains it, the line says
+  `— this message repeats it` and moves to the top (`noteRepeatsInMessage`),
+  because a small model in the middle of a role-play let the bare note pass.
+  Over three trials per arm on Gemma E4B, notes framing plus the standing
+  `### About the person` block plus this marker took the remembered tutor
+  from 5.9 to 7.8 against a fresh tutor's 6.6–7.1 (personalisation 8.3 vs
+  4.3, correction level with the fresh tutor), where the evidence framing
+  had left it below the fresh tutor.
   In a factual-mode session each row carries its session-wide evidence
   number (`[7] [knowledge] …`), and evidence tool results get the same
   `[n]` header in the bridge ([factual-writing.md](factual-writing.md)).
@@ -495,7 +536,34 @@ they compete with text for context and prefill. Measured accounting:
   ~225 ch/tool estimate above badly undercounts the heavy tail — size the wire, not the
   average. Diagnostics: `GEZEL_PROMPT_BREAKDOWN=1` (per-section text table, passed
   through by the eval harness) + the `wire tools= schemaChars=` debug line in the
-  llama-cpp provider.
+  llama-cpp provider. The `prompt.compiled` event carries both halves per session.
+
+## The prompt record
+
+Every prompt a session runs on is recorded, sizes only, so "why was this turn slow" or
+"what crowded the window" has an answer without a rerun:
+
+- **Sections.** `buildInstructions` returns `sections`: each non-empty section's name,
+  estimated tokens (`estimateTokens`, ~4 characters each), and band, in prompt order.
+  Every path reports them: standard, layered, minimal, and focused. The
+  `GEZEL_PROMPT_BREAKDOWN` table prints the same list, so there is one registry.
+- **Tools.** Engines template the tool schemas into the prompt, so they cost tokens the
+  text does not show. `LLMSession.getToolSurface()` reports the roster the latest turn
+  advertised (llama.cpp and MLX). A required-tool turn narrows what one request offers;
+  the record sizes the whole roster.
+- **The event.** After a turn, [chat/prompt-record.ts](../packages/service/src/chat/prompt-record.ts)
+  logs `prompt.compiled` once per distinct prompt per session (keyed by a hash of the
+  system message and volatile context; a daemon restart logs it again). Details:
+  `provider`, `model`, `footprint`, `contextWindow`, `systemTokens`, `volatileTokens`,
+  `sections`, session-scoped `extraSections` (craftbook editing, visitor rules), and
+  `tools: { count, tokens }`. Read it with `search_history` or
+  `GET /api/history?kind=prompt.compiled`.
+- **The text, in debug mode only.** The prompt holds about.md, project documents, and
+  recalled memories, so the text is never logged by default. With debug mode on, the
+  last 5 prompts per session are written to `logs/prompts/<sessionId>/` with their
+  section table; folders untouched for 7 days are swept.
+- **Phones** have no history log. The llama.cpp path logs the section sizes at debug
+  level once per distinct prompt.
 
 ## Prompt/tool contract matrix
 
@@ -687,7 +755,12 @@ both in the volatile band:
   one-sentence ownership statement. Rendered by `renderTaskOutline` in
   `chat/instructions.ts`; it names `advance_task_step` only when the turn
   wired it. The recency anchor gains the same ownership clause. The per-step
-  procedure and gate contract stay the authoritative instructions.
+  procedure and gate contract stay the authoritative instructions. A stepwise
+  task of more than one step renders the same outline without gate or fanout
+  markers, closed by "Only the active step is yours" instead of the ownership
+  sentence, and its task block adds the earlier steps' files
+  (`core/tasks/inferred-step-inputs.ts`): a file the procedure names becomes a
+  required input, the rest are listed under `#### Earlier steps' files`.
 - **A union tool surface** — the deliverable kit, mandated tools, conditional
   built-ins and research intent are unions over every step of the task
   (`generalistSteps` in `chat/session-tool-surface.ts`), so the tools block is

@@ -682,6 +682,7 @@ describe('sessionRouteGuard', () => {
       '/api/projects/proj-a/diffpacks/12/dismiss',
       '/api/projects/proj-a/report-actions/fire',
       '/api/projects/proj-a/report-actions/dismiss',
+      '/api/projects/proj-a/albums/copy',
     ];
     for (const team of [false, true]) {
       const app = sessionPolicyApp(session('proj-a', team), undefined, () => true);

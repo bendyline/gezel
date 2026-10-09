@@ -34,6 +34,7 @@ export interface KnowledgeWorkerRequest {
     | 'getChunk'
     | 'assets'
     | 'readAsset'
+    | 'assetFile'
     | 'search'
     | 'dispose';
   args: unknown[];

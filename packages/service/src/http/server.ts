@@ -110,6 +110,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
+import { reminderRoutes } from './routes/reminders.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
 import { v1KnowledgeRoutes } from './routes/v1-knowledge.js';
 
@@ -141,6 +142,7 @@ import {
   isOfficeListenerRequest,
   officeStaticRoutes,
 } from '../office-host/static-routes.js';
+import { mediaSearchRoutes } from './routes/media-search.js';
 import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { relevanceModelRoutes } from './routes/relevance-model.js';
 import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
@@ -605,6 +607,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // /api/sessions/:id/tools/*.
   app.route('/api/sessions', mcpToolRoutes(ctx));
   app.route('/api/questions', questionRoutes(ctx));
+  app.route('/api/reminders', reminderRoutes(ctx));
   app.route('/api/permissions', permissionRoutes(ctx));
   app.route('/api/asks', askRoutes(ctx));
   app.route('/api/system', systemRoutes(ctx));
@@ -615,6 +618,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/relevance-model', relevanceModelRoutes(ctx));
+  app.route('/api/media-search', mediaSearchRoutes(ctx));
   app.route('/api/ai-apps', aiAppRoutes(ctx));
   app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));

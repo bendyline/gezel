@@ -8,10 +8,15 @@ import {
   type TaskAssignee,
   type TaskCronOverlap,
   type TaskInputSource,
+  composeCraftbookLaunch,
   craftbookInputParams,
-  launchFormParamSchema,
   mainContentParamKey,
+  planBriefLabel,
+  planDisplayName,
+  planLaunchFormSchema,
+  planOutputSummary,
   prioritizePullsForCurrentBranch,
+  starterCraftbookIds,
   unmetParamAlternatives,
   visibleCatalogItems,
 } from '@bendyline/gezel';
@@ -51,6 +56,7 @@ import {
   taskLensesFor,
   toBookItems,
 } from './new-task-meta.js';
+import './plan-launch.css';
 
 /**
  * Sentinel for "let the entry step's role decide". Sends no assignee, so
@@ -76,7 +82,7 @@ const MODE_COPY: Record<
 > = {
   'one-time': {
     title: 'New Task',
-    subtitle: 'Pick a craftbook — a proven recipe your crew follows step by step — or start blank.',
+    subtitle: 'Pick a plan, add a few details, and let your crew get to work.',
     generalLabel: GENERAL_TASK_CARD.label,
     generalDescription: GENERAL_TASK_CARD.description,
     featuredLabel: 'Recommended',
@@ -87,11 +93,11 @@ const MODE_COPY: Record<
   },
   scheduled: {
     title: 'New Scheduled Task',
-    subtitle: 'Choose a repeatable craftbook, then set when each fresh run should begin.',
+    subtitle: 'Choose a repeatable plan, then set when each fresh run should begin.',
     generalLabel: 'Blank scheduled task',
     generalDescription: 'Define a repeatable job from scratch and run a fresh copy on a cadence.',
     featuredLabel: 'For schedules',
-    featuredTitle: 'Scheduled craftbooks',
+    featuredTitle: 'Scheduled plans',
     featuredTagline: 'recipes identified as safe for recurring unattended runs',
     submitLabel: 'Create schedule',
     footnote: 'Starts active and creates a fresh task on each scheduled run.',
@@ -102,7 +108,7 @@ const MODE_COPY: Record<
     generalLabel: 'Blank Night Shift task',
     generalDescription: 'Define a one-off job that waits for Night Shift before it begins.',
     featuredLabel: 'For Night Shift',
-    featuredTitle: 'Night Shift craftbooks',
+    featuredTitle: 'Night Shift plans',
     featuredTagline: 'recipes identified as safe for unattended overnight work',
     submitLabel: 'Queue for Night Shift',
     footnote: 'Starts active, but only runs while Night Shift is on.',
@@ -130,6 +136,8 @@ export function NewTaskDialog({
   open,
   creationMode = 'one-time',
   launchMode = 'immediate',
+  initialCraftbookId,
+  quickLaunch = false,
   initialLaunch,
   composerText,
   onComposerTextChange,
@@ -145,6 +153,9 @@ export function NewTaskDialog({
   creationMode?: TaskCreationMode;
   /** `compose`: hand the configuration to a chat composer instead of creating. */
   launchMode?: 'immediate' | 'compose';
+  /** Home opens the same launch form directly on a plan. */
+  initialCraftbookId?: string;
+  quickLaunch?: boolean;
   /** Compose mode: the attached task to reopen on, values restored. */
   initialLaunch?: PromptDraftTaskLaunch | null;
   /** Compose mode: the message so far, shown as the task's brief. */
@@ -171,7 +182,15 @@ export function NewTaskDialog({
   // depend on the project's type and GitHub/branch state).
   const [books, setBooks] = useState<BookItem[]>([]);
   const [booksLoaded, setBooksLoaded] = useState(false);
+  const [starterIds, setStarterIds] = useState<string[]>([]);
+  const [durationEstimates, setDurationEstimates] = useState<Record<string, number>>({});
+  const submissionKey = useRef('');
+  const submissionFingerprint = useRef('');
+  const briefInput = useRef<HTMLTextAreaElement>(null);
+  const submitting = useRef(false);
+  const submitTonight = useRef(false);
   const craftbookLoadSequence = useRef(0);
+  const loadedCraftbookSequence = useRef(0);
   const [missingToolsets, setMissingToolsets] = useState<Record<string, CraftbookToolsetNeed[]>>(
     {},
   );
@@ -229,6 +248,21 @@ export function NewTaskDialog({
   const handedOffRef = useRef(false);
   const initialLaunchRef = useRef(initialLaunch ?? null);
   initialLaunchRef.current = initialLaunch ?? null;
+  const launchModeRef = useRef(launchMode);
+  launchModeRef.current = launchMode;
+  useEffect(
+    () => () => {
+      if (handedOffRef.current) return;
+      const keep =
+        launchModeRef.current === 'compose' ? uploadStagingIds(initialLaunchRef.current) : [];
+      discardStagedInputs(
+        stagedRef.current.projectId,
+        stagedRef.current.inputValues,
+        new Set(keep),
+      );
+    },
+    [],
+  );
 
   // Reset per open so the dialog never reopens half-filled. The compose-mode
   // restore lives in the same effect, after the reset: a second effect would
@@ -238,9 +272,11 @@ export function NewTaskDialog({
   useEffect(() => {
     if (!open) return;
     setProjectId(defaultProjectId);
-    setSelectedBookId(null);
+    setSelectedBookId(initialCraftbookId ?? null);
     setGeneralChosen(false);
-    setStep('pick');
+    setStep(initialCraftbookId ? 'configure' : 'pick');
+    submissionKey.current = `craftbook-root-v1:${(crypto.randomUUID() + crypto.randomUUID()).replaceAll('-', '')}`;
+    submitting.current = false;
     setQuery('');
     setActiveRail('all');
     setRailInitialized(false);
@@ -258,7 +294,7 @@ export function NewTaskDialog({
     setError('');
     setPullHint(null);
     handedOffRef.current = false;
-    seedPendingRef.current = null;
+    seedPendingRef.current = initialCraftbookId ?? null;
     const restore = launchMode === 'compose' ? initialLaunchRef.current : null;
     if (restore) {
       setSelectedBookId(restore.craftbookId);
@@ -272,7 +308,7 @@ export function NewTaskDialog({
       setAssigneeTouched(Boolean(assignee));
       seedPendingRef.current = restore.craftbookId;
     }
-  }, [open, defaultProjectId, launchMode]);
+  }, [open, defaultProjectId, launchMode, initialCraftbookId]);
 
   // Files uploaded for a launch that never happened would otherwise sit in
   // staging until the daemon's sweep. After a successful launch the upload
@@ -282,7 +318,11 @@ export function NewTaskDialog({
     if (open) return;
     const keep = new Set<string>(
       launchMode !== 'compose'
-        ? []
+        ? handedOffRef.current
+          ? Object.values(stagedRef.current.inputValues).flatMap((value) =>
+              value.source?.from === 'upload' ? [value.source.stagingId] : [],
+            )
+          : []
         : handedOffRef.current
           ? Object.values(stagedRef.current.inputValues).flatMap((value) =>
               value.source?.from === 'upload' ? [value.source.stagingId] : [],
@@ -297,6 +337,7 @@ export function NewTaskDialog({
     if (!projectId) {
       if (sequence !== craftbookLoadSequence.current) return;
       setBooks([]);
+      loadedCraftbookSequence.current = sequence;
       setBooksLoaded(true);
       return;
     }
@@ -305,11 +346,16 @@ export function NewTaskDialog({
       if (sequence !== craftbookLoadSequence.current) return;
       const visibleItems = visibleCatalogItems(res.items ?? [], showWorkInProgressFeatures);
       const visibleIds = new Set(visibleItems.map((item) => item.manifest.id));
-      setBooks(toBookItems(visibleItems));
+      const nextBooks = toBookItems(visibleItems);
+      setBooks(nextBooks);
+      setStarterIds(res.starterIds ?? starterCraftbookIds(nextBooks.map((book) => book.manifest)));
+      setDurationEstimates(res.durationEstimatesMs ?? {});
       setMissingToolsets(res.missingToolsets ?? {});
       setProjectType(res.projectType ?? null);
       setSuggestedIds(new Set((res.suggestedIds ?? []).filter((id) => visibleIds.has(id))));
-      setSelectedBookId((current) => (current && !visibleIds.has(current) ? null : current));
+      setSelectedBookId((current) =>
+        seedPendingRef.current ? current : current && !visibleIds.has(current) ? null : current,
+      );
     } catch {
       if (sequence !== craftbookLoadSequence.current) return;
       // Craftbooks are best-effort — the General card always works.
@@ -318,7 +364,10 @@ export function NewTaskDialog({
       setProjectType(null);
       setSuggestedIds(new Set());
     } finally {
-      if (sequence === craftbookLoadSequence.current) setBooksLoaded(true);
+      if (sequence === craftbookLoadSequence.current) {
+        loadedCraftbookSequence.current = sequence;
+        setBooksLoaded(true);
+      }
     }
   }, [projectId, showWorkInProgressFeatures]);
 
@@ -326,13 +375,22 @@ export function NewTaskDialog({
     if (!open) return;
     setBooksLoaded(false);
     void loadCraftbooks();
+    return () => {
+      craftbookLoadSequence.current++;
+    };
   }, [open, loadCraftbooks]);
 
   // Finish a compose-mode restore once the listing answers: declared
   // defaults underneath the restored values, or back to the gallery with a
   // reason when the book is no longer offered here.
   useEffect(() => {
-    if (!open || !booksLoaded) return;
+    if (
+      !open ||
+      !booksLoaded ||
+      projectId !== defaultProjectId ||
+      loadedCraftbookSequence.current !== craftbookLoadSequence.current
+    )
+      return;
     const pending = seedPendingRef.current;
     if (!pending) return;
     seedPendingRef.current = null;
@@ -340,11 +398,11 @@ export function NewTaskDialog({
     if (!book) {
       setSelectedBookId(null);
       setStep('pick');
-      setError('That craftbook is no longer available in this project.');
+      setError('That plan is no longer available in this project.');
       return;
     }
     setParams((prev) => ({ ...seedParamDefaults(book.manifest.paramSchema), ...prev }));
-  }, [open, booksLoaded, books]);
+  }, [open, booksLoaded, books, projectId, defaultProjectId]);
 
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
@@ -359,23 +417,22 @@ export function NewTaskDialog({
               ? book.manifest.runModes?.scheduled
               : book.manifest.runModes?.nightShift,
           );
-    if (hasFeatured) setActiveRail('recommended');
-  }, [open, booksLoaded, railInitialized, suggestedIds, creationMode, books]);
+    if (creationMode === 'one-time' && starterIds.length) setActiveRail('starters');
+    else if (hasFeatured) setActiveRail('recommended');
+  }, [open, booksLoaded, railInitialized, suggestedIds, creationMode, books, starterIds]);
 
   const selectedBook = selectedBookId
     ? (books.find((b) => b.manifest.id === selectedBookId) ?? null)
     : null;
-
-  // The role the entry step names, if any. A craftbook that names one
-  // picks its own owner — the role resolves to a specialist when the
-  // task fires and that gezel becomes the assignee, so there is nothing
-  // for the user to decide here.
-  const entryRole: string | null = (() => {
-    if (!selectedBook) return null;
-    const m = selectedBook.manifest;
-    const entry = m.steps.find((s) => s.id === m.entryStepId) ?? m.steps[0];
-    return entry?.suggestedRole ?? null;
-  })();
+  const starterSelected = !!selectedBook && starterIds.includes(selectedBook.manifest.id);
+  const mainKey = selectedBook ? mainContentParamKey(selectedBook.manifest.paramSchema) : null;
+  const needsBrief = !!selectedBook && (starterSelected || mainKey !== null);
+  const briefValue = mainKey ? String(params[mainKey] ?? '') : description;
+  const outputSummary = selectedBook ? planOutputSummary(selectedBook.manifest) : null;
+  const durationMs = selectedBook ? durationEstimates[selectedBook.manifest.id] : undefined;
+  useEffect(() => {
+    if (open && step === 'configure' && selectedBookId && booksLoaded) briefInput.current?.focus();
+  }, [open, step, selectedBookId, booksLoaded]);
 
   // A scheduled host performs no work itself — its craftbook resolves per
   // tick, so there is nothing to pre-flight here.
@@ -468,6 +525,8 @@ export function NewTaskDialog({
       setSelectedBookId(b.manifest.id);
       setGeneralChosen(false);
       setParams(seedParamDefaults(b.manifest.paramSchema));
+      setDescription('');
+      submissionKey.current = `craftbook-root-v1:${(crypto.randomUUID() + crypto.randomUUID()).replaceAll('-', '')}`;
       setError('');
       setStep('configure');
       if (!titleTouched) setTitle(b.manifest.name);
@@ -475,18 +534,16 @@ export function NewTaskDialog({
         const d = b.manifest.defaultAssignee;
         if (d?.kind === 'gezel' && gezels.some((g) => g.id === d.gezelId)) {
           setAssigneeSel(d.gezelId);
-        }
+        } else setAssigneeSel('');
       }
     },
     [titleTouched, assigneeTouched, gezels, selectedBookId],
   );
 
-  // An explicit pick always wins. Otherwise a role-annotated craftbook
-  // defers (`null` — we send no assignee and the service mirrors the
-  // entry step's resolved specialist), and everything else falls back to
-  // the first gezel on the roster.
+  // An explicit pick wins. Plans otherwise let the service resolve their
+  // crew; only a blank task falls back to the roster's first gezel.
   const resolvedAssigneeSel =
-    assigneeSel || (entryRole ? AUTO_ASSIGNEE : (gezels[0]?.id ?? '__user'));
+    assigneeSel || (selectedBook ? AUTO_ASSIGNEE : (gezels[0]?.id ?? '__user'));
   const assignee: TaskAssignee | null =
     resolvedAssigneeSel === AUTO_ASSIGNEE
       ? null
@@ -551,12 +608,21 @@ export function NewTaskDialog({
       return [
         {
           id: 'search',
-          title: 'Craftbooks',
+          title: 'Plans',
           tagline: `matching "${query.trim()}"`,
           books: filteredBooks,
         },
       ];
     }
+    if (activeRail === 'starters')
+      return [
+        {
+          id: 'starters',
+          title: 'Start here',
+          tagline: 'A few details are all you need',
+          books: books.filter((book) => starterIds.includes(book.manifest.id)),
+        },
+      ];
     if (activeRail === 'recommended' && suggestedBooks.length > 0) {
       return [
         {
@@ -581,7 +647,7 @@ export function NewTaskDialog({
         },
       ];
     }
-    return [{ id: 'all', title: 'All craftbooks', tagline: undefined, books }];
+    return [{ id: 'all', title: 'All plans', tagline: undefined, books }];
   }, [
     searching,
     query,
@@ -593,6 +659,7 @@ export function NewTaskDialog({
     books,
     creationMode,
     modeCopy,
+    starterIds,
   ]);
 
   const selectedNeeds: CraftbookToolsetNeed[] = selectedBook
@@ -602,10 +669,17 @@ export function NewTaskDialog({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (busy) return;
+      if (busy || submitting.current) return;
+      const tonight = submitTonight.current;
+      submitTonight.current = false;
       // Enter in the picker's search box submits the form implicitly; the
       // task is not configured yet, so nothing may be created from there.
       if (step !== 'configure') return;
+      if (
+        selectedBookId &&
+        (!booksLoaded || loadedCraftbookSequence.current !== craftbookLoadSequence.current)
+      )
+        return;
       setError('');
       if (!projectId) {
         setError('Pick a project.');
@@ -621,7 +695,7 @@ export function NewTaskDialog({
       if (selectedBook) {
         const m = selectedBook.manifest;
         if ((missingToolsets[m.id]?.length ?? 0) > 0) {
-          setError('This craftbook needs its toolsets installed first — see the setup list.');
+          setError('This plan needs its toolsets installed first — see the setup list.');
           return;
         }
         const inputParams = craftbookInputParams(m.paramSchema);
@@ -633,16 +707,24 @@ export function NewTaskDialog({
           (input) => input.required && !inputValues[input.key]?.source,
         );
         if (missingInput) {
-          setError(`Choose the ${missingInput.title.toLowerCase()} this craftbook works on.`);
+          setError(`Choose the ${missingInput.title.toLowerCase()} this plan works on.`);
           return;
         }
         // In compose mode the chat message is the brief, and the brief is the
         // book's main content: it is never a field here and never missing.
         const briefKey = launchMode === 'compose' ? mainContentParamKey(m.paramSchema) : null;
         const briefFills = briefKey ? [briefKey] : [];
-        const schema = launchFormParamSchema(m.paramSchema, briefFills) as
-          | SquisqAnnotatedSchema
-          | undefined;
+        if (
+          !composeMode &&
+          needsBrief &&
+          !briefValue.trim() &&
+          !inputParams.some((input) => inputValues[input.key]?.source) &&
+          !String(params.content ?? '').trim()
+        ) {
+          setError('Add a topic or a short description to start this plan.');
+          return;
+        }
+        const schema = planLaunchFormSchema(m, briefFills) as SquisqAnnotatedSchema | undefined;
         const required = Array.isArray(schema?.required) ? (schema.required as string[]) : [];
         const missingKey = required.find((k) => {
           const v = params[k];
@@ -680,7 +762,16 @@ export function NewTaskDialog({
           onClose();
           return;
         }
-        const stringified = stringifyParamValues(params);
+        const composed = composeCraftbookLaunch({
+          message: briefValue,
+          craftbookName: m.name,
+          paramSchema: m.paramSchema,
+          params: stringifyParamValues(params),
+        });
+        const stringified = composed.params;
+        const launchTitle = titleTouched
+          ? title.trim() || planDisplayName(m)
+          : briefValue.trim().slice(0, 100) || planDisplayName(m);
         const inputSources: Record<string, TaskInputSource> = {};
         const inputLabels: Record<string, string> = {};
         for (const input of inputParams) {
@@ -699,12 +790,29 @@ export function NewTaskDialog({
             source.from === 'workspace' ? [[key, source.path]] : [],
           ),
         );
+        const fingerprint = JSON.stringify([
+          projectId,
+          m.id,
+          selectedBook.item.sourceId,
+          stringified,
+          inputSources,
+          assignee,
+          launchTitle,
+          composed.description,
+          creationMode,
+          tonight,
+        ]);
+        if (submissionFingerprint.current !== fingerprint) {
+          submissionFingerprint.current = fingerprint;
+          submissionKey.current = `craftbook-root-v1:${(crypto.randomUUID() + crypto.randomUUID()).replaceAll('-', '')}`;
+        }
+        submitting.current = true;
         setBusy(true);
         try {
           const created =
             creationMode === 'scheduled'
               ? await api.createTask(projectId, {
-                  title: title.trim() || m.name,
+                  title: launchTitle,
                   description: `Recurring scheduled task. ${composeCraftbookDescription(m, { ...stringified, ...inputLabels })} Each scheduled run creates a fresh task from this recipe.`,
                   steps: [
                     {
@@ -724,15 +832,18 @@ export function NewTaskDialog({
                     : {}),
                 })
               : await api.createTask(projectId, {
-                  title: title.trim() || m.name,
-                  description: composeCraftbookDescription(m, { ...stringified, ...inputLabels }),
+                  title: launchTitle,
+                  description: briefValue.trim()
+                    ? composed.description
+                    : composeCraftbookDescription(m, { ...stringified, ...inputLabels }),
+                  craftbookInvocationKey: submissionKey.current,
                   ...(Object.keys(inputSources).length > 0 ? { inputs: inputSources } : {}),
                   craftbookId: m.id,
                   ...(selectedBook.item.sourceId
                     ? { craftbookSourceId: selectedBook.item.sourceId }
                     : {}),
                   ...(assignee ? { assignee } : {}),
-                  ...(creationMode === 'one-time'
+                  ...(creationMode === 'one-time' && !tonight
                     ? { dispatchEntry: true }
                     : { nightShift: { enabled: true }, dispatchEntry: true }),
                   ...(Object.keys(stringified).length > 0 ? { craftbookParams: stringified } : {}),
@@ -754,11 +865,13 @@ export function NewTaskDialog({
               })
               .catch(() => {});
           }
+          handedOffRef.current = true;
           await onCreated?.(created);
           onClose();
         } catch (err) {
           setError(apiErrorMessage(err));
         } finally {
+          submitting.current = false;
           setBusy(false);
         }
         return;
@@ -823,6 +936,8 @@ export function NewTaskDialog({
       creationMode,
       launchMode,
       projectId,
+      selectedBookId,
+      booksLoaded,
       selectedBook,
       missingToolsets,
       params,
@@ -834,6 +949,10 @@ export function NewTaskDialog({
       cron,
       cronOverlap,
       onCreated,
+      needsBrief,
+      briefValue,
+      composeMode,
+      titleTouched,
       onUseInChat,
       onClose,
     ],
@@ -847,27 +966,71 @@ export function NewTaskDialog({
     ? craftbookInputParams(selectedBook.manifest.paramSchema)
     : [];
   const composeBriefKey =
-    composeMode && selectedBook ? mainContentParamKey(selectedBook.manifest.paramSchema) : null;
+    (composeMode || needsBrief) && selectedBook
+      ? mainContentParamKey(selectedBook.manifest.paramSchema)
+      : null;
   const nonInputParamSchema = selectedBook
-    ? launchFormParamSchema(
-        selectedBook.manifest.paramSchema,
-        composeBriefKey ? [composeBriefKey] : [],
-      )
+    ? planLaunchFormSchema(selectedBook.manifest, composeBriefKey ? [composeBriefKey] : [])
     : undefined;
   const selectedSchema =
     selectedBook &&
     craftbookHasParams({ ...selectedBook.manifest, paramSchema: nonInputParamSchema })
       ? (nonInputParamSchema as SquisqAnnotatedSchema)
       : null;
+  const requiredKeys = new Set((selectedSchema?.required ?? []) as string[]);
+  const requiredSchema = splitPlanSchema(selectedSchema, (key) => requiredKeys.has(key));
+  const optionalSchema = splitPlanSchema(selectedSchema, (key) => !requiredKeys.has(key));
   const inputBusy = selectedInputs.some((input) => inputValues[input.key]?.busy);
   // A restored selection whose book the listing has not delivered yet. The
   // configure pane must not flash the blank-task form in the meantime.
-  const pendingBook = Boolean(selectedBookId && !selectedBook);
+  const pendingBook = Boolean(selectedBookId && (!selectedBook || !booksLoaded));
   const createDisabled =
     busy || inputBusy || pendingBook || (selectedBook !== null && selectedNeeds.length > 0);
+  const compactLaunch =
+    quickLaunch ||
+    Boolean(
+      selectedBook &&
+        !needsBrief &&
+        !requiredSchema &&
+        !selectedInputs.some((input) => input.required),
+    );
+
+  const renderParams = (schema: SquisqAnnotatedSchema) => (
+    <GezelJsonEditor
+      schema={schema}
+      value={Object.fromEntries(
+        Object.entries(params).filter(([key]) => key in (schema.properties ?? {})),
+      )}
+      onChange={(next) => {
+        setParams((prev) => ({
+          ...Object.fromEntries(
+            Object.entries(prev).filter(([key]) => !(key in (schema.properties ?? {}))),
+          ),
+          ...((next ?? {}) as Record<string, unknown>),
+        }));
+        setError('');
+      }}
+      density="comfortable"
+    />
+  );
+  const renderInput = (input: ReturnType<typeof craftbookInputParams>[number]) =>
+    selectedBook && (
+      <CraftbookInputField
+        key={`${projectId}:${selectedBook.manifest.id}:${input.key}`}
+        projectId={projectId}
+        craftbookId={selectedBook.manifest.id}
+        input={input}
+        allowUpload={creationMode !== 'scheduled'}
+        value={inputValues[input.key] ?? EMPTY_INPUT_VALUE}
+        onChange={(next) => {
+          setInputValues((prev) => ({ ...prev, [input.key]: next }));
+          setError('');
+        }}
+      />
+    );
 
   const heroEyebrow = selectedBook
-    ? `Craftbook${
+    ? `Plan${
         isRecommended(selectedBook)
           ? creationMode === 'night-shift'
             ? ' · recommended for Night Shift'
@@ -887,12 +1050,14 @@ export function NewTaskDialog({
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next && !busy) onClose();
       }}
     >
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content className={`gz-npd gz-ntd gz-npd-step-${step}`}>
+        <Dialog.Content
+          className={`gz-npd gz-ntd gz-npd-step-${step}${compactLaunch ? ' gz-ntd-quick' : ''}`}
+        >
           <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
             {step === 'pick' ? (
               <>
@@ -902,9 +1067,7 @@ export function NewTaskDialog({
                       <h3>{composeMode ? 'Task for this message' : modeCopy.title}</h3>
                     </Dialog.Title>
                     <p className="gz-npd-header-sub">
-                      {composeMode
-                        ? 'Pick a craftbook to attach to your message.'
-                        : modeCopy.subtitle}
+                      {composeMode ? 'Pick a plan to attach to your message.' : modeCopy.subtitle}
                     </p>
                   </div>
                   <div className="gz-ntd-header-controls">
@@ -926,15 +1089,26 @@ export function NewTaskDialog({
                       </label>
                     )}
                     <GallerySearch
-                      label="Search craftbooks"
-                      placeholder="Search craftbooks…"
+                      label="Search plans"
+                      placeholder="Search plans…"
                       value={query}
                       onChange={setQuery}
                     />
                   </div>
                 </header>
                 <div className="gz-npd-body">
-                  <nav className="gz-npd-rail" aria-label="Craftbook shelves">
+                  <nav className="gz-npd-rail" aria-label="Plan shelves">
+                    {starterIds.length > 0 && creationMode === 'one-time' && (
+                      <button
+                        type="button"
+                        className={`gz-npd-rail-item${!searching && activeRail === 'starters' ? ' active' : ''}`}
+                        onClick={() => setActiveRail('starters')}
+                      >
+                        <ProjectGlyph glyph="sprout" size={16} />
+                        <span className="gz-npd-rail-label">Start here</span>
+                        <span className="gz-npd-rail-count">{starterIds.length}</span>
+                      </button>
+                    )}
                     {suggestedBooks.length > 0 && (
                       <button
                         type="button"
@@ -952,7 +1126,7 @@ export function NewTaskDialog({
                       onClick={() => setActiveRail('all')}
                     >
                       <ProjectGlyph glyph="sheet" size={16} />
-                      <span className="gz-npd-rail-label">All craftbooks</span>
+                      <span className="gz-npd-rail-label">All plans</span>
                       <span className="gz-npd-rail-count">{books.length}</span>
                     </button>
                     {lenses.map((lens, index) => {
@@ -1007,8 +1181,10 @@ export function NewTaskDialog({
                             {section.books.map((b, index) => (
                               <GalleryCard
                                 key={b.manifest.id}
-                                label={b.manifest.name}
-                                description={b.manifest.description}
+                                label={planDisplayName(b.manifest)}
+                                description={
+                                  planOutputSummary(b.manifest) ?? b.manifest.description
+                                }
                                 glyph={craftbookGlyph(b.manifest)}
                                 {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                                 {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
@@ -1023,8 +1199,8 @@ export function NewTaskDialog({
                           <p className="gz-npd-empty">
                             {booksLoaded
                               ? searching
-                                ? 'No craftbooks match your search.'
-                                : 'No craftbooks here yet.'
+                                ? 'No plans match your search.'
+                                : 'No plans here yet.'
                               : null}
                           </p>
                         )}
@@ -1034,7 +1210,7 @@ export function NewTaskDialog({
                             className="gz-ntd-show-all"
                             onClick={() => setActiveRail('all')}
                           >
-                            Browse all {books.length} craftbooks
+                            Browse all {books.length} plans
                           </button>
                         )}
                       </section>
@@ -1042,6 +1218,7 @@ export function NewTaskDialog({
                   </div>
                 </div>
                 <div className="gz-npd-pane-footer gz-npd-pick-footer">
+                  {error && <p role="alert">{error}</p>}
                   <p className="gz-npd-footnote">
                     Pick one to see what it does — nothing is created until the next screen.
                   </p>
@@ -1057,7 +1234,7 @@ export function NewTaskDialog({
                 <header className="gz-npd-header gz-npd-detail-header">
                   <button type="button" className="gz-npd-back" onClick={backToPicker}>
                     <span aria-hidden="true">‹</span>
-                    {selectedBook ? 'Craftbooks' : 'Back'}
+                    {selectedBook ? 'Plans' : 'Back'}
                   </button>
                   <div className="gz-npd-detail-id">
                     <span className="gz-npd-detail-art" aria-hidden="true">
@@ -1083,7 +1260,7 @@ export function NewTaskDialog({
                       <Dialog.Title asChild>
                         <h3 className="gz-npd-hero-name">
                           {selectedBook
-                            ? selectedBook.manifest.name
+                            ? planDisplayName(selectedBook.manifest)
                             : pendingBook
                               ? 'New task'
                               : modeCopy.generalLabel}
@@ -1104,7 +1281,9 @@ export function NewTaskDialog({
                 >
                   {selectedBook && (
                     <div className="gz-npd-brief">
-                      <p className="gz-npd-brief-lede">{selectedBook.manifest.description}</p>
+                      {!starterSelected && (
+                        <p className="gz-npd-brief-lede">{selectedBook.manifest.description}</p>
+                      )}
                       {selectedBook.manifest.basedOn && (
                         <p className="gz-ntd-based-on">
                           Based on{' '}
@@ -1117,27 +1296,36 @@ export function NewTaskDialog({
                           </a>
                         </p>
                       )}
-                      <div className="gz-ntd-steps">
-                        <p className="gz-npd-give-eyebrow">
-                          {selectedBook.manifest.steps.length} step
-                          {selectedBook.manifest.steps.length === 1 ? '' : 's'}
+                      {outputSummary && (
+                        <p>
+                          <strong>You’ll get:</strong> {outputSummary}
                         </p>
-                        <ol className="gz-ntd-steps-list">
-                          {selectedBook.manifest.steps.map((s) => (
-                            <li key={s.id}>
-                              <span className="gz-ntd-step-head">
-                                <span className="gz-ntd-step-name">{s.name}</span>
-                                {s.suggestedRole && (
-                                  <span className="gz-ntd-step-role">{s.suggestedRole}</span>
+                      )}
+                      {durationMs !== undefined && (
+                        <p className="muted">
+                          Usually about {Math.max(1, Math.round(durationMs / 60_000))} minutes here
+                        </p>
+                      )}
+                      {!compactLaunch && (
+                        <div className="gz-ntd-steps">
+                          <p className="gz-npd-give-eyebrow">
+                            {selectedBook.manifest.steps.length} step
+                            {selectedBook.manifest.steps.length === 1 ? '' : 's'}
+                          </p>
+                          <ol className="gz-ntd-steps-list">
+                            {selectedBook.manifest.steps.map((s) => (
+                              <li key={s.id}>
+                                <span className="gz-ntd-step-head">
+                                  <span className="gz-ntd-step-name">{s.name}</span>
+                                </span>
+                                {s.description && (
+                                  <span className="gz-ntd-step-note">{s.description}</span>
                                 )}
-                              </span>
-                              {s.description && (
-                                <span className="gz-ntd-step-note">{s.description}</span>
-                              )}
-                            </li>
-                          ))}
-                        </ol>
-                      </div>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
                     </div>
                   )}
                   <div className="gz-npd-setup" hidden={pendingBook}>
@@ -1145,41 +1333,39 @@ export function NewTaskDialog({
                       <p className="gz-npd-brief-lede">{modeCopy.generalDescription}</p>
                     )}
                     <div className="gz-npd-pane-form">
-                      <label>
-                        Title
-                        <input
-                          value={title}
-                          onChange={(e) => {
-                            setTitle(e.target.value);
-                            setTitleTouched(true);
-                          }}
-                          placeholder={
-                            selectedBook ? selectedBook.manifest.name : 'e.g. Ship the landing page'
-                          }
-                        />
-                      </label>
-                      {composeMode && selectedBook && (
+                      {composeMode && selectedBook ? (
                         <div className="gz-ntd-brief-from-message">
                           <p className="gz-npd-give-eyebrow">Brief · your chat message</p>
                           {onComposerTextChange ? (
                             <MarkdownField
-                              key={selectedBook.manifest.id}
                               value={composerText ?? ''}
-                              placeholder="What should this be about? Edits here change your chat message too."
+                              placeholder="What should this be about?"
                               minHeight="96px"
                               maxHeight="30vh"
                               onChange={onComposerTextChange}
                               onCommit={onComposerTextChange}
                             />
-                          ) : composerText?.trim() ? (
-                            <p className="gz-ntd-brief-text">{composerText}</p>
                           ) : (
-                            <p className="gz-ntd-brief-empty muted">
-                              Write the brief in the chat box. It becomes this task's description.
-                            </p>
+                            <p>{composerText?.trim() || 'Write the brief in the chat box.'}</p>
                           )}
                         </div>
-                      )}
+                      ) : selectedBook && needsBrief ? (
+                        <label>
+                          {planBriefLabel(selectedBook.manifest)}
+                          <textarea
+                            ref={briefInput}
+                            value={briefValue}
+                            rows={3}
+                            placeholder="A topic, an idea, or a short description"
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (mainKey) setParams((prev) => ({ ...prev, [mainKey]: value }));
+                              else setDescription(value);
+                              setError('');
+                            }}
+                          />
+                        </label>
+                      ) : null}
                       {selectedNeeds.length > 0 && selectedBook && (
                         <div className="gz-ntd-needs">
                           <p className="gz-npd-give-eyebrow">Needs setup</p>
@@ -1190,46 +1376,32 @@ export function NewTaskDialog({
                           />
                         </div>
                       )}
-                      {selectedBook && selectedInputs.length > 0 && selectedNeeds.length === 0 && (
-                        <div className="gz-npd-params">
-                          <p className="gz-npd-give-eyebrow">Works on</p>
-                          {selectedInputs.map((input) => (
-                            <CraftbookInputField
-                              key={`${projectId}:${selectedBook.manifest.id}:${input.key}`}
-                              projectId={projectId}
-                              craftbookId={selectedBook.manifest.id}
-                              input={input}
-                              allowUpload={creationMode !== 'scheduled'}
-                              value={inputValues[input.key] ?? EMPTY_INPUT_VALUE}
-                              onChange={(next) => {
-                                setInputValues((prev) => ({ ...prev, [input.key]: next }));
-                                setError('');
-                              }}
-                            />
-                          ))}
-                        </div>
-                      )}
-                      {selectedSchema && selectedNeeds.length === 0 && (
-                        <div className="gz-npd-params">
-                          <p className="gz-npd-give-eyebrow">Parameters</p>
-                          <GezelJsonEditor
-                            schema={selectedSchema}
-                            value={params}
-                            onChange={(next) => {
-                              setParams((next ?? {}) as Record<string, unknown>);
-                              setError('');
-                            }}
-                            density="comfortable"
-                          />
-                        </div>
+                      {selectedBook && selectedNeeds.length === 0 && (
+                        <>
+                          {selectedInputs
+                            .filter((input) => input.required)
+                            .map((input) => renderInput(input))}
+                          {requiredSchema && renderParams(requiredSchema)}
+                        </>
                       )}
                       {!selectedBook && (
                         <>
                           <label>
+                            Title
+                            <input
+                              value={title}
+                              onChange={(event) => {
+                                setTitle(event.target.value);
+                                setTitleTouched(true);
+                              }}
+                              placeholder="e.g. Ship the landing page"
+                            />
+                          </label>
+                          <label>
                             Description <span className="muted">· a sentence or two</span>
                             <textarea
                               value={description}
-                              onChange={(e) => setDescription(e.target.value)}
+                              onChange={(event) => setDescription(event.target.value)}
                               rows={4}
                               placeholder="What's the problem? What does success look like for the user?"
                             />
@@ -1238,58 +1410,85 @@ export function NewTaskDialog({
                             Steps <span className="muted">(one per line)</span>
                             <textarea
                               value={stepNames}
-                              onChange={(e) => setStepNames(e.target.value)}
+                              onChange={(event) => setStepNames(event.target.value)}
                               rows={4}
                             />
                           </label>
                         </>
                       )}
-                      <label>
-                        Assign to
-                        <Select.Root
-                          value={resolvedAssigneeSel}
-                          onValueChange={(v) => {
-                            setAssigneeSel(v);
-                            setAssigneeTouched(true);
-                          }}
-                        >
-                          <Select.Trigger>
-                            <Select.Value />
-                          </Select.Trigger>
-                          <Select.Content>
-                            {entryRole && (
-                              <Select.Item value={AUTO_ASSIGNEE}>
-                                Auto — the {entryRole} for step 1
-                              </Select.Item>
+                      <details className="gz-ntd-more" open={selectedBook ? undefined : true}>
+                        <summary>More options</summary>
+                        {selectedBook && (
+                          <>
+                            <label>
+                              Title
+                              <input
+                                value={titleTouched ? title : ''}
+                                onChange={(event) => {
+                                  setTitle(event.target.value);
+                                  setTitleTouched(true);
+                                }}
+                                placeholder={
+                                  briefValue.trim().slice(0, 100) ||
+                                  planDisplayName(selectedBook.manifest)
+                                }
+                              />
+                            </label>
+                            {selectedNeeds.length === 0 && (
+                              <>
+                                {optionalSchema && renderParams(optionalSchema)}
+                                {selectedInputs
+                                  .filter((input) => !input.required)
+                                  .map((input) => renderInput(input))}
+                              </>
                             )}
-                            {gezels.map((g) => (
-                              <Select.Item key={g.id} value={g.id}>
-                                {g.name}
-                                {g.role ? ` — ${g.role}` : ''}
-                              </Select.Item>
-                            ))}
-                            <Select.Item value="__user">Me (no gezel)</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-                        {resolvedAssigneeSel === AUTO_ASSIGNEE ? (
-                          <small className="muted">
-                            Every step picks its own specialist by role when the task fires. Step 1
-                            goes to the {entryRole}, and whoever that turns out to be owns the task.
-                          </small>
-                        ) : (
-                          selectedBook && (
+                          </>
+                        )}
+                        <label>
+                          Assign to
+                          <Select.Root
+                            value={resolvedAssigneeSel}
+                            onValueChange={(value) => {
+                              setAssigneeSel(value);
+                              setAssigneeTouched(true);
+                            }}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {selectedBook && (
+                                <Select.Item value={AUTO_ASSIGNEE}>
+                                  Choose automatically
+                                </Select.Item>
+                              )}
+                              {gezels.map((gezel) => (
+                                <Select.Item key={gezel.id} value={gezel.id}>
+                                  {gezel.name}
+                                </Select.Item>
+                              ))}
+                              <Select.Item value="__user">Me (no gezel)</Select.Item>
+                            </Select.Content>
+                          </Select.Root>
+                          {resolvedAssigneeSel === AUTO_ASSIGNEE && (
                             <small className="muted">
-                              Steps that name a role pick their own specialist when the task fires —
-                              this only covers steps that name none.
+                              The crew will choose someone for each step.
                             </small>
-                          )
+                          )}
+                        </label>
+                        {selectedBook && (
+                          <ol className="gz-ntd-steps-list">
+                            {selectedBook.manifest.steps.map((item) => (
+                              <li key={item.id}>
+                                {item.name}
+                                {item.suggestedRole && (
+                                  <span className="gz-ntd-step-role">{item.suggestedRole}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ol>
                         )}
-                        {resolvedAssigneeSel === '__user' && (
-                          <small className="muted">
-                            Assigned to you — firing won't hand it to a gezel.
-                          </small>
-                        )}
-                      </label>
+                      </details>
                       {creationMode === 'scheduled' && (
                         <div className="gz-ntd-schedule">
                           <p className="gz-npd-give-eyebrow">Schedule</p>
@@ -1344,7 +1543,7 @@ export function NewTaskDialog({
                       {composeMode
                         ? 'Nothing runs yet. It attaches to your message and starts when you send.'
                         : creationMode === 'one-time' && selectedBook
-                          ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
+                          ? 'Your crew can make this now or during the next Night Shift.'
                           : modeCopy.footnote}
                     </p>
                   )}
@@ -1352,6 +1551,17 @@ export function NewTaskDialog({
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel
                     </button>
+                    {!composeMode && selectedBook && creationMode === 'one-time' && (
+                      <button
+                        type="submit"
+                        disabled={createDisabled}
+                        onClick={() => {
+                          submitTonight.current = true;
+                        }}
+                      >
+                        Tonight
+                      </button>
+                    )}
                     <button type="submit" className="primary" disabled={createDisabled}>
                       {composeMode
                         ? 'Use in chat'
@@ -1360,7 +1570,7 @@ export function NewTaskDialog({
                             ? 'Starting…'
                             : 'Creating…'
                           : creationMode === 'one-time' && selectedBook
-                            ? 'Create & start'
+                            ? 'Start now'
                             : modeCopy.submitLabel}
                     </button>
                   </Dialog.Actions>
@@ -1445,4 +1655,20 @@ function GalleryCard({
       <span className="gz-npd-card-description">{description}</span>
     </button>
   );
+}
+
+function splitPlanSchema(
+  schema: SquisqAnnotatedSchema | null,
+  include: (key: string) => boolean,
+): SquisqAnnotatedSchema | null {
+  if (!schema) return null;
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties ?? {}).filter(([key]) => include(key)),
+  );
+  if (!Object.keys(properties).length) return null;
+  return {
+    ...schema,
+    properties,
+    required: ((schema.required ?? []) as string[]).filter(include),
+  } as SquisqAnnotatedSchema;
 }

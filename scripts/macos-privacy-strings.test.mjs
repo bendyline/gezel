@@ -36,6 +36,12 @@ const CAPTURE_APIS = [
     api: 'navigator.mediaDevices',
   },
   {
+    // Camera capture is a getUserMedia call whose constraints lead with video.
+    pattern: /\bgetUserMedia\(\s*\{\s*video\b/,
+    key: 'NSCameraUsageDescription',
+    api: 'getUserMedia (camera)',
+  },
+  {
     pattern: /\baskForMediaAccess\b/,
     key: 'NSMicrophoneUsageDescription',
     api: 'systemPreferences.askForMediaAccess',

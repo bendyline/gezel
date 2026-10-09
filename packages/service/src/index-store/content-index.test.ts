@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
@@ -103,7 +104,7 @@ describe('ContentIndex (code-intel façade)', () => {
   it('searches deep-pass area and architecture rollups for bigger-picture context', async () => {
     await writeFile(join(dir, 'README.md'), '# Driving game\n');
     await ci.refresh('p1');
-    const index = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+    const index = (await IndexStore.open(projectContentIndexDbFile(home, 'p1', dir), {
       collectionId: 'p1',
       kind: 'workspace',
       rootPath: dir,

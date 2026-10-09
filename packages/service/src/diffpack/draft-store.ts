@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import {
+  type DiffpackDraftOperation,
+  DiffpackDraftOperationSchema,
+  createLogger,
+} from '@bendyline/gezel';
 import { writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -207,6 +211,15 @@ export class DiffpackDraftStore {
     path: string,
     content: string,
   ): Promise<void> {
+    const landing = (await this.listOperations(projectId, packId)).find(
+      (op) => op.to === normalizeDraftPath(path),
+    );
+    if (landing) {
+      throw new WorkspaceEditError(
+        `${path} is where a proposed ${landing.op === 'mkdir' ? 'new folder' : landing.op} lands. Edit the file at its current path; the ${landing.op} is applied after the edits.`,
+        'invalid-range',
+      );
+    }
     const full = await this.draftPath(projectId, packId, path, { create: true });
     if (full === null) throw new WorkspaceEditError(`invalid path ${path}`, 'invalid-range');
     await mkdir(dirname(full), { recursive: true });
@@ -280,6 +293,121 @@ export class DiffpackDraftStore {
     await writeFileAtomic(file, `${JSON.stringify(paths, null, 2)}\n`);
   }
 
+  /* ─── File operations ────────────────────────────────────────────── */
+  //
+  // Moves, copies and new folders have no diff either. They are proposed in
+  // order, checked against the workspace as it stands, and applied after
+  // every content edit — so a gezel edits a file where it is now and moves
+  // it in the same proposal.
+
+  private operationsFile(projectId: string, packId: string): string {
+    return join(dirname(this.afterDir(projectId, packId)), 'operations.json');
+  }
+
+  async listOperations(projectId: string, packId: string): Promise<DiffpackDraftOperation[]> {
+    try {
+      const parsed: unknown = JSON.parse(
+        await readFile(this.operationsFile(projectId, packId), 'utf8'),
+      );
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((row) => {
+        const op = DiffpackDraftOperationSchema.safeParse(row);
+        return op.success ? [op.data] : [];
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Propose moving or copying `from` to `to`, or creating the folder `to`.
+   * Refused with the reason when the source is missing, the destination is
+   * taken (in the workspace or by this proposal), or a folder would land
+   * inside itself: an approved proposal never replaces a file.
+   */
+  async proposeOperation(
+    projectId: string,
+    packId: string,
+    input: DiffpackDraftOperation,
+  ): Promise<{ op: DiffpackDraftOperation; message: string }> {
+    const to = normalizeDraftPath(input.to);
+    const from = input.from ? normalizeDraftPath(input.from) : undefined;
+    if (!to || to === '.' || safeJoin('/w', to) === null) {
+      throw new WorkspaceEditError(`invalid destination "${input.to}"`, 'invalid-range');
+    }
+    const current = await this.listOperations(projectId, packId);
+    const drafted = await this.listDraftedPaths(projectId, packId);
+    const deletions = await this.listDeletions(projectId, packId);
+    const targetStat = await this.store.statProjectWorkspacePath(projectId, to);
+
+    if (input.op === 'mkdir') {
+      if (targetStat.kind === 'dir') {
+        return { op: { op: 'mkdir', to }, message: `${to} already exists.` };
+      }
+      if (targetStat.kind === 'file') {
+        throw new WorkspaceEditError(
+          `Cannot create folder ${to}: a file has that name.`,
+          'invalid-range',
+        );
+      }
+      if (!current.some((op) => op.to === to)) {
+        await this.writeOperations(projectId, packId, [...current, { op: 'mkdir', to }]);
+      }
+      return { op: { op: 'mkdir', to }, message: `Proposed a new folder ${to}.` };
+    }
+
+    if (!from || safeJoin('/w', from) === null) {
+      throw new WorkspaceEditError(`a ${input.op} needs the path it comes from`, 'invalid-range');
+    }
+    const source = await this.store.statProjectWorkspacePath(projectId, from);
+    if (source.kind === 'missing') {
+      throw new WorkspaceEditError(
+        `Cannot ${input.op} ${from}: no such file or folder in the workspace.`,
+        'file-not-found',
+      );
+    }
+    if (deletions.includes(from)) {
+      throw new WorkspaceEditError(
+        `Cannot ${input.op} ${from}: this proposal deletes it.`,
+        'invalid-range',
+      );
+    }
+    if (targetStat.kind !== 'missing' || drafted.includes(to)) {
+      throw new WorkspaceEditError(
+        `Cannot ${input.op} ${from} to ${to}: ${to} already exists. Pick a name nothing has.`,
+        'invalid-range',
+      );
+    }
+    if (current.some((op) => op.to === to)) {
+      throw new WorkspaceEditError(
+        `Cannot ${input.op} ${from} to ${to}: this proposal already puts something there.`,
+        'invalid-range',
+      );
+    }
+    if (to === from || to.startsWith(`${from}/`)) {
+      throw new WorkspaceEditError(`Cannot ${input.op} ${from} into itself.`, 'invalid-range');
+    }
+    if (input.op === 'move' && current.some((op) => op.op === 'move' && op.from === from)) {
+      throw new WorkspaceEditError(`This proposal already moves ${from}.`, 'invalid-range');
+    }
+    const op: DiffpackDraftOperation = { op: input.op, from, to };
+    await this.writeOperations(projectId, packId, [...current, op]);
+    return {
+      op,
+      message: `Proposed ${input.op === 'move' ? 'moving' : 'copying'} ${from} to ${to}. Nothing changes until the person applies the proposal.`,
+    };
+  }
+
+  private async writeOperations(
+    projectId: string,
+    packId: string,
+    ops: DiffpackDraftOperation[],
+  ): Promise<void> {
+    const file = this.operationsFile(projectId, packId);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFileAtomic(file, `${JSON.stringify(ops, null, 2)}\n`);
+  }
+
   /**
    * Write a sealed diff sidecar into `diffpacks/<packId>/files/`.
    *
@@ -323,11 +451,12 @@ export class DiffpackDraftStore {
    * because `notes.md` exists and reads perfectly well.
    */
   async isEmpty(projectId: string, packId: string): Promise<boolean> {
-    const [drafted, deletions] = await Promise.all([
+    const [drafted, deletions, operations] = await Promise.all([
       this.listDraftedPaths(projectId, packId),
       this.listDeletions(projectId, packId),
+      this.listOperations(projectId, packId),
     ]);
-    if (deletions.length > 0) return false;
+    if (deletions.length > 0 || operations.length > 0) return false;
     for (const path of drafted) {
       const before = await this.store.readProjectWorkspaceFile(projectId, path);
       const after = await this.read(projectId, packId, path);

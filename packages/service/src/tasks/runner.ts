@@ -52,7 +52,6 @@ import {
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
   taskEffectiveStatus,
-  withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
@@ -444,6 +443,21 @@ export class TaskRunner {
   }
 
   /**
+   * True while the Night Shift gate holds this task: the shift is off, or a
+   * `onceADay` task already ran tonight. The stuck-step sweep consults this
+   * too. A self-looping daily task (the Meester's oversight review) sits
+   * active on its re-armed step until tomorrow by design, and re-driving it
+   * re-ran a finished night's review three times into a session whose pass
+   * was over (2026-10-08).
+   */
+  isHeldForNightShift(task: Task): boolean {
+    return (
+      task.nightShift?.enabled === true &&
+      (!this.isNightShiftActive() || !this.isNightShiftPending(task))
+    );
+  }
+
+  /**
    * Transfer an already-running dispatch to a fresh activation of the same
    * task step. Completion-gate self-loops driven by the active model turn do
    * not enqueue a replacement handoff—the current turn consumes the verdict
@@ -598,6 +612,15 @@ export class TaskRunner {
     return this.wake();
   }
 
+  /** Resume can uncover dormant descendants; closing/pausing only prunes work.
+   * Waking is detached because a transition can originate inside our own tick. */
+  async reconcileStatusChange(task: Pick<Task, 'projectId' | 'status'>): Promise<void> {
+    if (task.status === 'active' || task.status === 'draft') {
+      await this.rehydrateFromStore({ projectId: task.projectId });
+    }
+    void this.wake();
+  }
+
   /**
    * Scan every `active` task and enqueue a handoff for any whose
    * current step has an effective gezel owner. Call on service boot and
@@ -623,9 +646,20 @@ export class TaskRunner {
       // pending handoffs from an inactive project auto-resuming after
       // the service restarts.
       if (!projectAllowsAmbientWork(proj)) continue;
-      const tasks = withEffectiveTaskStatuses(
-        await this.store.listProjectTasks(proj.id).catch(() => []),
-      );
+      // Status-change hooks call this for every completion, not just boot.
+      // Concurrent reconciliations must retain live work, not all history.
+      const tasks: Task[] = [];
+      try {
+        for await (const stored of this.store.iterateProjectTasks(proj.id)) {
+          if (stored.status !== 'active') continue;
+          const task = await readTaskWithEffectiveStatus(this.store, proj.id, stored.num);
+          if (task && taskEffectiveStatus(task) === 'active') tasks.push(task);
+        }
+      } catch {
+        // Match the previous best-effort listing: never dispatch a partial
+        // project graph when storage failed partway through the scan.
+        tasks.length = 0;
+      }
       for (const task of tasks) {
         if (taskEffectiveStatus(task) !== 'active') continue;
         // Cron/fanout records are schedule hosts, not worker tasks. Their
@@ -666,9 +700,7 @@ export class TaskRunner {
         // Meester's oversight task waits active all day, so charging it
         // paused it after the fourth daytime launch and asked the user for
         // help with a task that had never run.
-        const heldForNightShift =
-          task.nightShift?.enabled === true &&
-          (!this.isNightShiftActive() || !this.isNightShiftPending(task));
+        const heldForNightShift = this.isHeldForNightShift(task);
         if (opts.afterRestart && this.noteRestartResume && !heldForNightShift) {
           const { count, exhausted } = await this.noteRestartResume(
             proj.id,

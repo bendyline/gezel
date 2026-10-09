@@ -4,8 +4,6 @@ import { dirname } from 'node:path';
 import {
   type AppliedProjectType,
   type AppliedSeedRecord,
-  type GezelFrontmatter,
-  GezelFrontmatterSchema,
   type GezelSummary,
   type InstalledToolset,
   type ProjectTypeApplyPlan,
@@ -20,7 +18,11 @@ import {
   compareSemver,
   createLogger,
   pickRandomNameWithGender,
+  projectTypeCrewMatch,
   projectTypeIcon,
+  projectTypeTemplateFrontmatter,
+  renderProjectTypeTemplate,
+  seedParamDefaults,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
@@ -91,33 +93,6 @@ async function crewPool(
   return [...roster, ...install.filter((gezel) => !onRoster.has(gezel.id))];
 }
 
-function roleKey(role: string | undefined): string {
-  return (role ?? '')
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-/**
- * The gezel already filling a crew slot: one from the same template, else
- * one with the same role title. Titles match exactly, not through the role
- * aliases, which map "Practice Coach" to voorman. A fixed-function gezel runs
- * a single scripted job and never fills a slot, and no gezel fills two.
- */
-function crewMatch(
-  pool: readonly CrewCandidate[],
-  slot: { templateId: string; role: string | undefined },
-  taken: ReadonlySet<string>,
-): CrewCandidate | undefined {
-  const free = pool.filter((gezel) => !taken.has(gezel.id) && !gezel.fixedFunction);
-  const sameTemplate = free.find((gezel) => gezel.templateId === slot.templateId);
-  if (sameTemplate) return sameTemplate;
-  const wanted = roleKey(slot.role);
-  if (!wanted) return undefined;
-  return free.find((gezel) => roleKey(gezel.role) === wanted);
-}
-
 function sha256Hex(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
@@ -148,52 +123,9 @@ function classifySeed(args: {
   return 'update';
 }
 
-/**
- * Seed a param object from the type's JSON-schema `default`s. The type owns
- * its defaults, so the engine applies them under whatever the caller passed —
- * a caller (UI form, MCP) that omits a param still gets its default, rather
- * than leaving `{{placeholder}}` unrendered. Mirrors the launcher's seeding.
- */
-export function seedParamDefaults(
-  paramSchema: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const props = (paramSchema?.properties ?? {}) as Record<
-    string,
-    { default?: unknown } | undefined
-  >;
-  const out: Record<string, unknown> = {};
-  for (const [key, def] of Object.entries(props)) {
-    if (def && def.default !== undefined) out[key] = def.default;
-  }
-  return out;
-}
+export { renderProjectTypeTemplate, seedParamDefaults };
 
-/**
- * Substitute `{{ key }}` placeholders with param values. Unknown placeholders
- * are left untouched (never silently blanked) so a template typo is visible
- * rather than swallowed. Non-string values are JSON-ish stringified.
- */
-export function renderProjectTypeTemplate(
-  text: string,
-  params: Record<string, unknown> | undefined,
-): string {
-  if (!params) return text;
-  return text.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (whole, key: string) => {
-    if (!Object.prototype.hasOwnProperty.call(params, key)) return whole;
-    const v = params[key];
-    return typeof v === 'string' ? v : v == null ? '' : String(v);
-  });
-}
-
-/** Parse a gilde template's optional frontmatter extension, or null. */
-function parseTemplateFrontmatter(
-  raw: Record<string, unknown> | undefined,
-): Partial<GezelFrontmatter> | null {
-  if (!raw || Object.keys(raw).length === 0) return null;
-  const parsed = GezelFrontmatterSchema.parse({ name: '__template__', ...raw });
-  const { name: _name, id: _id, ...extras } = parsed;
-  return extras;
-}
+const parseTemplateFrontmatter = projectTypeTemplateFrontmatter;
 
 async function resolveProjectType(
   catalog: CatalogService,
@@ -384,7 +316,7 @@ export async function applyProjectType(
   for (const ref of manifest.gezels) {
     const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
     const role = tpl?.manifest.kind === 'gezel-template' ? tpl.manifest.role : undefined;
-    const reused = crewMatch(pool, { templateId: ref.templateId, role }, taken);
+    const reused = projectTypeCrewMatch(pool, { templateId: ref.templateId, role }, taken);
     let gezelId: string;
     let gezelName: string;
     if (reused) {
@@ -861,7 +793,7 @@ export async function planProjectTypeApply(
   for (const ref of manifest.gezels) {
     const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
     const role = tpl?.manifest.kind === 'gezel-template' ? tpl.manifest.role : undefined;
-    const match = crewMatch(pool, { templateId: ref.templateId, role }, taken);
+    const match = projectTypeCrewMatch(pool, { templateId: ref.templateId, role }, taken);
     if (match) taken.add(match.id);
     gezels.push({ templateId: ref.templateId, voorman: ref.voorman, reuse: !!match });
   }

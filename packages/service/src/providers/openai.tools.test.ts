@@ -91,9 +91,13 @@ describe('OpenAISession — external tools', () => {
     expect(text).toBe('I will look that up');
 
     // Tools were advertised.
-    const req = recorded[0] as { tools?: Array<{ name: string }> };
+    const req = recorded[0] as {
+      tools?: Array<{ name: string; strict?: boolean; parameters: unknown }>;
+    };
     expect(req.tools).toBeTruthy();
     expect(req.tools?.map((t) => t.name)).toContain('get_weather');
+    expect(req.tools?.[0]?.strict).toBe(false);
+    expect(req.tools?.[0]?.parameters).toEqual(WEATHER_TOOL.parameters);
     expect(session.getRegisteredToolNames()).toContain('get_weather');
 
     // Captures surfaced for the route.
@@ -130,6 +134,95 @@ describe('OpenAISession — external tools', () => {
     const text = await session.sendAndWait('Hi');
     expect(text).toBe('plain reply');
     expect(session.capturedToolCalls()).toEqual([]);
+  });
+});
+
+describe('OpenAISession — optional MCP tool arguments', () => {
+  it('preserves optional read modes across tool rounds without changing the bridge schema', async () => {
+    const parameters = {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        startLine: { type: 'integer' },
+        endLine: { type: 'integer' },
+        lines: {
+          type: 'object',
+          properties: { start: { type: 'integer' }, count: { type: 'integer' } },
+          required: ['start', 'count'],
+        },
+        head: { type: 'integer' },
+        tail: { type: 'integer' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    };
+    const bridgeTool = Object.freeze({
+      type: 'function' as const,
+      name: 'read_artifact',
+      description: 'Read an artifact; choose at most one slice mode.',
+      parameters,
+    });
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'isEmpty').mockReturnValue(false);
+    vi.spyOn(bridges, 'getOpenAITools').mockReturnValue([bridgeTool]);
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const read = vi.spyOn(bridges, 'callToolRich').mockResolvedValue({
+      text: 'Artifact contents',
+      images: [],
+      isError: false,
+    });
+    const requests: Array<{ tools: unknown[]; input: unknown }> = [];
+    const rounds = [
+      [
+        functionCallItemEvent('read-1', 'read_artifact', '{"path":"notes.md"}'),
+        completedEvent('resp-read'),
+      ],
+      [textEvent('Read the notes.'), completedEvent('resp-done')],
+    ];
+    const openai = {
+      responses: {
+        stream: (request: { tools: unknown[]; input: unknown }) => {
+          requests.push(request);
+          return (async function* () {
+            for (const event of rounds.shift() ?? []) yield event;
+          })();
+        },
+      },
+    } as unknown as OpenAI;
+    const session = await makeSession([], { bridges, openai });
+
+    await expect(session.sendAndWait('Read notes.md')).resolves.toBe('Read the notes.');
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request.tools).toEqual([{ ...bridgeTool, strict: false }]);
+    }
+    expect(requests[1]?.input).toEqual([
+      { type: 'function_call_output', call_id: 'read-1', output: 'Artifact contents' },
+    ]);
+    expect(read).toHaveBeenCalledWith('read_artifact', { path: 'notes.md' });
+    expect(bridgeTool).not.toHaveProperty('strict');
+    expect(parameters.required).toEqual(['path']);
+  });
+
+  it('keeps an explicitly strict bridge tool strict', async () => {
+    const bridgeTool = {
+      type: 'function' as const,
+      name: 'get_status',
+      description: 'Get status.',
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      strict: true,
+    };
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'isEmpty').mockReturnValue(false);
+    vi.spyOn(bridges, 'getOpenAITools').mockReturnValue([bridgeTool]);
+    const requests: unknown[] = [];
+    const session = await makeSession(
+      [textEvent('OK'), completedEvent('resp-status')],
+      { bridges },
+      (request) => requests.push(request),
+    );
+    await session.sendAndWait('Hi');
+    expect(requests[0]).toMatchObject({ tools: [bridgeTool] });
   });
 });
 

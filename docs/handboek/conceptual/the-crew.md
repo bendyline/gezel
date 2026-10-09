@@ -22,7 +22,8 @@ When you're not sure who should do a job, ask the Meester. They know every role 
 Every gezel has:
 
 - **A role** — what kind of work they're good at. The Gezel Roles section of this Handboek describes each role and exactly what it can do.
-- **A character** — an editable description of who they are and how they work. It shapes how they respond.
+- **A description** — editable prose on their About tab: who they are and how they work. It shapes how they respond.
+- **A character** — a temperament, a quirk, a style, and how much small talk they make. In social mode it colors how they come across in chat; see [Social mode](character-and-growth.md).
 - **A memory** — notes they keep about your work together, searched and recalled automatically.
 
 ## The Voorman

@@ -272,3 +272,13 @@ describe('translateMessages', () => {
     ).toThrow(/last message/);
   });
 });
+
+it('preserves an explicit progress request for the streaming route', () => {
+  const result = ChatCompletionRequestSchema.safeParse({
+    model: 'test',
+    messages: [{ role: 'user', content: 'Hi' }],
+    stream: true,
+    stream_options: { include_progress: true },
+  });
+  expect(result.success && result.data.stream_options?.include_progress).toBe(true);
+});

@@ -44,6 +44,12 @@ const observedMachineAuthorities = new Set<string>();
 const log = createLogger('native-capacity');
 /** Skew is announced once per (broker home, version) — acquire runs per launch. */
 const announcedSkew = new Set<string>();
+/**
+ * Installed brokers, by (home, version), that answered 404 for the capacity
+ * route: they predate memory coordination and never will coordinate, so later
+ * launches skip straight to the local ledger until Gezel is updated.
+ */
+const outdatedBrokers = new Set<string>();
 
 export interface BrokerVersionSkew {
   /** What the installed machine engine reports, or `'unknown'` if it reports none. */
@@ -251,9 +257,17 @@ async function capacityExecutor(
         const ledger = localDeviceCapacity(home);
         return (command) => ledger.execute(command);
       }
+      const outdatedKey = `${machineHome}\u0000${identity.gezelVersion ?? 'unknown'}`;
+      if (outdatedBrokers.has(outdatedKey) && authority !== 'machine') {
+        const ledger = localDeviceCapacity(home);
+        return (command) => ledger.execute(command);
+      }
       observedMachineAuthorities.add(machineHome);
       let verifiedCert = runtime.cert;
+      let brokerAccepted = false;
+      let local: DeviceCapacityLedger | null = null;
       return async (command) => {
+        if (local) return local.execute(command);
         // Re-read discovery on each operation: broker restarts rotate both the
         // token and TLS certificate. Never switch a live lease to another ledger.
         const current = await readSystemServiceRuntime(machineHome);
@@ -279,7 +293,13 @@ async function capacityExecutor(
             body: JSON.stringify(command),
             signal: AbortSignal.timeout(5_000),
           });
-          if (!response.ok) {
+          if (response.ok) {
+            brokerAccepted = true;
+            return NativeCapacityReplySchema.parse(await response.json());
+          }
+          // Once the broker has accepted a command it holds this lease, and a
+          // 404 is no longer evidence that it predates coordination.
+          if (response.status !== 404 || brokerAccepted || authority === 'machine') {
             const detail =
               response.status === 409
                 ? ((await response.json().catch(() => null)) as { error?: string } | null)
@@ -291,10 +311,26 @@ async function capacityExecutor(
                     `Machine memory coordination unavailable (HTTP ${response.status}).`),
             );
           }
-          return NativeCapacityReplySchema.parse(await response.json());
         } finally {
           await fetchImpl.close();
         }
+        // The installed broker predates memory coordination: it neither sees
+        // nor limits this build's engines, and refusing would leave an embedded
+        // Gezel unable to run its own models until the person updates an app
+        // they may not use. Admit through this build's ledger instead; it still
+        // checks the RAM the OS reports free, so the older app's resident
+        // engines count against every launch.
+        outdatedBrokers.add(outdatedKey);
+        observedMachineAuthorities.delete(machineHome);
+        // Diagnostics only: the person is never asked to resolve version skew.
+        log.info(
+          [
+            `the installed machine engine (${identity.gezelVersion ?? 'unknown'}) predates memory `,
+            'coordination; admitting this build’s engines through its own ledger.',
+          ].join(''),
+        );
+        local = localDeviceCapacity(home);
+        return local.execute(command);
       };
     }
     if (observedMachineAuthorities.has(machineHome))

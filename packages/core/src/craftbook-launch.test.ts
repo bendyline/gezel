@@ -50,6 +50,14 @@ describe('mainContentParamKey', () => {
       }),
     ).toEqual({ brief: 'Compile the field notes' });
     expect(
+      fillMainContentParam({
+        paramSchema: { properties: { brief: { type: 'string', fromMessage: true } } },
+        params: { brief: 'Field notes, spring survey' },
+        message: 'Compile the field notes',
+      }),
+      'a brief the caller wrote is not replaced by the request',
+    ).toEqual({ brief: 'Field notes, spring survey' });
+    expect(
       mainContentParamKey({ properties: { brief: { type: 'string', fromMessage: 'yes' } } }),
     ).toBeNull();
   });

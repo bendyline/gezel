@@ -1,6 +1,7 @@
 import { createLogger } from '@bendyline/gezel';
 import type OpenAI from 'openai';
 import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
@@ -123,10 +124,12 @@ export class OpenAIProvider implements LLMProvider {
     return new OpenAISession({
       openai: this.openai,
       model: opts.model ?? this.defaultModel,
+      observationContext: opts.observationContext,
       reasoningEffort: opts.reasoningEffort,
       systemMessage: opts.systemMessage,
       bridges,
       previousResponseId: opts.openaiPreviousResponseId ?? null,
+      pendingToolOutputs: opts.openaiPendingToolOutputs,
       queue: this.queue,
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.externalTools && opts.externalTools.length > 0
@@ -166,6 +169,7 @@ export class OpenAIProvider implements LLMProvider {
 
 /** @internal Exported alongside {@link OpenAISession} for unit tests. */
 export interface OpenAISessionDeps {
+  observationContext?: ApiObservationContext;
   openai: OpenAI;
   model: string;
   reasoningEffort?: string;
@@ -173,6 +177,7 @@ export interface OpenAISessionDeps {
   bridges: McpBridgePool;
   /** Pre-existing response id to continue a persisted session. */
   previousResponseId: string | null;
+  pendingToolOutputs?: ProviderSessionState['openaiPendingToolOutputs'];
   queue: ProviderQueue;
   /**
    * Caller-supplied external tool definitions. When non-empty, these
@@ -215,8 +220,13 @@ export interface OpenAISessionDeps {
  * @internal
  */
 export class OpenAISession extends StreamingSessionBase implements LLMSession {
+  private toolSurface: ReturnType<typeof apiToolSurface> | undefined;
+  getToolSurface() {
+    return this.toolSurface;
+  }
   /** `previous_response_id` for server-side state across turns. */
   private previousResponseId: string | null;
+  private pendingToolOutputs: ResponsesInputItem[];
   /** Names of caller-supplied external tools — used to classify each function_call. */
   private readonly externalToolNames: Set<string>;
   /** Captured external tool calls from the most recent `sendAndWait`. */
@@ -225,6 +235,9 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
   constructor(private readonly deps: OpenAISessionDeps) {
     super();
     this.previousResponseId = deps.previousResponseId ?? null;
+    this.pendingToolOutputs = this.previousResponseId
+      ? (deps.pendingToolOutputs ?? []).map((output) => ({ ...output }))
+      : [];
     this.externalToolNames = new Set((deps.externalTools ?? []).map((t) => t.name));
   }
 
@@ -258,12 +271,23 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
     // caller-supplied external tools. We tag the external tools so
     // the dispatch loop can distinguish them — same `type: 'function'`
     // shape OpenAI expects.
-    const bridgeTools = this.deps.bridges.isEmpty() ? [] : this.deps.bridges.getOpenAITools();
+    // Responses attempts strict normalization when `strict` is omitted. MCP
+    // schemas use omission for optional/exclusive arguments (e.g. read slices),
+    // so making every property required can force calls the tool must reject.
+    // Preserve those contracts at this provider boundary, without changing the
+    // shared bridge schemas or any explicitly strict tool.
+    const bridgeTools = this.deps.bridges.isEmpty()
+      ? []
+      : this.deps.bridges.getOpenAITools().map((tool) => ({
+          ...tool,
+          strict: tool.strict ?? false,
+        }));
     const externalToolsAsOpenAI = (this.deps.externalTools ?? []).map((t) => ({
       type: 'function' as const,
       name: t.name,
       description: t.description ?? '',
       parameters: t.parameters,
+      strict: false,
     }));
     const tools =
       bridgeTools.length + externalToolsAsOpenAI.length > 0
@@ -278,6 +302,12 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
     let input: unknown = this.previousResponseId
       ? buildInitialInput(prompt, opts?.attachments)
       : this.buildHistoricalInput(prompt, opts?.attachments);
+    if (this.pendingToolOutputs.length > 0) {
+      input = [
+        ...this.pendingToolOutputs,
+        ...(Array.isArray(input) ? input : [{ role: 'user', content: input }]),
+      ];
+    }
     let fullText = '';
     let lastUsage: {
       input_tokens: number;
@@ -323,15 +353,22 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
         applyTuning(request, this.deps.tuning, OPENAI_TUNING_MAP);
       }
 
-      const stream = await (
-        this.deps.openai as unknown as {
-          responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
-        }
-      ).responses.stream(request);
+      this.toolSurface = apiToolSurface(tools ?? []);
+      const stream = observeApiStream(
+        () =>
+          (
+            this.deps.openai as unknown as {
+              responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
+            }
+          ).responses.stream(request),
+        { provider: 'openai', request, round: turn + 1, context: this.deps.observationContext },
+      );
 
       const turnTextParts: string[] = [];
       const pendingCalls: OpenAIToolCall[] = [];
       let responseId: string | null = null;
+      let terminalType: string | undefined;
+      let terminalReason: string | undefined;
 
       for await (const event of stream) {
         const type = event.type;
@@ -350,11 +387,19 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
               arguments: (item.arguments as string) ?? '{}',
             });
           }
-        } else if (type === 'response.completed') {
+        } else if (
+          type === 'response.completed' ||
+          type === 'response.incomplete' ||
+          type === 'response.failed'
+        ) {
+          terminalType = type;
           const resp = (
             event as {
               response?: {
                 id?: string;
+                output?: Array<OpenAIToolCall & { type: string }>;
+                incomplete_details?: { reason?: string };
+                error?: { code?: string };
                 usage?: {
                   input_tokens: number;
                   output_tokens: number;
@@ -365,11 +410,58 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
             }
           ).response;
           if (resp?.id) responseId = resp.id;
+          if (resp?.output) {
+            // The final snapshot also includes calls cut off before an
+            // output_item.done event. They still need non-execution results
+            // when continuing an incomplete response.
+            pendingCalls.splice(
+              0,
+              pendingCalls.length,
+              ...resp.output.filter((item) => item.type === 'function_call'),
+            );
+          }
           if (resp?.usage) lastUsage = resp.usage;
+          terminalReason = resp?.incomplete_details?.reason ?? resp?.error?.code;
+        } else if (type === 'error') {
+          terminalType = 'error';
+          terminalReason = (event as { code?: string }).code;
         }
       }
 
-      if (responseId) this.previousResponseId = responseId;
+      if (responseId) {
+        // Even an incomplete response acknowledges the submitted tool results.
+        // Keeping the older id reopens those calls on the next task handoff.
+        this.previousResponseId = responseId;
+        this.pendingToolOutputs = [];
+      }
+      if (terminalType !== 'response.completed' || !responseId) {
+        // A partial generation must not execute tools or count as a successful
+        // turn. Close any emitted calls with explicit non-execution results so
+        // a later retry can continue this response without replaying effects.
+        if (responseId) {
+          this.pendingToolOutputs = pendingCalls.map((call) => ({
+            type: 'function_call_output',
+            call_id: call.call_id,
+            output: 'Tool was not executed because the model response did not complete.',
+          }));
+        }
+        if (lastUsage) {
+          this.emitUsage(
+            buildTurnUsage({
+              model: this.deps.model,
+              inputTokens: lastUsage.input_tokens,
+              outputTokens: lastUsage.output_tokens,
+              durationMs: Date.now() - start,
+              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
+            }),
+          );
+        }
+        const status =
+          terminalType?.replace('response.', '') ?? 'stream ended without a terminal response';
+        throw new Error(
+          `[openai] ${status}${terminalReason ? ` (${terminalReason})` : ''}${responseId ? '' : '; no response id received'}`,
+        );
+      }
       fullText += turnTextParts.join('');
 
       // External tool capture: when the model called any caller-supplied
@@ -415,7 +507,8 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
       }
 
       // Execute tools; feed the outputs back as the next turn's input.
-      const outputs: unknown[] = [];
+      const outputs: ResponsesInputItem[] = [];
+      this.pendingToolOutputs = outputs;
       const toolImages: Array<{ base64: string; mimeType: string }> = [];
       let terminalActionClosing: string | null = null;
       for (const call of pendingCalls) {
@@ -476,8 +569,9 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
       // follow-up user-message input_image so vision-capable runs can
       // actually *see* what the tool produced. Text-only runs still get
       // the textual output via the function_call_output items above.
+      const nextInput: unknown[] = [...outputs];
       if (toolImages.length > 0) {
-        outputs.push({
+        nextInput.push({
           role: 'user',
           content: toolImages.map((img) => ({
             type: 'input_image',
@@ -485,7 +579,7 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
           })),
         });
       }
-      input = outputs;
+      input = nextInput;
     }
 
     throw new Error('[openai] too many tool-call loops; aborting');
@@ -563,6 +657,9 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
   providerState(): ProviderSessionState {
     return {
       openaiPreviousResponseId: this.previousResponseId ?? undefined,
+      ...(this.pendingToolOutputs.length > 0
+        ? { openaiPendingToolOutputs: this.pendingToolOutputs.map((output) => ({ ...output })) }
+        : {}),
     };
   }
 
@@ -574,6 +671,7 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
       /* ignore */
     }
     this.previousResponseId = null;
+    this.pendingToolOutputs = [];
   }
 }
 

@@ -17,6 +17,7 @@ import { validatePortablePath } from './files.js';
 import { listGezels } from './gezels.js';
 import { lexicalExcerpt, lexicalScore, lexicalTerms } from './lexical.js';
 import { searchMemoryScope } from './memories.js';
+import { type MemoryScope, USER_MEMORY_ID, sameProjectMemoryScore } from './memory-markdown.js';
 import { type PortableFileArea, listFiles, readFile } from './project-files.js';
 import { listProjects, requireProject } from './projects.js';
 import type { PortableRepository } from './repository.js';
@@ -231,7 +232,8 @@ export async function searchProject(
     for (const [scope, id, source] of [
       ['project', projectId, 'project-memory'],
       ...(input.gezelId ? [['gezel', input.gezelId, 'gezel-memory']] : []),
-    ] as Array<['gezel' | 'project', string, 'gezel-memory' | 'project-memory']>) {
+      ['user', USER_MEMORY_ID, 'user-memory'],
+    ] as Array<[MemoryScope, string, 'gezel-memory' | 'project-memory' | 'user-memory']>) {
       if (!includes(source)) continue;
       const memories = await searchMemoryScope(repo, scope, id, input.query);
       state.truncated ||= memories.truncated;
@@ -245,7 +247,11 @@ export async function searchProject(
           gezelId: scope === 'gezel' ? id : undefined,
           retrievalSource: source,
           arm: 'fts',
-          ...scoreResult('memory', lexicalRelevance(memory.score)),
+          memory: { day: memory.day, kind: memory.kind },
+          ...scoreResult(
+            'memory',
+            sameProjectMemoryScore(lexicalRelevance(memory.score), memory.source, projectId),
+          ),
         });
     }
   if (input.sources?.includes('knowledge')) state.incomplete = true;

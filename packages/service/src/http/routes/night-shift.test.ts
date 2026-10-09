@@ -174,6 +174,7 @@ describe('night-shift status', () => {
         isActive: () => false,
         source: () => null,
         quotaHoldStatus: () => quotaHold,
+        isHeldOnBattery: () => false,
         windowBounds: () => WINDOW,
         startedAtIso: () => null,
       },
@@ -212,6 +213,7 @@ describe('night-shift status', () => {
         isActive: () => true,
         source: () => 'scheduled',
         quotaHoldStatus: () => null,
+        isHeldOnBattery: () => false,
         windowBounds: () => ({ ...WINDOW, open: true }),
         startedAtIso: () => '2026-07-29T23:12:00.000Z',
       },
@@ -223,6 +225,25 @@ describe('night-shift status', () => {
     };
     expect(body.startedAt).toBe('2026-07-29T23:12:00.000Z');
     expect(body.window.open).toBe(true);
+  });
+});
+
+describe('night-shift status on battery', () => {
+  it('says the shift is standing down on battery', async () => {
+    const ctx = {
+      nightShift: {
+        isActive: () => false,
+        source: () => null,
+        quotaHoldStatus: () => null,
+        isHeldOnBattery: () => true,
+        windowBounds: () => null,
+        startedAtIso: () => null,
+      },
+    } as unknown as ServiceContext;
+    const body = (await (await nightShiftRoutes(ctx).request('/status')).json()) as {
+      heldOnBattery?: boolean;
+    };
+    expect(body.heldOnBattery).toBe(true);
   });
 });
 

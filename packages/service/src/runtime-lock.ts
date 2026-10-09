@@ -12,7 +12,7 @@ export class SingleInstanceError extends Error {
   ) {
     super(
       holderPid > 0
-        ? `Another gezel daemon is already running for this home (pid ${holderPid}). Stop it first (e.g. \`gezel stop\`), or use a different GEZEL_HOME.`
+        ? `Another gezel daemon is already running for this home (pid ${holderPid}). Stop it first with \`gezel stop --daemon\` (plain \`gezel stop\` only halts AI work), or use a different GEZEL_HOME.`
         : `Could not acquire the single-instance lock at ${lockPath}.`,
     );
     this.name = 'SingleInstanceError';

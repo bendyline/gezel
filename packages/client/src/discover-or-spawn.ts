@@ -41,6 +41,19 @@ export class DaemonNotRunningError extends Error {
   }
 }
 
+/** A forced spawn's daemon exited before it published its runtime files. */
+export class SpawnedDaemonExitedError extends Error {
+  constructor(
+    public readonly code: number | null,
+    public readonly signal: NodeJS.Signals | null,
+  ) {
+    super(
+      `gezeld exited (${signal ? `signal ${signal}` : `code ${code}`}) before it started; another daemon may already be running for this home. Check ~/.gezel/logs/.`,
+    );
+    this.name = 'SpawnedDaemonExitedError';
+  }
+}
+
 export interface DiscoverOrSpawnResult {
   client: GezelClient;
   baseUrl: string;
@@ -124,6 +137,12 @@ export interface DiscoverOrSpawnOptions {
    * the readiness poll below uses the same function, so a null override
    * would blind the poll and time out while the daemon is actually coming
    * up. `forceSpawn` skips only the adopt check and leaves the poll intact.
+   *
+   * The poll then accepts only runtime files the spawned process wrote, and
+   * fails as soon as that process exits. It used to accept any live daemon's
+   * files: with one already running, the fresh daemon lost the home lock and
+   * exited, and `gezel start --web` reported the old daemon as the one it had
+   * started — on its old port, without a web UI.
    */
   forceSpawn?: boolean;
   /** `GEZEL_HOME` — forwarded to `readRuntime` for per-test isolation. */
@@ -243,11 +262,18 @@ export async function discoverOrSpawn(
     ...windowsHeadlessSpawnOptions(),
   });
   if (detached) child.unref();
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+    exit = { code, signal };
+  });
 
   while (Date.now() < deadline) {
     await wait(Math.min(pollIntervalMs, remainingMs(deadline)));
     const runtime = await readRuntimeFn(home);
-    if (runtime && isProcessAliveFn(runtime.pid)) {
+    // An unforced spawn may adopt whichever daemon won a concurrent start;
+    // a forced one wants its own process and nothing else.
+    const ours = !forceSpawn || runtime?.pid === child.pid;
+    if (runtime && ours && isProcessAliveFn(runtime.pid)) {
       const client = clientFactory({
         baseUrl: runtime.baseUrl,
         token: runtime.token,
@@ -268,6 +294,7 @@ export async function discoverOrSpawn(
         // Keep polling — the server may not have bound yet.
       }
     }
+    if (forceSpawn && exit) throw new SpawnedDaemonExitedError(exit.code, exit.signal);
   }
 
   await terminateFailedSpawn(child, logger);

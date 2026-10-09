@@ -196,8 +196,12 @@ export async function applyRelevanceModel(args: {
 
   const windowed = args.results.slice(0, args.window);
   const tail = args.results.slice(args.window);
-  const texts = await args.passages(windowed);
-  const keys = windowed.map((result, i) =>
+  // A text judge cannot see pixels or sound: a media hit that cleared its
+  // modality's vector floor keeps its fused place rather than being judged
+  // on a caption that may be one word.
+  const toJudge = windowed.filter((result) => !isVectorMediaHit(result));
+  const texts = await args.passages(toJudge);
+  const keys = toJudge.map((result, i) =>
     cacheKey(model.id, args.query, result.id, texts[i] ?? ''),
   );
   const scores = new Map<string, number>();
@@ -205,7 +209,7 @@ export async function applyRelevanceModel(args: {
   keys.forEach((key, i) => {
     const cached = cacheGet(key);
     if (cached === undefined) missing.push(i);
-    else scores.set(windowed[i]!.id, cached);
+    else scores.set(toJudge[i]!.id, cached);
   });
 
   let status: RelevanceRunStatus = 'scored';
@@ -222,7 +226,7 @@ export async function applyRelevanceModel(args: {
     run.scores?.forEach((score, j) => {
       if (score === null || score === undefined) return;
       const i = missing[j]!;
-      scores.set(windowed[i]!.id, score);
+      scores.set(toJudge[i]!.id, score);
       cacheSet(keys[i]!, score);
     });
   }
@@ -233,6 +237,10 @@ export async function applyRelevanceModel(args: {
   const unscored: UnifiedSearchResult[] = [];
   const hidden: UnifiedSearchResult[] = [];
   for (const result of windowed) {
+    if (isVectorMediaHit(result)) {
+      judged.push(result);
+      continue;
+    }
     const score = scores.get(result.id);
     if (score === undefined) {
       unscored.push(result);
@@ -256,6 +264,11 @@ export async function applyRelevanceModel(args: {
     results: [...judged, ...unscored, ...tail],
     report: report(status, scores, hidden),
   };
+}
+
+/** A media row found by its own vector arm, past its modality's measured floor. */
+function isVectorMediaHit(result: UnifiedSearchResult): boolean {
+  return result.media !== undefined && result.arm === 'vector';
 }
 
 /** The trace/history summary of a stage run. */

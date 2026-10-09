@@ -25,7 +25,7 @@ gezel knowledge --help
 Building a catalog and adding `--semantic` to file search need the optional embedding runtime. The desktop app includes it. For a global npm CLI installation, add it in the same installation context:
 
 ```bash
-npm install -g @huggingface/transformers@^3.8.1
+npm install -g @huggingface/transformers@^4.3.1
 ```
 
 For a project-local CLI installation, install both packages in that project and run commands with `npx gezel`. Plain keyword search, inspection, validation, and location discovery do not need the embedding model. Building and semantic search can download the profile's pinned model on first use; later runs can work offline from its cache. By default, the CLI cache is `<GEZEL_HOME>/engines/hf-cache`, or `~/.gezel/engines/hf-cache`; `GEZEL_HF_CACHE_DIR` overrides it.
@@ -111,7 +111,20 @@ gezel knowledge build ./existing-docs --out ./existing-docs.gezk
 
 `init` creates `catalog.json` without inserting a sample `content/` folder when it detects an existing Markdown tree. It refuses to overwrite an existing `catalog.json`.
 
-For a text-only catalog, run `gezel knowledge build ./existing-docs --skip-images`. Images are bundled for display; they are not embedded by the text embedding model. `--skip-images` keeps image alt text without resolving or reading the image files, avoiding the catalog's 256 MiB total asset limit. For a larger illustrated collection, split it into multiple catalogs.
+For a text-only catalog, run `gezel knowledge build ./existing-docs --skip-images`. With the BGE and E5 profiles, images are bundled for display only; the text embedding model does not read them. `--skip-images` keeps the alt text of images, video and audio without resolving or reading the files, avoiding the catalog's asset limits (8 MiB per image and 256 MiB of images in total; 512 MiB per video or audio file and 8 GiB in total). For a larger illustrated collection, split it into multiple catalogs.
+
+With the `embeddinggemma-2-512@1` profile, the build also makes photos, video and recordings searchable by what is in them. Reference them like images — `![A brass bell ringing](sounds/bell.mp3)` or `![Planing a board](clips/plane.mp4)` — and each photo becomes one searchable entry, each 30-second window of a clip or recording another. The alt text, the paragraph around the reference, the file name and the document title become that entry's text, so keyword search finds it too. Video and audio need `ffmpeg` (`GEZEL_FFMPEG`, `SQUISQ_FFMPEG`, or on `PATH`); without it the files are still bundled but get no entries, and the build says so. Shipped media usually carries its own terms, so record them per file in `catalog.json`:
+
+```json
+{
+  "profile": "embeddinggemma-2-512@1",
+  "assets": {
+    "sounds/bell.mp3": { "license": "CC0-1.0", "author": "Field recordist", "source": "https://example.org/bell" }
+  }
+}
+```
+
+Readers show that credit beside the entry. Keys are paths relative to the content root (or the archive path, `assets/…`).
 
 The build warns and skips images with mismatched or unrecognized file data, images over the per-file size limit, and unsafe SVGs. References to a skipped image become their alt text (or link label), preserving the surrounding document. Valid images are still included, and source files are unchanged.
 
@@ -129,7 +142,7 @@ You can make the selection explicit in `catalog.json`:
 
 These are additional fields in the complete configuration, not a replacement for its required identity fields. `content` is relative to the catalog folder; `ignore` names Markdown files relative to the content root. An explicit TOC `path` is resolved from the content root. Without a TOC file, use `"toc": { "format": "folders" }` to request folder-based organization.
 
-Choose an embedding profile appropriate to the documents: `bge-small-en-v1.5@1` for the default English build, or `multilingual-e5-small@2` for multilingual retrieval. The earlier `multilingual-e5-small@1` remains supported for existing catalogs. A profile is a complete vector-space contract; changing it requires rebuilding the catalog.
+Choose an embedding profile appropriate to the documents: `bge-small-en-v1.5@1` for the default English build, `multilingual-e5-small@2` for multilingual retrieval, or `embeddinggemma-2-512@1` when photos, video or audio should be searchable (its catalogs use format 0.8, which older Gezel releases refuse to open rather than misread). The earlier `multilingual-e5-small@1` remains supported for existing catalogs. A profile is a complete vector-space contract; changing it requires rebuilding the catalog.
 
 ## File command reference
 

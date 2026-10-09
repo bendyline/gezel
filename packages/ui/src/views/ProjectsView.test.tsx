@@ -1800,9 +1800,13 @@ describe('ProjectsView', () => {
 
     it('imports task-menu Open as a read-only slideshow in the current project', async () => {
       const writeDocument = mockPresentation();
-      render(<ProjectsView forceProjectId="pj-alpha" />);
-      await screen.findByTestId('project-chat');
-      act(() => {
+      // The live event needs the selected project's listener. A visible chat
+      // can precede its passive effects when React yields on a busy runner.
+      await act(async () => {
+        render(<ProjectsView forceProjectId="pj-alpha" />);
+      });
+      expect(screen.getByTestId('project-chat')).toBeInTheDocument();
+      await act(async () => {
         window.dispatchEvent(
           new CustomEvent('gezel:open-file', {
             detail: { projectId: 'pj-alpha', path: pptxLayout.targetPath, source: 'artifacts' },
@@ -2371,6 +2375,50 @@ describe('ProjectsView', () => {
       render(<ProjectsView forceProjectId="pj-alpha" compact />);
       const chat = await screen.findByTestId('project-chat');
       expect(chat.getAttribute('data-compact')).toBe('true');
+    });
+
+    it("offers a project type's pinned page as the Output tab at phone width", async () => {
+      activeWidth = 390;
+      vi.mocked(api.getProject).mockImplementation(
+        async (id) =>
+          ({
+            id,
+            name: 'Alpha',
+            packages: [],
+            projectType: {
+              id: 'checkers',
+              version: '1.2.1',
+              source: 'bundled',
+              appliedAt: '2026-10-06T00:00:00Z',
+            },
+          }) as never,
+      );
+      vi.mocked(api.listProjects).mockResolvedValue({
+        projects: [
+          {
+            id: 'pj-alpha',
+            name: 'Alpha',
+            projectType: {
+              id: 'checkers',
+              version: '1.2.1',
+              source: 'bundled',
+              appliedAt: '2026-10-06T00:00:00Z',
+            },
+          },
+        ],
+      } as never);
+      vi.mocked(api.getCatalogItem).mockResolvedValue({
+        sourceId: 'bundled',
+        kind: 'project-type',
+        manifest: {
+          kind: 'project-type',
+          id: 'checkers',
+          tools: [],
+          pages: { entry: 'board/index.html', api: 1 },
+        },
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      expect(await screen.findByRole('tab', { name: 'Output' })).toBeInTheDocument();
     });
 
     it('spends no row on a name-only heading in a compact single-project tab', async () => {

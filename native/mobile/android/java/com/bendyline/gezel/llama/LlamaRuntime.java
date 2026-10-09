@@ -50,4 +50,11 @@ public final class LlamaRuntime {
      * when the engine refuses the call outright (busy, nothing loaded).
      */
     public static native int chat(long engine, String requestJson, long requestId, int timeoutMs, Event event);
+    /**
+     * Describes one photo through the loaded model's vision projector; rgb holds
+     * width*height*3 bytes. Returns the description as UTF-8, or null when the
+     * request was cancelled. Throws on any other failure.
+     */
+    public static native byte[] describeImage(long engine, String projectorPath, byte[] rgb, int width, int height,
+        String system, String user, long requestId, int maxTokens, int timeoutMs);
 }

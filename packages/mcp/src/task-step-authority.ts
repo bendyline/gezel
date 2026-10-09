@@ -48,3 +48,25 @@ export function staleTaskStepRefusal(err: unknown): string | null {
   const { error, hint } = details as { error?: unknown; hint?: unknown };
   return error === 'stale_task_step' && typeof hint === 'string' && hint.trim() ? hint : null;
 }
+
+/**
+ * Whether the runtime has bound this session to the current pass of its own
+ * step, which ends the completion latch. A self-looping step (the nightly
+ * oversight review) re-activates the step it completes, and the next dispatch
+ * binds the same session to that pass. The latch alone refused every write of
+ * every later pass the subprocess served (2026-10-08). The binding moves only
+ * on a dispatch, so the turn that advanced still cannot write after its
+ * handoff.
+ */
+export function sessionReboundToCurrentPass(args: {
+  sessionStepId: string;
+  activeStepId: string | undefined;
+  activeStepActivation: string | undefined;
+  sessionActivation: string | undefined;
+}): boolean {
+  return (
+    args.activeStepId === args.sessionStepId &&
+    !!args.activeStepActivation &&
+    args.sessionActivation === args.activeStepActivation
+  );
+}

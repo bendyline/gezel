@@ -296,11 +296,44 @@ describe('dispatcher: memory', () => {
     const save = vi.fn().mockResolvedValue({ status: 'saved' });
     const { dispatch } = makeDispatcher({ memory: { save } as unknown as MemoryManager });
     await dispatch(ctx(['memory.write']), 'memory.save', { text: 'x', meta: { kind: 'pref' } });
-    expect(save).toHaveBeenCalledWith('project', 'p1', 'x', 'pref');
+    expect(save).toHaveBeenCalledWith('project', 'p1', 'x', 'pref', undefined);
 
     save.mockClear();
     await dispatch(ctx(['memory.write']), 'memory.save', { text: 'y', meta: { kind: 'bogus' } });
-    expect(save).toHaveBeenCalledWith('project', 'p1', 'y', undefined);
+    expect(save).toHaveBeenCalledWith('project', 'p1', 'y', undefined, undefined);
+  });
+
+  it('memory.save writes a short, kinded entry to the gezel whose chat called it', async () => {
+    const save = vi.fn().mockResolvedValue({ status: 'saved' });
+    const { dispatch } = makeDispatcher({ memory: { save } as unknown as MemoryManager });
+    const run = { ...ctx(['memory.write']), gezelId: 'wren' };
+    await dispatch(run, 'memory.save', {
+      text: 'Said "soy cansado"; it is "estoy cansado".',
+      meta: { scope: 'gezel', kind: 'correction' },
+    });
+    expect(save).toHaveBeenCalledWith(
+      'gezel',
+      'wren',
+      'Said "soy cansado"; it is "estoy cansado".',
+      'correction',
+      { project: 'p1' },
+    );
+
+    await expect(
+      dispatch(run, 'memory.save', { text: 'x', meta: { scope: 'gezel' } }),
+    ).rejects.toThrow(/needs meta.kind/);
+    await expect(
+      dispatch(run, 'memory.save', {
+        text: 'x'.repeat(201),
+        meta: { scope: 'gezel', kind: 'fact' },
+      }),
+    ).rejects.toThrow(/at most 200 characters/);
+    await expect(
+      dispatch(ctx(['memory.write']), 'memory.save', {
+        text: 'x',
+        meta: { scope: 'gezel', kind: 'fact' },
+      }),
+    ).rejects.toThrow(/only when a gezel called the script/);
   });
 
   it('memory.search is denied without memory.read', async () => {
@@ -555,5 +588,44 @@ describe('dispatcher: index readiness', () => {
     await expect(dispatch(ctx(['index.refresh']), 'index.ensureFresh', {})).rejects.toThrow(
       /no index access wired/,
     );
+  });
+});
+
+describe('dispatcher: reminders', () => {
+  it('reminder.set stores the project’s reminder and tells the notifiers', async () => {
+    const setProjectReminder = vi.fn().mockResolvedValue(undefined);
+    const remindersChanged = vi.fn();
+    const { dispatch } = makeDispatcher({
+      store: { setProjectReminder } as unknown as Store,
+      remindersChanged,
+    });
+    const at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await dispatch(ctx(['reminders']), 'reminder.set', { at, title: 'Cards are due' });
+    expect(setProjectReminder).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({
+        projectId: 'p1',
+        at,
+        title: 'Cards are due',
+        source: 'test-script',
+      }),
+    );
+    expect(remindersChanged).toHaveBeenCalledWith('p1');
+
+    await dispatch(ctx(['reminders']), 'reminder.clear', {});
+    expect(setProjectReminder).toHaveBeenLastCalledWith('p1', null);
+  });
+
+  it('reminder.set needs the capability and a future time', async () => {
+    const setProjectReminder = vi.fn().mockResolvedValue(undefined);
+    const { dispatch } = makeDispatcher({ store: { setProjectReminder } as unknown as Store });
+    const at = new Date(Date.now() + 60_000).toISOString();
+    await expect(
+      dispatch(ctx(['workspace.write']), 'reminder.set', { at, title: 'Hi' }),
+    ).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(
+      dispatch(ctx(['reminders']), 'reminder.set', { at: '2020-01-01T00:00:00Z', title: 'Hi' }),
+    ).rejects.toThrow(/future/);
+    expect(setProjectReminder).not.toHaveBeenCalled();
   });
 });

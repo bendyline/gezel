@@ -64,7 +64,7 @@ test.describe('tasks', () => {
 
     // Whether or not a recommended shelf resolved for the fixture project,
     // the full catalog is one rail click away.
-    await dialog.getByRole('button', { name: /All craftbooks/ }).click();
+    await dialog.getByRole('button', { name: /All plans/ }).click();
     // Use a setup-free catalog book for the create-and-fire path. Books such
     // as Accessibility Audit deliberately disable creation until their
     // required toolsets are installed; that setup gate has separate coverage.
@@ -73,14 +73,14 @@ test.describe('tasks', () => {
 
     // Selecting a craftbook fills the pane: recipe steps + suggested title.
     await bookCard.click();
-    await expect(dialog.locator('.gz-ntd-steps')).toBeVisible();
+    await expect(dialog.getByText('More options')).toBeVisible();
     await expect(dialog.locator('.gz-npd-hero-name')).toHaveText('A/B Ad Copy Variations');
     await shot(page, 'new-dialog-craftbook', {
       area: 'tasks',
       description: 'New Task dialog — a selected craftbook previewing its recipe steps',
     });
 
-    await dialog.getByRole('button', { name: 'Create & start' }).click();
+    await dialog.getByRole('button', { name: 'Start now' }).click();
     await expect(dialog).not.toBeVisible();
 
     // One-time catalog craftbooks start immediately and land active.

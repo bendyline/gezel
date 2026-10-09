@@ -4,6 +4,7 @@ import {
   MobileModelSchema,
   MobileModelSourceSchema,
   resolveMobileInferenceBudget,
+  resolveMobileInferenceLimits,
 } from './mobile-provider.js';
 
 describe('portable inference budget admission', () => {
@@ -33,6 +34,16 @@ describe('portable inference budget admission', () => {
       maxTokens: 256,
     });
   });
+  it.each([512, 1024, 4096, 8192, 16384])(
+    'advertises an admissible maximum at context %i',
+    (contextSize) => {
+      const limits = resolveMobileInferenceLimits(llama, contextSize);
+      expect(resolveMobileInferenceBudget(llama, limits)).toEqual(limits);
+      expect(() =>
+        resolveMobileInferenceBudget(llama, { ...limits, maxTokens: limits.maxTokens + 1 }),
+      ).toThrow();
+    },
+  );
   it('respects provider limits without silently reducing explicit settings', () => {
     const apple = { contextTokens: 4096, maxOutputTokens: 1024 };
     expect(resolveMobileInferenceBudget(apple)).toEqual({ contextSize: 4096, maxTokens: 1024 });

@@ -127,7 +127,7 @@ describe('GET /api/projects/:id/index/files?detail=1', () => {
     expect(note?.size).toBeTypeOf('number');
   });
 
-  it('hides Office lock files unless hidden=1 is requested', async () => {
+  it('excludes Office lock files from the index even when hidden=1 is requested', async () => {
     const workspaceDir = await svc.context.store.projectWorkspaceDir(projectId);
     await writeFile(join(workspaceDir, '~$deck.pptx'), 'lock');
     await svc.context.workspaceIndex.refreshAndWait(projectId);
@@ -135,13 +135,11 @@ describe('GET /api/projects/:id/index/files?detail=1', () => {
     const plain = await client.listProjectIndexFilesDetail(projectId);
     expect(plain.files.map((file) => file.path)).not.toContain('~$deck.pptx');
 
-    const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
-    const response = await httpFetch(
-      `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}/api/projects/${projectId}/index/files?detail=1&hidden=1`,
-      { headers: { authorization: `Bearer ${svc.context.token}` } },
-    );
-    const hidden = (await response.json()) as { files: Array<{ path: string }> };
-    expect(hidden.files.map((file) => file.path)).toContain('~$deck.pptx');
+    const hidden = await client.listProjectIndexFilesDetail(projectId, { hidden: true });
+    const paths = hidden.files.map((file) => file.path);
+    expect(paths).not.toContain('~$deck.pptx');
+    expect(paths).toContain('sub/note.md');
+    expect(hidden.total).toBe(hidden.files.length);
   });
 
   it('keeps the prefix-autocomplete mode unchanged', async () => {

@@ -25,18 +25,26 @@ import {
   openIndexDatabase,
   vectorToBlob,
 } from '../index-store/sqlite-driver.js';
-import { DEFAULT_MEMORY_KIND, type MemoryKind, isMemoryKind } from './daily-markdown.js';
+import {
+  DEFAULT_MEMORY_KIND,
+  type MemoryKind,
+  type MemoryScope,
+  type MemorySource,
+  isMemoryKind,
+} from './daily-markdown.js';
 import { embedProfileId } from './embed-core.js';
 import { embed, embedBatch, embedQuery } from './embeddings.js';
 
 export interface MemoryEntry {
   text: string;
-  scope: 'gezel' | 'project';
+  scope: MemoryScope;
   id: string;
   day: string;
   at: string;
   /** Memory kind; absent on legacy entries → treated as 'fact'. */
   kind?: MemoryKind;
+  /** Where the entry came from, when its scope does not already say. */
+  source?: MemorySource;
 }
 
 export interface SearchResult {
@@ -46,6 +54,26 @@ export interface SearchResult {
   scope: string;
   id: string;
   kind: MemoryKind;
+  source?: MemorySource;
+}
+
+/** The `source` column: the project an entry came from and the gezel that wrote it. */
+function sourceColumn(source: MemorySource | undefined): string | null {
+  return source?.project || source?.gezel ? JSON.stringify(source) : null;
+}
+
+function readSourceColumn(value: string | null | undefined): MemorySource | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as MemorySource;
+    const source: MemorySource = {
+      ...(typeof parsed.project === 'string' ? { project: parsed.project } : {}),
+      ...(typeof parsed.gezel === 'string' ? { gezel: parsed.gezel } : {}),
+    };
+    return source.project || source.gezel ? source : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function openMem(indexDir: string): Promise<SqliteDriver | null> {
@@ -66,6 +94,9 @@ async function openMem(indexDir: string): Promise<SqliteDriver | null> {
       const cols = db.prepare('PRAGMA table_info(mem)').all<{ name: string }>();
       if (!cols.some((c) => c.name === 'kind')) {
         db.exec('ALTER TABLE mem ADD COLUMN kind TEXT');
+      }
+      if (!cols.some((c) => c.name === 'source')) {
+        db.exec('ALTER TABLE mem ADD COLUMN source TEXT');
       }
       db.exec('CREATE TABLE IF NOT EXISTS mem_meta (key TEXT PRIMARY KEY, value TEXT);');
     });
@@ -153,7 +184,9 @@ export async function addToIndex(
     );
     const v = vector ?? (await embed(entry.text));
     const { lastInsertRowid } = db
-      .prepare('INSERT INTO mem (text, scope, ext_id, day, at, kind) VALUES (?, ?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO mem (text, scope, ext_id, day, at, kind, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
       .run(
         entry.text,
         entry.scope,
@@ -161,6 +194,7 @@ export async function addToIndex(
         entry.day,
         entry.at,
         entry.kind ?? DEFAULT_MEMORY_KIND,
+        sourceColumn(entry.source),
       );
     if (ensureVecTable(db, v.length)) {
       db.prepare('INSERT OR REPLACE INTO vec_mem (rowid, embedding) VALUES (?, ?)').run(
@@ -197,7 +231,7 @@ export async function searchByVector(
         'SELECT rowid, distance FROM vec_mem WHERE embedding MATCH ? ORDER BY distance LIMIT ?',
       )
       .all<{ rowid: number | bigint; distance: number }>(vectorToBlob(vector), topK);
-    const get = db.prepare('SELECT text, scope, ext_id, day, kind FROM mem WHERE id = ?');
+    const get = db.prepare('SELECT text, scope, ext_id, day, kind, source FROM mem WHERE id = ?');
     const out: SearchResult[] = [];
     for (const r of rows) {
       const m = get.get<{
@@ -206,8 +240,10 @@ export async function searchByVector(
         ext_id: string;
         day: string;
         kind: string | null;
+        source: string | null;
       }>(Number(r.rowid));
       if (!m) continue;
+      const source = readSourceColumn(m.source);
       out.push({
         text: m.text,
         score: 1 - r.distance, // cosine distance → similarity
@@ -215,6 +251,7 @@ export async function searchByVector(
         scope: m.scope,
         id: m.ext_id,
         kind: isMemoryKind(m.kind) ? m.kind : DEFAULT_MEMORY_KIND,
+        ...(source ? { source } : {}),
       });
     }
     return out;
@@ -254,7 +291,7 @@ export async function rebuildIndex(indexDir: string, entries: MemoryEntry[]): Pr
       }
     }
     const insMem = db.prepare(
-      'INSERT INTO mem (text, scope, ext_id, day, at, kind) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mem (text, scope, ext_id, day, at, kind, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
     );
     const insVec = hasVec
       ? db.prepare('INSERT OR REPLACE INTO vec_mem (rowid, embedding) VALUES (?, ?)')
@@ -262,9 +299,9 @@ export async function rebuildIndex(indexDir: string, entries: MemoryEntry[]): Pr
     db.transaction(() => {
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i]!;
-        // Rebuild must carry kind — dropping it here would silently erase
-        // kinds from the cache on every health-monitor rebuild while the
-        // markdown source keeps them.
+        // Rebuild must carry kind and source — dropping either here would
+        // silently erase it from the cache on every health-monitor rebuild
+        // while the markdown source keeps it.
         const { lastInsertRowid } = insMem.run(
           e.text,
           e.scope,
@@ -272,6 +309,7 @@ export async function rebuildIndex(indexDir: string, entries: MemoryEntry[]): Pr
           e.day,
           e.at,
           e.kind ?? DEFAULT_MEMORY_KIND,
+          sourceColumn(e.source),
         );
         const v = vectors[i];
         if (insVec && v) {

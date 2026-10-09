@@ -39,6 +39,27 @@ Rules:
 Current document:
 `;
 
+/** `## Pinned` — the heading of the lessons the person wrote and wants kept as written. */
+const PINNED_HEADING_RE = /^##\s+pinned\s*$/i;
+
+/**
+ * Split a lessons document into the person's pinned section (its `## Pinned`
+ * heading through the next `## ` heading) and everything else. Distillation
+ * rewrites only the rest, so a pinned line survives every refresh word for
+ * word, whatever the model does.
+ */
+export function splitPinnedLessons(doc: string): { pinned: string; rest: string } {
+  const lines = doc.split('\n');
+  const start = lines.findIndex((line) => PINNED_HEADING_RE.test(line.trim()));
+  if (start < 0) return { pinned: '', rest: doc };
+  let end = lines.findIndex((line, index) => index > start && /^##\s/.test(line));
+  if (end < 0) end = lines.length;
+  return {
+    pinned: lines.slice(start, end).join('\n').trim(),
+    rest: [...lines.slice(0, start), ...lines.slice(end)].join('\n').trim(),
+  };
+}
+
 export interface LessonsArgs {
   store: Store;
   memory: MemoryManager;
@@ -63,13 +84,13 @@ export async function runLessonsDistillation(args: LessonsArgs): Promise<{ updat
 
   const notes = await memory.getRecent('gezel', gezelId, lookbackDays);
   if (notes.trim().length < LESSONS_MIN_INPUT_CHARS) return { updated: false };
-  const current = await store.readMemoryLessons(gezelId);
+  const { pinned, rest: current } = splitPinnedLessons(await store.readMemoryLessons(gezelId));
 
   let raw: string;
   try {
     raw = (
       await oneShot(
-        `${LESSONS_PROMPT(maxChars, lookbackDays)}${current.trim() || '(empty)'}\n\nMemory notes from the last ${lookbackDays} days:\n${notes}`,
+        `${LESSONS_PROMPT(maxChars, lookbackDays)}${current.trim() || '(empty)'}\n\n${pinned ? `Pinned by the person (kept as written; do not repeat it):\n${pinned}\n\n` : ''}Memory notes from the last ${lookbackDays} days:\n${notes}`,
         120_000,
         { useKlerk: true, jobLabel: `lessons · ${gezelId}` },
       )
@@ -91,7 +112,7 @@ export async function runLessonsDistillation(args: LessonsArgs): Promise<{ updat
     content = lastNewline > 0 ? cut.slice(0, lastNewline) : cut;
   }
 
-  await store.writeMemoryLessons(gezelId, `${content}\n`);
+  await store.writeMemoryLessons(gezelId, `${pinned ? `${pinned}\n\n` : ''}${content}\n`);
   await history?.log({
     kind: 'memory.lessons-updated',
     gezelId,

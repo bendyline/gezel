@@ -27,10 +27,11 @@ Extract one concise sentence per genuinely useful item, one per line, no bullets
 - **Files / artifacts touched** — created, edited, referenced.
 - **Open questions** — things that were NOT resolved; next steps.
 
-Tag every line with its kind — start each line with FACT:, DECISION:, PREF:, or STATUS:
+Tag every line with its kind — start each line with FACT:, DECISION:, PREF:, STATUS:, or CORRECTION:
 - DECISION for choices made and tradeoffs accepted.
 - PREF for user preferences and working styles.
 - STATUS for temporary conditions true right now (a missing credential, an unresolved question, a next step).
+- CORRECTION for something that turned out wrong, and what is right.
 - FACT for everything else durable (intent, artifacts touched, context learned).
 
 Do NOT record task or project completion or progress (e.g. "the feature is done", "the project is complete") — the task system already tracks that.
@@ -122,7 +123,9 @@ export async function summarizeSessionForMemory(args: SummarizeArgs): Promise<vo
     for (const line of lines) {
       // Session summaries are project memory by design — the per-turn
       // extractor owns gezel-scope (transferable) routing.
-      await memory.save('project', record.projectId, line.text, line.kind);
+      await memory.save('project', record.projectId, line.text, line.kind, {
+        gezel: record.gezelId,
+      });
     }
   } catch (err) {
     if (err instanceof EmbeddingsDisabledError) {
@@ -147,7 +150,7 @@ export async function summarizeSessionForMemory(args: SummarizeArgs): Promise<vo
   log.info(`[summarize] session ${record.id.slice(0, 8)} → ${lines.length} memories (${trigger})`);
 }
 
-const SUMMARY_KIND_RE = /^(FACT|DECISION|PREF|STATUS)\s*:\s*(.+)$/i;
+const SUMMARY_KIND_RE = /^(FACT|DECISION|PREF|STATUS|CORRECTION|EXAMPLE)\s*:\s*(.+)$/i;
 
 /** Parse an optional `KIND:` prefix off a summary line; untagged → fact. */
 function parseSummaryLine(line: string): { text: string; kind: MemoryKind } {

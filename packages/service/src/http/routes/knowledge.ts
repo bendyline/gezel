@@ -37,6 +37,8 @@
  * Background auto-updates stay gated inside the KnowledgeManager.
  */
 
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
 import {
   KnowledgeAssetPathSchema,
@@ -50,6 +52,7 @@ import { streamSSE } from 'hono/streaming';
 import { KnowledgeNotFoundError } from '../../knowledge/manager.js';
 import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
 import { embedQuery } from '../../memory/embeddings.js';
+import { parseByteRange } from '../byte-range.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 
@@ -185,6 +188,7 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
       maxResults: body.maxResults ?? 20,
       catalogs: body.catalogs,
       spatial: body.spatial,
+      media: true,
     });
     return c.json({ results: results.slice(0, body.maxResults ?? 20) });
   });
@@ -212,10 +216,11 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     return c.json({ assets });
   });
 
-  // Served as bytes for the viewer's media provider. The manifest declaration
-  // is the authorization (extraction reconciled and hashed every entry), the
-  // sha256 doubles as the ETag, and an SVG is sandboxed in case a person
-  // opens the URL directly — the format already refuses active SVG content.
+  // Served for the viewer's media provider and players. The manifest
+  // declaration is the authorization (extraction reconciled and hashed every
+  // entry), the sha256 doubles as the ETag, video and audio seek with byte
+  // ranges (206), and an SVG is sandboxed in case a person opens the URL
+  // directly — the format already refuses active SVG content.
   app.get('/catalogs/:catalogId/assets/:path{.+}', async (c) => {
     const catalogId = c.req.param('catalogId');
     const parsed = KnowledgeAssetPathSchema.safeParse(`assets/${c.req.param('path')}`);
@@ -224,14 +229,13 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     if (version && version !== manager().mountedVersion(catalogId)) {
       return c.json({ error: 'catalog version not mounted' }, 404);
     }
-    const asset = await manager().readAsset(catalogId, parsed.data);
+    const asset = await manager().assetFile(catalogId, parsed.data);
     if (!asset) return c.json({ error: 'asset not found' }, 404);
     const etag = `"${asset.sha256}"`;
-    if (c.req.header('if-none-match') === etag) return c.body(null, 304);
-    return c.body(Buffer.from(asset.bytes), 200, {
+    const headers: Record<string, string> = {
       'Content-Type': asset.contentType,
-      'Content-Length': String(asset.sizeBytes),
       ETag: etag,
+      'Accept-Ranges': 'bytes',
       'Cache-Control': version ? 'private, max-age=31536000, immutable' : 'private, no-cache',
       'X-Content-Type-Options': 'nosniff',
       'Cross-Origin-Resource-Policy': 'same-origin',
@@ -239,6 +243,21 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
       ...(asset.contentType === 'image/svg+xml'
         ? { 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'" }
         : {}),
+    };
+    if (c.req.header('if-none-match') === etag) return c.body(null, 304, headers);
+    const ifRange = c.req.header('if-range');
+    const range =
+      ifRange && ifRange !== etag ? null : parseByteRange(c.req.header('range'), asset.sizeBytes);
+    if (range === 'unsatisfiable') {
+      return c.body(null, 416, { ...headers, 'Content-Range': `bytes */${asset.sizeBytes}` });
+    }
+    if (asset.sizeBytes === 0) return c.body(null, 200, { ...headers, 'Content-Length': '0' });
+    const { start, end } = range ?? { start: 0, end: asset.sizeBytes - 1 };
+    const body = Readable.toWeb(createReadStream(asset.absPath, { start, end })) as ReadableStream;
+    return c.body(body, range ? 206 : 200, {
+      ...headers,
+      'Content-Length': String(end - start + 1),
+      ...(range ? { 'Content-Range': `bytes ${start}-${end}/${asset.sizeBytes}` } : {}),
     });
   });
 

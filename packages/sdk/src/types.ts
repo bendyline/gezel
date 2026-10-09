@@ -36,7 +36,8 @@ export type ScriptCapability =
   | 'memory.read'
   | 'memory.write'
   | 'index.read'
-  | 'index.refresh';
+  | 'index.refresh'
+  | 'reminders';
 
 /** A free-text string input field. */
 export interface ScriptStringInput {

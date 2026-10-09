@@ -3,10 +3,16 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type InstalledToolset, securityPolicyForLevel } from '@bendyline/gezel';
+import {
+  type CommandApprovalIntent,
+  type InstalledToolset,
+  type Question,
+  securityPolicyForLevel,
+} from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
+import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 
 let svc: RunningService;
 let home: string;
@@ -113,12 +119,22 @@ afterAll(async () => {
   else process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP = priorSkipFlag;
 }, 30_000);
 
+interface RunPlaywrightBody {
+  ok: boolean;
+  log: string;
+  error?: string;
+  approvalPending?: boolean;
+  questionId?: string;
+  declined?: string;
+}
+
 async function runPlaywright(
   path: string,
   mode: 'script' | 'test' = 'script',
+  actor: { gezelId?: string; sessionId?: string } = {},
 ): Promise<{
   status: number;
-  body: { ok: boolean; log: string; error?: string };
+  body: RunPlaywrightBody;
 }> {
   const res = await httpFetch(`${baseUrl}/api/projects/default/run-playwright`, {
     method: 'POST',
@@ -126,12 +142,31 @@ async function runPlaywright(
       Authorization: `Bearer ${svc.context.token}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ path, mode }),
+    body: JSON.stringify({ path, mode, ...actor }),
   });
   return {
     status: res.status,
-    body: (await res.json()) as { ok: boolean; log: string; error?: string },
+    body: (await res.json()) as RunPlaywrightBody,
   };
+}
+
+const GEZEL_ACTOR = { gezelId: 'playwright-probe-gezel', sessionId: 'playwright-probe-session' };
+
+async function approvalQuestion(questionId: string): Promise<Question> {
+  const questions = await svc.context.store.listProjectQuestions('default');
+  const question = questions.find((q) => q.id === questionId);
+  if (!question) throw new Error(`question ${questionId} not found`);
+  return question;
+}
+
+async function answerApproval(questionId: string, choice: 0 | 1): Promise<void> {
+  const question = await approvalQuestion(questionId);
+  await applyCommandApprovalAnswer({
+    home,
+    projectId: 'default',
+    intent: question.intent as CommandApprovalIntent,
+    answer: { selectedChoices: [choice], at: new Date().toISOString() },
+  });
 }
 
 describe('POST /api/projects/:id/run-playwright', () => {
@@ -255,6 +290,112 @@ describe('POST /api/projects/:id/run-playwright', () => {
     expect(result.body).toMatchObject({ ok: false });
     expect(result.body.error).toContain("doesn't exist");
     expect(result.body.error).toContain('write_artifact');
+  });
+
+  it('asks the user before a gezel-initiated run and binds the approval to the script and its imports', async () => {
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/gated-helper.ts',
+      "export const greeting = 'gated-helper-v1';\n",
+    );
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/gated.ts',
+      "import { greeting } from './gated-helper.ts';\nconsole.log('gated-ran ' + greeting);\n",
+    );
+
+    const first = await runPlaywright('scripts/gated.ts', 'script', GEZEL_ACTOR);
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ ok: false, approvalPending: true });
+    expect(first.body.log).not.toContain('gated-ran');
+    const questionId = first.body.questionId!;
+    const question = await approvalQuestion(questionId);
+    expect(question.sessionId).toBe(GEZEL_ACTOR.sessionId);
+    expect(question.intent).toMatchObject({
+      kind: 'command-approval',
+      scope: 'playwright',
+      name: 'scripts/gated.ts',
+    });
+    expect(question.prompt).toContain("console.log('gated-ran ' + greeting);");
+    expect(question.prompt).toContain('scripts/gated-helper.ts');
+    expect(question.prompt).toMatch(/not isolated from your OS account/);
+
+    const again = await runPlaywright('scripts/gated.ts', 'script', GEZEL_ACTOR);
+    expect(again.body).toMatchObject({ approvalPending: true, questionId });
+
+    await answerApproval(questionId, 0);
+    const approved = await runPlaywright('scripts/gated.ts', 'script', GEZEL_ACTOR);
+    expect(approved.body).toMatchObject({ ok: true });
+    expect(approved.body.log).toContain('gated-ran gated-helper-v1');
+
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/gated-helper.ts',
+      "export const greeting = 'gated-helper-v2';\n",
+    );
+    const edited = await runPlaywright('scripts/gated.ts', 'script', GEZEL_ACTOR);
+    expect(edited.body).toMatchObject({ ok: false, approvalPending: true });
+    expect(edited.body.questionId).not.toBe(questionId);
+    expect(edited.body.log).not.toContain('gated-helper-v2');
+  });
+
+  it('refuses a gezel-initiated run the user declined', async () => {
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/declined.ts',
+      "console.log('declined-script-ran');\n",
+    );
+    const first = await runPlaywright('scripts/declined.ts', 'script', GEZEL_ACTOR);
+    await answerApproval(first.body.questionId!, 1);
+
+    const result = await runPlaywright('scripts/declined.ts', 'script', GEZEL_ACTOR);
+    expect(result.body.ok).toBe(false);
+    expect(result.body.declined).toMatch(/previously declined/);
+    expect(result.body.log).not.toContain('declined-script-ran');
+  });
+
+  it('runs the script without the daemon credentials in its environment', async () => {
+    const prior = {
+      GEZEL_TOKEN: process.env.GEZEL_TOKEN,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      NODE_AUTH_TOKEN: process.env.NODE_AUTH_TOKEN,
+    };
+    process.env.GEZEL_TOKEN = 'daemon-token-must-not-leak';
+    process.env.OPENAI_API_KEY = 'sk-must-not-leak';
+    process.env.NODE_AUTH_TOKEN = 'npm-token-must-not-leak';
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/env-probe.ts',
+      [
+        "const keys = ['GEZEL_TOKEN', 'OPENAI_API_KEY', 'NODE_AUTH_TOKEN', 'PATH'];",
+        "console.log('env-probe=' + JSON.stringify(Object.fromEntries(keys.map((k) => [k, k in process.env]))));",
+      ].join('\n'),
+    );
+    try {
+      const result = await runPlaywright('scripts/env-probe.ts');
+      expect(result.body).toMatchObject({ ok: true });
+      expect(result.body.log).toContain(
+        'env-probe={"GEZEL_TOKEN":false,"OPENAI_API_KEY":false,"NODE_AUTH_TOKEN":false,"PATH":true}',
+      );
+    } finally {
+      for (const [key, value] of Object.entries(prior)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it('denies the sink under lockdown, where scripts run but the open web is off', async () => {
+    await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('lockdown') });
+    try {
+      const result = await runPlaywright('scripts/import-managed-package.ts');
+
+      expect(result.status).toBe(403);
+      expect(result.body).toMatchObject({ ok: false, log: '' });
+      expect(result.body.error).toMatch(/external services are disabled/i);
+    } finally {
+      await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
+    }
   });
 
   it('denies the execution sink when script execution is disabled', async () => {

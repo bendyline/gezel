@@ -44,6 +44,8 @@ import {
   KnowledgeOrdinalSchema,
   KnowledgeTocReferenceSchema,
   canonicalizeJson,
+  embeddingProfileMinimumFormat,
+  isKnowledgeMediaAssetPath,
   normalizeLongitude,
   spatialManifest,
 } from '@bendyline/gezk';
@@ -56,8 +58,8 @@ import {
   CENTROID_MAX_PER_SHARD,
   CENTROID_SAMPLE_MAX,
   GEZK_APPLICATION_ID,
-  GEZK_FORMAT_VERSION,
-  GEZK_INDEX_SCHEMA_VERSION,
+  GEZK_FORMAT_GENERATIONS,
+  type GezkFormatVersion,
   LICENSE_NOTICE_PATH,
   MANIFEST_PATH,
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
@@ -68,11 +70,16 @@ import {
   SHARD_MAX_CHUNKS,
   SHARD_TARGET_CHUNKS,
 } from '../format/constants.js';
-import { ROUTER_DDL, SHARD_DDL } from '../format/ddl.js';
+import { ROUTER_DDL, shardDdlFor } from '../format/ddl.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
-import { l2Normalize, quantizeBinaryForProfile, quantizeInt8 } from '../format/quantize.js';
+import {
+  l2Normalize,
+  profileUnitVector,
+  quantizeBinaryForProfile,
+  quantizeInt8,
+} from '../format/quantize.js';
 import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 import {
@@ -81,6 +88,7 @@ import {
   omitSkippedAssetReferences,
   prepareAssets,
 } from './assets.js';
+import { type MediaEmbedder, type MediaRow, collectMediaRows } from './media-rows.js';
 
 export type { CompileAsset } from './assets.js';
 
@@ -120,6 +128,12 @@ export interface CompileKnowledgeCatalogOptions {
   embed: (texts: string[]) => Promise<number[][]>;
   /** The profile tokenizer's counter (chunking + header truncation). */
   countTokens: (text: string) => number;
+  /**
+   * Embeds the images, audio and video the documents reference into the
+   * profile's space (format 0.8 media rows; see media-rows.ts). Absent, a
+   * catalog carries text rows only, whatever its assets.
+   */
+  embedMedia?: MediaEmbedder;
   /** Scratch directory for the staged databases (removed on success). */
   workDir: string;
   smokeQueries?: Array<{ query: string; expectedDocumentIds: string[] }>;
@@ -202,7 +216,10 @@ export interface CompileKnowledgeCatalogOptions {
 export interface CompileReport {
   manifest: KnowledgeCatalogManifest;
   documents: number;
+  /** Every row of the shard `chunks` tables: text chunks plus media rows. */
   chunks: number;
+  /** Media rows by modality (all zero without `embedMedia`). */
+  media: { image: number; video: number; audio: number };
   shards: number;
   archiveBytes: number;
 }
@@ -215,6 +232,8 @@ interface PreparedDocument {
   placements: Array<{ topicId: string; ordinal: number | null }>;
   metaJson: string | null;
   chunks: MarkdownChunk[];
+  /** Media rows, written after the text chunks (0.8). */
+  media: MediaRow[];
 }
 
 export async function compileKnowledgeCatalog(
@@ -280,6 +299,7 @@ export async function compileKnowledgeCatalog(
       placements,
       metaJson: encodeDocumentMeta(doc),
       chunks: chunkMarkdownProfile(normalizeMarkdown(doc.markdown), chunkerOpts),
+      media: [],
     });
   }
   prepared.sort((a, b) =>
@@ -295,8 +315,37 @@ export async function compileKnowledgeCatalog(
   );
   const totalChunks = prepared.reduce((sum, p) => sum + p.chunks.length, 0);
 
+  // ── media pass: every referenced image/audio/video embedded once, before
+  //    any database exists, so counts, shard fill and generation are known ──
+  if (opts.embedMedia) {
+    const rows = await collectMediaRows({
+      documents: prepared.map((p) => ({
+        id: p.doc.id,
+        title: p.doc.title,
+        markdown: normalizeMarkdown(p.doc.markdown),
+        chunks: p.chunks,
+      })),
+      assets: preparedAssets,
+      profile,
+      embedMedia: opts.embedMedia,
+      countTokens: opts.countTokens,
+      onWarning: opts.onWarning,
+    });
+    for (const p of prepared) p.media = rows.get(p.doc.id) ?? [];
+  }
+  const mediaCounts = { image: 0, video: 0, audio: 0 };
+  for (const p of prepared) for (const row of p.media) mediaCounts[row.modality] += 1;
+  const totalMedia = mediaCounts.image + mediaCounts.video + mediaCounts.audio;
+  /** Rows of the shard `chunks` tables: text chunks plus media rows. */
+  const totalRows = totalChunks + totalMedia;
+  const rowsOf = (p: PreparedDocument): number => p.chunks.length + p.media.length;
+
+  const formatVersion = catalogFormatVersion(profile, preparedAssets, totalMedia);
+  const indexSchemaVersion = GEZK_FORMAT_GENERATIONS[formatVersion];
+  const shardDdl = shardDdlFor(indexSchemaVersion);
+
   const shardTarget = opts.shardTargetChunks ?? SHARD_TARGET_CHUNKS;
-  const embedded = totalChunks <= shardTarget;
+  const embedded = totalRows <= shardTarget;
   const semanticFill = opts.shardFill === 'semantic' && !embedded;
   /** The exact passage text the embedder sees for one chunk (§5). */
   const embedInput = (p: PreparedDocument, chunk: MarkdownChunk): string =>
@@ -318,7 +367,7 @@ export async function compileKnowledgeCatalog(
     docVectors = await stageVectors({
       prepared,
       stagedPath,
-      dimensions: profile.dimensions,
+      profile,
       batchSize: opts.embedBatchSize ?? 32,
       embed: opts.embed,
       embedInput,
@@ -333,11 +382,11 @@ export async function compileKnowledgeCatalog(
   if (embedded) {
     for (const p of prepared) shardOf.set(p.doc.id, 0);
   } else if (semanticFill) {
-    shardCount = Math.ceil(totalChunks / shardTarget);
-    const capacity = Math.min(SHARD_MAX_CHUNKS, Math.ceil((totalChunks / shardCount) * 1.02));
+    shardCount = Math.ceil(totalRows / shardTarget);
+    const capacity = Math.min(SHARD_MAX_CHUNKS, Math.ceil((totalRows / shardCount) * 1.02));
     const assignment = semanticShards(
       docVectors,
-      prepared.map((p) => p.chunks.length),
+      prepared.map(rowsOf),
       shardCount,
       capacity,
       seedFor(`${opts.catalog.id}#shard-fill`, 0),
@@ -350,12 +399,12 @@ export async function compileKnowledgeCatalog(
     let current = 0;
     let filled = 0;
     for (const p of prepared) {
-      if (filled > 0 && filled + p.chunks.length > shardTarget) {
+      if (filled > 0 && filled + rowsOf(p) > shardTarget) {
         current++;
         filled = 0;
       }
       shardOf.set(p.doc.id, current);
-      filled += p.chunks.length;
+      filled += rowsOf(p);
     }
     shardCount = current + 1;
   }
@@ -369,7 +418,7 @@ export async function compileKnowledgeCatalog(
   // makes the workDir rmSync fail with EBUSY on Windows (both our own
   // cleanup and a caller's retry into the same workDir).
   const shardDbs = new Map<number, DatabaseSync>();
-  const router = createCatalogDb(routerStaged);
+  const router = createCatalogDb(routerStaged, indexSchemaVersion);
   const closeAll = (): void => {
     for (const db of [router, ...shardDbs.values()]) {
       try {
@@ -386,12 +435,12 @@ export async function compileKnowledgeCatalog(
     // thousand-document build into minutes on Windows.
     router.exec('BEGIN');
     if (embedded) {
-      router.exec(SHARD_DDL.replace('CREATE TABLE meta', 'CREATE TABLE IF NOT EXISTS meta'));
+      router.exec(shardDdl.replace('CREATE TABLE meta', 'CREATE TABLE IF NOT EXISTS meta'));
     }
 
     const commonMeta: Record<string, string> = {
-      format_version: String(GEZK_FORMAT_VERSION),
-      index_schema_version: String(GEZK_INDEX_SCHEMA_VERSION),
+      format_version: String(formatVersion),
+      index_schema_version: String(indexSchemaVersion),
       catalog_id: opts.catalog.id,
       catalog_version: opts.catalog.version,
       embedding_profile_id: profile.id,
@@ -477,7 +526,7 @@ export async function compileKnowledgeCatalog(
           p.leafTopicId,
           p.doc.ordinal === undefined ? null : BigInt(p.doc.ordinal),
           BigInt(shardOf.get(p.doc.id) as number),
-          BigInt(p.chunks.length),
+          BigInt(rowsOf(p)),
           p.doc.sourceUrl ?? null,
           p.doc.sourceRevision ?? null,
           p.doc.sourceUpdatedAt ?? null,
@@ -526,8 +575,8 @@ export async function compileKnowledgeCatalog(
       if (embedded) return router;
       let db = shardDbs.get(id);
       if (!db) {
-        db = createCatalogDb(join(opts.workDir, shardPath(id)));
-        db.exec(SHARD_DDL);
+        db = createCatalogDb(join(opts.workDir, shardPath(id)), indexSchemaVersion);
+        db.exec(shardDdl);
         db.exec('BEGIN');
         shardDbs.set(id, db);
       }
@@ -566,7 +615,9 @@ export async function compileKnowledgeCatalog(
         );
       }
       for (let i = 0; i < vectors.length; i++) {
-        const unit = l2Normalize(vectors[i] as number[]);
+        // Staged vectors were projected in pass 1; fresh ones are raw model output.
+        const raw = vectors[i] as number[];
+        const unit = staged ? l2Normalize(raw) : profileUnitVector(profile, raw);
         if (unit.length !== profile.dimensions) {
           throw new Error(
             `embedder returned dim ${unit.length}, profile expects ${profile.dimensions}`,
@@ -638,6 +689,49 @@ export async function compileKnowledgeCatalog(
         pendingRows.push({ shardId, chunkId });
         if (pendingTexts.length >= embedBatchSize) await flushEmbeds();
       }
+      if (p.media.length > 0) {
+        // Media rows follow the text, so every text chunk id is the id a
+        // text-only build gives it. Their vectors are written here, never
+        // sampled into routing centroids (those route text queries to text).
+        const insertMedia = db.prepare(
+          `INSERT INTO chunks (chunk_uid, document_id, ordinal, title, heading_path, heading_text,
+          line_start, line_end, token_count, content_hash, text, modality, asset_path, mime_type,
+          width, height, start_ms, end_ms, attribution_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        );
+        const stmts = vecStmtsFor(db);
+        p.media.forEach((media, index) => {
+          const ordinal = p.chunks.length + index;
+          const headingText = media.headingPath.join(' > ');
+          const row = insertMedia.get(
+            chunkUid(p.doc.id, ordinal, `media:${media.modality}:${media.contentHash}`),
+            p.doc.id,
+            BigInt(ordinal),
+            p.doc.title,
+            JSON.stringify(media.headingPath),
+            headingText,
+            BigInt(media.line),
+            BigInt(media.line),
+            BigInt(opts.countTokens(media.text)),
+            media.contentHash,
+            media.text,
+            media.modality,
+            media.assetPath,
+            media.mimeType,
+            media.width === null ? null : BigInt(media.width),
+            media.height === null ? null : BigInt(media.height),
+            media.startMs === null ? null : BigInt(media.startMs),
+            media.endMs === null ? null : BigInt(media.endMs),
+            media.attributionJson,
+          ) as { id: number | bigint };
+          const chunkId = Number(row.id);
+          insertChunkFts.run(BigInt(chunkId), p.doc.title, headingText, media.text);
+          shardChunkCounts.set(shardId, (shardChunkCounts.get(shardId) ?? 0) + 1);
+          const unit = profileUnitVector(profile, media.vector);
+          stmts.vec.run(BigInt(chunkId), Buffer.from(quantizeBinaryForProfile(profile, unit)));
+          stmts.int8.run(BigInt(chunkId), Buffer.from(quantizeInt8(unit).buffer));
+        });
+      }
     }
     await flushEmbeds();
     staged?.close();
@@ -652,7 +746,7 @@ export async function compileKnowledgeCatalog(
           chunk_count: String(shardChunkCounts.get(id) ?? 0),
         });
     }
-    if (embedded) putMeta(router, { shard_id: '0', chunk_count: String(totalChunks) });
+    if (embedded) putMeta(router, { shard_id: '0', chunk_count: String(totalRows) });
 
     // VACUUM INTO final staged files (deterministic layout).
     const finalDir = join(opts.workDir, 'final');
@@ -792,8 +886,8 @@ export async function compileKnowledgeCatalog(
 
     const unsignedManifest: KnowledgeCatalogManifest = KnowledgeCatalogManifestSchema.parse({
       kind: GEZK_MANIFEST_KIND,
-      formatVersion: GEZK_FORMAT_VERSION,
-      indexSchemaVersion: GEZK_INDEX_SCHEMA_VERSION,
+      formatVersion,
+      indexSchemaVersion,
       id: opts.catalog.id,
       version: opts.catalog.version,
       name: opts.catalog.name,
@@ -822,9 +916,10 @@ export async function compileKnowledgeCatalog(
       },
       counts: {
         documents: prepared.length,
-        chunks: totalChunks,
+        chunks: totalRows,
         shards: shardCount,
         assets: preparedAssets.length,
+        ...(formatVersion === '0.8' ? { media: mediaCounts } : {}),
       },
       files: [...files].sort((a, b) => (a.path < b.path ? -1 : 1)),
       spatial: spatialManifest(
@@ -832,7 +927,7 @@ export async function compileKnowledgeCatalog(
           (p.doc.locations ?? []).map((location) => ({ documentId: p.doc.id, location })),
         ),
       ),
-      requires: { formatVersion: GEZK_FORMAT_VERSION, features: [] },
+      requires: { formatVersion, features: [] },
       ...(smokeQueries && smokeQueries.length > 0 ? { smokeQueries } : {}),
       toolchain: opts.toolchain ?? KNOWLEDGE_TOOLCHAIN,
     });
@@ -859,7 +954,8 @@ export async function compileKnowledgeCatalog(
     return {
       manifest,
       documents: prepared.length,
-      chunks: totalChunks,
+      chunks: totalRows,
+      media: mediaCounts,
       shards: shardCount,
       archiveBytes,
     };
@@ -964,11 +1060,26 @@ function assertAssetReferencesDeclared(
   }
 }
 
-function createCatalogDb(absPath: string): DatabaseSync {
+/**
+ * The oldest generation that can express this catalog: 0.7, unless the
+ * embedding profile uses 0.8 vocabulary or the catalog ships audio or video.
+ * Writing the oldest one keeps catalog updates reaching every reader that
+ * can open them, instead of cutting installs off at each format bump.
+ */
+export function catalogFormatVersion(
+  profile: KnowledgeEmbeddingProfile,
+  assets: ReadonlyArray<{ path: string }>,
+  mediaRows = 0,
+): Extract<GezkFormatVersion, '0.7' | '0.8'> {
+  const needsMedia = mediaRows > 0 || assets.some((asset) => isKnowledgeMediaAssetPath(asset.path));
+  return needsMedia || embeddingProfileMinimumFormat(profile) === '0.8' ? '0.8' : '0.7';
+}
+
+function createCatalogDb(absPath: string, indexSchemaVersion: number): DatabaseSync {
   const db = new DatabaseSync(absPath);
   db.exec('PRAGMA page_size=8192');
   db.exec(`PRAGMA application_id=${GEZK_APPLICATION_ID}`);
-  db.exec(`PRAGMA user_version=${GEZK_INDEX_SCHEMA_VERSION}`);
+  db.exec(`PRAGMA user_version=${indexSchemaVersion}`);
   db.exec('PRAGMA journal_mode=DELETE');
   return db;
 }
@@ -1032,13 +1143,14 @@ function buildContextHeader(
 async function stageVectors(args: {
   prepared: PreparedDocument[];
   stagedPath: string;
-  dimensions: number;
+  profile: KnowledgeEmbeddingProfile;
   batchSize: number;
   embed: (texts: string[]) => Promise<number[][]>;
   embedInput: (p: PreparedDocument, chunk: MarkdownChunk) => string;
   onProgress: (done: number) => void;
 }): Promise<Float32Array[]> {
-  const { prepared, dimensions } = args;
+  const { prepared, profile } = args;
+  const { dimensions } = profile;
   const docVectors = prepared.map(() => new Float32Array(dimensions));
   const fd = openSync(args.stagedPath, 'w');
   let texts: string[] = [];
@@ -1052,10 +1164,7 @@ async function stageVectors(args: {
     }
     const block = new Float32Array(texts.length * dimensions);
     for (let i = 0; i < vectors.length; i++) {
-      const unit = l2Normalize(vectors[i] as number[]);
-      if (unit.length !== dimensions) {
-        throw new Error(`embedder returned dim ${unit.length}, profile expects ${dimensions}`);
-      }
+      const unit = profileUnitVector(profile, vectors[i] as number[]);
       block.set(unit, i * dimensions);
       const sum = docVectors[owners[i] as number] as Float32Array;
       for (let d = 0; d < dimensions; d++) sum[d] = (sum[d] as number) + (unit[d] as number);
@@ -1079,7 +1188,13 @@ async function stageVectors(args: {
   } finally {
     closeSync(fd);
   }
-  return docVectors.map((v) => Float32Array.from(l2Normalize(Array.from(v))));
+  // A document with no chunks (an article converted to nothing) has no mean
+  // vector. It carries no load either, so it keeps a zero vector — kept out
+  // of the k-means sample in `semanticShards` — instead of aborting the
+  // build on a zero-norm normalize (Qualla's "Bibliography", 2026-10-07).
+  return docVectors.map((v) =>
+    v.some((x) => x !== 0) ? Float32Array.from(l2Normalize(Array.from(v))) : v,
+  );
 }
 
 /** Semantic fill, pass 2: reads the staged vectors back in the order they were written. */
@@ -1146,7 +1261,7 @@ function semanticShards(
     return sum;
   };
   const stride = Math.max(1, Math.ceil(n / 20_000));
-  const sample = docVectors.filter((_, i) => i % stride === 0);
+  const sample = docVectors.filter((v, i) => i % stride === 0 && v.some((x) => x !== 0));
   const centers = kMeans(sample, shardCount, seed).map((c) => c.centroid);
   // k-means drops empty clusters; top up with evenly spaced documents.
   for (let i = 0; centers.length < shardCount; i++) {

@@ -3,6 +3,7 @@
 #include "jni_helpers.h"
 #include <algorithm>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using gezel_jni::fail;
@@ -220,4 +221,59 @@ Java_com_bendyline_gezel_llama_LlamaRuntime_chat(JNIEnv * env, jclass, jlong han
 } catch (...) {
     fail(env, "Native chat ran out of resources");
     return 0;
+}
+
+namespace {
+int32_t collect_text(const char * bytes, size_t length, void * opaque) {
+    static_cast<std::string *>(opaque)->append(bytes, length);
+    return 0;
+}
+}
+
+/**
+ * Describes one photo through the loaded model's vision projector (see
+ * gezel_llama_describe_image). rgb holds width*height*3 bytes. Returns the
+ * description as UTF-8 (JNI's modified UTF-8 cannot carry every character),
+ * or null when the request was cancelled; throws on any other failure.
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_bendyline_gezel_llama_LlamaRuntime_describeImage(JNIEnv * env, jclass, jlong handle, jstring projector, jbyteArray rgb,
+        jint width, jint height, jstring system, jstring user, jlong requestId, jint maxTokens, jint timeoutMs) try {
+    if (!projector || !rgb || !user) { fail(env, "A projector, picture and instruction are required"); return nullptr; }
+    const std::string projectorPath = utf8(env, projector);
+    if (env->ExceptionCheck()) return nullptr;
+    const std::string instruction = utf8(env, user);
+    if (env->ExceptionCheck()) return nullptr;
+    std::string systemPrompt;
+    if (system) {
+        systemPrompt = utf8(env, system);
+        if (env->ExceptionCheck()) return nullptr;
+    }
+    const jsize length = env->GetArrayLength(rgb);
+    if (width < 1 || height < 1 || static_cast<int64_t>(width) * height * 3 != length) {
+        fail(env, "Picture size does not match its pixels");
+        return nullptr;
+    }
+    std::vector<uint8_t> pixels(static_cast<size_t>(length));
+    env->GetByteArrayRegion(rgb, 0, length, reinterpret_cast<jbyte *>(pixels.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    auto options = gezel_llama_default_image_options();
+    options.request_id = static_cast<uint64_t>(requestId);
+    options.max_tokens = static_cast<uint32_t>(std::clamp<jint>(maxTokens, 1, 1024));
+    options.timeout_ms = static_cast<uint32_t>(std::clamp<jint>(timeoutMs, 1, 600000));
+    std::string text;
+    gezel_llama_result result{};
+    gezel_llama_error error{};
+    const int32_t status = gezel_llama_describe_image(engine(handle), projectorPath.c_str(), pixels.data(),
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), system ? systemPrompt.c_str() : nullptr,
+        instruction.c_str(), &options, collect_text, &text, &result, &error);
+    if (status == GEZEL_LLAMA_CANCELLED) return nullptr;
+    if (status != GEZEL_LLAMA_OK) { fail(env, error.message); return nullptr; }
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(text.size()));
+    if (!output) return nullptr;
+    env->SetByteArrayRegion(output, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte *>(text.data()));
+    return output;
+} catch (...) {
+    fail(env, "Native image description ran out of resources");
+    return nullptr;
 }

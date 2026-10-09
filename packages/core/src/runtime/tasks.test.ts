@@ -320,7 +320,9 @@ describe('portable ordinary task lifecycle', () => {
         gate: { approved: true },
         next: 'invented',
       }),
-    ).rejects.toThrow('does not declare');
+    ).rejects.toThrow(
+      /^This task has no step "invented"\. Its steps are: "[^"]+".*Pass one of those ids as `next`/,
+    );
     const done = await store.completeTaskStep(task.ref, task.activeStepId!, {
       gate: { approved: true },
     });

@@ -3,12 +3,9 @@ import { createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
 import { chunkMarkdown, shadowDocFilesPaths, writeConvertedMarkdownAt } from './docs.js';
 import { parseFrontmatter, withFrontmatter } from './frontmatter.js';
-import {
-  type FileRecord,
-  type IndexProvenance,
-  type IndexStore,
-  MAX_ENRICH_ATTEMPTS,
-} from './index-store.js';
+import type { FileRecord, IndexProvenance } from './index-store-types.js';
+import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
+import { canNormalizeRaster } from './raster-normalize.js';
 
 /**
  * AI-shadow producers: the second shadow-tree producer class. Office docs get
@@ -37,6 +34,8 @@ const log = createLogger('enrich');
  * is the follow-up if demand appears.
  */
 const VISION_RASTER_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
+/** The same set without dots, for `toDecodableRaster`. HEIC and RAW are converted first. */
+export const VISION_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
 
 function fileExtension(path: string): string {
   const base = path.slice(path.lastIndexOf('/') + 1);
@@ -53,6 +52,14 @@ export interface AiShadowProducers {
   transcribeAudio?: (
     absPath: string,
   ) => Promise<{ body: string; model?: string; provider?: string } | null>;
+  /**
+   * Whether each producer can run right now (a model chosen and healthy).
+   * Checked once per batch: an unavailable producer is left out, so its files
+   * wait — no attempt is spent — instead of failing three times and staying
+   * undescribed after the person sets a model up.
+   */
+  describeAvailable?: () => Promise<boolean>;
+  transcribeAvailable?: () => Promise<boolean>;
 }
 
 export interface AiShadowDeps extends AiShadowProducers {
@@ -97,11 +104,32 @@ export async function aiShadowFile(
     }
   }
 
+  // A copy of a file already described elsewhere in the folder reuses that
+  // description. Shadow state is kept per content hash but sidecars per path,
+  // so describing the copy would pay for the same model call twice — and when
+  // that call failed while the twin was being adopted, the shared state
+  // flipped between ok and failed on every batch and the tier never stopped
+  // (24k "describe produced nothing … attempt 1/3" lines in two minutes).
+  const twin = await twinShadow(store, artifactsDir, file);
+  if (twin) {
+    await writeConvertedMarkdownAt(
+      paths,
+      withFrontmatter({ ...twin.data, source: file.path }, twin.body),
+    );
+    indexShadowBody(store, file, twin.body);
+    store.markAiShadowOk(file.hash, file.path, twin.data.model);
+    return { produced: true, skipped: false, called: false };
+  }
+
   // Formats the vision stack cannot decode are a deterministic dead end —
   // mark them terminal without paying (and re-paying) a doomed engine call.
   // Counted as handled (skipped: false) so an all-unsupported batch doesn't
   // read as "no media work left" to the drive loop while real files wait.
-  if (file.modality === 'image' && !VISION_RASTER_EXTS.has(fileExtension(file.path))) {
+  if (
+    file.modality === 'image' &&
+    !VISION_RASTER_EXTS.has(fileExtension(file.path)) &&
+    !canNormalizeRaster(file.path)
+  ) {
     store.markAiShadowUnsupported(file.hash, file.path);
     log.info(`no vision support for ${file.path} (no raster decoder for this format) — skipped`);
     return { produced: false, skipped: false, called: false };
@@ -151,6 +179,24 @@ export async function aiShadowFile(
   indexShadowBody(store, file, result.body.trim());
   store.markAiShadowOk(file.hash, file.path, result.model);
   return { produced: true, skipped: false, called: true };
+}
+
+/** The fresh shadow sidecar of another path with the same content, if one exists. */
+async function twinShadow(
+  store: IndexStore,
+  artifactsDir: string,
+  file: FileRecord,
+): Promise<{ data: Record<string, string>; body: string } | null> {
+  if (!file.hash) return null;
+  for (const path of store.pathsWithHash(file.hash)) {
+    if (path === file.path) continue;
+    const twinPaths = shadowDocFilesPaths(artifactsDir, path);
+    const raw = twinPaths ? await readFile(twinPaths.mdPath, 'utf8').catch(() => null) : null;
+    if (raw === null) continue;
+    const fm = parseFrontmatter(raw);
+    if (fm.data.source_hash === file.hash && fm.body.trim()) return fm;
+  }
+  return null;
 }
 
 /**

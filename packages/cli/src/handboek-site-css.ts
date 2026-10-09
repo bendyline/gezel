@@ -353,6 +353,66 @@ body.hb {
 
 .hb-watch { max-width: var(--hb-measure); margin: 1.25rem 0 0; font-size: 0.9rem; }
 
+/* A project type's page demo, framed like a window onto the room. */
+.hb-demo-frame {
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-lg);
+  background: var(--hb-panel);
+  box-shadow: var(--hb-shadow);
+  padding: 6px;
+}
+.hb-demo-frame iframe {
+  display: block;
+  width: 100%;
+  height: 34rem;
+  border: 0;
+  border-radius: var(--hb-radius-md);
+  background: #fff;
+}
+.hb-demo-open { font-size: 0.9rem; }
+
+/* Craftbook woodcuts: one under each craftbook's title, and a gallery shelf. */
+.hb-craftbook-art {
+  display: block;
+  width: 160px;
+  height: 160px;
+  margin: 0 0 1.25rem;
+  border-radius: var(--hb-radius-md);
+  background: #e8dec7;
+  box-shadow: inset 0 0 0 1px rgba(74, 52, 30, 0.14);
+}
+.hb-article .hb-gallery {
+  list-style: none;
+  margin: 0 0 2rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+.hb-article .hb-gallery li { margin: 0; font-size: inherit; }
+.hb-gallery a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-lg);
+  background: var(--hb-panel);
+  color: var(--hb-ink);
+  text-decoration: none;
+  box-shadow: var(--hb-shadow);
+}
+.hb-gallery a:hover { border-color: var(--hb-accent); }
+.hb-gallery img {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--hb-radius-md);
+  background: #e8dec7;
+}
+.hb-gallery-title { font-family: var(--hb-font-display); font-weight: 700; color: var(--hb-sage); }
+.hb-gallery-summary { font-size: 0.85rem; line-height: 1.4; color: var(--hb-ink-muted); }
+
 /* Home */
 .hb-home-main { max-width: 62rem; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 .hb-hero { max-width: var(--hb-measure); margin-bottom: 3rem; }

@@ -132,7 +132,39 @@ describe('native capacity broker discovery', () => {
     expect(mocks.local).not.toHaveBeenCalled();
   });
 
-  it('requires an older broker to update instead of bypassing admission', async () => {
+  it('runs on its own ledger when the installed broker predates coordination', async () => {
+    // An embedded Gezel must not depend on the person updating another app.
+    mocks.fetch.mockImplementation(async () => new Response('', { status: 404 }));
+    const lease = await acquire();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.local).toHaveBeenCalledWith(expect.objectContaining({ action: 'acquire' }));
+    await lease.release();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    // Later launches skip the probe until the broker's version changes.
+    await (await acquire()).release();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    // A stamped build defers to a broker of another version (see the skew suite).
+    mocks.unstampedDev = false;
+    mocks.inspect.mockResolvedValue({
+      pinnedIdentityFingerprint: 'stable-device',
+      gezelVersion: 'updated',
+    });
+    mocks.fetch.mockImplementation(
+      async () => new Response(JSON.stringify({ state: 'granted', releaseRequested: false })),
+    );
+    await (await acquire()).release();
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('never moves a lease the broker already holds to the local ledger', async () => {
+    const lease = await acquire();
+    mocks.fetch.mockImplementation(async () => new Response('', { status: 404 }));
+    await expect(lease.ready()).rejects.toThrow(/needs an update/);
+    expect(mocks.local).not.toHaveBeenCalled();
+  });
+
+  it('keeps refusing an outdated broker when the operator demands the machine authority', async () => {
+    vi.stubEnv('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'machine');
     mocks.fetch.mockImplementation(async () => new Response('', { status: 404 }));
     await expect(acquire()).rejects.toThrow(/needs an update/);
     expect(mocks.local).not.toHaveBeenCalled();

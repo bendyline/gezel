@@ -4,6 +4,7 @@ import {
   LlamaCppSession,
   constrainedToolNoSignalMsForModel,
 } from '../local-loop/llama-cpp-session.js';
+import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import {
   buildToolEvidenceReplay,
   toolEvidenceBudgetChars,
@@ -11,6 +12,7 @@ import {
 import { UnresolvedToolFailureLedger } from '../local-loop/unresolved-tool-failure-ledger.js';
 import type { PortableInference } from '../mobile/inference.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
+import { spliceIntoText } from '../recognition/digest.js';
 import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
 import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
@@ -56,6 +58,10 @@ export interface SharedLoopTurnOptions {
   /** The conversation before this turn, as stored. */
   history: readonly ChatMessage[];
   prompt: string;
+  /** Tools whose success ends the turn, as the desktop sets them (a game's move). */
+  terminalToolPolicy?: TerminalToolPolicy;
+  /** The turn's first request must call this tool (a reaction's `turn`). */
+  requiredTool?: string;
   tools: readonly PortableToolSpec[];
   actions: PortableToolActions;
   signal: AbortSignal;
@@ -161,7 +167,10 @@ export async function runSharedLoopTurn(
         ...(m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
           ? { toolCalls: m.toolCalls }
           : {}),
-        content: m.role === 'assistant' ? stripReasoningTags(m.content) : m.content,
+        content:
+          m.role === 'assistant'
+            ? stripReasoningTags(m.content)
+            : spliceIntoText(m.content, m.recognizedImages),
       })),
     toolEvidenceBudgetChars(options.contextSize),
   );
@@ -190,6 +199,7 @@ export async function runSharedLoopTurn(
     ...(options.systemPromptLayers ? { systemPromptLayers: options.systemPromptLayers } : {}),
     priorMessages: replay.entries,
     bridges: executor,
+    ...(options.terminalToolPolicy ? { terminalToolPolicy: options.terminalToolPolicy } : {}),
     queue: options.host.queue,
     provider: options.host,
     streamingIdleMs: STREAMING_IDLE_MS,
@@ -242,6 +252,7 @@ export async function runSharedLoopTurn(
   try {
     const text = await llama.sendAndWait(options.prompt, {
       timeoutMs: LOCAL_TURN_TIMEOUT_MS,
+      ...(options.requiredTool ? { requiredTool: options.requiredTool } : {}),
       queue: {
         lane: 'interactive',
         sessionId: session.id,

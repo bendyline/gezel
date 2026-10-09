@@ -151,6 +151,17 @@ function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSem
 const RRF_K = 60;
 const ARM_WEIGHTS = { vector: 1, docFts: 1, chunkFts: 0.5 } as const;
 /**
+ * Media rows fuse per row, not per document: a document's own text chunk
+ * (cosine ≈ 0.9) would otherwise always stand in for its image (≈ 0.7). Each
+ * modality is ranked on its own scale, past its own measured floor.
+ */
+const MEDIA_ARM_WEIGHTS = { vector: 0.5, chunkFts: 0.25 } as const;
+/** Media rows asked of each catalog, per modality, on an explicit search. */
+const MEDIA_K = 2;
+/** Media results one search returns at most, and per document. */
+const MEDIA_RESULT_CAP = 4;
+const MEDIA_PER_DOCUMENT = 1;
+/**
  * Fused documents per catalog when several are in scope: keeps one catalog
  * from monopolizing the merged list. A search scoped to one catalog has
  * nothing to share the list with, and the cap cut the Knowledge browser's
@@ -470,21 +481,33 @@ export class KnowledgeManager {
 
   // ── the gilde join ────────────────────────────────────────────────────────
 
-  /** Every gilde `knowledge-catalog` entry (newest version), keyed by publisher/id. */
-  private async gildeItems(): Promise<Map<string, KnowledgeCatalogItemManifest>> {
-    const out = new Map<string, KnowledgeCatalogItemManifest>();
+  /**
+   * Every gilde `knowledge-catalog` entry (newest version), keyed by
+   * publisher/id, with the catalog route URL of its Reference Mark artwork.
+   */
+  private async gildeEntries(): Promise<
+    Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>
+  > {
+    const out = new Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>();
     if (!this.opts.catalog) return out;
     try {
       for (const item of await this.opts.catalog.list('knowledge-catalog')) {
         if (item.manifest.kind !== 'knowledge-catalog') continue;
         out.set(
           this.keyFor({ publisherId: item.manifest.publisherId, catalogId: item.manifest.id }),
-          item.manifest,
+          { manifest: item.manifest, ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}) },
         );
       }
     } catch (err) {
       log.debug(`knowledge catalog listing unavailable: ${errorMessage(err)}`);
     }
+    return out;
+  }
+
+  /** Every gilde `knowledge-catalog` manifest (newest version), keyed by publisher/id. */
+  private async gildeItems(): Promise<Map<string, KnowledgeCatalogItemManifest>> {
+    const out = new Map<string, KnowledgeCatalogItemManifest>();
+    for (const [key, entry] of await this.gildeEntries()) out.set(key, entry.manifest);
     return out;
   }
 
@@ -509,11 +532,12 @@ export class KnowledgeManager {
   // ── listing ───────────────────────────────────────────────────────────────
 
   async list(): Promise<KnowledgeCatalogStatus[]> {
-    const gilde = await this.gildeItems();
+    const gilde = await this.gildeEntries();
     return this.registry.read().catalogs.map((entry) => {
       const key = this.keyFor(entry.ref);
       const mounted = this.mountedByKey.get(key);
-      const item = gilde.get(key);
+      const listed = gilde.get(key);
+      const item = listed?.manifest;
       const availableVersion =
         item && compareCatalogVersions(item.version, entry.ref.version) > 0
           ? item.version
@@ -540,6 +564,7 @@ export class KnowledgeManager {
         source: entry.source ?? (item ? 'gilde' : 'file'),
         updateAvailable: availableVersion !== undefined,
         ...(availableVersion ? { availableVersion } : {}),
+        ...(listed?.logoUrl ? { logoUrl: listed.logoUrl } : {}),
       };
     });
   }
@@ -1372,6 +1397,10 @@ export class KnowledgeManager {
     return this.opts.host.readAsset(this.requireMounted(catalogId).key, path);
   }
 
+  async assetFile(catalogId: string, path: string): ReturnType<KnowledgeCatalogHost['assetFile']> {
+    return this.opts.host.assetFile(this.requireMounted(catalogId).key, path);
+  }
+
   /** The mounted version of a catalog — what an asset URL binds to for caching. */
   mountedVersion(catalogId: string): string {
     return this.requireMounted(catalogId).ref.version;
@@ -1491,6 +1520,11 @@ export class KnowledgeManager {
       queryEmbedBudgetMs?: number;
       /** Query cached profile models only, falling back to keywords when absent. */
       localModelsOnly?: boolean;
+      /**
+       * Include media rows (images, audio and video windows) as results of
+       * their own. Explicit search asks; proactive injection does not.
+       */
+      media?: boolean;
     },
   ): Promise<UnifiedSearchResult[]> {
     const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
@@ -1534,9 +1568,8 @@ export class KnowledgeManager {
       documents: [] as GlobalSearchDocumentHit[],
     };
     for (const group of groups) {
-      const part = await this.opts.host.search({
+      const request = {
         query,
-        ...(group.vector ? { vector: group.vector } : {}),
         shardBudget: ROUTE_BUDGET_EXPLICIT,
         titleRouteShards: TITLE_ROUTE_EXPLICIT,
         finalK: FINAL_K,
@@ -1547,7 +1580,25 @@ export class KnowledgeManager {
         docFtsLimit: Math.max(DOC_FTS_MIN, opts.maxResults),
         chunkFtsLimit: Math.max(CHUNK_FTS_MIN, opts.maxResults),
         spatial: opts.spatial,
-      });
+      };
+      let part: Awaited<ReturnType<KnowledgeCatalogHost['search']>>;
+      try {
+        part = await this.opts.host.search(
+          group.vector
+            ? { ...request, vector: group.vector, ...(opts.media ? { mediaK: MEDIA_K } : {}) }
+            : request,
+        );
+      } catch (error) {
+        // A catalog that refuses the query vector (a width the catalog does
+        // not store, say) is an embedding failure, not a search failure: the
+        // worker forwards only the message, so any vector-arm error falls
+        // back to the keyword arms for this group.
+        if (!group.vector) throw error;
+        log.warn(
+          `[knowledge] semantic search failed for ${group.keys.join(', ')}; keyword-only: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        part = await this.opts.host.search(request);
+      }
       response.chunks.push(...part.chunks);
       response.documents.push(...part.documents);
     }
@@ -1586,9 +1637,11 @@ export class KnowledgeManager {
     // its profile's floor is not evidence at all — KNN always returns its
     // nearest rows, and a rank-0 row fuses to relevance 1.0 however far away
     // it is (see vector-floors.ts).
+    const textChunks = response.chunks.filter((h) => !h.media);
+    const mediaChunks = response.chunks.filter((h) => h.media);
     const seenVector = new Set<string>();
     let vectorRank = 0;
-    for (const hit of response.chunks
+    for (const hit of textChunks
       .filter((h) => h.cosine !== undefined)
       .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
       const key = `${hit.catalogKey}\u0000${hit.documentId}`;
@@ -1606,7 +1659,7 @@ export class KnowledgeManager {
     // Chunk-body FTS arm: BM25 order as the shards returned it, ranked per catalog.
     const chunkFtsRank = new Map<string, number>();
     const seenChunkFts = new Set<string>();
-    for (const hit of response.chunks.filter((h) => h.cosine === undefined)) {
+    for (const hit of textChunks.filter((h) => h.cosine === undefined)) {
       const key = `${hit.catalogKey}\u0000${hit.documentId}`;
       if (seenChunkFts.has(key)) continue;
       seenChunkFts.add(key);
@@ -1619,7 +1672,42 @@ export class KnowledgeManager {
       bump(doc.catalogKey, doc.documentId, ARM_WEIGHTS.docFts, doc.rank);
     }
 
-    const ordered = [...fused.values()].sort(
+    // Media rows: their own vector arm per modality (a modality with no
+    // measured floor gives no vector evidence — nearest-neighbour search
+    // always returns some image, and a media row has no query words to be
+    // grounded in) and a caption FTS arm.
+    const mediaFused: typeof fused = new Map();
+    const bumpMedia = (hit: GlobalSearchHit, weight: number, rank: number): void => {
+      const key = `${hit.catalogKey}\u0000${hit.chunkUid}`;
+      const entry = mediaFused.get(key) ?? {
+        catalogKey: hit.catalogKey,
+        documentId: hit.documentId,
+        score: 0,
+        chunk: hit,
+      };
+      entry.score += weight / (RRF_K + rank);
+      if ((hit.cosine ?? -1) > (entry.chunk?.cosine ?? -1)) entry.chunk = hit;
+      mediaFused.set(key, entry);
+    };
+    const mediaVectorRank = new Map<string, number>();
+    for (const hit of mediaChunks
+      .filter((h) => h.cosine !== undefined)
+      .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
+      const modality = hit.media?.modality as 'image' | 'video' | 'audio';
+      const floor = this.vectorFloorFor(hit.catalogKey, modality);
+      if (floor === null || (hit.cosine ?? 0) < floor) continue;
+      const rank = mediaVectorRank.get(modality) ?? 0;
+      mediaVectorRank.set(modality, rank + 1);
+      bumpMedia(hit, MEDIA_ARM_WEIGHTS.vector, rank);
+      const entry = mediaFused.get(`${hit.catalogKey}\u0000${hit.chunkUid}`);
+      if (entry) entry.similarity = Math.max(entry.similarity ?? -1, hit.cosine ?? 0);
+    }
+    let mediaFtsRank = 0;
+    for (const hit of mediaChunks.filter((h) => h.cosine === undefined)) {
+      bumpMedia(hit, MEDIA_ARM_WEIGHTS.chunkFts, mediaFtsRank++);
+    }
+
+    const ordered = [...fused.values(), ...mediaFused.values()].sort(
       (a, b) =>
         b.score - a.score ||
         (b.chunk?.cosine ?? -1) - (a.chunk?.cosine ?? -1) ||
@@ -1637,9 +1725,25 @@ export class KnowledgeManager {
     const out: UnifiedSearchResult[] = [];
     const perCatalogCount = new Map<string, number>();
     const capPerCatalog = !opts.spatial && active.length > 1;
+    const mediaPerDocument = new Map<string, number>();
+    let mediaResults = 0;
     for (const entry of ordered) {
       const info = this.mountedByKey.get(entry.catalogKey);
       if (!info) continue;
+      if (entry.chunk?.media) {
+        const docKey = `${entry.catalogKey}\u0000${entry.documentId}`;
+        const forDocument = mediaPerDocument.get(docKey) ?? 0;
+        if (mediaResults >= MEDIA_RESULT_CAP || forDocument >= MEDIA_PER_DOCUMENT) continue;
+        const evidence: KnowledgeEvidence =
+          entry.similarity !== undefined
+            ? { arm: 'vector', similarity: entry.similarity }
+            : { arm: 'fts' };
+        mediaPerDocument.set(docKey, forDocument + 1);
+        mediaResults++;
+        out.push(this.toResult(info, entry.chunk, fusedRankRelevance(out.length), evidence));
+        if (out.length >= Math.max(10, opts.maxResults)) break;
+        continue;
+      }
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
       if (capPerCatalog && count >= PER_CATALOG_CAP) continue;
       const spatialIdentity = regionalDocumentIdentity(
@@ -1700,10 +1804,17 @@ export class KnowledgeManager {
   }
 
   /** A catalog's vector floor, or null when its hits are keyword-only or its scale unmeasured. */
-  private vectorFloorFor(catalogKey: string): number | null {
+  private vectorFloorFor(
+    catalogKey: string,
+    modality?: 'image' | 'video' | 'audio',
+  ): number | null {
     const info = this.mountedByKey.get(catalogKey);
     if (!info) return null;
-    return this.vectorFloors.floorFor({ catalogKey, profileId: info.embedding.id });
+    return this.vectorFloors.floorFor({
+      catalogKey,
+      profileId: info.embedding.id,
+      ...(modality ? { modality } : {}),
+    });
   }
 
   /**
@@ -1787,6 +1898,7 @@ export class KnowledgeManager {
       }),
       line: hit.lineStart,
       lineEnd: hit.lineEnd,
+      ...(hit.media ? { media: hit.media } : {}),
       ...evidence,
       ...scoreResult('knowledge', relevance),
     };

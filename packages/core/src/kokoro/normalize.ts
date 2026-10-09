@@ -1,3 +1,5 @@
+import { MappedSpeechText } from './source-map.js';
+
 /**
  * Turn ordinary written text into the words a reader would say.
  *
@@ -133,7 +135,11 @@ function spellDigits(digits: string): string {
  * the model understands is left in place; it carries the prosody.
  */
 export function normalizeForSpeech(text: string): string {
-  let output = text.normalize('NFC');
+  return normalizeForSpeechWithMapping(text).text;
+}
+
+export function normalizeForSpeechWithMapping(text: string): MappedSpeechText {
+  let output = MappedSpeechText.from(text);
   // Currency reads as an amount and a unit: "$3.50" is three dollars fifty cents.
   output = output.replace(
     /([$£€¥])\s?(\d[\d,]*)(?:\.(\d{1,2}))?/g,
@@ -147,10 +153,9 @@ export function normalizeForSpeech(text: string): string {
       return `${head} ${spellNumber(cents)} ${minor}${cents === 1 ? '' : 's'}`;
     },
   );
-  output = output.replace(/(\d)(?:st|nd|rd|th)\b/gi, (_m, digit: string, offset: number) => {
-    const start = /\d+$/.exec(output.slice(0, offset + 1))?.[0] ?? digit;
-    return spellOrdinal(Number(start));
-  });
+  output = output.replace(/(\d+)(?:st|nd|rd|th)\b/gi, (_m, digits: string) =>
+    spellOrdinal(Number(digits)),
+  );
   // A bare four-digit number in prose is usually a year.
   output = output.replace(/\b(1[1-9]\d{2}|20\d{2})\b/g, (match) => spellYear(Number(match)));
   output = output.replace(/\b\d[\d,]*\.\d+\b/g, (match) => {
@@ -163,7 +168,7 @@ export function normalizeForSpeech(text: string): string {
     return match.replace(/,/g, '').length > 9 ? spellDigits(match) : spellNumber(value);
   });
   output = output.replace(/\d/g, (digit) => ` ${ONES[Number(digit)]!} `);
-  for (const [symbol, words] of Object.entries(SYMBOLS)) output = output.split(symbol).join(words);
+  output = output.replace(/[&@%=+°©®™]/g, (symbol: string) => SYMBOLS[symbol]!);
   output = output.replace(/\b([a-z]+)\.(?=\s|$)/gi, (match, word: string) => {
     const expansion = ABBREVIATIONS[word.toLowerCase()];
     return expansion ? `${expansion} ` : match;

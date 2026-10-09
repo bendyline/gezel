@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import selfsigned from 'selfsigned';
 import { z } from 'zod';
+import { minimalMediaFixture } from '../fixtures/media.ts';
 import { zipStored } from '../fixtures/office-documents.ts';
 import {
   MOCK_CONVERSION_TOOLS,
@@ -919,14 +920,20 @@ function resolveFixturePath(args: unknown, declared: string): string | null {
 }
 
 /** Fixture id → the bytes it materializes. */
-const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, () => Uint8Array>> = {
+const MOCK_FIXTURE_BYTES: Readonly<Record<MockToolFixture, (path: string) => Uint8Array>> = {
   'minimal-pptx': () => minimalPptxFixture(),
   'minimal-docx': () => minimalDocxFixture(),
   'minimal-pdf': () => minimalPdfFixture(),
   'minimal-png': () => minimalPngFixture(),
+  'minimal-media': minimalMediaFixture,
 };
 
-export type MockToolFixture = 'minimal-pptx' | 'minimal-docx' | 'minimal-pdf' | 'minimal-png';
+export type MockToolFixture =
+  | 'minimal-pptx'
+  | 'minimal-docx'
+  | 'minimal-pdf'
+  | 'minimal-png'
+  | 'minimal-media';
 
 /**
  * Build the fixture from the Markdown the conversion was asked to convert.
@@ -996,7 +1003,7 @@ export async function materializeMockToolFixture(
   const drawer = effect.surface === 'artifact' ? 'artifacts' : 'workspace';
   const target = join(context.trialHome, 'projects', context.projectId, drawer, normalized);
   await mkdir(dirname(target), { recursive: true });
-  const bytes = faithful ?? fixedBytes();
+  const bytes = faithful ?? fixedBytes(normalized);
   await writeFile(target, bytes);
   const source = faithful ? context.source : null;
   return {

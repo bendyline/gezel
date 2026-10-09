@@ -43,6 +43,12 @@ export interface PromptFootprintPolicy {
    * footprint: the brief is what makes a project more than a folder.
    */
   projectBriefMaxChars?: number;
+  /**
+   * Room for the standing "About the person" notes in the system prompt. Kept
+   * at every footprint: a 4B tutor that had to rediscover the learner's name
+   * and goals each turn never used them.
+   */
+  personNotesMaxChars: number;
   /** Where a text tool listing starts; it still narrows when the model refuses it. */
   textToolListing: 'full' | 'compact' | 'signatures';
   /** Where native tool definitions start; they narrow the same way. */
@@ -50,16 +56,18 @@ export interface PromptFootprintPolicy {
 }
 
 export const PROMPT_FOOTPRINT_POLICY: Readonly<Record<PromptFootprint, PromptFootprintPolicy>> = {
-  standard: { textToolListing: 'full', nativeToolListing: 'full' },
+  standard: { personNotesMaxChars: 700, textToolListing: 'full', nativeToolListing: 'full' },
   compact: {
     aboutMaxChars: 1500,
     projectBriefMaxChars: 1200,
+    personNotesMaxChars: 450,
     textToolListing: 'compact',
     nativeToolListing: 'compact',
   },
   minimal: {
     aboutMaxChars: 900,
     projectBriefMaxChars: 600,
+    personNotesMaxChars: 260,
     textToolListing: 'compact',
     nativeToolListing: 'compact',
   },

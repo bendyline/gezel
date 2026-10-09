@@ -38,6 +38,8 @@ export const SCRIPT_METHOD_CAPABILITIES: Readonly<Record<string, ScriptCapabilit
   'http.authed': 'network',
   'index.status': 'index.read',
   'index.ensureFresh': 'index.refresh',
+  'reminder.set': 'reminders',
+  'reminder.clear': 'reminders',
   'script.run': null,
 };
 

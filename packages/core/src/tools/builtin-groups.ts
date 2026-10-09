@@ -98,7 +98,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     name: 'Image Intelligence',
     description:
       'Navigate an indexed image library: search images by filename/caption/dimensions, summarize a folder of images for review or reorganizing, and find visually similar images. Built for folder-operations over large image collections.',
-    tools: ['search_images', 'find_similar_images', 'describe_folder'],
+    tools: [
+      'search_images',
+      'find_similar_images',
+      'describe_folder',
+      'list_photos',
+      'photo_groups',
+    ],
   },
   {
     id: 'entity-intel',
@@ -123,6 +129,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'make_dir',
       'delete_path',
       'rename',
+      'copy_path',
     ],
   },
   {

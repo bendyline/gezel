@@ -16,8 +16,8 @@ import sys
 HERE = Path(__file__).resolve().parent
 ENGINE = HERE.parent / "engines" / "llama-cpp"
 # Hashed into the manifest; verify-build.mjs refuses a cached build whose copy differs.
-BRIDGE_SOURCES = ("gezel_llama.h", "gezel_llama.cpp", "gezel_engine.h", "gezel_chat.cpp", "utf8_stream.h",
-                  "chat_formats.h", "CMakeLists.txt", "common-chat.cmake")
+BRIDGE_SOURCES = ("gezel_llama.h", "gezel_llama.cpp", "gezel_engine.h", "gezel_chat.cpp", "gezel_vision.cpp",
+                  "utf8_stream.h", "chat_formats.h", "CMakeLists.txt", "common-chat.cmake")
 
 
 def llama_patches():
@@ -150,7 +150,8 @@ def build_ios(args, source, output, pin):
             "-DGGML_METAL_TARGET_OS=ios", "-DGGML_ACCELERATE=ON",
         ]
         configure_build(source, build, flags, args.jobs)
-        components = [build / "libgezel-llama.a", build / "llama/src/libllama.a", build / "llama/ggml/src/libggml.a",
+        components = [build / "libgezel-llama.a", build / "mtmd/libmtmd.a", build / "llama/vendor/hash/libvendor-hash.a",
+                      build / "llama/src/libllama.a", build / "llama/ggml/src/libggml.a",
                       build / "llama/ggml/src/libggml-base.a", build / "llama/ggml/src/libggml-cpu.a"]
         if metal:
             components.append(build / "llama/ggml/src/ggml-metal/libggml-metal.a")
@@ -188,7 +189,10 @@ def verify_stripped(text):
 
 def verify_elf_dependencies(text, packaged):
     needed = set(re.findall(r"\(NEEDED\).*\[([^\]]+)\]", text))
-    system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"}
+    # Public NDK libraries are supplied by Android, including the graphics and
+    # compression dependencies of the packaged speech runtime.
+    system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
+              "libEGL.so", "libGLESv2.so", "libjnigraphics.so", "libz.so"}
     missing = needed - set(packaged) - system
     if missing:
         raise ValueError("Android shared library has unbundled dependencies: " + ", ".join(sorted(missing)))

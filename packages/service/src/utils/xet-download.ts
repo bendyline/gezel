@@ -74,6 +74,68 @@ interface CachedSegment {
 
 type PrefetchedTerm = { ok: true; data: Buffer } | { ok: false; error: unknown };
 
+/** How often progress is reported while the writer waits on the next term. */
+const PROGRESS_TICK_MS = 500;
+const TICK = Symbol('tick');
+
+/**
+ * Compressed bytes received across every in-flight segment, against the total
+ * the manifest says this attempt will fetch. Bytes reach the file only in term
+ * order, and the eight prefetched terms share the link, so the first term lands
+ * after about eight terms' worth of transfer: a 2 GB model read 0% for minutes
+ * and then jumped (2026-10-08). Received bytes move the bar while that happens.
+ */
+class ReceiveMeter {
+  private received = 0;
+
+  constructor(private readonly total: number) {}
+
+  add(bytes: number): void {
+    this.received += bytes;
+  }
+
+  fraction(): number {
+    return this.total > 0 ? Math.min(1, this.received / this.total) : 0;
+  }
+}
+
+/** Compressed bytes of every segment the terms still to be written will fetch. */
+function remainingFetchBytes(
+  recon: XetReconstruction,
+  termStarts: readonly number[],
+  resumeFrom: number,
+): number {
+  const seen = new Set<string>();
+  let total = 0;
+  recon.terms.forEach((term, index) => {
+    if (!term) return;
+    const leadingTrim = index === 0 ? (recon.offset_into_first_range ?? 0) : 0;
+    const termEnd = (termStarts[index] ?? 0) + Math.max(0, term.unpacked_length - leadingTrim);
+    if (termEnd <= resumeFrom) return;
+    for (const seg of recon.fetch_info[term.hash] ?? []) {
+      if (seg.range.end <= term.range.start || seg.range.start >= term.range.end) continue;
+      const key = `${term.hash}:${seg.range.start}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      total += seg.url_range.end - seg.url_range.start + 1;
+    }
+  });
+  return total;
+}
+
+/** The settled value, or {@link TICK} if `ms` passes first. */
+async function settledOrTick<T>(promise: Promise<T>, ms: number): Promise<T | typeof TICK> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tick = new Promise<typeof TICK>((resolve) => {
+    timer = setTimeout(() => resolve(TICK), ms);
+  });
+  try {
+    return await Promise.race([promise, tick]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function* downloadXet(
   opts: XetDownloadOptions,
 ): AsyncGenerator<DownloadEvent, DownloadResult, void> {
@@ -255,6 +317,14 @@ async function* runXetAttempt(
 
   const segCache = new Map<string, CachedSegment>();
   const prefetched = new Map<number, Promise<PrefetchedTerm>>();
+  const meter = new ReceiveMeter(remainingFetchBytes(recon, termStarts, resumeFrom));
+  const onBytes = (bytes: number) => meter.add(bytes);
+  let reported = resumeFrom;
+  const progress = (bytes: number): DownloadEvent => {
+    reported = Math.max(reported, Math.min(totalBytes, bytes));
+    return { type: 'progress', bytesWritten: reported, totalBytes };
+  };
+  const estimate = () => resumeFrom + Math.floor((totalBytes - resumeFrom) * meter.fraction());
   const termConcurrency = Math.max(
     1,
     Math.floor(opts.termConcurrency ?? DEFAULT_XET_TERM_CONCURRENCY),
@@ -271,7 +341,15 @@ async function* runXetAttempt(
       const termLength = Math.max(0, term.unpacked_length - leadingTrim);
       if (termStart + termLength <= resumeFrom) continue;
 
-      const pending = termData(term, recon, segCache, fetchImpl, chunkTimeoutMs, signal).then(
+      const pending = termData(
+        term,
+        recon,
+        segCache,
+        fetchImpl,
+        chunkTimeoutMs,
+        signal,
+        onBytes,
+      ).then(
         (data): PrefetchedTerm => ({
           ok: true,
           data: leadingTrim > 0 ? data.subarray(leadingTrim) : data,
@@ -325,7 +403,12 @@ async function* runXetAttempt(
       const pending = prefetched.get(termIndex);
       if (!pending)
         throw new XetError('reconstruction term was not prefetched', false, 'term-missing');
-      const fetched = await pending;
+      let fetched = await settledOrTick(pending, PROGRESS_TICK_MS);
+      while (fetched === TICK) {
+        lastReport = Date.now();
+        yield progress(estimate());
+        fetched = await settledOrTick(pending, PROGRESS_TICK_MS);
+      }
       prefetched.delete(termIndex);
       fillPrefetchWindow();
       if (!fetched.ok) throw fetched.error;
@@ -355,7 +438,7 @@ async function* runXetAttempt(
       const now = Date.now();
       if (now - lastReport > 250) {
         lastReport = now;
-        yield { type: 'progress', bytesWritten: Math.max(written, resumeFrom), totalBytes };
+        yield progress(Math.max(written, estimate()));
       }
     }
   } catch (err) {
@@ -400,7 +483,7 @@ async function* runXetAttempt(
     };
   }
 
-  yield { type: 'progress', bytesWritten: Math.max(written, resumeFrom), totalBytes };
+  yield progress(totalBytes);
   return { kind: 'ok', bytesWritten: written };
 }
 
@@ -412,6 +495,7 @@ async function termData(
   fetchImpl: typeof fetch,
   chunkTimeoutMs: number,
   signal: AbortSignal | undefined,
+  onBytes?: (bytes: number) => void,
 ): Promise<Buffer> {
   const segs = recon.fetch_info[term.hash];
   if (!segs)
@@ -429,7 +513,7 @@ async function termData(
     if (!entry) {
       entry = {
         end: seg.range.end,
-        chunks: fetchXorbSegment(seg, fetchImpl, chunkTimeoutMs, signal).then((buf) =>
+        chunks: fetchXorbSegment(seg, fetchImpl, chunkTimeoutMs, signal, onBytes).then((buf) =>
           decodeSegmentChunks(buf, seg.range.end - seg.range.start),
         ),
       };
@@ -467,11 +551,12 @@ async function fetchXorbSegment(
   fetchImpl: typeof fetch,
   chunkTimeoutMs: number,
   signal: AbortSignal | undefined,
+  onBytes?: (bytes: number) => void,
 ): Promise<Buffer> {
   let lastError: XetError | undefined;
   for (let attempt = 1; attempt <= SEGMENT_ATTEMPTS; attempt++) {
     try {
-      return await fetchXorbSegmentOnce(seg, fetchImpl, chunkTimeoutMs, signal);
+      return await fetchXorbSegmentOnce(seg, fetchImpl, chunkTimeoutMs, signal, onBytes);
     } catch (err) {
       if (!(err instanceof XetError) || !err.transient || err.wasAborted || signal?.aborted) {
         throw err;
@@ -496,6 +581,7 @@ async function fetchXorbSegmentOnce(
   fetchImpl: typeof fetch,
   chunkTimeoutMs: number,
   signal: AbortSignal | undefined,
+  onBytes?: (bytes: number) => void,
 ): Promise<Buffer> {
   const ac = new AbortController();
   const forward = (): void => ac.abort();
@@ -551,7 +637,10 @@ async function fetchXorbSegmentOnce(
         );
       }
       if (raced.done) break;
-      if (raced.value) parts.push(Buffer.from(raced.value));
+      if (raced.value) {
+        parts.push(Buffer.from(raced.value));
+        onBytes?.(raced.value.byteLength);
+      }
     }
     return Buffer.concat(parts);
   } finally {

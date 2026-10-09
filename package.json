@@ -186,6 +186,7 @@
     "mobile:sync:android:unleased": "pnpm mobile:build && pnpm --filter @bendyline/gezel-mobile run sync:android",
     "mobile:test:android": "node scripts/run-with-dependency-lease.mjs mobile:test:android:unleased",
     "mobile:test:android:unleased": "pnpm mobile:sync:android && node packages/mobile/scripts/stage-android-test-fixture.mjs && node packages/mobile/scripts/test-android.mjs",
+    "mobile:test:pages": "node packages/mobile/scripts/test-type-pages.mjs",
     "mobile:test:scripts": "node scripts/run-with-dependency-lease.mjs mobile:test:scripts:unleased",
     "mobile:test:scripts:unleased": "node packages/mobile/scripts/test-scripts.mjs",
     "check:embedding-consumers": "node scripts/check-embedding-consumers.mjs",

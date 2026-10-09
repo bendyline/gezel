@@ -6,10 +6,6 @@ import {
 } from '@bendyline/gezel/runtime';
 export { pickRoleBasedName } from '@bendyline/gezel/runtime';
 import { ConfigStore } from './config-store.js';
-import {
-  readProjectCraftbookDocument,
-  updateProjectCraftbookDocument,
-} from './project-craftbook-document.js';
 export { ConfigCorruptionError } from './config-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -35,10 +31,9 @@ import {
   ChatSessionSchema,
   type ChatSessionSummary,
   type Craftbook,
-  CraftbookSchema,
-  CraftbookStepSchema,
   type CraftbookSummary,
   type FileReviewIssue,
+  type GezelCharacter,
   type GezelConfig,
   type GezelDetail,
   type GezelFrontmatter,
@@ -67,7 +62,6 @@ import {
   type ProjectActivity,
   ProjectActivitySchema,
   type ProjectCraftbookProvenance,
-  ProjectCraftbookProvenanceSchema,
   type ProjectDetail,
   type ProjectFileEntry,
   type ProjectGitHub,
@@ -76,6 +70,8 @@ import {
   ProjectLocalConfigSchema,
   type ProjectManagedWorkspaceWritePolicy,
   type ProjectNudgeConfig,
+  type ProjectReminder,
+  ProjectReminderSchema,
   ProjectSchema,
   type ProjectTabVisibility,
   type ProjectTypeOverlay,
@@ -116,16 +112,12 @@ import {
   projectManagedWorkspaceWritePolicy,
   resolveFactualWriting,
   resolveSharedProjectId,
+  seedCharacter,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
   type ExternalFolders,
   activeMachineSharedHome,
-  craftbookTemplateDir,
-  craftbookTemplateManifestFile,
-  craftbookTemplateVersionDir,
-  craftbookTemplateVersionManifestFile,
-  craftbookTemplatesRoot,
   gezelDir,
   gezelGrowthPath,
   gezelLocalDir,
@@ -149,8 +141,6 @@ import {
   projectFindingLifecycleFile,
   projectInternalGithubDir,
   projectLocalConfigFile,
-  projectLocalCraftbookDir,
-  projectLocalCraftbooksRoot,
   projectLocalGezelDir,
   projectLocalGezelsRoot,
   projectLocalImportsFile,
@@ -159,6 +149,7 @@ import {
   projectMetaFile,
   projectPrivateDir,
   projectQuestionsFile,
+  projectReminderFile,
   projectStorageDir,
   projectStorageScope,
   projectTaskNotesFile,
@@ -181,7 +172,7 @@ import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
 import { sanitizeSvg } from '../icon/sanitize.js';
-import type { MemoryKind } from '../memory/daily-markdown.js';
+import type { MemoryKind, MemoryScope, MemorySource } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
   type DiskProbeBudget,
@@ -208,6 +199,7 @@ import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/erro
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
+import { CraftbookStore } from './craftbook-store.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
   DEFAULT_PROJECT_MISSION_MD,
@@ -391,90 +383,6 @@ export class ProjectDeleteError extends Error {
   }
 }
 
-/**
- * The craftbook fields a stored version manifest carries beyond
- * `steps`/`entryStepId`, and the fields read back out of it.
- *
- * These two functions exist because the local-template pair and the
- * project-local pair were hand-maintained copies of the same list and
- * drifted: the project pair carried the full declaration while the local
- * pair silently dropped `triggers`, `toolsets`, `connectors`, `hooks`,
- * `paramSchema`, `command` and `requirements`, and NEITHER carried
- * `spawn`. Since `craftbook_write(create: true)` routes every
- * model-authored book to the LOCAL writer, that meant a model could author
- * a parameterized or fanning-out recipe, be told it saved, and read back a
- * book with the declaration gone.
- *
- * A dropped field here is invisible: the write succeeds and the loss only
- * shows up as a recipe that does not do what its author wrote. Adding a
- * field to `CraftbookSchema` that belongs in a stored book means adding it
- * to BOTH functions below and nowhere else.
- */
-function craftbookVersionManifest(book: Craftbook): Record<string, unknown> {
-  return {
-    schemaVersion: 1,
-    version: book.version ?? '1.0.0',
-    releasedAt: book.updatedAt,
-    about: 'about.md',
-    entryStepId: book.entryStepId,
-    steps: book.steps,
-    ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-    ...(book.plan !== undefined ? { plan: book.plan } : {}),
-    ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
-    ...(book.triggers ? { triggers: book.triggers } : {}),
-    ...(book.toolsets ? { toolsets: book.toolsets } : {}),
-    // connectors decide whether the launch runs connector prep at all —
-    // the same drop that once disabled the feature for every catalog
-    // craftbook (see runtimeCraftbookFromTemplate). Without them a book
-    // launches with no corpus and `{{corpusScope}}` survives interpolation
-    // straight into the step prompts and gates.
-    ...(book.connectors ? { connectors: book.connectors } : {}),
-    ...(book.commands ? { commands: book.commands } : {}),
-    ...(book.hooks ? { hooks: book.hooks } : {}),
-    ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
-    ...(book.command ? { command: book.command } : {}),
-    ...(book.requirements ? { requirements: book.requirements } : {}),
-    ...(book.recommends ? { recommends: book.recommends } : {}),
-    ...(book.runModes ? { runModes: book.runModes } : {}),
-    // Declarative fanout. Dropping this turned a spawn host into an
-    // ordinary linear book whose `spawnFanout` step fans out over nothing.
-    ...(book.spawn ? { spawn: book.spawn } : {}),
-    ...(book.diffpackCapable !== undefined ? { diffpackCapable: book.diffpackCapable } : {}),
-    ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
-    ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
-  };
-}
-
-/** Read back what {@link craftbookVersionManifest} wrote. Mirror it exactly. */
-function craftbookFieldsFromVersionManifest(v: Record<string, unknown>): Partial<Craftbook> {
-  const isRecord = (value: unknown): value is Record<string, unknown> =>
-    !!value && typeof value === 'object' && !Array.isArray(value);
-  return {
-    ...(isRecord(v.basedOn) ? { basedOn: v.basedOn as Craftbook['basedOn'] } : {}),
-    ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
-    ...(v.defaultAssignee
-      ? { defaultAssignee: v.defaultAssignee as Craftbook['defaultAssignee'] }
-      : {}),
-    ...(Array.isArray(v.triggers) ? { triggers: v.triggers as string[] } : {}),
-    ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
-    ...(Array.isArray(v.connectors) ? { connectors: v.connectors as Craftbook['connectors'] } : {}),
-    ...(Array.isArray(v.commands) ? { commands: v.commands as Craftbook['commands'] } : {}),
-    ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
-    ...(isRecord(v.paramSchema) ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] } : {}),
-    ...(typeof v.command === 'string' ? { command: v.command } : {}),
-    ...(Array.isArray(v.requirements)
-      ? { requirements: v.requirements as Craftbook['requirements'] }
-      : {}),
-    ...(Array.isArray(v.recommends) ? { recommends: v.recommends as Craftbook['recommends'] } : {}),
-    ...(isRecord(v.runModes) ? { runModes: v.runModes as Craftbook['runModes'] } : {}),
-    ...(isRecord(v.spawn) ? { spawn: v.spawn as Craftbook['spawn'] } : {}),
-    ...(typeof v.diffpackCapable === 'boolean' ? { diffpackCapable: v.diffpackCapable } : {}),
-    ...(typeof v.capabilityFloor === 'string'
-      ? { capabilityFloor: v.capabilityFloor as Craftbook['capabilityFloor'] }
-      : {}),
-  };
-}
-
 export class Store {
   private readonly config: ConfigStore;
   readConfig(): Promise<GezelConfig> {
@@ -496,6 +404,7 @@ export class Store {
   private readonly artifacts: ProjectArtifactsStore;
   private readonly memories: MemoryStore;
   private readonly taskFiles: TaskFilesStore;
+  private readonly craftbooks: CraftbookStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new KeyedLock();
   private readonly boekwachterIssueLocks = new KeyedLock();
@@ -565,6 +474,11 @@ export class Store {
     });
     this.memories = new MemoryStore({ home: this.home, external: this.external });
     this.taskFiles = new TaskFilesStore({ home: this.home, external: this.external });
+    this.craftbooks = new CraftbookStore({
+      home: this.home,
+      projectWorkspaceDir: (id) => this.projectWorkspaceDir(id),
+      assertWorkspaceWritable: (id) => this.assertWorkspaceWritable(id),
+    });
   }
 
   /** Snapshot of the external-folder config this Store was constructed
@@ -719,6 +633,7 @@ export class Store {
     await this.ensureMachineSharedProjectPrivateState();
     await this.backfillRoleBasedNames();
     await this.backfillVoices();
+    await this.backfillCharacters();
     await this.migrateLegacyTemperatureField();
     await this.migrateLegacyExecutionDensity();
     await this.migrateLegacyGhCheckouts();
@@ -1042,6 +957,38 @@ export class Store {
     if (backfilled > 0) {
       log.info(`[store] backfilled voice on ${backfilled} gezels`);
     }
+  }
+
+  /**
+   * Give every gezel created before characters existed the character its id
+   * seeds, written down once so later vocabulary changes never move it.
+   */
+  private async backfillCharacters(): Promise<void> {
+    let all: GezelSummary[];
+    try {
+      all = await this.listGezels();
+    } catch {
+      return;
+    }
+    let backfilled = 0;
+    for (const g of all.filter((summary) => !summary.character)) {
+      const detail = await this.tryGetGezel(g.id);
+      if (!detail || detail.parsed.frontmatter.character) continue;
+      const updated = {
+        ...detail.parsed,
+        frontmatter: { ...detail.parsed.frontmatter, character: seedCharacter(g.id) },
+      };
+      try {
+        await writeFileAtomic(
+          join(gezelDir(this.home, g.id, this.external), 'gezel.md'),
+          serializeGezelMarkdown(updated),
+        );
+        backfilled++;
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (backfilled > 0) log.info(`[store] backfilled character on ${backfilled} gezels`);
   }
 
   /**
@@ -1655,6 +1602,7 @@ export class Store {
       writesFactually: d.writesFactually ?? false,
       font: d.font,
       voice: d.parsed.frontmatter.voice,
+      ...(d.parsed.frontmatter.character ? { character: d.parsed.frontmatter.character } : {}),
       templateId: d.templateId,
       templateVersion: d.parsed.frontmatter.templateVersion,
       sandboxCopilot: d.parsed.frontmatter.sandboxCopilot,
@@ -1775,6 +1723,7 @@ export class Store {
       roleBasedName,
       gender,
       voice,
+      character: input.frontmatter?.character ?? seedCharacter(id),
       model: input.model,
       templateId: input.templateId,
       templateVersion: input.templateVersion,
@@ -2057,6 +2006,7 @@ export class Store {
       autoRecall?: boolean | null;
       retrieval?: RetrievalPolicy | null;
       font?: string | null;
+      character?: GezelCharacter;
       sandboxCopilot?: boolean | null;
       claudePermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | null;
       codexPermissionMode?:
@@ -2133,6 +2083,7 @@ export class Store {
     else if (patch.iconOverride !== undefined) frontmatter.iconOverride = patch.iconOverride;
     if (patch.recognition === null) delete frontmatter.recognition;
     else if (patch.recognition !== undefined) frontmatter.recognition = patch.recognition;
+    if (patch.character !== undefined) frontmatter.character = patch.character;
     const updated = { ...existing.parsed, frontmatter };
     const source = serializeGezelMarkdown(updated);
     await writeFileAtomic(join(gezelDir(this.home, id, this.external), 'gezel.md'), source);
@@ -2154,6 +2105,7 @@ export class Store {
     if (patch.tuningProfile !== undefined) changed.push('tuningProfile');
     if (patch.iconOverride !== undefined) changed.push('iconOverride');
     if (patch.recognition !== undefined) changed.push('recognition');
+    if (patch.character !== undefined) changed.push('character');
     if (changed.length > 0) {
       await this.history?.log({
         kind: 'gezel.settings.updated',
@@ -2379,6 +2331,7 @@ export class Store {
         retrieval: parsed.frontmatter.retrieval,
         font: parsed.frontmatter.font,
         voice: parsed.frontmatter.voice,
+        ...(parsed.frontmatter.character ? { character: parsed.frontmatter.character } : {}),
         templateId: parsed.frontmatter.templateId,
         templateVersion: parsed.frontmatter.templateVersion,
         sandboxCopilot: parsed.frontmatter.sandboxCopilot,
@@ -2606,6 +2559,7 @@ export class Store {
       roleBasedName,
       gender,
       voice,
+      character: input.frontmatter?.character ?? seedCharacter(encodedId),
       model: input.model,
       extraFrontmatter: {
         ...(input.provider ? { provider: input.provider } : {}),
@@ -3282,6 +3236,44 @@ export class Store {
     });
   }
 
+  /**
+   * Proposal lifecycle for Boekwachter issues. A drafted fix is not a fix, so
+   * issues claimed by a drafting task stay in progress until the person acts
+   * on the proposal: applying a file resolves the issues on that file, and an
+   * issue no live proposal touches goes back to open. `taskRefs` is the
+   * drafting family — the task that claimed the issues and its shards.
+   */
+  async settleProjectBoekwachterIssuesForProposal(
+    id: string,
+    taskRefs: readonly string[],
+    change: { resolvePaths?: readonly string[]; reopenUnless?: ReadonlySet<string> },
+  ): Promise<{ resolved: number; reopened: number }> {
+    return this.withBoekwachterIssueLock(id, async () => {
+      const state = await this.readProjectBoekwachterIssuesFile(id);
+      const family = new Set(taskRefs);
+      const resolve = new Set(change.resolvePaths ?? []);
+      const at = nowIso();
+      let resolved = 0;
+      let reopened = 0;
+      for (const record of Object.values(state.issues)) {
+        if (record.status !== 'in_progress' || !record.taskRef || !family.has(record.taskRef)) {
+          continue;
+        }
+        if (resolve.has(record.path)) {
+          record.status = 'resolved';
+          record.resolvedAt = at;
+          resolved++;
+        } else if (change.reopenUnless && !change.reopenUnless.has(record.path)) {
+          record.status = 'open';
+          delete record.taskRef;
+          reopened++;
+        }
+      }
+      if (resolved + reopened > 0) await this.writeProjectBoekwachterIssuesFile(id, state);
+      return { resolved, reopened };
+    });
+  }
+
   private async readProjectBoekwachterIssuesFile(
     id: string,
   ): Promise<ProjectBoekwachterIssuesFile> {
@@ -3469,6 +3461,11 @@ export class Store {
         ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
         updatedAt: nowIso(),
       };
+      // A write grant was given for the old folder; a new one starts read-only.
+      if ((workingDir || undefined) !== meta.workingDir) {
+        delete updated.managedWorkspaceWritePolicy;
+        delete updated.allowGezelWrites;
+      }
       await this.writeProjectMeta(updated);
       const detail = await this.getProject(id);
       if (!detail) throw new Error(`project ${id} not found after update`);
@@ -4332,6 +4329,15 @@ export class Store {
 
   projectArtifactsDir(id: string): string {
     return this.artifacts.projectArtifactsDir(id);
+  }
+
+  /**
+   * Where connector content the safety scanner refused is kept: gezel's own
+   * per-project folder, never the workspace, so a connector sync never writes
+   * into a person's folder. Not indexed and not reachable through any tool.
+   */
+  projectQuarantineDir(id: string): string {
+    return join(projectPrivateDir(this.home, id), 'quarantine');
   }
 
   async listProjectArtifacts(
@@ -5320,9 +5326,15 @@ export class Store {
     await this.touchProject(id);
   }
 
-  async mkdirProjectWorkspace(id: string, dirPath: string, ctx?: JournalContext): Promise<void> {
+  async mkdirProjectWorkspace(
+    id: string,
+    dirPath: string,
+    ctx?: JournalContext,
+    opts: { userInitiated?: boolean } = {},
+  ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: dirPath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -5339,19 +5351,29 @@ export class Store {
     await this.touchProject(id);
   }
 
+  /**
+   * `noReplace` refuses a destination that already exists: `fs.rename`
+   * replaces a file silently, which a proposal the person approved must never
+   * do to a file they did not name.
+   */
   async renameProjectWorkspacePath(
     id: string,
     fromPath: string,
     toPath: string,
     ctx?: JournalContext,
+    opts: { userInitiated?: boolean; noReplace?: boolean } = {},
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: [fromPath, toPath],
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
     const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
+    if (opts.noReplace && (await pathExists(toFull))) {
+      throw new Error(`${toPath} already exists`);
+    }
     await mkdir(dirname(toFull), { recursive: true });
     await rename(fromFull, toFull);
     await appendJournalEntry(this.home, id, 'rename', toPath, { fromPath, ctx });
@@ -5360,6 +5382,39 @@ export class Store {
       projectId: id,
       ...(ctx?.gezelId ? { gezelId: ctx.gezelId } : {}),
       summary: `Renamed ${fromPath} → ${toPath}`,
+      details: { fromPath, toPath },
+    });
+    await this.touchProject(id);
+  }
+
+  /**
+   * Copy a file or folder inside the workspace. Never replaces anything at
+   * the destination. Only a user-initiated apply calls this today.
+   */
+  async copyProjectWorkspacePath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+    ctx?: JournalContext,
+    opts: { userInitiated?: boolean } = {},
+  ): Promise<void> {
+    const gate = await this.assertWorkspaceWritable(id, {
+      initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
+      path: [fromPath, toPath],
+    });
+    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+    const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
+    const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
+    if (await pathExists(toFull)) throw new Error(`${toPath} already exists`);
+    await mkdir(dirname(toFull), { recursive: true });
+    await cp(fromFull, toFull, { recursive: true, errorOnExist: true, force: false });
+    await appendJournalEntry(this.home, id, 'copy', toPath, { fromPath, ctx });
+    await this.history?.log({
+      kind: 'workspace.copy',
+      projectId: id,
+      ...(ctx?.gezelId ? { gezelId: ctx.gezelId } : {}),
+      summary: `Copied ${fromPath} → ${toPath}`,
       details: { fromPath, toPath },
     });
     await this.touchProject(id);
@@ -6335,32 +6390,33 @@ export class Store {
     }
   }
 
-  // ---------- memories (agent + project) ----------
+  // ---------- memories (gezel, project, and the person's own) ----------
 
   async appendMemory(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     text: string,
     kind?: MemoryKind,
+    source?: MemorySource,
   ): Promise<void> {
-    await this.memories.appendMemory(scope, id, text, kind);
+    await this.memories.appendMemory(scope, id, text, kind, source);
   }
 
-  async listMemoryDays(scope: 'gezel' | 'project', id: string): Promise<string[]> {
+  async listMemoryDays(scope: MemoryScope, id: string): Promise<string[]> {
     return this.memories.listMemoryDays(scope, id);
   }
 
-  async readMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<string> {
+  async readMemoryDay(scope: MemoryScope, id: string, day: string): Promise<string> {
     return this.memories.readMemoryDay(scope, id, day);
   }
 
-  async readRecentMemories(scope: 'gezel' | 'project', id: string, days = 7): Promise<string> {
+  async readRecentMemories(scope: MemoryScope, id: string, days = 7): Promise<string> {
     return this.memories.readRecentMemories(scope, id, days);
   }
 
   /** Replace one daily memory file wholesale (compaction output). */
   async writeMemoryDay(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     day: string,
     content: string,
@@ -6368,7 +6424,7 @@ export class Store {
     await this.memories.writeMemoryDay(scope, id, day, content);
   }
 
-  async deleteMemoryDay(scope: 'gezel' | 'project', id: string, day: string): Promise<void> {
+  async deleteMemoryDay(scope: MemoryScope, id: string, day: string): Promise<void> {
     await this.memories.deleteMemoryDay(scope, id, day);
   }
 
@@ -6379,7 +6435,7 @@ export class Store {
    * only). Returns the archive directory path.
    */
   async archiveMemoryDays(
-    scope: 'gezel' | 'project',
+    scope: MemoryScope,
     id: string,
     days: string[],
     runId: string,
@@ -6387,7 +6443,7 @@ export class Store {
     return this.memories.archiveMemoryDays(scope, id, days, runId);
   }
 
-  memorySummaryPath(scope: 'gezel' | 'project', id: string): string {
+  memorySummaryPath(scope: MemoryScope, id: string): string {
     return this.memories.memorySummaryPath(scope, id);
   }
 
@@ -6407,6 +6463,47 @@ export class Store {
 
   async writeMemoryLessons(gezelId: string, content: string): Promise<void> {
     await this.memories.writeMemoryLessons(gezelId, content);
+  }
+
+  /* ─── Reminders (one per project, set by its scripts) ───────────────── */
+
+  async getProjectReminder(projectId: string): Promise<ProjectReminder | null> {
+    let raw: string;
+    try {
+      raw = await readFile(projectReminderFile(this.home, projectId), 'utf8');
+    } catch {
+      return null;
+    }
+    const parsed = ProjectReminderSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
+      log.warn(`[reminders] ignoring an unreadable reminder for ${projectId}`);
+      return null;
+    }
+    return parsed.data;
+  }
+
+  /** Set (replacing any earlier one) or clear a project's reminder. */
+  async setProjectReminder(projectId: string, reminder: ProjectReminder | null): Promise<void> {
+    if (!(await this.getProject(projectId))) throw new Error(`project not found: ${projectId}`);
+    const path = projectReminderFile(this.home, projectId);
+    if (!reminder) {
+      await rm(path, { force: true });
+      return;
+    }
+    await mkdir(dirname(path), { recursive: true });
+    await writeFileAtomic(
+      path,
+      `${JSON.stringify(ProjectReminderSchema.parse(reminder), null, 2)}\n`,
+    );
+  }
+
+  async listReminders(): Promise<Array<ProjectReminder & { projectName?: string }>> {
+    const out: Array<ProjectReminder & { projectName?: string }> = [];
+    for (const project of await this.listProjects()) {
+      const reminder = await this.getProjectReminder(project.id).catch(() => null);
+      if (reminder) out.push({ ...reminder, projectName: project.name });
+    }
+    return out;
   }
 
   /* ─── Growth (per-gezel leveling state) ─────────────────────────────── */
@@ -6486,11 +6583,11 @@ export class Store {
    * anymore (compaction rewrites the daily corpus in place instead).
    * Kept so existing files on disk remain viewable.
    */
-  async readMemorySummary(scope: 'gezel' | 'project', id: string): Promise<string> {
+  async readMemorySummary(scope: MemoryScope, id: string): Promise<string> {
     return this.memories.readMemorySummary(scope, id);
   }
 
-  memoryIndexDir(scope: 'gezel' | 'project', id: string): string {
+  memoryIndexDir(scope: MemoryScope, id: string): string {
     return this.memories.memoryIndexDir(scope, id);
   }
 
@@ -6827,443 +6924,59 @@ export class Store {
 
   /* ─── Local craftbook templates ─────────────────────────────────────── */
 
-  /**
-   * List user-authored craftbook templates from the local catalog source
-   * under `~/.gezel/craftbook-templates/`. Returns lightweight summaries
-   * — full hydration goes through `getLocalCraftbookTemplate`.
-   */
   async listLocalCraftbookTemplates(): Promise<CraftbookSummary[]> {
-    const root = craftbookTemplatesRoot(this.home);
-    let shards: string[];
-    try {
-      shards = await readdir(root);
-    } catch {
-      return [];
-    }
-    const out: CraftbookSummary[] = [];
-    for (const shard of shards) {
-      let ids: string[] = [];
-      try {
-        ids = await readdir(join(root, shard));
-      } catch {
-        continue;
-      }
-      for (const id of ids) {
-        const book = await this.getLocalCraftbookTemplate(id);
-        if (!book) continue;
-        out.push({
-          id: book.id,
-          name: book.name,
-          ...(book.description ? { description: book.description } : {}),
-          ...(book.version ? { version: book.version } : {}),
-          ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-          source: 'local',
-          stepCount: book.steps.length,
-        });
-      }
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return out;
+    return this.craftbooks.listLocalCraftbookTemplates();
   }
 
-  /**
-   * Read every `scripts/*.ts` file in a craftbook version dir into the
-   * runtime `scripts` map (name → source). Absent/empty dir → undefined.
-   * The hydration half of the inline-scripts contract: sources stay
-   * ordinary files on disk; the resolved runtime object carries them.
-   */
-  private async readCraftbookScriptsDir(dir: string): Promise<Record<string, string> | undefined> {
-    let files: string[];
-    try {
-      files = await readdir(dir);
-    } catch {
-      return undefined;
-    }
-    const scripts: Record<string, string> = {};
-    for (const f of files.filter((f) => f.endsWith('.ts')).sort()) {
-      try {
-        scripts[f.slice(0, -3)] = await readFile(join(dir, f), 'utf8');
-      } catch {
-        /* unreadable entry — skip */
-      }
-    }
-    return Object.keys(scripts).length > 0 ? scripts : undefined;
-  }
-
-  /**
-   * Persist a `scripts` map into a version's `scripts/` dir. The map is
-   * the truth: entries are written, on-disk `.ts` files whose names left
-   * the map are deleted. `undefined` leaves the dir untouched (legacy
-   * callers that never carried scripts must not clear what the script
-   * editor wrote); pass `{}` to clear.
-   */
-  private async writeCraftbookScriptsDir(
-    dir: string,
-    scripts: Record<string, string> | undefined,
-  ): Promise<void> {
-    if (scripts === undefined) return;
-    let existing: string[] = [];
-    try {
-      existing = (await readdir(dir)).filter((f) => f.endsWith('.ts'));
-    } catch {
-      /* no dir yet */
-    }
-    const keep = new Set(Object.keys(scripts).map((n) => `${n}.ts`));
-    if (Object.keys(scripts).length > 0) await mkdir(dir, { recursive: true });
-    for (const [name, source] of Object.entries(scripts)) {
-      await writeFileAtomic(join(dir, `${name}.ts`), source);
-    }
-    for (const f of existing) {
-      if (!keep.has(f)) await rm(join(dir, f), { force: true }).catch(() => undefined);
-    }
-  }
-
-  /**
-   * Resolve a local craftbook template into the runtime `Craftbook`
-   * shape — identity + version manifest + about.md merged. When
-   * `version` is omitted, picks the only present version (v1: local
-   * templates have a single `1.0.0` version edited in place).
-   */
   async getLocalCraftbookTemplate(id: string, version?: string): Promise<Craftbook | null> {
-    const prefix = craftbookShardPrefix(id);
-    const identityFile = craftbookTemplateManifestFile(this.home, prefix, id);
-    let identity: { id?: string; name?: string; description?: string } = {};
-    try {
-      identity = JSON.parse(await readFile(identityFile, 'utf8'));
-    } catch {
-      return null;
-    }
-    if (identity.id !== id) return null;
-    // Discover versions; default to single 1.0.0 for local source.
-    const versionsDir = join(craftbookTemplateDir(this.home, prefix, id), 'versions');
-    let versions: string[];
-    try {
-      versions = await readdir(versionsDir);
-    } catch {
-      return null;
-    }
-    versions = versions.filter((v) => /^\d+\.\d+\.\d+/.test(v));
-    if (versions.length === 0) return null;
-    const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
-    if (!versions.includes(chosen)) return null;
-    const versionFile = craftbookTemplateVersionManifestFile(this.home, prefix, id, chosen);
-    let raw: string;
-    try {
-      raw = await readFile(versionFile, 'utf8');
-    } catch {
-      return null;
-    }
-    let parsedRaw: unknown;
-    try {
-      parsedRaw = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-    const v = parsedRaw as Record<string, unknown>;
-    let steps: Craftbook['steps'] | null;
-    try {
-      steps = z_array_parse(v.steps);
-    } catch {
-      return null;
-    }
-    if (!steps || typeof v.entryStepId !== 'string') return null;
-    const scripts = await this.readCraftbookScriptsDir(
-      join(craftbookTemplateVersionDir(this.home, prefix, id, chosen), 'scripts'),
-    );
-    const now = nowIso();
-    const candidate: Craftbook = {
-      id,
-      name: identity.name ?? id,
-      ...(identity.description ? { description: identity.description } : {}),
-      version: chosen,
-      ...craftbookFieldsFromVersionManifest(v),
-      steps,
-      entryStepId: v.entryStepId,
-      ...(scripts ? { scripts } : {}),
-      createdAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
-      updatedAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
-    };
-    try {
-      return CraftbookSchema.parse(candidate);
-    } catch {
-      return null;
-    }
+    return this.craftbooks.getLocalCraftbookTemplate(id, version);
   }
 
-  /**
-   * Persist a local craftbook template. Writes the identity manifest
-   * once (if absent), then writes the version manifest in place. v1
-   * uses a single `1.0.0` version per local craftbook — re-saves
-   * overwrite that version rather than minting a new one.
-   */
   async writeLocalCraftbookTemplate(book: Craftbook): Promise<void> {
-    const prefix = craftbookShardPrefix(book.id);
-    const version = book.version ?? '1.0.0';
-    const identityFile = craftbookTemplateManifestFile(this.home, prefix, book.id);
-    const versionDir = craftbookTemplateVersionDir(this.home, prefix, book.id, version);
-    const versionFile = craftbookTemplateVersionManifestFile(this.home, prefix, book.id, version);
-    await mkdir(versionDir, { recursive: true });
-    let writeIdentity = true;
-    try {
-      await readFile(identityFile, 'utf8');
-      writeIdentity = false;
-    } catch {
-      /* missing — write fresh */
-    }
-    if (writeIdentity) {
-      const identity = {
-        schemaVersion: 1,
-        kind: 'craftbook-template',
-        id: book.id,
-        name: book.name,
-        description: book.description ?? '',
-        tags: [],
-        maintainer: { name: 'local' },
-        license: undefined,
-        yankedVersions: [],
-      };
-      await writeFileAtomic(identityFile, `${JSON.stringify(identity, null, 2)}\n`);
-    }
-    const versionManifest = craftbookVersionManifest(book);
-    await writeFileAtomic(versionFile, `${JSON.stringify(versionManifest, null, 2)}\n`);
-    if (book.description) {
-      await writeFileAtomic(join(versionDir, 'about.md'), book.description);
-    }
-    await this.writeCraftbookScriptsDir(join(versionDir, 'scripts'), book.scripts);
+    await this.craftbooks.writeLocalCraftbookTemplate(book);
   }
 
-  /**
-   * Remove a local craftbook template entirely. Caller is responsible
-   * for refusing the delete when any task's `sourceCraftbookIds`
-   * references it — the Store doesn't cross-check that itself.
-   */
   async deleteLocalCraftbookTemplate(id: string): Promise<void> {
-    const prefix = craftbookShardPrefix(id);
-    const dir = craftbookTemplateDir(this.home, prefix, id);
-    try {
-      await rm(dir, { recursive: true, force: true });
-    } catch {
-      /* already absent */
-    }
+    await this.craftbooks.deleteLocalCraftbookTemplate(id);
   }
 
   /* ─── Project-local craftbooks (workspace `.gezel/craftbooks/`) ──────── */
 
-  /**
-   * List the project-local craftbooks defined in a project's workspace
-   * `.gezel/craftbooks/` folder. These travel with the repo and only
-   * surface inside their own project. Flat layout (no shard prefix);
-   * otherwise mirrors {@link listLocalCraftbookTemplates}.
-   */
   async listProjectCraftbooks(projectId: string): Promise<CraftbookSummary[]> {
-    let ws: string;
-    try {
-      ws = await this.projectWorkspaceDir(projectId);
-    } catch {
-      return [];
-    }
-    let ids: string[] = [];
-    try {
-      const entries = await readdir(projectLocalCraftbooksRoot(ws), { withFileTypes: true });
-      ids = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    } catch {
-      return [];
-    }
-    const out: CraftbookSummary[] = [];
-    for (const id of ids) {
-      const book = await this.getProjectCraftbook(projectId, id);
-      if (!book) continue;
-      out.push({
-        id: book.id,
-        name: book.name,
-        ...(book.description ? { description: book.description } : {}),
-        ...(book.version ? { version: book.version } : {}),
-        ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-        source: 'project',
-        stepCount: book.steps.length,
-      });
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return out;
+    return this.craftbooks.listProjectCraftbooks(projectId);
   }
 
-  /** Resolve a project-local craftbook into the runtime `Craftbook` shape. */
   async getProjectCraftbook(
     projectId: string,
     id: string,
     version?: string,
     options: { throwOnInvalid?: boolean } = {},
   ): Promise<Craftbook | null> {
-    let ws: string;
-    try {
-      ws = await this.projectWorkspaceDir(projectId);
-    } catch {
-      return null;
-    }
-    const dir = projectLocalCraftbookDir(ws, id);
-    let identity: { id?: string; name?: string; description?: string } = {};
-    try {
-      identity = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
-    } catch {
-      return null;
-    }
-    if (identity.id !== id) return null;
-    const versionsDir = join(dir, 'versions');
-    let versions: string[];
-    try {
-      versions = await readdir(versionsDir);
-    } catch {
-      return null;
-    }
-    versions = versions.filter((v) => /^\d+\.\d+\.\d+/.test(v));
-    if (versions.length === 0) return null;
-    const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
-    if (!versions.includes(chosen)) return null;
-    const document = await readProjectCraftbookDocument(
-      join(versionsDir, chosen),
-      id,
-      chosen,
-      options,
-    );
-    if (document !== undefined) return document;
-    let parsedRaw: unknown;
-    try {
-      parsedRaw = JSON.parse(await readFile(join(versionsDir, chosen, 'manifest.json'), 'utf8'));
-    } catch {
-      return null;
-    }
-    const v = parsedRaw as Record<string, unknown>;
-    let steps: Craftbook['steps'] | null;
-    try {
-      steps = z_array_parse(v.steps);
-    } catch {
-      return null;
-    }
-    if (!steps || typeof v.entryStepId !== 'string') return null;
-    const scripts = await this.readCraftbookScriptsDir(join(versionsDir, chosen, 'scripts'));
-    const now = nowIso();
-    const candidate: Craftbook = {
-      id,
-      name: identity.name ?? id,
-      ...(identity.description ? { description: identity.description } : {}),
-      version: chosen,
-      ...craftbookFieldsFromVersionManifest(v),
-      steps,
-      entryStepId: v.entryStepId,
-      ...(scripts ? { scripts } : {}),
-      createdAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
-      updatedAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
-    };
-    try {
-      return CraftbookSchema.parse(candidate);
-    } catch {
-      return null;
-    }
+    return this.craftbooks.getProjectCraftbook(projectId, id, version, options);
   }
 
-  /** Persist a project-local craftbook (flat `.gezel/craftbooks/<id>/` layout). */
   async writeProjectCraftbook(projectId: string, book: Craftbook): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(projectId);
-    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const dir = projectLocalCraftbookDir(gate.workspaceDir, book.id);
-    const version = book.version ?? '1.0.0';
-    const versionDir = join(dir, 'versions', version);
-    await mkdir(versionDir, { recursive: true });
-    if (await updateProjectCraftbookDocument(versionDir, book)) return;
-    const identityFile = join(dir, 'manifest.json');
-    let writeIdentity = true;
-    try {
-      await readFile(identityFile, 'utf8');
-      writeIdentity = false;
-    } catch {
-      /* missing — write fresh */
-    }
-    if (writeIdentity) {
-      const identity = {
-        schemaVersion: 1,
-        kind: 'craftbook-template',
-        id: book.id,
-        name: book.name,
-        description: book.description ?? '',
-        tags: [],
-        maintainer: { name: 'project' },
-        yankedVersions: [],
-      };
-      await writeFileAtomic(identityFile, `${JSON.stringify(identity, null, 2)}\n`);
-    }
-    const versionManifest = craftbookVersionManifest(book);
-    await writeFileAtomic(
-      join(versionDir, 'manifest.json'),
-      `${JSON.stringify(versionManifest, null, 2)}\n`,
-    );
-    if (book.description) {
-      await writeFileAtomic(join(versionDir, 'about.md'), book.description);
-    }
-    await this.writeCraftbookScriptsDir(join(versionDir, 'scripts'), book.scripts);
+    await this.craftbooks.writeProjectCraftbook(projectId, book);
   }
 
-  /** Remove a project-local craftbook from the workspace. */
   async deleteProjectCraftbook(projectId: string, id: string): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(projectId);
-    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const dir = projectLocalCraftbookDir(gate.workspaceDir, id);
-    try {
-      await rm(dir, { recursive: true, force: true });
-    } catch {
-      /* already absent */
-    }
+    await this.craftbooks.deleteProjectCraftbook(projectId, id);
   }
 
-  /**
-   * Read the project-type install sidecar for a project-local craftbook
-   * (`.gezel/craftbooks/<id>/provenance.json`). Null when the book was
-   * user-authored, imported from a SKILL.md, or the sidecar is invalid.
-   */
   async readProjectCraftbookProvenance(
     projectId: string,
     id: string,
   ): Promise<ProjectCraftbookProvenance | null> {
-    let ws: string;
-    try {
-      ws = await this.projectWorkspaceDir(projectId);
-    } catch {
-      return null;
-    }
-    try {
-      const raw = await readFile(join(projectLocalCraftbookDir(ws, id), 'provenance.json'), 'utf8');
-      return ProjectCraftbookProvenanceSchema.parse(JSON.parse(raw));
-    } catch {
-      return null;
-    }
+    return this.craftbooks.readProjectCraftbookProvenance(projectId, id);
   }
 
-  /** Stamp the project-type install sidecar next to the book's identity manifest. */
   async writeProjectCraftbookProvenance(
     projectId: string,
     id: string,
     prov: ProjectCraftbookProvenance,
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(projectId);
-    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
-    const dir = projectLocalCraftbookDir(gate.workspaceDir, id);
-    await mkdir(dir, { recursive: true });
-    await writeFileAtomic(join(dir, 'provenance.json'), `${JSON.stringify(prov, null, 2)}\n`);
+    await this.craftbooks.writeProjectCraftbookProvenance(projectId, id, prov);
   }
-}
-
-/** First two chars of a craftbook id, lowercased — the catalog shard prefix. */
-function craftbookShardPrefix(id: string): string {
-  return id.slice(0, 2).toLowerCase();
-}
-
-/** Parse a steps array against `CraftbookStepSchema`; throws on invalid rows. */
-function z_array_parse(raw: unknown): Craftbook['steps'] | null {
-  if (!Array.isArray(raw)) return null;
-  const out: Craftbook['steps'] = [];
-  for (const item of raw) {
-    out.push(CraftbookStepSchema.parse(item));
-  }
-  return out;
 }
 
 async function tryChmod600(path: string): Promise<void> {
@@ -7432,6 +7145,8 @@ function defaultAgentMarkdown(params: {
   roleBasedName?: string;
   gender?: GezelGender;
   voice?: string;
+  /** Seeded from the id at creation (or a template's default) and persisted. */
+  character?: GezelCharacter;
   model?: string;
   templateId?: string;
   templateVersion?: string;
@@ -7465,6 +7180,7 @@ function defaultAgentMarkdown(params: {
     ...(params.roleBasedName ? [`roleBasedName: ${JSON.stringify(params.roleBasedName)}`] : []),
     ...(params.gender ? [`gender: ${JSON.stringify(params.gender)}`] : []),
     ...(params.voice ? [`voice: ${JSON.stringify(params.voice)}`] : []),
+    ...(params.character ? [`character: ${JSON.stringify(params.character)}`] : []),
     ...(params.model ? [`model: ${params.model}`] : []),
     ...(provider ? [`provider: ${JSON.stringify(provider)}`] : []),
     ...(params.templateId ? [`templateId: ${JSON.stringify(params.templateId)}`] : []),

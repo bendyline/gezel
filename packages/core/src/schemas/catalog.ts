@@ -2,15 +2,18 @@ import { z } from 'zod';
 import { CraftbookCategorySchema } from '../craftbook-categories.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
+import { IdRegex } from './catalog-id.js';
 import { SemverRegex } from './catalog-semver.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookModelNeedSchema,
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
+  CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
   CraftbookStepSchema,
   CraftbookToolsetNeedSchema,
@@ -24,6 +27,7 @@ import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
+import { ScriptOutputPredicateSchema } from './script.js';
 
 /**
  * ─ Catalog items ────────────────────────────────────────────────────
@@ -53,10 +57,6 @@ import { ProjectTabVisibilitySchema } from './project.js';
  * Built-in toolsets (`builtin.*`) are synthetic — they don't live on
  * disk and they ship versioned with the app binary.
  */
-
-// Allow dots and colons to support real-world Ollama tag names like
-// `llama3.2` or `qwen2.5:7b`. Length cap keeps filesystem paths sane.
-const IdRegex = /^[a-z0-9][a-z0-9.\-:]{1,63}$/;
 
 // ─ License presentation ─────────────────────────────────────────────
 //
@@ -738,6 +738,10 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /** Command needs for commandEvidence gates (see CraftbookCommandNeedSchema). */
   commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Chat models the book runs on, offered as a download (see CraftbookModelNeedSchema). */
+  models: z.array(CraftbookModelNeedSchema).optional(),
+  /** Capabilities the book cannot run without (see CraftbookServiceNeedSchema). */
+  services: z.array(CraftbookServiceNeedSchema).optional(),
   /** Authored mode-agnostic — see `CraftbookSchema.diffpackCapable`. */
   diffpackCapable: z.boolean().optional(),
   /** Minimum model tier for the whole book (see CraftbookSchema.capabilityFloor). */
@@ -810,6 +814,10 @@ export const CraftbookTemplateManifestSchema = z.object({
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
   /** Command needs (mirrored from the version manifest). */
   commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Model needs (mirrored from the version manifest). */
+  models: z.array(CraftbookModelNeedSchema).optional(),
+  /** Service needs (mirrored from the version manifest). */
+  services: z.array(CraftbookServiceNeedSchema).optional(),
   /** Authored mode-agnostic (mirrored from the version manifest). */
   diffpackCapable: z.boolean().optional(),
   /** Whole-book model-tier floor (mirrored from the version manifest). */
@@ -887,6 +895,28 @@ export const ProjectTypeToolReactionSchema = z.object({
    * to false, so existing project types are unchanged.
    */
   hideSeed: z.boolean().optional(),
+  /**
+   * The seed carries the whole current state (the board, the deck), so the
+   * gezel answers it from its instructions and the seed alone, without the
+   * earlier conversation. A small model handed old turns copies its last
+   * reply and plays from a stale position, and those turns spend the window
+   * a 4K model needs for the state itself. The transcript keeps every turn;
+   * only what this turn's model call sees changes. Defaults to false.
+   */
+  standalone: z.boolean().optional(),
+  /**
+   * The summoned turn is one call to `tool` (a model tool of this type that
+   * declares `turn`): its first request offers only that tool and asks the
+   * engine to require it. `when` is checked against this tool's output, so a
+   * move is required only while one is due (checkers: `status` is
+   * `playing`); otherwise the turn is an ordinary one.
+   */
+  turn: z
+    .object({
+      tool: z.string().regex(/^[a-z][a-z0-9_]*$/),
+      when: ScriptOutputPredicateSchema.optional(),
+    })
+    .optional(),
 });
 export type ProjectTypeToolReaction = z.infer<typeof ProjectTypeToolReactionSchema>;
 
@@ -914,6 +944,45 @@ export const ProjectTypeToolSchema = z.object({
   bind: z.record(z.string(), z.unknown()).optional(),
   /** Gezel turn summoned when this tool completes via a page invoke. */
   reaction: ProjectTypeToolReactionSchema.optional(),
+  /**
+   * A successful call is the turn's whole job: it ends the turn, and its
+   * `say` argument (when given) is the reply. A small model asked to say
+   * something after acting acts again; the checkers move once came back
+   * as its own call written out as the reply. `fallback` replies when the
+   * call left `say` empty.
+   */
+  turn: z
+    .object({
+      say: z.string().min(1).optional(),
+      fallback: z.string().min(1).optional(),
+      /**
+       * An output field the script fills with the reply to show instead of
+       * `say`: text the app composed from what it scored (the tutor's line
+       * plus the corrections it graded), so feedback never depends on the
+       * model writing it out.
+       */
+      show: z.string().min(1).optional(),
+    })
+    .optional(),
+  /**
+   * Reads the activity's current state (a board, a deck). A message a person
+   * sends is answered from its output, read just before the turn, so the
+   * model never acts on a stale copy from earlier in the conversation.
+   */
+  state: z.boolean().optional(),
+  /**
+   * On the `state` tool: while its output matches `when`, a person's message
+   * is answered with `tool` (a model tool of this type that declares `turn`),
+   * required where the engine can, as a reaction's `turn` is. A tutor in a
+   * role-play scene answers every line through its scoring `reply`, rather
+   * than in prose that nothing grades.
+   */
+  answer: z
+    .object({
+      tool: z.string().regex(/^[a-z][a-z0-9_]*$/),
+      when: ScriptOutputPredicateSchema.optional(),
+    })
+    .optional(),
 });
 export type ProjectTypeTool = z.infer<typeof ProjectTypeToolSchema>;
 
@@ -1034,6 +1103,13 @@ const ProjectTypeCompositionShape = {
    * Omit for the default full-agent profile.
    */
   leanProfile: z.boolean().optional(),
+  /**
+   * Smallest model tier the type's sessions work on. A host whose model sits
+   * below it offers the type as needing a larger model and refuses to create
+   * it, rather than running it on a model that cannot hold the turn shape.
+   * Omit when any model with tool support will do.
+   */
+  capabilityFloor: ModelTierSchema.optional(),
   /**
    * Whether projects instantiated from this type should participate in
    * workspace indexing. `false` is appropriate for lightweight stateful
@@ -2562,6 +2638,12 @@ export const CatalogItemSummarySchema = z.object({
   logoUrl: z.string().optional(),
   /** Inline SVG markup. Treat as untrusted until structurally sanitized; live/community catalogs can supply it. */
   iconSvg: z.string().optional(),
+  /**
+   * Why this host cannot use the item, in words for a person ("Needs a larger
+   * model than this phone runs"). Absent when it can. Galleries show the item
+   * disabled with this reason instead of hiding it.
+   */
+  unavailableReason: z.string().optional(),
 });
 export type CatalogItemSummary = z.infer<typeof CatalogItemSummarySchema>;
 
@@ -2651,192 +2733,6 @@ export const ToolsetConfigSchema = z.object({
   updatedAt: z.string(),
 });
 export type ToolsetConfig = z.infer<typeof ToolsetConfigSchema>;
-
-// ─ .gezapp AI App packages ─────────────────────────────────────────
-//
-// A `.gezapp` is a renamed ZIP containing one entry project type and the
-// exact-version catalog items that make it self-contained: gezel roles and
-// craftbooks. Toolsets, connectors, and models stay outside the archive and
-// appear in the resolved dependency lock instead. The package manifest is an
-// install receipt as well as the review surface; it is retained after import.
-
-export const GezappEmbeddedKindSchema = z.enum([
-  'project-type',
-  'gezel-template',
-  'craftbook-template',
-]);
-export type GezappEmbeddedKind = z.infer<typeof GezappEmbeddedKindSchema>;
-
-export const GezappDependencyKindSchema = z.enum([
-  'toolset',
-  'connector-type',
-  'chat-model',
-  'image-model',
-  'video-model',
-]);
-export type GezappDependencyKind = z.infer<typeof GezappDependencyKindSchema>;
-
-/** One exact catalog item embedded in a `.gezapp`. Its path is derived. */
-export const GezappItemSchema = z.object({
-  kind: GezappEmbeddedKindSchema,
-  id: z.string().regex(IdRegex),
-  version: z.string().regex(SemverRegex),
-  /** SHA-256 (hex) over the selected identity/shared files + exact version. */
-  sha256: z.string().regex(/^[a-f0-9]{64}$/),
-});
-export type GezappItem = z.infer<typeof GezappItemSchema>;
-
-/** An exact external dependency resolved while the package was built. */
-export const GezappDependencySchema = z.object({
-  kind: GezappDependencyKindSchema,
-  id: z.string().regex(IdRegex),
-  version: z.string().regex(SemverRegex),
-  required: z.boolean().default(true),
-  sourceId: z.string().optional(),
-  reason: z.string().optional(),
-});
-export type GezappDependency = z.infer<typeof GezappDependencySchema>;
-
-export const GezappEntrySchema = z.object({
-  projectType: z.string().regex(IdRegex),
-  version: z.string().regex(SemverRegex),
-});
-export type GezappEntry = z.infer<typeof GezappEntrySchema>;
-
-/** The root `manifest.json` of a `.gezapp` package. */
-export const GezappManifestSchema = z
-  .object({
-    format: z.literal('gezel-ai-app'),
-    schemaVersion: z.literal(1),
-    entry: GezappEntrySchema,
-    /** Review snapshot. Canonical identity remains the entry project type. */
-    name: z.string().min(1),
-    description: z.string().default(''),
-    publisher: z.object({
-      name: z.string().min(1),
-      url: z.string().url().optional(),
-    }),
-    /** ISO timestamp stamped by the exporter. */
-    createdAt: z.string().datetime(),
-    /** Effective calendar-line floor across every embedded item. */
-    minGezelVersion: z.string().optional(),
-    /** v1 side-loaded packages are always explicit about being unsigned. */
-    signature: z.object({ status: z.literal('unsigned') }),
-    items: z.array(GezappItemSchema).min(1).max(512),
-    dependencies: z.array(GezappDependencySchema).max(512).default([]),
-    provenance: z
-      .object({
-        source: z.string().optional(),
-        exportedFromProject: z.string().optional(),
-      })
-      .optional(),
-  })
-  .superRefine((value, ctx) => {
-    const keys = new Set<string>();
-    for (const [index, item] of value.items.entries()) {
-      const key = `${item.kind}:${item.id}`;
-      if (keys.has(key)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['items', index],
-          message: `duplicate embedded item ${key}`,
-        });
-      }
-      keys.add(key);
-    }
-    const dependencyKeys = new Set<string>();
-    for (const [index, dependency] of value.dependencies.entries()) {
-      const key = `${dependency.kind}:${dependency.id}`;
-      if (dependencyKeys.has(key)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['dependencies', index],
-          message: `duplicate external dependency ${key}`,
-        });
-      }
-      dependencyKeys.add(key);
-    }
-    const projectTypes = value.items.filter((item) => item.kind === 'project-type');
-    if (projectTypes.length !== 1) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['items'],
-        message: 'a .gezapp must contain exactly one project type',
-      });
-      return;
-    }
-    const entry = projectTypes[0]!;
-    if (entry.id !== value.entry.projectType || entry.version !== value.entry.version) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['entry'],
-        message: 'entry must identify the embedded project type and exact version',
-      });
-    }
-  });
-export type GezappManifest = z.infer<typeof GezappManifestSchema>;
-
-/** Durable record retained with an installed AI App version. */
-export const GezappInstallReceiptSchema = z.object({
-  schemaVersion: z.literal(1),
-  manifest: GezappManifestSchema,
-  packageSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  installedAt: z.string().datetime(),
-});
-export type GezappInstallReceipt = z.infer<typeof GezappInstallReceiptSchema>;
-
-export const GezappRegistryEntrySchema = z.object({
-  appId: z.string().regex(IdRegex),
-  version: z.string().regex(SemverRegex),
-  packageSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  installedAt: z.string().datetime(),
-  enabled: z.boolean().default(true),
-});
-export type GezappRegistryEntry = z.infer<typeof GezappRegistryEntrySchema>;
-
-export const GezappRegistrySchema = z.object({
-  schemaVersion: z.literal(1),
-  apps: z.array(GezappRegistryEntrySchema).default([]),
-});
-export type GezappRegistry = z.infer<typeof GezappRegistrySchema>;
-
-/**
- * The root `gezapp.json` of an AI App *source folder* — the authoring form
- * of a `.gezapp`. Deliberately minimal: everything heavy on the packed
- * manifest (`items` + per-item sha256, `createdAt`, `dependencies`,
- * `minGezelVersion`, `signature`) is derived from the `items/` tree by
- * `gezel app pack`, never hand-maintained. Strict so an author who pastes
- * packed-manifest fields here gets told they are generated, not silently
- * carried stale.
- */
-export const GezappSourceManifestSchema = z
-  .object({
-    format: z.literal('gezel-ai-app-source'),
-    schemaVersion: z.literal(1),
-    /**
-     * Optional entry pin. When the items tree holds exactly one project
-     * type, both fields are discovered; `version` defaults to the highest
-     * semver version folder present.
-     */
-    entry: z
-      .object({
-        projectType: z.string().regex(IdRegex).optional(),
-        version: z.string().regex(SemverRegex).optional(),
-      })
-      .optional(),
-    /** Defaults to the entry project type identity's maintainer at pack time. */
-    publisher: z
-      .object({
-        name: z.string().min(1),
-        url: z.string().url().optional(),
-      })
-      .optional(),
-  })
-  .strict();
-export type GezappSourceManifest = z.infer<typeof GezappSourceManifestSchema>;
-
-/** The source-folder manifest filename beside `items/`. */
-export const GEZAPP_SOURCE_MANIFEST_FILENAME = 'gezapp.json';
 
 // ─ .gezmodel portable model bundles ──────────────────────────────────────
 //
@@ -2958,3 +2854,4 @@ export const SharedModelMigrationResultSchema = z.object({
 export type SharedModelMigrationResult = z.infer<typeof SharedModelMigrationResultSchema>;
 
 export { compareSemver, isSemver } from './catalog-semver.js';
+export * from './gezapp.js';

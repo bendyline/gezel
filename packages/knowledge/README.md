@@ -12,8 +12,9 @@ npm install @bendyline/gezel-knowledge
 
 ## What a `.gezk` is
 
-An open format (format version 0.6, preliminary until format 1.0; 0.5
-archives still open): a ZIP whose first entry is
+An open format (format version 0.8, preliminary until format 1.0; 0.5–0.7
+archives still open, and the writer emits the oldest generation that can
+express a catalog): a ZIP whose first entry is
 the stored `mimetype` magic (`application/vnd.gezk+zip`), then
 `manifest.json`, `README.md`, `LICENSES/`, a `router.db` (topics, document
 directory, brotli bodies, routing centroids) and shard SQLite databases with
@@ -62,10 +63,19 @@ await compileKnowledgeCatalog({
 
 Every archive ships a `README.md` and `LICENSES/catalog.txt`; the compiler
 generates minimal ones from the catalog block unless you pass richer texts in
-`extraFiles`. Embedding requires `@huggingface/transformers` at runtime; the
-module is imported dynamically so everything else works without it. The
-`gezel knowledge` CLI wraps this same API (`init`, `build`, `validate`,
-`inspect`, `search`), entirely offline — no daemon.
+`extraFiles`. Embedding requires `@huggingface/transformers` (^4.3.1) at
+runtime; the module is imported dynamically so everything else works without
+it. The `gezel knowledge` CLI wraps this same API (`init`, `build`,
+`validate`, `inspect`, `search`), entirely offline — no daemon.
+
+With a multimodal profile (`EMBEDDINGGEMMA_2_512_1`), pass `embedMedia` too and
+every image, video and audio file a document references becomes searchable
+media rows (one per image, one per 30-second window), stored after the text
+chunks so text chunk ids do not move. The compiler hands `embedMedia` the
+asset bytes and its modality and expects raw model vectors back; it projects
+them through the profile (`profileUnitVector`). `@bendyline/gezel-service/media`
+exports a ready implementation (`createCatalogMediaEmbedder`) that decodes
+images in pure JS and cuts video and audio with the system ffmpeg.
 
 ## Reading a catalog
 
@@ -86,6 +96,9 @@ Semantic search loads a shard's sign-bit rows into memory once (9.6 MB for a
 full 200,000-chunk shard) and scores the float query against them through a
 per-byte lookup table (the query is centered first when the catalog's profile
 is `centered-sign`); the int8 rerank reads the top 1,024 candidates by rowid.
+A query of the wrong width is refused with `CatalogQueryError('dimension')`.
+Media rows (0.8) are scored exactly in their own lane, `searchMedia`, and
+`assetFile` returns a declared asset's verified path for range streaming.
 
 ## Stability
 

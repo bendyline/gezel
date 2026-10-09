@@ -494,6 +494,49 @@ What lives where:
 
 ## Patterns
 
+### Pick a plan from Home
+
+Home's **Make something** tray offers six broad starting points: Research
+report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
+Each key has artwork, a plain name, and a short description of the declared
+output. **See all** opens the full plan gallery, whose **Start here** shelf
+uses the same starter set. Use the existing tray and radius tokens; these
+are square-ish keys, never pills.
+
+The starters and first-run folder setup share a bounded scroll area above the
+conversation, so neither can push the draft below the screen. On a short
+touchscreen or while the native keyboard is open, they yield their space to
+the conversation and return when the full viewport is available.
+
+A Home key opens a compact launch sheet with the main field focused.
+The person adds a topic, then chooses **Start now** or **Tonight**. Use the
+most recently visited project, or Default when none has been chosen. Derive
+the title from the topic and choose the crew automatically. Required inputs
+stay visible; optional inputs, additional fields, Title, Assign to, and step
+roles live in a closed **More options** disclosure. Plans with nothing to
+ask show a single confirmation. Keep launch errors beside the action keys.
+
+Output summaries come from declared output files, including publishing steps
+before a final Finish step. **Usually about N minutes here** appears only
+when this install has completed runs of the same plan. Use the median elapsed
+time, ending at the last completed step; exclude overnight waits, recurring
+hosts, and child tasks. Do not infer time from a later task edit or collect
+telemetry. Example images and catalog-wide estimates are future work.
+
+Words we show on starter cards, launch forms, the composer strip, and task cards:
+
+| Internal term | Visible wording |
+| --- | --- |
+| craftbook | plan |
+| default assignee / entry-step role | Choose automatically |
+| voorman | crew lead, when relevant |
+| gezel | gezel |
+| Meester | Meester |
+
+Paths are implementation details. Derive output destinations from the task's
+working folder; use file pickers for source material. A starter's main field
+asks what the person wants made, never for a prompt, title, or filesystem path.
+
 ### Task progress: stops on a route
 
 The task bench, chat rail, craftbook receipts, and craftbook editor share
@@ -788,6 +831,12 @@ footnote drop out. Each card becomes one row: a 2rem mark, then the name,
 then a single line of description, with the "Soon" stamp in line. Wider
 dialogs keep the full cards and the always-visible field.
 
+A starting point this host cannot run (a project type above the device's
+model, or one that needs desktop-only tools) stays in the gallery, disabled,
+with its reason in place of the description and an "Unavailable" stamp. Never
+hide it: a person who saw it on the desktop should learn why it is missing
+here, not wonder whether it exists.
+
 **A gallery dialog is a two-step wizard.** Both tenants are: New Task and
 New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
 [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
@@ -805,11 +854,12 @@ decides which craftbooks are applicable and recommended. Choosing a card —
 the blank card included — advances to step 2: what the starting point is and
 what it brings on the left, the properties form on the right, and one back
 key returning to the gallery with the choice still lit. Three rules keep it
-from reading as two different dialogs: the dialog keeps its size and its
-footer bar across both steps so the frame never jumps, the selection
+from reading as two different dialogs: the full gallery keeps its size and
+footer bar across both steps, the selection
 survives going back, and nothing is created until the second screen (the
 picker's footnote says so, and Enter in the search field must not submit the
-form).
+form). Home starts skip the gallery and use the compact sheet described
+above; a plan with nothing to ask also uses that single confirmation.
 
 **Step 2 goes to one centered column when there is nothing to read.** Two
 columns are for a selection whose brief earns one — a craftbook's steps, a
@@ -825,7 +875,8 @@ params come out of the generic parameter form and render above it, under a
 "Works on" eyebrow, as `CraftbookInputField`
 ([components/craftbook-input/](../packages/ui/src/components/craftbook-input/),
 `.gz-cbi-*` in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
-The source goes first because it is the thing the book works on. It is
+Required sources go first because they are what the book works on. Optional
+sources are inside More options. It is
 a keys-in-a-tray choice — **In this project** / **From your computer** —
 over one body:
 
@@ -960,6 +1011,24 @@ instead of growing with the text; an empty box that filled as you typed
 would put the caret somewhere different on every keystroke. The glyph is
 chevrons pushing apart, closing back together once expanded, and carries
 `title` + `aria-label` + `aria-pressed` like every other icon key.
+
+**Take photo is the camera's one door.** The composer toolbar's camera key
+sits between Insert image and Attach file and inserts `![Photo](…)` into the
+draft, like the other two. A phone opens its own camera
+(`<input capture>`): the system camera is better than anything we could
+draw, and the person already knows it. A desktop gets a small viewfinder
+dialog ([`CameraCaptureDialog`](../packages/ui/src/components/CameraCaptureDialog.tsx)):
+live preview, one shutter press, then a still to Retake or Insert. The key
+appears only where a camera exists. The camera runs only while its preview
+is on screen: it stops on the shutter press, so the indicator light never
+outlives what the person can see. Photos are capped at 2048px on the long
+edge and re-encoded, which also strips a phone photo's GPS metadata before it
+reaches a prompt. When the model cannot see images, the message carries a
+warning saying so; never let the person assume a gezel saw a picture it only
+had the name of. On a phone the photo is read on the device before the model
+runs (labels and text always, a description where a describer is ready), and
+the warning names what was missing: only labels, or nothing. Settings → AI →
+Photos is where a describer is fetched; a chat turn never starts a download.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
@@ -1167,6 +1236,42 @@ steampunk, medieval props, or nostalgic clutter. Source art is 512×512 WebP
 and must remain recognizable in the 44px gallery crop. Catalog image renderers
 must replace missing or failed assets with the surface's category glyph or
 initial; never expose the browser's native broken-image placeholder.
+
+**Knowledge catalog artwork: Reference Marks.** Knowledge catalogs get the
+Workshop Marks' sibling: the same bindery material language, palette, period
+restraint, and constraints, built as a single paper-crafted emblem of the
+subject (a loaf and pitcher for Food & Drink, a ringed planet for Astronomy).
+The subject alone fills about 80% of the tile, with nothing under or behind
+it. These marks are drawn at 24 and 56 px, and an earlier version that stood
+the subject on a cloth-bound book left the subject unreadable at that size. The
+subject carries the catalog's one muted accent. No magnifier: that is the
+craftbook shelf's tool. Gilde ships
+the mark as the catalog's `logo.webp`, with an `art.json` recording the subject
+and accent; the service passes it to installed catalogs as
+`KnowledgeCatalogStatus.logoUrl`, and the bundled Handboek's mark ships with
+the UI. `KnowledgeCatalogMark` is the one rendering: a `--radius-md` tile at
+24, 34, or 56 px, with a book glyph for catalogs that have no artwork. The
+Knowledge rail shows the 56 px mark beside the catalog's name and the 24 px
+mark in each picker row, which is why that picker is the Radix `Select` and
+not a native `<select>`.
+
+**Catalog management opens over the Knowledge browser, not in Settings.** The
+rail's add key opens `KnowledgeCatalogsDialog`, which hosts the same
+`KnowledgeCatalogManager` that Settings → Knowledge shows. Changing what is on
+the shelves is part of using the library, so it should not move the person to
+another area. Installs announce themselves, and the rail picks each one up
+while the dialog is still open.
+
+**A media hit says what matched and opens on it.** A search hit on a photo, a
+clip or a recording reads `Photo`, `Video · 1:30–2:00` or `Sound · 0:00–0:30`
+(`mediaSpanLabel` in core, the one wording for every surface). In the titlebar
+it leads the muted subtitle; in the Knowledge results it is its own muted line
+under the title, and a photo also gets a 3rem `--radius-sm` thumbnail beside
+the text. Opening a hit lands on the moment: a workspace file's player starts
+at the matched window, and a catalog hit opens its article with the media in
+a bordered `--radius-lg` figure above it, the asset's credit in the caption.
+Players start where the hit matched, never at 0:00 with the time left for the
+person to find.
 
 **Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
 entries Gezel ships and reviews with thousands imported automatically from
@@ -1585,6 +1690,114 @@ The corollary is a duty: once it's out of the chrome, that surface has to
 answer for it all day, not only while the window is open. And when queued
 work genuinely *is* stuck, say which of the two it is — a busy engine
 resolves itself, an engagement switch set to Off does not.
+
+**Adding a folder says what will happen before anything does.** A folder a
+person hands the crew is the product's main promise, so every door to it —
+first-run onboarding (`FolderOnboardingStep`), the add-folder sheet
+(`AddFolderSheet`, opened by `openAddFolder()` from the New Project dialog's
+Existing Folder card, the File menu and the Home tip) — shows the same three
+things first: what the folder holds ("12,480 photos · 1,204 only in iCloud",
+counted without reading a file), the read-only promise in plain words, and
+the night work from `describeFolderNightWork`. In the add-folder sheet, a native
+checkbox sits to the left of "Work on this folder during the night shift",
+above the work preview. Show "During the nightshift, Gezel will" and the work
+list only while that checkbox is checked. First-run folder choices are
+checkbox cards, not keys, because several may be picked at once; its
+overnight question is a two-key tray. A folder gezel refuses (a home folder,
+a drive root) is explained with `forbiddenFolderPlainName`, never an error
+code, and the add key stays disabled.
+
+**A folder's Overview opens on a first look.** `FirstLookCard` sits above
+everything index-derived once the first scan lands: one line of what the
+folder holds, what was left in the cloud, what the crew does tonight with a
+first-night estimate when it runs to hours, and the "Work on this folder
+overnight" switch. That switch is the folder's one off-switch for night work;
+there is no second place to look for it.
+
+**The morning leads with decisions.** While the night's review card is
+unanswered, Home opens on **This morning** whatever the band's saved
+collapse, and the tab stays until the card is dismissed — an unread night
+does not expire. The card leads (proposals, then reports, then what finished,
+a paused review's Resume, the quiet night's reason with its one fix), then the
+main report reads in place, then what is already queued for tonight. One
+desktop notification announces it; the renderer never raises a second.
+Both **This morning** and **Last night** use the available width beside the
+Meester's figure. The whole greeting band takes at most half the available
+Home height, capped at half the viewport, so the Meester conversation stays
+visible. Keep the tabs and collapse key above a single scroll area for the
+review, including its reports and actions.
+
+**Photos are prints on a table.** A photo anywhere in the app is a
+`PhotoThumb`: a square-cropped tile with `--radius-sm`, loaded when it scrolls
+into view from the daemon's thumbnail cache, with the file's initial standing
+in when this machine cannot read the format (never the browser's broken-image
+glyph). Several photos are a `PhotoGrid`, an `auto-fill` grid that shows a
+page at a time behind a "Show N more" key rather than rendering a library at
+once; captions and a pick's reason go under the tile only where they were
+written for it. An album proposal is a `--radius-lg` card with its cover,
+title, span and count; the card opens the album's Squisq slideshow in the
+document editor (after its photos are stored with it), where the person plays
+it, edits it and exports video, and a quiet "Copy to a folder…" link under the
+card opens a small dialog that copies the full-size originals into a folder
+they name and says plainly nothing is replaced. A photo folder's Overview gains
+**Albums** and **On this day** below the first look, and the morning view
+shows last night's albums and this day in earlier years; a folder without
+either shows nothing extra. Titlebar search gives a workspace photo hit a 3rem
+tile beside its text, like Knowledge results.
+
+**A file says what it is, one line above it.** When the Boekwachter has
+summarized a file, its project viewer and the Documents area show that
+summary's first prose paragraph as one muted line above the file
+(`FileAboutLine`): "About this file · …", truncated to the line, the whole
+summary on hover. A file not yet read, or edited since, shows nothing rather
+than a stale description.
+
+**A proposal that moves files reads as where things go.** Moves, copies and
+new folders in a change proposal have no diff, so the review lists them after
+the edits as rows — "Move `from` → `to`", "Copy …", "New folder …" — under one
+header that says they apply after the edits and never replace a file. Past a
+dozen, the rows group by destination folder, each a disclosure row with its
+count, so a tidy-up of a thousand photos reads as a handful of folders.
+
+**Social mode is one switch, and off means today.** Settings → General (and
+the phone's first-run Preferences) carry a single *Social mode* checkbox,
+beside — never merged with — *Show gezel names and poppetjes*. On, gezels
+speak with their character, growth (the Growth tab and level badges) is on
+display, and opening a chat shows what is waiting. Off reproduces the plain
+register exactly: no character block in any prompt, no growth surfaces, no
+card. It defaults on for phones and off for the desktop until the person
+chooses; `useSocialMode` is the only reader in the UI.
+
+**A character is edited as rows of keys, with its effect in plain words.**
+The gezel's Appearance panel (social mode only) shows Temperament, Quirk,
+Style and Sociability, each a `gz-tray` of `gz-key`s that saves on click (no
+Save button, like every autosave editor). Under the rows, the exact lines the
+model will read are shown, so nothing a choice does is hidden. A key's title
+carries that value's line; there is no second description to drift.
+
+**Notifications are earned, and there are few of them.** A notification
+says that something happened: a gezel asked a question, work the person asked
+for finished, a gezel reached a level (social mode only), the night's review
+landed, or a project's own script worked out that something is due (a
+flashcard). Nothing fires on the clock alone, no "haven't seen you in a while".
+What arrives within a few seconds becomes one notification ("3 things are
+waiting"). Nothing is said while the person is looking at the app, and at most
+`notifications.dailyCap` a day (default 3). The cap is a row of keys in
+Settings → General (*Off · 1 · 3 · 5 · 10*), saved on click. Held items still
+sit in Updates and their chats; the cap only limits interruptions. The policy
+lives once in core `notifications`. Electron's main process raises desktop
+notifications, so they arrive with the window closed. The phone's UI raises
+its own through the native bridge, and asks the OS for permission the first
+time something worth a notification happens while the person is in the app.
+The renderer never raises one on the desktop.
+
+**A chat opens on what is waiting, never on a greeting.** In social mode,
+opening a gezel's chat (and a just-chat project) shows at most one
+`.visit-card` above the thread: an open question that gezel asked, else work
+it finished in the last three days. It is read from questions and tasks on
+disk, never written by a model, so an empty moment stays empty. It is
+dismissible per item and sits outside the timeline because it is not a
+message.
 
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read

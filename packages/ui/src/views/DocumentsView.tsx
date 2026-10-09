@@ -2,6 +2,7 @@ import { isSharedLibraryProject } from '@bendyline/gezel';
 import { FolderView } from '@bendyline/squisq-editor-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { FileAboutLine } from '../components/FileAboutLine.js';
 import type { FileEntry } from '../components/FileTree.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import {
@@ -329,6 +330,11 @@ export function DocumentsView() {
         emptyMessage="No documents yet. Create a mission statement, coding guidelines, or any shared reference."
         mutations={mutations}
         viewer={viewer}
+        viewerNotice={
+          libraryProjectId && selectedPath && runtimeCapabilities().index ? (
+            <FileAboutLine projectId={libraryProjectId} path={selectedPath} />
+          ) : undefined
+        }
       />
       {error && <p className="error">{error}</p>}
       {/* Same ambient status bar every project gets — the library was the one

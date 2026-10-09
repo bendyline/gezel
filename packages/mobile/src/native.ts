@@ -21,12 +21,19 @@ import type {
   PortableFileSystem,
   PortableInference,
   PortableSpeech,
+  PortableVision,
 } from '@bendyline/gezel/runtime';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { type ExportFilePlugin, type ExportedFile, saveNativeExport } from './export-file.js';
 import type { PublishHtmlPreview } from './html-preview.js';
 import { type ProductFilePlugin, createRoutedProductFiles } from './product-files.js';
 import { createNativeSpeech } from './speech.js';
+import {
+  type VisionDescriberInstall,
+  createVisionModelDescriber,
+  visionDescriberInstall,
+} from './vision-model.js';
+import { type NativeVisionStatus, createNativeVision, nativeVision } from './vision.js';
 
 export type { MobileModel } from '@bendyline/gezel/schemas';
 export type ModelInventory = MobileModelInventory;
@@ -59,6 +66,11 @@ export interface GezelMobilePlugin
 
 export interface MobileHost {
   speech?: PortableSpeech;
+  vision?: PortableVision;
+  /** Photo reading here: the OS recognizers, and the vision model that stands in for a missing describer. */
+  visionStatus?(): Promise<{ system: NativeVisionStatus; model: VisionDescriberInstall }>;
+  /** Download the OS describer's model (Gemini Nano). Only ever from Settings. */
+  prepareSystemVision?(): Promise<NativeVisionStatus>;
   previewAvailability?(): Promise<boolean>;
   publishHtmlPreview?: PublishHtmlPreview;
   native: boolean;
@@ -88,6 +100,18 @@ export function createNativeHost(nativePlugin: GezelMobilePlugin = plugin): Mobi
   return {
     native: true,
     speech: createNativeSpeech(),
+    vision: createNativeVision(
+      nativeVision,
+      nativePlugin === plugin ? createVisionModelDescriber(GezelRuntime) : undefined,
+    ),
+    visionStatus: async () => ({
+      system: await nativeVision.status(),
+      model:
+        nativePlugin === plugin
+          ? await visionDescriberInstall(GezelRuntime)
+          : { state: 'unavailable', missingBytes: 0 },
+    }),
+    prepareSystemVision: () => nativeVision.prepare(),
     previewAvailability: async () =>
       (await nativePlugin.previewAvailability?.())?.available === true,
     publishHtmlPreview: async (html) => {

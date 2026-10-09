@@ -394,10 +394,10 @@ export const PROJECT_KINDS: ProjectKindMeta[] = [
   {
     id: 'folder',
     label: 'Existing Folder',
-    description: 'Work in an existing folder on this computer.',
+    description: 'Have your crew look after a folder on this computer.',
     category: 'general',
     glyph: 'folder',
-    give: ['Works directly in a folder you choose', 'Name and About suggested from what it finds'],
+    give: ['Read-only: your files are never changed', 'A crew that works on it overnight'],
   },
   {
     id: 'calendar',

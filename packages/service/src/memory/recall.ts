@@ -1,6 +1,17 @@
-import { type ChatSession, type GezelConfig, createLogger } from '@bendyline/gezel';
+import {
+  type ChatSession,
+  type GezelConfig,
+  createLogger,
+  memoryNoteLine,
+  renderMemoryNotes,
+} from '@bendyline/gezel';
 import type { ContentIndex } from '../index-store/content-index.js';
-import type { MemoryKind } from './daily-markdown.js';
+import {
+  type MemoryKind,
+  type MemoryScope,
+  USER_MEMORY_ID,
+  sameProjectMemoryScore,
+} from './daily-markdown.js';
 import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
@@ -14,7 +25,7 @@ export interface RecallHit {
    * scoped to the session's project: the library is the install's knowledge,
    * so a policy filed once should surface wherever the question is asked.
    */
-  scope: 'gezel' | 'project' | 'workspace' | 'library';
+  scope: MemoryScope | 'workspace' | 'library';
   day: string;
   /** EFFECTIVE score — post-decay; this is what ranking and filtering used. */
   score: number;
@@ -167,7 +178,8 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
   const memoryAvailable =
     typeof args.memory.hasIndex === 'function'
       ? args.memory.hasIndex('gezel', args.gezelId) ||
-        args.memory.hasIndex('project', args.projectId)
+        args.memory.hasIndex('project', args.projectId) ||
+        args.memory.hasIndex('user', USER_MEMORY_ID)
       : true;
   if (!memoryAvailable) {
     const codeAvailable = (await args.contentIndex?.hasIndex?.(args.projectId)) ?? false;
@@ -212,11 +224,15 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
   if (args.signal?.aborted) return null;
 
   const fetchK = Math.max(topK * 2, topK);
-  const [gezelResults, projectResults] = await Promise.all([
+  const [gezelResults, projectResults, userResults] = await Promise.all([
     args.memory.searchVector('gezel', args.gezelId, vector, fetchK).catch(() => []),
     args.memory.searchVector('project', args.projectId, vector, fetchK).catch(() => []),
+    args.memory.searchVector('user', USER_MEMORY_ID, vector, fetchK).catch(() => []),
   ]);
-  const results = [...gezelResults, ...projectResults];
+  const results = [...gezelResults, ...projectResults, ...userResults].map((r) => ({
+    ...r,
+    score: sameProjectMemoryScore(r.score, r.source, args.projectId),
+  }));
   if (args.signal?.aborted) return null;
 
   const ranked = results
@@ -235,7 +251,7 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     seen.add(r.text);
     hits.push({
       text: r.text,
-      scope: r.scope as 'gezel' | 'project',
+      scope: r.scope as MemoryScope,
       day: r.day,
       score: r.effective,
       ...(r.kind ? { kind: r.kind } : {}),
@@ -377,11 +393,15 @@ export function renderRecallBlock(hits: RecallHit[], now: Date = new Date()): st
     .map((h) => {
       if (h.scope === 'workspace') return `- [workspace] ${h.text}`;
       if (h.scope === 'library') return `- [library] ${h.text}`;
-      if (h.kind === 'status') {
-        return `- [${h.scope}/${h.day}] As of ${h.day} (${agePhrase(ageInDays(h.day, now))}): ${h.text}`;
-      }
-      return `- [${h.scope}/${h.day}] ${h.text}`;
+      const text =
+        h.kind === 'status' ? `As of ${agePhrase(ageInDays(h.day, now))}: ${h.text}` : h.text;
+      return memoryNoteLine({
+        scope: h.scope,
+        text,
+        day: h.day,
+        ...(h.kind ? { kind: h.kind } : {}),
+      });
     })
     .join('\n');
-  return `\n\n### Recalled from prior sessions\n\nHints from earlier work — these are informational, not authoritative. Use them to avoid re-asking the user things they've already told the team:\n\n${lines}`;
+  return `\n\n### Recalled from prior sessions\n\n${renderMemoryNotes([lines])}`;
 }

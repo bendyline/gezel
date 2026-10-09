@@ -9,12 +9,12 @@
  * no wasm, no postinstall) plus hand-rolled geometry/normalization that feeds
  * pixel tensors directly to the vision model, so the stub and its guard stand.
  *
- * Geometry follows the CLIP reference preprocessing: resize shortest side to
- * the target, then center-crop a square. Bilinear rather than the reference
- * bicubic — the embedding delta is irrelevant for nearest-neighbor retrieval
- * and the kernel is a quarter of the code. Every function is pure and
- *typed-array-in/typed-array-out, so the whole path unit-tests with tiny
- * fixtures and exact expected floats.
+ * Geometry follows the Gemma vision processor: an aspect-preserving resize to
+ * whole pooling blocks within the token budget, with PIL's antialiased
+ * bicubic kernel (≥ 0.99 cosine against the sharp-based reference). The face
+ * lane keeps a plain bilinear resize. Every function is pure and
+ * typed-array-in/typed-array-out, so the whole path unit-tests with tiny
+ * fixtures and exact expected values.
  */
 
 import { open } from 'node:fs/promises';
@@ -270,61 +270,145 @@ export function resizeBilinear(image: RgbImage, targetW: number, targetH: number
   return { data: out, width: targetW, height: targetH };
 }
 
-/** Scale so the SHORTEST side equals `target` (aspect preserved, round up). */
-export function resizeShortestSide(image: RgbImage, target: number): RgbImage {
-  const { width, height } = image;
-  if (Math.min(width, height) === target) return image;
-  const scale = target / Math.min(width, height);
-  return resizeBilinear(
-    image,
-    Math.max(target, Math.round(width * scale)),
-    Math.max(target, Math.round(height * scale)),
-  );
+/** Cubic convolution kernel with a = −0.5 (PIL's BICUBIC). */
+function cubicWeight(x: number): number {
+  const a = -0.5;
+  const t = Math.abs(x);
+  if (t < 1) return ((a + 2) * t - (a + 3)) * t * t + 1;
+  if (t < 2) return (((t - 5) * t + 8) * t - 4) * a;
+  return 0;
 }
-
-/** Center-crop to cw×ch (inputs must be at least that large). */
-export function centerCrop(image: RgbImage, cw: number, ch: number): RgbImage {
-  const { data, width, height } = image;
-  if (width === cw && height === ch) return image;
-  const left = Math.floor((width - cw) / 2);
-  const top = Math.floor((height - ch) / 2);
-  const out = new Uint8Array(cw * ch * 3);
-  for (let y = 0; y < ch; y++) {
-    const srcStart = ((top + y) * width + left) * 3;
-    out.set(data.subarray(srcStart, srcStart + cw * 3), y * cw * 3);
-  }
-  return { data: out, width: cw, height: ch };
-}
-
-/** OpenAI CLIP normalization constants (all ViT CLIP checkpoints). */
-export const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;
-export const CLIP_STD = [0.26862954, 0.26130258, 0.27577711] as const;
 
 /**
- * Interleaved RGB8 → planar CHW Float32, `(px/255 - mean[c]) / std[c]` per
- * channel — the tensor layout every torchvision-lineage vision model expects.
+ * Per-output-index source windows and normalized weights for one axis,
+ * antialiased like PIL: when shrinking, the kernel widens by the scale so
+ * every source pixel contributes.
  */
-export function normalizeToCHW(
-  image: RgbImage,
-  mean: readonly number[] = CLIP_MEAN,
-  std: readonly number[] = CLIP_STD,
-): Float32Array {
-  const { data, width, height } = image;
-  const plane = width * height;
-  const out = new Float32Array(3 * plane);
-  for (let i = 0; i < plane; i++) {
-    for (let c = 0; c < 3; c++) {
-      out[c * plane + i] = (data[i * 3 + c]! / 255 - mean[c]!) / std[c]!;
+function cubicTaps(inSize: number, outSize: number): Array<{ start: number; weights: number[] }> {
+  const scale = inSize / outSize;
+  const filterScale = Math.max(scale, 1);
+  const support = 2 * filterScale;
+  const taps: Array<{ start: number; weights: number[] }> = [];
+  for (let o = 0; o < outSize; o++) {
+    const center = (o + 0.5) * scale;
+    const start = Math.max(Math.floor(center - support + 0.5), 0);
+    const end = Math.min(Math.floor(center + support + 0.5), inSize);
+    const weights: number[] = [];
+    let sum = 0;
+    for (let i = start; i < end; i++) {
+      const w = cubicWeight((i - center + 0.5) / filterScale);
+      weights.push(w);
+      sum += w;
+    }
+    taps.push({ start, weights: sum === 0 ? weights : weights.map((w) => w / sum) });
+  }
+  return taps;
+}
+
+/**
+ * Bicubic resample an RGB image to exactly targetW×targetH: separable,
+ * antialiased cubic convolution (a = −0.5), the BICUBIC filter the Gemma 4
+ * image processor names. The intermediate pass stays in floating point; the
+ * result rounds and clamps once.
+ */
+export function resizeBicubic(image: RgbImage, targetW: number, targetH: number): RgbImage {
+  const { data, width: w, height: h } = image;
+  if (w === targetW && h === targetH) return image;
+  const xTaps = cubicTaps(w, targetW);
+  const yTaps = cubicTaps(h, targetH);
+  const mid = new Float32Array(targetW * h * 3);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < targetW; x++) {
+      const { start, weights } = xTaps[x]!;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let k = 0; k < weights.length; k++) {
+        const si = (y * w + start + k) * 3;
+        const wt = weights[k]!;
+        r += data[si]! * wt;
+        g += data[si + 1]! * wt;
+        b += data[si + 2]! * wt;
+      }
+      const mi = (y * targetW + x) * 3;
+      mid[mi] = r;
+      mid[mi + 1] = g;
+      mid[mi + 2] = b;
     }
   }
-  return out;
+  const out = new Uint8Array(targetW * targetH * 3);
+  for (let y = 0; y < targetH; y++) {
+    const { start, weights } = yTaps[y]!;
+    for (let x = 0; x < targetW; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let k = 0; k < weights.length; k++) {
+        const mi = ((start + k) * targetW + x) * 3;
+        const wt = weights[k]!;
+        r += mid[mi]! * wt;
+        g += mid[mi + 1]! * wt;
+        b += mid[mi + 2]! * wt;
+      }
+      const oi = (y * targetW + x) * 3;
+      out[oi] = Math.min(255, Math.max(0, Math.round(r)));
+      out[oi + 1] = Math.min(255, Math.max(0, Math.round(g)));
+      out[oi + 2] = Math.min(255, Math.max(0, Math.round(b)));
+    }
+  }
+  return { data: out, width: targetW, height: targetH };
 }
 
 /**
- * The full CLIP preprocessing chain: decode → RGB → shortest-side resize →
- * center-crop → normalized CHW tensor data for a [1, 3, size, size] input.
+ * The size the Gemma 4 image processor resizes to for a vision token budget:
+ * aspect preserved, the pixel area fitted to `tokenBudget · kernel² ·
+ * patch²`, each side floored to a multiple of `kernel · patch` (one pooled
+ * soft token). Pre-resizing to exactly this size is what keeps the processor
+ * from calling its own (sharp-backed) resize. Mirrors
+ * `get_aspect_ratio_preserving_size` in transformers.js.
  */
-export function preprocessForClip(buf: Buffer, size = 224): Float32Array {
-  const rgb = rgbaToRgb(decodeImage(buf));
-  return normalizeToCHW(centerCrop(resizeShortestSide(rgb, size), size, size));
+export function gemmaVisionTargetSize(
+  width: number,
+  height: number,
+  tokenBudget: number,
+  patchSize = 16,
+  poolingKernel = 3,
+): { width: number; height: number } {
+  const maxPatches = tokenBudget * poolingKernel ** 2;
+  const factor = Math.sqrt((maxPatches * patchSize ** 2) / (height * width));
+  const sideMult = poolingKernel * patchSize;
+  let targetH = Math.floor((factor * height) / sideMult) * sideMult;
+  let targetW = Math.floor((factor * width) / sideMult) * sideMult;
+  if (targetH === 0 && targetW === 0) {
+    throw new ImageDecodeError(`image ${width}x${height} is too small to encode`, 'unsupported');
+  }
+  const maxSide = Math.floor(maxPatches / poolingKernel ** 2) * sideMult;
+  if (targetH === 0) {
+    targetH = sideMult;
+    targetW = Math.min(Math.floor(width / height) * sideMult, maxSide);
+  } else if (targetW === 0) {
+    targetW = sideMult;
+    targetH = Math.min(Math.floor(height / width) * sideMult, maxSide);
+  }
+  return { width: targetW, height: targetH };
+}
+
+/**
+ * Whether a size is already a valid vision-encoder input for `tokenBudget`:
+ * both sides whole pooling blocks and the patch count within the budget.
+ * The processor's own sizing rule is not idempotent — applied to its own
+ * output it can add a block to one side — so frames that were sized once
+ * (ffmpeg scales video frames from the source dimensions) must be recognised
+ * rather than sized again.
+ */
+export function isGemmaVisionSize(
+  width: number,
+  height: number,
+  tokenBudget: number,
+  patchSize = 16,
+  poolingKernel = 3,
+): boolean {
+  const sideMult = poolingKernel * patchSize;
+  if (width <= 0 || height <= 0 || width % sideMult !== 0 || height % sideMult !== 0) return false;
+  return (width / patchSize) * (height / patchSize) <= tokenBudget * poolingKernel ** 2;
 }

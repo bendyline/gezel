@@ -42,6 +42,7 @@ public final class GezelRuntimePlugin extends Plugin {
     @PluginMethod public void cancelProviderPreparation(PluginCall call) { runtime().cancelProviderPreparation(adapt(call)); }
     @PluginMethod public void generate(PluginCall call) { runtime().generate(adapt(call)); }
     @PluginMethod public void chat(PluginCall call) { runtime().chat(adapt(call)); }
+    @PluginMethod public void describeImage(PluginCall call) { runtime().describeImage(adapt(call)); }
     @PluginMethod public void cancel(PluginCall call) { runtime().cancel(adapt(call)); }
     @PluginMethod public void releaseModel(PluginCall call) { runtime().releaseModel(adapt(call)); }
     @PluginMethod public void listModels(PluginCall call) { runtime().listModels(adapt(call)); }

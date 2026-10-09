@@ -40,6 +40,11 @@ export function isProseFile(path: string | undefined): boolean {
 /**
  * Tools whose successful result is evidence the model may cite: retrieval,
  * reading, and the person's own open document.
+ *
+ * The batch readers belong here as much as their single-file twins. Leaving
+ * `read_files` out made a writer that read all five source memos in one call
+ * hold "no source evidence", get sent to `search` for text it already had,
+ * and turned a 3-minute synthesis into a 20-minute one (2026-10-06).
  */
 export const EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   'search',
@@ -49,7 +54,9 @@ export const EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   'read_document',
   'read_doc_as_markdown',
   'read_file',
+  'read_files',
   'read_artifact',
+  'read_artifacts',
   'fetch_url',
   'web_search',
   'wikipedia_search',
@@ -80,6 +87,19 @@ const LOOKUP_TOOLS: Record<FactualLookupPreference, readonly string[]> = {
   knowledge: ['search', 'wikipedia_search', 'wikipedia_read', 'web_search', 'fetch_url'],
   wikipedia: ['wikipedia_search', 'wikipedia_read', 'search', 'web_search', 'fetch_url'],
 };
+
+/**
+ * Readers for sources that already sit in the project. When a writer's
+ * evidence came from these, a refused write is repaired by reading the
+ * source again, not by searching for it.
+ */
+export const WORKSPACE_SOURCE_READERS: readonly string[] = [
+  'read_file',
+  'read_files',
+  'read_artifact',
+  'read_artifacts',
+  'read_document',
+];
 
 /** The lookup tools among `toolNames`, in the order a writer should try them. */
 export function factualLookupTools(

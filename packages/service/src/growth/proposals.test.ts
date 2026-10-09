@@ -169,7 +169,7 @@ describe('generateProposals', () => {
 
   function stubs(opts: { entries?: CorpusEntry[]; klerkReply?: string | Error }) {
     const memory = {
-      allEntries: async () =>
+      authoredEntries: async () =>
         (opts.entries ?? []).map((e) => ({ ...e, scope: 'gezel', id: 'ada', at: 'now' })),
     } as unknown as MemoryManager;
     const store = {

@@ -338,6 +338,11 @@ async function isSessionRouteAllowed(
     if (/^\/diffpacks\/[^/]+\/(?:apply|dismiss)\/?$/.test(rest)) {
       return sessionDeny('reviewing a change proposal requires a first-party client');
     }
+    // Copying an album into the folder is the person's write, made with
+    // `userInitiated` so it reaches a read-only folder.
+    if (/^\/albums\/copy\/?$/.test(rest)) {
+      return sessionDeny('copying an album requires a first-party client');
+    }
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }
@@ -493,6 +498,9 @@ async function isSessionRouteAllowed(
     if (path === '/api/memory/day' && method === 'PATCH') {
       return sessionDeny('editing raw memory files requires a first-party client');
     }
+    if (path === '/api/memory/lessons' && method !== 'GET') {
+      return sessionDeny('editing lessons requires a first-party client');
+    }
     if (auth.team) return SESSION_ALLOW;
     if (path === '/api/memory/search' && method === 'POST') {
       const body = await readJsonSafe(c);
@@ -502,17 +510,27 @@ async function isSessionRouteAllowed(
     }
     if (path === '/api/memory/save' && method === 'POST') {
       const body = await readJsonSafe(c);
+      // Every gezel may write down something about the person. A source, when
+      // given, must name this session: it decides who growth credits.
+      const source = body?.source as { project?: unknown; gezel?: unknown } | undefined;
+      const honestSource =
+        (source?.project === undefined || source.project === auth.projectId) &&
+        (source?.gezel === undefined || source.gezel === auth.gezelId);
       const own =
         (body?.scope === 'project' && body.id === auth.projectId) ||
-        (body?.scope === 'gezel' && body.id === auth.gezelId);
-      return own ? SESSION_ALLOW : sessionDeny('memory write scope does not match the session');
+        (body?.scope === 'gezel' && body.id === auth.gezelId) ||
+        body?.scope === 'user';
+      return own && honestSource
+        ? SESSION_ALLOW
+        : sessionDeny('memory write scope does not match the session');
     }
     if (method === 'GET' && /^\/api\/memory\/(?:recent|days|day|summary)$/.test(path)) {
       const scope = c.req.query('scope') ?? 'gezel';
       const id = c.req.query('id') ?? '';
       const own =
         (scope === 'project' && id === auth.projectId) ||
-        (scope === 'gezel' && id === auth.gezelId);
+        (scope === 'gezel' && id === auth.gezelId) ||
+        scope === 'user';
       return own ? SESSION_ALLOW : sessionDeny('memory read scope does not match the session');
     }
     if (path === '/api/memory/lessons') {

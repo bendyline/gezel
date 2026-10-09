@@ -300,7 +300,10 @@ test.describe('Knowledge catalogs', () => {
     // the bundled Handboek, so switch to the catalog just installed.
     await page.getByTestId('sidebar-area-knowledge').click();
     await expect(page.getByTestId('knowledge-view')).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('combobox', { name: 'Catalog' }).selectOption({ label: 'Shop Notes' });
+    const catalogPicker = page.getByRole('combobox', { name: 'Catalog' });
+    await catalogPicker.click();
+    await page.getByRole('option', { name: 'Shop Notes', exact: true }).click();
+    await expect(catalogPicker).toHaveText('Shop Notes');
     // gezk 0.6: the Joinery row rolls its nested Variants shelf up (two
     // documents, not one), the listing puts ordered documents first, and the
     // body's asset paints from a blob: URL fetched through the client.

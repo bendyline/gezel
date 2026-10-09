@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bendyline.com/gezk/0.8/schemas/source-notices.schema.json",
+  "type": "object",
+  "properties": {
+    "sources": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string",
+            "minLength": 1
+          },
+          "licenseUrl": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "license"
+        ]
+      }
+    }
+  },
+  "required": [
+    "sources"
+  ]
+}

@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +22,7 @@ import {
   isModelInstalled,
   linkModelIntoTrial,
   readOnlyModelRoots,
+  shouldHardLinkModelFile,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
@@ -61,11 +64,12 @@ function writeInstall(
   modelId: string,
   manifest: Record<string, unknown>,
   extraFiles: string[] = [],
-  engine: 'llama-cpp' | 'ds4' = 'llama-cpp',
+  engine: 'llama-cpp' | 'ds4' | 'mlx' = 'llama-cpp',
 ): string {
   const dir = join(root, 'engines', engine, 'models', modelId);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
+  if (manifest.weightsFilename)
+    writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   for (const f of extraFiles) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
@@ -525,6 +529,46 @@ describe('linkModelIntoTrial', () => {
       rmSync(trialHome, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform === 'linux')(
+    'hard-links large weight files and copies everything else',
+    async () => {
+      const cacheRoot = mkdtempSync(join(tmpdir(), 'gezel-model-cache-'));
+      const trialHome = mkdtempSync(join(tmpdir(), 'gezel-model-trial-'));
+      const source = join(cacheRoot, 'engines', 'llama-cpp', 'models', 'big-q4');
+      mkdirSync(source, { recursive: true });
+      writeFileSync(join(source, 'manifest.json'), '{"model":"big"}');
+      const weights = join(source, 'big-Q4_K_M.gguf');
+      writeFileSync(weights, '');
+      truncateSync(weights, 64 * 1024 * 1024);
+      try {
+        await linkModelIntoTrial({
+          cacheRoot,
+          trialHome,
+          engine: 'llama-cpp',
+          modelId: 'big-q4',
+        });
+        const destination = join(trialHome, 'engines', 'llama-cpp', 'models', 'big-q4');
+        expect(statSync(join(destination, 'big-Q4_K_M.gguf')).ino).toBe(statSync(weights).ino);
+        expect(statSync(join(destination, 'manifest.json')).ino).not.toBe(
+          statSync(join(source, 'manifest.json')).ino,
+        );
+      } finally {
+        rmSync(cacheRoot, { recursive: true, force: true });
+        rmSync(trialHome, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('shouldHardLinkModelFile', () => {
+  it('links only large weight files', () => {
+    const big = 64 * 1024 * 1024;
+    expect(shouldHardLinkModelFile('m/Qwen3.8-27B.gguf', big)).toBe(true);
+    expect(shouldHardLinkModelFile('m/model.safetensors', big * 2)).toBe(true);
+    expect(shouldHardLinkModelFile('m/mmproj-F16.gguf', big - 1)).toBe(false);
+    expect(shouldHardLinkModelFile('m/manifest.json', big)).toBe(false);
+  });
 });
 
 describe('staleInstallReason', () => {
@@ -668,6 +712,62 @@ describe('staleInstallReason', () => {
     await expect(
       staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
     ).resolves.toBeNull();
+  });
+
+  it('compares the complete MLX file hashes across metadata-only releases', async () => {
+    const hashes = { 'config.json': 'a'.repeat(64), 'model.safetensors': 'b'.repeat(64) };
+    useSyntheticIndex([
+      {
+        id: 'm',
+        version: '2.0.0',
+        mlx: {
+          huggingfaceRepo: 'example/model',
+          files: Object.entries(hashes).map(([name, sha256]) => ({ name, sha256 })),
+        },
+      },
+    ]);
+    const r = root();
+    const check = () => staleInstallReason({ cacheRoot: r, engine: 'mlx', modelId: 'm' });
+    const manifest = {
+      catalogVersion: '1.0.0',
+      huggingfaceRepo: 'example/model',
+      fileSha256: hashes,
+    };
+    writeInstall(r, 'm', manifest, Object.keys(hashes), 'mlx');
+    await expect(check()).resolves.toBeNull();
+    // Same-version installs can carry sanctioned template rewrites; this
+    // release-drift check must not invent a stricter install contract.
+    writeInstall(
+      r,
+      'm',
+      {
+        ...manifest,
+        catalogVersion: '2.0.0',
+        fileSha256: { ...hashes, 'config.json': 'c'.repeat(64) },
+      },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toBeNull();
+    writeInstall(
+      r,
+      'm',
+      { ...manifest, fileSha256: { ...hashes, 'config.json': 'c'.repeat(64) } },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toMatch(/config.json sha256 differs/);
+    writeInstall(
+      r,
+      'm',
+      { ...manifest, fileSha256: { 'config.json': hashes['config.json'] } },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toMatch(/catalogVersion/);
+    writeInstall(r, 'm', manifest, [], 'mlx');
+    rmSync(join(r, 'engines', 'mlx', 'models', 'm', 'model.safetensors'));
+    await expect(check()).resolves.toMatch(/missing payload file/);
   });
 
   it('compares a historical directory against the current catalog id', async () => {

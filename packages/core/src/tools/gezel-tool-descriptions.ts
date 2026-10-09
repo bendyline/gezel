@@ -13,7 +13,7 @@ export const GEZEL_TOOL_DESCRIPTIONS = {
   create_task:
     'Create a task in a project. Always starts with status "active" at the first step of its craftbook. Provide either `craftbookId` (a recipe from the catalog) OR inline `steps` (an ad-hoc craftbook embedded in the task). For recurring work, also pass `spawnsCraftbookId` or `spawnsSteps` plus a `cron` expression; for N parallel copies, pass spawn-side steps plus a `fanout` config.',
   advance_task_step:
-    'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool. A SUCCESSFUL call is terminal for this gezel\'s turn: stop immediately and yield; the successor owns all further work. A rejected gate is not terminal — repair the named issue and retry.',
+    'Mark the step complete; pass `next` explicitly when the procedure chooses a destination. Omitting `next` follows configured routing, which can loop back. THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool. A SUCCESSFUL call is terminal for this gezel\'s turn: stop immediately and yield; the successor owns all further work. A rejected gate is not terminal — repair the named issue and retry.',
   list_gezels:
     "List every gezel (agent) on the user's team. Each entry includes id, name, and role. Use this to find the right gezel for a task, or to see who needs a change.",
   ensure_gezel:
@@ -59,7 +59,7 @@ export const GEZEL_TOOL_DESCRIPTIONS = {
   search:
     "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
   search_memory:
-    'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
+    "Search your memories, the project's, and what you know about the person you work for. Returns the most relevant remembered facts, decisions, and context.",
   save_memory:
     'Save an important fact, decision, preference, or context to memory so you can recall it later. Use this when you learn something worth remembering.',
   read_task_notes:

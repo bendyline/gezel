@@ -36,6 +36,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { FileAboutLine } from '../components/FileAboutLine.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
@@ -109,6 +110,7 @@ import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
+import { consumeProjectSection } from '../components/pending-project-section.js';
 import {
   type AiProviderEditabilityConfig,
   projectUsesClaude,
@@ -531,6 +533,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   } | null>(null);
   const [workspaceSourceReveal, setWorkspaceSourceReveal] =
     useState<WorkspaceSourceRevealRequest | null>(null);
+  // A video or sound search hit opens its file at the matched moment.
+  const [mediaStart, setMediaStart] = useState<{ path: string; startMs: number } | null>(null);
   // In-session output-pane choice, held only until the write to
   // `project.outputPaneVisible` lands (and, for a pre-server-side install,
   // until the localStorage value is migrated). The PROJECT is the source of
@@ -1181,7 +1185,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
       setWorkspaceIndexPaneOpen(false);
-      setTab('chat');
+      setTab(consumeProjectSection(id) ?? 'chat');
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
       setGitStatus('');
@@ -1208,9 +1212,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       source: FileTab,
       line?: number,
       fromQuestion?: boolean,
+      startMs?: number,
     ) => {
       setTab(source);
       setQuestionReturnPath(fromQuestion ? path : null);
+      setMediaStart(startMs === undefined ? null : { path, startMs });
       try {
         const file = await loadProjectFile(projectId, path, source);
         setOpenFile(file);
@@ -1270,12 +1276,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           source?: FileTab;
           line?: number;
           fromQuestion?: boolean;
+          startMs?: number;
         }>
       ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion);
+        void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion, d.startMs);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1295,6 +1302,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           intent.source,
           intent.line,
           intent.fromQuestion,
+          intent.startMs,
         );
       }
     });
@@ -2044,8 +2052,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   // Compact (narrow / mobile) form factor: the output pane can't sit
   // beside the content, so it becomes its own tab. It's offered whenever
-  // the workspace has any previewable HTML.
-  const compactOutputAvailable = effectiveCompact && workspaceHtmlFiles.length > 0;
+  // the workspace has any previewable HTML or the project type pins a page
+  // (a checkers project's board is the whole point of it).
+  const compactOutputAvailable =
+    effectiveCompact && (workspaceHtmlFiles.length > 0 || Boolean(typePage));
   const diffpackCount = useDiffpackCount(
     runtimeCapabilities().background ? (selected?.id ?? '') : '',
   );
@@ -3230,7 +3240,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         ) : undefined
                       }
                       viewerNotice={
-                        openFile && questionReturnPath === openFile.path ? (
+                        openFile &&
+                        questionReturnPath !== openFile.path &&
+                        openFile.source === 'workspace' &&
+                        runtimeCapabilities().index ? (
+                          <FileAboutLine projectId={selected.id} path={openFile.path} />
+                        ) : openFile && questionReturnPath === openFile.path ? (
                           <div className="file-viewer-return">
                             <button
                               type="button"
@@ -3269,6 +3284,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 {...(openFile.size === undefined
                                   ? {}
                                   : { sizeBytes: openFile.size })}
+                                {...(mediaStart?.path === openFile.path
+                                  ? { startMs: mediaStart.startMs }
+                                  : {})}
                               />
                               {openFile.content === MEDIA_IMAGE &&
                                 openFile.source === 'workspace' && (

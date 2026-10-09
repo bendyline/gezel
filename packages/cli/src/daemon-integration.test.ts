@@ -8,7 +8,7 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -664,46 +664,72 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     });
   });
 
-  it('keeps stdout reply-only when run owns an in-process service', async () => {
-    const runHome = await mkdtempHomeWithoutRetrieval('gezel-cli-run-output-');
-    const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-workspace-'));
-    const prompt = 'Reply exactly with: cli-stdout-only';
+  it.each(['', ' \r\n\t '])('rejects empty stdin (%j) before starting a service', async (input) => {
+    const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-empty-'));
     try {
-      const result = await execFileAsync(
-        process.execPath,
-        [cliEntry, '--home', runHome, '--standalone', 'run', prompt],
-        {
-          // This case verifies the CLI's stdout/stderr boundary, not workspace
-          // retrieval. Keep the empty project cwd separate from the service
-          // home so the indexer cannot ingest state the daemon is still writing.
-          cwd: runCwd,
-          env: childEnv({
-            GEZEL_HOME: runHome,
-            GEZEL_MOCK_PROVIDER: '1',
-            GEZEL_DISABLE_MACHINE_ENGINE: '1',
-            GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
-            GEZEL_SECRETS_BACKEND: 'file',
-            GEZEL_LOG_LEVEL: 'info',
-          }),
-          // Cold service startup and shutdown contend with the other
-          // integration workers in a full package run. Keep the child
-          // deadline below the test deadline so failures surface from the
-          // command itself and the finally block still has time to clean up.
-          timeout: 75_000,
-        },
-      );
-
-      expect(result.stdout).toBe(`Mock reply: ${prompt}\n`);
-      expect(result.stderr).toContain('INFO ');
-      expect(result.stderr).toContain('[service]');
-      expect(await readRuntime(runHome)).toBeNull();
+      const command = execFileAsync(process.execPath, [cliEntry, '--home', runHome, 'run', '-'], {
+        cwd: workspaceCwd,
+        env: childEnv({ GEZEL_HOME: runHome, GEZEL_MOCK_PROVIDER: '1' }),
+        timeout: 25_000,
+      });
+      command.child.stdin?.end(input);
+      await expect(command).rejects.toMatchObject({
+        code: 1,
+        stdout: '',
+        stderr: expect.stringContaining('empty input'),
+      });
+      expect(await readdir(runHome)).toEqual([]);
     } finally {
-      const runtime = await readRuntime(runHome).catch(() => null);
-      if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
       await rm(runHome, { recursive: true, force: true });
-      await rm(runCwd, { recursive: true, force: true });
     }
-  }, 90_000);
+  });
+
+  it.each(['arguments', 'stdin'])(
+    'keeps stdout reply-only when run reads %s and owns an in-process service',
+    async (source) => {
+      const runHome = await mkdtempHomeWithoutRetrieval('gezel-cli-run-output-');
+      const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-workspace-'));
+      const prompt = 'Summarize these notes:\nThe launch is Friday.\n';
+      try {
+        const command = execFileAsync(
+          process.execPath,
+          [cliEntry, '--home', runHome, '--standalone', 'run', source === 'stdin' ? '-' : prompt],
+          {
+            // This case verifies the CLI's stdout/stderr boundary, not workspace
+            // retrieval. Keep the empty project cwd separate from the service
+            // home so the indexer cannot ingest state the daemon is still writing.
+            cwd: runCwd,
+            env: childEnv({
+              GEZEL_HOME: runHome,
+              GEZEL_MOCK_PROVIDER: '1',
+              GEZEL_DISABLE_MACHINE_ENGINE: '1',
+              GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+              GEZEL_SECRETS_BACKEND: 'file',
+              GEZEL_LOG_LEVEL: 'info',
+            }),
+            // Cold service startup and shutdown contend with the other
+            // integration workers in a full package run. Keep the child
+            // deadline below the test deadline so failures surface from the
+            // command itself and the finally block still has time to clean up.
+            timeout: 75_000,
+          },
+        );
+        command.child.stdin?.end(source === 'stdin' ? prompt : undefined);
+        const result = await command;
+
+        expect(result.stdout).toBe(`Mock reply: ${source === 'stdin' ? prompt : prompt.trim()}\n`);
+        expect(result.stderr).toContain('INFO ');
+        expect(result.stderr).toContain('[service]');
+        expect(await readRuntime(runHome)).toBeNull();
+      } finally {
+        const runtime = await readRuntime(runHome).catch(() => null);
+        if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
+        await rm(runHome, { recursive: true, force: true });
+        await rm(runCwd, { recursive: true, force: true });
+      }
+    },
+    90_000,
+  );
 
   /**
    * The warm path, and the one that used to deadlock. Any command that starts

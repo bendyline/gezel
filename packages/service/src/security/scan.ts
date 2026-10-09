@@ -15,7 +15,8 @@ import { readFile } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
 import { type SecurityScanProvenance, createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
-import type { DependencyInput, IndexStore } from '../index-store/index-store.js';
+import type { DependencyInput } from '../index-store/index-store-types.js';
+import type { IndexStore } from '../index-store/index-store.js';
 import {
   type AvailableTools,
   detectTools,

@@ -72,11 +72,10 @@ const NON_SHIPPING_PROJECTS = ['@bendyline/gezel-evals', '@bendyline/gezel-eval-
 /**
  * Production declarations that never reach a released artifact.
  *
- * `@bendyline/squisq-editor-react` imports only the tree-shakable
- * `@bendyline/squisq-video-react/cover-image` entry. Upstream currently keeps
- * the browser encoder and `@ffmpeg/core` in that package's production
- * dependency graph even though the cover-image entry excludes it and Gezel no
- * longer publishes the core assets. The emitted UI is the shipping authority;
+ * `@bendyline/squisq-video-react` keeps `@ffmpeg/core` in its production
+ * dependency graph, but none of the entries Gezel's editors import
+ * (cover-image, dashboard-image, media-edit) loads it, and Gezel publishes no
+ * core assets. The emitted UI is the shipping authority;
  * `tests/published/bundledAssets.test.ts` guards that the ffmpeg runtime stays
  * absent.
  */

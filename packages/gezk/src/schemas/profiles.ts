@@ -37,6 +37,70 @@ export const DEFAULT_EMBEDDING_ONNX_FILE = 'onnx/model.onnx';
 export const DEFAULT_EMBEDDING_TOKENIZER_FILE = 'tokenizer.json';
 
 /**
+ * One more file the runtime loads beside the graph and the tokenizer (0.8).
+ * Large graphs keep their weights in an external-data sidecar
+ * (`onnx/model.onnx_data`), so a digest of the graph file alone pins a
+ * header and none of the weights; configs that steer loading belong here too.
+ */
+export const EmbeddingModelFileSchema = z.object({
+  path: RepoRelativePathSchema,
+  digest: ArtifactDigestSchema.optional(),
+});
+export type EmbeddingModelFile = z.infer<typeof EmbeddingModelFileSchema>;
+
+/** A media encoder graph in the profile's model repository, pinned like the text graph. */
+const EmbeddingMediaEncoderSchema = z.object({
+  onnxFile: RepoRelativePathSchema,
+  onnxDigest: ArtifactDigestSchema.optional(),
+  files: z.array(EmbeddingModelFileSchema).optional(),
+});
+
+/**
+ * How a multimodal profile turned media into vectors (0.8). Query vectors
+ * depend only on the text side, so none of this enters `sameVectorSpace`;
+ * it is the provenance a builder needs to reproduce a catalog's media rows,
+ * and the settings media floors are calibrated against.
+ */
+export const EmbeddingMediaSchema = z
+  .object({
+    image: z
+      .object({
+        encoder: EmbeddingMediaEncoderSchema,
+        /** Vision tokens per image; changing it moves every image vector. */
+        tokenBudget: z.number().int().positive(),
+        resample: z.enum(['bilinear', 'bicubic']),
+        /** Transparent pixels are composited onto white before encoding. */
+        alpha: z.literal('composite-white'),
+      })
+      .optional(),
+    /** Video frames go through the image encoder, so `video` requires `image`. */
+    video: z
+      .object({
+        framesPerSecond: z.number().positive(),
+        maxFrames: z.number().int().positive(),
+        tokenBudgetPerFrame: z.number().int().positive(),
+      })
+      .optional(),
+    audio: z
+      .object({
+        encoder: EmbeddingMediaEncoderSchema,
+        sampleRate: z.number().int().positive(),
+        channels: z.literal(1),
+        /** Longest window one audio row may cover. */
+        maxWindowMs: z.number().int().positive(),
+      })
+      .optional(),
+  })
+  .refine((media) => Boolean(media.image || media.video || media.audio), {
+    message: 'media must describe at least one modality',
+  })
+  .refine((media) => !media.video || Boolean(media.image), {
+    message: 'media.video requires media.image (frames go through the image encoder)',
+    path: ['video'],
+  });
+export type EmbeddingMedia = z.infer<typeof EmbeddingMediaSchema>;
+
+/**
  * The FULL vector-space identity of a catalog's embeddings, self-describing
  * so any reader can reproduce query vectors: the model by Hugging Face
  * coordinates, the tokenizer, pooling, normalization, dimensions, the
@@ -61,6 +125,8 @@ const KnowledgeEmbeddingProfileObject = z.object({
     onnxFile: RepoRelativePathSchema.optional(),
     /** sha256 of that file's bytes at `revision`. */
     onnxDigest: ArtifactDigestSchema.optional(),
+    /** Every further file the runtime loads: weight sidecars, configs (0.8). */
+    files: z.array(EmbeddingModelFileSchema).optional(),
   }),
   tokenizer: z.object({
     kind: z.string().min(1),
@@ -71,7 +137,19 @@ const KnowledgeEmbeddingProfileObject = z.object({
   }),
   pooling: z.enum(['mean', 'cls', 'last']),
   normalized: z.boolean(),
+  /** The stored vector width — after truncation, when the profile truncates. */
   dimensions: z.number().int().positive(),
+  /**
+   * Matryoshka truncation (0.8): the model emits `sourceDimensions` values,
+   * the first `dimensions` are kept, and the result is L2-normalized again.
+   * One rule for passages, queries and media; `profileUnitVector` owns it.
+   */
+  truncation: z
+    .object({
+      method: z.literal('prefix'),
+      sourceDimensions: z.number().int().positive(),
+    })
+    .optional(),
   maxTokens: z.number().int().positive(),
   queryInstruction: z.string(),
   passageInstruction: z.string(),
@@ -108,6 +186,7 @@ const KnowledgeEmbeddingProfileObject = z.object({
       center: z.array(z.number()).optional(),
     }),
   }),
+  media: EmbeddingMediaSchema.optional(),
 });
 export type KnowledgeEmbeddingProfile = z.infer<typeof KnowledgeEmbeddingProfileObject>;
 
@@ -137,7 +216,36 @@ export function embeddingProfileCenter(profile: KnowledgeEmbeddingProfile): Floa
   return center ? Float32Array.from(center) : null;
 }
 
-/** The profile schema proper: the object shape plus the center rule above. */
+/**
+ * Truncation keeps a strict prefix of a unit vector and re-normalizes, so it
+ * needs a source wider than the stored width and a normalized profile.
+ */
+export function embeddingProfileTruncationProblem(
+  profile: KnowledgeEmbeddingProfile,
+): string | null {
+  if (!profile.truncation) return null;
+  if (profile.truncation.sourceDimensions <= profile.dimensions) {
+    return `truncation.sourceDimensions (${profile.truncation.sourceDimensions}) must exceed dimensions (${profile.dimensions})`;
+  }
+  return profile.normalized ? null : 'truncation requires a normalized profile';
+}
+
+/** The width the model itself emits: `truncation.sourceDimensions`, else `dimensions`. */
+export function embeddingProfileSourceDimensions(profile: KnowledgeEmbeddingProfile): number {
+  return profile.truncation?.sourceDimensions ?? profile.dimensions;
+}
+
+/**
+ * The oldest format version that can describe this profile. Truncation,
+ * pinned extra files and a media block are 0.8 vocabulary: an older reader's
+ * strip-mode schema would drop them without a word and then embed queries the
+ * wrong way, so a catalog using any of them must refuse to open there instead.
+ */
+export function embeddingProfileMinimumFormat(profile: KnowledgeEmbeddingProfile): '0.5' | '0.8' {
+  return profile.truncation || profile.model.files || profile.media ? '0.8' : '0.5';
+}
+
+/** The profile schema proper: the object shape plus the cross-field rules above. */
 export const KnowledgeEmbeddingProfileSchema = KnowledgeEmbeddingProfileObject.superRefine(
   (profile, ctx) => {
     const problem = embeddingProfileCenterProblem(profile);
@@ -148,6 +256,10 @@ export const KnowledgeEmbeddingProfileSchema = KnowledgeEmbeddingProfileObject.s
         path: ['quantization', 'binary', 'center'],
       });
     }
+    const truncation = embeddingProfileTruncationProblem(profile);
+    if (truncation) {
+      ctx.addIssue({ code: 'custom', message: truncation, path: ['truncation'] });
+    }
   },
 );
 
@@ -157,12 +269,15 @@ export function embeddingProfileArtifacts(profile: KnowledgeEmbeddingProfile): {
   onnxDigest: string | null;
   tokenizerFile: string;
   tokenizerDigest: string | null;
+  /** Further text-model files (sidecars, configs), in the profile's order. */
+  files: Array<{ path: string; digest: string | null }>;
 } {
   return {
     onnxFile: profile.model.onnxFile ?? DEFAULT_EMBEDDING_ONNX_FILE,
     onnxDigest: profile.model.onnxDigest ?? null,
     tokenizerFile: profile.tokenizer.file ?? DEFAULT_EMBEDDING_TOKENIZER_FILE,
     tokenizerDigest: profile.tokenizer.digest ?? null,
+    files: (profile.model.files ?? []).map((f) => ({ path: f.path, digest: f.digest ?? null })),
   };
 }
 
@@ -170,11 +285,16 @@ export function embeddingProfileArtifacts(profile: KnowledgeEmbeddingProfile): {
  * Whether two profiles describe one vector space, so vectors from either
  * may be compared: same model files at the same revision, same tokenizer,
  * pooling, normalization, dimensions, instruction prefixes, encoding and
- * int8 quantization. The profile id and `maxTokens` are not compared — the
- * first is a label, the second a compile-time bound. A digest counts only
- * when both sides declare one: two pins at one revision that hash
- * differently name different artifacts, whatever the path says; an
- * undeclared digest is simply not a claim.
+ * int8 quantization, and the same truncation from the same source width. The
+ * profile id and `maxTokens` are not compared — the first is a label, the
+ * second a compile-time bound. A digest counts only when both sides declare
+ * one: two pins at one revision that hash differently name different
+ * artifacts, whatever the path says; an undeclared digest is simply not a
+ * claim. Extra `model.files` follow the same rule, path by path.
+ *
+ * The `media` block is not compared either: a text query vector is valid
+ * against a catalog's media rows however their pixels or samples were
+ * encoded.
  *
  * The binary (stage-1) parameters are deliberately NOT compared. They
  * describe how a catalog derived its own pre-filter bits, and a reader
@@ -190,7 +310,14 @@ export function sameVectorSpace(
   const aa = embeddingProfileArtifacts(a);
   const ab = embeddingProfileArtifacts(b);
   const digestsAgree = (x: string | null, y: string | null): boolean => !x || !y || x === y;
+  const bFiles = new Map(ab.files.map((f) => [f.path, f.digest]));
+  const filesAgree = aa.files.every(
+    (f) => !bFiles.has(f.path) || digestsAgree(f.digest, bFiles.get(f.path) ?? null),
+  );
   return (
+    filesAgree &&
+    a.truncation?.method === b.truncation?.method &&
+    embeddingProfileSourceDimensions(a) === embeddingProfileSourceDimensions(b) &&
     a.model.repo === b.model.repo &&
     a.model.revision === b.model.revision &&
     aa.onnxFile === ab.onnxFile &&

@@ -517,14 +517,14 @@ describe('renderRecallBlock', () => {
     expect(renderRecallBlock([])).toBe('');
   });
 
-  it('formats each hit with scope/day prefix', () => {
+  it('formats each hit as a note, like every other memory surface', () => {
     const block = renderRecallBlock([
       { text: 'Used pgvector for embeddings', scope: 'project', day: '2026-04-10', score: 0.9 },
       { text: 'User prefers terse replies', scope: 'gezel', day: '2026-04-09', score: 0.85 },
     ]);
     expect(block).toContain('### Recalled from prior sessions');
-    expect(block).toContain('- [project/2026-04-10] Used pgvector for embeddings');
-    expect(block).toContain('- [gezel/2026-04-09] User prefers terse replies');
+    expect(block).toContain('- Project note (2026-04-10): Used pgvector for embeddings');
+    expect(block).toContain('- Your note (2026-04-09): User prefers terse replies');
   });
 
   it('renders status hits with explicit temporality that self-refreshes with now', () => {
@@ -539,12 +539,12 @@ describe('renderRecallBlock', () => {
     ];
     const at10 = renderRecallBlock(hits, new Date('2026-06-11T12:00:00Z'));
     expect(at10).toContain(
-      '- [project/2026-06-01] As of 2026-06-01 (10 days ago): The staging key is missing.',
+      '- Project note (status, 2026-06-01): As of 10 days ago: The staging key is missing.',
     );
     const at1 = renderRecallBlock(hits, new Date('2026-06-02T12:00:00Z'));
-    expect(at1).toContain('(1 day ago):');
+    expect(at1).toContain('As of 1 day ago:');
     const at0 = renderRecallBlock(hits, new Date('2026-06-01T12:00:00Z'));
-    expect(at0).toContain('(today):');
+    expect(at0).toContain('As of today:');
   });
 
   it('renders workspace hits without a day stamp', () => {
@@ -613,7 +613,7 @@ describe('renderRecallBlock', () => {
       ],
       new Date('2026-06-11T00:00:00Z'),
     );
-    expect(block).toContain('- [project/2026-06-01] Chose Hono.');
+    expect(block).toContain('- Project note (decision, 2026-06-01): Chose Hono.');
     expect(block).not.toContain('As of');
   });
 });

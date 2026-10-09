@@ -633,6 +633,46 @@
   background: var(--hover, rgba(127, 127, 127, 0.12));
 }
 
+/* A photo tile (PhotoThumb): square-cropped with the small radius, so a grid
+   reads as prints laid out on a table. Here because titlebar search draws it;
+   the grids and albums that also use it are in village-and-overview.css. */
+.photo-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.photo-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+}
+.search-results-row.with-thumb {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  column-gap: 0.6rem;
+  align-items: start;
+}
+.search-results-row.with-thumb > :not(.search-results-thumb) {
+  grid-column: 2;
+}
+.search-results-thumb {
+  grid-row: 1 / span 3;
+  width: 3rem;
+}
+
 .search-results-title {
   font-size: var(--text-sm, 0.9rem);
 }

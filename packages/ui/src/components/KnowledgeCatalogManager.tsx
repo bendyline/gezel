@@ -21,6 +21,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { InstallProgressRow } from './InstallProgressRow.js';
+import { KnowledgeCatalogMark } from './KnowledgeCatalogMark.js';
 import { LicenseButton } from './LicenseButton.js';
 import { formatBytes } from './engine-pill-stats.js';
 
@@ -665,19 +666,22 @@ export function KnowledgeCatalogManager() {
                   return (
                     <tr key={c.ref.catalogId} data-testid={`knowledge-catalog-${c.ref.catalogId}`}>
                       <td className="model-name-table-cell">
-                        <div className="model-name-cell">
-                          <strong>{c.name ?? c.ref.catalogId}</strong>
-                          <div className="model-name-meta">
-                            <code>{c.ref.catalogId}</code>
-                            {c.language && <span className="muted small">{c.language}</span>}
-                            {c.updateAvailable && (
-                              <span
-                                className="gz-status-pill gz-status-pill--warn"
-                                title={`A newer release is available in the catalog (→ v${c.availableVersion ?? ''}).`}
-                              >
-                                update available
-                              </span>
-                            )}
+                        <div className="knowledge-installed-name">
+                          <KnowledgeCatalogMark catalog={c} size="md" />
+                          <div className="model-name-cell">
+                            <strong>{c.name ?? c.ref.catalogId}</strong>
+                            <div className="model-name-meta">
+                              <code>{c.ref.catalogId}</code>
+                              {c.language && <span className="muted small">{c.language}</span>}
+                              {c.updateAvailable && (
+                                <span
+                                  className="gz-status-pill gz-status-pill--warn"
+                                  title={`A newer release is available in the catalog (→ v${c.availableVersion ?? ''}).`}
+                                >
+                                  update available
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>

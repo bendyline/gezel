@@ -505,16 +505,21 @@ export function HtmlPreviewFrame({
       };
       if (!data) return;
 
-      // Snapshot previews carry only the selected files. They never relay
-      // page reads, tools, watches or refresh messages into the product API.
-      if (
-        window.__GEZEL__?.createHtmlPreview &&
-        (data.__gezelPreviewLog !== true ||
-          data.__gezelPage === 1 ||
+      // Snapshot previews carry only the selected files. A workspace or
+      // artifact snapshot never relays page reads, tools, watches or refresh
+      // messages into the product API. A project type's page speaks the v1
+      // bridge its manifest declares, as it does on the desktop; the routes
+      // behind it re-derive that allowlist on every call.
+      if (window.__GEZEL__?.createHtmlPreview) {
+        const typeBridge = source === 'type' && data.__gezelPage === 1;
+        const logOnly = data.__gezelPreviewLog === true && data.__gezelPage !== 1;
+        if (
+          (!typeBridge && !logOnly) ||
           data.__gezelPageInvoke === true ||
-          data.__gezelPageRefresh === true)
-      )
-        return;
+          data.__gezelPageRefresh === true
+        )
+          return;
+      }
       if (data.__gezelPage === 1 && typeof (data as { kind?: unknown }).kind === 'string') {
         handleV1Message(data as unknown as Record<string, unknown>);
         return;

@@ -9,7 +9,9 @@
  *   - a first-party native helper whose third-party notice is not inventoried;
  *   - missing or orphaned native license texts;
  *   - a built UI font missing from the font manifest/NOTICE (or vice versa);
- *   - a font license absent from the service npm payload or stale on disk.
+ *   - a font license absent from the service npm payload or stale on disk;
+ *   - a browser-bundle license inventory that is stale, or a copyleft term in
+ *     it that NOTICE.md does not resolve.
  */
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
@@ -22,6 +24,7 @@ import {
   pnpmReleaseTargets,
   shippedPnpmRuntimePackages,
 } from './pnpm-runtime-inventory.mjs';
+import { verifyServiceBundledLicenses } from './service-bundled-licenses.mjs';
 import { verifyServiceFontLegalBundle } from './service-font-legal.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -478,6 +481,109 @@ async function checkFontInventory(notice) {
   };
 }
 
+const WEAK_COPYLEFT = /^(?:MPL|EPL|CDDL|LGPL|CPL|EUPL)-/i;
+const STRONG_COPYLEFT = /^(?:A?GPL|SSPL|OSL|CC-BY-SA)-/i;
+
+function isCopyleft(id) {
+  return WEAK_COPYLEFT.test(id) || STRONG_COPYLEFT.test(id);
+}
+
+/** Split a license expression into its alternatives (`OR`, `/`) or its conjuncts. */
+function licenseTerms(expression) {
+  const bare = expression.replace(/[()]/g, ' ').trim();
+  if (/\s+OR\s+|\//.test(bare)) {
+    return { choice: true, ids: bare.split(/\s+OR\s+|\//).map((id) => id.trim()) };
+  }
+  return { choice: false, ids: bare.split(/\s+AND\s+/).map((id) => id.trim()) };
+}
+
+function firstCodeSpan(cell) {
+  return cell?.match(/`([^`]+)`/)?.[1];
+}
+
+/**
+ * The browser bundles' generated license inventory must be current, and every
+ * copyleft term in it must be resolved in NOTICE.md: a weak-copyleft package
+ * by a row with its source, a dual license by an election of the permissive
+ * option. A strong-copyleft package cannot ship in the MIT bundle at all.
+ */
+async function checkBundledPackageInventory(notice) {
+  const { packages, bundled } = await verifyServiceBundledLicenses();
+  if (packages.length === 0) {
+    throw new Error(
+      'packages/service/dist has no browser-bundle license inventory; build the UI and service before checking notices',
+    );
+  }
+  if (!notice.includes('dist/licenses/npm/')) {
+    throw new Error('NOTICE.md must point npm readers at dist/licenses/npm/');
+  }
+  const section = markdownSection(notice, 'Code compiled into the browser bundles');
+  const weakRows = parseMarkdownTable(markdownSubsection(section, 'Weak-copyleft components'))
+    .filter((cells) => cells[0] !== 'Component')
+    .map((cells) => ({ name: firstCodeSpan(cells[0]), cells }));
+  const elections = new Map(
+    parseMarkdownTable(markdownSubsection(section, 'License elections'))
+      .filter((cells) => cells[0] !== 'Package')
+      .map((cells) => [firstCodeSpan(cells[0]), plainMarkdown(cells[2] ?? '')]),
+  );
+
+  const problems = [];
+  for (const record of packages) {
+    const id = `${record.name}@${record.version}`;
+    const { choice, ids } = licenseTerms(record.license);
+    if (choice) {
+      if (!ids.some(isCopyleft)) continue;
+      const elected = elections.get(record.name);
+      if (!elected) {
+        problems.push(`${id} is ${record.license}; add a License elections row`);
+      } else if (!ids.includes(elected) || isCopyleft(elected)) {
+        problems.push(`${id}: elected ${elected} is not a permissive option of ${record.license}`);
+      }
+    } else if (ids.some((term) => STRONG_COPYLEFT.test(term))) {
+      problems.push(`${id} is ${record.license}, which the MIT browser bundle cannot carry`);
+    } else if (ids.some((term) => WEAK_COPYLEFT.test(term))) {
+      if (!weakRows.some((row) => row.name === record.name)) {
+        problems.push(`${id} is ${record.license}; add a Weak-copyleft components row`);
+      }
+    }
+  }
+  const names = new Set(packages.map((record) => record.name));
+  for (const name of elections.keys()) {
+    if (!names.has(name)) problems.push(`License elections names ${name}, which is not bundled`);
+  }
+
+  const byName = new Map([...bundled.values()].map((pkg) => [pkg.name, pkg]));
+  for (const { name, cells } of weakRows) {
+    const version = plainMarkdown(cells[1] ?? '');
+    const carrierName = firstCodeSpan(cells[3]);
+    const carrier = byName.get(carrierName);
+    const declared = ['dependencies', 'devDependencies', 'optionalDependencies']
+      .map((field) => carrier?.packageJson[field]?.[name])
+      .find(Boolean);
+    const shippedDirectly = packages.some(
+      (record) => record.name === name && record.version === version,
+    );
+    if (!shippedDirectly && declared !== version) {
+      problems.push(
+        carrier
+          ? `Weak-copyleft row ${name}@${version}: ${carrierName}@${carrier.version} declares ${declared ?? `no ${name}`}`
+          : `Weak-copyleft row ${name}@${version}: carrier ${carrierName ?? '(none named)'} is not bundled`,
+      );
+    }
+    const tarball = `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${version}.tgz`;
+    if (!cells[4]?.includes(tarball)) {
+      problems.push(`Weak-copyleft row ${name}@${version} must link its npm tarball ${tarball}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`browser-bundle license inventory:\n  - ${problems.join('\n  - ')}`);
+  }
+  return {
+    packages: packages.length,
+    embedded: packages.filter((record) => record.embeddedIn).length,
+  };
+}
+
 async function checkBundledRuntimes(notice) {
   const appRoot = join(repoRoot, 'packages', 'app');
   const requireFromApp = createRequire(join(appRoot, 'package.json'));
@@ -601,15 +707,16 @@ export async function verifyNoticeInventory() {
   const notice = await readFile(join(repoRoot, 'NOTICE.md'), 'utf8');
   const native = await checkNativeInventory(notice);
   const fonts = await checkFontInventory(notice);
+  const bundledCode = await checkBundledPackageInventory(notice);
   const runtimes = await checkBundledRuntimes(notice);
   const pnpmRuntime = await checkPnpmRuntimeInventory(notice);
-  return { native, fonts, runtimes, pnpmRuntime };
+  return { native, fonts, bundledCode, runtimes, pnpmRuntime };
 }
 
 async function main() {
   const result = await verifyNoticeInventory();
   console.log(
-    `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ${result.native.helpers} native helper${result.native.helpers === 1 ? '' : 's'} with third-party notices, ${result.native.licenseFiles} native license texts, ${result.fonts.families} font families, ${result.fonts.files} built font files, ${result.fonts.licenseFiles} service font-license files, and ${result.runtimes.count} bundled application runtimes with ${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
+    `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ${result.native.helpers} native helper${result.native.helpers === 1 ? '' : 's'} with third-party notices, ${result.native.licenseFiles} native license texts, ${result.fonts.families} font families, ${result.fonts.files} built font files, ${result.fonts.licenseFiles} service font-license files, ${result.bundledCode.packages} browser-bundle packages (${result.bundledCode.embedded} inlined by dependencies), and ${result.runtimes.count} bundled application runtimes with ${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
   );
 }
 

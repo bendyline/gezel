@@ -444,7 +444,12 @@ See the upstream gezel docs for the full route table and the OpenAPI document. T
 
 For opt-in lifecycle, model readiness/preparation, cancellation, and packaging, see
 [the embedding guide](https://github.com/bendyline/gezel/blob/main/docs/embedding-sdk.md).
-The existing low-level connection APIs remain available.
+The existing low-level connection APIs remain available. Applications with an
+existing lifecycle can use `connectDesktopEmbedding` from `/host`; it shares the
+same consent and hosted-model policy and returns `app`, `models`, `mode`,
+`revoke`, and `close`. Both desktop APIs opt into catalog authority with
+`knowledge: true`. `streamText` accepts temperature/reasoning controls and optional
+knowledge budgets, and emits progress plus final model/usage metadata.
 
 ## Knowledge catalogs
 
@@ -454,21 +459,60 @@ inference-only grant cannot silently gain catalog-management authority. The same
 API works through the private in-process host's direct Fetch transport.
 
 - `app.knowledge.state({ signal })` lists installed and available catalogs,
-  updates, download progress, errors, and relevance-model readiness.
+  updates, download progress, and errors. `improvement` is non-null when a
+  one-time relevance-model download would rank passages better: a catalog is
+  enabled, the model is missing, and this Gezel can download it. It carries
+  `downloadBytes` for the offer and `downloading` / `percent` once started.
 - `app.knowledge.update({ action, catalogId }, { signal })` supports
   `install` (also updates), `remove`, `enable`, `disable`, and `cancel`.
   Only curated IDs are accepted; downloads use private user placement. Removal
   affects every app using that provider's catalog registry.
-- `app.knowledge.update({ action: 'prepare-reranker' }, { signal })` explicitly
-  downloads the selected relevance model. Poll state for completion or failure.
-- `app.knowledge.retrieve({ query, rerank: 'required', maxResults: 4,
-  maxCharacters: 12000 }, { signal })` returns bounded, cited passages from
-  enabled catalogs. It waits for reranker loading and refuses incomplete scoring.
-  It never installs the relevance model or bypasses missing-model errors.
+- `app.knowledge.update({ action: 'prepare-reranker' }, { signal })` starts the
+  `improvement` download. Poll state until `improvement` is null.
+- `app.knowledge.retrieve({ query, maxResults: 4, maxCharacters: 12000 },
+  { signal })` returns bounded, cited passages from enabled catalogs. By
+  default (`rerank: 'auto'`) Gezel ranks them with the relevance model when it
+  is installed, and otherwise returns only passages that clear the bar Gezel
+  applies to its own unranked catalog hits; `reranked` says which. A missing
+  model is never an error. Against a Gezel older than `auto`, the SDK falls back
+  to `required` and returns no passages when that Gezel has no model.
+  `rerank: 'required'` refuses with `reranker_required` instead. Neither mode
+  installs the model.
+
+Offer `improvement` to people as better results with its size, for example
+"Improve knowledge results with a 300 MB model download", and stop showing it
+once it is null. Never call it a reranker.
 
 The caller includes returned passages in its own chat prompt as untrusted
 reference material. Plain `app.chat()` does not implicitly retrieve knowledge.
 With no enabled catalogs or no candidates, retrieval returns an empty list.
+Gezel's bundled Handboek is Gezel's own manual: apps never see, manage, or
+retrieve from it, so a fresh install has no enabled catalogs and needs no
+relevance model.
 Catalog and relevance-model downloads must follow an explicit user action.
 This surface grants no access to projects, sessions, arbitrary paths, URLs,
 machine-wide catalogs, or broader product administration.
+
+### Live inference progress
+
+Pass `stream_options: { include_progress: true, include_usage: true }` to `app.chat`
+with `stream: true`. Progress-only chunks have an empty `choices` array and a
+validated `gezel_progress` object: `phase` (`starting`, `queued`, `loading_model`,
+`prefill`, `reasoning`, or `generating`), `percent`, `outputTokens`, and
+`tokensPerSecond`. Read reply text with `chunk.choices[0]?.delta.content`.
+
+Percentages come from the engine and apply only to loading or prefill. Token
+counts and throughput are exact when reported; unknown values are `null`.
+Counts may include private reasoning, but progress never includes reasoning
+text, prompts, session identifiers, or engine log messages. Phase transitions
+are immediate and counter updates are throttled. Providers without telemetry
+still announce observed reasoning/response activity; older Gezel releases
+ignore the option and keep streaming content normally. This requires a Gezel
+service release containing the progress extension, not just an SDK update.
+
+`withKnowledgeContext(app.knowledge, messages, options)` provides optional cited
+evidence within explicit `maxPromptCharacters` and `maxMessages` limits. Optional
+context/output budgets use a conservative character estimate, not a tokenizer.
+It fails open on unavailable or malformed knowledge and propagates cancellation;
+plain `app.chat` does not enrich requests automatically. This helper is also
+available from `/browser`.

@@ -499,6 +499,11 @@ export function projectReportActionsFile(root: string, projectId: string): strin
   return join(projectPrivateDir(root, projectId), 'report-actions.json');
 }
 
+/** The project's one reminder, set by its own scripts. Account-private. */
+export function projectReminderFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'reminder.json');
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,
@@ -653,6 +658,20 @@ export function projectMemoriesDir(
 }
 
 /**
+ * The person's own memories ("About you"), shared by every gezel: daily
+ * markdown laid out like a gezel's `memories/`, with no lessons file.
+ * Always under the account's home, never a machine-shared root.
+ */
+export function userMemoriesDir(root: string): string {
+  return join(root, 'memories');
+}
+
+/** Derived vector index for the person's memories. */
+export function userMemoryIndexDir(root: string): string {
+  return join(userMemoriesDir(root), 'index');
+}
+
+/**
  * Per-account derived vector index for project memories. The canonical memory
  * markdown follows the project via {@link projectMemoriesDir}; mutable SQLite
  * never does.
@@ -709,6 +728,16 @@ export function sharedCloneDir(root: string, key: string): string {
  */
 export function projectIndexDir(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), '_index');
+}
+
+/**
+ * Per-project thumbnail cache: small JPEGs of workspace photos for grids and
+ * the morning view. Per-account and derived — it lives in the private sidecar,
+ * never in the (possibly synced, possibly read-only) workspace or the
+ * artifacts drawer gezels read. Size-capped; safe to delete.
+ */
+export function projectThumbnailsDir(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'thumbs');
 }
 
 /**
@@ -1126,12 +1155,10 @@ export function projectLocalRoot(workspaceDir: string): string {
 }
 
 /**
- * Workspace content-index store (code/doc intelligence — the boekwachter
- * index). Lives under the project-local `.gezel/index/` so it travels with the
- * repo *folder*, but gezel writes a `.gitignore` inside it so the binary sqlite
- * DB + regenerable artifacts are never committed. Distinct from the host-local
- * `_index/` (commands/files/tokens) under `~/.gezel`: that one is machine-
- * specific (mtimes, installed CLIs); this one is content-derived.
+ * LEGACY location of the content index, inside the workspace at
+ * `.gezel/index/`. Nothing writes here any more ({@link projectContentIndexDbFile}
+ * is home-side); kept so the boot migration and the `hasIndex` probe can find
+ * an index an earlier build left behind, and for test-only one-shot indexing.
  */
 export function projectLocalIndexDir(workspaceDir: string): string {
   return join(projectLocalRoot(workspaceDir), 'index');
@@ -1153,48 +1180,43 @@ export function projectLocalFilesDir(workspaceDir: string): string {
 }
 
 /**
- * Quarantine for untrusted content the safety scanner refused to index
- * (prompt-injection payloads, attachments that failed parser-safety checks).
- * Lives under `.gezel/quarantine/` — inside the project-local root the content
- * indexer skips, so quarantined material is structurally unreachable by search
- * + embeddings. Operators can inspect the raw artifacts here manually.
+ * LEGACY: where earlier builds put connector content the safety scanner
+ * refused, inside the workspace. Quarantine now lives in gezel's private
+ * per-project folder (`projectPrivateDir(home, id)/quarantine`) so a connector
+ * sync never writes into a person's folder.
+ *
+ * @deprecated Kept for published-API compatibility; nothing in gezel writes here.
  */
 export function projectLocalQuarantineDir(workspaceDir: string): string {
   return join(projectLocalRoot(workspaceDir), 'quarantine');
 }
 
 /**
- * Home-local fallback for the content index when the workspace `.gezel/` isn't
- * writable (external read-only repos). Mirrors the `_index` placement but for
- * the content-derived DB.
+ * Gezel's own per-project folder for derived index databases (the content
+ * index, the artifacts index). Every project's content index lives here.
  */
 export function fallbackProjectIndexDir(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'index');
 }
 
 /**
- * Mutable content-index database for a project. Ordinary writable workspaces
- * retain the historical `.gezel/index/` placement; machine-shared workspaces
- * always use the account-private fallback to prevent cross-daemon SQLite use.
+ * Mutable content-index database for a project: always in gezel's own
+ * per-project folder, never inside the workspace. Adding a folder to gezel
+ * must not write into it — not even a derived index — and mutable SQLite must
+ * not ride a sync client or end up committed to a repository. Earlier builds
+ * kept it at `<workspace>/.gezel/index/index.db`; the boot migration moves
+ * those (`migrateWorkspaceIndexes`).
  */
 export function projectContentIndexDbFile(
   root: string,
   projectId: string,
-  workspaceDir: string,
-  opts: {
-    /**
-     * Keep the database out of the workspace even though it is writable.
-     * The shared document library's workspace is the user's own documents
-     * folder, which may be a cloud-synced directory (OneDrive/Dropbox):
-     * mutable SQLite must not ride a sync client, and the user must not find
-     * a `.gezel/` directory in a folder they browse in Finder.
-     */
+  _workspaceDir: string,
+  _opts: {
+    /** No longer needed: every project's index is home-side. Kept for callers. */
     forceHomeSide?: boolean;
   } = {},
 ): string {
-  return opts.forceHomeSide || projectStorageScope(root, projectId) === 'machine-shared'
-    ? join(fallbackProjectIndexDir(root, projectId), 'index.db')
-    : projectLocalIndexDbFile(workspaceDir);
+  return join(fallbackProjectIndexDir(root, projectId), 'index.db');
 }
 
 /**

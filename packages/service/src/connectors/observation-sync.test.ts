@@ -74,6 +74,7 @@ function harness(manifest: ReturnType<typeof observationManifest> = observationM
     },
     projectWorkspaceDir: async () => ws,
     projectArtifactsDir: () => join(ws, 'artifacts'),
+    projectQuarantineDir: () => join(ws, 'private', 'quarantine'),
     get historyManager() {
       return undefined;
     },

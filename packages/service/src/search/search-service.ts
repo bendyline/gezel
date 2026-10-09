@@ -19,8 +19,17 @@ import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
-import { embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
+import { queryTerms } from '../index-store/query-terms.js';
+import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
+import {
+  type MemoryScope,
+  USER_MEMORY_ID,
+  sameProjectMemoryScore,
+} from '../memory/daily-markdown.js';
+import { embedKnowledgeQuery, embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
+import { imageEmbedAvailability } from '../memory/image-embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
+import type { SearchResult as MemorySearchResult } from '../memory/vector-index.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import {
   type ActiveRelevance,
@@ -162,6 +171,8 @@ export interface KnowledgeSearchProvider {
        * it keyword-only. Omitted → wait for the model however long it takes.
        */
       queryEmbedBudgetMs?: number;
+      /** Include catalog media rows as results (explicit search only). */
+      media?: boolean;
     },
   ): Promise<UnifiedSearchResult[]>;
 }
@@ -324,6 +335,11 @@ export class SearchService {
       skipColdEmbedder?: boolean;
       /** Re-judge the fused order with the relevance model, when one is on. */
       relevance?: RelevanceStageRequest;
+      /**
+       * Include media hits (images, audio and video windows) as results of
+       * their own. Explicit searches ask; proactive turn retrieval does not.
+       */
+      media?: boolean;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -353,6 +369,7 @@ export class SearchService {
       ...(opts.catalogs ? { catalogs: opts.catalogs } : {}),
       ...(opts.projectIds[0] ? { primaryProjectId: opts.projectIds[0] } : {}),
       ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
+      ...(opts.media ? { media: true } : {}),
       // Scale per-source fetch with paging depth so page 2 has material to
       // page into; identical to PER_SOURCE_RESULTS at offset 0.
       perSourceResults: Math.min(25, Math.max(PER_SOURCE_RESULTS, Math.ceil(fetchDepth / 6))),
@@ -681,6 +698,8 @@ export class SearchService {
        * path follows. Explicit searches leave this off and wait.
        */
       skipColdEmbedder?: boolean;
+      /** Include media hits; unscoped (titlebar) search always does. */
+      media?: boolean;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -719,6 +738,33 @@ export class SearchService {
     // under-represent the corpus — distinct from caps/dedupe truncation.
     let sourcesIncomplete = false;
 
+    // One memory scope's hits: by meaning when the embedder answered, else by
+    // keyword over the daily files, so a cold or disabled embedder still
+    // recalls. Keyword hits rank like every other `fts` arm and stay subject
+    // to retrieval's grounding check; the current project's entries rank first.
+    const memoryTerms = vector ? [] : queryTerms(query);
+    const preferProject = scope?.primaryProjectId;
+    const memoryHits = async (
+      memoryScope: MemoryScope,
+      id: string,
+    ): Promise<Array<{ row: MemorySearchResult; arm: 'vector' | 'fts'; relevance: number }>> => {
+      if (vector) {
+        const rows = await this.memory.searchVector(memoryScope, id, vector, PER_MEMORY_RESULTS);
+        return rows
+          .filter((row) => row.score >= MEMORY_MIN_SIMILARITY)
+          .map((row) => ({
+            row,
+            arm: 'vector' as const,
+            relevance: sameProjectMemoryScore(row.score, row.source, preferProject),
+          }));
+      }
+      const rows = await this.memory.searchTerms(memoryScope, id, memoryTerms, PER_MEMORY_RESULTS);
+      return rows
+        .map((row) => ({ row, s: sameProjectMemoryScore(row.score, row.source, preferProject) }))
+        .sort((a, b) => b.s - a.s)
+        .map(({ row }, rank) => ({ row, arm: 'fts' as const, relevance: ftsRankRelevance(rank) }));
+    };
+
     // Per-arm timing/outcome telemetry. Every arm is caught-to-null below,
     // so without this a failing arm is indistinguishable from an empty one.
     const armTimings: RetrievalArmTiming[] = [];
@@ -752,6 +798,23 @@ export class SearchService {
       }
     };
 
+    // Workspace photos, video and audio windows by meaning. The media-search
+    // profile embeds the query once, inside the knowledge query budget so a
+    // cold model never holds the search, and only while media search is on
+    // and installed. Vector hits only: filenames come from the file arm.
+    const wantMedia = (scope ? scope.media === true : true) && imageEmbedAvailability().ok;
+    let mediaVectorPending: Promise<number[] | null> | null = null;
+    const mediaVector = (): Promise<number[] | null> => {
+      mediaVectorPending ??= withTimeout(
+        embedKnowledgeQuery(query, MEDIA_SEARCH_PROFILE, { localFilesOnly: true }).catch(
+          () => null,
+        ),
+        KNOWLEDGE_QUERY_EMBED_BUDGET_MS,
+        null,
+      );
+      return mediaVectorPending;
+    };
+
     // One pool unit per project: code + docs + symbols + project memory.
     const perProject = projects.map((p) => ({
       label: `project:${p.id}`,
@@ -765,7 +828,7 @@ export class SearchService {
         const codeOpts = vector
           ? { queryVector: vector, maxResults: perSource }
           : { mode: 'keyword' as const, maxResults: perSource };
-        const [code, docs, artifacts, symbols, areas, mem] = await Promise.all([
+        const [code, docs, artifacts, symbols, areas, mem, media] = await Promise.all([
           workspaceIndexing && wants('workspace')
             ? timed(
                 'workspace:code',
@@ -806,13 +869,28 @@ export class SearchService {
                 () => this.contentIndex.searchAreaSummaries(p.id, query, perSource),
               )
             : Promise.resolve(null),
-          vector && wants('project-memory')
+          wants('project-memory')
             ? timed(
-                'project-memory',
+                vector ? 'project-memory' : 'project-memory:keyword',
                 p.id,
                 (r) => r?.length ?? 0,
-                () =>
-                  this.memory.searchVector('project', p.id, vector as number[], PER_MEMORY_RESULTS),
+                () => memoryHits('project', p.id),
+              )
+            : Promise.resolve(null),
+          workspaceIndexing && wantMedia && wants('workspace')
+            ? timed(
+                'workspace:media',
+                p.id,
+                (r) => r?.results.length ?? 0,
+                async () => {
+                  const mv = await mediaVector();
+                  if (!mv) return null;
+                  return this.contentIndex.searchImages(p.id, query, perSource, {
+                    kinds: ['image', 'video', 'audio'],
+                    vector: mv,
+                    vectorOnly: true,
+                  });
+                },
               )
             : Promise.resolve(null),
         ]);
@@ -902,8 +980,35 @@ export class SearchService {
             ...scoreResult('content', area.score),
           });
         }
-        for (const r of mem ?? []) {
-          if (r.score < MEMORY_MIN_SIMILARITY) continue;
+        for (const h of media?.results ?? []) {
+          const windowed = h.startMs !== undefined;
+          out.push({
+            kind: 'file',
+            // An image shares the file arm's id, so a filename match and a
+            // meaning match of the same photo are one row; a video or audio
+            // window is its own row per moment.
+            id: `file:${p.id}:${h.path}${windowed ? `#${h.startMs}` : ''}`,
+            title: basename(h.path),
+            subtitle: `${p.name} · ${h.path}`,
+            ...(h.caption ? { snippet: h.caption } : {}),
+            projectId: p.id,
+            projectName: p.name,
+            path: h.path,
+            source: 'workspace',
+            retrievalSource: 'workspace',
+            arm: 'vector',
+            media: {
+              modality: h.kind ?? 'image',
+              assetPath: h.path,
+              ...(h.width ? { width: h.width } : {}),
+              ...(h.height ? { height: h.height } : {}),
+              ...(windowed ? { startMs: h.startMs } : {}),
+              ...(h.endMs !== undefined ? { endMs: h.endMs } : {}),
+            },
+            ...scoreResult('file', h.score),
+          });
+        }
+        for (const { row: r, arm, relevance } of mem ?? []) {
           out.push({
             kind: 'memory',
             id: `memory:project:${p.id}:${r.day}:${hashText(r.text)}`,
@@ -913,43 +1018,71 @@ export class SearchService {
             projectId: p.id,
             projectName: p.name,
             retrievalSource: 'project-memory',
-            arm: 'vector',
-            ...scoreResult('memory', r.score),
+            arm,
+            memory: { day: r.day, kind: r.kind },
+            ...scoreResult('memory', relevance),
           });
         }
         return out;
       },
     }));
 
-    // One pool unit per gezel: gezel memory (vector-only).
-    const perGezel =
-      vector && wants('gezel-memory')
-        ? gezels.map((g) => ({
-            label: `gezel:${g.id}`,
+    // One pool unit per gezel: gezel memory.
+    const perGezel = wants('gezel-memory')
+      ? gezels.map((g) => ({
+          label: `gezel:${g.id}`,
+          run: async () => {
+            const mem =
+              (await timed(
+                vector ? 'gezel-memory' : 'gezel-memory:keyword',
+                g.id,
+                (r) => r?.length ?? 0,
+                () => memoryHits('gezel', g.id),
+              )) ?? [];
+            return mem.map(({ row: r, arm, relevance }) => ({
+              kind: 'memory' as const,
+              id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
+              title: r.text.slice(0, 80),
+              subtitle: `Memory · ${g.name}`,
+              snippet: r.text,
+              retrievalSource: 'gezel-memory' as const,
+              arm,
+              memory: { day: r.day, kind: r.kind },
+              ...scoreResult('memory', relevance),
+            }));
+          },
+        }))
+      : [];
+
+    // One pool unit for the person's own memories ("About you"), which every
+    // gezel reads.
+    const perUser = wants('user-memory')
+      ? [
+          {
+            label: 'user',
             run: async () => {
               const mem =
                 (await timed(
-                  'gezel-memory',
-                  g.id,
+                  vector ? 'user-memory' : 'user-memory:keyword',
+                  undefined,
                   (r) => r?.length ?? 0,
-                  () =>
-                    this.memory.searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS),
+                  () => memoryHits('user', USER_MEMORY_ID),
                 )) ?? [];
-              return mem
-                .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
-                .map((r) => ({
-                  kind: 'memory' as const,
-                  id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
-                  title: r.text.slice(0, 80),
-                  subtitle: `Memory · ${g.name}`,
-                  snippet: r.text,
-                  retrievalSource: 'gezel-memory' as const,
-                  arm: 'vector' as const,
-                  ...scoreResult('memory', r.score),
-                }));
+              return mem.map(({ row: r, arm, relevance }) => ({
+                kind: 'memory' as const,
+                id: `memory:user:${r.day}:${hashText(r.text)}`,
+                title: r.text.slice(0, 80),
+                subtitle: 'Memory · About you',
+                snippet: r.text,
+                retrievalSource: 'user-memory' as const,
+                arm,
+                memory: { day: r.day, kind: r.kind },
+                ...scoreResult('memory', relevance),
+              }));
             },
-          }))
-        : [];
+          },
+        ]
+      : [];
 
     // Global collections (session transcripts + documents content) — one task
     // each, not per-project: the global index answers across all scopes in a
@@ -1047,6 +1180,7 @@ export class SearchService {
                 ...(scope?.primaryProjectId ? { projectId: scope.primaryProjectId } : {}),
                 ...(scope?.catalogs ? { catalogs: scope.catalogs } : {}),
                 queryEmbedBudgetMs: KNOWLEDGE_QUERY_EMBED_BUDGET_MS,
+                ...(scope ? (scope.media ? { media: true } : {}) : { media: true }),
               }),
           );
           return hits ?? [];
@@ -1054,7 +1188,7 @@ export class SearchService {
       });
     }
 
-    const tasks = [...perProject, ...perGezel, ...globalTasks];
+    const tasks = [...perProject, ...perGezel, ...perUser, ...globalTasks];
     const settled = await mapPool(tasks, FANOUT_CONCURRENCY, async (task) => {
       const res = await withTimeout(task.run(), PER_SCOPE_TIMEOUT_MS, null);
       if (res === null) {

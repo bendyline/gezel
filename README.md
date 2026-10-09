@@ -1,12 +1,34 @@
 # Gezel
 
-Gezel helps you build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Their conversations, memory, and work are stored on your computer as ordinary files.
+**Hand off a job tonight. Review it in the morning.**
 
-![Gezel first-run experience](docs/assets/gezel-first-run.png)
+Gezel is a free, open-source desktop app that gives you a crew of AI helpers (a researcher, a writer, a developer, and more) working on your own computer. Tell the Meester what you need and they bring in the right helpers. The work can run overnight, and in the morning it's waiting for you as reports and suggested changes. Your own files only change when you say so.
 
-Instead of starting with an anonymous chat, you meet the **Meester**: a guildmaster who helps you decide which specialists you need and puts a crew together. Each gezel has a name, role, working style, tools, sessions, and durable project context. You can use local models or connect a supported cloud provider.
+**[Download for macOS, Windows or Linux](https://gezel.com/#download)** · [Docs](https://gezel.com/docs/) · [Craftbooks](https://gezel.com/docs/craftbooks-index/) · [Models](https://gezel.com/docs/model-catalog/) · [Model scorecard](https://gezel.com/docs/model-scorecard/)
+
+![Gezel's home screen in the morning: the Meester has turned last night's request into a plan for three helpers, the full crew is listed in the sidebar, and the top bar shows background work in progress](docs/assets/gezel-home.png)
 
 > **Project status: early preview.** Gezel is usable, but installers, data formats, extension APIs, and model support may still change. Keep backups of important work and expect rough edges. Please [report issues](https://github.com/bendyline/gezel/issues/new).
+
+## What it does
+
+- **A crew, not a chat box.** Each helper (a *gezel*, Dutch for journeyman) has a name, one role, a short list of tools, and a memory of past work. Your first conversation is with the Meester, who sets up the project and brings in the helpers it needs.
+- **Work that keeps going while you're away.** The [Night Shift](https://gezel.com/docs/night-shift/) runs from 22:00 to 06:00 by default, or whenever you start it. Your crew works through tasks, reviews and indexing, and leaves a morning summary with reports and proposed changes for you to approve.
+- **Tested plans for real jobs.** More than 250 [craftbooks](https://gezel.com/docs/craftbooks-index/), step-by-step plans with a quality check at the end, cover jobs such as research briefs, slide decks, Word documents, code reviews and websites.
+- **Built for the AI on your computer.** Gezel recommends [models](https://gezel.com/docs/model-catalog/) that fit your hardware and runs them on bundled engines (llama.cpp and MLX). Focused roles and step-by-step plans are what let smaller models finish multi-step work, and we publish [measured results](https://gezel.com/docs/model-scorecard/) for the models we test.
+- **Or use the plan you already pay for.** Gezel can work through the Claude, ChatGPT or GitHub Copilot plan you already have, using the Claude and Codex command-line tools or a Copilot sign-in. OpenAI and Anthropic API keys work too, and each gezel can use a different provider.
+- **Yours, as plain files.** Projects, conversations and memories are saved on your own disk as Markdown, JSON and SQLite you can read, search and back up.
+
+## What you need
+
+| | Minimum | Recommended |
+| --- | --- | --- |
+| **Mac** | M1 or newer with 16 GB of memory | 24 GB of memory or more |
+| **Windows or Linux** | A graphics card with 8 GB of its own memory (NVIDIA RTX 2070, 3070, 4060, 5060; AMD Radeon 6600, 7600) | 16 GB or more (NVIDIA RTX 4080, 5070 Ti; AMD Radeon 9070) |
+
+The minimum runs everyday models for chat, drafting and focused single tasks. The recommended tier adds larger models for multi-step work with tools. Models download the first time you use them. Without hardware like this, you can use a cloud plan instead.
+
+[gezel.com](https://gezel.com/#download) picks the right installer for your machine, and every build is also on the [releases page](https://github.com/bendyline/gezel/releases). Prefer a terminal? See the [CLI reference](https://gezel.com/docs/cli-reference/).
 
 ## What “local-first” means
 
@@ -80,7 +102,7 @@ pnpm test
 pnpm test:e2e:web:run
 ```
 
-The optional [visual regression suite](docs/visual-regression.md) compares reviewed
+The optional [visual regression suite](packages/app/e2e-visual/surfaces.spec.ts) compares reviewed
 desktop, tablet, and phone baselines with `pnpm test:e2e:visual` on macOS 26 ARM64;
 it is available locally or by manual workflow and does not block CI.
 

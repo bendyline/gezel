@@ -330,6 +330,16 @@ export const CraftbookStepPromptProfileSchema = z.enum(['focused']);
 export type CraftbookStepPromptProfile = z.infer<typeof CraftbookStepPromptProfileSchema>;
 
 /**
+ * The document format a step writes, when it is one the runtime teaches.
+ * The step's prompt gets the canonical notes (core `squisqAuthoringNote`):
+ * `squisq` for Squisq extended markdown, `squisq-slideshow` for scenes,
+ * photos and motion. Books declare it instead of copying syntax, so one
+ * source stays right when Squisq changes.
+ */
+export const CraftbookStepAuthoringSchema = z.enum(['squisq', 'squisq-slideshow']);
+export type CraftbookStepAuthoring = z.infer<typeof CraftbookStepAuthoringSchema>;
+
+/**
  * Run a step only when an earlier answer from the owner asked for it. The
  * runtime checks it when the step activates, against the answered question
  * the `answerOf` step asked; a step the answer did not call for completes
@@ -382,6 +392,8 @@ export const CraftbookStepSchema = z.object({
   retrieval: RetrievalPolicySchema.optional(),
   /** Optional reduced prompt context for tightly bounded procedure-only work. */
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
+  /** The document format this step writes; the runtime adds its authoring notes. */
+  authoring: CraftbookStepAuthoringSchema.optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -801,6 +813,47 @@ export function unmetConnectors(
   return (connectors ?? []).filter((c) => !c.optional && !boundTypeIds.has(c.typeId));
 }
 
+/**
+ * A chat model this craftbook runs on, by catalog id. Declaring it lets a
+ * launcher offer the one-time download before the run, instead of the run
+ * failing at its first model call — for a long batch, hours in.
+ *
+ * `id` and `provider` may each be a `{{param}}` reference instead of a
+ * literal. It resolves from that run parameter, else its `paramSchema`
+ * default, so a run that picks another model (`writerModel=gemma4-31b-q4`)
+ * is checked for the model it will actually use. A reference that resolves
+ * to nothing drops the need for that run. `provider` names an on-device
+ * engine (`llama-cpp`, `mlx`, `ds4`); absent means this computer's engine,
+ * and a hosted provider has nothing to download. See `craftbook-setup.ts`.
+ */
+export const CraftbookModelNeedSchema = z.object({
+  /** Catalog chat-model id, e.g. `qwen3.8-27b-q4`, or `{{param}}`. */
+  id: z.string().min(1),
+  /** On-device engine, or `{{param}}`. Default: this computer's engine. */
+  provider: z.string().min(1).optional(),
+  /** Human-readable rationale shown before the download ("writes the stories"). */
+  reason: z.string().optional(),
+});
+export type CraftbookModelNeed = z.infer<typeof CraftbookModelNeedSchema>;
+
+/**
+ * An install capability the craftbook cannot run without — the hard
+ * counterpart to {@link CraftbookRecommendationSchema}. A launcher checks
+ * these before the run, offers to turn them on, and does not start while
+ * one is missing. Unlike `requirements`, an unmet need never hides the book:
+ * the person can fix it, so they need to be told how.
+ */
+export const CraftbookServiceNeedSchema = z.discriminatedUnion('kind', [
+  /** `securityPolicy.allowExternalServices` — open-web research, URL fetch. */
+  z.object({ kind: z.literal('external-services'), reason: z.string().optional() }),
+  /**
+   * Real web search: a keyed provider (Brave) selected and configured.
+   * Wikipedia search does not count. Implies `external-services`.
+   */
+  z.object({ kind: z.literal('web-search'), reason: z.string().optional() }),
+]);
+export type CraftbookServiceNeed = z.infer<typeof CraftbookServiceNeedSchema>;
+
 /* ─────────────────────────── Inline scripts ─────────────────────────── */
 
 /** Per-script source ceiling. Inline sources are authored by models — a
@@ -991,6 +1044,16 @@ export const CraftbookSchema = z
      */
     connectors: z.array(CraftbookConnectorNeedSchema).optional(),
     /**
+     * Chat models the book runs on, offered as a one-time download before
+     * the run. See {@link CraftbookModelNeedSchema}.
+     */
+    models: z.array(CraftbookModelNeedSchema).optional(),
+    /**
+     * Install capabilities the book cannot run without (external services,
+     * web search). See {@link CraftbookServiceNeedSchema}.
+     */
+    services: z.array(CraftbookServiceNeedSchema).optional(),
+    /**
      * Embedded script sources (name → TypeScript). See
      * {@link CraftbookScriptsSchema}. Hydrated at resolution time for
      * bundled/local/project books (their sources stay `scripts/*.ts`
@@ -1116,6 +1179,8 @@ export const NewCraftbookStepSchema = z.object({
   retrieval: RetrievalPolicySchema.optional(),
   /** See {@link CraftbookStepSchema.shape.promptProfile}. */
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.authoring}. */
+  authoring: CraftbookStepAuthoringSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -1350,6 +1415,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.capabilityFloor ? { capabilityFloor: s.capabilityFloor } : {}),
       ...(s.retrieval ? { retrieval: s.retrieval } : {}),
       ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
+      ...(s.authoring ? { authoring: s.authoring } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),

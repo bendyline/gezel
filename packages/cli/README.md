@@ -104,6 +104,21 @@ gezel --home /path/to/another-home        # standalone with an alternate home
 An explicit `--port 6228` remains available when you intentionally want a
 CLI-owned daemon on the canonical port.
 
+## One-shot prompts and pipelines
+
+Use `gezel run -` to read a UTF-8 prompt from a pipe or redirected file. It
+reads until EOF and preserves line breaks and indentation:
+
+```bash
+printf 'Summarize these notes:\nThe launch is Friday.\n' | gezel run -
+gezel run - < prompt.txt
+```
+
+The reply goes to stdout, so you can redirect it to a file; diagnostics go to
+stderr. Empty or whitespace-only input exits with status 1 before connecting
+to a service. A sole `-` is required to read stdin; `gezel run "your prompt"`
+continues to use its arguments, and bare `gezel run` shows usage.
+
 ## Provider credentials
 
 Manage provider keys through the service credential store, using stdin or an
@@ -112,7 +127,8 @@ existing environment variable so the value does not appear in command arguments:
 ```bash
 gezel secret list
 gezel secret set braveSearchApiKey --env BRAVE_SEARCH_API_KEY --use-for-search
-gezel secret set openaiApiKey --stdin < /path/to/private-key-file
+gezel secret set openaiApiKey --env OPENAI_API_KEY
+gezel secret set anthropicApiKey --env ANTHROPIC_API_KEY
 gezel secret remove openaiApiKey
 ```
 
@@ -124,6 +140,10 @@ printed. All three commands support `--json`, and honor `--home` / `--connect`.
 This covers the built-in provider credentials, including webhooks; it is not an
 arbitrary environment-variable store. Storage uses the same native keyring or
 encrypted fallback as the application.
+
+After saving an OpenAI or Anthropic key, run `gezel` and use `/model` to choose
+one of that provider's available models. The desktop app and CLI share the same
+daemon credential store, so a key saved in either interface is available to both.
 
 Search also requires the selected environment to allow external services.
 `gezel security external-services` shows that setting; append `on` or `off` to
@@ -149,10 +169,24 @@ Both settings commands support `--json` and the ordinary connection/home flags.
 
 ## Batch craftbooks and repository workflows
 
-`do` accepts positional parameters in the recipe's `paramSchema.properties`
-order, `key=value` arguments, and repeatable `--param key=value` options:
+`do` takes the craftbook, then its values. A bare value fills the next
+required parameter the recipe asks people for, in `paramSchema.properties`
+order. `key=value` and repeatable `--param key=value` set any parameter,
+including ones launch forms hide, such as `workPath`. Every other word is your
+request. It becomes the task description and, when the recipe declares one,
+its main content parameter (`fromMessage`, else `topic`). Quoting is optional;
+unquoted words are joined.
+
+Any craftbook also runs by name: `gezel story-batch c23n` is
+`gezel do story-batch c23n`. The name must match the craftbook's `command`
+token (its id unless it declares one) exactly. Built-in commands always win.
+A mistyped name reports an unknown command without creating a project, and
+the expanded `gezel do …` line is printed to stderr. Workflow craftbooks
+(below) run repository code, so they start only through `gezel do`.
 
 ```bash
+gezel do summarize-long "Summarize notes.txt for the board"
+gezel summarize-long "Summarize notes.txt for the board"
 gezel do story-batch c23n limit=3 --wait --json
 gezel task wait my-project/12 --timeout 7200 --json
 gezel task resume my-project/12 --json
@@ -215,12 +249,51 @@ also work: `gezel workflow ./pipeline/storyify.mjs c23n`.
 
 To expose that driver as one command, add
 `"cliWorkflow": { "module": ".gezel/workflows/storyify.mjs" }` to a project
-craftbook and declare its inputs in `paramSchema`. Then run
+craftbook and declare its inputs in `paramSchema`, listing the ones a bare
+value should fill under `required`. Then run
 `gezel do my-batch c23n limit=200 --json`. Its module receives `craftbook` and
-validated explicit `params` in addition to the context above. The driver owns
+validated explicit `params` in addition to the context above. A workflow
+craftbook takes no request text. The driver owns
 parent creation, defaults, checkpoints, bounded child concurrency, and the
 final result. Modules must resolve inside the project workspace. Only project
 craftbooks can use this entry point; `--strict-sandbox` rejects it.
+
+### Declaring what a craftbook needs
+
+A craftbook can declare the chat models it runs on and the capabilities it
+cannot run without. `gezel do` checks them before anything starts:
+
+```json
+"services": [{ "kind": "web-search", "reason": "research checks every fact" }],
+"models": [
+  { "id": "qwen3.8-27b-q4", "reason": "writes the stories" },
+  { "id": "{{checkerModel}}", "provider": "llama-cpp", "reason": "checks every sentence" }
+]
+```
+
+`web-search` means a keyed search provider (Brave): Wikipedia does not count,
+and it implies `external-services`, which a book that only fetches pages can
+declare on its own. A model `id` (or `provider`) may be a `{{param}}`
+reference, resolved from the run's value or its `paramSchema` default; one
+that resolves to nothing is skipped. `provider` defaults to this computer's
+on-device engine.
+
+At a terminal, each missing piece is one question: turn on External services
+(naming the security level it moves to), paste a Brave Search API key (hidden,
+then proven with one test search, and removed again if that fails), and
+download the models (after a disk-space check, with the engine if it is
+missing). Any "no", or a run without a terminal, stops before the run starts
+and prints the commands that fix it:
+
+```text
+gezel security external-services on
+gezel secret set braveSearchApiKey --env BRAVE_SEARCH_API_KEY --use-for-search
+gezel model pull qwen3.8-27b-q4 --provider llama-cpp
+```
+
+A workflow module whose models depend on its own options asks at run time with
+`ensureSetup({ services, models })` on its context, which behaves the same way.
+`runCraftbook` checks the child book's declared needs too.
 
 These drivers run in the foreground even without `--wait`; keep the terminal
 open until completion. A timeout applies to each child wait. If the CLI exits,
@@ -265,12 +338,12 @@ Add it where Gezel is installed (drop `-g` for a project install); the desktop
 app already includes it:
 
 ```bash
-npm install -g @huggingface/transformers@^3.8.1
+npm install -g @huggingface/transformers@^4.3.1
 ```
 
 In a project install, also add the `overrides` from the
-[`@bendyline/gezel-service` README](https://www.npmjs.com/package/@bendyline/gezel-service):
-Transformers still asks for a `sharp` release that `npm audit` flags.
+[`@bendyline/gezel-service` README](https://www.npmjs.com/package/@bendyline/gezel-service),
+which keep Kokoro on the same Transformers.js copy as the service.
 
 ## Running models on your own machine
 
@@ -313,13 +386,14 @@ Run `gezel --help` for the full list. The most-used ones:
 | Command | What it does |
 |---|---|
 | `gezel` | Launch the interactive TUI |
-| `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
-| `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id or display name |
+| `gezel run [prompt…]` | One-shot prompt (a sole `-` reads stdin) in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
+| `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id, command, or display name, then required values, `key=value` parameters, and your request |
+| `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command or id; built-in commands always win |
 | `gezel workflow <name-or-file> [args…]` | Run an explicitly trusted repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
 | `gezel secret list / set / remove` | Manage write-only provider credentials, including the Brave search key |
 | `gezel task wait <ref>` / `resume <ref>` | Follow a task to completion, or retry a paused task and follow it |
 | `gezel task notes <ref> --warnings` | Read task notes and runtime warnings from its recent sessions |
-| `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI. On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
+| `gezel start` / `stop` / `status` | Use or inspect the selected service. `stop` is the same hard stop as the desktop UX: cancel work, unload local engines, and switch to Reactive. `stop --daemon` shuts down a user-owned daemon process itself. `start --web` serves the browser UI, reusing a daemon that already serves it; when a daemon is running without it, `start --web --restart` replaces that daemon (the same applies to `--port`). On hosts without a Gezel machine service, a started daemon prefers the canonical port 6228 (ephemeral fallback) so third-party OpenAI clients get a stable `https://127.0.0.1:6228/v1` base URL; with a machine service installed, the service owns 6228 and started daemons use an ephemeral port (`--port` pins one explicitly). |
 | `gezel doctor` | Report on the local install |
 | `gezel mode [read-only\|reactive\|reactive+tasks\|full-play]` | Show or change how much AI activity is allowed |
 | `gezel agent list\|create\|show` | Manage your gezels |

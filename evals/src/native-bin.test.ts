@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  cpuOverrideRefusal,
   ds4HelpSupportsVision,
   installedAppRoots,
   pinnedLlamaRevision,
@@ -224,5 +225,32 @@ describe('resolveSdBinary — GEZEL_SD_SERVER_BIN override', () => {
     // the model were at fault.
     process.env.GEZEL_SD_SERVER_BIN = join(tmpdir(), 'definitely-not-a-real-sd-server-xyz');
     expect(() => resolveSdBinary()).toThrowError(/GEZEL_SD_SERVER_BIN.*no file exists/s);
+  });
+});
+
+describe('cpuOverrideRefusal', () => {
+  const build = (backend: string | null) => ({
+    buildNumber: '11429',
+    revision: 'd8123504',
+    backend,
+    cudaArchitectures: null,
+    sidecar: true,
+  });
+
+  it('refuses a CPU-only build on a machine with an NVIDIA GPU', () => {
+    expect(cpuOverrideRefusal(build('cpu') as never, true, {})).toContain('CPU-only');
+  });
+
+  it('allows it on a machine without a GPU, or when explicitly asked', () => {
+    expect(cpuOverrideRefusal(build('cpu') as never, false, {})).toBeNull();
+    expect(
+      cpuOverrideRefusal(build('cpu') as never, true, { GEZEL_EVAL_ALLOW_CPU_BACKEND: '1' }),
+    ).toBeNull();
+  });
+
+  it('never refuses a GPU build or an unknown one', () => {
+    expect(cpuOverrideRefusal(build('cuda') as never, true, {})).toBeNull();
+    expect(cpuOverrideRefusal(build(null) as never, true, {})).toBeNull();
+    expect(cpuOverrideRefusal(undefined, true, {})).toBeNull();
   });
 });

@@ -28,6 +28,7 @@ import {
   PROSE_FILE_WRITE_TOOLS,
   type SentenceGrounding,
   type TextGrounding,
+  WORKSPACE_SOURCE_READERS,
   createLogger,
   describeGroundingProblems,
   evidenceLabel,
@@ -80,6 +81,20 @@ export function removeCitationMarkers(text: string): string {
 const str = (v: unknown): string | undefined =>
   typeof v === 'string' && v.trim() ? v.trim() : undefined;
 
+const SOURCE_FILE_MENTION =
+  /(?:^|[\s`'"(\[])((?:[\w-]+\/)*[\w-]+\.(?:md|markdown|txt|csv|tsv|json|ya?ml|html?|docx?|pdf|xlsx?|pptx?))(?=$|[\s`'"),.;:\]])/gi;
+
+/** Up to four source files the conversation names, in order. */
+export function mentionedSourceFiles(text: string): string[] {
+  const files: string[] = [];
+  for (const m of text.matchAll(SOURCE_FILE_MENTION)) {
+    const file = m[1];
+    if (file && !files.includes(file)) files.push(file);
+    if (files.length === 4) break;
+  }
+  return files;
+}
+
 /** What a person would call this result, and what opens it. */
 function describeToolEvidence(
   tool: string,
@@ -101,6 +116,16 @@ function describeToolEvidence(
     case 'read_doc_as_markdown': {
       const ref = str(args.uri) ?? str(args.path) ?? str(args.name) ?? str(args.id);
       return ref ? { title: ref, ref } : {};
+    }
+    case 'read_files':
+    case 'read_artifacts': {
+      const paths = [
+        ...(Array.isArray(args.paths) ? args.paths : []),
+        ...(Array.isArray(args.files)
+          ? args.files.map((f) => (f && typeof f === 'object' ? (f as { path?: unknown }).path : f))
+          : []),
+      ].filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+      return paths.length > 0 ? { title: paths.join(', ') } : {};
     }
     case 'office_read_selection':
     case 'doc_read_selection':
@@ -132,6 +157,18 @@ interface StructuredToolEvidence {
  * identified one source.
  */
 function structuredToolEvidence(tool: string, text: string): StructuredToolEvidence[] {
+  if (tool === 'read_files' || tool === 'read_artifacts') {
+    // One `--- <path> (lines=…) ---` section per file: number each file on
+    // its own so a citation names the memo it came from.
+    const headers = [...text.matchAll(/^--- (.+?) \(lines=[^)\n]*\) ---$/gm)];
+    return headers.flatMap((match, index) => {
+      const path = match[1]?.trim();
+      const start = (match.index ?? 0) + match[0].length;
+      const end = headers[index + 1]?.index ?? text.length;
+      const body = text.slice(start, end).trim();
+      return path && body ? [{ text: body, title: path, ref: path }] : [];
+    });
+  }
   if (tool === 'search') {
     const rows: StructuredToolEvidence[] = [];
     const knowledgeRow = /^\[[^\]]*\bknowledge\b[^\]]*\]\s+(knowledge:\/\/\S+)\s+(.+)$/gim;
@@ -211,6 +248,7 @@ export class EvidenceLedger {
   private readonly unverifiedWrites: SentenceGrounding[] = [];
   private readonly unverifiedPlaces = new Set<string>();
   private lookupTools: string[] = [];
+  private readerTools: string[] = [];
   private lookupPreference: FactualLookupPreference = 'default';
 
   constructor(opts: { floor?: number } = {}) {
@@ -399,7 +437,15 @@ export class EvidenceLedger {
    * `wikipedia_search` on its roster; naming the tools, and the next call,
    * is what turns a refusal into research.
    */
-  private remedy(again: string): string {
+  private remedy(again: string, target?: string): string {
+    const reread = this.workspaceReread(target);
+    if (reread) {
+      const others =
+        this.lookupTools.length > 0
+          ? ` (for anything the project files do not hold: ${this.lookupTools.map((t) => `\`${t}\``).join(', ')})`
+          : '';
+      return `Do not ${again} yet. Your next tool call must be \`${reread.reader}\` on the source file that states the missing detail${reread.files}${others}. Use what it returns before writing again. Remove anything the files do not support, or say in the text that it could not be verified.`;
+    }
     const [first, ...rest] = this.lookupTools;
     if (!first) {
       return `Remove each of these, or say in the text that it could not be verified, then ${again}. If the person can give you a source, ask for it.`;
@@ -417,9 +463,13 @@ export class EvidenceLedger {
    * write by trying the same write again. Keep this deliberately shorter than
    * the first refusal: tiny models attend better to one forced next action.
    */
-  private researchFirstRemedy(tool: string): string {
+  private researchFirstRemedy(tool: string, target?: string): string {
+    const reread = this.workspaceReread(target);
+    if (reread) {
+      return `Not saved: no source evidence has been collected. Do not call \`${tool}\` again yet. Your next tool call must be \`${reread.reader}\`${reread.files}. Use what it returns before writing.`;
+    }
     const first = this.lookupTools[0];
-    if (!first) return this.remedy('write again');
+    if (!first) return this.remedy('write again', target);
     const call =
       this.lookupPreference === 'knowledge' && first === 'search'
         ? '`search({ query: "<subject>", sources: ["knowledge"] })`'
@@ -427,13 +477,40 @@ export class EvidenceLedger {
     return `Not saved: no source evidence has been collected. Do not call \`${tool}\` again yet. Your next tool call must be ${call}. Use its returned evidence before writing.`;
   }
 
+  /**
+   * The reader to name when this writer's sources are project files: its
+   * evidence so far came from a workspace reader, or the conversation names
+   * the files. Sending such a writer to `search` re-acquires text it already
+   * had, or finds nothing: 92 recoveries narrowed to `search` across 28
+   * workspace-sourced trials before this existed (2026-10-06 review).
+   */
+  private workspaceReread(target?: string): { reader: string; files: string } | null {
+    const reader = this.readerTools[0];
+    if (!reader) return null;
+    const read = [...this.entries.values()]
+      .filter((e) => e.tool !== undefined && WORKSPACE_SOURCE_READERS.includes(e.tool))
+      .map((e) => e.ref ?? e.title)
+      .filter((p): p is string => typeof p === 'string' && p !== '');
+    const isTarget = (f: string) =>
+      target !== undefined && f.split('/').pop() === target.split('/').pop();
+    const named = mentionedSourceFiles(this.given).filter((f) => !isTarget(f));
+    if (read.length === 0 && named.length === 0) return null;
+    const files = [...new Set([...read, ...named])].filter((f) => !isTarget(f)).slice(0, 4);
+    return {
+      reader,
+      files: files.length > 0 ? ` (${files.map((f) => `\`${f}\``).join(', ')})` : '',
+    };
+  }
+
   /** The lookup tools this session has, in the order to try them. */
   setLookupTools(
     toolNames: Iterable<string>,
     preference: FactualLookupPreference = 'default',
   ): void {
+    const available = new Set(toolNames);
     this.lookupPreference = preference;
-    this.lookupTools = factualLookupTools(toolNames, preference);
+    this.lookupTools = factualLookupTools(available, preference);
+    this.readerTools = WORKSPACE_SOURCE_READERS.filter((t) => available.has(t));
   }
 
   /**
@@ -458,10 +535,13 @@ export class EvidenceLedger {
     // the first rejection. Keep counting these attempts so that once evidence
     // arrives the ordinary bounded guard can still fail open instead of
     // trapping a long-running task.
-    if (this.entries.size === 0 && this.lookupTools.length > 0) {
+    if (
+      this.entries.size === 0 &&
+      (this.lookupTools.length > 0 || this.workspaceReread(words.place) !== null)
+    ) {
       this.refusals.set(refusalKey, Math.min(MAX_WRITE_REFUSALS, refused + 1));
       log.warn(`${tool} blocked: no evidence collected`);
-      return { kind: 'reject', error: this.researchFirstRemedy(tool) };
+      return { kind: 'reject', error: this.researchFirstRemedy(tool, words.place) };
     }
     if (refused < MAX_WRITE_REFUSALS) {
       this.refusals.set(refusalKey, refused + 1);
@@ -473,7 +553,7 @@ export class EvidenceLedger {
         error: [
           `Not ${words.verb}: ${problems.length === 1 ? 'one sentence states' : `${problems.length} sentences state`} facts that no evidence in this conversation shows.`,
           describeGroundingProblems(problems),
-          this.remedy(words.again),
+          this.remedy(words.again, words.place),
         ].join('\n'),
       };
     }

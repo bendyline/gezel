@@ -8,6 +8,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { ImageEmbedJob, ImageEmbedOutcome } from '../memory/image-embeddings.js';
@@ -82,7 +83,9 @@ describe('image-embed tier (mock embedder)', () => {
     await mkdir(join(dir, 'photos'), { recursive: true });
     await writeFile(join(dir, 'photos', 'a.png'), PNG_800x600);
     await writeFile(join(dir, 'photos', 'anim.gif'), GIF_16x16);
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
 
     const { embed, calls } = mockEmbedder(new Map([['a.png', unitVec(0)]]));
     const first = await ci.embedImages('p', 10, embed);
@@ -98,7 +101,9 @@ describe('image-embed tier (mock embedder)', () => {
 
   it('records a capped attempt for per-image errors and keeps the file in the work-list', async () => {
     await writeFile(join(dir, 'flaky.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
 
     const { embed } = mockEmbedder(new Map()); // every job → error outcome
     const r = await ci.embedImages('p', 10, embed);
@@ -110,7 +115,9 @@ describe('image-embed tier (mock embedder)', () => {
 
   it('stops the drain on a pipeline-level failure instead of burning attempt budgets', async () => {
     await writeFile(join(dir, 'a.png'), PNG_800x600);
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
 
     const r = await ci.embedImages('p', 10, async () => {
       throw new Error('model unloadable');
@@ -124,7 +131,9 @@ describe('image-embed tier (mock embedder)', () => {
     await writeFile(join(dir, 'shots', 'a.png'), Buffer.concat([PNG_800x600, Buffer.from([1])]));
     await writeFile(join(dir, 'shots', 'b.png'), Buffer.concat([PNG_800x600, Buffer.from([2])]));
     await writeFile(join(dir, 'shots', 'c.png'), Buffer.concat([PNG_800x600, Buffer.from([3])]));
-    await runWorkspaceContentIndex(dir, 'p', artifacts);
+    await runWorkspaceContentIndex(dir, 'p', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p', dir),
+    });
 
     const { embed } = mockEmbedder(
       new Map([

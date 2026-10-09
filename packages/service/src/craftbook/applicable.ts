@@ -2,17 +2,15 @@ import { readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type {
   CatalogItemSummary,
-  Craftbook,
   CraftbookRequirementContext,
-  CraftbookTemplateManifest,
   CraftbookToolsetNeed,
   ProjectDetail,
   ProjectType,
   ToolsetsScope,
 } from '@bendyline/gezel';
 import {
-  CraftbookTemplateManifestSchema,
   craftbookRequirementsMet,
+  craftbookTemplateManifestFromRuntime,
   resolveSecurityPolicy,
   unmetToolsets,
 } from '@bendyline/gezel';
@@ -239,45 +237,6 @@ export function suggestedCraftbookIdsForType(
     if (tags.some((t) => wanted.has(t.toLowerCase()))) out.push(it.manifest.id);
   }
   return out;
-}
-
-/**
- * Present a runtime project-local craftbook in the catalog-summary shape
- * the launcher rail renders. Null when the book can't satisfy the
- * template-manifest schema (e.g. an id outside the catalog id grammar) —
- * such books stay invocable by id, they just don't join the rail.
- */
-export function craftbookTemplateManifestFromRuntime(
-  book: Craftbook,
-): CraftbookTemplateManifest | null {
-  const parsed = CraftbookTemplateManifestSchema.safeParse({
-    schemaVersion: 1,
-    kind: 'craftbook-template',
-    id: book.id,
-    name: book.name,
-    description: book.description ?? '',
-    tags: [],
-    maintainer: { name: 'project' },
-    version: book.version ?? '1.0.0',
-    releasedAt: book.updatedAt,
-    about: book.description ?? book.name,
-    steps: book.steps,
-    entryStepId: book.entryStepId,
-    ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-    ...(book.plan ? { plan: book.plan } : {}),
-    ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
-    ...(book.triggers ? { triggers: book.triggers } : {}),
-    ...(book.hooks ? { hooks: book.hooks } : {}),
-    ...(book.scripts ? { scripts: book.scripts } : {}),
-    ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
-    ...(book.command ? { command: book.command } : {}),
-    ...(book.requirements ? { requirements: book.requirements } : {}),
-    ...(book.recommends ? { recommends: book.recommends } : {}),
-    ...(book.runModes ? { runModes: book.runModes } : {}),
-    ...(book.toolsets ? { toolsets: book.toolsets } : {}),
-    ...(book.connectors ? { connectors: book.connectors } : {}),
-  });
-  return parsed.success ? parsed.data : null;
 }
 
 /**

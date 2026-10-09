@@ -109,6 +109,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
           // instead of the top of the file.
           ...(r.line ? { line: r.line } : {}),
           ...(r.lineEnd ? { lineEnd: r.lineEnd } : {}),
+          ...(r.media?.startMs !== undefined ? { startMs: r.media.startMs } : {}),
         };
         return openProjectFileActions(intent);
       }
@@ -162,6 +163,7 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
       const intent: OpenKnowledgeIntent = {
         catalogId: r.catalogId,
         ...(r.documentId ? { documentId: r.documentId } : {}),
+        ...(r.media ? { media: r.media } : {}),
       };
       return [
         // Queue first so the freshly-mounted Knowledge view can consume it.

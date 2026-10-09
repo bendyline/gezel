@@ -165,6 +165,11 @@ export const BackupItemKindSchema = z.enum([
    * creating a second one.
    */
   'document-root',
+  /**
+   * The person's own memories ("About you"). A restore merges them into the
+   * ones here, entry by entry, and never removes one.
+   */
+  'memory-root',
   'settings-file',
 ]);
 export type BackupItemKind = z.infer<typeof BackupItemKindSchema>;
@@ -201,6 +206,7 @@ export const BackupRequestSchema = z.object({
       gezels: z.array(z.string()).optional(),
       projects: z.array(z.string()).optional(),
       documents: z.boolean().optional(),
+      memories: z.boolean().optional(),
       settings: z.boolean().optional(),
     })
     .optional(),

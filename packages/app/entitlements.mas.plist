@@ -75,6 +75,12 @@
     <key>com.apple.security.device.audio-input</key>
     <true/>
 
+    <!-- The chat composer's Take photo key captures a single still through
+         an in-app viewfinder. Paired with NSCameraUsageDescription in
+         electron-builder.yml's extendInfo. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
     <!-- The rendezvous container. A Developer-ID-installed Gezel mirrors its
          runtime discovery metadata (port, scoped client token, cert
          fingerprint — never the daemon root credential, never the pid) into

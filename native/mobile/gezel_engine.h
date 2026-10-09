@@ -6,6 +6,7 @@
 #include "gezel_llama.h"
 #include "chat.h"
 #include "llama.h"
+#include "mtmd.h"
 
 #include <atomic>
 #include <chrono>
@@ -90,8 +91,18 @@ struct gezel_llama_engine {
     // template the Jinja renderer cannot parse fails that request, not the load.
     gezel_mobile::chat_config chat;
     common_chat_templates_ptr chat_templates;
+    // The vision projector for the loaded model, opened by the first
+    // gezel_llama_describe_image call and freed with the model it reads for.
+    mtmd_context * projector = nullptr;
+    std::string projector_path;
 
+    void unload_projector() {
+        if (projector) mtmd_free(projector);
+        projector = nullptr;
+        projector_path.clear();
+    }
     void unload() {
+        unload_projector();
         if (context) llama_free(context);
         context = nullptr;
         if (model) llama_model_free(model);

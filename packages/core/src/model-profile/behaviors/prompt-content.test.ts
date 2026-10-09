@@ -36,9 +36,12 @@ function promptCtx(overrides: Partial<PromptCtx>): PromptCtx {
 }
 
 describe('PromptToolCookbookFull', () => {
+  // An empty roster is an unknown one, which keeps every row; rows for a
+  // known roster are covered in prompt-tool-cookbook-full.test.ts.
+  const unknownRoster = { availableToolNames: new Set<string>() };
   it('emits the cookbook with the browse row hidden when hasPlaywright is false', () => {
     const out = PromptToolCookbookFull.promptAppend!(
-      promptCtx({ hasPlaywright: false }),
+      promptCtx({ ...unknownRoster, hasPlaywright: false }),
       undefined,
     );
     expect(out).toContain('Cookbook — common patterns');
@@ -51,13 +54,16 @@ describe('PromptToolCookbookFull', () => {
   });
 
   it('renders the browse row when hasPlaywright is true', () => {
-    const out = PromptToolCookbookFull.promptAppend!(promptCtx({ hasPlaywright: true }), undefined);
+    const out = PromptToolCookbookFull.promptAppend!(
+      promptCtx({ ...unknownRoster, hasPlaywright: true }),
+      undefined,
+    );
     expect(out).toContain('fetch / look up / browse / read this URL');
     expect(out).toContain('browser_navigate({ url:');
   });
 
   it('includes the anti-fabrication "What NOT to do" rules', () => {
-    const out = PromptToolCookbookFull.promptAppend!(promptCtx({}), undefined);
+    const out = PromptToolCookbookFull.promptAppend!(promptCtx(unknownRoster), undefined);
     expect(out).toContain('Never claim past-tense action without a tool call this turn.');
     expect(out).toContain('Never write placeholder content');
     expect(out).toContain('write it via `write_file`');

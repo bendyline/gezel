@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { copyFile, link, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -330,6 +330,7 @@ export async function staleInstall(opts: {
   const dir = opts.modelDir ?? modelDirInHome(opts.cacheRoot, opts.engine, opts.modelId);
   let installed: {
     catalogVersion?: string;
+    fileSha256?: Record<string, string>;
     sha256?: string;
     huggingfaceRepo?: string;
     weightsFilename?: string;
@@ -348,6 +349,33 @@ export async function staleInstall(opts: {
       kind: 'weights-changed',
       reason: `weights sha256 ${installed.sha256.slice(0, 12)}… != catalog ${expected.sha256.slice(0, 12)}…`,
     };
+  }
+  // Use the complete multi-file identity to prove a metadata-only release.
+  // Keep the existing same-version install contract: the MLX installer may
+  // intentionally rewrite chat_template.jinja and tokenizer_config.json
+  // with catalog template overrides after verifying upstream hashes.
+  // Changed versions with transformed/partial records conservatively fall
+  // back to the version check; only an exact set can waive version drift.
+  let matchingFiles = false;
+  if (
+    expected.catalogVersion !== installed.catalogVersion &&
+    expected.fileSha256 &&
+    installed.fileSha256
+  ) {
+    const entries = Object.entries(expected.fileSha256);
+    for (const [name, hash] of entries) {
+      if (installed.fileSha256[name] && installed.fileSha256[name] !== hash) {
+        return {
+          kind: 'weights-changed',
+          reason: `payload file ${name} sha256 differs from catalog`,
+        };
+      }
+      if (!existsSync(join(dir, name))) {
+        return { kind: 'weights-changed', reason: `missing payload file ${name} added by catalog` };
+      }
+    }
+    matchingFiles =
+      entries.length > 0 && entries.every(([name, hash]) => installed.fileSha256?.[name] === hash);
   }
   if (
     expected.huggingfaceRepo &&
@@ -397,7 +425,8 @@ export async function staleInstall(opts: {
     // the payload. When both sides carry the same cryptographic identity,
     // the local bytes are current; deleting multi-gigabyte weights merely to
     // refresh a version label is both destructive and network-dependent.
-    !(expected.sha256 && installed.sha256 && expected.sha256 === installed.sha256)
+    !(expected.sha256 && installed.sha256 && expected.sha256 === installed.sha256) &&
+    !matchingFiles
   ) {
     return {
       kind: 'weights-changed',
@@ -760,7 +789,37 @@ const execFileAsync = promisify(execFile);
  * The fallback keeps the old behavior wherever cloning is unavailable
  * (non-APFS volumes, Linux CI) — a slower trial setup, never a broken one.
  */
+/** Weight files large enough to matter and never written after install. */
+const HARD_LINKABLE_WEIGHTS = /\.(?:gguf|safetensors|bin)$/i;
+const HARD_LINK_MIN_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Hard-link a large weight file instead of copying it, where no reflink
+ * exists. On ext4 `COPYFILE_FICLONE` falls back to a full byte copy, so every
+ * trial wrote the whole model: 82 s for the 89 GB qwen3.8-flash-next and
+ * 165 s for a 138 GB ds4 model, about 76 TB across the eval history, and the
+ * copy's writeback overlapped the trial's own measurements (2026-10-06
+ * review). Weights are only ever read after install, and the product refuses
+ * linked *directories*, not hard-linked files. Small files (manifests,
+ * sentinels) are still copied, so a daemon writing one can never alter the
+ * shared cache.
+ */
+export function shouldHardLinkModelFile(path: string, sizeBytes: number): boolean {
+  return HARD_LINKABLE_WEIGHTS.test(path) && sizeBytes >= HARD_LINK_MIN_BYTES;
+}
+
 async function cloneFile(source: string, destination: string): Promise<void> {
+  if (process.platform !== 'darwin' && process.env.GEZEL_EVAL_NO_HARDLINK !== '1') {
+    try {
+      if (shouldHardLinkModelFile(source, statSync(source).size)) {
+        await link(source, destination);
+        return;
+      }
+    } catch {
+      // Cross-device, a filesystem without hard links, or a permission
+      // refusal: fall through to the copy.
+    }
+  }
   if (process.platform === 'darwin') {
     try {
       await execFileAsync('cp', ['-c', source, destination]);

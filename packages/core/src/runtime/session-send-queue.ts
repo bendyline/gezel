@@ -39,6 +39,10 @@ export interface QueuedSendOptions {
   fileTurnIntent?: FileTurnIntent;
   /** Persist and deliver to the model but never render a transcript bubble. */
   hidden?: boolean;
+  /** Answer from the instructions and this message alone (a state-carrying seed). */
+  standalone?: boolean;
+  /** The turn's first request must call this tool (a reaction's declared `turn`). */
+  requiredTool?: string;
   nudge?: boolean;
   /** The prompt draft this send was written in, if any. */
   draftId?: string;
@@ -112,10 +116,11 @@ function runOptionsOf<O extends QueuedSendOptions>(opts: O): QueuedRunOptions<O>
     'continuationMaxTokens',
     'fileTurnIntent',
     'draftId',
+    'requiredTool',
   ] as const) {
     if (!out[key]) delete out[key];
   }
-  for (const key of ['ambient', 'hidden', 'nudge'] as const) {
+  for (const key of ['ambient', 'hidden', 'nudge', 'standalone'] as const) {
     if (out[key] !== true) delete out[key];
   }
   return out as QueuedRunOptions<O>;
@@ -175,6 +180,9 @@ export class SessionSendQueue<R, O extends QueuedSendOptions = QueuedSendOptions
       // coalesced onto a hidden seed must still surface.
       tail.text = `${tail.text}\n\n${text}`;
       tail.opts.hidden = tail.opts.hidden === true && opts.hidden === true;
+      // The latest seed carries the latest state, so it decides whether a
+      // call is due.
+      tail.opts.requiredTool = opts.requiredTool;
       tail.waiters.push({ resolve, reject });
       // Same queueId, so the UI upserts its ghost bubble.
       this.publishEnqueued(sessionId, tail);

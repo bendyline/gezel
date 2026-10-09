@@ -44,14 +44,20 @@ export const AppKnowledgeActionSchema = z.union([
 export const AppKnowledgeQuerySchema = z
   .object({
     query: z.string().min(1).max(8192),
-    rerank: z.literal('required'),
+    /**
+     * `required` refuses (409 `reranker_required`) without the relevance
+     * model. `auto` uses the model when it is installed and otherwise admits
+     * only hits that clear Gezel's own bar for unjudged catalog passages.
+     */
+    rerank: z.enum(['required', 'auto']),
     maxResults: z.number().int().min(1).max(8),
     maxCharacters: z.number().int().min(1).max(24000),
   })
   .strict();
 export const AppKnowledgeRetrievalSchema = z
   .object({
-    reranked: z.literal(true),
+    /** False only when an `auto` query was answered without the relevance model. */
+    reranked: z.boolean(),
     passages: z
       .array(
         z
@@ -67,7 +73,22 @@ export const AppKnowledgeRetrievalSchema = z
       .max(8),
   })
   .strict();
+/**
+ * `GET /v1/knowledge/relevance`: the optional model that ranks passages. A
+ * separate route rather than new `/state` fields, because SDKs parse `/state`
+ * strictly and older ones would reject an unknown key.
+ */
+export const AppKnowledgeRelevanceSchema = z
+  .object({
+    ready: z.boolean(),
+    downloading: z.boolean(),
+    percent: z.number().min(0).max(100).nullable(),
+    /** Approximate download size; null when this Gezel cannot download it. */
+    downloadBytes: count,
+  })
+  .strict();
 export type AppKnowledgeState = z.infer<typeof AppKnowledgeStateSchema>;
+export type AppKnowledgeRelevance = z.infer<typeof AppKnowledgeRelevanceSchema>;
 export type AppKnowledgeAction = z.infer<typeof AppKnowledgeActionSchema>;
 export type AppKnowledgeQuery = z.infer<typeof AppKnowledgeQuerySchema>;
 export type AppKnowledgeRetrieval = z.infer<typeof AppKnowledgeRetrievalSchema>;

@@ -1,9 +1,21 @@
 import { EventEmitter, once } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { normalizeBundledPnpmPath, resolvePnpmCommand, spawnPnpm } from './pnpm.js';
+import {
+  INSTALL_GUARD_FLAGS,
+  normalizeBundledPnpmPath,
+  resolvePnpmCommand,
+  runPnpm,
+  spawnPnpm,
+} from './pnpm.js';
+
+const BUNDLED_PNPM = fileURLToPath(
+  new URL('../../../app/dist/pnpm-bundle/bin/pnpm.mjs', import.meta.url),
+);
 
 const originalPnpmPath = process.env.GEZEL_PNPM_PATH;
 const originalNodePath = process.env.GEZEL_NODE_PATH;
@@ -21,6 +33,57 @@ afterEach(async () => {
   if (originalNodePath === undefined) delete process.env.GEZEL_NODE_PATH;
   else process.env.GEZEL_NODE_PATH = originalNodePath;
   await rm(workRoot, { recursive: true, force: true });
+});
+
+describe('runPnpm install guard', () => {
+  it('prepends every guard flag to install-class runs, and none to allowed runs', async () => {
+    const fakePnpm = join(workRoot, 'fake-pnpm.mjs');
+    await writeFile(fakePnpm, 'console.log(JSON.stringify(process.argv.slice(2)));\n');
+    process.env.GEZEL_PNPM_PATH = fakePnpm;
+    process.env.GEZEL_NODE_PATH = process.execPath;
+
+    const guarded = await runPnpm(['add', '--', 'zod@^4'], { cwd: workRoot });
+    expect(JSON.parse(guarded.stdout)).toEqual([...INSTALL_GUARD_FLAGS, 'add', '--', 'zod@^4']);
+    expect(INSTALL_GUARD_FLAGS).toEqual(
+      expect.arrayContaining(['--ignore-scripts', '--ignore-pnpmfile']),
+    );
+
+    const allowed = await runPnpm(['config', 'get', 'registry'], {
+      cwd: workRoot,
+      lifecycle: 'allow',
+    });
+    expect(JSON.parse(allowed.stdout)).toEqual(['config', 'get', 'registry']);
+  });
+
+  it.runIf(existsSync(BUNDLED_PNPM))(
+    'keeps a planted pnpmfile inert under the bundled pnpm',
+    async () => {
+      const project = join(workRoot, 'planted');
+      await mkdir(project, { recursive: true });
+      await writeFile(
+        join(project, 'package.json'),
+        JSON.stringify({ name: 'planted', version: '1.0.0', private: true }),
+      );
+      for (const name of ['.pnpmfile.cjs', '.pnpmfile.mjs']) {
+        const marker = JSON.stringify(join(project, `RAN-${name}`));
+        await writeFile(
+          join(project, name),
+          name.endsWith('.mjs')
+            ? `import fs from 'node:fs';\nfs.writeFileSync(${marker}, 'x');\nexport const hooks = {};\n`
+            : `require('node:fs').writeFileSync(${marker}, 'x');\nmodule.exports = { hooks: {} };\n`,
+        );
+      }
+      process.env.GEZEL_PNPM_PATH = BUNDLED_PNPM;
+      process.env.GEZEL_NODE_PATH = process.execPath;
+
+      const result = await runPnpm(['install', '--offline'], { cwd: project });
+
+      expect(result.ok, result.log).toBe(true);
+      expect(existsSync(join(project, 'RAN-.pnpmfile.cjs'))).toBe(false);
+      expect(existsSync(join(project, 'RAN-.pnpmfile.mjs'))).toBe(false);
+    },
+    60_000,
+  );
 });
 
 describe('resolvePnpmCommand', () => {

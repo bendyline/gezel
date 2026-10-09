@@ -47,6 +47,7 @@ export async function verifyNativeBuild(repo, build, target) {
     'gezel_llama.cpp',
     'gezel_engine.h',
     'gezel_chat.cpp',
+    'gezel_vision.cpp',
     'utf8_stream.h',
     'chat_formats.h',
     'CMakeLists.txt',

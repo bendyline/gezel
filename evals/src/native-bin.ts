@@ -51,6 +51,32 @@ export function shouldProbeLlamaBackend(
   return existsSync(join(windowsRoot, 'System32', 'nvcuda.dll'));
 }
 
+/** Whether this machine has an NVIDIA driver loaded. */
+export function nvidiaGpuPresent(platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'linux') {
+    return existsSync('/proc/driver/nvidia/version') || existsSync('/dev/nvidiactl');
+  }
+  if (platform === 'win32') return shouldProbeLlamaBackend('cuda', platform);
+  return false;
+}
+
+/**
+ * Why an override must not run, or null. A CPU-only llama-server passed by
+ * `--llama-bin` on a GPU box is accepted silently by everything downstream:
+ * the gemma4-12b craftbook sweeps of 2026-09-26/27 ran 41 trials on the GB10's
+ * CPU build at 3-30 t/s prefill, failed 34, and read as a model floor until a
+ * history review found `linux-arm64-cpu` in the trial logs.
+ */
+export function cpuOverrideRefusal(
+  build: EngineBuild | null | undefined,
+  gpuPresent: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (build?.backend !== 'cpu' || !gpuPresent) return null;
+  if (env.GEZEL_EVAL_ALLOW_CPU_BACKEND === '1') return null;
+  return 'it is a CPU-only llama-server, and this machine has an NVIDIA GPU. Results from it measure the CPU, not the model. Set GEZEL_EVAL_ALLOW_CPU_BACKEND=1 to run it anyway.';
+}
+
 /**
  * Build identity of a resolved engine binary. A trial record that names only
  * the *path* cannot distinguish two different builds staged at the same
@@ -161,7 +187,9 @@ export function installedAppRoots(): string[] {
  *      capable backend regardless of which root carries it.
  *
  * Overrides are probed for build identity like any other candidate but are
- * never rejected: pointing them at a hand-built engine is their whole purpose.
+ * not rejected for it: pointing them at a hand-built engine is their whole
+ * purpose. The one exception is a CPU-only build on a machine with an NVIDIA
+ * GPU ({@link cpuOverrideRefusal}), which measures the wrong thing.
  * Anything suspicious lands in `warnings` for the caller to log.
  *
  * Throws when nothing is found.
@@ -184,6 +212,8 @@ export function resolveLlamaBinary(explicitPath?: string): ResolvedBinary {
       build: describeBuild(override, probe),
       warnings: [],
     };
+    const refusal = cpuOverrideRefusal(resolved.build, nvidiaGpuPresent());
+    if (refusal) throw new Error(`${source} points at "${override}", but ${refusal}`);
     if (!probe.ok) {
       resolved.warnings.push(
         `${source} points at "${override}", which exists but did not respond to --version. An override bypasses the capability walk entirely, so nothing else will be tried.`,

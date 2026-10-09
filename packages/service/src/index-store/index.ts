@@ -1,15 +1,15 @@
-export {
-  IndexStore,
-  type FileRecord,
-  type SymbolInput,
-  type SymbolHit,
-  type ChunkInput,
-  type DocHit,
-  type VectorHit,
-  type Modality,
-  type CollectionKind,
-  type OpenOptions,
-} from './index-store.js';
+export { IndexStore } from './index-store.js';
+export type {
+  FileRecord,
+  SymbolInput,
+  SymbolHit,
+  ChunkInput,
+  DocHit,
+  VectorHit,
+  Modality,
+  CollectionKind,
+  OpenOptions,
+} from './index-store-types.js';
 export {
   type SqliteDriver,
   type SqliteStatement,
@@ -17,7 +17,6 @@ export {
   vectorToBlob,
 } from './sqlite-driver.js';
 export { applySchema, TEXT_EMBED_DIM } from './schema.js';
-export { ensureIndexGitignore } from './gitignore.js';
 export { classifyFile, type FileClass, MAX_INDEXABLE_BYTES } from './classify.js';
 export { sha256 } from './hash.js';
 export {

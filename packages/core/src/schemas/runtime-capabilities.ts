@@ -26,7 +26,15 @@ export interface RuntimeCapabilities {
   search: boolean;
   memories: boolean;
   background: boolean;
+  /** Gezels earn XP and level up, with a Growth tab to choose what they learn. */
+  growth: boolean;
   catalog: boolean;
+  /**
+   * The host lists and creates catalog project types (`/api/catalog/project-type`,
+   * `POST /api/projects/typed`) even without the full catalog. Omitted means
+   * it follows `catalog`.
+   */
+  projectTypes?: boolean;
   htmlPreview: boolean;
   daemonSettings: boolean;
   /**
@@ -87,7 +95,9 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   search: true,
   memories: true,
   background: true,
+  growth: true,
   catalog: true,
+  projectTypes: true,
   htmlPreview: true,
   daemonSettings: true,
   engineStatus: true,
@@ -129,7 +139,9 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   search: true,
   memories: true,
   background: false,
+  growth: false,
   catalog: false,
+  projectTypes: false,
   htmlPreview: false,
   daemonSettings: false,
   engineStatus: true,
@@ -147,7 +159,10 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   audio: false,
   audioModelManagement: false,
   mediaExport: false,
-  chatAttachments: false,
+  // Photos and files land in the prompt draft's message_files/ like the
+  // desktop's. The send path inlines text files and tells the model when it
+  // cannot see an image (no on-device provider takes images yet).
+  chatAttachments: true,
   queuedChat: true,
   textTransforms: true,
 });

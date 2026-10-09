@@ -13,7 +13,13 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import type { InvokePageToolRequest, PageReadRequest } from '@bendyline/gezel';
-import { createLogger, formatJsonSchemaViolations, validateJsonSchema } from '@bendyline/gezel';
+import {
+  createLogger,
+  formatJsonSchemaViolations,
+  pageReadIsDeclared,
+  projectTypeModelTools,
+  validateJsonSchema,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChatManager } from '../chat/manager.js';
 import { realpathContained, safeJoin } from '../fs/safe-paths.js';
@@ -26,7 +32,7 @@ import {
   resolveProjectTypeManifest,
 } from '../project-type/script-tools.js';
 import type { ScriptRunner } from '../scripts/runner.js';
-import { normalizePreviewPath, pathIsInScope } from './preview-capability.js';
+import { normalizePreviewPath } from './preview-capability.js';
 
 const log = createLogger('page-io');
 
@@ -142,6 +148,9 @@ export async function invokePageTool(
   let reaction: Awaited<ReturnType<typeof dispatchToolReaction>> | undefined;
   if (run.status === 'ok' && tool.reaction) {
     if (args.allowReaction) {
+      const manifest = tool.reaction.turn
+        ? await resolveProjectTypeManifest(deps.catalog, project)
+        : undefined;
       reaction = await dispatchToolReaction(
         { store: deps.store, chat: deps.chat, history: deps.history },
         {
@@ -150,6 +159,7 @@ export async function invokePageTool(
           ...(pageTools.params ? { params: pageTools.params } : {}),
           tool,
           run,
+          ...(manifest ? { modelTools: projectTypeModelTools(manifest) } : {}),
         },
       );
     } else {
@@ -205,14 +215,7 @@ export async function resolveScopedPageFile(
   if (requested === null) {
     return { ok: false, result: { status: 400, body: { error: 'bad path' } } };
   }
-  const inScope = scopes.some(
-    (scope) =>
-      scope.source === args.source &&
-      (scope.subtree
-        ? pathIsInScope(requested, normalizePreviewPath(scope.path) ?? scope.path)
-        : requested === normalizePreviewPath(scope.path)),
-  );
-  if (!inScope) {
+  if (!pageReadIsDeclared(scopes, args.source, requested)) {
     return {
       ok: false,
       result: { status: 403, body: { error: 'path is not a declared page read' } },

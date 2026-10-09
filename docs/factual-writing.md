@@ -99,7 +99,14 @@ holds one session's evidence:
   ``[4] Evidence from `wikipedia_read` — Wikipedia: George Washington. Cite
   facts from it as [4].`` It is applied in `McpBridge.callToolRich` through the
   session's `grounding` hooks, after the output cap, so the ledger holds
-  exactly what the model saw.
+  exactly what the model saw. The batch readers (`read_files`,
+  `read_artifacts`) count like their single-file twins, numbered once per
+  file section.
+- **Refusal remedies follow the source.** When the session's evidence so far
+  came from a workspace reader, or the person's messages name source files,
+  a refused write is sent back to `read_file` on those files rather than to
+  `search`. Searching for text a writer already read cost the core synthesis
+  scenarios 3-5x their wall-clock on 2026-10-05/06.
 - **What the person said.** All of the person's messages in the session
   count as evidence that needs no citation. Restating someone's own facts
   back to them is not invention.
@@ -117,7 +124,22 @@ splits text into prose sentences, attaches each `[n]`, and extracts the
 details a person could check: years, numbers (thousands separators and
 spelled small numbers match), months, quotations of three words or more, and
 capitalized names. Every detail must appear in the text of the evidence the
-sentence cites. Each sentence ends up as one of:
+sentence cites. A quotation is normalized like the evidence (case, line
+breaks, thousands separators), loses the writer's punctuation at its edges,
+and matches piece by piece across an ellipsis. Only a well-formed thousands
+separator is folded ("1,426" matches "1426"); a CSV row keeps its columns. A
+year or number must also sit near its name (the rarest word of the name
+nearest it in the sentence, so "(Allen, 2022) and (Dunn, 2023)" pairs each
+year with its author), but only in a source that states both: a number taken from a different source is a
+synthesis the check cannot judge, and acronyms and code identifiers ("UTC",
+"PaymentGateway") are never the name a number belongs to. A number the
+sentence works out from two of its own sourced numbers (a sum or difference)
+counts as sourced, and so does today's date. A decimal also matches the same
+quantity stated a thousandfold ("5.18 s" for 5180 ms), a name matches its
+plural or possessive, common technical acronyms (HTTP, UTC, API) are
+vocabulary rather than names, and a name inside a file attribution
+("(timeline.md, Notes)") never anchors a number.
+Each sentence ends up as one of:
 
 | Status | Meaning |
 |---|---|
@@ -175,6 +197,11 @@ It checks the text, not the world:
 - A wrong *relationship* between true names passes: "Lawrence was George's
   son" when the evidence names both men.
 - A sentence with no checkable detail is never `supported`, only `cited`.
+- A number the writer computed without showing its inputs ("a 10× longer
+  timeout") appears in no source, so it reads as invented.
+- A fact the source wraps across more than 160 characters from its name
+  reads as detached. The window is what catches the right relative with the
+  wrong year, so it stays tight.
 
 The answer to these is not a bigger regex. It is a narrow model check of the
 flagged sentences, kept for later and measured with the factuality bench

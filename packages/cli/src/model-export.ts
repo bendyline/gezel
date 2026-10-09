@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import type { GezmodelEngine } from '@bendyline/gezel';
-import type { LlamaCppInstallEvent, MlxInstallEvent } from '@bendyline/gezel-client';
 import {
   type GezelClient,
   modelBytesFromResponse,
@@ -11,6 +10,7 @@ import {
   writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
 import { CliError } from './connection.js';
+import { formatGb, pullChatModel } from './model-pull.js';
 
 /**
  * `gezel model export` — turn a gilde catalog id into a portable `.gezmodel`.
@@ -113,41 +113,13 @@ async function isInstalled(
 }
 
 /** Download the catalog model into the connected daemon's home. */
-async function pull(
+function pull(
   client: ModelExportClient,
   engine: GezmodelEngine,
   id: string,
   output: ModelExportOutput,
 ): Promise<void> {
-  let lastPct = -1;
-  let pullError: string | undefined;
-  // MLX repos are multi-file, so the SSE carries cumulative `*All` totals
-  // while the GGUF engines report a single file. Render whichever arrives.
-  const onEvent = (ev: MlxInstallEvent | LlamaCppInstallEvent): void => {
-    if (ev.type === 'progress') {
-      const written = 'bytesWrittenAll' in ev ? ev.bytesWrittenAll : ev.bytesWritten;
-      const total = 'totalBytesAll' in ev ? ev.totalBytesAll : (ev.totalBytes ?? 0);
-      const pct = total > 0 ? Math.floor((written / total) * 100) : 0;
-      if (pct === lastPct) return;
-      lastPct = pct;
-      output.writeProgress(
-        `\rdownloading ${id} (${engine}): ${String(pct).padStart(3)}%  ${formatGb(written)}/${formatGb(total)} GB`,
-      );
-    } else if (ev.type === 'retrying') {
-      output.writeProgress(`\n  retry ${ev.attempt}/${ev.maxAttempts}: ${ev.reason}\n`);
-    } else if (ev.type === 'error') {
-      pullError = ev.error;
-      output.writeProgress('\n');
-    } else if (ev.type === 'done' && !pullError) {
-      output.writeProgress(`\rdownloaded ${id} (${engine})${' '.repeat(48)}\n`);
-    }
-  };
-
-  if (engine === 'mlx') await client.installMlxModel(id, onEvent);
-  else if (engine === 'ds4') await client.installDs4Model(id, onEvent);
-  else await client.installLlamaCppModel(id, onEvent);
-
-  if (pullError) throw new CliError(`download failed: ${pullError}`);
+  return pullChatModel(client, engine, id, (text) => output.writeProgress(text));
 }
 
 export async function exportModelToFile(
@@ -235,8 +207,4 @@ function progressText(bytesCompleted: number, bytesTotal: number | undefined): s
   if (!bytesTotal) return `${formatGb(bytesCompleted)} GB`;
   const pct = Math.floor((bytesCompleted / bytesTotal) * 100);
   return `${String(pct).padStart(3)}%  ${formatGb(bytesCompleted)}/${formatGb(bytesTotal)} GB`;
-}
-
-function formatGb(bytes: number): string {
-  return (bytes / 1e9).toFixed(2);
 }

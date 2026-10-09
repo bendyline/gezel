@@ -26,6 +26,10 @@ export const REVIEWED_ENTITLEMENTS = new Map([
     'Narrate microphone capture; hardened runtime denies it without a prompt otherwise',
   ],
   [
+    'com.apple.security.device.camera',
+    'the composer Take photo viewfinder; hardened runtime denies the camera without a prompt otherwise',
+  ],
+  [
     'com.apple.security.automation.apple-events',
     'the ambient wallpaper asking System Events (via osascript) to set the desktop picture',
   ],

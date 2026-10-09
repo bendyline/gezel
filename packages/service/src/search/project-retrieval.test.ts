@@ -5,7 +5,13 @@
  * every injected chunk, and the untrusted-evidence header extension.
  */
 
-import type { ChatSession, GezelConfig, GezelDetail, UnifiedSearchResult } from '@bendyline/gezel';
+import {
+  type ChatSession,
+  type GezelConfig,
+  type GezelDetail,
+  MEMORY_NOTES_HEADER,
+  type UnifiedSearchResult,
+} from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { resolveRetrievalPolicy, retrieveProjectContext } from './project-retrieval.js';
@@ -336,6 +342,65 @@ describe('keyword hits must be grounded in what they inject', () => {
       'Can you create a PowerPoint about France',
     );
     expect(result?.hits).toHaveLength(1);
+  });
+});
+
+describe('memory hits', () => {
+  it('render as the crew’s own notes, after the evidence and nearest the message', async () => {
+    const memory = (
+      source: 'user-memory' | 'gezel-memory',
+      snippet: string,
+      kind: 'pref' | 'correction',
+    ) =>
+      ({
+        kind: 'memory',
+        id: `memory:${source}:${kind}`,
+        title: snippet.slice(0, 80),
+        snippet,
+        retrievalSource: source,
+        arm: 'vector',
+        memory: { day: '2026-10-01', kind },
+        ...scoreResult('memory', 0.7),
+      }) satisfies UnifiedSearchResult;
+    const result = await run(
+      [
+        workspaceHit(1),
+        memory('user-memory', 'Prefers to cut joints by hand.', 'pref'),
+        memory('gezel-memory', 'Pins went too thin last time; mark them wider.', 'correction'),
+      ],
+      'balanced',
+    );
+    const prompt = result?.prompt ?? '';
+    const evidence = prompt.indexOf('[Indexed context for this turn');
+    const notes = prompt.indexOf(MEMORY_NOTES_HEADER);
+    expect(evidence).toBeGreaterThanOrEqual(0);
+    expect(notes).toBeGreaterThan(evidence);
+    expect(prompt.slice(notes)).toContain(
+      '- About the person (pref, 2026-10-01): Prefers to cut joints by hand.',
+    );
+    expect(prompt.slice(notes)).toContain(
+      '- Your note (correction, 2026-10-01): Pins went too thin last time; mark them wider.',
+    );
+    expect(prompt).not.toContain('(memory)');
+  });
+
+  it('carry no untrusted-evidence warning when they are all the turn found', async () => {
+    const result = await run(
+      [
+        {
+          kind: 'memory',
+          id: 'memory:user:1',
+          title: 'Prefers to cut joints by hand.',
+          snippet: 'Prefers to cut joints by hand.',
+          retrievalSource: 'user-memory',
+          arm: 'vector',
+          ...scoreResult('memory', 0.7),
+        },
+      ],
+      'balanced',
+    );
+    expect(result?.prompt.startsWith(MEMORY_NOTES_HEADER)).toBe(true);
+    expect(result?.prompt).not.toContain('untrusted evidence');
   });
 });
 

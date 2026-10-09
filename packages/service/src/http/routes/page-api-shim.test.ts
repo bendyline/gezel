@@ -251,6 +251,35 @@ describe('buildPageApiShim', () => {
     expect(seen).toEqual([{ mode: 'dark' }, { mode: 'light' }]);
   });
 
+  it('a snapshot page (no capability) gets a blank tagged image, then the bytes over the relay', async () => {
+    const h = boot({ pathname: '/__gezel_preview/abc/index.html' });
+    const first = h.gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' });
+    expect(first).toMatch(
+      /^data:image\/gif;base64,[^#]+#gezel-data=artifacts%3Aposts%2Fa%2Fmedia%2Fcover\.png;$/,
+    );
+    expect(h.gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' })).toBe(first);
+    const reads = h.posted.filter((m) => (m as { kind?: string }).kind === 'read');
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({
+      source: 'artifacts',
+      path: 'posts/a/media/cover.png',
+      as: 'bytes',
+    });
+    h.deliver({
+      __gezelPage: 1,
+      kind: 'read-result',
+      id: (reads[0] as { id: string }).id,
+      ok: true,
+      content: 'iVBORw0KGgo=',
+      encoding: 'base64',
+      etag: 'e1',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' })).toBe(
+      'data:image/png;base64,iVBORw0KGgo=',
+    );
+  });
+
   it('browser mode: invoke rejects unavailable, url derives from the capability, refresh reloads', async () => {
     const h = boot({ embedded: false });
     expect(h.gezel.page.mode).toBe('browser');

@@ -333,8 +333,9 @@ call.
 ## 6. The script sandbox
 
 `packages/service/src/sandbox/runner.ts`, `macos.ts`; `packages/service/src/scripts/`;
-`packages/sdk`. Backs gate-scripts (`defineScript`) and the model's `run_nodejs_script` /
-`run_playwright_script` tools.
+`packages/sdk`. Backs gate-scripts (`defineScript`) and the model's `run_nodejs_script`
+tool. `run_playwright_script` does **not** run here — it starts a browser and needs the
+network — so its boundary is the user's approval instead (§12).
 
 **Execution model — a real OS process, not `node:vm`.** `vm` is *not* a security boundary
 (constructor escapes); Gezel correctly avoids it. Each run is `child_process.spawn` of a Node
@@ -508,16 +509,34 @@ fix and is not yet implemented.
 - **Spawns use argv arrays, not shell strings.** The "reveal in file manager" launcher uses
   `execFile('open'|'xdg-open'|'explorer', [dir])` (a project `workingDir` is model-settable and
   flows here). On Windows, `runPnpm` quotes args for cmd.exe when `shell:true` is unavoidable
-  (the `.cmd` shim). `run_git` is restricted to read-only subcommands and rejects `-c`/`--exec`.
-- **`install_package`** is consent-gated and forces `--ignore-scripts` (npm lifecycle-script
-  vector closed).
+  (the `.cmd` shim).
+- **`run_git`** (`git/restricted-args.ts`) allows eight subcommands, each with a per-subcommand
+  option allowlist — not a denylist, because git accepts abbreviated long options and has
+  several file-writing or file-reading flags (`--output`, `--no-index`, `--contents`). Positional
+  arguments may not be absolute or contain a `..` segment, since `git diff` turns into
+  `--no-index` for a path outside the work tree. Every run disables fsmonitor and hooks, and the
+  diff family forces `--no-ext-diff --no-textconv`, because repository config is workspace
+  content. Clean/smudge filters in that config are not disabled.
+- **`run_playwright_script`** runs outside the script sandbox. The security level strips it
+  whenever external services are off (it is open-web egress, like `fetch_url`), and the route
+  refuses it the same way. A run a gezel asks for needs the user's approval of that exact
+  script plus the relative imports it pulls from the artifacts tree (`command-approval`, scope
+  `playwright`); editing any of them asks again. The child gets an allowlisted environment
+  (`browserScriptEnv`), not the daemon's credentials.
+- **`install_package`** is consent-gated, and like every install path it runs pnpm with
+  `INSTALL_GUARD_FLAGS` (below).
 - **NPM package installs are registry-only and project-bound.** Both the direct project API
   and approval-backed `npm_install` surface accept a canonical NPM package name plus a
   controlled semver range or dist-tag. URL, Git, local-file, workspace, alias, path, and
   option-like specifications are rejected. The project must already exist; entity ids are
   validated at the HTTP and path-helper boundaries; the resolved private package directory is
   checked for containment below `~/.gezel/projects`; and pnpm receives `--` before the package
-  specification. All install paths keep lifecycle scripts disabled.
+  specification. All install paths run pnpm with `INSTALL_GUARD_FLAGS`
+  (`packages/pnpm.ts`): no lifecycle scripts, no pnpmfile (`.pnpmfile.cjs`/`.mjs`, a
+  `pnpmfile` path in `pnpm-workspace.yaml`, or a `pnpm-plugin-*` config dependency), and no
+  switching to the pnpm version a `packageManager` field names. `npm_install` also pins the
+  registry it reads from outside the workspace, so a planted `.npmrc` cannot redirect an
+  allowlisted package.
 - **Engine binaries** downloaded by the supervisor are sha256 + code-signature verified
   (`engines/resolver.ts`) before use. Standalone macOS archives must receive an `Accepted`
   result from Apple's notary service before CI hashes and packages those exact signed bytes;

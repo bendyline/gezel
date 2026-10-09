@@ -1,4 +1,8 @@
-import { checksModuleSource, sdkModuleSource } from 'virtual:gezel-portable-sdk';
+import {
+  checksModuleSource,
+  sdkModuleSource,
+  storesModuleSource,
+} from 'virtual:gezel-portable-sdk';
 import { acquireSuspendMonitor, awakeNow } from '@bendyline/gezel';
 import { QuickJSScriptExecutor } from '@bendyline/gezel-script-runtime/quickjs';
 import type {
@@ -52,7 +56,10 @@ async function run(data: Omit<QuickJSWorkerData, 'sdkModuleSource' | 'checksModu
   try {
     const executor = new QuickJSScriptExecutor({
       sdkModuleSource,
-      modules: { '@bendyline/gezel-sdk/checks': checksModuleSource },
+      modules: {
+        '@bendyline/gezel-sdk/checks': checksModuleSource,
+        '@bendyline/gezel-sdk/stores': storesModuleSource,
+      },
       compile: (source) => source,
       now: awakeNow,
       memoryLimitBytes: 32 * 1024 * 1024,

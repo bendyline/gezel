@@ -37,6 +37,32 @@ describe('formatMemoryBlock + parseMemoryDay', () => {
     expect(parseMemoryDay(content)).toEqual([{ time: '09:05', kind: 'fact', text: 'Kept.' }]);
   });
 
+  it('round-trips the new kinds and a source', () => {
+    const content = formatMemoryBlock('08:15', 'Said "estoy cansado", not "soy".', 'correction', {
+      project: 'spanish',
+      gezel: 'wren',
+    });
+    expect(content).toContain('## 08:15 [correction] {project:spanish gezel:wren}');
+    expect(parseMemoryDay(content)).toEqual([
+      {
+        time: '08:15',
+        kind: 'correction',
+        text: 'Said "estoy cansado", not "soy".',
+        source: { project: 'spanish', gezel: 'wren' },
+      },
+    ]);
+  });
+
+  it('keeps a heading with an unreadable source a heading, and drops what it cannot use', () => {
+    const blocks = parseMemoryDay(
+      '\n## 09:00 [example] {project:ok/../x color:red}\n\nA worked example.\n',
+    );
+    expect(blocks).toEqual([{ time: '09:00', kind: 'example', text: 'A worked example.' }]);
+    expect(formatMemoryBlock('09:00', 'x', 'fact', { project: 'a b' })).toContain(
+      '## 09:00 [fact]\n',
+    );
+  });
+
   it('does not treat ### or deeper headings as block boundaries', () => {
     const blocks = parseMemoryDay('\n## 09:00 [fact]\n\nBody with\n### a sub-heading\ninside.\n');
     expect(blocks).toHaveLength(1);

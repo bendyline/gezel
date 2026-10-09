@@ -447,3 +447,283 @@ describe('NightShiftManager — quota reserve holds', () => {
     expect(gate).not.toHaveBeenCalled();
   });
 });
+
+describe('NightShiftManager — ambient work', () => {
+  function makeAmbientManager(work: {
+    eligible: () => boolean;
+    running: () => boolean;
+  }): { m: NightShiftManager; eligibleCalls: () => number } {
+    let calls = 0;
+    const m = new NightShiftManager({
+      store,
+      manager: tasks,
+      events,
+      now: () => new Date(clock),
+      ambientWork: {
+        hasEligibleProject: async () => {
+          calls++;
+          return work.eligible();
+        },
+        isRunning: () => work.running(),
+      },
+    });
+    return { m, eligibleCalls: () => calls };
+  }
+
+  it('turns ON for an eligible folder with no tasks, holds while the sweep runs, then latches off', async () => {
+    clock = localMs(2026, 6, 20, 22, 5);
+    let running = false;
+    const { m, eligibleCalls } = makeAmbientManager({
+      eligible: () => true,
+      running: () => running,
+    });
+    let activations = 0;
+    m.setOnActivated(async () => {
+      activations++;
+      running = true; // the sweep starts on activation
+    });
+
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('scheduled');
+
+    clock = localMs(2026, 6, 20, 23, 30);
+    await m.tick();
+    expect(m.isActive()).toBe(true); // still sweeping
+
+    running = false; // sweep and its hand-off finished
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(activations).toBe(1);
+    expect(eligibleCalls()).toBe(1); // never asked for a second sweep
+
+    clock = localMs(2026, 6, 21, 1, 0);
+    await m.tick();
+    expect(m.isActive()).toBe(false); // latched for the rest of the window
+  });
+
+  it('latches off when no project is eligible, as before', async () => {
+    clock = localMs(2026, 6, 20, 23, 0);
+    const { m } = makeAmbientManager({ eligible: () => false, running: () => false });
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+  });
+
+  it('does not ask for a second sweep after a task-triggered shift drains', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    let running = false;
+    const { m, eligibleCalls } = makeAmbientManager({
+      eligible: () => true,
+      running: () => running,
+    });
+    m.setOnActivated(async () => {
+      running = true;
+    });
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    const callsAtActivation = eligibleCalls();
+
+    const list = await tasks.list({ projectId: 'ns' });
+    await tasks.setStatus('ns', list[0]!.num, 'paused');
+    running = false;
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(eligibleCalls()).toBe(callsAtActivation);
+  });
+
+  it('runs a manual shift for ambient work alone, then reverts', async () => {
+    clock = localMs(2026, 6, 20, 12, 0); // midday
+    let running = false;
+    const { m } = makeAmbientManager({ eligible: () => true, running: () => running });
+    m.setOnActivated(async () => {
+      running = true;
+    });
+    await m.startManual();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('manual');
+
+    running = false;
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+  });
+
+  it('stays off outside the window with no manual request', async () => {
+    clock = localMs(2026, 6, 20, 12, 0);
+    const { m, eligibleCalls } = makeAmbientManager({ eligible: () => true, running: () => false });
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(eligibleCalls()).toBe(0);
+  });
+});
+
+describe('NightShiftManager — night-shift hosts', () => {
+  async function addNightHost(): Promise<void> {
+    await tasks.create('ns', {
+      title: 'Night shift: digest',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait for schedule' }],
+      spawnsSteps: [{ name: 'Digest' }],
+      cron: { expression: '*/30 * * * *', overlap: 'skip' },
+      nightShift: { enabled: true, onceADay: true },
+    });
+  }
+
+  it('stays on early in the window for a host that has not spawned tonight', async () => {
+    await addNightHost();
+    clock = localMs(2026, 6, 20, 22, 0);
+    const m = makeManager();
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+  });
+
+  it('does not hold the shift for a host that never spawns past the grace period', async () => {
+    await addNightHost();
+    clock = localMs(2026, 6, 20, 23, 30);
+    const m = makeManager();
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+  });
+
+  it('does not count a host that already spawned tonight', async () => {
+    await addNightHost();
+    const [host] = await tasks.list({ projectId: 'ns' });
+    await tasks.recordNightShiftSpawn(host!.ref, '2026-06-20');
+    clock = localMs(2026, 6, 20, 22, 0);
+    const m = makeManager();
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+  });
+});
+
+describe('NightShiftManager — window outcome', () => {
+  it('reads a window it never saw open as asleep', async () => {
+    clock = localMs(2026, 6, 21, 9, 0); // morning, first tick after a night asleep
+    const m = makeManager();
+    await m.tick();
+    expect(m.windowOutcome('2026-06-20')).toEqual({
+      windowKey: '2026-06-20',
+      ran: false,
+      reason: 'asleep',
+    });
+  });
+
+  it('records when the shift ran and when it ended', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    const m = makeManager();
+    await m.tick();
+    const list = await tasks.list({ projectId: 'ns' });
+    await tasks.setStatus('ns', list[0]!.num, 'paused');
+    clock = localMs(2026, 6, 20, 23, 30);
+    await m.tick();
+    const outcome = m.windowOutcome('2026-06-20');
+    expect(outcome.ran).toBe(true);
+    expect(outcome.reason).toBeUndefined();
+    expect(outcome.startedAt).toBe(new Date(localMs(2026, 6, 20, 23, 0)).toISOString());
+    expect(outcome.endedAt).toBe(new Date(localMs(2026, 6, 20, 23, 30)).toISOString());
+  });
+
+  it('names a night with nothing owed as no-work, and a stopped one as stopped', async () => {
+    clock = localMs(2026, 6, 20, 23, 0);
+    const idle = makeManager();
+    await idle.tick();
+    expect(idle.windowOutcome('2026-06-20').reason).toBe('no-work');
+
+    await addNightTask();
+    const stopped = makeManager();
+    await stopped.stopManual();
+    expect(stopped.windowOutcome('2026-06-20')).toMatchObject({ ran: false, reason: 'stopped' });
+  });
+});
+
+describe('NightShiftManager — window opened', () => {
+  it('runs the window-opened hook once per window, before deciding', async () => {
+    clock = localMs(2026, 6, 20, 22, 1);
+    const m = makeManager();
+    const opened = vi.fn(async () => {
+      await addNightTask(); // e.g. the oversight task, re-created
+    });
+    m.setOnWindowOpened(opened);
+    await m.tick();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(m.isActive()).toBe(true); // the queued work counted tonight, no latch
+
+    clock = localMs(2026, 6, 20, 23, 0);
+    await m.tick();
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    clock = localMs(2026, 6, 21, 12, 0);
+    await m.tick();
+    clock = localMs(2026, 6, 21, 22, 5);
+    await m.tick();
+    expect(opened).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('NightShiftManager — on battery', () => {
+  function onPower(onBattery: { value: boolean | null }) {
+    return new NightShiftManager({
+      store,
+      manager: tasks,
+      events,
+      now: () => new Date(clock),
+      power: { onBatteryPower: () => onBattery.value },
+    });
+  }
+
+  it('stands down when unplugged mid-shift and resumes on mains, without latching', async () => {
+    await addNightTask();
+    await store.writeConfig({ nightShift: { keepAwakeWhileRunning: true } });
+    clock = localMs(2026, 6, 20, 23, 0);
+    const power = { value: false as boolean | null };
+    const m = onPower(power);
+    const deactivated = vi.fn(async () => {});
+    m.setOnDeactivated(deactivated);
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.getPowerIntent().keepAwake).toBe(true);
+
+    power.value = true;
+    clock = localMs(2026, 6, 20, 23, 30);
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(m.isHeldOnBattery()).toBe(true);
+    expect(m.getPowerIntent().keepAwake).toBe(false);
+    expect(deactivated).toHaveBeenCalledTimes(1);
+
+    power.value = false;
+    clock = localMs(2026, 6, 21, 0, 0);
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.isHeldOnBattery()).toBe(false);
+  });
+
+  it('names a night spent on battery, and keeps a manual shift for when power returns', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    const power = { value: true as boolean | null };
+    const m = onPower(power);
+    await m.startManual();
+    expect(m.isActive()).toBe(false);
+    expect(m.windowOutcome('2026-06-20')).toMatchObject({ ran: false, reason: 'on-battery' });
+
+    power.value = false;
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('manual');
+  });
+
+  it('runs on battery when the person turned the pause off, or the power source is unknown', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    const unknown = onPower({ value: null });
+    await unknown.tick();
+    expect(unknown.isActive()).toBe(true);
+
+    await store.writeConfig({ nightShift: { pauseOnBattery: false } });
+    const optedOut = onPower({ value: true });
+    await optedOut.tick();
+    expect(optedOut.isActive()).toBe(true);
+  });
+});

@@ -5,6 +5,7 @@ import type {
   ExternalToolCall,
   ExternalToolSpec,
   LLMSession,
+  ProviderSessionState,
   TerminalToolPolicy,
   WireTranscriptEntry,
 } from '@bendyline/gezel/local-loop';
@@ -27,6 +28,7 @@ export type {
   ProviderSessionState,
   SendAndWaitOpts,
   ToolArgsDeltaMeta,
+  ToolSurfaceSize,
   TurnUsage,
 } from '@bendyline/gezel/local-loop';
 
@@ -39,6 +41,8 @@ export interface ProviderCredentials {
 }
 
 export interface SessionOpts {
+  /** Safe attribution for opt-in eval request observation. */
+  observationContext?: import('./api-observation.js').ApiObservationContext;
   systemMessage: string;
   /**
    * Layered prompt-cache prefixes (flag `layeredPrefixCache`). Present
@@ -71,6 +75,8 @@ export interface SessionOpts {
    * next turn continues a server-side conversation instead of starting fresh.
    */
   openaiPreviousResponseId?: string;
+  /** Results queued at a turn boundary, paired with openaiPreviousResponseId. */
+  openaiPendingToolOutputs?: ProviderSessionState['openaiPendingToolOutputs'];
   /**
    * `anthropic-cli` only: pre-seed the session with a session id captured
    * from a prior `claude -p` invocation. The provider passes

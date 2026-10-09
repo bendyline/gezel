@@ -23,4 +23,4 @@ Most craftbooks can be started straight from chat — each one declares trigger 
 
 Every craftbook has its own article in the Craftbooks section of this Handboek, with the full step-by-step walk of how it runs.
 
-You can also browse the public [Gezel Gilde craftbook catalog](https://gezelgilde.com/craftbooks/), where the full shelf is grouped by kind of work and each entry shows its steps and evaluation status.
+You can also browse [every craftbook](https://gezel.com/docs/craftbooks-index/) on gezel.com, where the full shelf is grouped by kind of work and each entry shows its steps.

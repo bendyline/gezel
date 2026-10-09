@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
@@ -38,7 +39,9 @@ async function seedWorkspace(): Promise<void> {
   await writeFile(join(dir, 'src', 'wheels.ts'), 'export function roll() { return 2; }\n');
   await writeFile(join(dir, 'docs', 'a.md'), '# A\nmanual part one\n');
   await writeFile(join(dir, 'docs', 'b.md'), '# B\nmanual part two\n');
-  await runWorkspaceContentIndex(dir, 'p1', artifacts);
+  await runWorkspaceContentIndex(dir, 'p1', artifacts, {
+    dbPath: projectContentIndexDbFile(home, 'p1', dir),
+  });
 }
 
 function deps(summarize: EnrichDeps['summarize']): EnrichDeps {
@@ -102,7 +105,9 @@ describe('area pass (deep-pass tier 2)', () => {
     );
 
     await writeFile(join(dir, 'src', 'engine.ts'), 'export function ignite() { return 99; }\n');
-    await runWorkspaceContentIndex(dir, 'p1', artifacts);
+    await runWorkspaceContentIndex(dir, 'p1', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p1', dir),
+    });
     await ci.enrich(
       'p1',
       deps(async () => 'Updated file summary.'),

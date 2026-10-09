@@ -80,3 +80,23 @@ export function textMatchesAnyTerm(text: string, terms: readonly string[]): bool
   }
   return false;
 }
+
+/**
+ * The share of `terms` that `text` contains, under the same prefix rule as
+ * {@link textMatchesAnyTerm} — so any text scoring above zero is grounded.
+ * Ranks keyword hits over a corpus with no FTS index (the daily memory files).
+ */
+export function termMatchFraction(text: string, terms: readonly string[]): number {
+  if (terms.length === 0) return 0;
+  const tokens = new Set(tokenizeText(text));
+  let matched = 0;
+  for (const term of terms) {
+    for (const token of tokens) {
+      if (token === term || (term.length >= PREFIX_MIN_LENGTH && token.startsWith(term))) {
+        matched++;
+        break;
+      }
+    }
+  }
+  return matched / terms.length;
+}

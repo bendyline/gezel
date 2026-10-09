@@ -25,7 +25,11 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const defaultDestination = join(repoRoot, 'packages', 'app', 'dist', 'licenses');
 const destination = process.argv[2] ? resolve(process.argv[2]) : defaultDestination;
-const LICENSE_FILE = /^(?:licen[cs]e|copying|notice|copyright)(?:$|[._-])/i;
+// Third-party notice files carry the licenses of code a package pre-bundled
+// into its own dist: squisq's THIRD_PARTY_LICENSES.txt is the only MPL-2.0
+// text for the Mediabunny inside @bendyline/squisq-video-react.
+const LICENSE_FILE =
+  /^(?:licen[cs]e|copying|notice|copyright|third[-_ ]?party[-_ ]?(?:licen[cs]es?|notices?))(?:$|[._-])/i;
 const CUDA_LIBRARY = /(?:^|lib)(?:cudart|cublas)/i;
 
 const MIT_TERMS = `Permission is hereby granted, free of charge, to any person obtaining a copy

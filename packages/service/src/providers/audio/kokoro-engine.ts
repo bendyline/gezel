@@ -375,7 +375,7 @@ async function defaultKokoroLoader(): Promise<KokoroJsModule> {
     const detail = err instanceof Error ? err.message : String(err);
     if (detail.includes('kokoro-js')) {
       throw new Error(
-        'Local text-to-speech is an optional npm feature. Install kokoro-js@^1.2.1 and @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).',
+        'Local text-to-speech is an optional npm feature. Install kokoro-js@^1.2.1 and @huggingface/transformers@^4.3.1 alongside @bendyline/gezel-service (see the service README).',
       );
     }
     throw err;

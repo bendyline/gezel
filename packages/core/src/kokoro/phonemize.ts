@@ -9,7 +9,8 @@
 
 import { soundOutWord } from './letter-to-sound.js';
 import type { KokoroLexicon } from './lexicon.js';
-import { normalizeForSpeech } from './normalize.js';
+import { normalizeForSpeechWithMapping } from './normalize.js';
+import { type KokoroSourceRange, MappedSpeechText } from './source-map.js';
 import { kokoroTokenFor } from './vocab.js';
 
 /** Longest Han run tried as a single dictionary word. */
@@ -42,8 +43,11 @@ function phonemesForWord(word: string, lexicon: KokoroLexicon): string {
 }
 
 /** Longest-match segmentation for Han text, which is written without spaces. */
-function phonemesForHan(run: string, lexicon: KokoroLexicon): string {
-  const parts: string[] = [];
+function phonemesForHan(
+  run: string,
+  lexicon: KokoroLexicon,
+): Array<{ phonemes: string; start: number; end: number }> {
+  const parts: Array<{ phonemes: string; start: number; end: number }> = [];
   let index = 0;
   while (index < run.length) {
     let matched = '';
@@ -60,40 +64,60 @@ function phonemesForHan(run: string, lexicon: KokoroLexicon): string {
       index += 1;
       continue;
     }
-    parts.push(matched);
+    parts.push({ phonemes: matched, start: index, end: index + width });
     index += width;
   }
-  return parts.join(' ');
+  return parts;
 }
 
-/**
- * Convert text to a phoneme string the tokenizer accepts. Punctuation the
- * model knows is preserved, because it carries the phrasing; anything else is
- * dropped rather than spoken.
- */
+/** Phonemes and their original-source ranges before token filtering. */
+export interface KokoroMappedPhonemes {
+  readonly phonemes: string;
+  /** One entry per UTF-16 code unit in phonemes. */
+  readonly ranges: readonly (KokoroSourceRange & { readonly word?: number })[];
+}
+
+/** Preserve known punctuation for prosody; omit unsupported symbols. */
 export function phonemizeForKokoro(text: string, options: KokoroPhonemizeOptions): string {
-  const prepared = options.normalize === false ? text : normalizeForSpeech(text);
-  const pieces: string[] = [];
-  // Words, Han runs, and single other characters, in document order.
+  return phonemizeForKokoroWithMapping(text, options).phonemes;
+}
+
+export function phonemizeForKokoroWithMapping(
+  text: string,
+  options: KokoroPhonemizeOptions,
+): KokoroMappedPhonemes {
+  const prepared =
+    options.normalize === false
+      ? MappedSpeechText.from(text, false)
+      : normalizeForSpeechWithMapping(text);
+  let phonemes = '';
+  const ranges: Array<KokoroSourceRange & { readonly word?: number }> = [];
+  let wordIndex = 0;
+  const append = (value: string, range: KokoroSourceRange, word?: number) => {
+    for (const symbol of value) {
+      const normalized = /\s/u.test(symbol) ? ' ' : symbol;
+      if (normalized === ' ' && (!phonemes || phonemes.endsWith(' '))) continue;
+      phonemes += normalized;
+      for (let i = 0; i < normalized.length; i++)
+        ranges.push({ ...range, ...(word !== undefined ? { word } : {}) });
+    }
+  };
   const pattern = /([\p{Script=Han}]+)|([\p{L}\p{M}'’-]+)|(\s+)|([^\s])/gu;
-  for (const match of prepared.matchAll(pattern)) {
+  for (const match of prepared.text.matchAll(pattern)) {
     const [, han, word, space, other] = match;
+    const range = prepared.range(match.index, match.index + match[0].length);
     if (han) {
-      const lexicon = options.hanLexicon;
-      if (lexicon) pieces.push(phonemesForHan(han, lexicon));
-      continue;
-    }
-    if (word) {
-      const phonemes = phonemesForWord(word, options.lexicon);
-      if (phonemes) pieces.push(phonemes);
-      continue;
-    }
-    if (space) {
-      if (pieces.at(-1) !== ' ') pieces.push(' ');
-      continue;
-    }
-    // Keep only punctuation the model has a symbol for.
-    if (other && kokoroTokenFor(other) !== undefined) pieces.push(other);
+      if (options.hanLexicon) {
+        for (const [index, part] of phonemesForHan(han, options.hanLexicon).entries()) {
+          const source = prepared.range(match.index + part.start, match.index + part.end);
+          if (index) append(' ', source);
+          append(part.phonemes, source, wordIndex++);
+        }
+      }
+    } else if (word) append(phonemesForWord(word, options.lexicon), range, wordIndex++);
+    else if (space) append(' ', range);
+    else if (other && kokoroTokenFor(other) !== undefined) append(other, range);
   }
-  return pieces.join('').replace(/\s+/g, ' ').trim();
+  const trimmed = phonemes.trimEnd();
+  return { phonemes: trimmed, ranges: ranges.slice(0, trimmed.length) };
 }

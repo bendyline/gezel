@@ -12,7 +12,7 @@
  * value — only a redacted shape — because the finding is persisted to the index DB.
  */
 
-import type { SecurityFindingInput, SecuritySeverity } from '../index-store/index-store.js';
+import type { SecurityFindingInput, SecuritySeverity } from '../index-store/index-store-types.js';
 
 export type SecurityCategory =
   | 'injection'

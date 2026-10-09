@@ -17,3 +17,15 @@ export function updateActiveTraySessions(
   }
   return wasWorking !== activeSessions.size > 0;
 }
+
+export function waitForTrayActivityRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolveRetry) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolveRetry();
+    };
+    const timer = setTimeout(finish, 1_500);
+    signal.addEventListener('abort', finish, { once: true });
+  });
+}

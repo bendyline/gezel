@@ -2059,6 +2059,75 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(requestCount).toBe(1);
   });
 
+  it('offers a required call alone on the turn’s first request, then the whole surface', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length > 1)
+        return sseResponse([
+          { choices: [{ index: 0, delta: { content: 'No legal move there.' } }] },
+          { choices: [{ index: 0, finish_reason: 'stop' }] },
+          '[DONE]',
+        ]);
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_move',
+                    type: 'function',
+                    function: { name: 'make_move', arguments: '{"from":"b6","to":"z9"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    Object.defineProperty(provider, 'supportsForcedToolChoice', { value: true });
+    const session = await provider.createSession({
+      systemMessage: 'Play from the current board.',
+      model: 'qwen',
+      terminalToolPolicy: { toolNames: ['make_move'], fallbackText: 'Your turn.' },
+    });
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['get_board', 'make_move', 'new_game'].map((name) => ({
+          name,
+          description: name,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async () => 'ERROR: z9 is not a square on the board.',
+    };
+
+    await session.sendAndWait('Your opponent played c3-d4. Make your move.', {
+      requiredTool: 'make_move',
+    });
+
+    const names = (body: Record<string, unknown>) =>
+      (body.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
+    expect(names(bodies[0]!)).toEqual(['make_move']);
+    expect(bodies[0]!.tool_choice).toBe('required');
+    expect(bodies[0]!.chat_template_kwargs).toMatchObject({ enable_thinking: false });
+    // The move was refused: the model answers with everything in reach again.
+    expect(names(bodies[1]!)).toEqual(['get_board', 'make_move', 'new_game']);
+    expect(bodies[1]!.tool_choice).toBeUndefined();
+    // The prompt record sizes the whole roster, not the one-tool narrowing.
+    expect(session.getToolSurface?.()).toMatchObject({ count: 3 });
+    expect(session.getToolSurface?.()?.tokens).toBeGreaterThan(0);
+  });
+
   it('ends a task-step turn after advance succeeds and skips later calls in the batch', async () => {
     let requestCount = 0;
     let staleWriteRan = false;
@@ -8410,7 +8479,7 @@ describe('strict alternation tool transcript fallback', () => {
 });
 
 describe('compactSuccessfulWriteToolCallForTranscript', () => {
-  it('replaces large successful write_file content with a compact transcript marker', () => {
+  it('drops large successful write_file content, leaving nothing a model could copy back', () => {
     const call = {
       id: 'call_1',
       type: 'function' as const,
@@ -8423,11 +8492,15 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
 
     expect(compactSuccessfulWriteToolCallForTranscript(call, args, 'Wrote index.html')).toBe(true);
 
-    const compacted = JSON.parse(call.function.arguments) as { path: string; content: string };
+    const compacted = JSON.parse(call.function.arguments) as {
+      path: string;
+      content?: string;
+      omittedChars?: number;
+    };
     expect(compacted.path).toBe('index.html');
-    expect(compacted.content).toContain('2500 chars were written');
-    expect(compacted.content).toContain('Use read_file');
-    expect(compacted.content).not.toContain('x'.repeat(100));
+    expect(compacted.content).toBeUndefined();
+    expect(compacted.omittedChars).toBe(2_500);
+    expect(call.function.arguments).not.toContain('x'.repeat(100));
   });
 
   it('leaves failed or small writes unchanged', () => {
@@ -9942,5 +10015,49 @@ describe('LlamaCppSession stream events', () => {
     // through, so only the first emission is deterministic here.
     expect(counted[0]).toEqual({ outputTokens: 1, tokensPerSec: 61.4 });
     expect(counted.every((c) => typeof c.outputTokens === 'number')).toBe(true);
+  });
+});
+
+describe('standalone turns', () => {
+  it('sends the instructions and the turn alone, and keeps the transcript whole', async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    const reply = (text: string) =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: text } }] },
+        { choices: [{ index: 0, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]);
+    const provider = new ExternalLlamaServer({
+      baseUrl: 'http://engine.test',
+      fetchImpl: (async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return reply(`Reply ${requests.length}.`);
+      }) as typeof fetch,
+    });
+    try {
+      const session = await provider.createSession({
+        systemMessage: 'You play checkers.',
+        model: 'fixture',
+        priorMessages: [
+          { role: 'user', content: 'Old board.' },
+          { role: 'assistant', content: 'Old reply.' },
+        ],
+      });
+      await session.sendAndWait('Board after c3-d4.', { standalone: true });
+      await session.sendAndWait('How are you?');
+      const contents = (index: number) => requests[index]!.messages.map((m) => m.content);
+      expect(contents(0)).toEqual(['You play checkers.', 'Board after c3-d4.']);
+      // An ordinary turn afterwards sees everything, the standalone turn included.
+      expect(contents(1)).toEqual([
+        'You play checkers.',
+        'Old board.',
+        'Old reply.',
+        'Board after c3-d4.',
+        'Reply 1.',
+        'How are you?',
+      ]);
+    } finally {
+      await provider.shutdown();
+    }
   });
 });

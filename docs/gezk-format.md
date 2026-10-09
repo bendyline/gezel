@@ -10,12 +10,44 @@ Python reference reader. Gezel is its reference
 TypeScript implementation and the decision that opened it is
 [ADR 0012](decisions/0012-gezk-open-format.md).
 
-Current implementation: **0.7** (index schema 4), retaining reads of 0.5
-(schema 2) and 0.6 (schema 3). The new shared TOC reference contract is
-documented in [gezk-shared-toc.md](gezk-shared-toc.md) and the 0.7 draft in
-bendyline/gezk, whose Python reference reader now exercises the same conformance
-kit. Publishing the draft specification, schema URLs, and npm reader releases
-remains a coordinated release step. Readers
+Current implementation: **0.8** (index schema 5), retaining reads of 0.5
+(schema 2), 0.6 (schema 3) and 0.7 (schema 4). The writer emits the
+**oldest** generation that can express a catalog — 0.7, unless the catalog
+uses 0.8 vocabulary — so catalog updates keep reaching readers that predate
+0.8. 0.8 adds, over 0.7:
+
+- **Profile fields.** `model.files` pins every further file the runtime
+  loads (external-data weight sidecars such as `onnx/model.onnx_data`, and
+  configs), so a digest covers the weights and not just a graph header.
+  `truncation: { method: 'prefix', sourceDimensions }` is Matryoshka
+  truncation: keep the first `dimensions` values of the model output and
+  L2-normalize again, for passages and queries alike (`profileUnitVector`).
+  `media` records how image, video and audio rows were embedded. Any of
+  these forces 0.8, because an older reader's strip-mode schema would drop
+  them silently and then embed queries the wrong way.
+- **Media rows** (index schema 5). The shard `chunks` table gains `modality`
+  (`text|image|video|audio`), `asset_path`, `mime_type`, `width`/`height`,
+  `start_ms`/`end_ms`, `thumbnail_path` and `attribution_json`. A media row
+  keeps every chunk invariant (dense ids, both vector tables, FTS over its
+  caption or transcript) and follows its document's text chunks, so text
+  chunk ids never change. `counts.media` is required in 0.8.
+- **Audio and video assets** (`mp4`, `webm`, `mp3`, `m4a`, `ogg`, `opus`,
+  `wav`, `flac`) with their own limits: 512 MiB per file and 8 GiB in total,
+  beside the image limits of 8 MiB and 256 MiB.
+- **Query width is checked.** A query whose length differs from the
+  catalog's `dimensions` is refused with a typed `CatalogQueryError`
+  before any scan; the daemon falls back to keyword search for that group.
+
+The compiler does not emit media rows yet; they arrive with the multimodal
+embedding profile. The 0.8 draft specification and the Python reference
+reader's support for it are still to be written in bendyline/gezk; the local
+JSON Schemas (`packages/gezk/schemas/0.8/`) and conformance kit are current.
+
+The shared TOC reference contract (0.7) is documented in
+[gezk-shared-toc.md](gezk-shared-toc.md) and the 0.7 draft in bendyline/gezk,
+whose Python reference reader exercises the same conformance kit. Publishing
+the draft specification, schema URLs, and npm reader releases remains a
+coordinated release step. Readers
 support exactly the versions they name, so older readers reject 0.7 instead of
 losing its shared references. Each document still has one body and search index.
 0.6 is additive over 0.5: documents are filed at the leaf of their topic
@@ -85,8 +117,8 @@ are frozen in their own directory; only the current version's is rewritten.
   proactive retrieval, ≤ 750 ms p95 explicit search.
 - **Query embedding is verified, not assumed.** A catalog's query vector
   comes from the daemon's own pipeline (`shared`) only when the daemon's
-  model is a registered profile *and* its cached `onnx/model.onnx` and
-  `tokenizer.json` hash to the digests that profile pins
+  model is a registered profile *and* its cached `onnx/model.onnx`,
+  `tokenizer.json` and any `model.files` hash to the digests that profile pins
   (`daemonEmbedderVerified` in `memory/embed-core.ts`, checked once per
   process). Otherwise a profile embedder loads exactly the pinned graph —
   precision read off `model.onnxFile`, never a transformers.js default —

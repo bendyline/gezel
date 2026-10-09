@@ -21,6 +21,11 @@ export const TaskLaunchSpecSchema = z.object({
   assignee: TaskAssigneeSchema.optional(),
   params: z.record(z.string(), z.unknown()).default({}),
   inputs: z.record(z.string(), TaskInputSourceSchema).optional(),
+  /**
+   * Run it in tonight's Night Shift instead of now: the task is created as a
+   * night task, and the runner holds its first turn until the shift is on.
+   */
+  tonight: z.boolean().optional(),
 });
 export type TaskLaunchSpec = z.infer<typeof TaskLaunchSpecSchema>;
 

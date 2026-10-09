@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MEMORY_KINDS, MEMORY_SCOPES } from '../../runtime/memory-markdown.js';
 
 export const SearchMemoryInputSchema = z
   .object({
@@ -17,15 +18,15 @@ export const SaveMemoryInputSchema = z
   .object({
     text: z.string().describe('The memory to save — a concise fact or observation'),
     scope: z
-      .enum(['gezel', 'project'])
+      .enum(MEMORY_SCOPES)
       .describe(
-        'Where to save: "gezel" for your own personal memories, "project" for project-shared context',
+        'Where to save: "user" for something about the person you work for (every gezel reads it), "gezel" for how you do your own work well, "project" for project-shared context',
       ),
     kind: z
-      .enum(['fact', 'decision', 'pref', 'status'])
+      .enum(MEMORY_KINDS)
       .optional()
       .describe(
-        'What kind of memory: "fact" (durable fact — the default), "decision" (a choice made), "pref" (a preference or working style), "status" (a temporary condition true right now)',
+        'What kind of memory: "fact" (durable fact — the default), "decision" (a choice made), "pref" (a preference or working style), "status" (a temporary condition true right now), "correction" (a mistake and its fix), "example" (a worked example worth repeating)',
       ),
   })
   .strict();

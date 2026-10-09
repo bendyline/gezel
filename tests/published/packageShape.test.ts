@@ -357,6 +357,31 @@ describe('published package payloads', () => {
     }
   });
 
+  it('ships license texts for every package compiled into the service browser bundles', () => {
+    // Minification strips license comments, so these staged texts are the only
+    // notice the ~300 packages inside dist/ui and dist/office carry on npm.
+    const service = packages.find((pkg) => pkg.name === '@bendyline/gezel-service')!;
+    const files = new Set(
+      packed.get(service.name)!.files.map((file) => file.path.replace(/\\/g, '/')),
+    );
+    const manifest = JSON.parse(
+      readFileSync(resolve(service.dist, 'licenses/npm/manifest.json'), 'utf8'),
+    ) as { packages: { name: string; texts: { file: string }[] }[] };
+    expect(files.has('dist/licenses/npm/manifest.json')).toBe(true);
+    expect(files.has('dist/kokoro-lexicon/LICENSE')).toBe(true);
+    expect(manifest.packages.map((pkg) => pkg.name)).toEqual(
+      expect.arrayContaining(['@bendyline/squisq-video-react', 'chevrotain', 'dompurify']),
+    );
+    for (const record of manifest.packages) {
+      expect(record.texts.length, record.name).toBeGreaterThan(0);
+      for (const text of record.texts) {
+        expect(files.has(`dist/licenses/npm/${text.file}`), `${record.name} ${text.file}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
   it.each(packages)(
     '$name ships every file its exports and bin point at',
     ({ name, path, pkg }) => {

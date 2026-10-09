@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CACHE_REUSE, buildLlamaCppEngineArgs } from './engine-flags.js';
+import {
+  DEFAULT_CACHE_REUSE,
+  type EngineFlagInput,
+  GPU_RESIDENT_THREADS,
+  buildLlamaCppEngineArgs,
+} from './engine-flags.js';
 
 /** Value token immediately after `flag`, or undefined if the flag is absent. */
 function argValue(args: string[], flag: string): string | undefined {
@@ -537,6 +542,109 @@ describe('buildLlamaCppEngineArgs — scalar overrides', () => {
     });
 
     expect(argValue(args, '--chat-template')).toBe('mistral-v3');
+  });
+});
+
+describe('buildLlamaCppEngineArgs — GPU-resident thread default', () => {
+  const fits = { fullGpuResidency: true, reason: 'fits' } as const;
+
+  it('caps threads for a GPU build the planner measured as fully resident', () => {
+    for (const backend of ['cuda', 'vulkan', 'metal']) {
+      const args = buildLlamaCppEngineArgs({
+        config: {},
+        planner: fits,
+        backend,
+        hostCpuCount: 20,
+      });
+      expect(argValue(args, '--threads')).toBe(String(GPU_RESIDENT_THREADS));
+    }
+  });
+
+  it('leaves two cores free on a small host', () => {
+    // A pool that covers every core starves the thread driving the GPU.
+    const threadsFor = (hostCpuCount: number) =>
+      argValue(
+        buildLlamaCppEngineArgs({ config: {}, planner: fits, backend: 'cuda', hostCpuCount }),
+        '--threads',
+      );
+    expect(threadsFor(6)).toBe('4');
+    expect(threadsFor(4)).toBe('2');
+    expect(threadsFor(3)).toBe('1');
+    expect(threadsFor(1)).toBe('1');
+  });
+
+  it('keeps llama.cpp default on a CPU build or an unknown backend', () => {
+    for (const backend of ['cpu', undefined]) {
+      const args = buildLlamaCppEngineArgs({ config: {}, planner: fits, backend });
+      expect(has(args, '--threads')).toBe(false);
+    }
+  });
+
+  it('needs the planner to have measured a full fit', () => {
+    // No planner, or a decision that leaves placement to the engine's own
+    // fit, may put layers on the CPU where every thread counts.
+    for (const planner of [undefined, {}, { reason: 'leaving whole-layer fit to the engine' }]) {
+      const args = buildLlamaCppEngineArgs({ config: {}, planner, backend: 'cuda' });
+      expect(has(args, '--threads')).toBe(false);
+    }
+  });
+
+  it('stands down when any layer places weights on the CPU', () => {
+    const cpuPlacements: Pick<EngineFlagInput, 'config' | 'perModel'>[] = [
+      { config: { llamaCppCpuMoe: true } },
+      { config: { llamaCppNCpuMoe: 12 } },
+      { config: { llamaCppNCpuFfn: 4 } },
+      { config: { llamaCppNGpuLayers: 20 } },
+      { config: {}, perModel: { cpuMoe: true } },
+      { config: {}, perModel: { nGpuLayers: 10 } },
+      { config: { llamaCppExtraArgs: { 'override-tensor': 'exps=CPU' } } },
+      { config: { llamaCppExtraArgs: { '-ngl': 12 } } },
+    ];
+    for (const placement of cpuPlacements) {
+      const args = buildLlamaCppEngineArgs({ ...placement, planner: fits, backend: 'cuda' });
+      expect(has(args, '--threads')).toBe(false);
+    }
+  });
+
+  it('stays on with an explicit all-layers GPU pin', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppNGpuLayers: -1 },
+      planner: fits,
+      backend: 'cuda',
+      hostCpuCount: 20,
+    });
+    expect(argValue(args, '--threads')).toBe(String(GPU_RESIDENT_THREADS));
+  });
+
+  it('an explicit thread count from config, manifest or extra args wins', () => {
+    expect(
+      argValue(
+        buildLlamaCppEngineArgs({
+          config: { llamaCppThreads: 12 },
+          planner: fits,
+          backend: 'cuda',
+        }),
+        '--threads',
+      ),
+    ).toBe('12');
+    expect(
+      argValue(
+        buildLlamaCppEngineArgs({
+          config: {},
+          perModel: { threads: 6 },
+          planner: fits,
+          backend: 'cuda',
+        }),
+        '--threads',
+      ),
+    ).toBe('6');
+    const extra = buildLlamaCppEngineArgs({
+      config: { llamaCppExtraArgs: { threads: 16 } },
+      planner: fits,
+      backend: 'cuda',
+    });
+    expect(extra.filter((a) => a === '--threads')).toHaveLength(1);
+    expect(argValue(extra, '--threads')).toBe('16');
   });
 });
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
 import { ProjectTypeToolSchema } from './catalog.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
@@ -95,6 +96,14 @@ export const ExternalRequestDiagnosticsSchema = z.object({
 });
 export type ExternalRequestDiagnostics = z.infer<typeof ExternalRequestDiagnosticsSchema>;
 
+/** Executed or explicitly skipped calls whose results the next OpenAI request must submit. */
+export const OpenAIPendingToolOutputSchema = z.object({
+  type: z.literal('function_call_output'),
+  call_id: z.string(),
+  output: z.string(),
+});
+export type OpenAIPendingToolOutput = z.infer<typeof OpenAIPendingToolOutputSchema>;
+
 /**
  * A chat session — one persistent thread of conversation between the user
  * and a gezel. Every session lives inside a (gezel, project) pair. The
@@ -157,6 +166,7 @@ export const ChatSessionSchema = z.object({
   providerState: z.object({
     copilotSessionId: z.string().optional(),
     openaiPreviousResponseId: z.string().optional(),
+    openaiPendingToolOutputs: z.array(OpenAIPendingToolOutputSchema).optional(),
     /**
      * `anthropic-cli`-only: the session id `claude` reports in the first
      * `system` event of its stream-json output. Persisted so the next
@@ -374,11 +384,11 @@ export const ChatSessionSchema = z.object({
           /** 'workspace' = an index-derived code hit (path:line + snippet)
            *  and 'library' = a shared-document hit — neither is a memory, so
            *  `day` is empty for both. */
-          scope: z.enum(['gezel', 'project', 'workspace', 'library']),
+          scope: z.enum(['gezel', 'project', 'user', 'workspace', 'library']),
           day: z.string(),
           score: z.number(),
           /** Memory kind; absent on hits recalled before kinds existed. */
-          kind: z.enum(['fact', 'decision', 'pref', 'status']).optional(),
+          kind: z.enum(MEMORY_KINDS).optional(),
         }),
       ),
     })

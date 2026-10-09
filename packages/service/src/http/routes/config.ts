@@ -6,6 +6,7 @@ import {
   transferBoekwachterMembership,
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
+import { syncPerfProfiling } from '../../perf/responsiveness.js';
 import { appleFoundationModelsInstalled } from '../../providers/apple-foundation-models/provider.js';
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
@@ -496,6 +497,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       const nextDebug = body.debugMode === true;
       if (nextDebug !== ctx.debug.isEnabled()) {
         ctx.debug.set(nextDebug);
+        syncPerfProfiling();
         log.info(`[debug] verbose diagnostics ${nextDebug ? 'ON' : 'OFF'}`);
       }
     }
@@ -552,6 +554,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
     // Turning the relevance check on (or picking another model) downloads the
     // model in the background, network permitting.
     if (body.relevanceModel !== undefined) void ctx.relevance.reconcile().catch(() => {});
+    // Media search: a budget change re-keys the index; turning it on downloads the model.
+    if (body.mediaSearch !== undefined) void ctx.mediaSearch.reconcile().catch(() => {});
     const creds = await readCredentialView(ctx.secrets);
     const copilotCliInstallDir = (
       await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk')

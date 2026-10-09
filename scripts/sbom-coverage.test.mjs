@@ -460,9 +460,7 @@ test('the Visual C++ redistributable is disclosed wherever Windows ships', async
     /Microsoft Visual C\+\+ 2015-2022 Redistributable/,
     'the EULA names every component whose terms differ from the MIT License',
   );
-  const includedComponents = eula.match(
-    /3\. Third-party components included with Gezel\n\n([\s\S]*?)\n\nWhere a bundled component's license/,
-  )?.[1];
+  const includedComponents = eula.match(/(?:^|\n)3\.[^\n]+\n\n([\s\S]*?)(?=\n\d+\.|$)/)?.[1];
   assert.ok(includedComponents, 'the EULA must retain its bundled-components disclosure section');
   assert.doesNotMatch(
     includedComponents,
@@ -784,7 +782,7 @@ function installedPackageDir(name) {
 test('DirectML and the other binaries inside ONNX Runtime packages carry file digests', async () => {
   const supplemental = await loadSupplementalLicenses();
   const installedPackages = new Map();
-  for (const name of ['onnxruntime-node', 'onnxruntime-web', '@huggingface/transformers']) {
+  for (const name of ['onnxruntime-node', 'onnxruntime-web']) {
     const path = installedPackageDir(name);
     const { version } = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
     installedPackages.set(name, new Map([[version, path]]));
@@ -816,11 +814,8 @@ test('DirectML and the other binaries inside ONNX Runtime packages carry file di
   assert.ok(gpu, 'the CUDA providers the linux-x64 install script fetches must be inventoried');
   assert.match(property(gpu, 'gezel:platforms'), /^linux-x64(,|$)/);
   const web = components.filter((component) => component.name === 'ONNX Runtime Web');
-  assert.equal(web.length, 1, 'one upstream build carried by two packages is one component');
-  assert.match(
-    property(web[0], 'gezel:carried-by'),
-    /^@huggingface\/transformers@[^,]+,onnxruntime-web@/,
-  );
+  assert.equal(web.length, 1, 'one upstream build is one component');
+  assert.match(property(web[0], 'gezel:carried-by'), /^onnxruntime-web@[^,]+$/);
 });
 
 test('elevate.exe is a component bound to the toolset electron-builder verifies', async () => {

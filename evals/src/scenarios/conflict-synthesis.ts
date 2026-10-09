@@ -96,8 +96,11 @@ export const PLANTED_CONFLICTS: PlantedConflict[] = [
     supersededLabel: '240,000',
     supersededSource: 'memo-product.md',
     canonicalSource: 'finance.csv',
+    // "the finance sheet is the source of record for all figures" resolves the
+    // conflict as plainly as "authoritative"; the narrower pattern failed a
+    // correct qwen3.8-27b synthesis four repairs running (2026-10-07).
     resolution:
-      /\bauthoritative\b|\bauthority\s*:|finance(?:\.csv)?`?\s+(?:wins|controls|prevails)/i,
+      /\bauthoritative\b|\bauthority\s*:|\b(?:source|system) of record\b|finance(?:\.csv|\s+sheet)?`?\s+(?:wins|controls|governs|prevails)/i,
   },
   {
     id: 'dri',
@@ -585,6 +588,12 @@ export function checkSynthesis(
     const resolved = discussion ? conflict.resolution.test(discussion) : false;
     if (discussion && canonicalGrounded && supersededGrounded && resolved) {
       signals.push(`conflict-${conflict.id}-surfaced`);
+    } else if (discussion && canonicalGrounded && supersededGrounded) {
+      // Name the one missing part: the combined message below sent a model
+      // that had already bound both values back to rewrite the same entry.
+      fail(
+        `conflict (${conflict.label}): the entry names both values and their files but never says which source controls; add a sentence saying why ${conflict.canonicalSource} wins (for example, that it is authoritative or supersedes ${conflict.supersededSource})`,
+      );
     } else {
       fail(
         `conflict (${conflict.label}) is not source-bound: re-read ${conflict.supersededSource} and ${conflict.canonicalSource}, then state each file's observed ${conflict.label} field in one Conflicts entry and explain which source controls it`,

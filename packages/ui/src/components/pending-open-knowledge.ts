@@ -6,9 +6,13 @@
  * intent from hijacking an unrelated later visit.
  */
 
+import type { SearchMedia } from '@bendyline/gezel';
+
 export interface OpenKnowledgeIntent {
   catalogId: string;
   documentId?: string;
+  /** A media hit: the photo, clip or recording to show, and the moment that matched. */
+  media?: SearchMedia;
 }
 
 interface StoredIntent extends OpenKnowledgeIntent {

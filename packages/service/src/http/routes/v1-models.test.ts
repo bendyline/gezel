@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { appleFoundationModelsStatus } from '../../providers/apple-foundation-models/status.js';
 import type { ServiceContext } from '../context.js';
 import { v1ModelsRoutes } from './v1-models.js';
+vi.mock('../../providers/apple-foundation-models/status.js', () => ({
+  appleFoundationModelsStatus: vi.fn(async () => ({
+    supported: false,
+    installed: false,
+    available: false,
+  })),
+}));
 
 function modelContext(): ServiceContext {
   return {
@@ -109,4 +117,48 @@ describe('GET /v1/models catalog metadata', () => {
     expect(providers).toEqual(['llama-cpp', 'mlx', 'ds4']);
     expect(ctx.store.listGezels).not.toHaveBeenCalled();
   });
+});
+
+it('enumerates Apple readiness and context through the public inventory without granting product access', async () => {
+  vi.mocked(appleFoundationModelsStatus).mockResolvedValueOnce({
+    supported: true,
+    installed: true,
+    available: false,
+    reason: 'Enable Apple Intelligence in System Settings.',
+  });
+  let response = await v1ModelsRoutes(modelContext(), { localOnly: true }).request(
+    'http://localhost/',
+  );
+  let body = (await response.json()) as { data: Array<Record<string, unknown>> };
+  expect(body.data).toContainEqual(
+    expect.objectContaining({
+      id: 'apple-foundation-models:apple-foundation-models',
+      availability: 'unavailable',
+      locality: 'on-device',
+      preparation: 'system-settings',
+      recovery_actions: ['open-system-settings'],
+    }),
+  );
+  vi.mocked(appleFoundationModelsStatus).mockResolvedValueOnce({
+    supported: true,
+    installed: true,
+    available: true,
+    runtime: {
+      version: '1',
+      os: 'macOS',
+      available: true,
+      contextTokens: 4096,
+      maxOutputTokens: 2048,
+    },
+  });
+  response = await v1ModelsRoutes(modelContext(), { localOnly: true }).request('http://localhost/');
+  body = (await response.json()) as { data: Array<Record<string, unknown>> };
+  expect(body.data).toContainEqual(
+    expect.objectContaining({
+      id: 'apple-foundation-models:apple-foundation-models',
+      availability: 'available',
+      context_window: 4096,
+      max_output_tokens: 2048,
+    }),
+  );
 });

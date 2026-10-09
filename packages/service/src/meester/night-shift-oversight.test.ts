@@ -1,12 +1,17 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeStepGate } from '@bendyline/gezel';
+import { type ChatSession, normalizeStepGate } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from '../tasks/manager.js';
-import { ensureNightShiftOversightTask } from './night-shift-oversight.js';
+import {
+  ensureNightShiftOversightTask,
+  findNightShiftOversightTask,
+  isNightShiftOversightTask,
+  prepareReviewForNight,
+} from './night-shift-oversight.js';
 
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
 
@@ -152,13 +157,143 @@ describe('night-shift oversight task', () => {
       expect(card?.answer?.silentSkip).toBe(true);
     });
 
-    it('leaves a pause the budget did not cause', async () => {
+    it('resumes a pause of any kind with a fresh budget, so nobody presses Resume', async () => {
       await pauseLikeAnEarlierBuild(2);
+      const paused = await oversightStep();
+      await store.writeTask({
+        ...paused.task,
+        craftbook: {
+          ...paused.task.craftbook,
+          steps: paused.task.craftbook.steps.map((s) =>
+            s.id === 'oversight' ? { ...s, redriveCount: 3, gateAttempts: 3 } : s,
+          ),
+        },
+      });
       await ensureNightShiftOversightTask(store, tasks);
 
-      const { task } = await oversightStep();
-      expect(task.status).toBe('paused');
-      expect((await store.getQuestion('default', 'q-paused'))?.answer).toBeUndefined();
+      const { task, step } = await oversightStep();
+      expect(task.status).toBe('active');
+      expect(step.redriveCount ?? 0).toBe(0);
+      expect(step.gateAttempts).toBeUndefined();
+      expect((await store.getQuestion('default', 'q-paused'))?.answer?.silentSkip).toBe(true);
     });
+  });
+
+  // A re-driven run asked the person how to settle a mismatch between two
+  // runtime guards (2026-10-08). Nobody is awake to answer the review.
+  describe('never asks the person anything', () => {
+    it('tells the run, in its step, that nobody can answer', async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { step } = await oversightStep();
+      expect(step.prompt).toContain('never ask the user anything');
+      // `ask_user_question` is a workflow safety tool no step policy may
+      // remove; the question route declines it instead.
+      expect(step.toolPolicy).toBeUndefined();
+    });
+
+    it("withdraws what a run already asked, and leaves other work's questions", async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      const ask = (id: string, taskRef?: string) =>
+        store.writeQuestion({
+          id,
+          projectId: 'default',
+          gezelId: 'wren',
+          sessionId: 'session-1',
+          prompt: 'The recurring re-arm is generating false re-nudges. How should I handle it?',
+          choices: ['The report is done', 'Pause the task'],
+          allowWriteIn: true,
+          multiSelect: false,
+          ...(taskRef ? { taskRef } : {}),
+          createdAt: new Date().toISOString(),
+        });
+      await ask('q-review', task.ref);
+      await ask('q-other', 'default/9');
+      await ask('q-chat');
+
+      await ensureNightShiftOversightTask(store, tasks);
+
+      expect((await store.getQuestion('default', 'q-review'))?.answer?.silentSkip).toBe(true);
+      expect((await store.getQuestion('default', 'q-other'))?.answer).toBeUndefined();
+      expect((await store.getQuestion('default', 'q-chat'))?.answer).toBeUndefined();
+    });
+
+    it("is recognized as the runtime's own work, which files no paused-for-help card", async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      expect(isNightShiftOversightTask(task)).toBe(true);
+      expect(isNightShiftOversightTask({ ...task, projectId: 'pics' })).toBe(false);
+      expect(isNightShiftOversightTask({ ...task, title: 'Weekly digest' })).toBe(false);
+    });
+  });
+
+  // The next night resumed last night's session, read the old report back,
+  // and advanced on it: the gate passed on yesterday's file (2026-10-08).
+  describe('each night starts from nothing', () => {
+    const lastNight = async (lastRunDay: string) => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      await store.writeTask({ ...task, nightShift: { ...task.nightShift!, lastRunDay } });
+      const at = new Date().toISOString();
+      const session: ChatSession = {
+        version: 1,
+        id: 'review-session',
+        gezelId: task.assignee.kind === 'gezel' ? task.assignee.gezelId : 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: task.title,
+        createdAt: at,
+        lastActivityAt: at,
+        messages: [],
+        providerState: {},
+        taskRef: task.ref,
+        stepId: 'oversight',
+      };
+      await store.writeSession(session);
+      await store.writeProjectArtifact('default', 'night-shift-report.md', '# Last night\n');
+      const archived: string[] = [];
+      const archiveSession = async (id: string) => {
+        archived.push(id);
+        const record = await store.getSession(session.gezelId, id);
+        await store.writeSession({ ...record!, archived: true });
+      };
+      return { archived, archiveSession };
+    };
+
+    it("archives last night's session and dates last night's report aside", async () => {
+      const { archived, archiveSession } = await lastNight('2026-10-07');
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(archived).toEqual(['review-session']);
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBeNull();
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07.md')).toBe(
+        '# Last night\n',
+      );
+    });
+
+    it('leaves a night whose review already ran alone', async () => {
+      const { archived, archiveSession } = await lastNight('2026-10-08');
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(archived).toEqual([]);
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBe(
+        '# Last night\n',
+      );
+    });
+  });
+
+  it('finds the installed task, paused or not, for the morning card', async () => {
+    expect(await findNightShiftOversightTask(store)).toBeNull();
+    await ensureNightShiftOversightTask(store, tasks);
+    const found = await findNightShiftOversightTask(store);
+    expect(found?.title).toBe(OVERSIGHT_TITLE);
+
+    await tasks.setStatus('default', found!.num, 'paused');
+    expect((await findNightShiftOversightTask(store))?.status).toBe('paused');
+    // Ensuring again (each window open) resumes it for that night.
+    await ensureNightShiftOversightTask(store, tasks);
+    expect((await findNightShiftOversightTask(store))?.status).toBe('active');
   });
 });
