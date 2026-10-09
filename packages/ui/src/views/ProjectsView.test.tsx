@@ -1800,9 +1800,13 @@ describe('ProjectsView', () => {
 
     it('imports task-menu Open as a read-only slideshow in the current project', async () => {
       const writeDocument = mockPresentation();
-      render(<ProjectsView forceProjectId="pj-alpha" />);
-      await screen.findByTestId('project-chat');
-      act(() => {
+      // The live event needs the selected project's listener. A visible chat
+      // can precede its passive effects when React yields on a busy runner.
+      await act(async () => {
+        render(<ProjectsView forceProjectId="pj-alpha" />);
+      });
+      expect(screen.getByTestId('project-chat')).toBeInTheDocument();
+      await act(async () => {
         window.dispatchEvent(
           new CustomEvent('gezel:open-file', {
             detail: { projectId: 'pj-alpha', path: pptxLayout.targetPath, source: 'artifacts' },
