@@ -185,8 +185,12 @@ export class KnowledgeClient {
         code: 'invalid_response',
       });
     if (
+      result.passages.length > query.maxResults ||
+      result.passages.some(
+        (passage) => !passage.uri.startsWith('knowledge://') || !passage.text.length,
+      ) ||
       result.passages.reduce((total, passage) => total + passage.text.length, 0) >
-      query.maxCharacters
+        query.maxCharacters
     )
       throw new GezelSdkError('Knowledge passages exceed the requested budget', {
         code: 'invalid_response',

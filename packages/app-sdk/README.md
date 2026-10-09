@@ -444,7 +444,12 @@ See the upstream gezel docs for the full route table and the OpenAPI document. T
 
 For opt-in lifecycle, model readiness/preparation, cancellation, and packaging, see
 [the embedding guide](https://github.com/bendyline/gezel/blob/main/docs/embedding-sdk.md).
-The existing low-level connection APIs remain available.
+The existing low-level connection APIs remain available. Applications with an
+existing lifecycle can use `connectDesktopEmbedding` from `/host`; it shares the
+same consent and hosted-model policy and returns `app`, `models`, `mode`,
+`revoke`, and `close`. Both desktop APIs opt into catalog authority with
+`knowledge: true`. `streamText` accepts temperature/reasoning controls and optional
+knowledge budgets, and emits progress plus final model/usage metadata.
 
 ## Knowledge catalogs
 
@@ -504,3 +509,10 @@ are immediate and counter updates are throttled. Providers without telemetry
 still announce observed reasoning/response activity; older Gezel releases
 ignore the option and keep streaming content normally. This requires a Gezel
 service release containing the progress extension, not just an SDK update.
+
+`withKnowledgeContext(app.knowledge, messages, options)` provides optional cited
+evidence within explicit `maxPromptCharacters` and `maxMessages` limits. Optional
+context/output budgets use a conservative character estimate, not a tokenizer.
+It fails open on unavailable or malformed knowledge and propagates cancellation;
+plain `app.chat` does not enrich requests automatically. This helper is also
+available from `/browser`.

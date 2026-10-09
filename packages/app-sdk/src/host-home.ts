@@ -159,13 +159,17 @@ export function computeHostEnvironment(
       'GEZEL_APPLE_FM_BIN',
       'GEZEL_UV_BIN',
       'GEZEL_DUCKDB_BIN',
+      'GGML_BACKEND_PATH',
     ])
       variables.set(key, undefined);
     variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
   }
   if (opts.nativeBinDir) variables.set('GEZEL_NATIVE_BIN_DIR', opts.nativeBinDir);
 
-  if (borrowed.length > 0) variables.set('GEZEL_READONLY_MODEL_HOMES', borrowed.join(delimiter));
+  variables.set(
+    'GEZEL_READONLY_MODEL_HOMES',
+    borrowed.length ? borrowed.join(delimiter) : undefined,
+  );
 
   return { home, variables };
 }

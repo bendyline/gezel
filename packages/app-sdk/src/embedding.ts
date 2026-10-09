@@ -1,19 +1,19 @@
 import type { GezelApp } from './client.js';
+import { type TextOptions, type TextRequest, streamEmbeddingText } from './embedding-text.js';
 import { GezelSdkError } from './errors.js';
+import type { KnowledgeClient } from './knowledge-client.js';
 import { type ModelManager, type PrepareModelOptions, notify, sdkError } from './model-manager.js';
-import type { ChatMessage, RequestOptions } from './types.js';
+import type { RequestOptions } from './types.js';
+export type { TextRequest, TextOptions, TextEvent } from './embedding-text.js';
 
 export interface EmbeddingConnection {
   app: GezelApp | GezelApp<'portable'>;
   models: ModelManager;
+  knowledge?: Pick<KnowledgeClient, 'state' | 'update' | 'retrieve'>;
   /** Await transport disposal and native memory release here. */
   close(): Promise<void>;
 }
 export type EmbeddingState = 'disabled' | 'idle' | 'connecting' | 'ready' | 'suspended' | 'closed';
-export type TextEvent =
-  | { type: 'delta'; text: string }
-  | { type: 'done'; text: string; cancelled: boolean; finishReason: string | null }
-  | { type: 'error'; error: GezelSdkError };
 export interface EmbeddingOptions {
   /** Called lazily, only after opt-in. Silent mode must never raise a consent prompt. */
   connect(options: { interactive: boolean }): Promise<EmbeddingConnection>;
@@ -97,7 +97,9 @@ export function createEmbedding(options: EmbeddingOptions) {
       combined.throwIfAborted();
       const value = await getConnection();
       combined.throwIfAborted();
-      return action(value, combined);
+      const result = await action(value, combined);
+      combined.throwIfAborted();
+      return result;
     })().catch((error) => {
       throw sdkError(error);
     });
@@ -174,67 +176,28 @@ export function createEmbedding(options: EmbeddingOptions) {
       prepare: (id: string, opts: PrepareModelOptions = {}) =>
         run(opts.signal, (value, signal) => value.models.prepare(id, { ...opts, signal })),
     },
-    async streamText(
-      request: { model: string; messages: ChatMessage[]; maxTokens?: number },
-      opts: RequestOptions & { onEvent?(event: TextEvent): void } = {},
-    ): Promise<Extract<TextEvent, { type: 'done' }>> {
-      let text = '';
-      let finishReason: string | null = null;
-      try {
-        await run(opts.signal, async (value, signal) => {
-          const model = await value.models.inspect(request.model, { signal });
-          if (!model || model.availability !== 'available')
-            throw new GezelSdkError(
-              model?.unavailable_reason ?? 'The selected model is not ready',
-              { code: model?.reason_code ?? 'model_not_ready' },
-            );
-          const stream = await value.app.chat(
-            {
-              model: model.id,
-              messages: request.messages,
-              stream: true,
-              ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
-            },
-            { signal },
-          );
-          for await (const chunk of stream) {
-            signal.throwIfAborted();
-            const choice = chunk.choices[0];
-            const delta = choice?.delta.content;
-            if (delta) {
-              if (text.length + delta.length > 4 * 1024 * 1024)
-                throw new GezelSdkError('Response exceeds its size limit', {
-                  code: 'response_too_large',
-                });
-              text += delta;
-              notify(opts.onEvent, { type: 'delta', text: delta });
-            }
-            if (choice?.finish_reason) finishReason = choice.finish_reason;
-          }
-          signal.throwIfAborted();
-          if (!finishReason)
-            throw new GezelSdkError('Chat stream ended without a finish reason', {
-              code: 'incomplete_stream',
-            });
-        });
-        const result = {
-          type: 'done' as const,
-          text,
-          cancelled: finishReason === 'cancelled',
-          finishReason,
-        };
-        notify(opts.onEvent, result);
-        return result;
-      } catch (error) {
-        const normalized = sdkError(error);
-        if (normalized.code === 'aborted') {
-          const result = { type: 'done' as const, text, cancelled: true, finishReason };
-          notify(opts.onEvent, result);
-          return result;
-        }
-        notify(opts.onEvent, { type: 'error', error: normalized });
-        throw normalized;
-      }
+    knowledge: {
+      state: (opts: RequestOptions = {}) =>
+        run(opts.signal, (value, signal) => {
+          if (!value.knowledge)
+            throw new GezelSdkError('Knowledge is not enabled', { code: 'knowledge_unavailable' });
+          return value.knowledge.state({ signal });
+        }),
+      update: (action: Parameters<KnowledgeClient['update']>[0], opts: RequestOptions = {}) =>
+        run(opts.signal, (value, signal) => {
+          if (!value.knowledge)
+            throw new GezelSdkError('Knowledge is not enabled', { code: 'knowledge_unavailable' });
+          return value.knowledge.update(action, { signal });
+        }),
+      retrieve: (query: Parameters<KnowledgeClient['retrieve']>[0], opts: RequestOptions = {}) =>
+        run(opts.signal, (value, signal) => {
+          if (!value.knowledge)
+            throw new GezelSdkError('Knowledge is not enabled', { code: 'knowledge_unavailable' });
+          return value.knowledge.retrieve(query, { signal });
+        }),
+    },
+    streamText(request: TextRequest, opts: TextOptions = {}) {
+      return streamEmbeddingText(run, request, opts);
     },
   };
 }
