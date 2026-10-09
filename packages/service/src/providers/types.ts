@@ -40,6 +40,8 @@ export interface ProviderCredentials {
 }
 
 export interface SessionOpts {
+  /** Safe attribution for opt-in eval request observation. */
+  observationContext?: import('./api-observation.js').ApiObservationContext;
   systemMessage: string;
   /**
    * Layered prompt-cache prefixes (flag `layeredPrefixCache`). Present

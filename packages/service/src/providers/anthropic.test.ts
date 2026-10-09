@@ -100,6 +100,11 @@ describe('anthropic — applyCacheBreakpoints', () => {
 });
 
 describe('anthropic — isReasoningModel', () => {
+  it('recognizes Sonnet 5 and 5.5 API ids', () => {
+    expect(isReasoningModel('claude-sonnet-5')).toBe(true);
+    expect(isReasoningModel('claude-sonnet-5-5')).toBe(true);
+  });
+
   it('marks claude-opus and claude-sonnet 4.x as reasoning-capable', () => {
     expect(isReasoningModel('claude-opus-4-7')).toBe(true);
     expect(isReasoningModel('claude-opus-4-6')).toBe(true);

@@ -248,6 +248,117 @@ describe('AnthropicSession — bridge tool results', () => {
 });
 
 describe('AnthropicSession — thinking capture', () => {
+  it('preserves signed, empty, and redacted thinking through tool results and follow-up turns', async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const callToolRich = vi.spyOn(bridges, 'callToolRich').mockResolvedValue({
+      text: '15C, cloudy',
+      images: [],
+      isError: false,
+    });
+    const firstTurn = [
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'thinking', thinking: '', signature: '' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'signature_delta', signature: 'empty-' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'signature_delta', signature: 'signature' },
+      },
+      { type: 'content_block_stop', index: 0 },
+      {
+        type: 'content_block_start',
+        index: 1,
+        content_block: { type: 'thinking', thinking: '', signature: 'signed-' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'thinking_delta', thinking: 'Check ' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'thinking_delta', thinking: 'weather.' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'signature_delta', signature: 'reasoning' },
+      },
+      { type: 'content_block_stop', index: 1 },
+      {
+        type: 'content_block_start',
+        index: 2,
+        content_block: { type: 'redacted_thinking', data: 'opaque-data' },
+      },
+      { type: 'content_block_stop', index: 2 },
+      {
+        type: 'content_block_start',
+        index: 3,
+        content_block: { type: 'tool_use', id: 'weather-1', name: 'get_weather' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 3,
+        delta: { type: 'input_json_delta', partial_json: '{"city":' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 3,
+        delta: { type: 'input_json_delta', partial_json: '"Berlin"}' },
+      },
+      { type: 'content_block_stop', index: 3 },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+      { type: 'message_stop' },
+    ];
+    const session = await makeSession([], {
+      anthropic: stubAnthropicTurns(
+        [firstTurn, textStream('Cloudy.'), textStream('Yes.')],
+        (req) => {
+          requests.push(structuredClone(req) as (typeof requests)[number]);
+        },
+      ),
+      model: 'claude-sonnet-5-5',
+      bridges,
+    });
+
+    await expect(session.sendAndWait('Weather in Berlin?')).resolves.toBe('Cloudy.');
+    expect(callToolRich).toHaveBeenCalledWith('get_weather', { city: 'Berlin' });
+    expect(session.getLastTurnReasoning()).toBe('Check weather.');
+    const expectedBlocks = [
+      { type: 'thinking', thinking: '', signature: 'empty-signature' },
+      { type: 'thinking', thinking: 'Check weather.', signature: 'signed-reasoning' },
+      { type: 'redacted_thinking', data: 'opaque-data' },
+      { type: 'tool_use', id: 'weather-1', name: 'get_weather', input: { city: 'Berlin' } },
+    ];
+    expect(requests[1]?.messages[1]).toEqual({ role: 'assistant', content: expectedBlocks });
+    expect(requests[1]?.messages[2]?.content).toEqual([
+      expect.objectContaining({
+        type: 'tool_result',
+        tool_use_id: 'weather-1',
+        content: '15C, cloudy',
+      }),
+    ]);
+    expect(requests[0]).toMatchObject({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'high' },
+    });
+
+    await expect(session.sendAndWait('Should I take a jacket?')).resolves.toBe('Yes.');
+    expect(requests[2]?.messages[1]).toEqual({ role: 'assistant', content: expectedBlocks });
+    expect(session.getLastTurnReasoning()).toBeUndefined();
+  });
+
   function thinkingThenTextStream(thinking: string, text: string): unknown[] {
     return [
       { type: 'message_start', message: { usage: { input_tokens: 10 } } },

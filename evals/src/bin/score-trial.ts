@@ -37,6 +37,8 @@ import {
 import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
 
 export interface TrialFacts {
+  qualification?: import('../qualification/report.ts').QualificationReport;
+  repairPolicy?: 'runtime' | 'harness';
   trialId: string;
   scenarioId: string;
   modelId: string;
@@ -740,6 +742,8 @@ export function score(runDir: string): TrialFacts {
     failureMode?: string;
     modelTier?: string;
     generalistMode?: string;
+    qualification?: import('../qualification/report.ts').QualificationReport;
+    repairPolicy?: 'runtime' | 'harness';
     retrievalArm?: import('../types.ts').TrialRetrievalArm;
     engine?: string;
     finalSniff?: TrialFinalSniff;
@@ -1089,6 +1093,8 @@ export function score(runDir: string): TrialFacts {
   );
 
   return {
+    ...(result.qualification ? { qualification: result.qualification } : {}),
+    ...(result.repairPolicy ? { repairPolicy: result.repairPolicy } : {}),
     trialId: result.trialId,
     scenarioId: result.scenarioId,
     modelId: result.modelId,

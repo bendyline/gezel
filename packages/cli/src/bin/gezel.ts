@@ -75,6 +75,7 @@ import {
   parseNativeEngine,
   parseNativeVariant,
 } from '../native-command.js';
+import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
 import { registerSecretCommands } from '../secrets-command.js';
 import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
@@ -633,15 +634,14 @@ program
 
 program
   .command('run [prompt...]')
-  .description('Run a prompt through a gezel and print the reply')
+  .description('Run a prompt through a gezel and print the reply (use - to read stdin)')
   .option('-g, --gezel <ref>', "gezel id or name (default: this project's voorman)")
+  .addHelpText(
+    'after',
+    '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.',
+  )
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
-    const prompt = (promptParts ?? []).join(' ').trim();
-    if (!prompt) {
-      console.error('usage: gezel run "<prompt>"');
-      process.exitCode = 1;
-      return;
-    }
+    const prompt = await resolveRunPrompt(promptParts);
     // stdout is the command's result channel. A fresh-home run starts the
     // service in this process, so route its structured info/debug records to
     // stderr for the whole owned-service lifetime and restore the caller's

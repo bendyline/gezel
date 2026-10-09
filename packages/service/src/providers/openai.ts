@@ -1,6 +1,7 @@
 import { createLogger } from '@bendyline/gezel';
 import type OpenAI from 'openai';
 import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
@@ -123,6 +124,7 @@ export class OpenAIProvider implements LLMProvider {
     return new OpenAISession({
       openai: this.openai,
       model: opts.model ?? this.defaultModel,
+      observationContext: opts.observationContext,
       reasoningEffort: opts.reasoningEffort,
       systemMessage: opts.systemMessage,
       bridges,
@@ -166,6 +168,7 @@ export class OpenAIProvider implements LLMProvider {
 
 /** @internal Exported alongside {@link OpenAISession} for unit tests. */
 export interface OpenAISessionDeps {
+  observationContext?: ApiObservationContext;
   openai: OpenAI;
   model: string;
   reasoningEffort?: string;
@@ -215,6 +218,10 @@ export interface OpenAISessionDeps {
  * @internal
  */
 export class OpenAISession extends StreamingSessionBase implements LLMSession {
+  private toolSurface: ReturnType<typeof apiToolSurface> | undefined;
+  getToolSurface() {
+    return this.toolSurface;
+  }
   /** `previous_response_id` for server-side state across turns. */
   private previousResponseId: string | null;
   /** Names of caller-supplied external tools — used to classify each function_call. */
@@ -323,11 +330,16 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
         applyTuning(request, this.deps.tuning, OPENAI_TUNING_MAP);
       }
 
-      const stream = await (
-        this.deps.openai as unknown as {
-          responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
-        }
-      ).responses.stream(request);
+      this.toolSurface = apiToolSurface(tools ?? []);
+      const stream = observeApiStream(
+        () =>
+          (
+            this.deps.openai as unknown as {
+              responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
+            }
+          ).responses.stream(request),
+        { provider: 'openai', request, round: turn + 1, context: this.deps.observationContext },
+      );
 
       const turnTextParts: string[] = [];
       const pendingCalls: OpenAIToolCall[] = [];

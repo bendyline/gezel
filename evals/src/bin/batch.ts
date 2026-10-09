@@ -27,6 +27,7 @@ import { isSuccessfulBatch, isSuccessfulMatrix, runBatch, runMatrix } from '../b
 import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
+import { QUALIFICATION_FLAGS, resolveQualificationFlags } from '../qualification/config.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
 import { installEvalSignalHandlers } from '../signal-handler.ts';
 import { formatPassClaim } from '../stats-discipline.ts';
@@ -36,14 +37,17 @@ import {
   parseArgs,
   parseDuration,
   printScenarios,
+  resolveGeneralistFlag,
   resolveKeurmeesterFlag,
   resolveProviderFlag,
+  resolveRepairPolicyFlag,
 } from './args.ts';
 
 async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
   assertKnownFlags(args.flags, [
+    ...QUALIFICATION_FLAGS,
     'cache-root',
     'count',
     'image-bin',
@@ -107,6 +111,7 @@ async function main() {
     console.error('--triage-k must be a non-negative integer');
     process.exit(2);
   }
+  const qualification = await resolveQualificationFlags(args.flags);
   const provider = resolveProviderFlag(args.flags) ?? defaultProvider();
   const modelId = String(args.flags.model ?? defaultModelFor(provider));
   assertLocalEngineSource(provider, modelId);
@@ -127,6 +132,9 @@ async function main() {
       count,
       parallel,
       engine: provider,
+      generalistMode: resolveGeneralistFlag(args.flags),
+      repairPolicy: resolveRepairPolicyFlag(args.flags),
+      ...(qualification ? { qualification } : {}),
       ...(keurmeester ? { keurmeester } : {}),
       ...(args.flags['mlx-source-home']
         ? { mlxSourceHome: String(args.flags['mlx-source-home']) }

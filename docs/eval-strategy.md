@@ -2,6 +2,8 @@
 
 This is the perspective doc for everything in [evals/](../evals/). Read this **before** adding a new scenario, tuning an existing one, or changing the success criteria. Tactical advice for *running* an eval lives in the [evals README](../evals/README.md) and the [eval-run skill](../.agents/skills/eval-run/SKILL.md); strategy lives here.
 
+For the proposed Anthropic/OpenAI API campaign on generalist execution, prompt guidance, product recovery, and evaluator assistance, see the [API harness guidance evaluation roadmap](api-harness-evaluation-roadmap.md). It separates product qualification from explicitly assisted diagnostics and defines the measurement work needed before changing defaults.
+
 ## The frame
 
 The eval framework is a **coverage matrix, not a leaderboard**. Each scenario tests a specific *capability axis* — single-file JS generation, multi-tool routing, long-context handoff, self-correction. Adding scenarios fills coverage gaps; the goal is **never** "make this one model pass tankcombat."

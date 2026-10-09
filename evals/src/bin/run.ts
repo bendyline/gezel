@@ -28,6 +28,7 @@ import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { writeTrialReport } from '../postmortem-report.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
+import { QUALIFICATION_FLAGS, resolveQualificationFlags } from '../qualification/config.ts';
 import { runTrial } from '../runner.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
 import { installEvalSignalHandlers } from '../signal-handler.ts';
@@ -49,6 +50,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
   assertKnownFlags(args.flags, [
+    ...QUALIFICATION_FLAGS,
     'cache-root',
     'decode-rate',
     'embeddings',
@@ -86,6 +88,7 @@ async function main() {
   }
 
   const scenario = getScenario(scenarioId);
+  const qualification = await resolveQualificationFlags(args.flags);
   const provider = resolveProviderFlag(args.flags) ?? defaultProvider();
   const modelId = String(args.flags.model ?? defaultModelFor(provider));
   // Fail fast when the chosen local engine has no weights for this model
@@ -144,6 +147,7 @@ async function main() {
       ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
       ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
       engine: provider,
+      ...(qualification ? { qualification } : {}),
       ...(generalistMode ? { generalistMode } : {}),
       ...(retrieval ? { retrieval } : {}),
       ...(repairPolicy ? { repairPolicy } : {}),

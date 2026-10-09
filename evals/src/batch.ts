@@ -339,6 +339,8 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
     trialIds: results.map((r) => r.trialId),
     perTrial: results.map((r) => ({
       trialId: r.trialId,
+      ...(r.qualification ? { qualification: r.qualification } : {}),
+      ...(r.repairPolicy ? { repairPolicy: r.repairPolicy } : {}),
       success: r.success,
       durationMs: r.durationMs,
       reason: r.reason,

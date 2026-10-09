@@ -69,6 +69,17 @@ describe('PromptRecorder', () => {
     await expect(readdir(join(logsDir, 'prompts'))).rejects.toThrow();
   });
 
+  it('records a schema-only change even when prompt and tool token counts match', async () => {
+    const first = { count: 1, tokens: 40, schemaHash: 'first' };
+    const second = { count: 1, tokens: 40, schemaHash: 'second' };
+    recorder.compiled(session, prompt('Same prompt.'));
+    await recorder.flush(session.id, first);
+    recorder.compiled(session, prompt('Same prompt.'));
+    await recorder.flush(session.id, second);
+    expect(events).toHaveLength(2);
+    expect(events[1]?.details?.tools).toMatchObject({ schemaHash: 'second' });
+  });
+
   it('keeps the last prompt texts per session in debug mode', async () => {
     debug = true;
     for (let i = 0; i < PROMPT_TEXTS_PER_SESSION + 2; i += 1) {

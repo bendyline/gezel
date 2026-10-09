@@ -11,6 +11,92 @@ For the operational preflight, monitoring, scoring, and postmortem workflow, use
 [eval-run skill](../.agents/skills/eval-run/SKILL.md). Strategy and suite-design rules live
 in [docs/eval-strategy.md](../docs/eval-strategy.md).
 
+## Qualify the API harness (Phase 0)
+
+`--qualification` is available on `eval:run`, `eval:batch`, and `eval:all` for
+`anthropic` and `openai`. It defaults to `--repair-policy runtime`,
+`--user-simulation disabled`, and `--completion-timeout 2m`. Existing runs without
+this flag retain their historical grading and auto-answering behavior.
+
+With `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` already exported in your terminal,
+start with one trial per provider:
+
+```bash
+pnpm eval:all --provider anthropic --model claude-sonnet-5-5 \
+  --scenarios tictactoe --count 1 --timeout 10m --write-reports \
+  --qualification --generalist on
+
+pnpm eval:all --provider openai --model gpt-6-luna \
+  --scenarios tictactoe --count 1 --timeout 10m --write-reports \
+  --qualification --generalist on
+```
+
+The runner observes the artifact gate, waits for settled turn/task completion,
+then grades the final artifact again. An artifact can pass while qualification
+fails because work is still running, a question needs an answer, or provenance
+is incomplete. Plain chats have no task execution mode; generalist treatment
+must be verified on a scenario that actually creates tasks.
+
+Qualification records:
+
+- `measurement.json`: source revision and diff digest, service build and Gilde
+  content digests, eval fixture source digest, exact scenario brief and user
+  script, declared treatment and treatment hash.
+- `api-requests.json`: each SDK request/result, requested and response model,
+  session/task identity where available, effective generation settings,
+  behavior IDs/config hashes, prompt section estimates, system/input hashes,
+  tool names/schema hash, rounds, provider failures, and native token counters.
+- `interventions.jsonl`: fixture actions, initial requests, simulated-user
+  answers and evaluator mutations, including blocked attempts. The scenario
+  client rejects non-read HTTP operations outside a declared origin under
+  runtime repair. Nested client helpers and uploads use the same boundary.
+- `runtime-interventions.json`: product prompt preparations, labeled separately
+  from matching evaluator/user inputs. These are **prepared** prompts, not an
+  assertion that every preparation reached the provider; API requests are the
+  wire evidence.
+- `lifecycle.json`, `tasks.json`, and `qualification.json`: natural completion,
+  resolved task modes, artifact result, provenance, assistance and API totals.
+  The result, batch summary, facts and postmortem carry the qualification result.
+
+Provider acquisition is restricted to the requested API inside qualification,
+including background helpers. A different requested model is detected in API
+records. Recorded execution-tool calls are checked for Claude/Codex CLI usage;
+this is not an OS process audit and cannot prove that arbitrary scripts never
+launch an obscured subprocess. API observations contain hashes and metadata,
+not keys or full SDK payloads. Normal eval transcripts and workspace snapshots
+remain local artifacts and can contain task data.
+
+Missing usage is `null`, including SDK-internal retries, which are not exposed
+by this observer. Token fields retain provider-native meanings: Anthropic's
+input counter excludes cache reads/writes, reported separately. Do not compare
+input counters or calculate costs without accounting for these differences.
+Completion claims are checked against artifact/task state; semantic claims in
+arbitrary final prose still need a scenario-specific grader.
+
+For an interaction scenario, use `--user-simulation scripted --user-script path.json`.
+The JSON array matches exact question text, kind and optional intent kind, with
+each entry consumed at most once across daemon restarts:
+
+```json
+[
+  {
+    "kind": "structured",
+    "prompt": "Allow the command?",
+    "intentKind": "command-approval",
+    "answer": { "choice": "Deny" }
+  }
+]
+```
+
+`answer` accepts exactly one `choice` (exact choice text) or `writeIn`. Inline
+questions use `"kind": "inline"` with `writeIn`. An unmatched question receives
+no answer and is recorded as assistance required. Task-finished notification
+cards are ignored. Inline detection covers idle assistant replies ending in
+`?`; it is a heuristic and cannot identify every possible request in prose.
+`--user-simulation heuristic` or `--repair-policy harness` explicitly labels
+the trial an **assisted diagnostic**, never independent qualification. Keep
+those scores separate from the primary arm.
+
 ## Available scenarios
 
 Run `pnpm eval:all --list` for the complete live registry. The standardized `core` scorecard
@@ -330,6 +416,7 @@ accepts every chat provider gezel itself supports via `--provider <name>`
 pnpm eval:run tictactoe --provider codex-cli --model gpt-5.5
 pnpm eval:run tictactoe --provider copilot   --model claude-sonnet-4.6
 pnpm eval:run tictactoe --provider anthropic --model claude-sonnet-4-6
+pnpm eval:run tictactoe --provider anthropic --model claude-sonnet-5-5 --write-reports
 pnpm eval:run tictactoe --provider openai    --model gpt-5
 pnpm eval:run tictactoe --provider anthropic-cli --model claude-sonnet-4.6
 ```

@@ -163,6 +163,10 @@ import {
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
 import {
+  assertQualificationProvider,
+  recordRuntimeIntervention,
+} from '../providers/api-observation.js';
+import {
   resolveCatalogIdFromModelId,
   resolveCatalogReasoningBudget,
 } from '../providers/catalog-model-config.js';
@@ -7582,14 +7586,44 @@ export class ChatManager extends LocalEngineRuntime {
       // engine's saved prefix still matches. Preludes all prepend, so the
       // words are always the suffix.
       const firstSend = withCurrentDateTimeLine(promptForTurn, clockLine);
+      recordRuntimeIntervention({
+        sessionId,
+        taskRef: state.record.taskRef,
+        source: opts?.nudge || opts?.from ? 'product-runtime' : 'external',
+        reason: `turn:${resolveTurnMessageOrigin(opts)}`,
+        prompt: userText,
+      });
+      if (promptForTurn !== spliceIntoText(userText, pendingDigests)) {
+        recordRuntimeIntervention({
+          sessionId,
+          taskRef: state.record.taskRef,
+          source: 'product-runtime',
+          reason: 'turn-preamble',
+          prompt: promptForTurn,
+        });
+      }
       const words = spliceIntoText(userText, pendingDigests);
       if (firstSend.endsWith(words)) {
         userMessage.sentPreamble = firstSend.slice(0, firstSend.length - words.length);
       }
       // Lazy on purpose: a Keurmeester recovery swaps `promptForTurn` without
       // counting a continuation, and must send the corrective prompt.
-      const providerPrompt = () =>
-        continuations === 0 ? withCurrentDateTimeLine(promptForTurn, clockLine) : promptForTurn;
+      let observedCorrection = promptForTurn;
+      const providerPrompt = () => {
+        if (promptForTurn !== observedCorrection) {
+          recordRuntimeIntervention({
+            sessionId,
+            taskRef: state.record.taskRef,
+            source: 'product-runtime',
+            reason: 'continuation-or-recovery',
+            prompt: promptForTurn,
+          });
+          observedCorrection = promptForTurn;
+        }
+        return continuations === 0
+          ? withCurrentDateTimeLine(promptForTurn, clockLine)
+          : promptForTurn;
+      };
       let falseCapabilityDenialCorrected = false;
       const maxContinuations = resolveContinuationBudget(state);
       // Voorman-idle recovery is a project-level suggestion, not a broken
@@ -11951,6 +11985,7 @@ export class ChatManager extends LocalEngineRuntime {
     effectiveModel?: string,
   ): Promise<LLMProvider> {
     const name = record.providerName;
+    assertQualificationProvider(name);
     const modelId = effectiveModel ?? (await this.resolveEffectiveSessionModel(record, gezel));
     // Remote models route to a per-server RemoteGezelProvider (turn loop +
     // tools stay local; only the forward-pass is remoted).
@@ -12021,6 +12056,7 @@ export class ChatManager extends LocalEngineRuntime {
     modelId?: string,
     opts: { engineDrainWaitMs?: number } = {},
   ): Promise<LLMProvider> {
+    assertQualificationProvider(name);
     if (name === 'remote') return this.getRemoteProvider(modelId);
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
@@ -12268,6 +12304,7 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   private async ensureProvider(name: ProviderName, signal?: AbortSignal): Promise<LLMProvider> {
+    assertQualificationProvider(name);
     if (name === 'remote') {
       // Remote providers are keyed per-server and need a model id to resolve
       // which server; they must be reached via getProviderForModel /
@@ -14659,6 +14696,15 @@ export class ChatManager extends LocalEngineRuntime {
 
     const opts: BuiltSessionOpts = {
       systemMessage,
+      observationContext: {
+        sessionId: record.id,
+        gezelId: record.gezelId,
+        projectId: record.projectId,
+        taskRef: record.taskRef,
+        executionMode: taskContext?.task.executionMode ?? 'chat',
+        behaviors: modelProfile.behaviors.map((b) => ({ id: b.id, config: b.config })),
+        promptSections: systemInstructions.sections,
+      },
       ...(systemInstructions.layers ? { systemPromptLayers: systemInstructions.layers } : {}),
       ...(sharedBandPrefixEnabled && systemInstructions.sharedPrefix
         ? { systemSharedPrefix: systemInstructions.sharedPrefix }

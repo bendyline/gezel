@@ -56,6 +56,13 @@ import {
   probeProviderAuth,
   providerCredentialConfig,
 } from './providers.ts';
+import { QualificationBoundary } from './qualification/boundary.ts';
+import { validateQualification } from './qualification/config.ts';
+import { checkFinalArtifact } from './qualification/final-artifact.ts';
+import { observeLifecycle } from './qualification/lifecycle.ts';
+import { writeQualificationMetadata } from './qualification/metadata.ts';
+import { writeQualificationReport } from './qualification/report.ts';
+import { startUserSimulation } from './qualification/user-simulation.ts';
 import { captureRecordingState, writeRecordingManifest } from './recording/capture.ts';
 import { distillRunDir } from './recording/distill-io.ts';
 import {
@@ -343,7 +350,14 @@ export async function runTrial(
     trialOptions.retrieval || !scenarioInput.retrieval
       ? trialOptions
       : { ...trialOptions, retrieval: scenarioInput.retrieval };
-  const scenario = withRepairPolicy(scenarioInput, opts.repairPolicy);
+  if (opts.qualification) validateQualification(opts.qualification);
+  const scenario = withRepairPolicy(
+    scenarioInput,
+    opts.repairPolicy ?? (opts.qualification ? 'runtime' : undefined),
+  );
+  if (opts.qualification && !['anthropic', 'openai'].includes(opts.engine ?? 'llama-cpp')) {
+    throw new Error('Phase 0 qualification currently requires --provider anthropic or openai');
+  }
   const engine = opts.engine ?? 'llama-cpp';
   const category = categorizeProvider(engine);
   if (opts.offline && category !== 'local-engine' && category !== 'system-model') {
@@ -444,6 +458,11 @@ export async function runTrial(
   let imageModelHome: string | undefined;
 
   await mkdir(runDir, { recursive: true });
+  const boundary = opts.qualification
+    ? new QualificationBoundary(runDir, scenario.repairPolicy ?? 'runtime')
+    : undefined;
+  if (opts.qualification) await writeQualificationMetadata(repoRoot(), runDir, scenario, opts);
+
   if (scenario.retrievalOracle) {
     await writeFile(
       join(runDir, 'retrieval-oracle.json'),
@@ -843,6 +862,10 @@ export async function runTrial(
     ...(opts.retrieval ? { retrievalTrace: true } : {}),
     ...(opts.retrieval ? { relevanceModel: opts.retrieval.relevanceModel ?? null } : {}),
   });
+  if (opts.qualification) {
+    mergedExtraEnv.GEZEL_EVAL_OBSERVE = '1';
+    mergedExtraEnv.GEZEL_EVAL_API_PROVIDER = engine;
+  }
   // Live mock services (craftbook test.json `mocks[]`): boot BEFORE the
   // daemon so its env can carry the trial CA + credential seed file. The
   // runtime closes in the trial's finally.
@@ -1211,15 +1234,27 @@ export async function runTrial(
       const setupTimeoutMs = scenario.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS;
       await runScenarioSetupWithTimeout(
         () =>
-          scenario.setup!({
-            client,
-            meesterId,
-            ...(mockRuntime ? { mocks: mockRuntime } : {}),
-            state: scenarioState,
-            log,
-            // logChanged is a no-op during setup; setup is one-shot, not polled.
-            logChanged: (_key, line) => log(line),
-          }),
+          boundary
+            ? boundary.run('fixture', 'scenario-setup', () =>
+                scenario.setup!({
+                  client: boundary.client(spawned),
+                  repairPolicy: scenario.repairPolicy,
+                  meesterId,
+                  ...(mockRuntime ? { mocks: mockRuntime } : {}),
+                  state: scenarioState,
+                  log,
+                  logChanged: (_key, line) => log(line),
+                }),
+              )
+            : scenario.setup!({
+                client,
+                meesterId,
+                ...(mockRuntime ? { mocks: mockRuntime } : {}),
+                state: scenarioState,
+                log,
+                // logChanged is a no-op during setup; setup is one-shot, not polled.
+                logChanged: (_key, line) => log(line),
+              }),
         setupTimeoutMs,
       );
       log('[trial] scenario setup complete');
@@ -1230,20 +1265,28 @@ export async function runTrial(
     // ask_user_question calls — without it any scenario where a gezel
     // pauses to ask a clarifying question runs out the clock.
     logger.startHistoryTail();
-    let stopAutoAnswerer = startAutoAnswerer({
-      client,
-      meesterId,
-      log,
-      ...(opts.signal ? { signal: opts.signal } : {}),
-    });
+    const startSimulation = () =>
+      opts.qualification && boundary
+        ? startUserSimulation({
+            client: boundary.client(spawned),
+            boundary,
+            options: opts.qualification,
+            meesterId,
+            log,
+            signal: opts.signal,
+          })
+        : startAutoAnswerer({ client, meesterId, log, signal: opts.signal });
+    let stopAutoAnswerer = startSimulation();
     if (scenario.skipInitialPrompt) {
       log('[trial] skipped initial meester prompt (scenario setup already kicked off work)');
     } else {
       const kickoff = mockRuntime ? mockRuntime.substitute(scenario.prompt) : scenario.prompt;
-      await client.sendChatMessage(meesterId, {
-        message: kickoff,
-        projectId: 'default',
-      });
+      const sendKickoff = () =>
+        (boundary?.client(spawned) ?? client).sendChatMessage(meesterId, {
+          message: kickoff,
+          projectId: 'default',
+        });
+      await (boundary ? boundary.run('user-request', 'initial-brief', sendKickoff) : sendKickoff());
       log(`[trial] sent prompt to meester (${kickoff.length} chars)`);
     }
 
@@ -1277,16 +1320,12 @@ export async function runTrial(
             `[recording] tap restart failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        stopAutoAnswerer = startAutoAnswerer({
-          client,
-          meesterId,
-          log,
-          ...(opts.signal ? { signal: opts.signal } : {}),
-        });
-        return client;
+        stopAutoAnswerer = startSimulation();
+        return boundary?.client(spawned) ?? client;
       };
       const verdict = await pollUntilDone(scenario, {
-        client,
+        client: boundary?.client(spawned) ?? client,
+        ...(boundary ? { qualificationBoundary: boundary } : {}),
         meesterId,
         log,
         pollIntervalMs,
@@ -1307,6 +1346,30 @@ export async function runTrial(
       failureMode = verdict.failureMode;
       finalSniff = verdict.finalSniff;
       diagnostics = verdict.diagnostics;
+      if (success && opts.qualification) {
+        log('[qualification] artifact gate passed; observing natural turn and task completion');
+        const lifecycle = await observeLifecycle({
+          client,
+          timeoutMs: opts.qualification.completionTimeoutMs,
+          signal: opts.signal,
+        });
+        await writeFile(join(runDir, 'lifecycle.json'), JSON.stringify(lifecycle, null, 2));
+        const finalArtifact = await checkFinalArtifact(scenario, {
+          client: boundary?.client(spawned) ?? client,
+          meesterId,
+          state: scenarioState,
+          repairPolicy: scenario.repairPolicy,
+          log,
+          logChanged: (_key, line) => log(line),
+          ...(mockRuntime ? { mocks: mockRuntime } : {}),
+          ...(evalHints ? { evalHints } : {}),
+        });
+        if (!finalArtifact.done || !finalArtifact.success) {
+          success = false;
+          failureMode = 'success-check-false';
+          reason = `Final artifact check: ${finalArtifact.done ? finalArtifact.reason : 'artifact no longer passes'}`;
+        }
+      }
     } finally {
       await stopAutoAnswerer();
     }
@@ -1365,6 +1428,11 @@ export async function runTrial(
       };
     }
     try {
+      if (opts.qualification)
+        await writeFile(
+          join(runDir, 'tasks.json'),
+          JSON.stringify(await client.listTasks(), null, 2),
+        );
       await captureFinalState({ client, trialHome, runDir, log, trialFailed: !success });
     } catch (err) {
       log(
@@ -1415,6 +1483,7 @@ export async function runTrial(
       log(`[recording] manifest write failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     await shutdownTrialDaemon(spawned);
+    await spawned.daemonLogDrain?.catch(() => {});
     log('[trial] daemon shut down');
     if (mockRuntime) {
       // Persist the request logs for postmortems before closing.
@@ -2299,6 +2368,7 @@ export async function pollUntilDone(
   scenario: EvalScenario,
   args: {
     client: GezelClient;
+    qualificationBoundary?: QualificationBoundary;
     meesterId: string;
     log: (line: string) => void;
     pollIntervalMs: number;
@@ -2706,6 +2776,13 @@ export async function pollUntilDone(
           );
         }
       }
+    }
+    if (args.qualificationBoundary?.interventions.some((event) => event.status === 'blocked')) {
+      return {
+        success: false,
+        reason: 'Qualification blocked an undeclared evaluator mutation',
+        failureMode: 'success-check-false',
+      };
     }
     let result: SuccessCheckResult;
     try {
@@ -4719,6 +4796,20 @@ async function finalize(args: {
   trialHome: string;
   client: GezelClient | null;
 }): Promise<TrialResult> {
+  const qualification = await writeQualificationReport(args.runDir, args.success);
+  if (
+    args.success &&
+    qualification &&
+    qualification.issues.some((issue) => !issue.startsWith('assisted diagnostic;'))
+  ) {
+    args.success = false;
+    args.failureMode =
+      qualification.lifecycle?.status === 'interrupted' ? 'interrupted' : 'success-check-false';
+    args.reason =
+      qualification.lifecycle?.status === 'interrupted'
+        ? 'interrupted (SIGINT/SIGTERM) during qualification completion wait'
+        : `Qualification failed: ${qualification.issues.join('; ')}`;
+  }
   const finishedAt = new Date();
   const durationMs = Date.now() - args.startMonotonic;
   // Tag the trial with who-broke-it accountability so pass-rate tables
@@ -4771,6 +4862,7 @@ async function finalize(args: {
   // by now). Never blocks finalize; null = control arm.
   const keurmeesterSummary = await summarizeKeurmeesterCases(args.runDir).catch(() => null);
   const result: TrialResult = {
+    ...(qualification ? { qualification } : {}),
     trialId: args.trialId,
     scenarioId: args.scenarioId,
     modelId: args.modelId,

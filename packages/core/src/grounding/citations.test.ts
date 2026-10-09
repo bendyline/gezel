@@ -242,10 +242,7 @@ describe('groundText', () => {
       },
       {
         n: 2,
-        text:
-          '# Timeline (UTC)\n\nIncident commander: Mira Chen\n\n' +
-          'Notes on the on-call rotation and the review that followed. '.repeat(4) +
-          '\n[2026-03-14T14:30:00Z] cd-pipeline 8147 START service=checkout-api pods=12 READY',
+        text: `# Timeline (UTC)\n\nIncident commander: Mira Chen\n\n${'Notes on the on-call rotation and the review that followed. '.repeat(4)}\n[2026-03-14T14:30:00Z] cd-pipeline 8147 START service=checkout-api pods=12 READY`,
       },
     ];
     expect(
@@ -306,10 +303,7 @@ describe('groundText', () => {
       },
       {
         n: 3,
-        text:
-          '## Timeline\n\n- 14:30 deploy starts\n- 14:46 decision to revert\n\n' +
-          'Context on rotations and staffing for the week. '.repeat(5) +
-          '\n\n## Notes\n\nThe change was reviewed before merge.',
+        text: `## Timeline\n\n- 14:30 deploy starts\n- 14:46 decision to revert\n\n${'Context on rotations and staffing for the week. '.repeat(5)}\n\n## Notes\n\nThe change was reviewed before merge.`,
       },
     ];
     expect(groundText('All errors were HTTP 504 on /charge [2].', ev).sentences[0]?.status).toBe(

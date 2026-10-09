@@ -226,6 +226,19 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
     return { failureClass: 'operator', rule: 'operator-interrupt', evidence: reason.slice(0, 140) };
   }
 
+  if (
+    /Qualification (?:failed:|blocked evaluator|blocked provider)/.test(reason) &&
+    /(?:measurement|provenance|observation|unobservable|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
+      reason,
+    )
+  ) {
+    return {
+      failureClass: 'grader',
+      rule: 'qualification-evidence',
+      evidence: reason.slice(0, 240),
+    };
+  }
+
   const ungraded = reason.match(GRADER_UNAVAILABLE_PATTERN);
   if (ungraded && ungraded.index !== undefined) {
     return {

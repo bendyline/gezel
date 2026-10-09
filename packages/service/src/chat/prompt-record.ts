@@ -101,9 +101,12 @@ export class PromptRecorder {
     const prompt = this.pending.get(sessionId);
     if (!prompt) return;
     this.pending.delete(sessionId);
-    if (this.loggedHash.get(sessionId) === prompt.hash) return;
+    const observationHash = `${prompt.hash}:${createHash('sha256')
+      .update(JSON.stringify(tools) ?? '')
+      .digest('hex')}`;
+    if (this.loggedHash.get(sessionId) === observationHash) return;
     this.loggedHash.delete(sessionId);
-    this.loggedHash.set(sessionId, prompt.hash);
+    this.loggedHash.set(sessionId, observationHash);
     trim(this.loggedHash);
 
     const { details } = prompt;

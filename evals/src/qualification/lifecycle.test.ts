@@ -1,0 +1,77 @@
+import type { GezelClient } from '@bendyline/gezel-client/node';
+import { describe, expect, it, vi } from 'vitest';
+import type { EvalContext, EvalScenario } from '../types.ts';
+import { checkFinalArtifact } from './final-artifact.ts';
+import { observeLifecycle, readLifecycle } from './lifecycle.ts';
+
+function client(overrides: Record<string, unknown> = {}): GezelClient {
+  return {
+    listTasks: async () => ({ tasks: [{ ref: '1', status: 'complete' }] }),
+    listInflightTurns: async () => ({ inflight: [] }),
+    listQuestions: async () => ({ questions: [{ id: 'info', intent: { kind: 'task-finished' } }] }),
+    listChatSessions: async () => ({ sessions: [{ id: 'worker' }] }),
+    getChatSession: async () => ({
+      messages: [
+        { role: 'user', content: 'Work' },
+        { role: 'assistant', content: 'Done.' },
+      ],
+    }),
+    ...overrides,
+  } as unknown as GezelClient;
+}
+
+describe('natural completion', () => {
+  it('requires settled completion, while ignoring informational finished cards', async () => {
+    const listTasks = vi.fn(async () => ({ tasks: [{ ref: '1', status: 'complete' }] }));
+    const result = await observeLifecycle({
+      client: client({ listTasks }),
+      timeoutMs: 100,
+      intervalMs: 1,
+    });
+    expect(result.status).toBe('complete');
+    expect(result.completionClaim).toBe('supported');
+    expect(listTasks).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    { listTasks: async () => ({ tasks: [{ ref: '1', status: 'running' }] }) },
+    { listInflightTurns: async () => ({ inflight: [{ sessionId: 'worker' }] }) },
+    {
+      listQuestions: async () => ({
+        questions: [{ id: 'approval', intent: { kind: 'command-approval' } }],
+      }),
+    },
+    {
+      getChatSession: async () => ({
+        messages: [
+          { role: 'user', content: 'Work' },
+          { role: 'assistant', content: 'May I proceed?' },
+        ],
+      }),
+    },
+  ])('does not call an unfinished lifecycle complete', async (overrides) => {
+    expect((await readLifecycle(client(overrides))).status).toBe('incomplete');
+  });
+  it('bounds a hung observer and honors interruption during a hung read', async () => {
+    const hung = client({ listTasks: () => new Promise(() => {}) });
+    expect((await observeLifecycle({ client: hung, timeoutMs: 10 })).status).toBe('unobservable');
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 5);
+    const result = await observeLifecycle({ client: hung, timeoutMs: 1000, signal: ac.signal });
+    expect(result.status).toBe('interrupted');
+    expect(result.waitedMs).toBeLessThan(500);
+  });
+  it('preserves final artifact regressions and fails closed on a hung grader', async () => {
+    const ctx = {} as EvalContext;
+    const scenario = {
+      id: 'test',
+      description: 'test',
+      prompt: 'test',
+      successCheck: async () => ({ done: true, success: false, reason: 'changed output' }),
+    } as EvalScenario;
+    expect(await checkFinalArtifact(scenario, ctx)).toMatchObject({ done: true, success: false });
+    scenario.successCheck = () => new Promise(() => {});
+    expect(await checkFinalArtifact(scenario, ctx, 5)).toMatchObject({
+      reason: expect.stringContaining('grader unavailable'),
+    });
+  });
+});

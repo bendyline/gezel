@@ -318,6 +318,20 @@ export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRub
     '|---|---:|---|',
     ...performanceRows(facts),
     '',
+    ...(facts.qualification
+      ? [
+          '## API harness qualification',
+          '',
+          `Qualification: **${facts.qualification.passed ? 'PASS' : 'NOT QUALIFIED'}**; artifact: ${facts.qualification.artifactSuccess ? 'pass' : 'fail'}; lifecycle: ${facts.qualification.lifecycle?.status ?? 'unobservable'}; independence: ${facts.qualification.independence}.`,
+          '',
+          `Evaluator repairs delivered: ${facts.qualification.interventions.delivered}; blocked: ${facts.qualification.interventions.blocked}; unanswered questions: ${facts.qualification.interventions.unanswered}.`,
+          '',
+          `API requests: ${facts.qualification.api.requests}; failures: ${facts.qualification.api.failures}; incomplete: ${facts.qualification.api.incomplete}. SDK retries: unknown.`,
+          '',
+          ...facts.qualification.issues.map((issue) => `- ${issue}`),
+          '',
+        ]
+      : []),
     ...continuitySection(facts),
     ...retrievalSection(facts),
     ...nativeReliabilitySection(facts),

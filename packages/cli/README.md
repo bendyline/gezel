@@ -104,6 +104,21 @@ gezel --home /path/to/another-home        # standalone with an alternate home
 An explicit `--port 6228` remains available when you intentionally want a
 CLI-owned daemon on the canonical port.
 
+## One-shot prompts and pipelines
+
+Use `gezel run -` to read a UTF-8 prompt from a pipe or redirected file. It
+reads until EOF and preserves line breaks and indentation:
+
+```bash
+printf 'Summarize these notes:\nThe launch is Friday.\n' | gezel run -
+gezel run - < prompt.txt
+```
+
+The reply goes to stdout, so you can redirect it to a file; diagnostics go to
+stderr. Empty or whitespace-only input exits with status 1 before connecting
+to a service. A sole `-` is required to read stdin; `gezel run "your prompt"`
+continues to use its arguments, and bare `gezel run` shows usage.
+
 ## Provider credentials
 
 Manage provider keys through the service credential store, using stdin or an
@@ -371,7 +386,7 @@ Run `gezel --help` for the full list. The most-used ones:
 | Command | What it does |
 |---|---|
 | `gezel` | Launch the interactive TUI |
-| `gezel run [prompt…]` | One-shot prompt in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
+| `gezel run [prompt…]` | One-shot prompt (a sole `-` reads stdin) in the current directory's project, using its voorman by default; optionally `--gezel <id>` / `--project <folder>` |
 | `gezel do <craftbook…>` | Start a craftbook as an immediately dispatched task in the current directory's project; accepts its id, command, or display name, then required values, `key=value` parameters, and your request |
 | `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command or id; built-in commands always win |
 | `gezel workflow <name-or-file> [args…]` | Run an explicitly trusted repository workflow from `.gezel/workflows/<name>.mjs` or a module path |

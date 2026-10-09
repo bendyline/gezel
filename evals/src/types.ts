@@ -397,6 +397,8 @@ export interface EvalScenario {
 }
 
 export interface TrialOptions {
+  /** Opt-in API harness measurement; legacy trials keep their existing semantics. */
+  qualification?: import('./qualification/config.ts').QualificationOptions;
   /** Catalog id of the chat model to use (e.g. `gemma4-e4b-q4`). */
   modelId: string;
   /**
@@ -636,6 +638,7 @@ export interface NativeEngineIncidentSummary {
 }
 
 export interface TrialResult {
+  qualification?: import('./qualification/report.ts').QualificationReport;
   trialId: string;
   scenarioId: string;
   modelId: string;
@@ -863,7 +866,14 @@ export interface BatchSummary {
   perTrial: Array<
     Pick<
       TrialResult,
-      'trialId' | 'success' | 'durationMs' | 'reason' | 'failureMode' | 'engineContext'
+      | 'trialId'
+      | 'success'
+      | 'durationMs'
+      | 'reason'
+      | 'failureMode'
+      | 'engineContext'
+      | 'qualification'
+      | 'repairPolicy'
     >
   >;
   /** Set when auto-triage detected a consecutive-failure cluster (Theme E / E2). */
