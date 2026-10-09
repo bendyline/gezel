@@ -29,7 +29,9 @@ its own serial provider queue and never joins the machine broker's downloadable
 model pool. `/api/models/apple/status` is a product-only diagnostic; installation
 and OS readiness are separate states. There is no model download, implicit cloud
 fallback, or LAN sharing for this provider. Service-account and logged-out access
-to Apple's model have not been established. See [Apple-native AI](apple-native-ai.md).
+to Apple's model have not been established. See the
+[Apple Foundation Models helper](../native/helpers/apple-fm/README.md) for its
+protocol, build, and verification steps.
 
 ## Configuration ownership
 

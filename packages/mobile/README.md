@@ -211,7 +211,7 @@ The offline runtime supports foreground crew/tool work, authored and bundled scr
 
 The Node daemon still owns desktop orchestration; this increment shares schemas, domain helpers, storage conventions, client/event contracts, and the entire UI. Further extraction should move desktop business rules into shared runtime modules behind host ports, rather than add mobile-only views or imitate daemon endpoints with dummy results.
 
-Physical-device resource/quality testing, comprehensive accessibility/keyboard checks, signing, and distribution remain release work. Native CI now builds Android ARM64 app/test APKs and runs iOS simulator tests; Android instrumentation runs locally on the dedicated ARM64 emulator. Tiny-fixture inference proves mechanics, not trained-model quality. The detailed [parity status](../../docs/mobile-parity.md) separates working features from these remaining release gates.
+Physical-device resource/quality testing, comprehensive accessibility/keyboard checks, signing, and distribution remain release work. Native CI now builds Android ARM64 app/test APKs and runs iOS simulator tests; Android instrumentation runs locally on the dedicated ARM64 emulator. Tiny-fixture inference proves mechanics, not trained-model quality.
 
 ## Packaged evaluations
 
