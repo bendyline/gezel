@@ -19,6 +19,7 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import { dispatchTaskEntry } from '../tasks/entry-dispatch.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
+import { unattendedNightWork } from '../tasks/unattended.js';
 import type { DiffpackManager } from './manager.js';
 import { FIX_CRAFTBOOK_ID, createNightFixTask } from './night-fix-task.js';
 
@@ -58,6 +59,46 @@ export interface NightFixPlanResult {
     | 'no-developer'
     | 'nothing-open'
     | 'already-planned';
+}
+
+/**
+ * Cancel the night fix sweeps that paused on an earlier night. Cancelling hands
+ * their claimed issues back (the settle hook reopens them), so tonight's
+ * planning can take them up again. A paused sweep otherwise holds its issues
+ * forever: gezel-site/5 sat on 40 of them, and the planner skips claimed
+ * issues (2026-10-09). A sweep that paused tonight keeps its claim until the
+ * next night. One whose shards already finished a proposal is left for the
+ * person, because cancelling would reopen issues that proposal covers.
+ */
+export async function releasePausedNightFixes(
+  deps: {
+    store: Pick<Store, 'listProjects' | 'listProjectTasks'>;
+    tasks: Pick<TaskManager, 'setStatus'>;
+  },
+  windowStartMs: number,
+): Promise<string[]> {
+  const released: string[] = [];
+  for (const project of await deps.store.listProjects()) {
+    const projectTasks = await deps.store.listProjectTasks(project.id).catch(() => []);
+    for (const host of projectTasks) {
+      if (host.status !== 'paused' || host.parentTaskRef) continue;
+      if (unattendedNightWork(host) !== 'night-fix') continue;
+      if (Date.parse(host.updatedAt) >= windowStartMs) continue;
+      const proposed = projectTasks.some(
+        (child) => child.parentTaskRef === host.ref && child.status === 'complete',
+      );
+      if (proposed) {
+        log.info(`[diffpack] ${host.ref}: paused with a finished proposal; left for the person`);
+        continue;
+      }
+      await deps.tasks.setStatus(project.id, host.num, 'canceled');
+      released.push(host.ref);
+      log.info(
+        `[diffpack] ${host.ref}: paused since an earlier night; canceled to release its issues`,
+      );
+    }
+  }
+  return released;
 }
 
 /**

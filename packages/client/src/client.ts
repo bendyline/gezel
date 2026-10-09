@@ -6568,7 +6568,8 @@ export class GezelClient {
    * Complete flat workspace file list from the last static index scan
    * (`{path, size, mtimeMs}` per file, up to the indexer's cap). Empty for
    * never-indexed or indexing-disabled projects — read `/index/status` to
-   * tell those states apart. `hidden` includes Office lock files.
+   * tell those states apart. `hidden` exposes Office lock files retained in
+   * older index snapshots; new scans exclude lock files and other OS/sync junk.
    */
   listProjectIndexFilesDetail(
     id: string,

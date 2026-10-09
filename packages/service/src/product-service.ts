@@ -17,6 +17,7 @@ import {
   formatSuspension,
   isSharedLibraryProject,
   isTaskWorkAllowed,
+  lastNightShiftWindow,
   nightShiftDayKey,
   nowIso,
   onSuspension,
@@ -68,7 +69,7 @@ import {
   settleIssuesForDraftingTask,
 } from './diffpack/issue-lifecycle.js';
 import { DiffpackManager } from './diffpack/manager.js';
-import { planProjectNightFixes } from './diffpack/night-fix-planner.js';
+import { planProjectNightFixes, releasePausedNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
@@ -1655,6 +1656,13 @@ export async function startProductService(
       windowKey,
     ).catch((err) =>
       log.warn(`[night-shift] could not prepare the nightly review: ${String(err)}`),
+    );
+    const windowStart = lastNightShiftWindow(
+      opts.nightShiftNow?.() ?? new Date(),
+      nightShift.currentWindow(),
+    ).start;
+    await releasePausedNightFixes({ store, tasks }, windowStart.getTime()).catch((err) =>
+      log.warn(`[night-shift] could not release paused night fixes: ${String(err)}`),
     );
   });
   // The morning review card; see tasks/night-review-card.ts.

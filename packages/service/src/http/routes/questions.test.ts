@@ -132,6 +132,49 @@ describe('POST /api/questions — the unattended nightly review', () => {
   });
 });
 
+describe('POST /api/questions — a night fix sweep', () => {
+  it("declines its questions too, and still posts a person's own night task", async () => {
+    const tasks = svc.context.tasks;
+    const sweep = await tasks.create(
+      'default',
+      {
+        title: 'Nightly fixes — 3 open issues',
+        assignee: { kind: 'user' },
+        steps: [{ id: 'triage', name: 'Triage', prompt: 'Triage the leads.' }],
+        entryStepId: 'triage',
+        nightShift: { enabled: true, onceADay: true },
+      },
+      { origin: { kind: 'boekwachter-issue', issueRef: 'BW-531', path: 'src/a.ts' } },
+    );
+    const own = await tasks.create('default', {
+      title: 'Research tonight',
+      assignee: { kind: 'user' },
+      steps: [{ id: 'research', name: 'Research', prompt: 'Research it.' }],
+      entryStepId: 'research',
+      nightShift: { enabled: true },
+    });
+    const askFrom = (taskRef: string, sessionId: string) =>
+      api('POST', '/api/questions', {
+        projectId: 'default',
+        gezelId: 'imara',
+        sessionId,
+        prompt: 'Should I enable project file edits to read the issue store?',
+        taskRef,
+      });
+
+    const declined = (await (await askFrom(sweep.ref, 'sweep-session')).json()) as {
+      declined?: string;
+    };
+    expect(declined.declined).toMatch(/Nobody is awake/);
+    const posted = (await (await askFrom(own.ref, 'own-session')).json()) as {
+      questionId: string;
+      declined?: string;
+    };
+    expect(posted.declined).toBeUndefined();
+    expect(posted.questionId).not.toBe('');
+  });
+});
+
 describe('GET /api/questions — night-shift report attachments', () => {
   it('qualifies a legacy bare report path from the persisted review intent', async () => {
     const questionId = crypto.randomUUID();
