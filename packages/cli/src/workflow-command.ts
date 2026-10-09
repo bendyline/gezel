@@ -84,47 +84,69 @@ export async function runWorkflow(
     // Needs the module computes at run time (models chosen by its own
     // options): asked for at a terminal, otherwise a CliError naming the fix.
     ensureSetup: (needs: CraftbookSetupNeeds) => ensureSetup(needs),
-    runCraftbook: async (
-      id: string,
-      params: Record<string, string>,
-      options: {
-        timeoutMs?: number;
-        title?: string;
-        taskRef?: string;
-        parentTaskRef?: string;
-        onCreated?: (task: Task) => Promise<void>;
-      } = {},
-    ) => {
-      let ref = options.taskRef;
-      if (!ref) {
-        const { craftbook: book } = await client.getCraftbook(id, { projectId, source: 'project' });
-        const { params: parsed } = parseCraftbookArguments(
-          book,
-          [],
-          Object.entries(params).map(([key, value]) => `${key}=${value}`),
-        );
-        await ensureSetup(book, book, parsed);
-        const task = await client.createTask(projectId, {
-          title: options.title ?? book.name,
-          description: `Run the project craftbook ${book.name}. Follow every step and satisfy its required outcomes before completing this task.`,
-          craftbookId: id,
-          craftbookSourceId: 'project',
-          craftbookVersion: book.version,
-          craftbookParams: parsed,
-          dispatchEntry: true,
-          roleBasedNameOnlyMode: true,
-          trustScripts: true,
-          ...(options.parentTaskRef ? { parentTaskRef: options.parentTaskRef } : {}),
+    runCraftbook: Object.assign(
+      async (
+        id: string,
+        params: Record<string, string>,
+        options: {
+          timeoutMs?: number;
+          title?: string;
+          taskRef?: string;
+          creationKey?: string;
+          parentTaskRef?: string;
+          onCreated?: (task: Task) => Promise<void>;
+        } = {},
+      ) => {
+        let ref = options.taskRef;
+        if (!ref) {
+          let book: Craftbook;
+          try {
+            ({ craftbook: book } = await client.getCraftbook(id, { projectId, source: 'project' }));
+          } catch (error) {
+            // A driver can replay this read even without a persisted task reference.
+            // Never attach this proof to createTask or subsequent observation errors.
+            if (error instanceof Error) {
+              Object.assign(error, {
+                taskCreation: { attempted: false, phase: 'craftbook-read' },
+              });
+            }
+            throw error;
+          }
+          const { params: parsed } = parseCraftbookArguments(
+            book,
+            [],
+            Object.entries(params).map(([key, value]) => `${key}=${value}`),
+          );
+          await ensureSetup(book, book, parsed);
+          const body = {
+            title: options.title ?? book.name,
+            description: `Run the project craftbook ${book.name}. Follow every step and satisfy its required outcomes before completing this task.`,
+            craftbookId: id,
+            craftbookSourceId: 'project',
+            craftbookVersion: book.version,
+            craftbookParams: parsed,
+            dispatchEntry: true,
+            roleBasedNameOnlyMode: true,
+            trustScripts: true,
+            ...(options.parentTaskRef ? { parentTaskRef: options.parentTaskRef } : {}),
+          };
+          const task = options.creationKey
+            ? await client.createWorkflowTask(projectId, {
+                ...body,
+                workflowInvocationKey: options.creationKey,
+              })
+            : await client.createTask(projectId, body);
+          await options.onCreated?.(task);
+          ref = task.ref;
+        }
+        log(`Following ${ref}`);
+        return waitForTask(client, ref, {
+          timeoutMs: options.timeoutMs ?? invocation?.timeoutMs ?? 7_200_000,
+          onProgress: (task) =>
+            log(`${task.ref}: ${task.status} (${task.activeStepId ?? 'finished'})`),
         });
-        await options.onCreated?.(task);
-        ref = task.ref;
-      }
-      log(`Following ${ref}`);
-      return waitForTask(client, ref, {
-        timeoutMs: options.timeoutMs ?? invocation?.timeoutMs ?? 7_200_000,
-        onProgress: (task) =>
-          log(`${task.ref}: ${task.status} (${task.activeStepId ?? 'finished'})`),
-      });
-    },
+      },
+      { supportsIdempotentCreation: true },
+    ),
   });
 }

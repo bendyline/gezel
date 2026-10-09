@@ -94,6 +94,35 @@ describe('CodexCliSession', () => {
     expect(body).toContain('default_tools_approval_mode = "approve"');
   });
 
+  it.each([undefined, 'existing-thread'])(
+    'requires the primary bridge on new and resumed turns (%s)',
+    async (initialResumeId) => {
+      const codex = await makeFakeCodex(happyPathStream);
+      const deps = buildDeps({
+        binaryPath: codex,
+        ...(initialResumeId ? { initialResumeId } : {}),
+      });
+      deps.mcpServer = { command: 'node', args: ['/tmp/gezel-mcp.js'], env: {} };
+      deps.toolAllowlist = new Set(['read_artifact', 'write_artifact', 'advance_task_step']);
+      deps.extraMcpServers = [
+        { id: 'optional', kind: 'stdio', command: 'node', args: [], env: {} },
+      ];
+      await new CodexCliSession(deps).sendAndWait('review');
+      const config = await readFile(
+        join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml'),
+        'utf8',
+      );
+      const primary = config.split('[mcp_servers.gezel]')[1]?.split('[mcp_servers.optional]')[0];
+      const optional = config.split('[mcp_servers.optional]')[1];
+      expect(primary).toContain('required = true');
+      expect(primary).toContain('startup_timeout_sec = 60');
+      expect(primary).toContain(
+        'enabled_tools = ["read_artifact", "write_artifact", "advance_task_step"]',
+      );
+      expect(optional).not.toContain('required = true');
+    },
+  );
+
   it('forwards an initial resume id as providerState until a fresh one arrives', async () => {
     // First invocation: no thread.started in stream, only completion.
     // Means the cached id from the seed stays put.

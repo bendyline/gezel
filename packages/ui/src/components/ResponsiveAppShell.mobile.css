@@ -272,6 +272,19 @@
   ) {
   flex: 0 0 30px;
   width: 30px;
+}
+
+:root[data-platform="darwin"]
+  .app.app-compact:not(.app-mobile-preview)
+  :is(
+    .app-header-navigation,
+    .app-header-questions,
+    .titlebar-search-trigger,
+    .activity-control,
+    .queue-meter-button,
+    .engine-pill,
+    .narration-stop
+  ) {
   height: 30px;
   min-height: 30px;
 }
@@ -361,11 +374,15 @@
   display: none;
 }
 
+/* Activity keeps its label's width but shares the other status keys' height. */
+.app.app-compact :is(.activity-control, .queue-meter-button, .engine-pill, .narration-stop) {
+  height: 44px;
+}
+
 .app.app-compact :is(.queue-meter-button, .engine-pill, .narration-stop) {
   position: relative;
   justify-content: center;
   width: 44px;
-  height: 44px;
   max-width: none;
   padding: 0;
   gap: 0;

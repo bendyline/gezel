@@ -7025,6 +7025,18 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/tasks`, body);
   }
 
+  /** Durable workflow creation: an old daemon rejects this route instead of ignoring its key. */
+  createWorkflowTask(
+    projectId: string,
+    body: CreateTaskRequest & { workflowInvocationKey: string },
+  ): Promise<Task> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/workflow`,
+      body,
+    );
+  }
+
   getTask(projectId: string, num: number, signal?: AbortSignal): Promise<Task> {
     return this.request(
       'GET',

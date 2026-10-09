@@ -18,6 +18,7 @@ import {
   type TaskManager,
 } from './manager.js';
 import type { TaskRunner } from './runner.js';
+import { WorkflowLaunches } from './workflow-launches.js';
 
 /**
  * The one way a task is created-and-started from an HTTP surface. The
@@ -34,7 +35,7 @@ import type { TaskRunner } from './runner.js';
  */
 export interface TaskLaunchDeps {
   tasks: Pick<TaskManager, 'create' | 'list' | 'describeCraftbook'>;
-  store: Pick<Store, 'getProject' | 'getGezel' | 'readConfig'>;
+  store: Pick<Store, 'getProject' | 'getGezel' | 'readConfig' | 'iterateProjectTasks' | 'readTask'>;
   taskRunner: Pick<TaskRunner, 'enqueueHandoff'>;
   history?: Pick<HistoryManager, 'log'>;
   /**
@@ -49,6 +50,7 @@ export interface TaskLaunchDeps {
 }
 
 export interface TaskLaunchOptions {
+  workflowInvocationKey?: string;
   craftbookInvocationKey?: string;
   dispatchEntry?: boolean;
 }
@@ -63,7 +65,7 @@ export interface TaskLaunchResult {
 
 export type TaskLaunchRequest = Omit<
   CreateTaskRequest,
-  'dispatchEntry' | 'craftbookInvocationKey' | 'description'
+  'dispatchEntry' | 'craftbookInvocationKey' | 'workflowInvocationKey' | 'description'
 > & {
   description?: string;
 };
@@ -73,13 +75,25 @@ const LIVE_STATUSES = new Set<Task['status']>(['draft', 'active', 'paused']);
 export class TaskLauncher {
   private readonly inflight = new Map<string, Promise<Task>>();
 
-  constructor(private readonly deps: TaskLaunchDeps) {}
+  private readonly workflowLaunches: WorkflowLaunches;
+
+  constructor(private readonly deps: TaskLaunchDeps) {
+    this.workflowLaunches = new WorkflowLaunches(deps.store);
+  }
 
   async launch(
     projectId: string,
     body: TaskLaunchRequest,
     options: TaskLaunchOptions = {},
   ): Promise<TaskLaunchResult> {
+    if (options.workflowInvocationKey) {
+      return this.workflowLaunches.launch(
+        projectId,
+        options.workflowInvocationKey,
+        { ...body, dispatchEntry: options.dispatchEntry === true },
+        async (origin) => this.finish(await this.create(projectId, body, options, origin), options),
+      );
+    }
     const key = options.craftbookInvocationKey;
     if (key) {
       const existing = await this.findLive(projectId, key);
