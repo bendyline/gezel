@@ -28,10 +28,20 @@ export function isOfficeLockName(name: string): boolean {
 /** OneDrive/Dropbox staging directories that appear mid-sync. */
 const SYNC_STAGING_DIRS = new Set(['.tmp.drivedownload', '.tmp.driveupload', '.dropbox.cache']);
 
+/**
+ * macOS AppleDouble metadata: `._IMG_0001.JPEG` beside `IMG_0001.JPEG` when
+ * files were copied to a drive that can't hold resource forks. They carry an
+ * image's extension but hold no image: the vision engine refused 48 of them in
+ * the first five minutes of a night, three attempts each (2026-10-08).
+ */
+export function isAppleDoubleName(name: string): boolean {
+  return name.length > 2 && name.startsWith('._');
+}
+
 /** True when this single path segment is sync/app droppings. */
 export function isSyncJunkName(name: string): boolean {
   if (EXACT_NAMES.has(name) || SYNC_STAGING_DIRS.has(name)) return true;
-  if (isOfficeLockName(name)) return true;
+  if (isOfficeLockName(name) || isAppleDoubleName(name)) return true;
   const lower = name.toLowerCase();
   return SUFFIXES.some((suffix) => lower.endsWith(suffix));
 }

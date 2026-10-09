@@ -6393,7 +6393,10 @@ export class ChatManager extends LocalEngineRuntime {
     return true;
   }
 
-  async archiveSession(sessionId: string): Promise<ChatSession> {
+  async archiveSession(
+    sessionId: string,
+    opts: { summarize?: boolean } = {},
+  ): Promise<ChatSession> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     record.archived = true;
@@ -6409,7 +6412,9 @@ export class ChatManager extends LocalEngineRuntime {
     this.cacheController?.invalidate(sessionId);
     // Fire-and-forget summarization into project memory. We don't await
     // so the HTTP handler returns promptly; failures are logged inside.
-    this.trackBackground(this.summarizeInBackground(record, 'archive'));
+    if (opts.summarize !== false) {
+      this.trackBackground(this.summarizeInBackground(record, 'archive'));
+    }
     return record;
   }
 

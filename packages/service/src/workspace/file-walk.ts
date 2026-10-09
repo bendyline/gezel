@@ -1,5 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { isSyncJunkName, isSyncJunkPath } from '@bendyline/gezel';
 import { runGit } from '../git/git.js';
 
 /** Directories that are never useful to either workspace index. */
@@ -151,7 +152,9 @@ async function listGitVisiblePaths(
     for (const raw of stdout.split('\0')) {
       if (!raw) continue;
       const path = raw.replaceAll('\\', '/').replace(/^\.\//, '');
-      if (!path || seen.has(path) || containsAlwaysSkippedDir(path)) continue;
+      if (!path || seen.has(path) || containsAlwaysSkippedDir(path) || isSyncJunkPath(path)) {
+        continue;
+      }
       if (ignorePath?.(path)) continue;
       seen.add(path);
       paths.push(path);
@@ -220,6 +223,10 @@ async function walkFilesystem(
   for (const entry of entries) {
     if (out.length >= maxFiles) return;
     if (entry.isDirectory() && isSkippedDir(entry.name)) continue;
+    // OS and sync droppings (`.DS_Store`, `._IMG_0001.JPEG`, `~$draft.docx`)
+    // are never a person's files, and an image extension on one sent it to
+    // the vision engine.
+    if (isSyncJunkName(entry.name)) continue;
     const abs = join(dir, entry.name);
     const rel = relative(root, abs).replaceAll('\\', '/');
     if (ignorePath?.(rel)) continue;

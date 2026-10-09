@@ -91,6 +91,50 @@ export async function findNightShiftOversightTask(
 }
 
 /**
+ * Start each night's review from nothing. The step loops back to itself when a
+ * run finishes, so the next night's dispatch found last night's session, still
+ * holding a transcript in which the report was already written, and resumed it
+ * as an interrupted run. It read the old report back and advanced on it, and
+ * the gate (the report exists and is long enough) passed on yesterday's file
+ * (2026-10-08). So before the night's first dispatch: archive the review's
+ * sessions (without a memory summary, which would be a long model turn of its
+ * own), and date last night's report aside, so only a report written tonight
+ * can satisfy the gate. A night whose review already ran is left alone.
+ */
+export async function prepareReviewForNight(
+  deps: {
+    store: Pick<
+      Store,
+      | 'listProjectTasks'
+      | 'listSessions'
+      | 'readProjectArtifact'
+      | 'writeProjectArtifact'
+      | 'deleteProjectArtifact'
+    >;
+    archiveSession: (sessionId: string) => Promise<unknown>;
+  },
+  windowKey: string,
+): Promise<void> {
+  const task = await findNightShiftOversightTask(deps.store);
+  if (!task || task.nightShift?.lastRunDay === windowKey) return;
+  let archived = 0;
+  for (const session of await deps.store.listSessions({ projectId: 'default' })) {
+    if (session.taskRef !== task.ref || session.archived) continue;
+    await deps.archiveSession(session.id);
+    archived++;
+  }
+  const previous = await deps.store.readProjectArtifact('default', OVERSIGHT_REPORT_PATH);
+  if (previous !== null) {
+    const day = task.nightShift?.lastRunDay ?? 'earlier';
+    await deps.store.writeProjectArtifact('default', `night-shift-report-${day}.md`, previous);
+    await deps.store.deleteProjectArtifact('default', OVERSIGHT_REPORT_PATH);
+  }
+  log.info(
+    `[night-shift] review ready for ${windowKey}: ${archived} earlier session(s) archived${previous !== null ? ', last report dated aside' : ''}`,
+  );
+}
+
+/**
  * Ensure the always-present bundled night-shift task exists: a single
  * perpetual, self-looping step assigned to the Meester that produces a
  * daily project-oversight report. Flagged `{ enabled, onceADay }` so it

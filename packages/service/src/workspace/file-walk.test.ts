@@ -38,6 +38,23 @@ describe('discoverWorkspaceFiles', () => {
     expect(files.map((f) => f.path)).toEqual(['Trips/beach.jpg']);
   });
 
+  // AppleDouble files carry an image extension but hold no image: the vision
+  // engine refused each one three times (2026-10-08).
+  it('skips OS and sync droppings, in a plain folder and a git listing', async () => {
+    await writeFile(join(dir, 'IMG_0001.JPEG'), 'x');
+    await writeFile(join(dir, '._IMG_0001.JPEG'), 'x');
+    await writeFile(join(dir, '.DS_Store'), 'x');
+    await writeFile(join(dir, '~$notes.docx'), 'x');
+    expect((await discoverWorkspaceFiles(dir, { maxFiles: 100 })).files.map((f) => f.path)).toEqual(
+      ['IMG_0001.JPEG'],
+    );
+    if (!(await isGitInstalled())) return;
+    await runGit(['init', '-q'], { cwd: dir });
+    expect((await discoverWorkspaceFiles(dir, { maxFiles: 100 })).files.map((f) => f.path)).toEqual(
+      ['IMG_0001.JPEG'],
+    );
+  });
+
   it('flags a file whose bytes are not on disk', async () => {
     await writeFile(join(dir, 'local.jpg'), Buffer.alloc(64 * 1024, 1));
     // A sparse file allocates no blocks, which is what a cloud placeholder reports.

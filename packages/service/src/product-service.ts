@@ -135,6 +135,7 @@ import { mailCatalogEntries } from './mail/search-catalog.js';
 import {
   ensureNightShiftOversightTask,
   isNightShiftOversightTask,
+  prepareReviewForNight,
 } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
@@ -1647,8 +1648,14 @@ export async function startProductService(
   // The nightly oversight task is ensured at boot; ensure it again as each
   // window opens, so a task deleted, renamed or stuck on an old prompt since
   // boot is repaired in time to run tonight.
-  nightShift.setOnWindowOpened(async () => {
+  nightShift.setOnWindowOpened(async (windowKey) => {
     await ensureNightShiftOversightTask(store, tasks);
+    await prepareReviewForNight(
+      { store, archiveSession: (id) => chat.archiveSession(id, { summarize: false }) },
+      windowKey,
+    ).catch((err) =>
+      log.warn(`[night-shift] could not prepare the nightly review: ${String(err)}`),
+    );
   });
   // The morning review card; see tasks/night-review-card.ts.
   nightShift.setOnWindowSettled((windowKey) =>

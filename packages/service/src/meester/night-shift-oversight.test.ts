@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeStepGate } from '@bendyline/gezel';
+import { type ChatSession, normalizeStepGate } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -10,6 +10,7 @@ import {
   ensureNightShiftOversightTask,
   findNightShiftOversightTask,
   isNightShiftOversightTask,
+  prepareReviewForNight,
 } from './night-shift-oversight.js';
 
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
@@ -223,6 +224,63 @@ describe('night-shift oversight task', () => {
       expect(isNightShiftOversightTask(task)).toBe(true);
       expect(isNightShiftOversightTask({ ...task, projectId: 'pics' })).toBe(false);
       expect(isNightShiftOversightTask({ ...task, title: 'Weekly digest' })).toBe(false);
+    });
+  });
+
+  // The next night resumed last night's session, read the old report back,
+  // and advanced on it: the gate passed on yesterday's file (2026-10-08).
+  describe('each night starts from nothing', () => {
+    const lastNight = async (lastRunDay: string) => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      await store.writeTask({ ...task, nightShift: { ...task.nightShift!, lastRunDay } });
+      const at = new Date().toISOString();
+      const session: ChatSession = {
+        version: 1,
+        id: 'review-session',
+        gezelId: task.assignee.kind === 'gezel' ? task.assignee.gezelId : 'wren',
+        projectId: 'default',
+        providerName: 'mlx',
+        title: task.title,
+        createdAt: at,
+        lastActivityAt: at,
+        messages: [],
+        providerState: {},
+        taskRef: task.ref,
+        stepId: 'oversight',
+      };
+      await store.writeSession(session);
+      await store.writeProjectArtifact('default', 'night-shift-report.md', '# Last night\n');
+      const archived: string[] = [];
+      const archiveSession = async (id: string) => {
+        archived.push(id);
+        const record = await store.getSession(session.gezelId, id);
+        await store.writeSession({ ...record!, archived: true });
+      };
+      return { archived, archiveSession };
+    };
+
+    it("archives last night's session and dates last night's report aside", async () => {
+      const { archived, archiveSession } = await lastNight('2026-10-07');
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(archived).toEqual(['review-session']);
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBeNull();
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07.md')).toBe(
+        '# Last night\n',
+      );
+    });
+
+    it('leaves a night whose review already ran alone', async () => {
+      const { archived, archiveSession } = await lastNight('2026-10-08');
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(archived).toEqual([]);
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBe(
+        '# Last night\n',
+      );
     });
   });
 
