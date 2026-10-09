@@ -126,9 +126,19 @@ spelled small numbers match), months, quotations of three words or more, and
 capitalized names. Every detail must appear in the text of the evidence the
 sentence cites. A quotation is normalized like the evidence (case, line
 breaks, thousands separators), loses the writer's punctuation at its edges,
-and matches piece by piece across an ellipsis. A year or number must also sit
-near the sentence's rarest name, but only in a source that states both:
-a number taken from a different source is a synthesis the check cannot judge.
+and matches piece by piece across an ellipsis. Only a well-formed thousands
+separator is folded ("1,426" matches "1426"); a CSV row keeps its columns. A
+year or number must also sit near its name (the rarest word of the name
+nearest it in the sentence, so "(Allen, 2022) and (Dunn, 2023)" pairs each
+year with its author), but only in a source that states both: a number taken from a different source is a
+synthesis the check cannot judge, and acronyms and code identifiers ("UTC",
+"PaymentGateway") are never the name a number belongs to. A number the
+sentence works out from two of its own sourced numbers (a sum or difference)
+counts as sourced, and so does today's date. A decimal also matches the same
+quantity stated a thousandfold ("5.18 s" for 5180 ms), a name matches its
+plural or possessive, common technical acronyms (HTTP, UTC, API) are
+vocabulary rather than names, and a name inside a file attribution
+("(timeline.md, Notes)") never anchors a number.
 Each sentence ends up as one of:
 
 | Status | Meaning |
@@ -187,9 +197,11 @@ It checks the text, not the world:
 - A wrong *relationship* between true names passes: "Lawrence was George's
   son" when the evidence names both men.
 - A sentence with no checkable detail is never `supported`, only `cited`.
-- A number the writer computed ("30,000 EUR more than the finance sheet")
-  appears in no source, so it reads as invented. Cite the inputs and state
-  the arithmetic, or leave the number out.
+- A number the writer computed without showing its inputs ("a 10× longer
+  timeout") appears in no source, so it reads as invented.
+- A fact the source wraps across more than 160 characters from its name
+  reads as detached. The window is what catches the right relative with the
+  wrong year, so it stays tight.
 
 The answer to these is not a bigger regex. It is a narrow model check of the
 flagged sentences, kept for later and measured with the factuality bench

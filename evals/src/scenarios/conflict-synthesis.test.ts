@@ -381,7 +381,7 @@ describe('conflict-synthesis grader', () => {
     expect(check.signals).not.toContain('conflict-budget-surfaced');
     expect(check.signals).toContain('conflict-launch-date-surfaced');
     expect(check.signals).toContain('conflict-dri-surfaced');
-    expect(check.failReason).toMatch(/launch budget.*not source-bound/i);
+    expect(check.failReason).toMatch(/launch budget.*never says which source controls/i);
   });
 
   it('a near-miss: the losing value mentioned in the Overview correctly fails (quarantine)', () => {
@@ -621,5 +621,54 @@ describe('conflict-synthesis grader', () => {
     expect(engineering).toMatch(/SUPERSEDES/);
     expect(product).toContain('240,000');
     expect(finance).toContain('210000');
+  });
+});
+
+const SOURCE_OF_RECORD_SYNTHESIS = [
+  '# Skylark Launch — Consolidated Brief',
+  '',
+  '## Overview',
+  '',
+  'Skylark launches on 2026-09-01, per `memo-engineering.md`, which supersedes the product memo on timing. The total launch budget is 210,000 EUR, per `finance.csv`, split across the campaign (120,000), the launch event (50,000), and contractors (40,000). Marcus is the launch DRI, per the current `org.md`. The launch scope is the campaign, the event, and two contractors, plus the onboarding revamp, per `memo-product.md`, whose feature scope `memo-engineering.md` leaves otherwise standing. The original August target was not achievable because the migration alone takes six weeks, per `memo-engineering.md`.',
+  '',
+  '## Consolidated plan',
+  '',
+  '- **Launch date:** 2026-09-01, per `memo-engineering.md` (supersedes the product memo on timing).',
+  '- **Launch budget:** 210,000 EUR total, per `finance.csv` — campaign 120,000, launch_event 50,000, contractors 40,000.',
+  '- **Launch DRI:** Marcus (since June 1), per `org.md`.',
+  '- **Other ownership:** Iris is campaign lead and Deniz is engineering lead, per `org.md`.',
+  '- **Scope:** the campaign, the event, and two contractors, plus the onboarding revamp, per `memo-product.md`; feature scope otherwise stands per `memo-engineering.md`.',
+  '- **Timing constraint:** the migration alone takes six weeks, which is why the August date was not achievable, per `memo-engineering.md`.',
+  '',
+  '## Conflicts and resolutions',
+  '',
+  '1. **Launch date.** `memo-product.md` gives a launch date of 2026-08-15. `memo-engineering.md` gives a launch date of 2026-09-01 and states that it supersedes the product memo on timing. Winner: 2026-09-01, from `memo-engineering.md`, because the engineering memo is the controlling source on timing and says so directly.',
+  '2. **Launch budget.** `memo-product.md` states "The launch budget is 240,000 EUR". `finance.csv` records the field `total_budget` as 210000 (EUR), made up of campaign 120000, launch_event 50000, and contractors 40000. Winner: 210,000 EUR, from `finance.csv`, because the finance sheet is the source of record for all figures.',
+  '3. **Launch DRI.** `memo-oldplan.md` names Priya as the launch DRI. `org.md` names Marcus as launch DRI since June 1, and `memo-oldplan.md` states it predates the reorg and defers to `org.md` for current ownership. Winner: Marcus, from `org.md`, because the org chart is current for ownership.',
+  '',
+  '## Open questions',
+  '',
+  "- The product memo's launch budget figure is higher than the total in `finance.csv`; the sources do not state what the product memo included that the finance sheet does not itemize, so the gap could not be verified.",
+  '- `memo-oldplan.md` lists weekly syncs on Tuesdays; the sources do not state whether that cadence still holds under `org.md`.',
+].join('\n');
+
+// qwen3.8-27b, 2026-10-07: a correct synthesis resolved the budget with "the
+// finance sheet is the source of record for all figures" and failed four
+// repairs in a row on a message that never said what was missing.
+describe('conflict-synthesis resolution wording', () => {
+  it('accepts "source of record" as resolving the budget conflict', () => {
+    expect(evaluateSynthesis(SOURCE_OF_RECORD_SYNTHESIS).signals).toContain(
+      'conflict-budget-surfaced',
+    );
+  });
+
+  it('names the missing resolution sentence when both values are bound', () => {
+    const unresolved = SOURCE_OF_RECORD_SYNTHESIS.replace(
+      /because the finance sheet is the source of record for all figures/,
+      'per the sheet',
+    );
+    const result = evaluateSynthesis(unresolved);
+    expect(result.signals).not.toContain('conflict-budget-surfaced');
+    expect(result.failReason).toContain('never says which source controls');
   });
 });

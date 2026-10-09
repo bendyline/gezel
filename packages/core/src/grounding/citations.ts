@@ -114,9 +114,12 @@ export function citedSentences(markdown: string): Array<{ text: string; cites: n
   for (const unit of units) {
     // A marker written after the full stop belongs to the sentence before it.
     const normalized = unit.replace(/([.!?])((?:\s*\[\d[\d,\s–-]*\])+)/g, '$2$1');
-    // A bold or italic lead opens a sentence too: unsplit, "… on timing.
-    // **Winner:** the engineering memo" read "Winner" as a name.
-    const pieces = normalized.split(/(?<=[.!?]["”’)]?)\s+(?=(?:\*\*|__|\*|_|["“‘(])?[A-Z0-9])/);
+    // A bold or italic lead opens a sentence too, and so does the word after
+    // one that ends in a full stop: unsplit, "… on timing. **Winner:** …" and
+    // "**Error rate.** Baseline was …" read "Winner" and "Baseline" as names.
+    const pieces = normalized.split(
+      /(?<=[.!?](?:\*\*|__|\*|_)?["”’)]?)\s+(?=(?:\*\*|__|\*|_|["“‘(])?[A-Z0-9])/,
+    );
     const sentences: string[] = [];
     for (const piece of pieces) {
       const previous = sentences.at(-1);
@@ -167,6 +170,16 @@ const SMALL_NUMBERS = [
 /** Capitalized words that open clauses rather than name anything. */
 const COMMON_CAPITALIZED = new Set(
   'a an the and but or nor so yet for if when while after before during although though because since until unless as at by from in into of on onto to with without within he she it they we you i his her its their our your my this that these those there here then today tonight yesterday tomorrow later earlier meanwhile however instead still also each every both either neither many most some few all one two three no not yes later once soon now who what where which why how'.split(
+    ' ',
+  ),
+);
+/**
+ * Technical acronyms are vocabulary, not names a source must state: "HTTP
+ * 504" was refused because the chat log said only "504s" (2026-10-07,
+ * incident-postmortem).
+ */
+const TECHNICAL_ACRONYMS = new Set(
+  'http https api url uri utc gmt json csv xml html css sql cpu gpu ram ssd dns tls ssl sdk cli ci cd pr id ui ux os vm qa sla slo sli rps qps eur usd gbp kb mb gb tb ms pdf faq'.split(
     ' ',
   ),
 );
@@ -238,16 +251,19 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   const flush = () => {
     const words = run.filter((w) => !NAME_JOINERS.has(w.toLowerCase()));
     const startsSentence = runStart >= 0 && opensClause(runStart);
-    if (words.length >= 2 || (words.length === 1 && !startsSentence)) {
-      for (const word of words) {
-        const bare = word.replace(/['’]s$/, '');
-        if (
-          bare.length > 1 &&
-          !COMMON_CAPITALIZED.has(bare.toLowerCase()) &&
-          !MONTHS.includes(bare.toLowerCase())
-        )
-          add('name', bare);
-      }
+    // A sentence opener is a name only when another real name runs with it:
+    // "Mira Chen assumed IC" names Mira, "Clean IC handoff" does not name Clean.
+    const named =
+      startsSentence && words.filter((w) => isEntityName(w)).length < 2 ? words.slice(1) : words;
+    for (const word of named) {
+      const bare = word.replace(/['’]s$/, '');
+      if (
+        bare.length > 1 &&
+        !COMMON_CAPITALIZED.has(bare.toLowerCase()) &&
+        !TECHNICAL_ACRONYMS.has(bare.toLowerCase()) &&
+        !MONTHS.includes(bare.toLowerCase())
+      )
+        add('name', bare);
     }
     run = [];
     runStart = -1;
@@ -269,10 +285,19 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   return claims;
 }
 
+/**
+ * "1,426" and "240,000" lose their separators so they match "1426"; a CSV
+ * row does not. Folding every digit-comma-three-digits ran the columns of
+ * `14:25:00,1240,0.3,218,42` together into `0.3218`, and every p99 a
+ * postmortem quoted from metrics.csv read as invented (2026-10-07,
+ * incident-postmortem).
+ */
+const THOUSANDS = /(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d|,\d)/g;
+
 const normalizeEvidence = (text: string): string =>
   ` ${text
     .toLowerCase()
-    .replace(/(\d),(?=\d{3}\b)/g, '$1')
+    .replace(THOUSANDS, (n) => n.replace(/,/g, ''))
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\s+/g, ' ')} `;
@@ -288,7 +313,12 @@ function claimPattern(kind: ClaimKind, value: string): RegExp {
       'g',
     );
   }
-  return new RegExp(`(?<![\\p{L}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'gu');
+  // A name matches its plural and possessive: "the Tuesday sync" against
+  // "syncs on Tuesdays" was refused (2026-10-07, conflict-synthesis).
+  return new RegExp(
+    `(?<![\\p{L}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:['’]?s)?(?![\\p{L}])`,
+    'gu',
+  );
 }
 
 const QUOTE_EDGE_PUNCTUATION = /^[\s,.;:!?…]+|[\s,.;:!?…]+$/g;
@@ -311,8 +341,32 @@ function quoteFound(value: string, evidence: string): boolean {
 
 function claimFound(kind: ClaimKind, value: string, evidence: string): boolean {
   if (kind === 'quote') return quoteFound(value, evidence);
-  return claimPattern(kind, value).test(evidence);
+  if (claimPattern(kind, value).test(evidence)) return true;
+  // "5.18 s", "~5.1 s" and "0.8 s" restate 5180, 5090 and 800 ms: a decimal
+  // also counts when the source states it a thousandfold (ms, KB, mm),
+  // rounded to the places the writer kept.
+  if (kind === 'number' && value.includes('.')) {
+    const target = Number(value);
+    const tolerance = 0.5 * 10 ** -(value.split('.')[1]?.length ?? 0) + 1e-9;
+    for (const m of evidence.matchAll(/(?<![\d.])\d+(?:\.\d+)?(?![\d]|\.\d)/g)) {
+      if (Math.abs(Number(m[0]) / 1000 - target) <= tolerance) return true;
+    }
+  }
+  return false;
 }
+
+/**
+ * Whether a capitalized word can be what a number belongs to. Acronyms and
+ * code identifiers ("UTC", "READY", "PaymentGateway") are still checked for
+ * presence, but as anchors they read "pipeline 8147 at 14:30 UTC" as 8147
+ * detached from UTC.
+ */
+function isEntityName(word: string): boolean {
+  return !/^\p{Lu}[\p{Lu}\d]+$/u.test(word) && !/\p{Ll}\p{Lu}/u.test(word);
+}
+
+const ATTRIBUTION_PARENTHETICAL =
+  /\([^()]*\b[\w.-]+\.(?:md|csv|txt|log|json|diff|ya?ml|tsv|html?)\b[^()]*\)/gi;
 
 /** How far apart a number and the name it belongs to may sit in a source. */
 const NEAR_CHARS = 160;
@@ -333,29 +387,43 @@ const NEAR_CHARS = 160;
 function detachedNumbers(
   claims: ReadonlyArray<{ kind: ClaimKind; value: string }>,
   sources: readonly string[],
+  sentence = '',
 ): string[] {
-  // The anchor is the sentence's rarest name in the sources: in an article
-  // about George Washington, "Washington" sits near every year it states,
-  // while "Mildred" sits only near hers.
   const occurrences = (kind: ClaimKind, value: string, text: string) => [
     ...text.matchAll(claimPattern(kind, value)),
   ];
-  let anchor: { value: string; count: number } | null = null;
-  for (const claim of claims) {
-    if (claim.kind !== 'name') continue;
-    const count = sources.reduce(
-      (sum, text) => sum + occurrences('name', claim.value, text).length,
-      0,
-    );
-    if (count > 0 && (!anchor || count < anchor.count)) anchor = { value: claim.value, count };
-  }
-  if (!anchor) return [];
-  const near = new RegExp(claimPattern('name', anchor.value).source, 'u');
-  const anchored = sources.filter((text) => near.test(text));
+  const count = (value: string) =>
+    sources.reduce((sum, text) => sum + occurrences('name', value, text).length, 0);
+  // The anchor is the rarest name in the sources: in an article about George
+  // Washington, "Washington" sits near every year it states, while "Mildred"
+  // sits only near hers. Each number takes it from the name nearest it in
+  // the sentence, so "(Allen, 2022) and … (Dunn, 2023)" pairs 2023 with Dunn
+  // rather than with the rarer Allen (2026-10-07, annotated-bibliography).
+  // A name inside a parenthetical that cites a file is the attribution, not
+  // the subject: "(timeline.md, Notes)" made a section heading the anchor.
+  const subject = sentence.replace(ATTRIBUTION_PARENTHETICAL, ' ');
+  const names = claims.filter(
+    (c) =>
+      c.kind === 'name' &&
+      isEntityName(c.value) &&
+      count(c.value) > 0 &&
+      (!sentence || claimPattern('name', c.value).test(normalizeEvidence(subject))),
+  );
+  if (names.length === 0) return [];
+  const rarest = (values: readonly string[]) =>
+    values.reduce((best, v) => (count(v) < count(best) ? v : best));
+  const runs = nameRuns(
+    names.map((c) => c.value),
+    subject,
+  );
   const out: string[] = [];
   for (const claim of claims) {
     if (claim.kind !== 'year' && claim.kind !== 'number') continue;
-    const stated = anchored
+    const run = nearestRun(runs, claim, subject);
+    const anchor = rarest(run ?? names.map((c) => c.value));
+    const near = new RegExp(claimPattern('name', anchor).source, 'u');
+    const stated = sources
+      .filter((text) => near.test(text))
       .map((text) => ({ text, at: occurrences(claim.kind, claim.value, text) }))
       .filter((source) => source.at.length > 0);
     if (stated.length === 0) continue;
@@ -365,9 +433,51 @@ function detachedNumbers(
         return near.test(text.slice(Math.max(0, i - NEAR_CHARS), i + NEAR_CHARS));
       }),
     );
-    if (!placed) out.push(`${claim.value} next to ${anchor.value}`);
+    if (!placed) out.push(`${claim.value} next to ${anchor}`);
   }
   return out;
+}
+
+interface NameRun {
+  words: string[];
+  start: number;
+  end: number;
+}
+
+/** Where each name sits in the sentence, adjacent names joined into one run ("Mildred Washington"). */
+function nameRuns(values: readonly string[], sentence: string): NameRun[] {
+  const text = normalizeEvidence(sentence);
+  const spots = values
+    .flatMap((value) =>
+      [...text.matchAll(claimPattern('name', value))].map((m) => ({
+        value,
+        start: m.index ?? 0,
+        end: (m.index ?? 0) + m[0].length,
+      })),
+    )
+    .sort((a, b) => a.start - b.start);
+  const runs: NameRun[] = [];
+  for (const spot of spots) {
+    const last = runs.at(-1);
+    if (last && /^[\s'’.-]*$/.test(text.slice(last.end, spot.start))) {
+      if (!last.words.includes(spot.value)) last.words.push(spot.value);
+      last.end = spot.end;
+    } else runs.push({ words: [spot.value], start: spot.start, end: spot.end });
+  }
+  return runs;
+}
+
+function nearestRun(
+  runs: readonly NameRun[],
+  claim: { kind: ClaimKind; value: string },
+  sentence: string,
+): string[] | undefined {
+  if (runs.length === 0) return undefined;
+  const at = claimPattern(claim.kind, claim.value).exec(normalizeEvidence(sentence))?.index;
+  if (at === undefined) return undefined;
+  const distance = (run: NameRun) =>
+    at < run.start ? run.start - at : at > run.end ? at - run.end : 0;
+  return runs.reduce((best, run) => (distance(run) < distance(best) ? run : best)).words;
 }
 
 export interface GroundOptions {
@@ -472,7 +582,8 @@ function groundWith(
   if (opaque.length > 0) return { ...sentence, status: 'cited', checks: [], missing: [] };
   const holds = (sources: string[]) => {
     const checks = checkAgainst(claims, sources.join('\n'));
-    return checks.every((c) => c.found) && detachedNumbers(claims, sources).length === 0
+    return checks.every((c) => c.found) &&
+      detachedNumbers(claims, sources, sentence.text).length === 0
       ? checks
       : null;
   };
@@ -486,7 +597,7 @@ function groundWith(
   }
   const checks = checkAgainst(claims, ctx.everything);
   const absent = checks.filter((c) => !c.found).map((c) => c.value);
-  const missing = absent.length > 0 ? absent : detachedNumbers(claims, ctx.sources);
+  const missing = absent.length > 0 ? absent : detachedNumbers(claims, ctx.sources, sentence.text);
   if (missing.length === 0) return { ...sentence, status: 'unattributed', checks, missing };
   return {
     ...sentence,

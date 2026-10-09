@@ -44,7 +44,7 @@
   {
     "id": "conflict-synthesis",
     "sourceFile": "conflict-synthesis",
-    "sourceSha256": "4eb90f49554a0732910742a96af1b9ff1ee3f40b4ad641aaaa8dab6886fc7135",
+    "sourceSha256": "23acf6fecc5300ffa6ea7687b43dcda6dafba334b4e8f219f017640a758a0548",
     "timeoutMs": 1800000,
     "kind": "specialist",
     "project": {

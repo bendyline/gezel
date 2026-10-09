@@ -899,6 +899,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
+  'draft-social-post': {
+    // The sidecar requires a task sourced from this book, which artifact-task
+    // mode (a freehand kickoff) can never produce: every trial was unwinnable
+    // (2026-10-06 eval review, F11).
+    mode: 'workflow',
+  },
   'drive-wrap-up': {
     coverage: {
       status: 'implemented',
@@ -1852,6 +1858,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The artifact-task prompt drives the run, so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
     ],
   },
+  'reception-report': {
+    // The sidecar requires a task sourced from this book, which artifact-task
+    // mode (a freehand kickoff) can never produce: every trial was unwinnable
+    // (2026-10-06 eval review, F11).
+    mode: 'workflow',
+  },
   'recurring-invoice-run': {
     coverage: {
       status: 'validated',
@@ -2084,6 +2096,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: [
       'Build fake-github MCP server and fake-test-cli fixtures before enabling as implemented.',
     ],
+  },
+  'social-digest': {
+    // The sidecar requires a task sourced from this book, which artifact-task
+    // mode (a freehand kickoff) can never produce: every trial was unwinnable
+    // (2026-10-06 eval review, F11).
+    mode: 'workflow',
   },
   'social-thread': {
     coverage: {
