@@ -438,6 +438,15 @@
   min-height: 0;
 }
 
+/* Starters and folder setup can be taller than a phone screen. Let them
+   scroll together while reserving the rest of Home for the conversation. */
+.home-workshop-actions {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 40%;
+  overflow-y: auto;
+}
+
 /* Bound the reused chat surface so the timeline scrolls internally and the
    composer stays pinned at the bottom — a long conversation never pushes the
    compose box below the fold. The existing

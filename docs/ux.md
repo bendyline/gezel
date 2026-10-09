@@ -503,6 +503,11 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
+The starters and first-run folder setup share a bounded scroll area above the
+conversation, so neither can push the draft below the screen. On a short
+touchscreen or while the native keyboard is open, they yield their space to
+the conversation and return when the full viewport is available.
+
 A Home key opens a compact launch sheet with the main field focused.
 The person adds a topic, then chooses **Start now** or **Tonight**. Use the
 most recently visited project, or Default when none has been chosen. Derive

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectTypeScriptHeader } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
@@ -117,12 +118,11 @@ it.runIf(process.platform !== 'darwin')(
 // appended byte — drops it back to the fail-closed path. Uses the real
 // bundled fitness-coach type so a break in the shipped bytes fails here.
 describe('ScriptRunner — provenance-trusted sandbox lane', () => {
-  const header = '// @gezel-project-type: fitness-coach@1.0.0\n';
-
   async function installShippedScript(catalog: CatalogService, tamper = false): Promise<void> {
     const detail = await catalog.get('project-type', 'fitness-coach');
     if (!detail || detail.manifest.kind !== 'project-type') throw new Error('type missing');
     const body = (detail.manifest.scripts as Record<string, string>)['training-store']!;
+    const header = projectTypeScriptHeader(detail.manifest.id, detail.manifest.version);
     await writeScript('training-store', `${header}${body}${tamper ? '\n// tampered\n' : ''}`);
   }
 

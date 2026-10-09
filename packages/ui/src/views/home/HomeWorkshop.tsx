@@ -338,14 +338,18 @@ export function HomeWorkshop({
       />
       <div className="home-workshop-body">
         <div className="home-workshop-main">
-          {runtimeCapabilities().tasks && (
-            <MakeSomething
-              projectId={deriveLaunchProjectId(config, projects)}
-              projects={projects}
-            />
-          )}
-          {offerFolderStep && (
-            <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
+          {(runtimeCapabilities().tasks || offerFolderStep) && (
+            <div className="home-workshop-actions">
+              {runtimeCapabilities().tasks && (
+                <MakeSomething
+                  projectId={deriveLaunchProjectId(config, projects)}
+                  projects={projects}
+                />
+              )}
+              {offerFolderStep && (
+                <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
+              )}
+            </div>
           )}
           {meesterGezelId ? (
             <MeesterConversation

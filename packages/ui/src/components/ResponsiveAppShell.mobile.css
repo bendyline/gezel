@@ -155,9 +155,9 @@
 }
 
 /* Keep the header's Navigation key reachable when a phone turns sideways.
-   Greetings and chat banners can yield their space to the draft. */
+   Greetings, starters and chat banners can yield their space to the draft. */
 @media (max-height: 500px) and (pointer: coarse) {
-  .app.app-compact :is(.home-workshop-greeting, .chat-rail-banner) {
+  .app.app-compact :is(.home-workshop-greeting, .home-workshop-actions, .chat-rail-banner) {
     display: none;
   }
 }
