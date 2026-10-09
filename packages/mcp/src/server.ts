@@ -7205,6 +7205,10 @@ server.tool(
         ...(effectiveTaskRef ? { taskRef: effectiveTaskRef } : {}),
         ...(documentPath ? { documentPath } : {}),
       });
+      // Nobody can answer this asker (the unattended nightly review): the
+      // runtime posted nothing, and its text is the instruction. Not an
+      // error, so the model does not retry with reworded arguments.
+      if (res.declined) return { content: [{ type: 'text' as const, text: res.declined }] };
       const colleague = toolIsAuthorizedForThisSession('message_gezel')
         ? await questionColleague(body)
         : undefined;

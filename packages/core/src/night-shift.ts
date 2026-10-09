@@ -272,7 +272,7 @@ export function formatNightShiftSummary(counts: {
     summary = `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
   }
   if (counts.pausedReview) {
-    summary = `${summary} Your nightly review paused and won't run again until you resume it.`;
+    summary = `${summary} Your nightly review didn't finish; it tries again tonight on its own.`;
   }
   return summary;
 }

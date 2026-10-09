@@ -143,7 +143,9 @@ describe('night-shift review card', () => {
     expect(container.querySelector('.pending-question-splitwrap')).toBeNull();
   });
 
-  it('offers to resume a paused nightly review and queues it for tonight', async () => {
+  // The review is unattended plumbing: it resumes itself when the next window
+  // opens, so the card informs and asks nothing (2026-10-08).
+  it('says a paused nightly review retries tonight, with nothing to press', async () => {
     const base = nightCard();
     render(
       <PendingQuestionCard
@@ -156,13 +158,11 @@ describe('night-shift review card', () => {
       />,
     );
 
-    await screen.findByText(/Your nightly review paused and won't run again until you resume it\./);
-    fireEvent.click(screen.getByRole('button', { name: 'Resume nightly review' }));
-
-    await screen.findByText('Your nightly review will run again tonight.');
-    expect(vi.mocked(api.retryTask)).toHaveBeenCalledWith('default', 4);
-    expect(screen.queryByRole('button', { name: 'Resume nightly review' })).toBeNull();
-    expect(screen.queryByText(/Your nightly review paused/)).toBeNull();
+    await screen.findByText(
+      /Your nightly review didn't finish; it tries again tonight on its own\./,
+    );
+    expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull();
+    expect(vi.mocked(api.retryTask)).not.toHaveBeenCalled();
   });
 
   it("gives a quiet night its fix, counts the sweep, and links the week's recap", async () => {

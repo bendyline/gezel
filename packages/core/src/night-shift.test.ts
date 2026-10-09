@@ -228,7 +228,7 @@ describe('formatNightShiftSummary', () => {
 
   it('says when the nightly review is paused, after the rest of the night', () => {
     expect(formatNightShiftSummary({ tasks: 1, reports: 0, pausedReview: true })).toBe(
-      "The night shift finished 1 task. Your nightly review paused and won't run again until you resume it.",
+      "The night shift finished 1 task. Your nightly review didn't finish; it tries again tonight on its own.",
     );
     expect(
       formatNightShiftSummary({
@@ -238,7 +238,7 @@ describe('formatNightShiftSummary', () => {
         pausedReview: true,
       }),
     ).toBe(
-      "The night shift ran, but nothing came of it. Your nightly review paused and won't run again until you resume it.",
+      "The night shift ran, but nothing came of it. Your nightly review didn't finish; it tries again tonight on its own.",
     );
   });
 

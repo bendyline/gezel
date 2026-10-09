@@ -14,6 +14,10 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
+import {
+  OVERSIGHT_QUESTION_DECLINED,
+  isNightShiftOversightTask,
+} from '../../meester/night-shift-oversight.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import { answerOwnerStep } from '../../tasks/owner-step.js';
 import { retryPausedTask } from '../../tasks/retry.js';
@@ -58,6 +62,18 @@ export function questionRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = AskQuestionRequestSchema.parse(await c.req.json());
+
+    // The nightly review runs unattended: nobody is awake to answer it, and
+    // its questions are about the runtime's own plumbing, never the person's
+    // business. Decline instead of filing a card.
+    const parsedRef = body.taskRef ? parseTaskRef(body.taskRef) : null;
+    const askingTask = parsedRef
+      ? await ctx.store.readTask(parsedRef.projectId, parsedRef.num).catch(() => null)
+      : null;
+    if (askingTask && isNightShiftOversightTask(askingTask)) {
+      log.info(`[questions] declined a question from ${askingTask.ref}: unattended review`);
+      return c.json({ questionId: '', declined: OVERSIGHT_QUESTION_DECLINED }, 200);
+    }
 
     // Turn-to-turn dedup: never stack a second unanswered question card
     // on a session. A gezel that re-asks a reworded version of the same

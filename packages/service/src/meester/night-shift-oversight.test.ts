@@ -9,6 +9,7 @@ import { TaskManager } from '../tasks/manager.js';
 import {
   ensureNightShiftOversightTask,
   findNightShiftOversightTask,
+  isNightShiftOversightTask,
 } from './night-shift-oversight.js';
 
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
@@ -155,17 +156,77 @@ describe('night-shift oversight task', () => {
       expect(card?.answer?.silentSkip).toBe(true);
     });
 
-    it('leaves a pause the budget did not cause', async () => {
+    it('resumes a pause of any kind with a fresh budget, so nobody presses Resume', async () => {
       await pauseLikeAnEarlierBuild(2);
+      const paused = await oversightStep();
+      await store.writeTask({
+        ...paused.task,
+        craftbook: {
+          ...paused.task.craftbook,
+          steps: paused.task.craftbook.steps.map((s) =>
+            s.id === 'oversight' ? { ...s, redriveCount: 3, gateAttempts: 3 } : s,
+          ),
+        },
+      });
       await ensureNightShiftOversightTask(store, tasks);
 
-      const { task } = await oversightStep();
-      expect(task.status).toBe('paused');
-      expect((await store.getQuestion('default', 'q-paused'))?.answer).toBeUndefined();
+      const { task, step } = await oversightStep();
+      expect(task.status).toBe('active');
+      expect(step.redriveCount ?? 0).toBe(0);
+      expect(step.gateAttempts).toBeUndefined();
+      expect((await store.getQuestion('default', 'q-paused'))?.answer?.silentSkip).toBe(true);
     });
   });
 
-  it('finds the installed task, paused or not, so the morning card can offer Resume', async () => {
+  // A re-driven run asked the person how to settle a mismatch between two
+  // runtime guards (2026-10-08). Nobody is awake to answer the review.
+  describe('never asks the person anything', () => {
+    it('tells the run, in its step, that nobody can answer', async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { step } = await oversightStep();
+      expect(step.prompt).toContain('never ask the user anything');
+      // `ask_user_question` is a workflow safety tool no step policy may
+      // remove; the question route declines it instead.
+      expect(step.toolPolicy).toBeUndefined();
+    });
+
+    it("withdraws what a run already asked, and leaves other work's questions", async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      const ask = (id: string, taskRef?: string) =>
+        store.writeQuestion({
+          id,
+          projectId: 'default',
+          gezelId: 'wren',
+          sessionId: 'session-1',
+          prompt: 'The recurring re-arm is generating false re-nudges. How should I handle it?',
+          choices: ['The report is done', 'Pause the task'],
+          allowWriteIn: true,
+          multiSelect: false,
+          ...(taskRef ? { taskRef } : {}),
+          createdAt: new Date().toISOString(),
+        });
+      await ask('q-review', task.ref);
+      await ask('q-other', 'default/9');
+      await ask('q-chat');
+
+      await ensureNightShiftOversightTask(store, tasks);
+
+      expect((await store.getQuestion('default', 'q-review'))?.answer?.silentSkip).toBe(true);
+      expect((await store.getQuestion('default', 'q-other'))?.answer).toBeUndefined();
+      expect((await store.getQuestion('default', 'q-chat'))?.answer).toBeUndefined();
+    });
+
+    it("is recognized as the runtime's own work, which files no paused-for-help card", async () => {
+      await ensureNightShiftOversightTask(store, tasks);
+      const { task } = await oversightStep();
+      expect(isNightShiftOversightTask(task)).toBe(true);
+      expect(isNightShiftOversightTask({ ...task, projectId: 'pics' })).toBe(false);
+      expect(isNightShiftOversightTask({ ...task, title: 'Weekly digest' })).toBe(false);
+    });
+  });
+
+  it('finds the installed task, paused or not, for the morning card', async () => {
     expect(await findNightShiftOversightTask(store)).toBeNull();
     await ensureNightShiftOversightTask(store, tasks);
     const found = await findNightShiftOversightTask(store);
@@ -173,9 +234,8 @@ describe('night-shift oversight task', () => {
 
     await tasks.setStatus('default', found!.num, 'paused');
     expect((await findNightShiftOversightTask(store))?.status).toBe('paused');
-    // Ensuring again (each window open) repairs the task but never resumes a
-    // pause that is meant for the person.
+    // Ensuring again (each window open) resumes it for that night.
     await ensureNightShiftOversightTask(store, tasks);
-    expect((await findNightShiftOversightTask(store))?.status).toBe('paused');
+    expect((await findNightShiftOversightTask(store))?.status).toBe('active');
   });
 });

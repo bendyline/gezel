@@ -177,6 +177,9 @@ export function GreetingBand({
     hour12: false,
   });
   const dateLabel = `${weekday} ${partOfDay} · ${time}`;
+  const showingNightReview = Boolean(
+    (tab === 'morning' && morning) || (tab === 'night' && nightReview),
+  );
 
   if (collapsed) {
     return (
@@ -200,7 +203,10 @@ export function GreetingBand({
   }
 
   return (
-    <div className="home-workshop-greeting" data-testid="greeting-band">
+    <div
+      className={`home-workshop-greeting${showingNightReview ? ' home-workshop-greeting-night-review' : ''}`}
+      data-testid="greeting-band"
+    >
       <div className="home-workshop-greeting-top">
         {/* The date label and the tour share a tab strip — the tour reads
             as a second tab beside the greeting rather than a panel that
@@ -264,7 +270,12 @@ export function GreetingBand({
         </button>
       </div>
 
-      <div className="home-workshop-greeting-cols">
+      <div
+        className="home-workshop-greeting-cols"
+        role={showingNightReview ? 'region' : undefined}
+        aria-label={showingNightReview ? 'Night shift report' : undefined}
+        tabIndex={showingNightReview ? 0 : undefined}
+      >
         <div className="home-workshop-greeting-left">
           {tab === 'status' && report ? (
             <StatusReportPanel

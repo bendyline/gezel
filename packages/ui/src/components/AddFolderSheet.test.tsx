@@ -42,7 +42,9 @@ describe('AddFolderSheet', () => {
     expect(
       screen.getByText('Describe your photos, so you can find one by what is in it'),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Work on this folder overnight' }));
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Work on this folder during the night shift' }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Add folder' }));
 
     await waitFor(() =>

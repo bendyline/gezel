@@ -3559,6 +3559,12 @@ export const AskQuestionResponseSchema = z.object({
    * answer rather than stack duplicates.
    */
   deduped: z.boolean().optional(),
+  /**
+   * The runtime posted nothing, because nobody can answer this asker (the
+   * unattended nightly review). The text says what to do instead, and the
+   * MCP tool returns it as the result so the model does not retry.
+   */
+  declined: z.string().optional(),
 });
 export type AskQuestionResponse = z.infer<typeof AskQuestionResponseSchema>;
 

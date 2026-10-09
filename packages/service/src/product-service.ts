@@ -132,7 +132,10 @@ import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { mailCatalogEntries } from './mail/search-catalog.js';
-import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
+import {
+  ensureNightShiftOversightTask,
+  isNightShiftOversightTask,
+} from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
 import { warmEmbeddings } from './memory/embeddings.js';
@@ -1673,6 +1676,9 @@ export async function startProductService(
   // answered files a fresh one. No live session — answering collapses
   // the card; the `taskRef` attachment gives the UI its "Open task" link.
   tasks.setTaskNeedsHelpHook(async ({ projectId, task, stepId, reason, detail }) => {
+    // The nightly review is the runtime's own work: it resumes itself when the
+    // next window opens and the morning card says so.
+    if (isNightShiftOversightTask(task)) return;
     const existing = await store.listProjectQuestions(projectId).catch(() => []);
     if (
       existing.some(

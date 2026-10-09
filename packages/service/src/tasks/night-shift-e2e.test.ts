@@ -148,10 +148,8 @@ describe('a night in the life', () => {
   it('runs with nothing queued, sweeps the added folders, and leaves one morning card', async () => {
     const ctx = svc.context;
     const windowKey = nightShiftWindowKey(new Date(clock), DEFAULT_NIGHT_SHIFT_WINDOW)!;
-    // The nightly review pausing must not stop the night.
     const oversight = await findNightShiftOversightTask(ctx.store);
     expect(oversight).not.toBeNull();
-    await ctx.tasks.setStatus('default', oversight!.num, 'paused');
 
     const before = { pictures: await snapshot(pictures), code: await snapshot(code) };
     const picturesId = await addFolder(pictures);
@@ -163,6 +161,10 @@ describe('a night in the life', () => {
 
     await ctx.nightShift.tick();
     expect(ctx.nightShift.isActive()).toBe(true);
+    // The review pauses partway through the night (its gate spent, say). That
+    // must not stop the night. A review paused before the window opens is
+    // resumed when it opens, so the pause comes after.
+    await ctx.tasks.setStatus('default', oversight!.num, 'paused');
 
     await until(
       async () =>
@@ -187,7 +189,7 @@ describe('a night in the life', () => {
     const intent = card!.intent as NightShiftReviewIntent;
     expect(intent.windowKey).toBe(windowKey);
     expect(intent.pausedReview).toEqual({ projectId: 'default', num: oversight!.num });
-    expect(card!.prompt).toContain('Your nightly review paused');
+    expect(card!.prompt).toContain("Your nightly review didn't finish");
 
     // A restart replaying the settle (here, another tick) adds nothing.
     await ctx.nightShift.tick();

@@ -1698,8 +1698,11 @@ first-run onboarding (`FolderOnboardingStep`), the add-folder sheet
 Existing Folder card, the File menu and the Home tip) — shows the same three
 things first: what the folder holds ("12,480 photos · 1,204 only in iCloud",
 counted without reading a file), the read-only promise in plain words, and
-"Tonight your crew will…" from `describeFolderNightWork`. Folder choices are
-checkbox cards, not keys, because several may be picked at once; the
+the night work from `describeFolderNightWork`. In the add-folder sheet, a native
+checkbox sits to the left of "Work on this folder during the night shift",
+above the work preview. Show "During the nightshift, Gezel will" and the work
+list only while that checkbox is checked. First-run folder choices are
+checkbox cards, not keys, because several may be picked at once; its
 overnight question is a two-key tray. A folder gezel refuses (a home folder,
 a drive root) is explained with `forbiddenFolderPlainName`, never an error
 code, and the add key stays disabled.
@@ -1718,6 +1721,11 @@ does not expire. The card leads (proposals, then reports, then what finished,
 a paused review's Resume, the quiet night's reason with its one fix), then the
 main report reads in place, then what is already queued for tonight. One
 desktop notification announces it; the renderer never raises a second.
+Both **This morning** and **Last night** use the available width beside the
+Meester's figure. The whole greeting band takes at most half the available
+Home height, capped at half the viewport, so the Meester conversation stays
+visible. Keep the tabs and collapse key above a single scroll area for the
+review, including its reports and actions.
 
 **Photos are prints on a table.** A photo anywhere in the app is a
 `PhotoThumb`: a square-cropped tile with `--radius-sm`, loaded when it scrolls

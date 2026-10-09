@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { findNightShiftOversightTask } from '../../meester/night-shift-oversight.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -107,6 +108,27 @@ describe('POST /api/questions — cross-turn dedup', () => {
     expect(second.status).toBe(201);
     expect(((await second.json()) as { deduped?: boolean }).deduped).toBeUndefined();
     expect(await pendingFor(project)).toHaveLength(1);
+  });
+});
+
+// The nightly review runs unattended. A re-driven run asked the person how to
+// settle a mismatch between two runtime guards (2026-10-08).
+describe('POST /api/questions — the unattended nightly review', () => {
+  it('declines its questions with what to do instead, and files no card', async () => {
+    const review = await findNightShiftOversightTask(svc.context.store);
+    expect(review).not.toBeNull();
+
+    const res = await api('POST', '/api/questions', {
+      projectId: 'default',
+      gezelId: 'imara',
+      sessionId: 'review-session',
+      prompt: 'The recurring re-arm is generating false re-nudges. How should I handle it?',
+      taskRef: review!.ref,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { questionId: string; declined?: string };
+    expect(body.declined).toMatch(/Nobody is awake/);
+    expect((await pendingFor('default')).some((q) => q.sessionId === 'review-session')).toBe(false);
   });
 });
 

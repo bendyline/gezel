@@ -1,7 +1,6 @@
 import {
   type InferProjectForPathResponse,
   describeFolderNightWork,
-  folderCrewRoles,
   forbiddenFolderPlainName,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
@@ -138,18 +137,6 @@ export function AddFolderSheet() {
                   so gezel never downloads them. Download them to have your crew read them.
                 </p>
               )}
-              {kind && (
-                <>
-                  <div className="add-folder-eyebrow">
-                    Tonight your {folderCrewRoles(kind).join(' and ')} will
-                  </div>
-                  <ul className="add-folder-night">
-                    {describeFolderNightWork(kind).map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
               <label className="add-folder-switch">
                 <input
                   type="checkbox"
@@ -157,8 +144,18 @@ export function AddFolderSheet() {
                   onChange={(e) => setOvernight(e.target.checked)}
                   disabled={adding}
                 />
-                <span>Work on this folder overnight</span>
+                <span>Work on this folder during the night shift</span>
               </label>
+              {overnight && kind && (
+                <>
+                  <div className="add-folder-eyebrow">During the nightshift, Gezel will</div>
+                  <ul className="add-folder-night">
+                    {describeFolderNightWork(kind).map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           )}
           {error && <p className="error">{error}</p>}

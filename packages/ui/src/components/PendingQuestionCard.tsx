@@ -357,11 +357,6 @@ function NightShiftReviewCard({
   const intent = question.intent as NightShiftReviewIntent;
   const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
   const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
-  const [resume, setResume] = useQuestionDraft<'idle' | 'resuming' | 'resumed'>(
-    question.id,
-    'resume',
-    () => 'idle',
-  );
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
   const pausedReview = intent.pausedReview;
 
@@ -393,21 +388,6 @@ function NightShiftReviewCard({
     }
   }, [question.id, submitting, onAnswered, setSubmitting, setError]);
 
-  // A night task's retry waits for the shift, so resuming in the morning
-  // queues the review for tonight rather than running it now.
-  const resumeReview = useCallback(async () => {
-    if (!pausedReview || resume !== 'idle') return;
-    setResume('resuming');
-    setError(null);
-    try {
-      await api.retryTask(pausedReview.projectId, pausedReview.num);
-      setResume('resumed');
-    } catch (err) {
-      setError((err as Error).message ?? 'Failed to resume the nightly review.');
-      setResume('idle');
-    }
-  }, [pausedReview, resume, setResume, setError]);
-
   const tasks = review?.tasksCompleted ?? [];
   const proposals = review?.diffpacks ?? [];
   const reports =
@@ -432,7 +412,9 @@ function NightShiftReviewCard({
     proposals: proposals.length,
     actions: reports.reduce((n, r) => n + r.actionCount, 0),
     ...(intent.quiet ? { quiet: intent.quiet } : {}),
-    ...(pausedReview && resume !== 'resumed' ? { pausedReview: true } : {}),
+    // The review resumes itself when the next window opens, so the card only
+    // says so: the person never manages the review's own plumbing.
+    ...(pausedReview ? { pausedReview: true } : {}),
     ...(intent.indexing ? { indexing: intent.indexing } : {}),
   });
   const quietFix = intent.quiet ? quietNightFix(intent.quiet.reason) : null;
@@ -548,9 +530,6 @@ function NightShiftReviewCard({
           </button>
         </div>
       )}
-      {resume === 'resumed' && (
-        <p className="pending-question-hold muted">Your nightly review will run again tonight.</p>
-      )}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
         {quietFix && (
@@ -561,16 +540,6 @@ function NightShiftReviewCard({
             disabled={submitting}
           >
             {quietFix.label}
-          </button>
-        )}
-        {pausedReview && resume !== 'resumed' && (
-          <button
-            type="button"
-            className="pending-question-submit"
-            onClick={() => void resumeReview()}
-            disabled={resume === 'resuming' || submitting}
-          >
-            {resume === 'resuming' ? 'Resuming…' : 'Resume nightly review'}
           </button>
         )}
         <button
