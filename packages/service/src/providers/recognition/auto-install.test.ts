@@ -2,10 +2,19 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StatfsImpl } from '../../utils/disk-space.js';
 import { decideAutoInstall } from './auto-install.js';
 import { RecognitionManager } from './manager.js';
 import { MockRecognitionProvider } from './mock.js';
+
+const { statfs } = vi.hoisted(() => ({ statfs: vi.fn<StatfsImpl>() }));
+
+// Exercise the real download preflight without depending on the host's free disk space.
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs/promises')>()),
+  statfs,
+}));
 
 /**
  * The image reader is pulled automatically alongside a chat model that can't
@@ -29,6 +38,7 @@ const hasReader = () =>
   });
 
 beforeEach(async () => {
+  statfs.mockReset().mockResolvedValue({ bsize: 1, bavail: 16 * 1024 ** 3 });
   home = await mkdtemp(join(tmpdir(), 'gezel-auto-install-'));
 });
 afterEach(async () => {
@@ -46,6 +56,38 @@ describe('decideAutoInstall', () => {
     });
     expect(decision?.entry.id).toBe('granite-vision-4.1-4b-q4');
     expect(decision?.reason).toContain('cannot read images');
+  });
+
+  it.each([
+    ['the download does not fit', 0],
+    ['the download fits but working headroom does not', 4 * 1024 ** 3],
+  ])('skips when %s', async (_reason, freeBytes) => {
+    statfs.mockResolvedValue({ bsize: 1, bavail: freeBytes });
+
+    expect(
+      await decideAutoInstall({
+        home,
+        config: CONFIG,
+        catalogId: 'deepseek-v4-flash-284b-q2',
+        recognition: noReader(),
+        env: EMPTY_ENV,
+      }),
+    ).toBeNull();
+    expect(statfs).toHaveBeenCalledWith(join(home, 'engines', 'recognition', 'models'));
+  });
+
+  it('still installs when disk space cannot be measured', async () => {
+    statfs.mockRejectedValue(new Error('ENOTSUP'));
+
+    const decision = await decideAutoInstall({
+      home,
+      config: CONFIG,
+      catalogId: 'deepseek-v4-flash-284b-q2',
+      recognition: noReader(),
+      env: EMPTY_ENV,
+    });
+
+    expect(decision?.entry.id).toBe('granite-vision-4.1-4b-q4');
   });
 
   it('skips when a reader is already installed', async () => {

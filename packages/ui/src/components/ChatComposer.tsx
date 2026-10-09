@@ -1839,11 +1839,11 @@ export function ChatComposer({
           </div>
         )}
         <EditorShell
-          // Squisq installs its Tiptap placeholder extension on mount. Include
-          // the active recipient and prompt in the key so changing the To line
-          // refreshes that extension. Seed the remount from draftRef so a
-          // recipient switch never discards text the user already entered.
-          key={`${editorRevision}:${gezelId}:${placeholder ?? ''}`}
+          // Squisq installs its placeholder on mount. Refresh it when the
+          // recipient changes or the draft is reset, but never remount just
+          // for new hint text: late crew metadata can change that hint during
+          // input, before Squisq has reported the edit to draftRef.
+          key={`${editorRevision}:${gezelId}`}
           initialMarkdown={draftRef.current}
           // Chat is a single-surface compose flow. Squisq's host mode keeps
           // it in Write and removes the document-oriented view tabs while

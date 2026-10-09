@@ -19,6 +19,7 @@ import {
   stepOwnerGezelId,
   taskEffectiveStatus,
   withEffectiveTaskStatuses,
+  writeTaskNoteText,
 } from '@bendyline/gezel';
 import { outputMediumForStep } from '../craftbook/step-toolsets.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
@@ -190,7 +191,14 @@ export async function maybeAutoAdvanceOnObservableProgress(
         (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
       ) &&
       normalizedGate.scripts.length === 0;
-    if (!adv && !readEvidenceOnly) continue;
+    const terminalTaskNote =
+      !adv &&
+      step.terminal === true &&
+      step.toolPolicy?.outputMedium === 'task-note' &&
+      !step.toolPolicy.additionalOutputMedia?.length &&
+      state.record.taskRef === task.ref &&
+      state.record.stepId === step.id;
+    if (!adv && !readEvidenceOnly && !terminalTaskNote) continue;
     // Only this gezel's step (step assignee → suggested → task assignee);
     // an owner step advances only when the owner says so.
     const owner = stepOwnerGezelId(task, step);
@@ -215,18 +223,44 @@ export async function maybeAutoAdvanceOnObservableProgress(
     // History. Once the turn has a successful artifact read, try the gate
     // automatically. Partial/truncated reads stay held and feed the exact
     // missing ranges back through the normal rejection loop.
-    if (readEvidenceOnly) {
-      const attemptedRead = drained.some(
-        (call) => call.success && (call.name === 'read_artifact' || call.name === 'read_artifacts'),
-      );
-      if (!attemptedRead) continue;
+    if (readEvidenceOnly || terminalTaskNote) {
+      if (terminalTaskNote) {
+        // A terminal note is the declared deliverable, just like a terminal
+        // artifact. Match this turn's receipt against the persisted note so
+        // another task's note, an old note, or a prose DONE cannot close it.
+        const writes = drained.filter((call) => call.success && call.name === 'write_task_note');
+        if (writes.length === 0) continue;
+        const notes = await deps.store.listTaskNotes(projectId, task.num, step.id);
+        const written = notes.some(
+          (note) =>
+            note.stepId === step.id &&
+            note.author.kind === 'gezel' &&
+            note.author.gezelId === gezelId &&
+            writes.some((call) => call.resultText === writeTaskNoteText(task.ref, step.id, note)),
+        );
+        if (!written) continue;
+      } else {
+        const attemptedRead = drained.some(
+          (call) =>
+            call.success && (call.name === 'read_artifact' || call.name === 'read_artifacts'),
+        );
+        if (!attemptedRead) continue;
+      }
       log.info(
-        `session ${sessionId}: read evidence observed on ${task.ref} step "${step.id}" — auto-advancing`,
+        `session ${sessionId}: ${terminalTaskNote ? 'task note' : 'read evidence'} observed on ${task.ref} step "${step.id}" — auto-advancing`,
       );
       const outcome = await deps.taskAdvancer(projectId, task.num, step.id).catch((err) => {
-        log.error('[chat] read-evidence auto-advance failed:', err);
+        log.error('[chat] non-file evidence auto-advance failed:', err);
         return null;
       });
+      if (
+        outcome?.status === 'held' &&
+        !outcome.paused &&
+        outcome.activeStepId &&
+        outcome.activeStepId !== step.id
+      ) {
+        return { autoAdvanced: true };
+      }
       if (outcome && outcome.status === 'held') {
         return {
           gateRejected: {

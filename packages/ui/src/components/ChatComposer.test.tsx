@@ -1535,6 +1535,38 @@ describe('ChatComposer recipient picker', () => {
     expect(onPrimaryRecipientChange).toHaveBeenCalledWith('ada');
   });
 
+  it('keeps the live editor when a late placeholder update arrives for the same recipient', () => {
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        placeholder="Ask Tomas a question."
+      />,
+    );
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('Message');
+    fireEvent.change(editor, { target: { value: 'Keep this draft while the crew loads' } });
+    editor.focus();
+    editor.setSelectionRange(5, 15);
+
+    rerender(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        placeholder="Talk with Tomas about project ideas."
+      />,
+    );
+
+    expect(screen.getByLabelText('Message')).toBe(editor);
+    expect(editor).toHaveFocus();
+    expect(editor).toHaveValue('Keep this draft while the crew loads');
+    expect(editor.selectionStart).toBe(5);
+    expect(editor.selectionEnd).toBe(15);
+  });
+
   it('refreshes the recipient placeholder without losing the current draft', () => {
     const { rerender } = render(
       <ChatComposer

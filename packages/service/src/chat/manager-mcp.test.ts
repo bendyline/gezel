@@ -1597,6 +1597,81 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     30_000,
   );
 
+  it.each([false, true])(
+    'settles a terminal task-note through the real completion gate (rejected=%s)',
+    async (rejected) => {
+      const task = await svc.context.tasks.create('default', {
+        title: 'Record the final verification',
+        assignee: { kind: 'gezel', gezelId: 'ada' },
+        steps: [
+          {
+            id: 'finish',
+            name: 'Finish',
+            terminal: true,
+            prompt: 'Write a final task note with the verification result.',
+            toolPolicy: { outputMedium: 'task-note', allowTools: ['write_task_note'] },
+            gate: {
+              at: 'completion',
+              maxAttempts: 1,
+              scripts: [
+                {
+                  name: 'checkTaskNoteContains',
+                  scope: 'standard',
+                  inputs: { pattern: 'verification passed' },
+                },
+              ],
+            },
+          },
+        ],
+        entryStepId: 'finish',
+      });
+      manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
+        const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
+          cause: 'auto',
+        });
+        return outcome.status === 'advanced'
+          ? { status: 'advanced' as const }
+          : {
+              status: 'held' as const,
+              message: outcome.gate.message,
+              messageFingerprint: outcome.gate.messageFingerprint,
+              attempt: outcome.gate.attempt,
+              paused: outcome.gate.paused,
+            };
+      });
+      const session = await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        taskRef: task.ref,
+        stepId: 'finish',
+      });
+      mock.scriptToolCalls([
+        {
+          name: 'write_task_note',
+          arguments: {
+            ref: task.ref,
+            text: rejected ? 'Work is done.' : 'All verification passed.',
+          },
+        },
+      ]);
+      mock.script('', 'Final note recorded.');
+
+      await manager.send(session.id, 'Record the final result.');
+
+      const updated = await store.readTask('default', task.num);
+      expect(updated?.status).toBe(rejected ? 'paused' : 'complete');
+      expect(updated?.activeStepId).toBe(rejected ? 'finish' : undefined);
+      if (rejected) expect(updated?.craftbook.steps[0]?.gateAttempts).toBe(1);
+      expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+      const notes = await store.listTaskNotes('default', task.num, 'finish');
+      const written = notes.filter(
+        (note) => note.author.kind === 'gezel' && note.author.gezelId === 'ada',
+      );
+      expect(written).toHaveLength(1);
+    },
+    30_000,
+  );
+
   // Default is where the Meester files craftbooks. The observable-progress
   // hook once skipped it outright, and because the checkpoint write ends the
   // turn, nothing could advance the step: default/11 paused after three
