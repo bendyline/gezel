@@ -8,6 +8,7 @@ import { AnswerText } from './answer-text.js';
 import { prepareChat } from './chat.js';
 import type { GezelRuntimePlugin } from './definitions.js';
 import { listModels, requireModel } from './models.js';
+import { generateText } from './native-text.js';
 
 const origin = 'https://gezel.native.invalid';
 const jsonResponse = (value: unknown) =>
@@ -169,21 +170,49 @@ async function runChat(
   runs.set(id, { stop, done });
   signal.addEventListener('abort', onAbort, { once: true });
   // generate reserves the shared admission gate synchronously, before cancel.
-  const generation = inference.generate({ requestId: id, ...prepared.native }, ({ delta }) => {
-    if (stopped) return;
-    emitted += delta;
-    if (emitted.length > 4 * 1024 * 1024 || (streamController?.desiredSize ?? 1) <= 0) {
-      terminalError = new GezelSdkError('Native response exceeded the consumer buffer', {
-        code: 'resource_limit',
-      });
-      streamController?.error(terminalError);
-      void stop();
-      return;
-    }
-    const content = filter.push(delta);
-    answer += content;
-    if (content) chunk(content);
-  });
+  const generation = generateText(
+    inference,
+    prepared,
+    id,
+    ({ delta }) => {
+      if (stopped) return;
+      emitted += delta;
+      if (emitted.length > 4 * 1024 * 1024 || (streamController?.desiredSize ?? 1) <= 0) {
+        terminalError = new GezelSdkError('Native response exceeded the consumer buffer', {
+          code: 'resource_limit',
+        });
+        streamController?.error(terminalError);
+        void stop();
+        return;
+      }
+      const content = filter.push(delta);
+      answer += content;
+      if (content) chunk(content);
+    },
+    prepared.request.stream_options?.include_progress
+      ? {
+          onPhase(event) {
+            const measured = event.phase === 'loading_model' || event.phase === 'prefill';
+            frame({
+              id,
+              object: 'chat.completion.chunk',
+              created,
+              model,
+              choices: [],
+              gezel_progress: {
+                phase: event.phase === 'cooling' ? 'queued' : event.phase,
+                percent: measured && event.progress !== undefined ? event.progress * 100 : null,
+                outputTokens: event.outputTokens ?? null,
+                tokensPerSecond:
+                  event.tokensPerSec !== undefined && event.tokensPerSec <= 10_000_000
+                    ? event.tokensPerSec
+                    : null,
+              },
+            });
+          },
+        }
+      : undefined,
+  );
   if (signal.aborted) onAbort();
   const result = generation
     .then((reply) => {

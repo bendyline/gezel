@@ -4,6 +4,7 @@ import {
   MobileModelSchema,
   MobileProviderIdSchema,
   resolveMobileInferenceBudget,
+  resolveMobileInferenceLimits,
 } from '@bendyline/gezel/mobile-providers';
 
 export function modelIdentity(model: string) {
@@ -35,56 +36,68 @@ export async function listModels(inference: PortableInference): Promise<ModelLis
     data: providers.flatMap((provider) => {
       const models =
         provider.id === 'llama-cpp' ? inventory.models : [{ id: provider.id, name: provider.name }];
-      return models.map((model) => ({
-        id: `${provider.id}:${model.id}`,
-        object: 'model' as const,
-        created: 0,
-        owned_by: provider.id,
-        name:
-          provider.id === 'apple-foundation-models'
-            ? 'Apple Foundation Models'
-            : provider.id === 'android-mlkit'
-              ? 'Gemini Nano (Android ML Kit)'
-              : model.name,
-        context_window: resolveMobileInferenceBudget(provider).contextSize,
-        max_output_tokens: Math.min(
-          provider.maxOutputTokens,
-          resolveMobileInferenceBudget(provider).contextSize - 1,
-        ),
-        default_output_tokens: resolveMobileInferenceBudget(provider).maxTokens,
-        supported_options: ['model', 'messages', 'stream', 'max_tokens'],
-        availability: provider.availability,
-        unavailable_reason: provider.reason,
-        locality: provider.locality,
-        capabilities: { ...provider.capabilities, tools: false, structuredOutput: false },
-        native_capabilities: provider.capabilities,
-        preparation:
-          provider.id === 'llama-cpp'
-            ? 'app-download'
-            : provider.id === 'android-mlkit'
-              ? 'system-download'
-              : 'system-settings',
-        reason_code:
-          provider.availability === 'available'
-            ? undefined
-            : provider.availability === 'unavailable'
-              ? 'provider_unavailable'
-              : 'model_download_required',
-        recovery_actions:
-          provider.availability === 'available'
-            ? []
-            : provider.availability === 'unavailable'
-              ? ['choose-model']
-              : provider.id === 'apple-foundation-models'
-                ? ['open-system-settings']
-                : ['prepare'],
-      }));
+      return models.map((model) => {
+        const contextSize = 'contextTokens' in model ? model.contextTokens : undefined;
+        const limits = resolveMobileInferenceLimits(provider, contextSize);
+        const budget = resolveMobileInferenceBudget(provider, { contextSize });
+        return {
+          id: `${provider.id}:${model.id}`,
+          object: 'model' as const,
+          created: 0,
+          owned_by: provider.id,
+          name:
+            provider.id === 'apple-foundation-models'
+              ? 'Apple Foundation Models'
+              : provider.id === 'android-mlkit'
+                ? 'Gemini Nano (Android ML Kit)'
+                : model.name,
+          context_window: limits.contextSize,
+          max_output_tokens: limits.maxTokens,
+          default_output_tokens: budget.maxTokens,
+          supported_options: [
+            'model',
+            'messages',
+            'stream',
+            'max_tokens',
+            ...(provider.id === 'llama-cpp' &&
+            provider.capabilities.structuredChat &&
+            inference.chat
+              ? ['temperature', 'reasoning_effort']
+              : []),
+          ],
+          availability: provider.availability,
+          unavailable_reason: provider.reason,
+          locality: provider.locality,
+          capabilities: { ...provider.capabilities, tools: false, structuredOutput: false },
+          native_capabilities: provider.capabilities,
+          preparation:
+            provider.id === 'llama-cpp'
+              ? 'app-download'
+              : provider.id === 'android-mlkit'
+                ? 'system-download'
+                : 'system-settings',
+          reason_code:
+            provider.availability === 'available'
+              ? undefined
+              : provider.availability === 'unavailable'
+                ? 'provider_unavailable'
+                : 'model_download_required',
+          recovery_actions:
+            provider.availability === 'available'
+              ? []
+              : provider.availability === 'unavailable'
+                ? ['choose-model']
+                : provider.id === 'apple-foundation-models'
+                  ? ['open-system-settings']
+                  : ['prepare'],
+        };
+      });
     }),
   };
 }
 
-export async function requireModel(inference: PortableInference, model: string) {
-  const identity = modelIdentity(model);
+export async function requireModel(inference: PortableInference, selectedId: string) {
+  const identity = modelIdentity(selectedId);
   const provider = (await inference.providers()).find((entry) => entry.id === identity.providerId);
   if (!provider)
     throw new GezelSdkError('Provider is unavailable on this device', {
@@ -95,13 +108,14 @@ export async function requireModel(inference: PortableInference, model: string) 
       code: provider.availability,
     });
   }
-  if (
-    identity.providerId === 'llama-cpp' &&
-    !(await inference.models!()).models.some((entry) => entry.id === identity.modelId)
-  ) {
+  const model =
+    identity.providerId === 'llama-cpp'
+      ? (await inference.models!()).models.find((entry) => entry.id === identity.modelId)
+      : undefined;
+  if (identity.providerId === 'llama-cpp' && !model) {
     throw new GezelSdkError('The requested model is not installed in this app', {
       code: 'model_unavailable',
     });
   }
-  return { ...identity, provider };
+  return { ...identity, provider, model };
 }

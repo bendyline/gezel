@@ -116,7 +116,7 @@ describe('mobile model manager', () => {
     const app = connectRuntime(plugin);
     expect((await app.models()).data[0]).toMatchObject({
       context_window: 4096,
-      max_output_tokens: 4095,
+      max_output_tokens: 3967,
       default_output_tokens: 2048,
       capabilities: { tools: false },
       native_capabilities: { tools: true },
@@ -243,4 +243,22 @@ it('reports native cancellation failure instead of claiming disposal succeeded',
   await vi.waitFor(() => expect(plugin.startModelDownload).toHaveBeenCalled());
   await expect(manager.close()).rejects.toMatchObject({ code: 'cleanup_failed' });
   await rejected;
+});
+
+it('offers the first model download while native inference has no installed weights', async () => {
+  const { plugin } = fixture();
+  const snapshot = await plugin.providers();
+  snapshot.providers[0]!.availability = 'unavailable';
+  snapshot.providers[0]!.reason = 'No imported model is available.';
+  vi.mocked(plugin.providers).mockResolvedValue(snapshot);
+  const manager = createMobileModelManager(plugin, { catalog });
+  try {
+    expect(await manager.inspect('catalog:fixture')).toMatchObject({
+      availability: 'download-required',
+      recovery_actions: ['prepare'],
+    });
+    expect(plugin.startModelDownload).not.toHaveBeenCalled();
+  } finally {
+    await manager.close();
+  }
 });
