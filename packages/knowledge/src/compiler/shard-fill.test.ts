@@ -127,6 +127,49 @@ describe("shardFill: 'semantic'", () => {
     expect(report.checks.filter((c) => !c.ok)).toEqual([]);
   });
 
+  it('files a document that chunks to nothing instead of failing the build', async () => {
+    const empty: CatalogDocument = {
+      ...(DOCS[0] as CatalogDocument),
+      id: 'empty-doc',
+      slug: 'empty-doc',
+      title: 'ALPHA Empty',
+      markdown: '',
+    };
+    const outputPath = join(dir, 'empty.gezk');
+    await compileKnowledgeCatalog({
+      catalog: {
+        id: 'fixture-en',
+        version: '1.0.0',
+        name: 'Fixture Catalog',
+        language: 'en',
+        publisher: { id: 'gezel-tests', name: 'Gezel Tests' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        license: { name: 'MIT', attributionRequired: false },
+      },
+      topics: FIXTURE_TOPICS,
+      documents: (async function* () {
+        for (const doc of [...DOCS, empty]) yield doc;
+      })(),
+      outputPath,
+      embeddingProfile: FIXTURE_EMBEDDING_PROFILE,
+      chunkingProfile: FIXTURE_CHUNKING_PROFILE,
+      embed: groupEmbed,
+      countTokens: fakeCountTokens,
+      workDir: join(dir, 'work-empty'),
+      assets: FIXTURE_ASSETS,
+      shardTargetChunks: 40,
+      shardFill: 'semantic',
+    });
+    const extracted = join(dir, 'x-empty');
+    await extractGezkVerified(outputPath, extracted);
+    const router = new DatabaseSync(join(extracted, 'index', 'router.db'));
+    const row = router
+      .prepare('SELECT shard_id, chunk_count FROM documents WHERE id = ?')
+      .get('empty-doc') as { shard_id: number | bigint; chunk_count: number | bigint } | undefined;
+    router.close();
+    expect(row && Number(row.chunk_count)).toBe(0);
+  });
+
   it('builds byte-identical archives from identical inputs, and leaves no staging file', async () => {
     const total = (await build('probe2', 'topic', 1_000_000)).report.chunks;
     const target = Math.ceil(total / 3);

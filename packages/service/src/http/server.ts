@@ -110,6 +110,7 @@ import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
+import { reminderRoutes } from './routes/reminders.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
 import { v1KnowledgeRoutes } from './routes/v1-knowledge.js';
 
@@ -141,8 +142,8 @@ import {
   isOfficeListenerRequest,
   officeStaticRoutes,
 } from '../office-host/static-routes.js';
-import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { mediaSearchRoutes } from './routes/media-search.js';
+import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { relevanceModelRoutes } from './routes/relevance-model.js';
 import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
@@ -606,6 +607,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // /api/sessions/:id/tools/*.
   app.route('/api/sessions', mcpToolRoutes(ctx));
   app.route('/api/questions', questionRoutes(ctx));
+  app.route('/api/reminders', reminderRoutes(ctx));
   app.route('/api/permissions', permissionRoutes(ctx));
   app.route('/api/asks', askRoutes(ctx));
   app.route('/api/system', systemRoutes(ctx));

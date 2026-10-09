@@ -19,6 +19,10 @@ vi.mock('../memory/embeddings.js', () => {
   return {
     EmbeddingsDisabledError,
     embeddingsDisabledReason: () => null,
+    embeddingPipelineStatus: () => 'ready' as const,
+    embeddingsHealth: () => ({ status: 'ready' as const }),
+    openEmbeddings: () => {},
+    shutdownEmbeddings: async () => {},
     warmEmbeddings: async () => true,
     embed: async (t: string) => vectorFor(t),
     embedQuery: async (t: string) => vectorFor(t),
@@ -27,16 +31,17 @@ vi.mock('../memory/embeddings.js', () => {
 });
 
 let svc: RunningService;
+let home: string;
 
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
-  const home = await mkdtemp(join(tmpdir(), 'gezel-fanout-'));
+  home = await mkdtemp(join(tmpdir(), 'gezel-fanout-'));
   svc = await startService({ home });
 }, 30_000);
 
 afterAll(async () => {
-  await svc.stop();
-  await rm(svc.context.home, { recursive: true, force: true }).catch(() => {});
+  await svc?.stop();
+  await rm(home, { recursive: true, force: true }).catch(() => {});
   delete process.env.GEZEL_MOCK_PROVIDER;
 }, 30_000);
 

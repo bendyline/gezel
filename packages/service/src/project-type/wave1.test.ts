@@ -135,7 +135,8 @@ const WAVE1: Wave1Row[] = [
     role: 'Coach',
     script: 'training-store',
     seeds: ['training.json'],
-    craftbooks: ['weekly-review'],
+    craftbooks: ['training-recap'],
+    pageTools: ['page_log_workout', 'request_recap'],
     numericSeedKeys: [{ file: 'training.json', key: 'weeklyTarget' }],
   },
   {

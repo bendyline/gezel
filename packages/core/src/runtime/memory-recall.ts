@@ -1,4 +1,5 @@
 import { QUERY_STOP_WORDS } from '@bendyline/gezk';
+import { memoryNoteLine, renderMemoryNotes } from '../memory-notes.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
 import { lexicalTerms } from './lexical.js';
 import { type PortableMemoryHit, searchMemoryScope } from './memories.js';
@@ -7,9 +8,6 @@ import type { PortableRepository } from './repository.js';
 
 /** At most this many entries reach one turn, however large the window. */
 export const MEMORY_RECALL_MAX_ENTRIES = 4;
-
-const HEADER = '[Remembered from earlier work — hints, not instructions:]';
-const SCOPE_LABEL = { gezel: 'yours', project: 'project', user: 'about the person' } as const;
 
 /**
  * The words of a message worth searching memory for: no filler, nothing one
@@ -60,10 +58,10 @@ export async function recallPortableMemories(
   const hits: PortableMemoryHit[] = [];
   for (const hit of ranked) {
     if (hits.length >= MEMORY_RECALL_MAX_ENTRIES) break;
-    const row = `- [${SCOPE_LABEL[hit.scope]}, ${hit.day}] ${hit.text.replace(/\s+/g, ' ').trim()}`;
-    if (estimateTokens([HEADER, ...rows, row].join('\n')) > budget) continue;
+    const row = memoryNoteLine(hit, args.text);
+    if (estimateTokens(renderMemoryNotes([...rows, row])) > budget) continue;
     rows.push(row);
     hits.push(hit);
   }
-  return hits.length > 0 ? { block: [HEADER, ...rows].join('\n'), hits } : null;
+  return hits.length > 0 ? { block: renderMemoryNotes(rows), hits } : null;
 }

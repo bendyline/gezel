@@ -33,8 +33,8 @@ afterAll(async () => {
   else process.env.GEZEL_MOCK_PROVIDER = priorMockFlag;
 }, 30_000);
 
-function createTask(body: unknown) {
-  return httpFetch(`${baseUrl}/api/projects/${projectId}/tasks`, {
+function createTask(body: unknown, suffix = '') {
+  return httpFetch(`${baseUrl}/api/projects/${projectId}/tasks${suffix}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -79,5 +79,31 @@ describe('craftbook root-turn task idempotency', () => {
     expect([aResponse.status, bResponse.status].sort()).toEqual([200, 201]);
     expect(a.ref).toBe(b.ref);
     expect(await svc.context.tasks.list({ projectId })).toHaveLength(2);
+  });
+});
+
+describe('workflow request endpoint', () => {
+  it('requires a key and returns the same task without accepting changed inputs', async () => {
+    const body = {
+      title: 'Review image',
+      description: 'Inspect the supplied image and record its quality.',
+      steps: [{ name: 'Review' }],
+      workflowInvocationKey: `workflow-v1:${'c'.repeat(64)}`,
+    };
+    const missing = await createTask({ ...body, workflowInvocationKey: undefined }, '/workflow');
+    expect(missing.status).toBe(400);
+    const [a, b] = await Promise.all([
+      createTask(body, '/workflow'),
+      createTask(body, '/workflow'),
+    ]);
+    const [first, replay] = (await Promise.all([a.json(), b.json()])) as [Task, Task];
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(first.ref).toBe(replay.ref);
+    expect(first.origin).toMatchObject({
+      kind: 'workflow-invocation',
+      key: body.workflowInvocationKey,
+    });
+    const changed = await createTask({ ...body, title: 'Different image' }, '/workflow');
+    expect(changed.status).toBe(409);
   });
 });

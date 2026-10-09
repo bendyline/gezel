@@ -34,6 +34,9 @@ import { sha8, slug } from '../writer.js';
 
 const log = createLogger('connectors');
 
+/** Pull requests whose diff GitHub refused as too large, by `<project>#<number>`. */
+const diffRefused = new Set<string>();
+
 /** Newest-N open pull requests the ambient pass mirrors when unconfigured. */
 const DEFAULT_MAX_PULLS = 20;
 /** GitHub caps one PR at 3,000 changed files; overview adds one record. */
@@ -233,14 +236,22 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       config.includeComments
         ? this.runtime.prs.listComments(project, num)
         : Promise.resolve([] as GitHubPullComment[]),
-      this.runtime.prs
-        .getPullRequestDiff(project, num, { limit: Number.POSITIVE_INFINITY })
-        .catch((err) => {
-          // A missing diff degrades the corpus (per-file patches survive);
-          // it should not fail the whole scope.
-          log.warn(`github-pulls: could not fetch the unified diff for #${num}: ${err}`);
-          return '';
-        }),
+      diffRefused.has(`${project.id}#${num}`)
+        ? Promise.resolve('')
+        : this.runtime.prs
+            .getPullRequestDiff(project, num, { limit: Number.POSITIVE_INFINITY })
+            .catch((err) => {
+              // A missing diff degrades the corpus (per-file patches survive);
+              // it should not fail the whole scope. GitHub refuses a diff past
+              // its file limit every time, and every sync pass asked again and
+              // warned again: 10-23 identical warnings an hour (2026-10-09).
+              // Ask once per pull request per run.
+              if (/exceeded the maximum number of files/i.test(String(err))) {
+                diffRefused.add(`${project.id}#${num}`);
+              }
+              log.warn(`github-pulls: could not fetch the unified diff for #${num}: ${err}`);
+              return '';
+            }),
     ]);
     // GitHub's list-files endpoint may itself clip or omit `patch` for a
     // large file. Prefer the exact segment from the full diff whenever it is

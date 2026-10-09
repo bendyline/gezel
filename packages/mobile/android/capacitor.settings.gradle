@@ -4,3 +4,6 @@ project(':capacitor-android').projectDir = new File('../../../node_modules/.pnpm
 
 include ':bendyline-gezel-capacitor'
 project(':bendyline-gezel-capacitor').projectDir = new File('../../capacitor/android')
+
+include ':capacitor-local-notifications'
+project(':capacitor-local-notifications').projectDir = new File('../../../node_modules/.pnpm/@capacitor+local-notifications@8.3.1_@capacitor+core@8.5.2/node_modules/@capacitor/local-notifications/android')

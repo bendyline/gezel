@@ -35,6 +35,7 @@ describe('storage tiers', () => {
       'projects/default/artifacts/tabular/sheet.xlsx_tables/tables/a',
       'projects/default/input-staging/x/meta.json',
       'projects/default/digest-state.json',
+      'projects/default/index/index.db',
       'projects/default/workspace/.gezel/index/index.db',
     ])
       expect(storageTierFor(path), path).toBe('device');

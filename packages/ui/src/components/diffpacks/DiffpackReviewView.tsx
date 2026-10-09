@@ -1,5 +1,5 @@
 import type { Diffpack, DiffpackFile } from '@bendyline/gezel';
-import { formatDiffpackRef } from '@bendyline/gezel';
+import { formatDiffpackRef, isDiffpackFileOperation } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { formatAbsoluteTime } from '../../relative-time.js';
@@ -42,7 +42,77 @@ function statusLabel(pack: Diffpack): string {
 function changeLabel(file: DiffpackFile): string {
   if (file.change === 'add') return 'New file';
   if (file.change === 'delete') return 'Delete';
+  if (file.change === 'move') return 'Move';
+  if (file.change === 'copy') return 'Copy';
+  if (file.change === 'mkdir') return 'New folder';
   return 'Edit';
+}
+
+/** Past this many, moves and copies are grouped by the folder they land in. */
+const GROUP_OPERATIONS_AT = 12;
+
+function parentFolder(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash < 0 ? '' : path.slice(0, slash);
+}
+
+/**
+ * Moves, copies and new folders: no diff to read, just where each file goes.
+ * A large tidy-up reads by destination folder, each folder a row that opens.
+ */
+function DiffpackOperations({
+  operations,
+  applied,
+}: {
+  operations: DiffpackFile[];
+  applied: Set<string>;
+}) {
+  const row = (op: DiffpackFile) => (
+    <li key={op.path} className="dp-op">
+      <span className="muted small">{changeLabel(op)}</span>{' '}
+      {op.from ? (
+        <>
+          <code title={op.from}>{op.from}</code> → <code title={op.path}>{op.path}</code>
+        </>
+      ) : (
+        <code title={op.path}>{op.path}</code>
+      )}
+      {applied.has(op.path) && <span className="muted small"> · Applied</span>}
+    </li>
+  );
+  const groups = new Map<string, DiffpackFile[]>();
+  for (const op of operations) {
+    const folder = op.change === 'mkdir' ? op.path : parentFolder(op.path);
+    groups.set(folder, [...(groups.get(folder) ?? []), op]);
+  }
+  return (
+    <section className="dp-file dp-ops" aria-label="Moves and copies">
+      <header className="dp-file-head">
+        <span>
+          {operations.length === 1 ? 'One file change' : `${operations.length} file changes`}
+          <span className="muted small">
+            {' '}
+            · applied after the edits, never over an existing file
+          </span>
+        </span>
+      </header>
+      {operations.length < GROUP_OPERATIONS_AT ? (
+        <ul className="dp-op-list">{operations.map(row)}</ul>
+      ) : (
+        <div className="dp-op-groups">
+          {[...groups.entries()].map(([folder, ops]) => (
+            <details key={folder} className="dp-op-group">
+              <summary>
+                <code>{folder ? `${folder}/` : 'Top level'}</code>{' '}
+                <span className="muted small">{plural(ops.length, 'item')}</span>
+              </summary>
+              <ul className="dp-op-list">{ops.map(row)}</ul>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function DiffpackReviewView({ projectId }: { projectId: string }) {
@@ -204,36 +274,44 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
             ) : null}
 
             <div className="dp-files">
-              {selected.files.map((file) => (
-                <section key={file.path} className="dp-file">
-                  <header className="dp-file-head">
-                    <code className="dp-file-path" title={file.path}>
-                      {file.path}
-                    </code>
-                    <span className="muted small">
-                      {changeLabel(file)} · +{file.additions} −{file.deletions}
-                    </span>
-                    {appliedPaths.has(file.path) && <span className="muted small">Applied</span>}
-                    {canApply && !appliedPaths.has(file.path) && file.change !== 'delete' && (
-                      <button
-                        type="button"
-                        className="small"
-                        disabled={busy === selected.packId}
-                        onClick={() => void runApply({ paths: [file.path] })}
-                      >
-                        Apply this file
-                      </button>
+              {selected.files
+                .filter((file) => !isDiffpackFileOperation(file.change))
+                .map((file) => (
+                  <section key={file.path} className="dp-file">
+                    <header className="dp-file-head">
+                      <code className="dp-file-path" title={file.path}>
+                        {file.path}
+                      </code>
+                      <span className="muted small">
+                        {changeLabel(file)} · +{file.additions} −{file.deletions}
+                      </span>
+                      {appliedPaths.has(file.path) && <span className="muted small">Applied</span>}
+                      {canApply && !appliedPaths.has(file.path) && file.change !== 'delete' && (
+                        <button
+                          type="button"
+                          className="small"
+                          disabled={busy === selected.packId}
+                          onClick={() => void runApply({ paths: [file.path] })}
+                        >
+                          Apply this file
+                        </button>
+                      )}
+                    </header>
+                    {file.change === 'delete' ? (
+                      <p className="git-diff-placeholder muted">
+                        This proposal suggests deleting the file.
+                      </p>
+                    ) : (
+                      <GitDiffView diff={diffs[file.path]} />
                     )}
-                  </header>
-                  {file.change === 'delete' ? (
-                    <p className="git-diff-placeholder muted">
-                      This proposal suggests deleting the file.
-                    </p>
-                  ) : (
-                    <GitDiffView diff={diffs[file.path]} />
-                  )}
-                </section>
-              ))}
+                  </section>
+                ))}
+              {selected.files.some((file) => isDiffpackFileOperation(file.change)) && (
+                <DiffpackOperations
+                  operations={selected.files.filter((file) => isDiffpackFileOperation(file.change))}
+                  applied={appliedPaths}
+                />
+              )}
             </div>
 
             {toast && <output className="dp-toast">{toast}</output>}

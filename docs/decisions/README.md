@@ -27,3 +27,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0018](0018-local-add-in-grants.md) | Accepted | Gezel's own local add-ins connect without a connection code |
 | [0019](0019-multimodal-embeddings.md) | Accepted | Multimodal embeddings with EmbeddingGemma 2: one space for text, photos, video and audio |
 | [0020](0020-phone-photo-reading.md) | Accepted | Phones read chat photos with the OS first and a small vision model second |
+| [0021](0021-read-only-folders.md) | Accepted | Added folders: read-only, indexed home-side, crewed only by the person's act |

@@ -200,7 +200,12 @@ export async function runHandboekExport(
   for (const entry of entries) {
     const sitePage = sitePages.get(entry.id);
     const article = sitePage
-      ? { id: entry.id, title: entry.title, markdown: sitePage.markdown, defaultDuration: undefined }
+      ? {
+          id: entry.id,
+          title: entry.title,
+          markdown: sitePage.markdown,
+          defaultDuration: undefined,
+        }
       : await engine.article(entry.id, { mode: 'site' });
     if (!article) {
       skipped.push(entry.id);
@@ -214,7 +219,9 @@ export async function runHandboekExport(
     const art = entry.id.startsWith('craftbook/')
       ? site.craftbookArt.get(entry.id.slice('craftbook/'.length))
       : undefined;
-    let rendered = wrapTables(extractBody(markdownDocToPlainHtml(parsed, { title: article.title })));
+    let rendered = wrapTables(
+      extractBody(markdownDocToPlainHtml(parsed, { title: article.title })),
+    );
     if (sitePage?.html) rendered = `${rendered}\n${sitePage.html}`;
     if (demo) rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title));
     if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title));

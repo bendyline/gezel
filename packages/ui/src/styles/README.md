@@ -54,7 +54,7 @@ an example of restoring the old winner explicitly.
 | `project-section-tabs.css` | **On demand:** Shared project section navigation for desktop and native mobile surfaces |
 | `fitted-tabs.css` | **On demand:** Tab faces (label / icon / both) and the hidden probe row for `FittedTabsList` |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
-| `github-and-growth.css` | **Surface:** GitHub workspace and gezel growth surfaces |
+| `github-and-growth.css` | **Surface:** GitHub workspace, gezel growth, and the social-mode visit card |
 | `diffpacks.css` | **On demand:** Change-proposal review pane (owned by `DiffpackReviewView`) |
 | `scripts-and-craftbooks.css` | **Surface:** Script editor, craftbook editor, automation, and gates |
 | `village-and-overview.css` | **Surface:** Village, project overview, machine budget, and remote serving |

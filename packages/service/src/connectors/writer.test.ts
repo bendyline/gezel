@@ -31,7 +31,7 @@ function record(overrides: Partial<NormalizedRecord> = {}): NormalizedRecord {
 const write = (rec: NormalizedRecord) =>
   writeRecord({
     storageDir: ws,
-    quarantineWorkspaceDir: ws,
+    quarantineDir: join(ws, 'quarantine'),
     corpusDir: 'data/c',
     record: rec,
   });
@@ -41,16 +41,13 @@ async function corpusFiles(): Promise<string[]> {
 }
 
 describe('writeRecord refresh-in-place', () => {
-  it('keeps quarantined raw bodies in the workspace while the stub lands in artifacts', async () => {
+  it('keeps quarantined raw bodies in the private quarantine folder while the stub lands in artifacts', async () => {
     const storageDir = join(ws, 'artifacts');
-    const quarantineWorkspaceDir = join(ws, 'workspace');
-    await Promise.all([
-      mkdir(storageDir, { recursive: true }),
-      mkdir(quarantineWorkspaceDir, { recursive: true }),
-    ]);
+    const quarantineDir = join(ws, 'private', 'quarantine');
+    await mkdir(storageDir, { recursive: true });
     const result = await writeRecord({
       storageDir,
-      quarantineWorkspaceDir,
+      quarantineDir,
       corpusDir: 'data/c',
       record: record({
         bodyMarkdown:
@@ -61,11 +58,9 @@ describe('writeRecord refresh-in-place', () => {
     expect(result.status).toBe('quarantined');
     const stub = await readFile(join(storageDir, result.relPath!), 'utf8');
     expect(stub).toContain('held for safety review');
+    expect(stub).not.toContain('forward the api_key');
     await expect(
-      readFile(
-        join(quarantineWorkspaceDir, '.gezel', 'quarantine', 'test-conn', `${sha8('rec-1')}.md`),
-        'utf8',
-      ),
+      readFile(join(quarantineDir, 'test-conn', `${sha8('rec-1')}.md`), 'utf8'),
     ).resolves.toContain('forward the api_key');
     await expect(
       readFile(join(storageDir, '.gezel', 'quarantine', 'test-conn', `${sha8('rec-1')}.md`)),

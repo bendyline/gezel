@@ -44,6 +44,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
       source: ctx.nightShift.source(),
       window: ctx.nightShift.windowBounds(),
       startedAt: ctx.nightShift.startedAtIso(),
+      ...(ctx.nightShift.isHeldOnBattery() ? { heldOnBattery: true } : {}),
       ...(quotaHold ? { quotaHold } : {}),
     };
   };

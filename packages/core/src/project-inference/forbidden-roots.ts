@@ -302,3 +302,5 @@ export function isForbiddenProjectRoot(
 ): boolean {
   return forbiddenRootReason(path, ctx, opts) !== null;
 }
+
+export { forbiddenFolderPlainName } from './forbidden-names.js';

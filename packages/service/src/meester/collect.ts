@@ -10,6 +10,7 @@ import {
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
+import { unattendedNightWork } from '../tasks/unattended.js';
 
 /**
  * Cross-project survey shared by the meester's ambient generators (the
@@ -78,14 +79,29 @@ export async function collectProjectContexts(
       project,
       lastActivityAt,
       voormanName: voorman?.name ?? null,
+      // The runtime's own night work is not the person's to follow up on: the
+      // status line drafted chores about paused fix sweeps (2026-10-09).
       openTasks: tasks
         .filter((t) => t.status === 'active' || t.status === 'paused' || t.status === 'draft')
+        .filter(
+          (t) =>
+            unattendedNightWork(t, tasks.find((p) => p.ref === t.parentTaskRef) ?? null) === null,
+        )
         .slice(0, MAX_TASKS_PER_PROJECT),
       // "Your work is ready" cards ask nothing of anyone.
       pendingQuestions: questions.filter((q) => !q.answer && q.intent?.kind !== 'task-finished')
         .length,
       events: rawEvents
         .filter((e) => !opts.excludeEventKinds.includes(e.kind))
+        .filter((e) => {
+          const ref = (e.details as { taskRef?: unknown } | undefined)?.taskRef;
+          const task = typeof ref === 'string' ? tasks.find((t) => t.ref === ref) : undefined;
+          return (
+            !task ||
+            unattendedNightWork(task, tasks.find((p) => p.ref === task.parentTaskRef) ?? null) ===
+              null
+          );
+        })
         .slice(0, MAX_EVENTS_PER_PROJECT),
       sessionTitles: sessions
         .slice()

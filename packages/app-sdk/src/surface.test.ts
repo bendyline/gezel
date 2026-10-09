@@ -23,6 +23,7 @@ const shared = [
   'notify',
   'sdkError',
   'selectModel',
+  'withKnowledgeContext',
 ];
 
 describe('published surface', () => {
@@ -68,6 +69,7 @@ describe('published surface', () => {
         'hostedGezelHome',
         'registerAppTools',
         'createDesktopEmbedding',
+        'connectDesktopEmbedding',
         ...shared,
       ].sort(),
     );

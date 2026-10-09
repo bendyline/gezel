@@ -18,11 +18,16 @@
  */
 export { registerAppTools } from './app-tools.js';
 export { GezelApp } from './client.js';
-export { KnowledgeClient } from './knowledge-client.js';
+export {
+  KnowledgeClient,
+  type KnowledgeRetrieveInput,
+  type KnowledgeState,
+} from './knowledge-client.js';
 export type {
   AppKnowledgeState,
   AppKnowledgeAction,
   AppKnowledgeQuery,
+  AppKnowledgeRelevance,
   AppKnowledgeRetrieval,
 } from '@bendyline/gezel-client/app-models';
 export { GezelSdkError } from './errors.js';
@@ -38,6 +43,7 @@ export type {
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,
+  AppChatProgress,
   ChatRequest,
   ChatStream,
   ChatTool,
@@ -65,3 +71,5 @@ export type {
 
 export * from './model-manager.js';
 export * from './embedding.js';
+
+export * from './knowledge-context.js';

@@ -277,6 +277,10 @@ export interface LLMSession {
    * silently drop the attachments and proceed text-only.
    */
   sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string>;
+  /** Optional engine-measured phase/progress, scoped to this session. */
+  onEnginePhase?(
+    handler: (event: import('./streaming-session.js').EnginePhaseEvent) => void,
+  ): () => void;
   onDelta(handler: (chunk: string) => void): () => void;
   /**
    * Subscribe to live private-reasoning deltas, streamed separately from
@@ -499,6 +503,12 @@ export interface TerminalToolPolicy {
   closingArg?: string;
   /** Per-tool `closingArg`, for a policy over tools whose replies sit in different arguments. */
   closingArgByTool?: Record<string, string>;
+  /**
+   * Per-tool output field that, when the script returns it, is the reply in
+   * place of the argument: text the app composed (a tutor's line plus the
+   * corrections it graded). Held to its own bound, not the sociability cap.
+   */
+  closingOutputByTool?: Record<string, string>;
   fallbackText: string;
   maxClosingChars?: number;
   /**

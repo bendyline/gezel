@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { staleTaskStepRefusal, taskStepMutationRejection } from './task-step-authority.js';
+import {
+  sessionReboundToCurrentPass,
+  staleTaskStepRefusal,
+  taskStepMutationRejection,
+} from './task-step-authority.js';
 
 describe('taskStepMutationRejection', () => {
   it('allows the session to write while its step is active', () => {
@@ -73,5 +77,52 @@ describe('staleTaskStepRefusal', () => {
     expect(staleTaskStepRefusal(apiError({ error: 'stale_task_step' }))).toBeNull();
     expect(staleTaskStepRefusal(new Error('boom'))).toBeNull();
     expect(staleTaskStepRefusal(undefined)).toBeNull();
+  });
+});
+
+describe('sessionReboundToCurrentPass', () => {
+  const pass1 = '2026-10-08T07:30:00.000Z';
+  const pass2 = '2026-10-08T07:51:29.600Z';
+
+  it('keeps the latch for the turn that advanced a self-looping step', () => {
+    // The step re-activated as pass 2; the session is still bound to pass 1.
+    expect(
+      sessionReboundToCurrentPass({
+        sessionStepId: 'oversight',
+        activeStepId: 'oversight',
+        activeStepActivation: pass2,
+        sessionActivation: pass1,
+      }),
+    ).toBe(false);
+  });
+
+  it('ends the latch once a dispatch binds the session to the new pass', () => {
+    expect(
+      sessionReboundToCurrentPass({
+        sessionStepId: 'oversight',
+        activeStepId: 'oversight',
+        activeStepActivation: pass2,
+        sessionActivation: pass2,
+      }),
+    ).toBe(true);
+  });
+
+  it('never for another step, or a pass nobody recorded', () => {
+    expect(
+      sessionReboundToCurrentPass({
+        sessionStepId: 'evaluate',
+        activeStepId: 'collect',
+        activeStepActivation: pass2,
+        sessionActivation: pass2,
+      }),
+    ).toBe(false);
+    expect(
+      sessionReboundToCurrentPass({
+        sessionStepId: 'oversight',
+        activeStepId: 'oversight',
+        activeStepActivation: undefined,
+        sessionActivation: undefined,
+      }),
+    ).toBe(false);
   });
 });

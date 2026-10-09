@@ -4,11 +4,11 @@ import {
   resolveCraftbookCategory,
 } from '@bendyline/gezel';
 import type {
-  CatalogKind,
   CatalogItemSummary,
+  CatalogKind,
   ChatModelManifest,
-  CraftbookTemplateManifest,
   ConnectorTypeManifest,
+  CraftbookTemplateManifest,
   GezelTemplateManifest,
   HandboekTocEntry,
   HandboekTocSubcategory,
@@ -155,7 +155,8 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
         title: 'Every model',
         area: 'technical',
         order: 14,
-        summary: 'Every AI model Gezel can run on your own computer, with size, context and license.',
+        summary:
+          'Every AI model Gezel can run on your own computer, with size, context and license.',
         generated: true,
         subcategory: MODELS_AND_TESTING,
       },
@@ -181,7 +182,8 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
         title: 'Add-on toolsets and connectors',
         area: 'technical',
         order: 4.5,
-        summary: 'Toolsets you can add to a gezel, and connectors that bring outside data into a project.',
+        summary:
+          'Toolsets you can add to a gezel, and connectors that bring outside data into a project.',
         generated: true,
         subcategory: HOW_GEZEL_WORKS,
       },
@@ -426,8 +428,9 @@ function roleTemplateMarkdown(r: GezelTemplateManifest, about: string | undefine
 
 /** Keep a brief's own headings below the page's h2, so it cannot add a second title. */
 function demoteHeadings(markdown: string): string {
-  return markdown.replace(/^(#{1,4})(\s)/gm, (_, hashes: string, space: string) =>
-    `${'#'.repeat(Math.min(hashes.length + 2, 6))}${space}`,
+  return markdown.replace(
+    /^(#{1,4})(\s)/gm,
+    (_, hashes: string, space: string) => `${'#'.repeat(Math.min(hashes.length + 2, 6))}${space}`,
   );
 }
 
@@ -440,7 +443,10 @@ function craftbookGalleryHtml(
   books: CraftbookTemplateManifest[],
   art: Map<string, Buffer>,
 ): string {
-  const groups = new Map<string, { title: string; order: number; books: CraftbookTemplateManifest[] }>();
+  const groups = new Map<
+    string,
+    { title: string; order: number; books: CraftbookTemplateManifest[] }
+  >();
   for (const book of books) {
     const category = resolveCraftbookCategory(book);
     const index = CRAFTBOOK_CATEGORY_META.findIndex((item) => item.id === category);
@@ -491,7 +497,11 @@ export function insertAfterTitle(body: string, html: string): string {
 }
 
 function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 async function projectTypeDemo(
@@ -602,7 +612,10 @@ function link(text: string, url: string | undefined): string {
 
 /** A table cell cannot hold a pipe or a line break. */
 function cell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ').trim();
+  return text
+    .replace(/\|/g, '\\|')
+    .replace(/\s*\n\s*/g, ' ')
+    .trim();
 }
 
 function row(cells: string[]): string {

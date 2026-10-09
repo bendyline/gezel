@@ -8,6 +8,7 @@ import { Store } from '../fs/store.js';
 import { applyProjectType } from './apply.js';
 import {
   reconcileScriptTools,
+  resolvePageTools,
   resolveProjectScriptTools,
   scriptToolNamesFromEnv,
 } from './script-tools.js';
@@ -34,14 +35,30 @@ describe('resolveProjectScriptTools', () => {
       { store, catalog, home },
       { projectId: project.id, typeId: 'language-trainer' },
     );
-    expect(applied.toolsBound).toEqual(['record_session', 'advance_level']);
+    expect(applied.toolsBound).toEqual([
+      'practice_state',
+      'reply',
+      'begin_scene',
+      'advance_level',
+      'start_scene',
+      'review_card',
+      'end_scene',
+    ]);
 
     const detail = await store.getProject(project.id);
     const tools = await resolveProjectScriptTools(catalog, detail);
-    expect(tools.map((t) => t.name)).toEqual(['record_session', 'advance_level']);
-    expect(tools[0]?.script).toBe('progress-store');
-    expect(tools[0]?.bind).toEqual({ action: 'record' });
-    expect(tools[1]?.bind).toEqual({ action: 'advance' });
+    expect(tools.map(({ name, script, bind }) => ({ name, script, bind }))).toEqual([
+      { name: 'practice_state', script: 'progress-store', bind: { action: 'state' } },
+      { name: 'reply', script: 'progress-store', bind: { action: 'reply' } },
+      { name: 'begin_scene', script: 'progress-store', bind: { action: 'begin' } },
+      { name: 'advance_level', script: 'progress-store', bind: { action: 'advance' } },
+    ]);
+    const pageTools = await resolvePageTools(catalog, detail);
+    expect(pageTools?.tools.map((t) => t.name)).toEqual([
+      'start_scene',
+      'review_card',
+      'end_scene',
+    ]);
   });
 
   it('returns [] for projects without type provenance', async () => {

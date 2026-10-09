@@ -99,6 +99,20 @@ describe('roleToolsetGroups', () => {
     expect(groups).not.toContain('code-execution');
   });
 
+  it.each(['Meester', 'Voorman', 'Planner', 'Fitness Coach'])(
+    'classifies the coordinator role %s as pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(true);
+    },
+  );
+
+  it.each(['Curator', 'Image Generator', 'Video Generator', 'Conversationalist'])(
+    'does not mistake the non-writing executor role %s for pure delegation',
+    (role) => {
+      expect(isPureDelegationRole(role)).toBe(false);
+    },
+  );
+
   it('gives the voorman read-only workspace access (so they can investigate before delegating)', () => {
     const groups = roleToolsetGroups('voorman');
     expect(groups).toContain('workspace-fs-read');
@@ -1409,9 +1423,11 @@ describe('computeToolAllowlist', () => {
 
   it('keeps the script runner on a scenario repair of a data file, not of a page', () => {
     const repairOf = (file: string) =>
-      `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.\n` +
-      "Signals that didn't fire: **dates-iso**.\n" +
-      'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.';
+      [
+        `[Message from Torsten]: [scenario check] I looked at \`${file}\` and the success criteria aren't met yet.`,
+        "Signals that didn't fire: **dates-iso**.",
+        'Re-read all three raw inputs and rebuild the file from the sources. Use a real CSV parse.',
+      ].join('\n');
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',

@@ -102,7 +102,7 @@ pnpm test
 pnpm test:e2e:web:run
 ```
 
-The optional [visual regression suite](docs/visual-regression.md) compares reviewed
+The optional [visual regression suite](packages/app/e2e-visual/surfaces.spec.ts) compares reviewed
 desktop, tablet, and phone baselines with `pnpm test:e2e:visual` on macOS 26 ARM64;
 it is available locally or by manual workflow and does not block CI.
 

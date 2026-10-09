@@ -112,6 +112,76 @@ describe('repository-owned workflow modules', () => {
     expect(logs).toContain('project/1: complete (finished)');
   });
 
+  it.each(['craftbook-read', 'create', 'observe'])(
+    'marks only failures before task creation (%s)',
+    async (phase) => {
+      const workspace = await mkdtemp(join(tmpdir(), 'gezel-cli-workflow-'));
+      homes.push(workspace);
+      await writeFile(
+        join(workspace, 'recover.mjs'),
+        "export async function run({runCraftbook}) { return runCraftbook('book', {}); }",
+      );
+      const failure = Object.assign(new Error('fetch failed (read ECONNRESET)'), {
+        status: 0,
+        details: { kind: 'transport', cause: 'read ECONNRESET' },
+      });
+      const client = {
+        getCraftbook: vi.fn(async () => {
+          if (phase === 'craftbook-read') throw failure;
+          return { craftbook: { id: 'book', name: 'Book', version: '1' } };
+        }),
+        createTask: vi.fn(async () => {
+          if (phase === 'create') throw failure;
+          return { ref: 'project/1' };
+        }),
+        getTaskByRef: vi.fn(async () => {
+          throw failure;
+        }),
+      };
+      await expect(
+        runWorkflow(
+          client as unknown as GezelClient,
+          'project',
+          workspace,
+          'recover.mjs',
+          [],
+          () => {},
+        ),
+      ).rejects.toBe(failure);
+      expect(failure).toMatchObject({ status: 0, details: { kind: 'transport' } });
+      expect((failure as Error & { taskCreation?: unknown }).taskCreation).toEqual(
+        phase === 'craftbook-read' ? { attempted: false, phase: 'craftbook-read' } : undefined,
+      );
+      expect(client.createTask).toHaveBeenCalledTimes(phase === 'craftbook-read' ? 0 : 1);
+    },
+  );
+
+  it('uses the dedicated keyed endpoint and exposes replay support to workflow drivers', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'gezel-cli-workflow-'));
+    homes.push(workspace);
+    const key = `workflow-v1:${'a'.repeat(64)}`;
+    await writeFile(
+      join(workspace, 'keyed.mjs'),
+      `export async function run({runCraftbook}) {
+        if (!runCraftbook.supportsIdempotentCreation) throw new Error('missing replay support');
+        return runCraftbook('book', {}, { creationKey: '${key}' });
+      }`,
+    );
+    const task = { ref: 'p/1', projectId: 'p', num: 1, status: 'complete', craftbook: {} };
+    const client = {
+      getCraftbook: vi.fn(async () => ({ craftbook: { id: 'book', name: 'Book', version: '1' } })),
+      createWorkflowTask: vi.fn(async () => task),
+      createTask: vi.fn(),
+      getTaskByRef: vi.fn(async () => task),
+    };
+    await runWorkflow(client as unknown as GezelClient, 'p', workspace, 'keyed.mjs', [], () => {});
+    expect(client.createTask).not.toHaveBeenCalled();
+    expect(client.createWorkflowTask).toHaveBeenCalledWith(
+      'p',
+      expect.objectContaining({ workflowInvocationKey: key }),
+    );
+  });
+
   it('gives modules a bounded one-shot completion scoped to their project', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'gezel-cli-workflow-'));
     homes.push(workspace);

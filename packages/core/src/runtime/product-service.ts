@@ -1,24 +1,31 @@
 import { z } from 'zod';
-import { craftbookTemplateManifestFromRuntime } from '../craftbook-doc.js';
+import {
+  renderCharacterBlock,
+  resolveSocialMode,
+  withCharacterChatCap,
+} from '../character/index.js';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { displayName } from '../gezel-display.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
+import { type XpRefresher, createXpRefresher } from '../growth/xp-refresher.js';
+import { stepCreditedGezelId } from '../growth/xp.js';
 import { checkHandoffChain } from '../handoff-limits.js';
 import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
 import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { createLogger } from '../log.js';
+import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
 import type { PortableInference, PortableSampling } from '../mobile/inference.js';
 import { classifyModelTier } from '../model-profile/local-model-tier.js';
 import { resolveProfile } from '../model-profile/registry.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { pickRandomNameWithGender } from '../names.js';
+import { isOwnerLaunchedCompletion } from '../notifications/index.js';
 import {
   LEAN_PROFILE_REPLY_MAX_TOKENS,
-  type ProjectTypeHost,
   leanSession,
   projectTypeTurnRules,
-  renderTurnStatePrelude,
+  stateAnswerTool,
   turnStateWanted,
 } from '../project-types/composition.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
@@ -31,41 +38,22 @@ import {
 import type { BuiltInstructions } from '../prompt/instructions.js';
 import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
-import { spliceIntoText } from '../recognition/digest.js';
 import { resolveRoleId } from '../roles/index.js';
-import {
-  type AnswerQuestionRequest,
-  AskQuestionRequestSchema,
-  type GezelConfig,
-} from '../schemas/api.js';
+import { type AnswerQuestionRequest, AskQuestionRequestSchema } from '../schemas/api.js';
 import {
   type CreateGezelRequest,
-  CreateGezelRequestSchema,
-  CreateProjectRequestSchema,
   MessageGezelRequestSchema,
-  RerollGezelPoppetjeRequestSchema,
   UpdateConfigRequestSchema,
-  UpdateGezelPoppetjeRequestSchema,
-  UpdateGezelSettingsRequestSchema,
-  UpdateProjectRequestSchema,
 } from '../schemas/api.js';
 import type { ProjectTypeTool } from '../schemas/catalog.js';
 import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
-  type MobileInferenceBudget,
   type MobileModelInventory,
   type MobileProvider,
   type MobileProviderId,
   MobileProviderIdSchema,
-  resolveMobileInferenceBudget,
 } from '../schemas/mobile-provider.js';
-import {
-  CreatePromptDraftRequestSchema,
-  DuplicatePromptDraftRequestSchema,
-  PatchPromptDraftRequestSchema,
-  type PromptDraftMeta,
-} from '../schemas/prompt-draft.js';
-import type { MessageImageDigest } from '../schemas/recognition.js';
+import type { PromptDraftMeta } from '../schemas/prompt-draft.js';
 import {
   OFFLINE_RUNTIME_CAPABILITIES,
   type RuntimeCapabilities,
@@ -89,8 +77,19 @@ import type { PortableContent } from './content.js';
 import { type HistoryMessage, portableConversationHistory } from './conversation-history.js';
 import { handlePortableDataRequest } from './data-routes.js';
 import { draftMatchesSession } from './draft-address.js';
-import { decodeText, encodeText } from './files.js';
-import { portableWorkspaceHtmlPages } from './html-pages.js';
+import {
+  type PortableEntityRouteHost,
+  handlePortableEntityRoute,
+  portableTimeline,
+  requiredString,
+} from './entity-routes.js';
+import { portableEventStream } from './event-stream.js';
+import { PortableGrowth } from './growth-engine.js';
+import {
+  type PortableGrowthHost,
+  announcePortableGrowth,
+  portableGrowthCompletion,
+} from './growth-host.js';
 /**
  * Foreground product service for hosts without a Node daemon. The wire boundary
  * is the ordinary GezelClient API; neither the React app nor persisted entities
@@ -100,12 +99,14 @@ import { HttpStatusError as ProductError, errorToResponse } from './http/errors.
 import { json } from './http/json.js';
 import { portableInputLimitError } from './inference-limits.js';
 import { PORTABLE_HANDOFF_LIMITS } from './inference-limits.js';
+import { resolvePortableKlerkModel } from './klerk-model.js';
 import { PortableEngineHost } from './local-loop-host.js';
 import {
   portableFileTurnContext,
   preparePortableMessage,
   validatePortableMessageHints,
 } from './message-delivery.js';
+import { handlePortableModelsRoute, modelBudget } from './model-budget.js';
 import { buildPortableInstructions } from './portable-instructions.js';
 import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
@@ -113,6 +114,13 @@ import {
   handlePortableProjectTypeRoute,
   portableProjectScriptTools,
 } from './project-type-routes.js';
+import {
+  type PortableProjectTypeSupportHost,
+  portableProjectCraftbookOffer,
+  portableProjectTypeCraftbook,
+  portableProjectTypeHost,
+  portableTurnState,
+} from './project-type-support.js';
 import { type PortableProjectType, PortableProjectTypes } from './project-types.js';
 import { AbortedWhileQueuedError, type Lane, ProviderQueue, runInQueue } from './provider-queue.js';
 import { answeredQuestion } from './questions.js';
@@ -140,22 +148,20 @@ import {
 import { type PortableTextOperation, createPortableTextOperation } from './transform-route.js';
 import type { PortableTransformTarget } from './transform.js';
 import {
-  PORTABLE_IMAGE_FILE,
-  PORTABLE_MAX_IMAGES_PER_TURN,
-  type PortableVision,
-  imageMimeType,
-  portableImageDigest,
-  portableImageRecognition,
-  portableImageRefs,
-  sha256Hex,
-} from './vision.js';
+  PORTABLE_UNSEEN_IMAGE_WARNING,
+  SUPPLIED_FILES_HEADING,
+  portableAttachedText,
+  readPortableTurnImages,
+} from './turn-attachments.js';
+import { PORTABLE_MAX_IMAGES_PER_TURN, type PortableVision, portableImageRefs } from './vision.js';
 
 const log = createLogger('portable-tasks');
 export type { PortableInference, PortableSampling } from '../mobile/inference.js';
-const requiredString = (value: unknown, name: string): string => {
-  if (typeof value !== 'string' || !value.trim()) throw new ProductError(`${name} is required`);
-  return value;
-};
+export {
+  PORTABLE_LABELS_ONLY_WARNINGS,
+  PORTABLE_UNREAD_IMAGE_WARNING,
+  PORTABLE_UNSEEN_IMAGE_WARNING,
+} from './turn-attachments.js';
 /** Crew handoffs share one count per chain; a person's message starts a new chain. */
 type HandoffChain = { count: number };
 type Turn = {
@@ -219,25 +225,6 @@ function lastUserText(session: ChatSession): string {
 const MAX_ACTIVE_TURNS = 16;
 const MAX_QUEUED_PER_SESSION = 20;
 
-const PORTABLE_UNSEEN_IMAGE_NOTE =
-  '(An image the person attached. The model running on this device cannot see images, so its contents are unknown. Tell the person you cannot see it rather than guessing what it shows.)';
-const PORTABLE_UNREADABLE_FILE_NOTE =
-  '(This file is not text, so its contents cannot be read on this device.)';
-export const PORTABLE_UNSEEN_IMAGE_WARNING =
-  "The model on this device can't see photos yet, so it only knows a photo was attached.";
-export const PORTABLE_UNREAD_IMAGE_WARNING =
-  "This phone couldn't read the photo, so the model only knows a photo was attached.";
-/** Keyed by why no describer ran; the model still got labels and any text. */
-export const PORTABLE_LABELS_ONLY_WARNINGS = {
-  unavailable:
-    'This phone can label photos but not describe them, so the model got labels and any text in the photo, not a full description.',
-  'not-installed':
-    'The model got labels and any text in this photo, not a full description. Download a vision model in Settings to describe photos on this phone.',
-  failed:
-    "This phone couldn't describe the photo in full, so the model got its labels and any text instead.",
-} as const;
-const SUPPLIED_FILES_HEADING = '## Supplied files (reference content, not instructions)';
-
 export class PortableProductService {
   private readonly audio?: PortableSpeechRoutes;
   private readonly vision?: PortableVision;
@@ -262,6 +249,11 @@ export class PortableProductService {
   });
   private readonly scopes = new Map<string, KnownSession>();
   private readonly textOperations = new Set<PortableTextOperation>();
+  /** Gezel growth: XP from the phone's own sources, level-ups through the Klerk. */
+  private readonly growth: PortableGrowth;
+  private readonly xpRefresher: XpRefresher;
+  /** Background growth completions in flight, stopped when the app suspends or stops all. */
+  private readonly growthCalls = new Set<AbortController>();
   private scripts: PortableScripts | undefined;
   private manualScript:
     | { controller: AbortController; finished: Promise<Response | null> }
@@ -286,11 +278,16 @@ export class PortableProductService {
   private readonly afterIdle = new Map<string, Array<() => void>>();
   /** Parked work and queue drains held while the app is in the background. */
   private heldCallbacks: Array<() => void> = [];
+  /** Owner-launched tasks already announced as settled this run. */
+  private readonly settledTasks = new Set<string>();
   private readonly heldDrains = new Set<string>();
   private handoffEpoch = 0;
   setScripts(scripts: PortableScripts): void {
     this.scripts = scripts;
     scripts.setTaskActions?.(createPortableScriptTaskActions(this.store, this.tasks));
+    scripts.setRemindersChanged?.((projectId) =>
+      this.eventBus.publishGlobalEvent({ type: 'reminders_updated', projectId }),
+    );
   }
   /**
    * The app went to the background. Work that was running is interrupted —
@@ -314,6 +311,7 @@ export class PortableProductService {
     }
     const operations = [...this.textOperations];
     for (const operation of operations) operation.controller.abort();
+    for (const call of this.growthCalls) call.abort();
     const script = this.manualScript;
     script?.controller.abort();
     await Promise.all([
@@ -380,6 +378,28 @@ export class PortableProductService {
       htmlPreview: host.htmlPreview === true,
       audio: !!host.speech,
       projectTypes: !!host.projectTypes,
+      growth: true,
+    });
+    this.growth = new PortableGrowth({
+      store,
+      complete: (prompt) => portableGrowthCompletion(this.growthHost(), prompt),
+      proposalBudget: async () =>
+        // About a third of the Klerk's window in characters, never more than the desktop's.
+        Math.min(
+          14_000,
+          Math.floor(
+            (await this.resolveKlerkModel(new AbortController().signal)).contextSize * 1.5,
+          ),
+        ),
+      announce: (gezelId, toLevel) => announcePortableGrowth(this.growthHost(), gezelId, toLevel),
+      onUpdated: (gezelId, xp) =>
+        this.eventBus.publishGlobalEvent({ type: 'growth_updated', gezelId, xp }),
+    });
+    // A phone has no daily sweep, so finished work is also where a level-up
+    // is offered; the Klerk call it makes waits for a quiet engine.
+    this.xpRefresher = createXpRefresher({
+      refresh: (gezelId) => this.growth.refresh(gezelId, { allowKlerk: true, createPending: true }),
+      onRefreshed: () => {},
     });
     this.projectTypes = new PortableProjectTypes(host.projectTypes ?? (async () => []));
     this.tasks = new PortableTaskRunner({
@@ -403,7 +423,7 @@ export class PortableProductService {
             entry.book.id === id &&
             (!source || entry.item.sourceId === source) &&
             (!version || entry.item.manifest.version === version),
-        )?.book ?? (await this.projectTypeCraftbook(projectId, id)),
+        )?.book ?? (await portableProjectTypeCraftbook(this.projectTypeSupport(), projectId, id)),
       shouldContinue: async (task) =>
         !(await store.listQuestions({ projectId: task.projectId, pending: true })).some(
           (q) => q.taskRef === task.ref,
@@ -445,6 +465,12 @@ export class PortableProductService {
         ),
       onChange: (task) => {
         this.publishStatus();
+        if (task.status === 'complete' && task.assignee.kind === 'gezel')
+          this.xpRefresher.note(task.assignee.gezelId);
+        for (const step of task.craftbook.steps) {
+          const credited = step.completedAt ? stepCreditedGezelId(step) : undefined;
+          if (credited) this.xpRefresher.note(credited);
+        }
         this.eventBus.publishProjectEvent(task.projectId, {
           type: 'task_event',
           eventId: crypto.randomUUID(),
@@ -453,6 +479,21 @@ export class PortableProductService {
           at: new Date().toISOString(),
           taskRef: task.ref,
         });
+        if (
+          task.status === 'complete' &&
+          !this.settledTasks.has(task.ref) &&
+          isOwnerLaunchedCompletion(task, 'complete')
+        ) {
+          this.settledTasks.add(task.ref);
+          this.eventBus.publishProjectEvent(task.projectId, {
+            type: 'task_settled',
+            taskRef: task.ref,
+            title: task.title,
+            outcome: 'complete',
+            ...(task.launchSessionId ? { sessionId: task.launchSessionId } : {}),
+            ...(task.assignee.kind === 'gezel' ? { gezelId: task.assignee.gezelId } : {}),
+          });
+        }
       },
     });
   }
@@ -732,6 +773,7 @@ export class PortableProductService {
     const script = this.manualScript;
     const operations = [...this.textOperations];
     for (const operation of operations) operation.controller.abort();
+    for (const call of this.growthCalls) call.abort();
     script?.controller.abort();
     // A turn can be awaiting QuickJS instead of inference. Revoke both at once;
     // waiting for the turn before cancelling its script deadlocks cancellation.
@@ -824,150 +866,42 @@ export class PortableProductService {
     });
   }
 
-  private async resolveKlerkModel(signal: AbortSignal): Promise<PortableTransformTarget> {
-    signal.throwIfAborted();
-    const config = await this.store.readConfig();
-    if (!isEngagementAllowed(config)) throw new ProductError('AI engagement is off', 403);
-    let gezel = config.klerkGezelId ? await this.store.getGezel(config.klerkGezelId) : null;
-    if (!gezel) {
-      const recruited = await this.recruit('Klerk');
-      signal.throwIfAborted();
-      gezel = await this.store.getGezel(recruited.id);
-      if (!gezel) throw new ProductError('The Klerk could not be prepared');
-      await this.store.writeConfig({ klerkGezelId: gezel.id });
-    }
-    const providerId = MobileProviderIdSchema.parse(
-      gezel.provider ?? config.provider ?? 'llama-cpp',
+  private resolveKlerkModel(signal: AbortSignal): Promise<PortableTransformTarget> {
+    return resolvePortableKlerkModel(
+      {
+        store: this.store,
+        inference: this.inference,
+        providers: () => this.providers(),
+        recruit: (role) => this.recruit(role),
+        catalogModelFor: (inventory, modelId) => this.catalogModelFor(inventory, modelId),
+      },
+      signal,
     );
-    const provider = (await this.providers()).find((item) => item.id === providerId);
-    if (provider?.availability !== 'available')
-      throw new ProductError(provider?.reason ?? 'Choose an available model in Settings.', 409);
-    const inventory = providerId === 'llama-cpp' ? await this.inference.models?.() : undefined;
-    const modelId = gezel.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerId;
-    if (providerId !== 'llama-cpp' && modelId !== providerId)
-      throw new ProductError('The Klerk model is not available from this on-device provider.', 409);
-    if (inventory && !inventory.models.some((model) => model.id === modelId))
-      throw new ProductError(
-        'The Klerk model is no longer available. Choose a model in Settings.',
-        409,
-      );
-    const budget = modelBudget(
-      config,
-      provider,
-      inventory,
-      modelId,
-      gezel.parsed.frontmatter.tuning?.sampling?.maxTokens,
-    );
-    const sampling =
-      providerId === 'llama-cpp'
-        ? portableSampling({
-            catalog: this.catalogModelFor(inventory, modelId),
-            installDefault: config.modelTuning?.[modelId],
-            override: gezel.parsed.frontmatter.tuning,
-            tuningProfileId: gezel.parsed.frontmatter.tuningProfile,
-            installDefaultProfileId: config.modelTuningProfile?.[modelId],
-            suggestedProfileId: gezel.parsed.frontmatter.suggestedTuningProfile,
-          })
-        : undefined;
-    signal.throwIfAborted();
+  }
+
+  private growthHost(): PortableGrowthHost {
     return {
-      gezelId: gezel.id,
-      about: gezel.about,
-      providerId,
-      modelId,
-      ...budget,
-      ...(sampling ? { sampling } : {}),
+      store: this.store,
+      growth: this.growth,
+      engine: this.engine,
+      inference: this.inference,
+      eventBus: this.eventBus,
+      growthCalls: this.growthCalls,
+      turns: this.turns,
+      emit: (session, event) => this.emit(session, event),
+      resolveKlerkModel: (signal) => this.resolveKlerkModel(signal),
     };
   }
 
-  /**
-   * The activity's state as its own script reads it, for a person's message:
-   * the transcript may hold older copies, or none when the last seed failed.
-   */
-  private async turnState(
-    session: ChatSession,
-    tools: readonly ProjectTypeTool[],
-    stateTool: string,
-  ): Promise<string | null> {
-    const tool = tools.find((item) => item.name === stateTool);
-    if (!tool || !this.scripts) return null;
-    try {
-      const run = await this.scripts.run({
-        projectId: session.projectId,
-        scriptName: tool.script,
-        scope: 'project',
-        inputs: { ...(tool.bind ?? {}) },
-        trigger: { kind: 'chat', gezelId: session.gezelId, sessionId: session.id },
-        admission: 'wait',
-      });
-      return run.status === 'ok' && run.output !== undefined
-        ? renderTurnStatePrelude(tool.name, run.output)
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * The craftbooks a project offers: a book its type carries, then the bundled
-   * catalog. As on the desktop, the books the type declares are suggested by
-   * definition, under the type's name.
-   */
-  private async projectCraftbookOffer(projectId: string) {
-    const project = await this.store.getProject(projectId).catch(() => null);
-    const entry = await this.projectTypes.forProject(project).catch(() => undefined);
-    const carried = Object.values(entry?.craftbooks ?? {}).flatMap((book) => {
-      const manifest = craftbookTemplateManifestFromRuntime(book);
-      return manifest
-        ? [{ sourceId: 'project', kind: 'craftbook-template' as const, manifest }]
-        : [];
-    });
-    const carriedIds = new Set(carried.map((item) => item.manifest.id));
-    const items = [
-      ...carried,
-      ...this.content.craftbooks
-        .map((book) => book.item)
-        .filter((item) => !carriedIds.has(item.manifest.id)),
-    ];
-    const offered = new Set(items.map((item) => item.manifest.id));
-    const manifest = entry?.item.manifest;
+  private projectTypeSupport(): PortableProjectTypeSupportHost {
     return {
-      items,
-      suggestedIds: (manifest?.craftbooks ?? []).filter((bookId) => offered.has(bookId)),
-      missingToolsets: {},
-      projectType: manifest ? { id: manifest.id, label: manifest.name } : null,
+      store: this.store,
+      types: this.projectTypes,
+      inference: this.inference,
+      scripts: () => this.scripts,
+      craftbooks: () => this.content.craftbooks,
+      catalogModelFor: (inventory, modelId) => this.catalogModelFor(inventory, modelId),
     };
-  }
-
-  /** A craftbook the project's bundled type declares, by id. */
-  private async projectTypeCraftbook(projectId: string | undefined, id: string) {
-    if (!projectId) return undefined;
-    const project = await this.store.getProject(projectId).catch(() => null);
-    const entry = await this.projectTypes.forProject(project).catch(() => undefined);
-    return entry?.craftbooks?.[id];
-  }
-
-  /**
-   * What this device offers a project type's sessions. The tier is the
-   * selected model's: system models count as tiny, an imported file with no
-   * catalog entry is classified from its name, as on the desktop.
-   */
-  private async projectTypeHost(): Promise<ProjectTypeHost> {
-    const config = await this.store.readConfig();
-    const providerId = MobileProviderIdSchema.catch('llama-cpp').parse(config.provider);
-    let modelTier: ProjectTypeHost['modelTier'] = 'tiny';
-    if (providerId === 'llama-cpp') {
-      const inventory = await this.inference.models?.().catch(() => undefined);
-      const modelId = inventory?.selectedModelId;
-      modelTier = modelId
-        ? classifyModelTier({
-            providerName: 'llama-cpp',
-            modelId,
-            parameterSize: this.catalogModelFor(inventory, modelId)?.parameterSize,
-          })
-        : undefined;
-    }
-    return { ...(modelTier ? { modelTier } : {}), scripts: !!this.scripts, toolsets: false };
   }
 
   private projectTypeRouteHost() {
@@ -977,7 +911,7 @@ export class PortableProductService {
       templates: () => this.content.templates,
       craftbooks: () => this.content.craftbooks,
       scripts: this.scripts,
-      host: () => this.projectTypeHost(),
+      host: () => portableProjectTypeHost(this.projectTypeSupport()),
       assertNoConflict: () => this.assertNoConflict(),
       serial: <T>(action: () => Promise<T>) => this.serial(action),
       projectCreated: (project: { id: string; name: string }, hired: readonly string[]) => {
@@ -1244,6 +1178,10 @@ export class PortableProductService {
       // What the type's tools declare: a turn call ends the turn, and a
       // person's message is answered from the state as it stands.
       const turnRules = projectTypeTurnRules(projectTools, context.project);
+      // Social mode (on by default here) shows the gezel's character.
+      const socialCharacter = resolveSocialMode(config, 'phone')
+        ? context.gezel.parsed.frontmatter.character
+        : undefined;
       const origin: TurnMessageOrigin = placement.seeded
         ? 'system'
         : delivery
@@ -1255,7 +1193,7 @@ export class PortableProductService {
               : 'direct-user';
       const gameState =
         turnRules?.stateTool && turnStateWanted(text, origin)
-          ? await this.turnState(session, projectTools, turnRules.stateTool)
+          ? await portableTurnState(this.scripts, session, projectTools, turnRules.stateTool)
           : null;
       const inventoryTools = await portableToolSurface(
         this.store,
@@ -1285,6 +1223,8 @@ export class PortableProductService {
           profile: structuredChat.profile,
           toolNames: inventoryTools.map((tool) => tool.name),
           minimalContext: footprintName === 'minimal',
+          personNotesMaxChars: footprint.personNotesMaxChars,
+          ...(socialCharacter ? { character: socialCharacter } : {}),
           inAppWebPreview: this.capabilities.htmlPreview,
         });
       if (structuredChat?.prompt)
@@ -1295,6 +1235,13 @@ export class PortableProductService {
             .join('\n\n')
         : [
             capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
+            renderCharacterBlock(socialCharacter).replace(/^\s*(?:---\s*)?/, ''),
+            renderPersonNotesBlock(
+              selectPersonNotes(
+                await this.store.personMemoryEntries().catch(() => []),
+                footprint.personNotesMaxChars,
+              ),
+            ).replace(/^\s*(?:---\s*)?/, ''),
             activeTask &&
               renderTaskContextBlock(
                 { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
@@ -1337,7 +1284,7 @@ export class PortableProductService {
           role: 'user' as const,
           content: [
             recall?.block,
-            gameState,
+            gameState?.prelude,
             text,
             portableFileTurnContext(validated.fileTurnIntent, session.expectedDeliverable),
           ]
@@ -1358,7 +1305,8 @@ export class PortableProductService {
       for (const [index, message] of input.entries()) {
         if (message.role !== 'user') continue;
         const current = index === input.length - 1;
-        const attachments = await this.attachedText(
+        const attachments = await portableAttachedText(
+          this.store,
           session.projectId,
           message.content,
           current,
@@ -1453,7 +1401,18 @@ export class PortableProductService {
         ...(photos.length
           ? {
               readImages: () =>
-                this.readTurnImages(session, user.id, photos, input.at(-1)!, turn.abort.signal),
+                readPortableTurnImages(
+                  {
+                    store: this.store,
+                    vision: this.vision,
+                    emit: (scope, event) => this.emit(scope, event),
+                  },
+                  session,
+                  user.id,
+                  photos,
+                  input.at(-1)!,
+                  turn.abort.signal,
+                ),
             }
           : {}),
         finished: Promise.resolve(),
@@ -1484,8 +1443,11 @@ export class PortableProductService {
         },
         inventoryTools,
         projectTools,
-        turnRules?.terminal,
-        placement.requiredTool,
+        turnRules?.terminal && withCharacterChatCap(turnRules.terminal, socialCharacter),
+        placement.requiredTool ??
+          (gameState
+            ? stateAnswerTool(projectTools, gameState.output, context.project)
+            : undefined),
       );
       return { accepted: true, sessionId: id };
     } finally {
@@ -1673,6 +1635,18 @@ export class PortableProductService {
           return scope ? [{ gezelId: scope.gezelId, projectId: scope.projectId }] : [];
         }),
       changed: () => this.publishStatus(),
+    };
+  }
+  private entityRouteHost(): PortableEntityRouteHost {
+    return {
+      store: this.store,
+      eventBus: this.eventBus,
+      tasks: this.tasks,
+      growth: this.growth,
+      session: (id) => this.session(id),
+      assertSessionsFree: (match) => this.assertSessionsFree(match),
+      draftChanged: (draft, deleted) => this.draftChanged(draft, deleted),
+      createGezel: (input) => this.createGezel(input),
     };
   }
   /** Claim a session synchronously, before any await lets another send in. */
@@ -2424,44 +2398,6 @@ export class PortableProductService {
     });
   }
 
-  private events(url: URL, signal: AbortSignal): Response {
-    let stop = (_close = true) => {};
-    const stream = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        let closed = false;
-        const send = (value: string) => {
-          if (!closed) controller.enqueue(encodeText(value));
-        };
-        const sendEvent = (event: unknown) => send(`data: ${JSON.stringify(event)}\n\n`);
-        const unsubscribe =
-          url.pathname === '/events/chat'
-            ? this.eventBus.subscribe(url.searchParams.get('session') ?? '', sendEvent)
-            : url.pathname === '/events/chat/project'
-              ? this.eventBus.subscribeProject(url.searchParams.get('project') ?? '', sendEvent)
-              : url.pathname === '/events/chat/gezel'
-                ? this.eventBus.subscribeGezel(url.searchParams.get('gezel') ?? '', sendEvent)
-                : this.eventBus.subscribeAll(sendEvent);
-        const ping = setInterval(() => send(': heartbeat\n\n'), 2000);
-        const abort = () => stop();
-        stop = (close = true) => {
-          if (closed) return;
-          closed = true;
-          clearInterval(ping);
-          unsubscribe();
-          signal.removeEventListener('abort', abort);
-          if (close) controller.close();
-        };
-        signal.addEventListener('abort', abort, { once: true });
-        if (signal.aborted) stop();
-        else send(': connected\n\n');
-      },
-      cancel: () => stop(false),
-    });
-    return new Response(stream, {
-      headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
-    });
-  }
-
   readonly fetch: typeof globalThis.fetch = async (input, init) => {
     try {
       const request = new Request(input, init);
@@ -2528,7 +2464,7 @@ export class PortableProductService {
           url.pathname,
         )
       )
-        return this.events(url, request.signal);
+        return portableEventStream(this.eventBus, url, request.signal);
       if (request.method === 'POST' && /^\/api\/sessions\/[^/]+\/cancel$/.test(url.pathname)) {
         const id = decodeURIComponent(url.pathname.split('/')[3]!);
         const raw: unknown = request.headers.get('content-type')?.includes('application/json')
@@ -2639,6 +2575,8 @@ export class PortableProductService {
         'The conversation could not be saved. Retry saving it before making changes.',
         507,
       );
+    if (resource === 'reminders' && !id && method === 'GET')
+      return json({ reminders: await this.store.listReminders() });
     if (resource === 'questions') {
       if (!id && method === 'GET')
         return json({
@@ -2689,7 +2627,7 @@ export class PortableProductService {
     const taskResponse = await this.tasks.route(method, url.pathname, body, query);
     if (taskResponse) return taskResponse;
     if (resource === 'projects' && id && action === 'craftbooks' && method === 'GET')
-      return json(await this.projectCraftbookOffer(id));
+      return json(await portableProjectCraftbookOffer(this.projectTypeSupport(), id));
     if (resource === 'health' && method === 'GET')
       return json({
         ok: true,
@@ -2717,56 +2655,12 @@ export class PortableProductService {
         hasGoogleAiApiKey: false,
       });
     }
-    if (resource === 'models' && method === 'GET') {
-      const providers = await this.providers();
-      const provider = providers.find((item) => item.id === query.get('provider'));
-      const inventory = provider?.id === 'llama-cpp' ? await this.inference.models?.() : undefined;
-      if (id === 'test') {
-        if (inventory && !inventory.models.some((model) => model.id === inventory.selectedModelId))
-          return json({
-            ok: false,
-            provider: provider!.id,
-            error: inventory.models.length
-              ? 'Choose an installed chat model to finish setup.'
-              : 'Download or import a chat model to get started.',
-          });
-        return json(
-          provider?.availability === 'available'
-            ? { ok: true, provider: provider.id, modelCount: inventory?.models.length ?? 1 }
-            : {
-                ok: false,
-                provider: query.get('provider'),
-                error: provider?.reason ?? 'Provider unavailable on this host',
-              },
-        );
-      }
-      if (provider?.availability !== 'available')
-        return json({ provider: query.get('provider'), models: [] });
-      const config = await this.store.readConfig();
-      // The window and reply ceiling turns actually get, so the UI and the
-      // eval harness never run on a second copy of the budget rules.
-      const describe = (id: string, name: string) => {
-        let budget: MobileInferenceBudget | undefined;
-        try {
-          budget = modelBudget(config, provider, inventory, id);
-        } catch {
-          budget = undefined;
-        }
-        return {
-          id,
-          name,
-          contextWindow: budget?.contextSize ?? provider.contextTokens,
-          ...(budget ? { maxOutputTokens: budget.maxTokens } : {}),
-          supportsTools: true,
-        };
-      };
-      return json({
-        provider: provider.id,
-        models: inventory
-          ? inventory.models.map((model) => describe(model.id, model.name))
-          : [describe(provider.id, provider.name)],
-      });
-    }
+    if (resource === 'models' && method === 'GET')
+      return handlePortableModelsRoute(
+        { store: this.store, inference: this.inference, providers: () => this.providers() },
+        id,
+        query,
+      );
     if (resource === 'sessions') {
       if (!id) {
         if (method === 'GET')
@@ -2870,648 +2764,53 @@ export class PortableProductService {
     }
     if (resource === 'timeline' || action === 'timeline')
       return json(
-        await this.timeline(
+        await portableTimeline(
+          this.entityRouteHost(),
           query,
           resource === 'projects' ? id : undefined,
           resource === 'gezels' ? id : undefined,
         ),
       );
-    // Entity and file dispatch lives below the same public API boundary.
-    return this.entities(request, url, body, parts);
-  }
-
-  private async timeline(
-    query: URLSearchParams,
-    projectId?: string,
-    gezelId?: string,
-  ): Promise<unknown> {
-    const summaries = await this.store.listSessions({
-      projectId: projectId ?? query.get('project') ?? undefined,
-      gezelId: gezelId ?? query.get('gezel') ?? undefined,
-    });
-    const rows = [];
-    for (const summary of summaries) {
-      const session = await this.session(summary.id);
-      if (session.archived) continue;
-      for (const [index, message] of session.messages.entries())
-        rows.push({
-          ...message,
-          _cursor: `${message.at}|${session.id}|${String(index).padStart(8, '0')}`,
-          sessionId: session.id,
-          gezelId: session.gezelId,
-          projectId: session.projectId,
-          sessionTitle: session.title,
-          sessionCreatedAt: session.createdAt,
-          sessionLastActivityAt: session.lastActivityAt,
-          sessionProviderName: session.providerName,
-          sessionModel: session.model,
-          sessionLastTurnError: session.lastTurnError,
-        });
-    }
-    rows.sort((a, b) => a._cursor.localeCompare(b._cursor));
-    const before = query.get('before');
-    const filtered = rows.filter((row) => !before || row._cursor < before);
-    const limit = Math.min(500, Math.max(1, Number(query.get('limit')) || 100));
-    const selected = filtered.slice(-limit);
-    return {
-      messages: selected.map(({ _cursor, ...row }) => row),
-      hasMore: filtered.length > limit,
-      nextCursor: selected[0]?._cursor,
-    };
-  }
-
-  /**
-   * The photo-reading phase of a turn. It runs inside the turn's engine slot,
-   * because a vision model on llama.cpp needs the engine the chat model would
-   * otherwise hold, and before the model sees anything. Each reading is saved
-   * on the person's message as a digest, so later turns replay the text
-   * instead of reading the photo again. It never fails the turn: a photo it
-   * cannot read gets the same "cannot see it" note a host without vision gives.
-   */
-  private async readTurnImages(
-    session: ChatSession,
-    messageId: string | undefined,
-    refs: readonly string[],
-    prompt: { content: string },
-    signal: AbortSignal,
-  ): Promise<void> {
-    const vision = this.vision;
-    if (!vision) return;
-    this.emit(session, {
-      type: 'gpu_swap',
-      state: 'started',
-      task: 'image_recognition',
-      detail: refs.length === 1 ? 'Reading your photo' : 'Reading your photos',
-    });
-    const digests: MessageImageDigest[] = [];
-    const unread: string[] = [];
-    const warnings = new Set<string>();
-    try {
-      for (const ref of refs) {
-        if (signal.aborted) {
-          unread.push(ref);
-          continue;
-        }
-        try {
-          const path = decodeURIComponent(ref);
-          const slash = path.indexOf('/');
-          const area = path.slice(0, slash) as 'artifacts' | 'workspace';
-          const bytes = await this.store.readFileBytes(
-            area,
-            session.projectId,
-            path.slice(slash + 1),
-          );
-          if (!bytes) {
-            unread.push(ref);
-            continue;
-          }
-          const started = Date.now();
-          const reading = await vision.read({ data: bytes, mimeType: imageMimeType(ref), signal });
-          const recognition = portableImageRecognition({
-            bytes,
-            sha256: await sha256Hex(bytes),
-            reading,
-            durationMs: Date.now() - started,
-            at: new Date().toISOString(),
-          });
-          if (recognition.status === 'static-only') {
-            unread.push(ref);
-            continue;
-          }
-          digests.push(portableImageDigest(ref, recognition));
-          if (!recognition.description)
-            warnings.add(PORTABLE_LABELS_ONLY_WARNINGS[reading.describer ?? 'unavailable']);
-        } catch {
-          unread.push(ref);
-        }
-      }
-    } finally {
-      this.emit(session, { type: 'gpu_swap', state: 'ended', task: 'image_recognition' });
-    }
-    if (unread.length) warnings.add(PORTABLE_UNREAD_IMAGE_WARNING);
-    prompt.content = spliceIntoText(prompt.content, digests);
-    if (unread.length)
-      prompt.content += `\n\n${SUPPLIED_FILES_HEADING}\n${unread
-        .map((ref) => `${ref}\n${PORTABLE_UNSEEN_IMAGE_NOTE}`)
-        .join('\n\n')}`;
-    const message = messageId && session.messages.find((item) => item.id === messageId);
-    if (!message) return;
-    if (digests.length) message.recognizedImages = digests;
-    if (warnings.size) message.warnings = [...(message.warnings ?? []), ...warnings];
-    try {
-      await this.store.writeSession(session);
-    } catch {
-      // The reading still reaches this turn; only its replay on later turns is lost.
-    }
-  }
-
-  /**
-   * Pull the text of files a message references.
-   *
-   * `current` is the message the user just sent: a missing or unreadable file
-   * there is worth refusing the turn over, because they can see and fix it.
-   * For everything already in the transcript a miss is recorded inline instead,
-   * so deleting a file cannot retroactively block a conversation.
-   */
-  private async attachedText(
-    projectId: string,
-    markdown: string,
-    current = true,
-    /** Photos the turn reads itself once it holds the engine. */
-    readLater?: ReadonlySet<string>,
-  ): Promise<{ text: string; images: number }> {
-    const excerpts: string[] = [];
-    const seen = new Set<string>();
-    let images = 0;
-    for (const match of markdown.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
-      let target = match[1]!.replace(/^<|>$/g, '');
-      // The turn reads its photos by the ref as written; skip them here
-      // before decoding turns `My%20Photo.png` into a different string.
-      if (readLater?.has(target)) continue;
-      // Test the prefix before decoding: an ordinary link with a stray percent
-      // sign is not an attachment, and must not fail the turn.
-      if (!/^(?:artifacts|workspace|documents)\//.test(target)) continue;
-      try {
-        target = decodeURIComponent(target);
-      } catch {
-        if (current) throw new ProductError('An attachment path is malformed');
-        continue;
-      }
-      if (seen.has(target)) continue;
-      seen.add(target);
-      if (seen.size > 10) {
-        if (current) throw new ProductError('Attach at most ten text files at a time.');
-        break;
-      }
-      const slash = target.indexOf('/');
-      const area = target.slice(0, slash) as 'artifacts' | 'workspace' | 'documents';
-      const bytes = await this.store.readFileBytes(
-        area,
-        area === 'documents' ? undefined : projectId,
-        target.slice(slash + 1),
-      );
-      if (bytes === null) {
-        if (current) throw new ProductError(`Attached file not found: ${target}`, 404);
-        excerpts.push(`${target}\n(This file is no longer available.)`);
-        continue;
-      }
-      // Every on-device provider here is text-only. Say so in the turn rather
-      // than decoding pixels as text (which fails the send) or leaving only a
-      // file name a small model will happily "describe".
-      if (PORTABLE_IMAGE_FILE.test(target)) {
-        images++;
-        excerpts.push(`${target}\n${PORTABLE_UNSEEN_IMAGE_NOTE}`);
-        continue;
-      }
-      let content: string;
-      try {
-        content = decodeText(bytes);
-      } catch {
-        excerpts.push(`${target}\n${PORTABLE_UNREADABLE_FILE_NOTE}`);
-        continue;
-      }
-      excerpts.push(`${target}\n${content}`);
-    }
-    return { text: excerpts.join('\n\n'), images };
-  }
-
-  private async entities(
-    request: Request,
-    url: URL,
-    body: Record<string, unknown>,
-    parts: string[],
-  ): Promise<Response> {
-    const [resource, id, action, child, subaction] = parts;
-    const method = request.method;
-    const query = url.searchParams;
-    if (resource === 'projects') {
-      if (!id) {
-        if (method === 'GET') return json({ projects: await this.store.listProjects() });
-        if (method === 'POST') {
-          const project = await this.store.createProject(CreateProjectRequestSchema.parse(body));
-          this.eventBus.publishProjectEvent(project.id, {
-            type: 'project_created',
-            projectId: project.id,
-            name: project.name,
-          });
-          return json(project);
-        }
-      }
-      if (id === 'poisoned' && method === 'GET') {
-        const poisoned = [];
-        for (const summary of await this.store.listSessions()) {
-          const session = await this.session(summary.id);
-          if (session.lastTurnError && !session.archived)
-            poisoned.push({
-              projectId: session.projectId,
-              sessionId: session.id,
-              gezelId: session.gezelId,
-              error: session.lastTurnError,
-            });
-        }
-        return json({ poisoned });
-      }
-      if (id) {
-        const project = await this.store.getProject(id);
-        if (!project) throw new ProductError('Project not found', 404);
-        if (!action) {
-          if (method === 'GET') return json(project);
-          if (method === 'PUT')
-            return json(await this.store.updateProject(id, UpdateProjectRequestSchema.parse(body)));
-          if (method === 'DELETE') {
-            this.assertSessionsFree((scope) => scope.projectId === id);
-            if (this.tasks.isBusy())
-              throw new ProductError('Wait for the task step to finish, or stop it first.', 409);
-            const deleted = await this.store.deleteProject(id, {
-              removeWorkspace: query.get('removeWorkspace') === '1',
-            });
-            this.eventBus.publishProjectEvent(id, {
-              type: 'project_deleted',
-              projectId: id,
-              name: project.name,
-            });
-            return json({ ok: true, ...deleted });
-          }
-        }
-        if (action === 'gezels') {
-          const gezelId = method === 'POST' ? requiredString(body.gezelId, 'Gezel') : child;
-          if (method === 'POST' && gezelId) await this.store.addGezelToProject(id, gezelId);
-          if (method === 'DELETE' && gezelId) await this.store.removeGezelFromProject(id, gezelId);
-          const current = await this.store.getProject(id);
-          return json({
-            projectId: id,
-            gezelIds: current?.gezelIds ?? [],
-            ...(method === 'POST' ? { added: !project.gezelIds?.includes(gezelId!) } : {}),
-            ...(method === 'DELETE' ? { removed: project.gezelIds?.includes(gezelId!) } : {}),
-          });
-        }
-        if (action === 'clear-errors' && method === 'POST') {
-          let cleared = 0;
-          for (const summary of await this.store.listSessions({ projectId: id })) {
-            const session = await this.session(summary.id);
-            if (session.lastTurnError) {
-              delete session.lastTurnError;
-              delete session.lastTurnErrorDetail;
-              await this.store.writeSession(session);
-              cleared++;
-            }
-          }
-          return json({ cleared });
-        }
-        if (action === 'local-gezels' && method === 'GET' && !child)
-          return json({ gezels: await this.store.listProjectLocalGezels(id) });
-        if (action === 'workspace' || action === 'artifacts')
-          return this.files(request, url, body, action, id, child);
-        if (action === 'prompt-drafts') {
-          if (
-            parts.length > 5 ||
-            (subaction &&
-              !(
-                (method === 'PUT' && subaction === 'content') ||
-                (method === 'POST' && subaction === 'duplicate')
-              ))
-          )
-            throw new ProductError('Unsupported prompt draft operation', 501);
-          if (!child) {
-            if (method === 'GET')
-              return json({
-                drafts: await this.store.listPromptDrafts(id, {
-                  gezelId: query.get('gezelId') ?? undefined,
-                  sessionId: query.has('sessionId')
-                    ? query.get('sessionId') === 'new'
-                      ? null
-                      : query.get('sessionId')!
-                    : undefined,
-                  status:
-                    query.get('status') === 'sent'
-                      ? 'sent'
-                      : query.get('status') === 'draft'
-                        ? 'draft'
-                        : undefined,
-                }),
-              });
-            if (method === 'POST') {
-              const draft = await this.store.createPromptDraft(
-                id,
-                CreatePromptDraftRequestSchema.parse(body),
-              );
-              this.draftChanged(draft);
-              return json(draft);
-            }
-          } else {
-            if (method === 'GET') {
-              const draft = await this.store.getPromptDraft(id, child);
-              if (!draft) throw new ProductError('Draft not found', 404);
-              return json(draft);
-            }
-            if (method === 'POST' && subaction === 'duplicate') {
-              const draft = await this.store.duplicatePromptDraft(
-                id,
-                child,
-                DuplicatePromptDraftRequestSchema.parse(body),
-              );
-              this.draftChanged(draft);
-              return json(draft);
-            }
-            if (method === 'PUT' && subaction === 'content') {
-              const before = await this.store.getPromptDraft(id, child);
-              const result = await this.store.writePromptDraftContent(
-                id,
-                child,
-                z.string().parse(body.content),
-              );
-              if (result.draft ?? before)
-                this.draftChanged((result.draft ?? before)!, result.deleted);
-              return json(result);
-            }
-            if (method === 'PATCH') {
-              const draft = await this.store.patchPromptDraft(
-                id,
-                child,
-                PatchPromptDraftRequestSchema.parse(body),
-              );
-              this.draftChanged(draft);
-              return json(draft);
-            }
-            if (method === 'DELETE') {
-              const before = await this.store.getPromptDraft(id, child);
-              const deleted = await this.store.deletePromptDraft(id, child);
-              if (before && deleted) this.draftChanged(before, true);
-              return json({ ok: true, deleted });
-            }
-          }
-        }
-      }
-    }
-    if (resource === 'gezels') {
-      if (id && action === 'message' && !child && method === 'POST') {
-        this.assertNoConflict();
-        if (!isEngagementAllowed(await this.store.readConfig()))
-          throw new ProductError(
-            'AI engagement is off. Turn it on in Settings to send a message.',
-            403,
-          );
-        const message = MessageGezelRequestSchema.parse(body);
-        if (message.suppressReply !== true)
-          throw new ProductError(
-            'This host supports one-way crew messages. Set suppressReply to true; automatic reply routing requires desktop execution.',
-            501,
-          );
-        const epoch = this.handoffEpoch;
-        const check = () => {
-          if (epoch !== this.handoffEpoch || this.suspended)
-            throw new ProductError('This message was stopped before delivery began.', 409);
-        };
-        const prepared = await preparePortableMessage(
-          this.store,
-          id,
-          message,
-          !!this.scripts,
-          check,
+    if (resource === 'gezels' && id && action === 'message' && !child && method === 'POST') {
+      this.assertNoConflict();
+      if (!isEngagementAllowed(await this.store.readConfig()))
+        throw new ProductError(
+          'AI engagement is off. Turn it on in Settings to send a message.',
+          403,
         );
-        check();
-        const delivered = await this.submit(
-          prepared.session.id,
-          {
-            message: `[Message from ${prepared.from.gezelName}]: ${message.text}`,
-            fileTurnIntent: message.fileTurnIntent,
-          },
-          {
-            from: prepared.from,
-            expectedDeliverable: message.expectedDeliverable,
-          },
+      const message = MessageGezelRequestSchema.parse(body);
+      if (message.suppressReply !== true)
+        throw new ProductError(
+          'This host supports one-way crew messages. Set suppressReply to true; automatic reply routing requires desktop execution.',
+          501,
         );
-        return json({
-          accepted: true,
-          sessionId: prepared.session.id,
-          toGezelId: prepared.session.gezelId,
-          toGezelName: prepared.toName,
-          deliveryState: delivered.queued ? 'queued' : 'dispatched',
-        });
-      }
-      if (!id) {
-        if (method === 'GET') return json({ gezels: await this.store.listGezels() });
-        if (method === 'POST') {
-          const gezel = await this.createGezel(CreateGezelRequestSchema.parse(body));
-          this.eventBus.publishGlobalEvent({
-            type: 'gezel_created',
-            gezelId: gezel.id,
-            name: gezel.name,
-          });
-          return json(gezel);
-        }
-      }
-      if (id === 'mention-candidates' && method === 'GET')
-        return json({
-          candidates: (await this.store.listGezels())
-            .filter(
-              (g) =>
-                !query.get('query') ||
-                `${g.name} ${g.role ?? ''}`
-                  .toLowerCase()
-                  .includes(query.get('query')!.toLowerCase()),
-            )
-            .map((g) => ({
-              id: g.id,
-              label: g.name,
-              description: g.role,
-              roleBasedName: g.roleBasedName,
-              group: 'team',
-            })),
-        });
-      if (id) {
-        const gezel = await this.store.getGezel(id);
-        if (!gezel) throw new ProductError('Gezel not found', 404);
-        if (!action) {
-          if (method === 'GET') return json(gezel);
-          if (method === 'DELETE') {
-            this.assertSessionsFree((scope) => scope.gezelId === id);
-            await this.store.deleteGezel(id);
-            return json({ ok: true });
-          }
-        }
-        if (action === 'poppetje') {
-          if (method === 'GET') return json({ poppetje: await this.store.getGezelPoppetje(id) });
-          if (method === 'PUT')
-            return json({
-              poppetje: await this.store.setGezelPoppetje(
-                id,
-                UpdateGezelPoppetjeRequestSchema.parse(body).poppetje,
-              ),
-            });
-          if (method === 'POST' && child === 'reroll')
-            return json({
-              poppetje: await this.store.rerollGezelPoppetje(
-                id,
-                RerollGezelPoppetjeRequestSchema.parse(body),
-              ),
-            });
-        }
-        if (action === 'about' && method === 'PUT')
-          return json(await this.store.updateGezelAbout(id, z.string().parse(body.source)));
-        if (action === 'md' && method === 'PUT')
-          return json(
-            await this.store.updateGezelMarkdown(id, requiredString(body.source, 'Character')),
-          );
-        if (action === 'rename' && method === 'POST')
-          return json(
-            await this.store.updateGezelSettings(id, { name: requiredString(body.name, 'Name') }),
-          );
-        if (action === 'settings' && method === 'POST')
-          return json(
-            await this.store.updateGezelSettings(id, UpdateGezelSettingsRequestSchema.parse(body)),
-          );
-        if (action === 'projects' && method === 'GET')
-          return json({
-            projects: (await this.store.listProjects())
-              .filter(
-                (p) => p.id === 'default' || p.voormanGezelId === id || p.gezelIds?.includes(id),
-              )
-              .map((p) => ({
-                projectId: p.id,
-                projectName: p.name,
-                precedence: p.voormanGezelId === id ? 'voorman' : 'fallback',
-              })),
-          });
-      }
-    }
-    if (resource === 'documents') return this.files(request, url, body, 'documents', undefined, id);
-    throw new ProductError(
-      `This operation is not available on this host: ${request.method} ${url.pathname}`,
-      501,
-    );
-  }
-
-  private async files(
-    request: Request,
-    url: URL,
-    body: Record<string, unknown>,
-    area: 'workspace' | 'artifacts' | 'documents',
-    projectId: string | undefined,
-    action: string | undefined,
-  ): Promise<Response> {
-    const method = request.method;
-    const query = url.searchParams;
-    const path = query.get('path') ?? (typeof body.path === 'string' ? body.path : '');
-    if (area === 'workspace' && action === 'html-pages' && method === 'GET')
-      return json(await portableWorkspaceHtmlPages(this.store, projectId!));
-    if (!action && method === 'GET') {
-      const result = await this.store.listFiles(
-        area,
-        projectId,
-        path,
-        query.get('recursive') === '1',
-        { withStats: query.get('stats') === '1', includeHidden: query.get('hidden') === '1' },
+      const epoch = this.handoffEpoch;
+      const check = () => {
+        if (epoch !== this.handoffEpoch || this.suspended)
+          throw new ProductError('This message was stopped before delivery began.', 409);
+      };
+      const prepared = await preparePortableMessage(this.store, id, message, !!this.scripts, check);
+      check();
+      const delivered = await this.submit(
+        prepared.session.id,
+        {
+          message: `[Message from ${prepared.from.gezelName}]: ${message.text}`,
+          fileTurnIntent: message.fileTurnIntent,
+        },
+        {
+          from: prepared.from,
+          expectedDeliverable: message.expectedDeliverable,
+        },
       );
-      return json({ files: result.entries, truncated: result.truncated });
-    }
-    if (action === 'read' && method === 'GET') {
-      const bytes =
-        area === 'documents'
-          ? await this.store.readDocumentReference(path)
-          : await this.store.readFileBytes(area, projectId, path);
-      if (bytes === null) throw new ProductError('File not found', 404);
-      if (query.get('raw') === '1')
-        return new Response(bytes as Uint8Array<ArrayBuffer>, {
-          headers: {
-            'content-type': mimeFor(path),
-            'content-disposition': 'attachment',
-            'x-content-type-options': 'nosniff',
-          },
-        });
-      return json({ path, content: decodeText(bytes), size: bytes.length, kind: 'document' });
-    }
-    if (action === 'stat' && method === 'GET') {
-      const slash = path.lastIndexOf('/');
-      const parent = slash < 0 ? '' : path.slice(0, slash);
-      const result = await this.store.listFiles(area, projectId, parent, false, {
-        withStats: true,
-        includeHidden: true,
+      return json({
+        accepted: true,
+        sessionId: prepared.session.id,
+        toGezelId: prepared.session.gezelId,
+        toGezelName: prepared.toName,
+        deliveryState: delivered.queued ? 'queued' : 'dispatched',
       });
-      const entry = result.entries.find((e) => e.path === path);
-      return json(
-        entry
-          ? {
-              kind: entry.isDirectory ? 'dir' : 'file',
-              mtime: entry.mtimeMs ? new Date(entry.mtimeMs).toISOString() : undefined,
-            }
-          : { kind: 'missing' },
-      );
     }
-    if (['write', 'file'].includes(action ?? '') && method === 'PUT') {
-      if (typeof body.content !== 'string') throw new ProductError('File content is required');
-      await this.store.writeFile(area, projectId, path, body.content);
-      return json({ ok: true, path });
-    }
-    if (action === 'raw' && method === 'PUT') {
-      await this.store.writeFileBytes(
-        area,
-        projectId,
-        path,
-        new Uint8Array(await request.arrayBuffer()),
-        { createOnly: query.get('create') === '1' },
-      );
-      return json({ ok: true, path });
-    }
-    if (action === 'mkdir' && method === 'POST') {
-      await this.store.makeFolder(area, projectId, path);
-      return json({ ok: true, path });
-    }
-    if ((action === 'delete' || action === 'path') && method === 'DELETE') {
-      await this.store.deleteFile(area, projectId, path);
-      return json({ ok: true });
-    }
-    if (action === 'rename' && method === 'POST') {
-      const from = requiredString(body.fromPath, 'Source path');
-      const to = requiredString(body.toPath, 'Destination path');
-      await this.store.renameFile(area, projectId, from, to);
-      return json({ ok: true, fromPath: from, toPath: to });
-    }
-    throw new ProductError('This file operation is not available on this host', 501);
+    // Entity and file dispatch lives below the same public API boundary.
+    return handlePortableEntityRoute(this.entityRouteHost(), request, url, body, parts);
   }
-}
-/** The window the device reported it can hold for this model, when it did. */
-function fittedContext(
-  inventory: MobileModelInventory | undefined,
-  modelId: string,
-): number | undefined {
-  return inventory?.models.find((model) => model.id === modelId)?.contextTokens;
-}
-
-/**
- * The window and reply ceiling a turn runs with, and what the model listing
- * reports: the person's per-model choice, else the window this device fits and
- * the default reply budget. A gezel's own reply budget wins over both.
- */
-function modelBudget(
-  config: Pick<GezelConfig, 'modelContextOverrides' | 'modelTuning'>,
-  provider: MobileProvider,
-  inventory: MobileModelInventory | undefined,
-  modelId: string,
-  gezelMaxTokens?: number,
-): MobileInferenceBudget {
-  return resolveMobileInferenceBudget(provider, {
-    contextSize:
-      config.modelContextOverrides?.[`${provider.id}:${modelId}`] ??
-      fittedContext(inventory, modelId),
-    maxTokens: gezelMaxTokens ?? config.modelTuning?.[modelId]?.sampling?.maxTokens,
-  });
-}
-
-function mimeFor(path: string): string {
-  const extension = path.split('.').at(-1)?.toLowerCase();
-  const types: Record<string, string> = {
-    md: 'text/markdown',
-    txt: 'text/plain',
-    json: 'application/json',
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    webp: 'image/webp',
-    gif: 'image/gif',
-    pdf: 'application/pdf',
-    mp3: 'audio/mpeg',
-    mp4: 'video/mp4',
-  };
-  return types[extension ?? ''] ?? 'application/octet-stream';
 }

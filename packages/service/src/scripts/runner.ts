@@ -23,6 +23,8 @@ export interface ScriptRunnerOptions {
   /** Host-selected execution engine. Scripts cannot select or replace it. */
   executor?: ScriptExecutor;
   store: Store;
+  /** Told when a script sets or clears its project's reminder. */
+  remindersChanged?: (projectId: string) => void;
   /** Backs `llm.oneShot`; a runner without one refuses that call. */
   chat?: Pick<ChatManager, 'oneShotCompletion'>;
   /** Backs the `gezel.memory.*` script API. Injected by service.ts. */
@@ -67,6 +69,7 @@ export class ScriptRunner {
   private readonly memory?: MemoryManager;
   private readonly tasks?: TaskManager;
   private readonly credentials?: CredentialRegistry;
+  private readonly remindersChanged?: (projectId: string) => void;
   private mcpCall: DispatcherDeps['mcpCall'];
   private indexAccess: DispatcherDeps['index'];
   private readonly host: NodeScriptHost;
@@ -78,6 +81,7 @@ export class ScriptRunner {
     this.memory = opts.memory;
     this.tasks = opts.tasks;
     this.mcpCall = opts.mcpCall;
+    this.remindersChanged = opts.remindersChanged;
     this.credentials =
       opts.credentials ??
       (opts.secrets
@@ -116,6 +120,7 @@ export class ScriptRunner {
       mcpCall: this.mcpCall,
       credentials: this.credentials,
       index: this.indexAccess,
+      ...(this.remindersChanged ? { remindersChanged: this.remindersChanged } : {}),
     });
   }
 

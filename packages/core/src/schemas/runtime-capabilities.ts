@@ -26,6 +26,8 @@ export interface RuntimeCapabilities {
   search: boolean;
   memories: boolean;
   background: boolean;
+  /** Gezels earn XP and level up, with a Growth tab to choose what they learn. */
+  growth: boolean;
   catalog: boolean;
   /**
    * The host lists and creates catalog project types (`/api/catalog/project-type`,
@@ -93,6 +95,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   search: true,
   memories: true,
   background: true,
+  growth: true,
   catalog: true,
   projectTypes: true,
   htmlPreview: true,
@@ -136,6 +139,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   search: true,
   memories: true,
   background: false,
+  growth: false,
   catalog: false,
   projectTypes: false,
   htmlPreview: false,

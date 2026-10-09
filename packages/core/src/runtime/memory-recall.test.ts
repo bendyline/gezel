@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MEMORY_NOTES_HEADER } from '../memory-notes.js';
 import { estimateTokens } from '../retrieval-budget.js';
 import { readBackupZip } from './backup-zip.js';
 import { USER_MEMORY_ID, parseMemoryDay } from './memory-markdown.js';
@@ -40,7 +41,8 @@ describe('phone memory recall', () => {
       ['user', 'Likes checkers puzzles that end in a double jump.'],
       ['user', 'Plays checkers with their daughter on Sundays.'],
     ]);
-    expect(recall?.block).toContain('- [about the person, ');
+    expect(recall?.block).toContain('- About the person (pref, ');
+    expect(recall?.block.split('\n')[0]).toBe(MEMORY_NOTES_HEADER);
 
     expect(
       await store.recallMemories({

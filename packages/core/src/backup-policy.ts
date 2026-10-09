@@ -41,6 +41,8 @@ export const BACKUP_ROLE_CONFIG_KEYS = [
 export const BACKUP_RESTORABLE_CONFIG_KEYS = [
   ...BACKUP_ROLE_CONFIG_KEYS,
   'roleBasedNameOnlyMode',
+  'social',
+  'notifications',
 ] as const;
 
 export interface BackupItemRef {

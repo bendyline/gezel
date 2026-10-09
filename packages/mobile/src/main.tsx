@@ -6,6 +6,7 @@ import { ProductModelSettings } from './ProductModelSettings.js';
 import { createBrowserHost } from './browser-host.js';
 import { createOfflineHtmlPreview } from './html-preview.js';
 import { createNativeHost, isNativeHost } from './native.js';
+import { createNativeNotifications } from './notifications.js';
 import { createPreviewModuleCompiler } from './script-compiler.js';
 import { createMobileScripts } from './scripts.js';
 // The native host is always compact, so its stylesheet belongs in the first
@@ -47,6 +48,7 @@ async function boot() {
     platform: host.native ? 'mobile' : 'browser',
     capabilities: service.capabilities,
     saveExportedFile: host.saveExportedFile,
+    earnedNotifications: host.native ? createNativeNotifications() : undefined,
     createHtmlPreview:
       htmlPreview && host.publishHtmlPreview
         ? createOfflineHtmlPreview(

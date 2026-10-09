@@ -32,11 +32,12 @@ export async function connectorCorpusStorage(
   store: Store,
   projectId: string,
   corpusDir: string,
-): Promise<{ storageDir: string; quarantineWorkspaceDir: string; migrated: boolean }> {
+): Promise<{ storageDir: string; quarantineDir: string; migrated: boolean }> {
   const storageDir = store.projectArtifactsDir(projectId);
-  const quarantineWorkspaceDir = await store.projectWorkspaceDir(projectId);
+  const quarantineDir = store.projectQuarantineDir(projectId);
+  const workspaceDir = await store.projectWorkspaceDir(projectId);
   await mkdir(storageDir, { recursive: true });
-  const legacy = await resolveInside(quarantineWorkspaceDir, corpusDir);
+  const legacy = await resolveInside(workspaceDir, corpusDir);
   const target = await resolveInside(storageDir, corpusDir);
 
   let migrated = false;
@@ -65,5 +66,5 @@ export async function connectorCorpusStorage(
     }
   }
 
-  return { storageDir, quarantineWorkspaceDir, migrated };
+  return { storageDir, quarantineDir, migrated };
 }

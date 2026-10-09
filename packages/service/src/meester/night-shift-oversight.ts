@@ -1,5 +1,5 @@
-import type { StepGate } from '@bendyline/gezel';
-import { MAX_RESTART_RESUMES, REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
+import type { StepGate, Task } from '@bendyline/gezel';
+import { REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 
@@ -42,6 +42,16 @@ const OVERSIGHT_GATE: StepGate = {
   maxAttempts: 3,
 };
 
+/**
+ * What `ask_user_question` answers the review instead of posting a card. The
+ * tool is a workflow safety tool that no step policy may remove, so the
+ * runtime declines it here. On 2026-10-08 a re-driven run asked the person
+ * how to settle a mismatch between two runtime guards: a question about the
+ * review's own plumbing that only a developer could answer.
+ */
+export const OVERSIGHT_QUESTION_DECLINED =
+  'Nobody is awake to answer during the nightly review, so this question was not posted. Write what blocked you in the report, then finish the run with advance_task_step.';
+
 const OVERSIGHT_PROMPT = `You are running the nightly **Meester oversight** review. The machine is idle and this is low-priority background work — be thorough but do not kick any project back into action.
 
 For EACH active project:
@@ -60,7 +70,69 @@ Every action block MUST name its target project via \`projectId\` (this report l
 
 Suggest changes that genuinely move projects toward their objectives; do not gild the lily — if a project is healthy, say so in a line rather than inventing busywork.
 
+Nobody is awake to answer questions, so never ask the user anything. If something blocks you, say what in the report and finish.
+
 When the report is written, call \`advance_task_step\` to finish this run. The task re-arms automatically for tomorrow night.`;
+
+/**
+ * The bundled review is the runtime's own work, not the person's: it never
+ * files a "paused for help" card and never asks them anything.
+ */
+export function isNightShiftOversightTask(task: Pick<Task, 'projectId' | 'title'>): boolean {
+  return task.projectId === 'default' && task.title === OVERSIGHT_TITLE;
+}
+
+/** The bundled oversight task, when installed. */
+export async function findNightShiftOversightTask(
+  store: Pick<Store, 'listProjectTasks'>,
+): Promise<Task | null> {
+  const tasks = await store.listProjectTasks('default').catch(() => []);
+  return tasks.find((t) => t.title === OVERSIGHT_TITLE) ?? null;
+}
+
+/**
+ * Start each night's review from nothing. The step loops back to itself when a
+ * run finishes, so the next night's dispatch found last night's session, still
+ * holding a transcript in which the report was already written, and resumed it
+ * as an interrupted run. It read the old report back and advanced on it, and
+ * the gate (the report exists and is long enough) passed on yesterday's file
+ * (2026-10-08). So before the night's first dispatch: archive the review's
+ * sessions (without a memory summary, which would be a long model turn of its
+ * own), and date last night's report aside, so only a report written tonight
+ * can satisfy the gate. A night whose review already ran is left alone.
+ */
+export async function prepareReviewForNight(
+  deps: {
+    store: Pick<
+      Store,
+      | 'listProjectTasks'
+      | 'listSessions'
+      | 'readProjectArtifact'
+      | 'writeProjectArtifact'
+      | 'deleteProjectArtifact'
+    >;
+    archiveSession: (sessionId: string) => Promise<unknown>;
+  },
+  windowKey: string,
+): Promise<void> {
+  const task = await findNightShiftOversightTask(deps.store);
+  if (!task || task.nightShift?.lastRunDay === windowKey) return;
+  let archived = 0;
+  for (const session of await deps.store.listSessions({ projectId: 'default' })) {
+    if (session.taskRef !== task.ref || session.archived) continue;
+    await deps.archiveSession(session.id);
+    archived++;
+  }
+  const previous = await deps.store.readProjectArtifact('default', OVERSIGHT_REPORT_PATH);
+  if (previous !== null) {
+    const day = task.nightShift?.lastRunDay ?? 'earlier';
+    await deps.store.writeProjectArtifact('default', `night-shift-report-${day}.md`, previous);
+    await deps.store.deleteProjectArtifact('default', OVERSIGHT_REPORT_PATH);
+  }
+  log.info(
+    `[night-shift] review ready for ${windowKey}: ${archived} earlier session(s) archived${previous !== null ? ', last report dated aside' : ''}`,
+  );
+}
 
 /**
  * Ensure the always-present bundled night-shift task exists: a single
@@ -82,8 +154,7 @@ export async function ensureNightShiftOversightTask(
   const meesterId = config?.meesterGezelId;
   if (!meesterId) return; // no meester yet; ensureDefaultMeester runs first, so rare
 
-  const existing = await store.listProjectTasks('default').catch(() => []);
-  const installed = existing.find((t) => t.title === OVERSIGHT_TITLE);
+  const installed = await findNightShiftOversightTask(store);
   if (installed) {
     await migrateOversightTask(store, installed.num).catch((err) => {
       log.warn(
@@ -91,9 +162,15 @@ export async function ensureNightShiftOversightTask(
         err instanceof Error ? err.message : err,
       );
     });
-    await releaseRestartBudgetPause(store, tasks, installed.num).catch((err) => {
+    await releasePausedReview(store, tasks, installed.num).catch((err) => {
       log.warn(
-        '[night-shift] failed to resume oversight task after a restart-budget pause:',
+        '[night-shift] failed to resume the paused oversight task:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+    await withdrawReviewQuestions(store, installed.ref).catch((err) => {
+      log.warn(
+        '[night-shift] failed to withdraw the oversight task questions:',
         err instanceof Error ? err.message : err,
       );
     });
@@ -178,40 +255,39 @@ async function migrateOversightTask(store: Store, num: number): Promise<void> {
 }
 
 /**
- * Undo the restart-budget pause that earlier builds put on this task.
- *
- * Those builds charged the oversight step on every launch while it waited
- * for the shift, so an install that restarts daily paused it within four
- * launches and filed a "Needs your input" card about a task that had never
- * run. A paused oversight task whose count is past the budget carries that
- * pause: the count only crosses the budget in the call that pauses.
+ * Resume a paused review. It runs at boot and when each window opens, so a
+ * review that paused (its gate spent, a stalled step, a restart budget) gets a
+ * fresh try the next night with no one asked. The morning card says it will
+ * retry; the person never has to press Resume on the runtime's own work
+ * (2026-10-08). A review that keeps failing costs one night's attempts a
+ * night, which is what it costs when it works.
  */
-async function releaseRestartBudgetPause(
-  store: Store,
-  tasks: TaskManager,
-  num: number,
-): Promise<void> {
+async function releasePausedReview(store: Store, tasks: TaskManager, num: number): Promise<void> {
   const task = await store.readTask('default', num);
   if (!task || task.status !== 'paused') return;
-  const step = task.craftbook.steps.find((s) => s.id === OVERSIGHT_STEP_ID);
-  if ((step?.restartResumeCount ?? 0) <= MAX_RESTART_RESUMES) return;
-
   await tasks.resetStepRecoveryBudget('default', num, OVERSIGHT_STEP_ID, {
+    redriveCount: 0,
+    clearGateAttempts: true,
     clearRestartResumes: true,
   });
   await tasks.setStatus('default', num, 'active');
+  log.info(`[night-shift] resumed ${task.ref} for the next window`);
+}
 
+/**
+ * Close every open question the review left: its own "paused for help" cards
+ * from earlier builds, and anything a run asked before the question tool was
+ * taken away. Closed silently: none of them were the person's to answer.
+ */
+async function withdrawReviewQuestions(store: Store, taskRef: string): Promise<void> {
   const at = new Date().toISOString();
+  let closed = 0;
   for (const question of await store.listProjectQuestions('default')) {
-    const intent = question.intent;
-    if (
-      intent?.kind === 'task-paused' &&
-      intent.taskRef === task.ref &&
-      intent.reason === 'step_stalled' &&
-      !question.answer
-    ) {
-      await store.writeQuestion({ ...question, answer: { silentSkip: true, at } });
-    }
+    if (question.answer) continue;
+    const ownCard = question.intent?.kind === 'task-paused' && question.intent.taskRef === taskRef;
+    if (!ownCard && question.taskRef !== taskRef) continue;
+    await store.writeQuestion({ ...question, answer: { silentSkip: true, at } });
+    closed++;
   }
-  log.info(`[night-shift] resumed ${task.ref} after an earlier build's restart-budget pause`);
+  if (closed > 0) log.info(`[night-shift] withdrew ${closed} question(s) left by ${taskRef}`);
 }

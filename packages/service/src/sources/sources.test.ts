@@ -7,7 +7,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { projectLocalIndexDbFile } from '@bendyline/gezel/paths';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from '../index-store/content-index.js';
@@ -60,7 +60,8 @@ describe('EmlMailAdapter', () => {
     const out = await materializeSource(new EmlMailAdapter(), join(src, 'msg1.eml'), mirror);
     expect(out).not.toBeNull();
 
-    await runWorkspaceContentIndex(mirror, 'mail', join(home, 'artifacts'));
+    const dbPath = projectContentIndexDbFile(home, 'mail', mirror);
+    await runWorkspaceContentIndex(mirror, 'mail', join(home, 'artifacts'), { dbPath });
 
     const ci = new ContentIndex(
       {
@@ -73,7 +74,7 @@ describe('EmlMailAdapter', () => {
     expect(search.results.some((r) => r.sourcePath === 'msg1.md')).toBe(true);
 
     // Headers were lifted into the metadata table.
-    const store = (await IndexStore.open(projectLocalIndexDbFile(mirror), {
+    const store = (await IndexStore.open(dbPath, {
       collectionId: 'mail',
       kind: 'mail',
       rootPath: mirror,

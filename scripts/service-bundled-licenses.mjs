@@ -246,7 +246,9 @@ export async function loadEmbeddedLicenses(root = EMBEDDED_LICENSES_ROOT) {
     if (!matchesRecordedSha(content, record?.sha256)) {
       throw new Error(`legal/embedded-licenses/${file} does not match its recorded sha256`);
     }
-    texts.set(file, { file, path, content, sha256: record.sha256, source: record.source });
+    // The reviewed hash may describe the other line ending. Staged manifests
+    // and content-addressed filenames must hash the bytes we actually ship.
+    texts.set(file, { file, path, content, sha256: sha256(content), source: record.source });
   }
   const referenced = new Set();
   const carriers = new Map();

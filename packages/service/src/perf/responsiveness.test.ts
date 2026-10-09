@@ -16,6 +16,7 @@ import {
   perfSnapshot,
   recordClientPerfReport,
   startResponsivenessMonitor,
+  syncPerfProfiling,
   workDuring,
 } from './responsiveness.js';
 
@@ -139,6 +140,55 @@ describe('responsiveness monitor', () => {
 
     const profile = await waitFor(() => perfSnapshot().stalls[0]?.profile);
     expect(profile).toMatch(/^stall-.*\.cpuprofile$/);
+    expect(await readdir(join(logs, 'perf'))).toContain(profile);
+  });
+
+  // Debug mode is read about 300 lines into boot. Waiting for the next
+  // window roll left every boot block unprofiled (2026-10-08).
+  it('starts profiling as soon as its condition is known, not at the next window', async () => {
+    logs = await mkdtemp(join(tmpdir(), 'gezel-perf-'));
+    let debug = false;
+    stop = startResponsivenessMonitor({ logsDir: logs, profileWhen: () => debug });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(perfSnapshot().profiling).toBe(false);
+
+    debug = true;
+    syncPerfProfiling();
+
+    await waitFor(() => (perfSnapshot().profiling ? true : undefined), 2_000);
+  });
+
+  it('files no profile that began after the block did', async () => {
+    logs = await mkdtemp(join(tmpdir(), 'gezel-perf-'));
+    let debug = false;
+    stop = startResponsivenessMonitor({ logsDir: logs, profileWhen: () => debug });
+    await new Promise((r) => setTimeout(r, 300));
+
+    blockFor(1_200);
+    debug = true;
+    syncPerfProfiling();
+
+    const stall = await waitFor(() => perfSnapshot().stalls[0]);
+    await waitFor(() => (perfSnapshot().profiling ? true : undefined));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(stall.profile).toBeUndefined();
+    expect(await readdir(logs)).not.toContain('perf');
+  });
+
+  // The window timer comes due during a long block and fires beside the beat
+  // that reports it; rolling then threw away the profile the report would save.
+  it('keeps the profile of a block that ran across a window roll', async () => {
+    logs = await mkdtemp(join(tmpdir(), 'gezel-perf-'));
+    stop = startResponsivenessMonitor({
+      logsDir: logs,
+      profileWhen: () => true,
+      profileWindowMs: 1_000,
+    });
+    await waitFor(() => (perfSnapshot().profiling ? true : undefined));
+
+    blockFor(1_500);
+
+    const profile = await waitFor(() => perfSnapshot().stalls[0]?.profile);
     expect(await readdir(join(logs, 'perf'))).toContain(profile);
   });
 

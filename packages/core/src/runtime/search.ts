@@ -247,6 +247,7 @@ export async function searchProject(
           gezelId: scope === 'gezel' ? id : undefined,
           retrievalSource: source,
           arm: 'fts',
+          memory: { day: memory.day, kind: memory.kind },
           ...scoreResult(
             'memory',
             sameProjectMemoryScore(lexicalRelevance(memory.score), memory.source, projectId),

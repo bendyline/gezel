@@ -2,13 +2,18 @@
  * Gezels — the roster list and the per-gezel detail view (profile, growth,
  * memories). Uses the seeded gezels so avatars/names are stable.
  */
+import { GezelClient } from '@bendyline/gezel-client';
 import { expect, test } from './fixtures/test.js';
 import { gotoHome, openAreaView, openGezel } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
+test.use({ daemonGroup: 'gezels-social' });
+
 test.describe('gezels', () => {
-  test('list + detail (profile, growth, memories)', async ({ page, world }) => {
+  test('list + detail (profile, growth, memories)', async ({ page, world, daemon }) => {
     test.skip(!world, 'requires the seeded world');
+    const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+    await client.updateConfig({ social: true });
     await gotoHome(page);
 
     await openAreaView(page, 'gezels');

@@ -86,6 +86,6 @@ export function unknownTaskStepText(
 ): string {
   const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
   return field === 'next'
-    ? `This task has no step "${id}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to advance to the following step in order.`
+    ? `This task has no step "${id}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to follow the plan's configured routing, which can loop back.`
     : `This task has no step "${id}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
 }

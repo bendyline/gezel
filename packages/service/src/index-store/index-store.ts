@@ -2,13 +2,40 @@ import {
   type FileReviewIssue,
   type HistoryEvent,
   type HistoryFilter,
+  type ProjectIndexOverview,
   nowIso,
 } from '@bendyline/gezel';
-import { embedProfileId } from '../memory/embed-core.js';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
+import { reconcileEmbedModel, reconcileImageEmbedModel } from './embed-model-reconcile.js';
+import type {
+  ChunkInput,
+  CurrentFileReviewIssues,
+  DependencyInput,
+  DependencyRow,
+  DocHit,
+  FileRecord,
+  FileReviewRow,
+  ImportBinding,
+  ImportEdgeInput,
+  IndexProvenance,
+  LayoutRow,
+  MediaVectorModality,
+  MediaVectorRow,
+  Modality,
+  OpenOptions,
+  PhotoRow,
+  SecurityFindingInput,
+  SecurityFindingRow,
+  SecurityFindingStatus,
+  SecuritySeverity,
+  SecuritySource,
+  SymbolHit,
+  SymbolInput,
+  VectorHit,
+} from './index-store-types.js';
 import { queryTerms } from './query-terms.js';
 import { purgeSpuriousTruncationReviews } from './review-claims.js';
-import { TEXT_EMBED_DIM, applySchema } from './schema.js';
+import { applySchema } from './schema.js';
 import {
   type SqlValue,
   type SqliteDriver,
@@ -28,122 +55,6 @@ import {
  * ripgrep/live-read when `IndexStore.open` returns null (sqlite unavailable).
  */
 
-export type Modality = 'text' | 'code' | 'doc' | 'image' | 'audio' | 'video' | 'email';
-/** The modalities the media tier embeds (one row per image, per window otherwise). */
-export type MediaVectorModality = 'image' | 'audio' | 'video';
-
-export interface MediaVectorRow {
-  contentHash: string;
-  filePath: string;
-  modality: MediaVectorModality;
-  startMs: number;
-  endMs: number | null;
-  vec: Float32Array;
-}
-export type CollectionKind =
-  | 'workspace'
-  | 'documents'
-  | 'images'
-  | 'mail'
-  | 'sessions'
-  | 'history'
-  | 'generic';
-
-export interface FileRecord {
-  path: string;
-  hash: string | null;
-  size: number;
-  mtimeMs: number;
-  lang: string | null;
-  kind: string | null;
-  modality: Modality;
-  trivial: boolean;
-  indexedAt: string;
-  /** Line count; null for trivial/binary files we never read. Drives block size. */
-  loc: number | null;
-}
-
-export interface SymbolInput {
-  name: string;
-  kind: string;
-  lineStart: number;
-  lineEnd: number;
-  signature?: string;
-  /** Containing class/module/interface name, when nested. */
-  parent?: string;
-}
-
-/**
- * One binding taken by an import statement. `name` is the exported name at the
- * target ('default' for default imports, '*' for namespace); `local` is the
- * identifier used in the importing file (differs from `name` when aliased).
- * Inbound attribution ("who imports symbol X") matches on `name`; outbound
- * attribution ("what does this symbol use") matches on `local`.
- */
-export interface ImportBinding {
-  name: string;
-  local: string;
-  kind: 'named' | 'default' | 'namespace';
-}
-
-/** A raw dependency edge: one importer + one unresolved module specifier. */
-export interface ImportEdgeInput {
-  /** The literal module string, e.g. './db', 'react', 'os/path'. */
-  raw: string;
-  /** Named/default/namespace bindings; undefined = not recorded (legacy row or
-   *  a language whose imports we don't destructure). */
-  bindings?: ImportBinding[];
-}
-
-export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type SecuritySource = 'builtin' | 'semgrep' | 'osv' | 'gitleaks';
-export type SecurityFindingStatus = 'open' | 'in_progress' | 'resolved';
-
-/** A static security finding, minus the file it belongs to (passed separately). */
-export interface SecurityFindingInput {
-  /** 1-based line, or null when whole-file/unknown. */
-  line: number | null;
-  /** Stable rule identifier, e.g. `sink.eval`, `secret.aws-key`, semgrep's check id. */
-  ruleId: string;
-  /** Coarse class, e.g. `injection`, `secret`, `ssrf`, `crypto`, `dependency`. */
-  category: string;
-  severity: SecuritySeverity;
-  /** One-line human summary. */
-  title: string;
-  /** The matched snippet (capped) for audit — NEVER a raw secret value. */
-  evidence?: string;
-  /** Dedup key across re-scans/tools; defaults to `ruleId:file:line`. */
-  fingerprint?: string;
-}
-
-export interface SecurityFindingRow extends SecurityFindingInput {
-  filePath: string;
-  source: SecuritySource;
-  fingerprint: string;
-  status: SecurityFindingStatus;
-  taskRef?: string;
-}
-
-export interface DependencyInput {
-  name: string;
-  ecosystem: string;
-  version: string | null;
-  direct: boolean;
-  advisoryIds?: string[];
-  maxSeverity?: SecuritySeverity | null;
-  license?: string | null;
-}
-
-export interface DependencyRow {
-  name: string;
-  ecosystem: string;
-  version: string | null;
-  direct: boolean;
-  advisoryIds: string[];
-  maxSeverity: SecuritySeverity | null;
-  license: string | null;
-}
-
 interface SecurityFindingDbRow {
   file_path: string;
   line: number | null;
@@ -156,67 +67,6 @@ interface SecurityFindingDbRow {
   fingerprint: string | null;
   finding_status: string | null;
   task_ref: string | null;
-}
-
-/** A persisted city-map node coordinate (district, block, street, label
- *  plate, or plaza). `node_kind` is unconstrained TEXT in sqlite, so the new
- *  kinds need no schema migration — only this union. */
-export interface LayoutRow {
-  nodeKind: 'district' | 'block' | 'street' | 'plate' | 'plaza';
-  nodeId: string;
-  parentId: string | null;
-  contentHash: string | null;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  weight: number;
-  placedAt: string | null;
-  removedAt: string | null;
-}
-
-export interface SymbolHit extends SymbolInput {
-  /** Stable id `path#name` for multi-step flows. */
-  id: string;
-  filePath: string;
-  signature: string;
-}
-
-export interface ChunkInput {
-  kind: string;
-  lineStart: number;
-  lineEnd: number;
-  text: string;
-}
-
-export interface DocHit {
-  filePath: string;
-  lineStart: number;
-  lineEnd: number;
-  chunkId: number;
-  snippet: string;
-}
-
-export interface VectorHit {
-  chunkId: number;
-  filePath: string;
-  lineStart: number;
-  lineEnd: number;
-  text: string;
-  /**
-   * Raw sqlite-vec distance — RANK ORDER ONLY, and not comparable across
-   * installs: fresh vec_text tables declare cosine, but tables created before
-   * the declaration report L2 until a re-embed migration recreates them. Read
-   * {@link VectorHit.similarity} instead of converting this by hand; it
-   * accounts for the declared metric.
-   */
-  distance: number;
-  /**
-   * Cosine similarity in 0..1-ish, normalized across both declared metrics
-   * (see {@link IndexStore.similarityForDistance}). This is the value a
-   * relevance floor may be compared against; `distance` is not.
-   */
-  similarity: number;
 }
 
 /**
@@ -248,54 +98,6 @@ export interface VectorHit {
  * this number does not travel.
  */
 export const VECTOR_ARM_MIN_SIMILARITY = 0.55;
-
-/**
- * Who produced an LLM-written index row. Output-only bookkeeping — never an
- * input to model routing. Absent fields stay NULL (rows written before the
- * v10 migration, or deps built without a boekwachter) and renderers degrade
- * to whatever segments exist.
- */
-export interface IndexProvenance {
-  provider?: string;
-  gezelId?: string;
-  gezelName?: string;
-  appVersion?: string;
-}
-
-/** A successful boekwachter review as served per file (hash-keyed). */
-export interface FileReviewRow {
-  notesMd: string;
-  issues: FileReviewIssue[];
-  health: number;
-  healthReason: string;
-  rubricHash: string;
-  model: string | null;
-  provider: string | null;
-  gezelId: string | null;
-  gezelName: string | null;
-  appVersion: string | null;
-  reviewedAt: string | null;
-}
-
-export interface CurrentFileReviewIssues {
-  path: string;
-  contentHash: string;
-  issues: FileReviewIssue[];
-}
-
-export interface OpenOptions {
-  collectionId: string;
-  kind: CollectionKind;
-  rootPath: string;
-  label?: string;
-  /**
-   * Skip vector-table creation AND the embed-model reconcile. For stores
-   * that never hold embeddings (the global FTS mirror) — without this, every
-   * embed-model swap ran a pointless vec_text DROP/CREATE + enrichments
-   * clear against a vectorless database.
-   */
-  vectorless?: boolean;
-}
 
 interface FileRow {
   path: string;
@@ -366,69 +168,6 @@ function truncateReason(reason: string | undefined): string | null {
   return trimmed.length > ENRICH_REASON_CAP
     ? `${trimmed.slice(0, ENRICH_REASON_CAP - 1)}…`
     : trimmed;
-}
-
-/**
- * Invalidate the text vectors when the embedding model changed. Vectors from a
- * different embedder are not comparable to the current model's query vectors
- * (garbage cosine similarity), so on a model swap we drop `vec_text` (recreated
- * at the current dim — handles a dim change too) and clear `enrichments` so the
- * enrichment loop re-embeds every file. Summaries + chunks survive, so
- * re-embedding pays no LLM cost (see enrichFile's summary reuse). First-ever
- * open just stamps the model; matching model is a no-op (no write on the hot
- * read-open path).
- */
-function reconcileEmbedModel(db: SqliteDriver, vecAvailable: boolean): void {
-  // The stamp is the FULL profile identity (model|dim|pooling|norm|prefix
-  // hashes), not the bare model id — so a dim or instruction change also
-  // invalidates vectors. Pre-profile stamps mismatch once and re-embed.
-  const current = embedProfileId();
-  const stored = db
-    .prepare("SELECT value FROM meta WHERE key = 'embed_model'")
-    .get<{ value: string }>()?.value;
-  if (stored === current) return;
-  if (stored) {
-    if (vecAvailable) {
-      db.exec('DROP TABLE IF EXISTS vec_text');
-      // Same metric + fallback discipline as applySchema — the re-embed
-      // migration is also how pre-cosine tables pick up the declaration.
-      try {
-        db.exec(
-          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}] distance_metric=cosine);`,
-        );
-      } catch {
-        db.exec(
-          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
-        );
-      }
-    }
-    db.exec('DELETE FROM enrichments');
-    // The embed-only gate holds the same invalidated vectors' bookkeeping.
-    db.exec('DELETE FROM embed_state');
-  }
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('embed_model', ?)").run(current);
-}
-
-/**
- * Same contract as {@link reconcileEmbedModel} for the media embedder: its
- * identity is the profile plus the vision token budget, since a budget change
- * moves every image vector. A change wipes media_vectors and the
- * image_embed_state gate (the tier re-embeds lazily). Face vectors are NOT
- * touched — the face embedder is a separate pinned model with its own catalog.
- */
-function reconcileImageEmbedModel(db: SqliteDriver): void {
-  const current = imageEmbedModelId();
-  const stored = db
-    .prepare("SELECT value FROM meta WHERE key = 'image_embed_model'")
-    .get<{ value: string }>()?.value;
-  if (stored === current) return;
-  if (stored) {
-    db.exec('DELETE FROM media_vectors');
-    db.exec('DELETE FROM image_embed_state');
-  }
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('image_embed_model', ?)").run(
-    current,
-  );
 }
 
 export class IndexStore {
@@ -524,6 +263,70 @@ export class IndexStore {
    * derived from `path`. HTML/CSS et al. aren't classified as a `lang`, so
    * extension is the reliable file-shape signal for project-type detection.
    */
+  /**
+   * What the folder holds, from rows the static pass already wrote: counts by
+   * modality, screenshots, cloud-only files, the photos' capture-date range,
+   * and byte-identical copies. One cheap read for the first-look card.
+   */
+  folderOverview(): ProjectIndexOverview {
+    const cid = this.collectionId;
+    const byModality: Record<string, number> = {};
+    let files = 0;
+    let totalBytes = 0;
+    for (const row of this.db
+      .prepare(
+        'SELECT modality, COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM files WHERE collection_id = ? GROUP BY modality',
+      )
+      .all<{ modality: string | null; n: number; bytes: number }>(cid)) {
+      byModality[row.modality ?? 'other'] = row.n;
+      files += row.n;
+      totalBytes += row.bytes;
+    }
+    const countKey = (key: string) =>
+      this.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM metadata WHERE collection_id = ? AND key = ? AND value = '1'",
+        )
+        .get<{ n: number }>(cid, key)?.n ?? 0;
+    const taken = this.db
+      .prepare(
+        "SELECT MIN(value) AS lo, MAX(value) AS hi FROM metadata WHERE collection_id = ? AND key = 'taken_at'",
+      )
+      .get<{ lo: string | null; hi: string | null }>(cid);
+    const mtime = this.db
+      .prepare('SELECT MIN(mtime_ms) AS lo, MAX(mtime_ms) AS hi FROM files WHERE collection_id = ?')
+      .get<{ lo: number | null; hi: number | null }>(cid);
+    const dupes = this.db
+      .prepare(
+        `SELECT COUNT(*) AS groups, COALESCE(SUM(n - 1), 0) AS extra, COALESCE(SUM((n - 1) * size), 0) AS bytes
+           FROM (SELECT COUNT(*) AS n, MAX(size) AS size FROM files
+                  WHERE collection_id = ? AND hash IS NOT NULL AND trivial = 0 AND size > 0
+                  GROUP BY hash HAVING COUNT(*) > 1)`,
+      )
+      .get<{ groups: number; extra: number; bytes: number }>(cid);
+    return {
+      files,
+      totalBytes,
+      byModality,
+      screenshots: countKey('screenshot'),
+      cloudOnly: countKey('cloud_only'),
+      ...(taken?.lo && taken.hi ? { takenRange: { from: taken.lo, to: taken.hi } } : {}),
+      ...(mtime?.lo != null && mtime.hi != null
+        ? {
+            modifiedRange: {
+              from: new Date(mtime.lo).toISOString(),
+              to: new Date(mtime.hi).toISOString(),
+            },
+          }
+        : {}),
+      duplicates: {
+        groups: dupes?.groups ?? 0,
+        extraCopies: dupes?.extra ?? 0,
+        bytes: dupes?.bytes ?? 0,
+      },
+    };
+  }
+
   extensionCounts(): Record<string, number> {
     const out: Record<string, number> = {};
     const rows = this.db
@@ -781,6 +584,14 @@ export class IndexStore {
    * or stale for the current content hash. Same capped-retry discipline as
    * {@link filesNeedingEnrichment}; an 'ok' row is the terminal success.
    */
+  /** Every indexed path holding this exact content: a file and its copies. */
+  pathsWithHash(contentHash: string): string[] {
+    return this.db
+      .prepare('SELECT path FROM files WHERE collection_id = ? AND hash = ? ORDER BY path')
+      .all<{ path: string }>(this.collectionId, contentHash)
+      .map((r) => r.path);
+  }
+
   filesNeedingAiShadow(limit = 5, maxAttempts = MAX_ENRICH_ATTEMPTS): FileRecord[] {
     return this.db
       .prepare(
@@ -2182,6 +1993,13 @@ export class IndexStore {
     return out;
   }
 
+  /** Remove one metadata key from one file. */
+  deleteMetadataKey(filePath: string, key: string): void {
+    this.db
+      .prepare('DELETE FROM metadata WHERE collection_id = ? AND path = ? AND key = ?')
+      .run(this.collectionId, filePath, key);
+  }
+
   /** Upsert specific metadata keys for one file (delete-then-insert; the
    *  table has no unique constraint). */
   mergeMetadata(filePath: string, entries: Array<{ key: string; value: string }>): void {
@@ -2244,6 +2062,29 @@ export class IndexStore {
   // ── images ───────────────────────────────────────────────────────────────
 
   /** Image files, optionally restricted to a folder prefix. */
+  /**
+   * Every photo with the metadata the photo tools read, in one query: the
+   * key/value metadata rows pivoted onto the file row. Newest capture first,
+   * then newest file.
+   */
+  photoRows(prefix?: string): PhotoRow[] {
+    const clause = prefix ? " AND f.path LIKE ? || '%'" : '';
+    const params: string[] = [this.collectionId];
+    if (prefix) params.push(prefix.endsWith('/') ? prefix : `${prefix}/`);
+    const pick = (key: string) => `MAX(CASE WHEN m.key = '${key}' THEN m.value END) AS ${key}`;
+    return this.db
+      .prepare(
+        `SELECT f.path, f.hash, f.size, f.mtime_ms,
+                ${['taken_at', 'camera_make', 'camera_model', 'lens', 'gps_lat', 'gps_lon', 'width', 'height', 'format', 'screenshot', 'cloud_only'].map(pick).join(', ')}
+           FROM files f
+           LEFT JOIN metadata m ON m.collection_id = f.collection_id AND m.path = f.path
+          WHERE f.collection_id = ? AND f.modality = 'image'${clause}
+          GROUP BY f.path
+          ORDER BY taken_at IS NULL, taken_at DESC, f.mtime_ms DESC`,
+      )
+      .all<PhotoRow>(...params);
+  }
+
   imageFiles(prefix?: string): FileRecord[] {
     const clause = prefix ? " AND path LIKE ? || '%'" : '';
     const params: string[] = [this.collectionId];

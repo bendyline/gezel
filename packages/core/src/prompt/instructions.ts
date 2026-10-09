@@ -30,8 +30,11 @@ import { NATIVE_TOOL_NOTE } from '../tools/native-tools.js';
 
 export type { PromptTaskContext };
 export { renderTaskOutline };
+import { renderCharacterBlock } from '../character/index.js';
+import { renderPersonNotesBlock } from '../memory-notes.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { PromptCtx, ResolvedModelProfile } from '../model-profile/types.js';
+import type { GezelCharacter } from '../schemas/character.js';
 import type { ProviderName } from '../schemas/gezel.js';
 import { canonicalToolName } from '../tools/tool-names.js';
 import {
@@ -162,6 +165,21 @@ export interface BuildInstructionsOptions {
    */
   lessons?: string;
   /**
+   * What the crew knows about the person (the "About you" memory scope),
+   * already selected for this footprint (`selectPersonNotes`). Rendered as a
+   * `### About the person` block in the STABLE prefix right after lessons:
+   * every gezel shares it, and it changes only when a note about the person
+   * is saved.
+   */
+  personNotes?: readonly string[];
+  /**
+   * The gezel's character, passed only in social mode (`resolveSocialMode`).
+   * Rendered as a `### Character` block of 60 tokens or fewer in the STABLE
+   * prefix right after traits, and kept in the minimal footprint: absent,
+   * the prompt is byte for byte what it was before characters existed.
+   */
+  character?: GezelCharacter;
+  /**
    * Standing behavior traits (frontmatter `traits[].text`), adopted via
    * the growth system's level-up flow. Rendered as a `### Traits` block
    * in the STABLE prefix between the about body and lessons — traits
@@ -171,13 +189,12 @@ export interface BuildInstructionsOptions {
   /**
    * Gezel's role from frontmatter (e.g. `'Meester'`, `'Voorman'`,
    * `'Developer'`). Drives the delegation-guardrail decision: roles
-   * whose tool groups exclude `workspace-fs-write`/`code-execution`
-   * (i.e. Meester, Voorman, Planner) get an explicit "don't try to
-   * write code or run shells — delegate" block prepended to the
-   * system prompt. Voorman is unusual — they have `workspace-fs-read`
-   * for diagnostic browsing but still don't *build*, so the
-   * orientation prose for "where work belongs" still treats them as
-   * a delegator.
+   * with an explicit coordination contract (Meester, Voorman, Planner)
+   * get a "don't try to write code or run shells — delegate" block
+   * prepended to the system prompt. Voorman is unusual — they have
+   * `workspace-fs-read` for diagnostic browsing but still don't *build*,
+   * so the orientation prose for "where work belongs" still treats them
+   * as a delegator.
    */
   role?: string;
   /**
@@ -705,18 +722,21 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // accumulated cross-project knowledge read as part of who it is, not
   // as volatile per-turn context.
   const traitsBlock = renderTraitsBlock(opts.traits ?? []);
+  const characterBlock = renderCharacterBlock(opts.character);
   const lessonsBlock = opts.lessons
     ? `\n\n---\n\n### Lessons from past work\n\n(accumulated by you across projects — preferences and practices that have proven out)\n\n${opts.lessons}`
     : '';
+  const personBlock = renderPersonNotesBlock(opts.personNotes ?? []);
 
-  // Delegation guardrail. Roles whose tool groups don't include
-  // `workspace-fs-write`/`code-execution` (Meester, Voorman, Planner)
-  // get explicit prose telling them what they CAN'T do — otherwise the
-  // model reads its (still-rich) about.md and assumes it should
-  // build the thing the user asked for. The tool-denial layer
-  // (`--disallowedTools` for Claude CLI, MCP exclude env for
-  // gezel-mcp) is the hard guardrail; this prose is the soft one
-  // telling the model how to think when it hits a denial.
+  // Delegation guardrail. Explicit coordinator roles (Meester, Voorman,
+  // Planner) get prose telling them what they CAN'T do — otherwise the
+  // model reads its (still-rich) about.md and assumes it should build the
+  // thing the user asked for. Missing workspace/code tools alone are not
+  // enough to classify a role: Curator and media generators are executors
+  // whose output tools do not require generic workspace writes. The
+  // tool-denial layer (`--disallowedTools` for Claude CLI, MCP exclude env
+  // for gezel-mcp) is the hard guardrail; this prose is the soft one telling
+  // the model how to think when it hits a denial.
   //
   // Provider gate: we've only observed denial-spelunking on Claude
   // CLI so far (the model dives into `ToolSearch` looking for any
@@ -1731,7 +1751,9 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     ['aboutIntro', aboutIntro, 'stable'],
     ['about (persona body)', body, 'stable'],
     ['traits', traitsBlock, 'stable'],
+    ['character', characterBlock, 'stable'],
     ['lessons', lessonsBlock, 'stable'],
+    ['aboutPerson', personBlock, 'stable'],
     ['projectContext (about+mission+github)', projectContext, 'stable'],
     ['actDontNarrate', actDontNarrate, 'stable'],
     ['decisionGuidance', decisionGuidance, 'stable'],
@@ -1792,13 +1814,15 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       ? `\n\n---\n\nYou are working in the project "${project.name}".${brief ? `\n\n${brief}` : ''}`
       : '';
     const minimalFull = minimalContextNativeTools
-      ? `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
-      : `${header}${aboutIntro}${cappedBody}${MINIMAL_CONTEXT_CONDUCT}`;
+      ? `${header}${aboutIntro}${cappedBody}${characterBlock}${personBlock}${MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT}${minimalProject}${taskContext}${activeTaskAnchor}`
+      : `${header}${aboutIntro}${cappedBody}${characterBlock}${personBlock}${MINIMAL_CONTEXT_CONDUCT}`;
     const minimalSections: PromptSection[] = minimalContextNativeTools
       ? [
           ['header', header, 'stable'],
           ['aboutIntro', aboutIntro, 'stable'],
           ['about (persona body)', cappedBody, 'stable'],
+          ['character', characterBlock, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
           ['minimalConduct', MINIMAL_CONTEXT_NATIVE_TOOLS_CONDUCT, 'stable'],
           ['projectBrief', minimalProject, 'stable'],
           ['taskContext', taskContext, 'volatile'],
@@ -1808,6 +1832,8 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
           ['header', header, 'stable'],
           ['aboutIntro', aboutIntro, 'stable'],
           ['about (persona body)', cappedBody, 'stable'],
+          ['character', characterBlock, 'stable'],
+          ['aboutPerson', personBlock, 'stable'],
           ['minimalConduct', MINIMAL_CONTEXT_CONDUCT, 'stable'],
         ];
     return {
@@ -1861,7 +1887,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     // byte-prefix of `full` — siblings of the same (gezel, project) render
     // everything up to `taskContext` identically. Concatenation order is
     // unchanged, so `full` stays byte-identical to the single-string form.
-    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
+    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${characterBlock}${lessonsBlock}${personBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
     const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
     return {
       full: `${sharedPrefix}${sessionTail}`,
@@ -1876,7 +1902,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // above) — and ONLY removes the volatile band. The gezel-identity
   // prefix (everything before projectContext) is a true byte-prefix of
   // the full stable message, so adapters key `prefix-gezel` ⊂ `prefix-gp`.
-  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
+  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${characterBlock}${lessonsBlock}${personBlock}`;
   const stableSystem = `${gezelPrefix}${projectContext}${operationalGuidanceSection}${responseGuidanceSection}`;
 
   // Volatile band → a frozen message injected after the tool block. The

@@ -693,19 +693,39 @@ describe('SettingsView', () => {
     ).toBeInTheDocument();
   });
 
-  it('only shows the night-shift wake option on macOS', async () => {
+  it('explains on macOS why the night shift cannot wake a sleeping Mac', async () => {
     const { unmount } = render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
-    expect(
-      screen.queryByRole('checkbox', { name: 'Wake this machine when the window opens' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't wake a sleeping Mac/)).not.toBeInTheDocument();
     unmount();
 
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     render(<SettingsView />);
+    expect(await screen.findByText(/can't wake a sleeping Mac/)).toBeInTheDocument();
+  });
+
+  it('pauses night work on battery by default and offers start at login on the desktop', async () => {
+    const set = vi.fn().mockResolvedValue({ supported: true, enabled: true });
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: 'test-token',
+      startAtLogin: { get: vi.fn().mockResolvedValue({ supported: true, enabled: false }), set },
+    };
+    render(<SettingsView />);
     expect(
-      await screen.findByRole('checkbox', { name: 'Wake this machine when the window opens' }),
-    ).toBeInTheDocument();
+      await screen.findByRole('checkbox', {
+        name: 'Pause night work while this computer runs on battery',
+      }),
+    ).toBeChecked();
+    const login = await screen.findByRole('checkbox', {
+      name: 'Start Gezel when I log in, without opening a window',
+    });
+    expect(login).not.toBeChecked();
+    fireEvent.click(login);
+    await waitFor(() => expect(login).toBeChecked());
+    expect(set).toHaveBeenCalledWith(true);
+    // The shared setup spreads the previous bridge forward.
+    window.__GEZEL__ = { ...window.__GEZEL__, startAtLogin: undefined };
   });
 
   it('defaults the quota reserve to overall-on at 20% with per-day opt-in', async () => {
@@ -860,29 +880,73 @@ describe('SettingsView', () => {
     expect(await pills.findByRole('button', { name: 'Apple Intelligence' })).toBeInTheDocument();
   });
 
-  // The API-key OpenAI and Anthropic surfaces are hidden until they've been
-  // tested; the CLI-driven variants are untouched.
-  it('hides the API-key OpenAI and Anthropic pills but keeps the CLI ones', async () => {
+  it('offers both API-key providers alongside their CLI variants', async () => {
     render(<SettingsView />);
     const pills = await defaultProviderSwitch();
 
     expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
     expect(pills.getByRole('button', { name: 'Anthropic Claude CLI' })).toBeInTheDocument();
-    expect(pills.queryByRole('button', { name: 'OpenAI' })).toBeNull();
-    expect(pills.queryByRole('button', { name: 'Anthropic Claude' })).toBeNull();
+    expect(pills.getByRole('button', { name: 'OpenAI' })).toBeInTheDocument();
+    expect(pills.getByRole('button', { name: 'Anthropic Claude' })).toBeInTheDocument();
+    expect(screen.getByTestId('settings-nav-openai')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-nav-anthropic')).toBeInTheDocument();
   });
 
-  it('keeps the Anthropic pill when a key is already on file', async () => {
+  it('saves an OpenAI API key and optional organization from its restored tab', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mlx',
       meesterGezelId: 'gz-meester',
-      hasAnthropicApiKey: true,
     } as never);
-    render(<SettingsView />);
-    const pills = await defaultProviderSwitch();
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+      hasOpenaiApiKey: true,
+      openaiApiKey: '****2345',
+      openaiOrganization: 'org-example',
+    } as never);
 
-    // Never strand a configured user without the control to change it.
-    expect(await pills.findByRole('button', { name: 'Anthropic Claude' })).toBeInTheDocument();
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-openai'));
+    fireEvent.change(await screen.findByPlaceholderText('Paste OpenAI API key (sk-…)'), {
+      target: { value: 'sk-test-12345' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Organization (optional)'), {
+      target: { value: 'org-example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        openaiApiKey: 'sk-test-12345',
+        openaiOrganization: 'org-example',
+      }),
+    );
+    expect(await screen.findByTestId('model-picker-openai')).toBeInTheDocument();
+  });
+
+  it('saves an Anthropic API key from its restored tab', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+      hasAnthropicApiKey: true,
+      anthropicApiKey: '****2345',
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-anthropic'));
+    fireEvent.change(await screen.findByPlaceholderText('Paste Anthropic API key (sk-ant-…)'), {
+      target: { value: 'sk-ant-test-12345' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ anthropicApiKey: 'sk-ant-test-12345' }),
+    );
+    expect(await screen.findByTestId('model-picker-anthropic')).toBeInTheDocument();
   });
 
   // Super Lockdown makes `ChatManager.ensureProvider` refuse every non-local
@@ -921,6 +985,8 @@ describe('SettingsView', () => {
       const codex = await pills.findByRole('button', { name: 'OpenAI Codex CLI' });
       expect(codex).toBeDisabled();
       expect(codex).toHaveAttribute('title', expect.stringContaining('Super Lockdown'));
+      expect(pills.getByRole('button', { name: 'OpenAI' })).toBeDisabled();
+      expect(pills.getByRole('button', { name: 'Anthropic Claude' })).toBeDisabled();
       expect(pills.getByRole('button', { name: 'Anthropic Claude CLI' })).toBeDisabled();
       // Copilot arrives on its own availability probe; it is blocked too.
       expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeDisabled();

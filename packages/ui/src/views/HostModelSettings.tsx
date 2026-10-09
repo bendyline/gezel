@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestBackupRestore } from '../components/BackupRestoreDialog.js';
 import { UserMemoriesEditor } from '../components/MemoriesTree.js';
+import { NotificationsSetting } from '../components/NotificationsSetting.js';
+import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import {
   clearPendingSettingsSection,
@@ -111,6 +113,14 @@ export function HostModelSettings() {
             <section className="settings-sidebar-side">
               <h3>Sidebar position</h3>
               <SidebarSidePicker />
+            </section>
+            <section>
+              <h3>Social mode</h3>
+              <SocialModeToggle />
+            </section>
+            <section>
+              <h3>Notifications</h3>
+              <NotificationsSetting />
             </section>
             <section>
               <h3>Advanced</h3>

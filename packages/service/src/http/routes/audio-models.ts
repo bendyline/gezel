@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { ChatModelInstallRegistry } from '../../models/install-registry.js';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
@@ -11,13 +12,26 @@ import {
   KOKORO_DEFAULT_VOICES,
   isKokoroRuntimeAvailable,
 } from '../../providers/audio/kokoro.js';
-import type { AudioModelPullSpec } from '../../providers/audio/types.js';
+import type { AudioModelPullEvent, AudioModelPullSpec } from '../../providers/audio/types.js';
 import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
 import type { EngineContext } from '../engine-context.js';
+import { subscribeToInstallSse } from './install-sse.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
 
 export function audioModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
+
+  // One download per model, owned by the daemon rather than the request, so
+  // a second click joins the running download instead of appending a second
+  // writer to the same `.partial` (see the recognition route).
+  const sttPulls = new ChatModelInstallRegistry<AudioModelPullEvent, AudioModelPullSpec>({
+    engine: 'stt',
+    run: (id, spec) => pullThrough(() => ctx.stt.current(), id, spec),
+  });
+  const ttsPulls = new ChatModelInstallRegistry<AudioModelPullEvent, AudioModelPullSpec>({
+    engine: 'tts',
+    run: (id, spec) => pullThrough(() => ctx.tts.current(), id, spec),
+  });
   const proxy = machineEngineProxy(ctx, '/api/audio', '/v1/remote/manage/audio', []);
 
   app.get('/engine-status', proxy, async (c) => {
@@ -69,29 +83,14 @@ export function audioModelRoutes(ctx: EngineContext): Hono {
         },
       ],
     };
-    return streamSSE(c, async (stream) => {
-      try {
-        const provider = await ctx.stt.current();
-        for await (const event of provider.pullModel(id, spec)) {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-          if (event.type === 'done' || event.type === 'error') {
-            if (event.type === 'error') {
-              await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-            }
-            return;
-          }
-        }
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: 'error',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        });
-        await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-      }
-    });
+    sttPulls.start(id, spec);
+    return streamSSE(c, (stream) => subscribeToInstallSse(sttPulls, id, stream));
   });
+
+  /** Cancel a download. Closing the page only detaches; the download keeps going. */
+  app.delete('/stt/models/:id/pull', proxy, (c) =>
+    c.json({ cancelled: sttPulls.cancel(c.req.param('id')) }),
+  );
 
   app.delete('/stt/models/:id', proxy, async (c) => {
     const id = c.req.param('id');
@@ -136,29 +135,14 @@ export function audioModelRoutes(ctx: EngineContext): Hono {
         },
       ],
     };
-    return streamSSE(c, async (stream) => {
-      try {
-        const provider = await ctx.tts.current();
-        for await (const event of provider.pullModel(id, spec)) {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-          if (event.type === 'done' || event.type === 'error') {
-            if (event.type === 'error') {
-              await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-            }
-            return;
-          }
-        }
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: 'error',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        });
-        await stream.writeSSE({ data: JSON.stringify({ type: 'done', id }) });
-      }
-    });
+    ttsPulls.start(id, spec);
+    return streamSSE(c, (stream) => subscribeToInstallSse(ttsPulls, id, stream));
   });
+
+  /** Cancel a download. Closing the page only detaches; the download keeps going. */
+  app.delete('/tts/models/:id/pull', proxy, (c) =>
+    c.json({ cancelled: ttsPulls.cancel(c.req.param('id')) }),
+  );
 
   app.delete('/tts/models/:id', proxy, async (c) => {
     const id = c.req.param('id');
@@ -225,4 +209,15 @@ export function buildAudioCatalog(options: { kokoroRuntimeAvailable?: boolean } 
         ]
       : [],
   };
+}
+
+async function* pullThrough(
+  current: () => Promise<{
+    pullModel(id: string, spec: AudioModelPullSpec): AsyncIterable<AudioModelPullEvent>;
+  }>,
+  id: string,
+  spec: AudioModelPullSpec,
+): AsyncIterable<AudioModelPullEvent> {
+  const provider = await current();
+  yield* provider.pullModel(id, spec);
 }

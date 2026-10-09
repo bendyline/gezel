@@ -13,6 +13,7 @@ import {
   projectTypeTurnRules,
   reactionRequiredTool,
   renderProjectTypeReactionSeed,
+  stateAnswerTool,
 } from './composition.js';
 
 const tool = (name: string) => ({ name, description: name, script: 'store' });
@@ -159,6 +160,38 @@ describe('turn rules a type declares', () => {
     expect(reactionRequiredTool(reaction, { status: 'won' }, tools)).toBeUndefined();
     expect(reactionRequiredTool({ turn: { tool: 'get_board' } }, {}, tools)).toBeUndefined();
     expect(reactionRequiredTool({}, { status: 'playing' }, tools)).toBeUndefined();
+  });
+
+  it('answers a person through the state’s answer tool only while the state asks for it', () => {
+    const scene = {
+      ...tool('scene'),
+      state: true,
+      answer: {
+        tool: 'reply',
+        when: { op: 'equals' as const, field: 'status', value: 'active' },
+      },
+    };
+    const tools = [scene, reply];
+    expect(stateAnswerTool(tools, { status: 'active' })).toBe('reply');
+    expect(stateAnswerTool(tools, { status: 'idle' })).toBeUndefined();
+    expect(stateAnswerTool([board, reply], { status: 'active' })).toBeUndefined();
+    // An answer naming a tool that does not end the turn requires nothing.
+    expect(
+      stateAnswerTool([{ ...scene, answer: { tool: 'get_board' } }, board], { status: 'active' }),
+    ).toBeUndefined();
+    expect(
+      projectTypeTurnProblems({
+        tools: [
+          { ...scene, answer: { tool: 'make_move' } },
+          { ...tool('make_move') },
+          { ...tool('peek'), answer: { tool: 'reply' } },
+          reply,
+        ],
+      }),
+    ).toEqual([
+      'scene: answer names make_move, which is not a model tool that declares turn',
+      'peek: answer applies only to the state tool',
+    ]);
   });
 
   it('names what is wrong with the declarations', () => {

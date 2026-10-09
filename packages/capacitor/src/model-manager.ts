@@ -16,6 +16,7 @@ import {
   MobileModelInventorySchema,
   type MobileModelSourceIdentity,
   MobileModelSourceSchema,
+  resolveMobileInferenceLimits,
 } from '@bendyline/gezel/mobile-providers';
 import snapshot from './catalog.json';
 import type { GezelRuntimePlugin } from './definitions.js';
@@ -94,6 +95,7 @@ export function createMobileModelManager(
             inventory.models.some((model) => model.source && sameSource(item.source, model.source))
           )
             continue;
+          const limits = resolveMobileInferenceLimits(llama);
           const fits =
             inventory.memoryBudgetBytes === undefined ||
             item.approxSizeBytes + 512 * 1024 ** 2 <= inventory.memoryBudgetBytes;
@@ -102,6 +104,8 @@ export function createMobileModelManager(
               sameSource(item.source, job.source) &&
               ['queued', 'downloading', 'verifying'].includes(job.state),
           );
+          // Inference can be unavailable because no weights are installed yet.
+          // Catalog preparation is independent; native installation enforces admission.
           result.push({
             id: `catalog:${item.source.catalogId}`,
             object: 'model',
@@ -111,29 +115,14 @@ export function createMobileModelManager(
             locality: 'on-device',
             preparation: 'app-download',
             download_bytes: item.approxSizeBytes,
-            context_window: Math.min(4096, llama.contextTokens),
-            max_output_tokens: Math.min(
-              Math.min(4096, llama.contextTokens) - 1,
-              llama.maxOutputTokens,
-            ),
-            availability:
-              !fits || llama.availability === 'unavailable'
-                ? 'unavailable'
-                : active
-                  ? 'downloading'
-                  : 'download-required',
-            reason_code: !fits
-              ? 'insufficient_memory'
-              : llama.availability === 'unavailable'
-                ? 'provider_unavailable'
-                : 'model_download_required',
+            context_window: limits.contextSize,
+            max_output_tokens: limits.maxTokens,
+            availability: !fits ? 'unavailable' : active ? 'downloading' : 'download-required',
+            reason_code: !fits ? 'insufficient_memory' : 'model_download_required',
             unavailable_reason: !fits
               ? 'This model exceeds the device memory budget'
-              : llama.availability === 'unavailable'
-                ? llama.reason
-                : 'Prepare this model to use it',
-            recovery_actions:
-              !fits || llama.availability === 'unavailable' ? ['choose-model'] : ['prepare'],
+              : 'Prepare this model to use it',
+            recovery_actions: !fits ? ['choose-model'] : ['prepare'],
             capabilities: { ...llama.capabilities, tools: false, structuredOutput: false },
             supported_options: ['model', 'messages', 'stream', 'max_tokens'],
           });

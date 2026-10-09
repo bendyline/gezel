@@ -8,6 +8,7 @@ import { ActivityTracker } from '../fs/activity-tracker.js';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from './manager.js';
+import { TaskRunner } from './runner.js';
 import { TaskScheduler } from './scheduler.js';
 
 let home: string;
@@ -1645,10 +1646,47 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
       now: () => now,
       // A queued handoff (fanout admission, provider backpressure) is work the
       // runner will start on its own schedule, not a stall.
-      runner: () => ({ hasHandoffFor: () => true }),
+      runner: () => ({ hasHandoffFor: () => true, isHeldForNightShift: () => false }),
     });
     await scheduler.sweepStuckSteps();
     expect(chat.delivered).toHaveLength(0);
+  });
+
+  it('does not re-drive a nightly task that already ran tonight, or one waiting for the night', async () => {
+    // The Meester's oversight review loops back to its own step when it
+    // finishes, re-armed for tomorrow. The sweep read the re-armed step as
+    // stalled and re-ran a finished night's review three times (2026-10-08).
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const rec = await store.readTask('cron', num);
+    await store.writeTask({ ...rec!, nightShift: { enabled: true, onceADay: true } });
+    const gate = { active: true, pending: false };
+    const runner = new TaskRunner({
+      store,
+      dispatcher: {} as ConstructorParameters<typeof TaskRunner>[0]['dispatcher'],
+      isNightShiftActive: () => gate.active,
+      isNightShiftPending: () => gate.pending,
+    });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+      runner: () => runner,
+    });
+
+    await scheduler.sweepStuckSteps();
+    gate.active = false;
+    gate.pending = true;
+    await scheduler.sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(0);
+
+    // Tonight's run is owed and the shift is on: a silent step is a stall again.
+    gate.active = true;
+    await scheduler.sweepStuckSteps();
+    expect(chat.delivered.map((d) => d.taskRef)).toEqual([`cron/${num}`]);
   });
 
   it('does not re-drive a spawn host held by the fanout barrier until its children settle', async () => {

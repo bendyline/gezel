@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NIGHT_SHIFT_QUIET_REASONS } from '../night-shift.js';
 import { NpmPackageNameSchema, NpmRegistryVersionSchema } from './npm-package.js';
 
 /**
@@ -322,6 +323,20 @@ export const NightShiftReviewIntentSchema = z.object({
       actionCount: z.number(),
     }),
   ),
+  /** Why the window produced nothing; absent when it produced something. */
+  quiet: z.object({ reason: z.enum(NIGHT_SHIFT_QUIET_REASONS) }).optional(),
+  /** The nightly oversight task, when it is paused waiting for the person. */
+  pausedReview: z.object({ projectId: z.string(), num: z.number() }).optional(),
+  /** The week's recap, written the first morning of a new week (Default project artifacts). */
+  weeklyRecap: z.object({ week: z.string(), path: z.string() }).optional(),
+  /** What the nightly sweep got through (see `NightShiftIndexing`). */
+  indexing: z
+    .object({
+      filesIndexed: z.number(),
+      filesReviewed: z.number(),
+      mediaDescribed: z.number(),
+    })
+    .optional(),
 });
 export type NightShiftReviewIntent = z.infer<typeof NightShiftReviewIntentSchema>;
 

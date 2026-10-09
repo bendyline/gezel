@@ -414,4 +414,15 @@ describe('launchRequestBody', () => {
       }),
     ).toEqual({ craftbookId: 'powerpoint-deck', params: { topic: 'France' } });
   });
+
+  it('carries Tonight, so the task waits for the night shift', () => {
+    expect(
+      launchRequestBody({
+        craftbookId: 'powerpoint-deck',
+        params: {},
+        origin: 'user',
+        tonight: true,
+      }),
+    ).toEqual({ craftbookId: 'powerpoint-deck', params: {}, tonight: true });
+  });
 });

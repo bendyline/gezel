@@ -301,7 +301,7 @@ export function leanSession(
   return project?.leanProfile === true && !session.taskRef;
 }
 
-type TurnTool = Pick<ProjectTypeTool, 'name' | 'turn' | 'state'>;
+type TurnTool = Pick<ProjectTypeTool, 'name' | 'turn' | 'state' | 'answer'>;
 
 /** How an activity's turns run, on every host, from what its tools declare. */
 export interface ProjectTypeTurnRules {
@@ -358,6 +358,15 @@ export function projectTypeTurnRules(
             closingArgByTool: Object.fromEntries(
               turnTools.flatMap((tool) => (tool.turn?.say ? [[tool.name, tool.turn.say]] : [])),
             ),
+            ...(turnTools.some((tool) => tool.turn?.show)
+              ? {
+                  closingOutputByTool: Object.fromEntries(
+                    turnTools.flatMap((tool) =>
+                      tool.turn?.show ? [[tool.name, tool.turn.show]] : [],
+                    ),
+                  ),
+                }
+              : {}),
             fallbackText:
               turnTools.find((tool) => tool.turn?.fallback)?.turn?.fallback ?? 'Your turn.',
             maxClosingChars: 600,
@@ -373,6 +382,23 @@ export function projectTypeTurnRules(
  * that summoned it. Otherwise the turn is an ordinary one, free to say
  * something instead (checkers: the game is over, so there is no move to make).
  */
+/**
+ * The turn tool a person's message must be answered with, given the state
+ * just read: the state tool's `answer.tool` while its output matches
+ * `answer.when`, else none (the turn is an ordinary one).
+ */
+export function stateAnswerTool(
+  tools: readonly TurnTool[],
+  stateOutput: unknown,
+  project?: { leanProfile?: boolean } | null,
+): string | undefined {
+  const rules = projectTypeTurnRules(tools, project);
+  const answer = tools.find((tool) => tool.name === rules?.stateTool)?.answer;
+  if (!answer || !rules?.terminal?.toolNames.includes(answer.tool)) return undefined;
+  if (answer.when && !scriptOutputMatches(answer.when, stateOutput)) return undefined;
+  return answer.tool;
+}
+
 export function reactionRequiredTool(
   reaction: Pick<ProjectTypeToolReaction, 'turn'> | undefined,
   output: unknown,
@@ -410,6 +436,15 @@ export function projectTypeTurnProblems(
       );
     else if (!target.turn)
       problems.push(`${tool.name}: reaction.turn names ${turn.tool}, which does not declare turn`);
+  }
+  for (const tool of manifest.tools) {
+    if (!tool.answer) continue;
+    if (!tool.state) problems.push(`${tool.name}: answer applies only to the state tool`);
+    const target = byName.get(tool.answer.tool);
+    if (!target || pageTools.has(tool.answer.tool) || !target.turn)
+      problems.push(
+        `${tool.name}: answer names ${tool.answer.tool}, which is not a model tool that declares turn`,
+      );
   }
   if (manifest.tools.filter((tool) => tool.state).length > 1)
     problems.push('more than one tool declares state; a message is answered from one');

@@ -259,7 +259,7 @@ describe('consolidated MCP tools', () => {
     });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual({
-      summary: 'Memory already existed (project); no duplicate was added.',
+      summary: 'Already in the project’s notes; nothing was added.',
       status: 'duplicate',
       scope: 'project',
     });

@@ -17,6 +17,7 @@ import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/questio
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import { answerOwnerStep } from '../../tasks/owner-step.js';
 import { retryPausedTask } from '../../tasks/retry.js';
+import { unattendedNightWork, unattendedQuestionDecline } from '../../tasks/unattended.js';
 import { applyCommandApprovalAnswer } from '../../workspace/command-approval-answer.js';
 import { applyNpmInstallApprovals, intentPackages } from '../../workspace/npm.js';
 import {
@@ -58,6 +59,24 @@ export function questionRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = AskQuestionRequestSchema.parse(await c.req.json());
+
+    // The runtime's own night work runs unattended: nobody is awake to answer
+    // it, and its questions are about its own plumbing, never the person's
+    // business. Decline instead of filing a card.
+    const readRef = async (ref: string | undefined) => {
+      const parsed = ref ? parseTaskRef(ref) : null;
+      return parsed
+        ? await ctx.store.readTask(parsed.projectId, parsed.num).catch(() => null)
+        : null;
+    };
+    const askingTask = await readRef(body.taskRef);
+    const unattended = askingTask
+      ? unattendedNightWork(askingTask, await readRef(askingTask.parentTaskRef))
+      : null;
+    if (askingTask && unattended) {
+      log.info(`[questions] declined a question from ${askingTask.ref}: unattended ${unattended}`);
+      return c.json({ questionId: '', declined: unattendedQuestionDecline(unattended) }, 200);
+    }
 
     // Turn-to-turn dedup: never stack a second unanswered question card
     // on a session. A gezel that re-asks a reworded version of the same

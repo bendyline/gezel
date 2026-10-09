@@ -24,8 +24,10 @@ vi.mock('./projects/infer-project.js', async (importOriginal) => {
       deps: InferProjectDeps,
       request: Parameters<typeof actual.inferProjectForPath>[1],
     ) => actual.inferProjectForPath(isolatedDeps(deps), request),
-    listWellKnownFolders: (deps: InferProjectDeps) =>
-      actual.listWellKnownFolders(isolatedDeps(deps)),
+    listWellKnownFolders: (
+      deps: InferProjectDeps,
+      opts?: Parameters<typeof actual.listWellKnownFolders>[1],
+    ) => actual.listWellKnownFolders(isolatedDeps(deps), opts),
   };
 });
 
@@ -48,6 +50,8 @@ vi.mock('./memory/embeddings.js', () => {
     embeddingsDisabledReason: () => null,
     embeddingPipelineStatus: () => 'ready' as const,
     embeddingsHealth: () => ({ status: 'ready' as const }),
+    openEmbeddings: () => {},
+    shutdownEmbeddings: async () => {},
     warmEmbeddings: async () => true,
     embed: async (text: string) => vectorFor(text),
     embedQuery: async (text: string) => vectorFor(text),
@@ -447,6 +451,74 @@ describe('projects API', () => {
       path: join(inferenceMachine.homedir, 'Documents'),
       itemCount: 1,
       documentCount: 1,
+    });
+  });
+
+  it("recruits an added folder's crew only for the app's own credential", async () => {
+    const make = async (name: string) => {
+      const dir = join(fixtureRoot, 'added', name);
+      await mkdir(dir, { recursive: true });
+      for (let i = 0; i < 6; i++) await writeFile(join(dir, `IMG_${i}.jpg`), 'jpeg');
+      return dir;
+    };
+    type Inferred = { project: { id: string; properties?: Record<string, string> } };
+
+    const cli = await svc.context.tokenStore.issue({
+      appId: 'test-cli',
+      appName: 'Test CLI',
+      scopes: ['cli'],
+    });
+    const fromCli = await httpFetch(`${baseUrl}/api/projects/infer-for-path`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cli.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: await make('cli-photos'), kind: 'folder', recruitCrew: true }),
+    });
+    expect(fromCli.status).toBe(200);
+    const ignored = (await fromCli.json()) as Inferred;
+    expect(ignored.project.properties?.['gezel.folderKind']).toBeUndefined();
+
+    const fromApp = await api('POST', '/api/projects/infer-for-path', {
+      path: await make('app-photos'),
+      kind: 'folder',
+      recruitCrew: true,
+    });
+    expect(fromApp.status).toBe(200);
+    const recruited = (await fromApp.json()) as Inferred;
+    expect(recruited.project.properties?.['gezel.folderKind']).toBe('pictures');
+  });
+
+  it('refuses a second project on a folder, and a folder gezel never owns', async () => {
+    const dir = join(fixtureRoot, 'added', 'twice');
+    await mkdir(dir, { recursive: true });
+    const first = await api('POST', '/api/projects', { name: 'Once', workingDir: dir });
+    expect(first.status).toBe(201);
+    const firstId = ((await first.json()) as { id: string }).id;
+
+    const second = await api('POST', '/api/projects', { name: 'Twice', workingDir: dir });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toMatchObject({ code: 'folder_in_use', projectId: firstId });
+
+    const tmp = await api('POST', '/api/projects', {
+      name: 'Temp',
+      workingDir: await realpath(tmpdir()),
+    });
+    expect(tmp.status).toBe(403);
+    expect(((await tmp.json()) as { code?: string }).code).toBe('forbidden_root');
+  });
+
+  it('previews what an added folder holds before creating it', async () => {
+    const dir = join(fixtureRoot, 'added', 'preview-photos');
+    await mkdir(dir, { recursive: true });
+    for (let i = 0; i < 4; i++) await writeFile(join(dir, `IMG_${i}.jpg`), 'jpeg');
+    const res = await api('POST', '/api/projects/infer-for-path', {
+      path: dir,
+      kind: 'folder',
+      create: false,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      project: null,
+      folder: { kind: 'pictures', census: { images: 4, files: 4, complete: true } },
     });
   });
 

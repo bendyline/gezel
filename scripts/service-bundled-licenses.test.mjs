@@ -205,12 +205,46 @@ test('an inlined package needs a reviewed text for the exact carrier version', a
   );
 });
 
+for (const lineEnding of ['\n', '\r\n']) {
+  test(`staged license digests match the shipped bytes after checkout conversion to ${JSON.stringify(lineEnding)}`, async (t) => {
+    const dir = await tempDir(t, 'gezel-bundled-license-endings-');
+    const { surfaces, serviceDist } = await fixture(dir);
+    const embeddedRoot = await registry(dir, betaCarrier());
+    const sourcePath = join(embeddedRoot, 'inlined@3.1.0-LICENSE');
+    const source = (await readFile(sourcePath, 'utf8')).replace(/\n/g, lineEnding);
+    const registryPath = join(embeddedRoot, 'manifest.json');
+    const reviewed = JSON.parse(await readFile(registryPath, 'utf8'));
+    const otherEnding = lineEnding === '\n' ? '\r\n' : '\n';
+    const recorded = source.replace(/\r?\n/g, otherEnding);
+    reviewed.texts['inlined@3.1.0-LICENSE'].sha256 = createHash('sha256')
+      .update(recorded)
+      .digest('hex');
+    await writeFile(registryPath, JSON.stringify(reviewed));
+    await writeFile(sourcePath, source);
+    const options = { serviceDist, surfaces, extraPackageRoots: [], embeddedRoot };
+
+    await stageServiceBundledLicenses(options);
+    const { packages } = await verifyServiceBundledLicenses(options);
+    const text = packages.find((pkg) => pkg.name === 'inlined').texts[0];
+    const stagedPath = join(serviceDist, 'licenses', 'npm', text.file);
+    assert.equal(await readFile(stagedPath, 'utf8'), source);
+    assert.equal(text.sha256, createHash('sha256').update(source).digest('hex'));
+    assert.ok(text.file.includes(text.sha256));
+
+    await writeFile(stagedPath, `${source}altered`);
+    await assert.rejects(() => verifyServiceBundledLicenses(options), /missing or altered/);
+  });
+}
+
 test('a recorded license hash survives a line-ending conversion, not an edit', () => {
   const crlf = Buffer.from('MIT License\r\n\r\nCopyright inlined authors\r\n');
   const recorded = createHash('sha256').update(crlf).digest('hex');
   const lf = Buffer.from('MIT License\n\nCopyright inlined authors\n');
   assert.equal(matchesRecordedSha(crlf, recorded), true);
   assert.equal(matchesRecordedSha(lf, recorded), true, 'an LF checkout of a CRLF-recorded text');
-  assert.equal(matchesRecordedSha(Buffer.from('MIT License\n\nCopyright someone else\n'), recorded), false);
+  assert.equal(
+    matchesRecordedSha(Buffer.from('MIT License\n\nCopyright someone else\n'), recorded),
+    false,
+  );
   assert.equal(matchesRecordedSha(lf, undefined), false);
 });

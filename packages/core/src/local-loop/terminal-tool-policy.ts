@@ -1,3 +1,4 @@
+import { scriptRunOutputFromText } from '../tools/results.js';
 import { canonicalToolName } from '../tools/tool-names.js';
 import type { ActiveCraftbookStep, TerminalToolPolicy } from './provider-contract.js';
 
@@ -15,6 +16,9 @@ export const TERMINAL_ACTION_SKIPPED_OUTPUT =
  * overwrite the deliverable that just cleared the gate).
  */
 const BUILTIN_TERMINAL_TOOLS = new Set(['advance_task_step']);
+
+/** Bound on app-composed reply text a turn tool's script returns (`turn.show`). */
+export const TERMINAL_SHOW_MAX_CHARS = 800;
 
 function normalizePath(path: string): string {
   return path.trim().replace(/^\.\//, '').replace(/\\/g, '/');
@@ -53,6 +57,14 @@ export function terminalToolClosingText(
     ) {
       return null;
     }
+  }
+  const outputField = policy.closingOutputByTool?.[toolName];
+  if (outputField) {
+    const shown = (scriptRunOutputFromText(output) as Record<string, unknown> | undefined)?.[
+      outputField
+    ];
+    if (typeof shown === 'string' && shown.trim())
+      return compactClosing(shown, policy.fallbackText.trim(), TERMINAL_SHOW_MAX_CHARS);
   }
   const closingArg = policy.closingArgByTool?.[toolName] ?? policy.closingArg;
   const fromArg =

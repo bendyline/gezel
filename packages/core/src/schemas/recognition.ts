@@ -60,7 +60,7 @@ export type ImageExif = z.infer<typeof ImageExifSchema>;
  * which lands in the history log as `tool.called`.
  */
 export const ImageStaticMetaSchema = z.object({
-  format: z.enum(['png', 'jpeg', 'gif', 'webp', 'svg', 'unknown']),
+  format: z.enum(['png', 'jpeg', 'gif', 'webp', 'svg', 'heic', 'raw', 'unknown']),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   byteLength: z.number().int().nonnegative(),

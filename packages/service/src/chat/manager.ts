@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
   MINIMAL_FOOTPRINT_MAX_WINDOW,
+  PROMPT_FOOTPRINT_POLICY,
   buildToolReceipt,
   estimateTokens,
   findAskCycleOrDepth,
@@ -14,10 +15,13 @@ import {
   renderTurnStatePrelude,
   resolveFactualWriting,
   resolvePromptFootprint,
-  stepOwnerGezelId,
+  resolveSocialMode,
+  selectPersonNotes,
+  stateAnswerTool,
   taskTranscriptCompatible,
   todayIso,
   turnStateWanted,
+  withCharacterChatCap,
   withCurrentDateTimeLine,
 } from '@bendyline/gezel';
 import type {
@@ -89,7 +93,6 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
-  requiredOutputMediaForGate,
   resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -116,10 +119,7 @@ import {
   appToolBindingsFingerprint,
 } from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
-import {
-  outputMediumForStep,
-  toolsetIdsExplicitlyDisabledForStep,
-} from '../craftbook/step-toolsets.js';
+import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
   DEFAULT_PROJECT_MISSION_MD,
@@ -130,6 +130,7 @@ import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
+import { USER_MEMORY_ID } from '../memory/daily-markdown.js';
 import { extractMemories, isCancelledExtraction } from '../memory/extractor.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { renderRecallBlock, runAutoRecall } from '../memory/recall.js';
@@ -145,12 +146,7 @@ import {
   type ResolvedTuning,
   resolveTuning,
 } from '../model-profile/tuning.js';
-import type {
-  ModelCtx,
-  NudgeVerdict,
-  ResolvedModelProfile,
-  TurnCtx,
-} from '../model-profile/types.js';
+import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { reconcileDefaultModel } from '../models/default-model-fallback.js';
 import { hasObservationTables } from '../observations/query.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
@@ -257,18 +253,9 @@ import {
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
 import { reviewTaskFigures } from '../tasks/figure-review.js';
-import {
-  buildStageOneNudge,
-  buildStageTwoNudge,
-  escalationDisabled,
-  gateFailureSignature,
-  stageForPlateau,
-} from '../tasks/gate-escalation.js';
-import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
 import { findOwnerThread } from '../tasks/owner-thread.js';
 import { taskReferencesAsRetrieval } from '../tasks/references.js';
-import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
 import {
   discoverProjectMcpToolsets,
   resolveImportedMcpRuntime,
@@ -352,13 +339,6 @@ import {
 } from './context-forcefit.js';
 import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
-import { evaluateDeliverableContract } from './deliverable-contract.js';
-import {
-  completionGateWorkspaceFiles,
-  deliverableWrittenThisTurn,
-  evaluateDeliverableGate,
-  hookOwnedAdvanceHasModelOutput,
-} from './deliverable-gate.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -411,6 +391,20 @@ import {
   modelRoutingDisabled,
   rankModelForFloor,
 } from './model-routing.js';
+import {
+  type DeliverableGateDeps,
+  type TaskAdvancerFn,
+  maybeAutoAdvanceOnObservableProgress,
+  maybeGateExpectedDeliverable,
+  workspaceDeliverableReady,
+} from './observable-progress.js';
+import {
+  liveTurnToolNames,
+  resolveContinuationBudget,
+  resolveProfileTurnTimeoutMs,
+  resolveUserPromptPrelude,
+  runPostTurnDetectors,
+} from './profile-hooks.js';
 import { type CompiledPrompt, PromptRecorder } from './prompt-record.js';
 import {
   capabilitySafeCorrectivePrompt,
@@ -428,7 +422,6 @@ import {
 import {
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,
-  extractDeliverableTargetPath,
   gezelMcpToolsToAllow,
   isPureDelegationRole,
   isRoleDelegationTool,
@@ -439,30 +432,34 @@ import {
   shouldConstrainToImmediateFileWrite,
   shouldConstrainToScenarioFileRepair,
 } from './role-tool-filter.js';
-import {
-  bindStepActivation,
-  currentStepActivation,
-  servesEarlierActivation,
-} from './session-step-activation.js';
+import { bindStepActivation, currentStepActivation } from './session-step-activation.js';
 import { SessionTelemetryTracker } from './session-telemetry.js';
 import {
   SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
   applyActiveStepToolPolicy,
   availableBuiltinToolsForAllowlist,
   buildToolCapWarning,
-  projectOrchestrationConstraintActive as resolveProjectOrchestrationConstraintActive,
   resolveSessionToolSurface,
   stepAllowsOnlyBuiltinTools,
   taskStepContextualBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
-import { repairClampDisabled, stepGateRepairActive } from './step-tool-kit.js';
 import {
   type TaskBudgetLimits,
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
 import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
+import {
+  deliverableIsExistingSubstantialFile,
+  directFileWorkConstraintActive,
+  exactCraftbookConstraintActive,
+  gateRepairConstraintActive,
+  immediateFileWriteConstraintActive,
+  latestUserMessageContent,
+  scenarioFileRepairConstraintActive,
+  sessionProjectOrchestrationConstraintActive,
+} from './tool-clamps.js';
 import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { markTurnCancelled, turnCancelReasonOf } from './turn-cancel-marker.js';
@@ -472,7 +469,6 @@ import {
   isCoordinatorRole,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
-  shouldConstrainToExactCraftbookInvocation,
 } from './turn-intent-plan.js';
 import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-file-claim.js';
 import { UsageTracker } from './usage.js';
@@ -601,14 +597,6 @@ function awaitOneShotStage<T>(
   });
 }
 
-function latestUserMessageContent(messages: readonly ChatMessage[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role === 'user') return message.content;
-  }
-  return undefined;
-}
-
 /**
  * Connector-type prefixes that expose the social post write tools
  * (draft_post / queue_post / publish_post). Mirrors the prefix list in
@@ -689,17 +677,6 @@ function buildUserTurnMessage(
   };
 }
 
-/** Include provider-qualified and unqualified spellings in capability checks. */
-function liveTurnToolNames(session: LLMSession | null | undefined): string[] {
-  const names = new Set<string>();
-  for (const name of session?.getRegisteredToolNames?.() ?? []) {
-    names.add(name);
-    const qualified = name.match(/^mcp__.+?__(.+)$/)?.[1];
-    if (qualified && qualified !== '*') names.add(qualified);
-  }
-  return [...names];
-}
-
 /**
  * Resolve one model id for every stage of a session build. Keeping this pure
  * prevents provider binding/admission from drifting away from the model later
@@ -728,47 +705,6 @@ export function effectiveSessionModel(args: {
     args.record.model
   );
 }
-
-export interface GateScriptDiagnostic {
-  scriptName: string;
-  runId?: string;
-  error?: string;
-  logsTail?: string;
-}
-
-/** Result the injected task advancer reports back to the chat loop. */
-export type TaskAdvancerOutcome =
-  | { status: 'advanced' }
-  | {
-      status: 'held';
-      message: string;
-      messageFingerprint: string;
-      attempt: number;
-      /** True when the gate paused the task (budget spent / plateau). */
-      paused?: boolean;
-      /** The gate runtime/configuration failed before judging the deliverable. */
-      infrastructureError?: boolean;
-      /** Present when an onExit hook, rather than the declarative gate, held completion. */
-      hook?: 'onExit';
-      /** The gate cannot be met under current policy (workspace writes off); paused for a human. */
-      unsatisfiable?: boolean;
-      /** Gate script diagnostics for durable/user-visible failure reporting. */
-      scriptRuns?: GateScriptDiagnostic[];
-      /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
-      escalationStage?: number;
-      /**
-       * The task's active step after the hold. Differs from the held step when
-       * the gate's `onReject` looped the task to another step.
-       */
-      activeStepId?: string;
-    };
-
-export type TaskAdvancerFn = (
-  projectId: string,
-  num: number,
-  stepId: string,
-  goto?: string,
-) => Promise<TaskAdvancerOutcome>;
 
 /**
  * Wired to the TaskManager pause-for-help path when a task's fail-fast budget
@@ -1619,6 +1555,11 @@ export class ChatManager extends LocalEngineRuntime {
   /** Set of session ids whose first-turn system prompt has been logged
    *  under debug mode, so repeat turns don't spam stdout. */
   private readonly debugPromptLoggedFor = new Set<string>();
+
+  /** Whether the person has social mode on (off by default on the desktop). */
+  private async socialMode(): Promise<boolean> {
+    return resolveSocialMode(await this.store.readConfig().catch(() => ({})), 'desktop');
+  }
   /** `prompt.compiled` history events, and the debug-mode prompt texts. */
   private readonly promptRecorder: PromptRecorder;
   /** What each built set of session opts was compiled from, until a session uses it. */
@@ -1741,7 +1682,7 @@ export class ChatManager extends LocalEngineRuntime {
     record: ChatSession,
     userText: string,
     origin: TurnMessageOrigin,
-  ): Promise<string | null> {
+  ): Promise<{ prelude: string; requiredTool?: string } | null> {
     const runner = this.scriptRunnerForHooks;
     if (!runner || !record.scriptTools?.length || !turnStateWanted(userText, origin)) return null;
     const project = await this.store.getProject(record.projectId).catch(() => null);
@@ -1763,7 +1704,11 @@ export class ChatManager extends LocalEngineRuntime {
         return null;
       }
       log.info(`session ${record.id.slice(0, 8)}: authoritative state refreshed before turn`);
-      return renderTurnStatePrelude(boardTool.name, run.output);
+      const requiredTool = stateAnswerTool(record.scriptTools, run.output, project);
+      return {
+        prelude: renderTurnStatePrelude(boardTool.name, run.output),
+        ...(requiredTool ? { requiredTool } : {}),
+      };
     } catch (err) {
       log.warn(
         `session ${record.id.slice(0, 8)}: pre-turn ${boardTool.name} threw; leaving the model to call the tool: ${
@@ -2336,325 +2281,16 @@ export class ChatManager extends LocalEngineRuntime {
     }
   }
 
-  /**
-   * Observable-progress auto-advance. Called at the end of a gezel's turn:
-   * if this gezel owns the active step of an active task in this project,
-   * and that step declares an `advanceWhen` whose deliverable now exists +
-   * clears `minBytes` + passes the optional sniff, advance the step WITHOUT
-   * the model having called `advance_task_step`. This is the fix for "gezels
-   * do the work but never advance the workflow" — progression rides on the
-   * deliverable, not on a meta-tool call the model omits.
-   *
-   * Keyed on the gezel's *assignment* (not the session's task-scope) so it
-   * fires even in a plain project session — the shape the meester macros
-   * actually produce (no task-scoped handoff session at create today).
-   * Routes through the injected `taskAdvancer` (= `TaskManager.completeStep`),
-   * so the same onExit/branches/onEnter/handoff/attemptCount machinery a
-   * model-driven advance would trigger runs identically downstream.
-   */
-  private async maybeAutoAdvanceOnObservableProgress(
-    state: LiveSessionState,
-    drained: ChatMessageToolCall[],
-    sessionId: string,
-  ): Promise<{
-    /** The active step completed and ownership moved; this session must yield. */
-    autoAdvanced?: true;
-    unmetEditGate?: { taskRef: string; file: string };
-    gateRejected?: {
-      taskRef: string;
-      stepId: string;
-      message: string;
-      fingerprint: string;
-      paused?: boolean;
-      escalationStage?: number;
-      infrastructureError?: boolean;
-      hook?: 'onExit';
-      unsatisfiable?: boolean;
-      scriptRuns?: GateScriptDiagnostic[];
+  /** The manager state the end-of-turn deliverable checks read (see observable-progress.ts). */
+  private deliverableGateDeps(): DeliverableGateDeps {
+    return {
+      store: this.store,
+      taskAdvancer: this.taskAdvancer,
+      draftReader: this.draftReader,
+      scriptRunner: this.scriptRunnerForHooks,
+      readEffectiveTask: (projectId, num) => this.readEffectiveTask(projectId, num),
+      liveRecord: (sessionId) => this.states.get(sessionId)?.record,
     };
-  }> {
-    if (!this.taskAdvancer) return {};
-    const projectId = state.record.projectId;
-    if (!projectId) return {};
-    const gezelId = state.record.gezelId;
-    // The model's own advance wins — never double-advance in one turn.
-    if (drained.some((d) => d.name === 'advance_task_step' && d.success)) return {};
-
-    const scopedRef = state.record.taskRef ? parseTaskRef(state.record.taskRef) : null;
-    const scopedTask = scopedRef
-      ? await this.readEffectiveTask(scopedRef.projectId, scopedRef.num)
-      : null;
-    const tasks = state.record.taskRef
-      ? scopedTask
-        ? [scopedTask]
-        : []
-      : withEffectiveTaskStatuses(
-          await this.store.listProjectTasks(projectId).catch(() => [] as Task[]),
-        );
-    // First owned, active edit-gate that HELD because the model didn't
-    // write to the deliverable this turn. Surfaced to the caller so the
-    // false-"done" re-prompt can fire (the active half of the gate).
-    let unmetEditGate: { taskRef: string; file: string } | undefined;
-    for (const task of tasks) {
-      // A task-scoped handoff may share its gezel with the host and dozens of
-      // fanout siblings. Its tool trace is evidence only for that task. The
-      // older assignment-only fallback remains for ordinary project sessions,
-      // but a pinned session must never advance some other task merely because
-      // the same reviewer owns both (wild-caught when a child read made the PR
-      // review host spend its collect-gate attempt early).
-      if (state.record.taskRef && task.ref !== state.record.taskRef) continue;
-      // A scheduled run always arrives task-scoped, so an unpinned session is
-      // never doing its step. Default always holds the Meester's Night Shift
-      // oversight task, which made every front-door reply that read as
-      // finished "unmet" on night-shift-report.md. On a routed PowerPoint ask
-      // the resulting nudge turn was still clamped to `invoke_craftbook`, and
-      // it launched a second deck crew (qwen3.8-27b, 2026-09-23).
-      if (!state.record.taskRef && (task.cron || task.nightShift?.enabled)) continue;
-      if (taskEffectiveStatus(task) !== 'active' || !task.activeStepId) continue;
-      const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
-      const adv = step?.advanceWhen;
-      if (!step) continue;
-      // `terminal` means that completing this step completes the task. It is
-      // not an instruction to bypass observable-progress handling. In fact,
-      // terminal artifact steps are the most important place to do this: the
-      // provider stops after the checkpoint write, then the completion gate
-      // must validate that write and finish (or repair) the task.
-      const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
-      const readEvidenceOnly =
-        !adv &&
-        normalizedGate?.at === 'completion' &&
-        normalizedGate.checks.length > 0 &&
-        normalizedGate.checks.every(
-          (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
-        ) &&
-        normalizedGate.scripts.length === 0;
-      if (!adv && !readEvidenceOnly) continue;
-      // Only this gezel's step (step assignee → suggested → task assignee);
-      // an owner step advances only when the owner says so.
-      const owner = stepOwnerGezelId(task, step);
-      if (owner !== gezelId) continue;
-      // A loop re-enters a step under a NEW session; a turn ending in the
-      // session of an earlier pass is not this pass's work. Wild-caught on
-      // spreadsheet-model (qwen3.8-flash-next, 2026-09-30): a nudge into
-      // build's first-pass session ended after evaluate looped back to build,
-      // advanced the new pass on the unchanged index.html, and took the write
-      // lease from the session actually rebuilding it.
-      if (servesEarlierActivation(state.record, task.ref, step)) {
-        log.info(
-          `skip observable advance: session ${sessionId} belongs to an earlier activation of ` +
-            `${task.ref}/${step.id} (bound ${state.record.stepActivationId}, current ${step.lastActivatedAt})`,
-        );
-        continue;
-      }
-
-      // A fixed-action evidence step intentionally hides
-      // `advance_task_step`: the only useful model action is opening the
-      // exact records, and the completion gate can prove that from service
-      // History. Once the turn has a successful artifact read, try the gate
-      // automatically. Partial/truncated reads stay held and feed the exact
-      // missing ranges back through the normal rejection loop.
-      if (readEvidenceOnly) {
-        const attemptedRead = drained.some(
-          (call) =>
-            call.success && (call.name === 'read_artifact' || call.name === 'read_artifacts'),
-        );
-        if (!attemptedRead) continue;
-        log.info(
-          `session ${sessionId}: read evidence observed on ${task.ref} step "${step.id}" — auto-advancing`,
-        );
-        const outcome = await this.taskAdvancer(projectId, task.num, step.id).catch((err) => {
-          log.error('[chat] read-evidence auto-advance failed:', err);
-          return null;
-        });
-        if (outcome && outcome.status === 'held') {
-          return {
-            gateRejected: {
-              taskRef: task.ref,
-              stepId: step.id,
-              message: outcome.message,
-              fingerprint: outcome.messageFingerprint,
-              ...(outcome.paused !== undefined ? { paused: outcome.paused } : {}),
-              ...(outcome.infrastructureError !== undefined
-                ? { infrastructureError: outcome.infrastructureError }
-                : {}),
-              ...(outcome.hook !== undefined ? { hook: outcome.hook } : {}),
-              ...(outcome.unsatisfiable !== undefined
-                ? { unsatisfiable: outcome.unsatisfiable }
-                : {}),
-              ...(outcome.scriptRuns !== undefined ? { scriptRuns: outcome.scriptRuns } : {}),
-              ...(outcome.escalationStage !== undefined
-                ? { escalationStage: outcome.escalationStage }
-                : {}),
-            },
-          };
-        }
-        return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
-      }
-
-      // From here the ordinary observable is a persisted deliverable.
-      if (!adv) continue;
-
-      // A hook-owned `advanceWhen.file` is evidence prepared by the runtime,
-      // not proof that the model completed every other required output. Pull
-      // Request Review's scope step is the wild-caught case: onEnter wrote the
-      // immutable batches file, while the model still owed a task note. A
-      // failed read-only turn therefore satisfied the file observable and
-      // burned a gate attempt before the note could exist. Hold automatic
-      // progression until this turn produces the model-owned task-note
-      // surface. Pure runtime steps such as coverage collection still advance
-      // from their hook-owned file because they declare no model output.
-      const hookOwnsAdvanceFile = stepOnEnterProducesAdvanceFile(step);
-      const taskNoteIsModelOutput =
-        outputMediumForStep(step) === 'task-note' ||
-        requiredOutputMediaForGate(step.gate).has('task-note');
-      if (!hookOwnedAdvanceHasModelOutput(hookOwnsAdvanceFile, taskNoteIsModelOutput, drained)) {
-        continue;
-      }
-
-      const content = await this.readStepDeliverable(
-        projectId,
-        task,
-        adv.file,
-        adv.artifact === true,
-      );
-      // `requireChange` steps (edit-an-existing-file deliverables) gate on
-      // the model having written to `adv.file` THIS turn — presence alone
-      // would advance on turn 1 since the source already exists. The
-      // turn's drained tool calls carry the path + success of each write.
-      // Match the write's drawer too: a workspace edit cannot prove an
-      // artifact checkpoint changed, nor can another task's same-named file.
-      const gate = evaluateDeliverableGate({ content, spec: adv, writes: drained });
-      if (!gate.satisfied) {
-        if (
-          adv.requireChange &&
-          !unmetEditGate &&
-          !deliverableWrittenThisTurn(drained, adv.file, adv.artifact === true)
-        ) {
-          unmetEditGate = { taskRef: task.ref, file: adv.file };
-        }
-        continue;
-      }
-
-      log.info(
-        `session ${sessionId}: observable progress on ${task.ref} step "${step.id}" ` +
-          `(${gate.reason}) — auto-advancing`,
-      );
-      const outcome = await this.taskAdvancer(projectId, task.num, step.id, adv.goto).catch(
-        (err) => {
-          log.error('[chat] observable auto-advance failed:', err);
-          return null;
-        },
-      );
-      // The step's COMPLETION gate judged the deliverable and rejected
-      // it: the deliverable exists (advanceWhen fired) but isn't good
-      // enough yet. Surface the prescriptive message so the continuation
-      // loop can re-prompt this same session toward the named gaps.
-      // A rejection whose onReject looped the task to ANOTHER step leaves this
-      // session nothing to repair: its step is no longer active. Re-prompting
-      // it "toward the named gaps" started invoice-run's reviewer on a stale
-      // turn that paused the whole task (qwen3.8-27b, 2026-10-01). Yield like
-      // a handoff instead.
-      if (
-        outcome &&
-        outcome.status === 'held' &&
-        !outcome.paused &&
-        outcome.activeStepId !== undefined &&
-        outcome.activeStepId !== step.id
-      ) {
-        log.info(
-          `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected and looped the task ` +
-            `to "${outcome.activeStepId}" — yielding`,
-        );
-        return { autoAdvanced: true };
-      }
-      if (outcome && outcome.status === 'held') {
-        log.info(
-          `session ${sessionId}: ${task.ref} step "${step.id}" gate rejected ` +
-            `(attempt ${outcome.attempt}) — holding`,
-        );
-        return {
-          gateRejected: {
-            taskRef: task.ref,
-            stepId: step.id,
-            message: outcome.message,
-            fingerprint: outcome.messageFingerprint,
-            ...(outcome.paused !== undefined ? { paused: outcome.paused } : {}),
-            ...(outcome.infrastructureError !== undefined
-              ? { infrastructureError: outcome.infrastructureError }
-              : {}),
-            ...(outcome.hook !== undefined ? { hook: outcome.hook } : {}),
-            ...(outcome.unsatisfiable !== undefined
-              ? { unsatisfiable: outcome.unsatisfiable }
-              : {}),
-            ...(outcome.scriptRuns !== undefined ? { scriptRuns: outcome.scriptRuns } : {}),
-            ...(outcome.escalationStage !== undefined
-              ? { escalationStage: outcome.escalationStage }
-              : {}),
-          },
-        };
-      }
-      return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
-    }
-    return unmetEditGate ? { unmetEditGate } : {};
-  }
-
-  /**
-   * A step deliverable as the observable-progress check reads it. A drafting
-   * task's workspace deliverable lives in the diffpack overlay — judge the
-   * proposed tree, not the untouched real one. Artifact deliverables are
-   * real in both modes.
-   */
-  private readStepDeliverable(
-    projectId: string,
-    task: Task,
-    file: string,
-    artifact: boolean,
-  ): Promise<string | null> {
-    return (
-      artifact
-        ? this.store.readProjectArtifact(projectId, file)
-        : task.diffpackId && this.draftReader
-          ? this.draftReader.read(projectId, task.diffpackId, file)
-          : this.store.readProjectWorkspaceFile(projectId, file)
-    ).catch(() => null);
-  }
-
-  /**
-   * Mid-turn twin of the workspace branch of
-   * {@link maybeAutoAdvanceOnObservableProgress}: the same task status,
-   * step ownership, read and {@link evaluateDeliverableGate} verdict, so the
-   * local loop's "deliverable is ready" footer never fires on a file the
-   * end-of-turn advance would hold. It additionally waits for every other
-   * workspace file the completion gate reads (see
-   * {@link completionGateWorkspaceFiles}).
-   */
-  private async workspaceDeliverableReady(
-    projectId: string,
-    taskNum: number,
-    stepId: string,
-    session: ChatSession,
-    writtenThisTurn: boolean,
-  ): Promise<boolean> {
-    const task = await this.readEffectiveTask(projectId, taskNum);
-    if (!task || taskEffectiveStatus(task) !== 'active' || task.activeStepId !== stepId) {
-      return false;
-    }
-    const step = task.craftbook.steps.find((s) => s.id === stepId);
-    const adv = step?.advanceWhen;
-    if (!step || !adv || adv.artifact) return false;
-    if (stepOwnerGezelId(task, step) !== session.gezelId) return false;
-    // The live record: a gate self-loop adopts its new activation there.
-    const record = this.states.get(session.id)?.record ?? session;
-    if (servesEarlierActivation(record, task.ref, step)) return false;
-    const content = await this.readStepDeliverable(projectId, task, adv.file, false);
-    const writes = writtenThisTurn ? [{ name: 'write_file', path: adv.file, success: true }] : [];
-    if (!evaluateDeliverableGate({ content, spec: adv, writes }).satisfied) return false;
-    const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
-    if (gate?.at !== 'completion') return true;
-    for (const file of completionGateWorkspaceFiles(gate.checks, adv.file)) {
-      if ((await this.readStepDeliverable(projectId, task, file, false)) === null) return false;
-    }
-    return true;
   }
 
   /**
@@ -2705,131 +2341,6 @@ export class ChatManager extends LocalEngineRuntime {
       }
     });
     return runnable.length > 0 ? { ...ed, scripts: runnable } : ed;
-  }
-
-  /**
-   * Evaluate a consultation session's `expectedDeliverable` completion
-   * contract at the end of the specialist's turn — the ad-hoc sibling of
-   * the craftbook completion gate in
-   * `maybeAutoAdvanceOnObservableProgress`. On reject, returns the
-   * prescriptive verdict so `runSend` re-prompts the specialist with the
-   * named gaps (same re-prompt machinery a step gate uses). No-op unless
-   * the session carries a file contract (`checks`/`scripts`).
-   */
-  private async maybeGateExpectedDeliverable(
-    state: LiveSessionState,
-    sessionId: string,
-  ): Promise<{
-    deliverableRejected?: {
-      message: string;
-      fingerprint: string;
-      stage?: number;
-      stopRetrying?: boolean;
-      filePath?: string;
-      plateauCount?: number;
-    };
-  }> {
-    const ed = state.record.expectedDeliverable;
-    if (!ed || ed.kind !== 'file') return {};
-    const checks = ed.checks ?? [];
-    const scripts = ed.scripts ?? [];
-    if (checks.length === 0 && scripts.length === 0) return {};
-    const projectId = state.record.projectId;
-    if (!projectId) return {};
-    const runner = this.scriptRunnerForHooks;
-    // Scripts need the runner; if it isn't wired, don't half-evaluate.
-    if (scripts.length > 0 && !runner) return {};
-
-    const ws: GateWorkspaceReader = {
-      read: (f) => this.store.readProjectWorkspaceFile(projectId, f).catch(() => null),
-      list: async () =>
-        (await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
-      readBytes: (f) => this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
-      readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
-      readArtifactBytes: async (f) =>
-        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
-      listArtifacts: async () =>
-        (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-    };
-    const runScript: GateScriptExecutor = async (ref) => {
-      // Ad-hoc deliverable gates run only trusted, packed standard checks.
-      if ((ref.scope ?? 'project') !== 'standard' || !runner) return 'skipped';
-      return runner.run({
-        projectId,
-        scriptName: ref.name,
-        scope: 'standard',
-        inputs: ref.inputs ?? {},
-        trigger: { kind: 'chat', sessionId, gezelId: state.record.gezelId },
-      });
-    };
-
-    const verdict = await evaluateDeliverableContract({
-      contract: { checks, scripts },
-      ws,
-      runScript,
-    });
-    if (verdict.decision === 'reject' && verdict.message && verdict.fingerprint) {
-      // Ad-hoc twin of the craftbook plateau ladder: consecutive rejects
-      // with the same failing-check signature climb targeted-edit →
-      // full-rewrite → stop-retrying. Persisted on the session record so
-      // the ladder survives restarts; cleared on approve below.
-      const signature = gateFailureSignature(verdict.checkResults, []);
-      const prior = state.record.deliverableGatePlateau;
-      const count = prior?.signatureHash === signature ? prior.count + 1 : 1;
-      let stage = escalationDisabled() ? 0 : stageForPlateau(count);
-      const filePath = ed.filePath;
-      if (stage === 2 && !filePath) stage = 1;
-      state.record.deliverableGatePlateau = {
-        signatureHash: signature,
-        count,
-        stage,
-        at: nowIso(),
-      };
-      await this.store.writeSession(state.record).catch(() => {});
-      const adHocSurface =
-        checks.length > 0 && checks.every((c) => (c as { artifact?: boolean }).artifact === true)
-          ? ('artifact' as const)
-          : ('workspace' as const);
-      const message =
-        stage === 1
-          ? buildStageOneNudge({
-              ...(filePath ? { file: filePath } : {}),
-              failingBullets: verdict.message,
-              frozen: false,
-              surface: adHocSurface,
-            })
-          : stage === 2 && filePath
-            ? buildStageTwoNudge({
-                file: filePath,
-                failingBullets: verdict.message,
-                repeats: count,
-                surface: adHocSurface,
-              })
-            : verdict.message;
-      log.info(
-        `session ${sessionId}: expectedDeliverable gate rejected — holding${stage > 0 ? ` (escalation stage ${stage}, ${count} identical)` : ''}`,
-      );
-      return {
-        deliverableRejected: {
-          message,
-          fingerprint: gateMessageFingerprint(message),
-          ...(stage > 0 ? { stage } : {}),
-          ...(stage >= 3 ? { stopRetrying: true } : {}),
-          ...(filePath ? { filePath } : {}),
-          plateauCount: count,
-        },
-      };
-    }
-    if (state.record.deliverableGatePlateau) {
-      delete state.record.deliverableGatePlateau;
-      await this.store.writeSession(state.record).catch(() => {});
-    }
-    return {};
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3426,29 +2937,6 @@ export class ChatManager extends LocalEngineRuntime {
     return readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
   }
 
-  /**
-   * Snapshot what the model would receive on the next turn for this
-   * session — exact system prompt + recent message thread + the
-   * True when the immediate-file-write deliverable in `message` names an
-   * existing, substantial workspace file — a modification, not a create —
-   * so {@link constrainAllowlistForImmediateFileWrite} keeps the surgical
-   * patch tools available instead of forcing a `write_file`-only full
-   * rewrite the model corrupts. Fresh creates (file absent, e.g. evals)
-   * and stubs stay on the `write_file`-only path.
-   */
-  private async deliverableIsExistingSubstantialFile(
-    projectId: string,
-    message: string | undefined,
-  ): Promise<boolean> {
-    const target = extractDeliverableTargetPath(message);
-    if (!target) return false;
-    const normalized = target.replace(/^\.?\/?workspace\//i, '').replace(/^\.\//, '');
-    const content = await this.store
-      .readProjectWorkspaceFile(projectId, normalized)
-      .catch(() => null);
-    return (content?.length ?? 0) >= EXISTING_SUBSTANTIAL_FILE_BYTES;
-  }
-
   private async shouldReleaseAfterMutationTurnForValidation(
     record: ChatSession,
     prompt: string,
@@ -3470,6 +2958,8 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Snapshot what the model would receive on the next turn for this
+   * session — exact system prompt + recent message thread + the
    * metadata that drove how the prompt was built (provider, model,
    * tier, parameter size, verbose-family flag, num_ctx, reasoning
    * effort). Surfaced via `GET /api/sessions/:id/debug` and consumed
@@ -6903,7 +6393,10 @@ export class ChatManager extends LocalEngineRuntime {
     return true;
   }
 
-  async archiveSession(sessionId: string): Promise<ChatSession> {
+  async archiveSession(
+    sessionId: string,
+    opts: { summarize?: boolean } = {},
+  ): Promise<ChatSession> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
     record.archived = true;
@@ -6919,7 +6412,9 @@ export class ChatManager extends LocalEngineRuntime {
     this.cacheController?.invalidate(sessionId);
     // Fire-and-forget summarization into project memory. We don't await
     // so the HTTP handler returns promptly; failures are logged inside.
-    this.trackBackground(this.summarizeInBackground(record, 'archive'));
+    if (opts.summarize !== false) {
+      this.trackBackground(this.summarizeInBackground(record, 'archive'));
+    }
     return record;
   }
 
@@ -7944,8 +7439,9 @@ export class ChatManager extends LocalEngineRuntime {
         resolveTurnMessageOrigin(opts),
       );
       if (freshGameState) {
-        promptForTurn = `${freshGameState}\n\n${promptForTurn}`;
+        promptForTurn = `${freshGameState.prelude}\n\n${promptForTurn}`;
       }
+      const turnRequiredTool = opts?.requiredTool ?? freshGameState?.requiredTool;
       // Fail-fast budget (F3.1): a genuine USER message (no `from`) means the
       // human is engaged, so reset the task's unattended-spend accumulator —
       // a long interactive conversation must never trip. Autonomous sends
@@ -8008,7 +7504,7 @@ export class ChatManager extends LocalEngineRuntime {
       const plannedPrelude = turnIntentPlan ? renderTurnIntentPrelude(turnIntentPlan) : null;
       const preludeForTurn = plannedPrelude
         ? { behaviorId: 'turn-intent-plan', text: plannedPrelude }
-        : await this.resolveUserPromptPrelude(state, userText, messageOrigin, libraryRecall);
+        : await resolveUserPromptPrelude(this.store, state, userText, messageOrigin, libraryRecall);
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -8314,7 +7810,7 @@ export class ChatManager extends LocalEngineRuntime {
             ? { continuationMaxTokens: opts.continuationMaxTokens }
             : {}),
           ...(opts?.standalone ? { standalone: true } : {}),
-          ...(continuations === 0 && opts?.requiredTool ? { requiredTool: opts.requiredTool } : {}),
+          ...(continuations === 0 && turnRequiredTool ? { requiredTool: turnRequiredTool } : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
             enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),
@@ -8736,7 +8232,8 @@ export class ChatManager extends LocalEngineRuntime {
         // The outcome also reports an edit-gate that HELD (a requireChange
         // deliverable the model didn't write this turn) so the false-"done"
         // re-prompt below can fire.
-        const advanceOutcome = await this.maybeAutoAdvanceOnObservableProgress(
+        const advanceOutcome = await maybeAutoAdvanceOnObservableProgress(
+          this.deliverableGateDeps(),
           state,
           drained,
           sessionId,
@@ -8745,7 +8242,11 @@ export class ChatManager extends LocalEngineRuntime {
         // expectedDeliverable carried a check list (its own, or the target
         // role's gateAffinity) gets the same completion gate a craftbook
         // step does — evaluated here, re-prompted below on reject.
-        const deliverableOutcome = await this.maybeGateExpectedDeliverable(state, sessionId);
+        const deliverableOutcome = await maybeGateExpectedDeliverable(
+          this.deliverableGateDeps(),
+          state,
+          sessionId,
+        );
         // Unsaved-file-claim salvage. Fires AFTER profile-driven
         // detectors (they win priority) but BEFORE the stall-detection
         // branches below, so the re-prompt the model gets next turn is
@@ -9650,7 +9151,12 @@ export class ChatManager extends LocalEngineRuntime {
         // is already persisted by TaskManager; there is no live model turn
         // left to re-prompt here, so the scheduler can pick it up normally.
         if (!intentionallyCancelled && drainedTools.some((tool) => tool.success)) {
-          await this.maybeAutoAdvanceOnObservableProgress(state, drainedTools, sessionId);
+          await maybeAutoAdvanceOnObservableProgress(
+            this.deliverableGateDeps(),
+            state,
+            drainedTools,
+            sessionId,
+          );
         }
         // Salvage the partial reply the model streamed before the abort so
         // the record reflects what the user actually saw, not an empty
@@ -11909,6 +11415,7 @@ export class ChatManager extends LocalEngineRuntime {
       title: task.title,
       outcome,
       sessionId: record.id,
+      ...(task.assignee?.kind === 'gezel' ? { gezelId: task.assignee.gezelId } : {}),
     });
 
     // A "ready for you" card in Updates, so the finished work stays one click
@@ -13018,18 +12525,6 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * Walk the resolved profile's `userPromptPrelude` hooks and return
-   * the first non-null result. Carries the {@link TurnCtx} the hooks
-   * expect: per-turn user text, the active gezel's `isMeester`
-   * status (resolved via the on-disk config's `meesterGezelId`),
-   * model context. Returns the prelude text + the firing behavior id
-   * for the diagnostic log line. `null` when no behavior applies.
-   *
-   * Today's only hook is `prompt.meester-build-prelude`; the
-   * Step-6 Gemma behaviors that re-prompt (single-tool-per-turn,
-   * etc.) ride this same path without further manager.ts changes.
-   */
-  /**
    * Effective image-scanning policy: per-gezel frontmatter wins over the
    * install default. `auto` (the default) means "describe only when the model
    * genuinely can't see" — which is what makes ds4 work without a
@@ -13389,38 +12884,6 @@ export class ChatManager extends LocalEngineRuntime {
     });
   }
 
-  private async resolveUserPromptPrelude(
-    state: LiveSessionState,
-    userText: string,
-    messageOrigin: TurnMessageOrigin,
-    libraryRecall: ReadonlyArray<{ path: string; snippet: string; score: number }> = [],
-  ): Promise<{ behaviorId: string; text: string } | null> {
-    const profile = state.profile;
-    if (!profile) return null;
-    const cfg = await this.store.readConfig().catch(() => null);
-    const isMeester = cfg?.meesterGezelId === state.record.gezelId;
-    const turnCtx: TurnCtx = {
-      ...modelCtxFromProfile(profile, state),
-      sessionId: state.record.id,
-      isMeester,
-      projectId: state.record.projectId,
-      messageOrigin,
-      availableToolNames: liveTurnToolNames(state.session),
-      userText,
-      drained: [],
-      assistantContent: '',
-      continuationCount: 0,
-      ...(libraryRecall.length > 0 ? { libraryRecall } : {}),
-    };
-    for (const entry of profile.behaviors) {
-      const hook = entry.behavior.userPromptPrelude;
-      if (!hook) continue;
-      const text = hook(turnCtx, entry.config);
-      if (text) return { behaviorId: entry.id, text };
-    }
-    return null;
-  }
-
   /**
    * Get or build the live state for a session. On first use after process
    * start (or after a resetClient), this loads the persisted record and
@@ -13450,21 +12913,31 @@ export class ChatManager extends LocalEngineRuntime {
       // edit doesn't take effect until we tear down + rebuild.
       const gezel = await this.store.getGezel(existing.record.gezelId);
       const immediateFileWriteConstrained = gezel
-        ? await this.immediateFileWriteConstraintActive(existing.record, gezel, pendingUserText)
+        ? await immediateFileWriteConstraintActive(
+            this.store,
+            existing.record,
+            gezel,
+            pendingUserText,
+          )
         : false;
       const directFileWorkConstrained = gezel
-        ? await this.directFileWorkConstraintActive(existing.record, gezel, pendingUserText)
+        ? await directFileWorkConstraintActive(this.store, existing.record, gezel, pendingUserText)
         : false;
       const scenarioFileRepairConstrained = gezel
-        ? await this.scenarioFileRepairConstraintActive(existing.record, gezel, pendingUserText)
+        ? await scenarioFileRepairConstraintActive(
+            this.store,
+            existing.record,
+            gezel,
+            pendingUserText,
+          )
         : false;
       const projectOrchestrationConstrained = gezel
-        ? this.projectOrchestrationConstraintActive(existing.record, gezel, pendingUserText)
+        ? sessionProjectOrchestrationConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const exactCraftbookConstrained = gezel
-        ? this.exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
+        ? exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
-      const gateRepairConstrained = await this.gateRepairConstraintActive(existing.record);
+      const gateRepairConstrained = await gateRepairConstraintActive(this.store, existing.record);
       const codexPermissionMode = gezel
         ? await this.resolveCodexPermissionMode(existing.record, gezel)
         : undefined;
@@ -13475,7 +12948,7 @@ export class ChatManager extends LocalEngineRuntime {
         gezel &&
         (gezel.about !== existing.aboutSnapshot ||
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
-          growthSignature(gezel) !== existing.growthSnapshot ||
+          growthSignature(gezel, await this.socialMode()) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
           this.appToolsFingerprint(existing.record) !== existing.appToolsSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
@@ -13594,27 +13067,30 @@ export class ChatManager extends LocalEngineRuntime {
     // Pool-route may have rebound the session; persist the new
     // engineKey so a restart routes consistently.
     if (record.engineKey) await this.store.writeSession(record);
-    const immediateFileWriteConstrained = await this.immediateFileWriteConstraintActive(
+    const immediateFileWriteConstrained = await immediateFileWriteConstraintActive(
+      this.store,
       record,
       gezel,
       pendingUserText,
     );
-    const directFileWorkConstrained = await this.directFileWorkConstraintActive(
+    const directFileWorkConstrained = await directFileWorkConstraintActive(
+      this.store,
       record,
       gezel,
       pendingUserText,
     );
-    const scenarioFileRepairConstrained = await this.scenarioFileRepairConstraintActive(
+    const scenarioFileRepairConstrained = await scenarioFileRepairConstraintActive(
+      this.store,
       record,
       gezel,
       pendingUserText,
     );
-    const projectOrchestrationConstrained = this.projectOrchestrationConstraintActive(
+    const projectOrchestrationConstrained = sessionProjectOrchestrationConstraintActive(
       record,
       gezel,
       pendingUserText,
     );
-    const gateRepairConstrained = await this.gateRepairConstraintActive(record);
+    const gateRepairConstrained = await gateRepairConstraintActive(this.store, record);
     const effectiveContextWindow = await this.resolveEffectiveContextWindow(
       provider,
       effectiveModel,
@@ -13633,7 +13109,7 @@ export class ChatManager extends LocalEngineRuntime {
           }
         : undefined,
     );
-    const exactCraftbookConstrained = this.exactCraftbookConstraintActive(
+    const exactCraftbookConstrained = exactCraftbookConstraintActive(
       record,
       gezel,
       pendingUserText,
@@ -13763,7 +13239,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(liveEffectiveModel ? { effectiveModel: liveEffectiveModel } : {}),
       aboutSnapshot: gezel.about,
       toolsMdSnapshot: gezel.toolsMd ?? null,
-      growthSnapshot: growthSignature(gezel),
+      growthSnapshot: growthSignature(gezel, await this.socialMode()),
       catalogContentSnapshot: this.catalog.contentRoot(),
       appToolsSnapshot: this.appToolsFingerprint(record),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
@@ -13790,29 +13266,6 @@ export class ChatManager extends LocalEngineRuntime {
     };
     this.states.set(sessionId, state);
     return state;
-  }
-
-  private async immediateFileWriteConstraintActive(
-    record: ChatSession,
-    gezel: GezelDetail,
-    pendingUserText?: string,
-  ): Promise<boolean> {
-    const latestUserMessage = pendingUserText ?? latestUserMessageContent(record.messages);
-    let hasToolsetOverride = false;
-    try {
-      const perGezel = await this.store.listInstalledToolsets({
-        kind: 'gezel',
-        gezelId: record.gezelId,
-      });
-      hasToolsetOverride = perGezel.some((toolset) => toolset.runtime.kind === 'builtin');
-    } catch {
-      hasToolsetOverride = false;
-    }
-    return shouldConstrainToImmediateFileWrite({
-      role: gezel.role,
-      latestUserMessage,
-      hasToolsetOverride,
-    });
   }
 
   /** Resolve the mode that a Codex CLI session will actually receive. */
@@ -13850,110 +13303,6 @@ export class ChatManager extends LocalEngineRuntime {
       config.anthropicCli?.defaultPermissionMode ??
       'acceptEdits'
     );
-  }
-
-  /**
-   * D4 clamp-lifetime derivation for the rebuild check: read the
-   * session's active step (step-scoped sessions only) and combine with
-   * the ad-hoc deliverable plateau. One task read per send on
-   * step-scoped sessions — the same read buildSessionOpts pays.
-   */
-  private async gateRepairConstraintActive(record: ChatSession): Promise<boolean> {
-    if (repairClampDisabled()) return false;
-    let step: TaskCraftbookStep | undefined;
-    if (record.taskRef && record.stepId) {
-      const parsed = parseTaskRef(record.taskRef);
-      if (parsed) {
-        const task = await this.store.readTask(parsed.projectId, parsed.num).catch(() => null);
-        step = task?.craftbook.steps.find((s) => s.id === record.stepId);
-      }
-    }
-    return stepGateRepairActive(step, record);
-  }
-
-  private async scenarioFileRepairConstraintActive(
-    record: ChatSession,
-    gezel: GezelDetail,
-    pendingUserText?: string,
-  ): Promise<boolean> {
-    const latestUserMessage = pendingUserText ?? latestUserMessageContent(record.messages);
-    let hasToolsetOverride = false;
-    try {
-      const perGezel = await this.store.listInstalledToolsets({
-        kind: 'gezel',
-        gezelId: record.gezelId,
-      });
-      hasToolsetOverride = perGezel.some((toolset) => toolset.runtime.kind === 'builtin');
-    } catch {
-      hasToolsetOverride = false;
-    }
-    return shouldConstrainToScenarioFileRepair({
-      role: gezel.role,
-      latestUserMessage,
-      hasToolsetOverride,
-    });
-  }
-
-  private async directFileWorkConstraintActive(
-    record: ChatSession,
-    gezel: GezelDetail,
-    pendingUserText?: string,
-  ): Promise<boolean> {
-    const latestUserMessage = pendingUserText ?? latestUserMessageContent(record.messages);
-    let hasToolsetOverride = false;
-    try {
-      const perGezel = await this.store.listInstalledToolsets({
-        kind: 'gezel',
-        gezelId: record.gezelId,
-      });
-      hasToolsetOverride = perGezel.some((toolset) => toolset.runtime.kind === 'builtin');
-    } catch {
-      hasToolsetOverride = false;
-    }
-    if (
-      shouldConstrainToDirectFileWork({
-        role: gezel.role,
-        latestUserMessage,
-        hasToolsetOverride,
-      })
-    ) {
-      return true;
-    }
-    if (hasToolsetOverride || record.expectedDeliverable?.kind !== 'file') return false;
-    const filePath = record.expectedDeliverable.filePath?.trim();
-    if (!filePath) return false;
-    return shouldConstrainToDirectFileWork({
-      role: gezel.role,
-      latestUserMessage:
-        `The deliverable is the workspace file ${filePath}. ` +
-        `Write the result to ${filePath} with workspace file tools.`,
-      hasToolsetOverride,
-    });
-  }
-
-  private projectOrchestrationConstraintActive(
-    record: ChatSession,
-    gezel: GezelDetail,
-    pendingUserText?: string,
-  ): boolean {
-    const latestUserMessage = pendingUserText ?? latestUserMessageContent(record.messages);
-    return resolveProjectOrchestrationConstraintActive({
-      record,
-      role: gezel.role,
-      provider: record.providerName,
-      latestUserMessage,
-    });
-  }
-
-  private exactCraftbookConstraintActive(
-    record: ChatSession,
-    gezel: GezelDetail,
-    pendingUserText?: string,
-  ): boolean {
-    return shouldConstrainToExactCraftbookInvocation({
-      role: gezel.role,
-      latestUserMessage: pendingUserText ?? latestUserMessageContent(record.messages),
-    });
   }
 
   private async staleWorkspaceFileRequest(
@@ -14396,6 +13745,15 @@ export class ChatManager extends LocalEngineRuntime {
     // sweep. Loaded fresh on every session (re)build like about.md — a
     // live session keeps its prompt until its next natural rebuild.
     const lessonsMd = await this.store.readMemoryLessons(record.gezelId).catch(() => '');
+    // Social mode shows the gezel's character; off, the prompt is unchanged.
+    const socialCharacter = resolveSocialMode(config, 'desktop')
+      ? gezel?.parsed.frontmatter.character
+      : undefined;
+    // What the crew knows about the person, read the same way. A visitor on a
+    // shared mini-site is someone else, so they never see it.
+    const personEntries = record.visitorAccess
+      ? []
+      : await this.memory.allEntries?.('user', USER_MEMORY_ID).catch(() => []);
     const voorman = project?.voormanGezelId
       ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
       : null;
@@ -14900,7 +14258,7 @@ export class ChatManager extends LocalEngineRuntime {
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
     const directFileWorkConstrained = gezel
-      ? await this.directFileWorkConstraintActive(record, gezel, pendingUserText)
+      ? await directFileWorkConstraintActive(this.store, record, gezel, pendingUserText)
       : false;
     // A persisted handoff contract is authoritative. Prompts for transforms
     // commonly mention the input before the output ("transform raw.csv into
@@ -14913,7 +14271,8 @@ export class ChatManager extends LocalEngineRuntime {
     const toolCapWarnings: string[] = [];
     let existingSubstantialFileForImmediate: Promise<boolean> | undefined;
     const readExistingSubstantialFileForImmediate = (): Promise<boolean> => {
-      existingSubstantialFileForImmediate ??= this.deliverableIsExistingSubstantialFile(
+      existingSubstantialFileForImmediate ??= deliverableIsExistingSubstantialFile(
+        this.store,
         record.projectId,
         latestUserTextForToolFilter,
       );
@@ -15011,14 +14370,15 @@ export class ChatManager extends LocalEngineRuntime {
     // A drafting session composes its change through before/after edits and
     // the runtime derives the diff. Keep only operations implemented by the
     // draft adapter: apply_patch deliberately refuses hand-authored hunks,
-    // while mkdir/rename/binary-copy still target the real workspace. They
-    // must be withheld from BOTH surfaces so proposal mode can never leak a
-    // mutation into a writable checkout and never promises a tool that will
-    // merely hit the read-only project gate (ADR 0001).
+    // and binary copy-in still targets the real workspace. They must be
+    // withheld from BOTH surfaces so proposal mode can never leak a mutation
+    // into a writable checkout and never promises a tool that will merely hit
+    // the read-only project gate (ADR 0001). make_dir, rename and copy_path
+    // propose a file operation into the pack while drafting, so they stay.
     const withheldWhileDrafting = <T extends Set<string> | null | undefined>(allowlist: T): T => {
       if (!taskContext?.task.diffpackId || !allowlist) return allowlist;
       const next = new Set(allowlist);
-      for (const tool of ['apply_patch', 'copy_artifact_to_workspace', 'make_dir', 'rename']) {
+      for (const tool of ['apply_patch', 'copy_artifact_to_workspace']) {
         next.delete(tool);
       }
       return next as T;
@@ -15121,9 +14481,14 @@ export class ChatManager extends LocalEngineRuntime {
       ...(gezel?.id ? { gezelId: gezel.id } : {}),
       about: aboutText,
       ...(lessonsMd.trim() ? { lessons: lessonsMd.trim() } : {}),
+      personNotes: selectPersonNotes(
+        personEntries ?? [],
+        PROMPT_FOOTPRINT_POLICY[promptFootprint].personNotesMaxChars,
+      ),
       ...((gezel?.parsed.frontmatter.traits?.length ?? 0) > 0
         ? { traits: gezel!.parsed.frontmatter.traits!.map((t) => t.text) }
         : {}),
+      ...(socialCharacter ? { character: socialCharacter } : {}),
       role: gezel?.role,
       providerName: record.providerName,
       generalistKickoff,
@@ -15403,7 +14768,8 @@ export class ChatManager extends LocalEngineRuntime {
         !step.advanceWhen.artifact &&
         !stepOnEnterProducesAdvanceFile(step)
           ? ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
-              this.workspaceDeliverableReady(
+              workspaceDeliverableReady(
+                this.deliverableGateDeps(),
                 readyTask.projectId,
                 readyTask.num,
                 step.id,
@@ -16050,7 +15416,8 @@ export class ChatManager extends LocalEngineRuntime {
           );
       }
       const turnRules = projectTypeTurnRules(scriptToolPlan.effective, project);
-      if (turnRules?.terminal) opts.terminalToolPolicy = turnRules.terminal;
+      if (turnRules?.terminal)
+        opts.terminalToolPolicy = withCharacterChatCap(turnRules.terminal, socialCharacter);
       // MCP registration is fixed for the life of the provider session, so
       // inspect the whole embedded graph rather than only the current step.
       // The per-turn surface below remains narrower and advertises the large
@@ -16544,7 +15911,7 @@ export class ChatManager extends LocalEngineRuntime {
     const suppressExtrasForExactCraftbook =
       routingClamps === 'narrow' &&
       gezel !== null &&
-      this.exactCraftbookConstraintActive(record, gezel, pendingUserText) &&
+      exactCraftbookConstraintActive(record, gezel, pendingUserText) &&
       permittedExtras.length > 0;
     if (suppressExtrasForExactCraftbook) {
       log.info(
@@ -16918,140 +16285,6 @@ export interface AnthropicCliPoolView {
 }
 
 /**
- * Default cap on how many times we'll silently nudge a stalled turn
- * before giving up — used when no behavior on the resolved profile
- * fires a `continuationBudget` value. The runaway-hallucination case
- * ("I will now…" repeated indefinitely) is the dominant failure
- * mode this bounds; legitimate multi-step rituals override via the
- * `turn.continuation-budget` behavior (tier:tiny opts in with
- * `count: 4` to absorb a voorman setup chain). See
- * `manager.test.ts`'s `tier-aware MAX_CONTINUATIONS` coverage.
- */
-const DEFAULT_CONTINUATION_BUDGET = 2;
-
-/**
- * Continuation budget for one user-initiated send. Walks the
- * resolved profile's `continuationBudget` hooks; first non-null
- * wins — the registered behavior is `turn.continuation-budget` with
- * config `{ count }`. Falls through to
- * {@link DEFAULT_CONTINUATION_BUDGET} when no behavior fires.
- */
-function resolveContinuationBudget(state: LiveSessionState): number {
-  const profile = state.profile;
-  if (profile) {
-    for (const entry of profile.behaviors) {
-      const hook = entry.behavior.continuationBudget;
-      if (!hook) continue;
-      const ctx = modelCtxFromProfile(profile, state);
-      const value = hook(ctx, entry.config);
-      if (typeof value === 'number') return value;
-    }
-  }
-  return DEFAULT_CONTINUATION_BUDGET;
-}
-
-/**
- * Walk the `turnTimeoutMs` hooks on the resolved profile. Used to
- * let a behavior raise/lower the per-turn output-budget ceiling
- * without code changes (no shipped behavior uses this today; the
- * consumer exists so future per-model overrides land cleanly).
- * Returns `null` to signal "no behavior fired" — caller keeps its
- * provider-keyed default.
- */
-function resolveProfileTurnTimeoutMs(state: LiveSessionState): number | null {
-  const profile = state.profile;
-  if (!profile) return null;
-  for (const entry of profile.behaviors) {
-    const hook = entry.behavior.turnTimeoutMs;
-    if (!hook) continue;
-    const ctx = modelCtxFromProfile(profile, state);
-    const value = hook(ctx, entry.config);
-    if (typeof value === 'number') return value;
-  }
-  return null;
-}
-
-/**
- * Build the {@link ModelCtx} every behavior hook expects from the
- * resolved profile + the live session state. Centralizing the
- * mapping here keeps every hook call site reading the same shape;
- * behaviors should never reach back into `state` directly.
- */
-function modelCtxFromProfile(profile: ResolvedModelProfile, state: LiveSessionState): ModelCtx {
-  return {
-    catalogId: profile.catalogId,
-    tier: profile.tier,
-    family: profile.style.family,
-    modelId: state.record.model,
-    providerName: state.record.providerName,
-  };
-}
-
-/**
- * Walk the `postTurnDetector` hooks on the resolved profile and
- * return the first non-null verdict. Mirrors today's hand-rolled
- * detection chain in `runSend` (`detectHallucinatedToolUse` →
- * `detectFabricatedToolClaim`) but driven by the registry — new
- * detectors land via the model-profile package, not by editing
- * manager.ts.
- *
- * The verdict `kind` distinguishes warn-only (attach reason to the
- * message's `warnings`) from re-prompt (queue a continuation with
- * `promptForNextTurn` as the next user-prompt). A behavior may set
- * both flags; both effects are applied independently.
- */
-function runPostTurnDetectors(
-  state: LiveSessionState,
-  args: {
-    sessionId: string;
-    isMeester: boolean;
-    messageOrigin: TurnMessageOrigin;
-    userText: string;
-    drained: ChatMessageToolCall[];
-    verifiedPriorArtifactRead: boolean;
-    assistantContent: string;
-    continuationCount: number;
-  },
-): NudgeVerdict | null {
-  const profile = state.profile;
-  if (!profile) return null;
-  const turnCtx: TurnCtx = {
-    ...modelCtxFromProfile(profile, state),
-    sessionId: args.sessionId,
-    isMeester: args.isMeester,
-    projectId: state.record.projectId,
-    messageOrigin: args.messageOrigin,
-    availableToolNames: liveTurnToolNames(state.session),
-    userText: args.userText,
-    drained: args.drained,
-    verifiedPriorArtifactRead: args.verifiedPriorArtifactRead,
-    assistantContent: args.assistantContent,
-    continuationCount: args.continuationCount,
-  };
-  for (const entry of profile.behaviors) {
-    const hook = entry.behavior.postTurnDetector;
-    if (!hook) continue;
-    const verdict = hook(turnCtx, entry.config);
-    if (verdict) {
-      // Stable marker — ab-prompt-conduct greps daemon logs for
-      // "post-turn detector fired id=" to count caught-after-the-fact
-      // failures per arm. Keep the phrasing if you touch this line.
-      const action =
-        verdict.warnUser && verdict.promptForNextTurn
-          ? 'warn+reprompt'
-          : verdict.warnUser
-            ? 'warn'
-            : 'reprompt';
-      log.info(
-        `session ${args.sessionId}: post-turn detector fired id=${entry.id} action=${action}`,
-      );
-      return verdict;
-    }
-  }
-  return null;
-}
-
-/**
  * How long B may go completely idle before the cross-gezel reply listener
  * abandons the reply after A's outbound `messageGezel`. This is deliberately
  * an idle timeout, not a wall-clock cap: slow local engines can spend 5–15
@@ -17384,14 +16617,6 @@ function latestExpectedFilePath(messages: Array<{ content?: string }>): string |
   }
   return null;
 }
-
-/**
- * Byte floor for "an existing substantial file" — above a stub, big
- * enough that a full `write_file` rewrite is corruption-prone for a weak
- * local model. A 15-byte placeholder stays on the write-only path; a
- * 16 KB game does not. See deliverableIsExistingSubstantialFile.
- */
-const EXISTING_SUBSTANTIAL_FILE_BYTES = 1500;
 
 const VALIDATION_REPAIR_CHECK_PREFIX_RE = /^\[(?:runtime|scenario) check\b/i;
 const VALIDATION_REPAIR_REPEAT_PREFIX_RE =
@@ -17747,11 +16972,13 @@ function isSessionGoneError(err: unknown): boolean {
  * so accepted traits and tuning payouts apply on the next turn instead of
  * waiting for a restart.
  */
-export function growthSignature(gezel: GezelDetail): string {
+export function growthSignature(gezel: GezelDetail, social = false): string {
   const fm = gezel.parsed.frontmatter;
   return JSON.stringify({
     traits: fm.traits ?? [],
     tuningProfile: fm.tuningProfile ?? null,
     tuning: fm.tuning ?? null,
+    // Turning social mode on or off, or editing the character, rebuilds the prompt.
+    character: social ? (fm.character ?? null) : null,
   });
 }

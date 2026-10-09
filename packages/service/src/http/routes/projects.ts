@@ -29,10 +29,12 @@ import {
   getProjectType,
   isTaskWorkAllowed,
   isUserCreatedProject,
+  planDurationEstimates,
   resolveProjectTypeId,
   resolveSecurityPolicy,
+  starterCraftbookIds,
 } from '@bendyline/gezel';
-import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
+import { playwrightBrowsersDir, projectThumbnailsDir } from '@bendyline/gezel/paths';
 import { type Context, Hono } from 'hono';
 import { previewFolder } from '../../about/folder-preview.js';
 import { generateProjectAboutFromRepo } from '../../about/project-generator.js';
@@ -64,6 +66,16 @@ import { isOfficeLockName } from '../../fs/sync-junk.js';
 import { resolveProjectBoekwachter } from '../../gezels/autonomous-roles.js';
 import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
+import {
+  albumMediaDeps,
+  copyAlbumToFolder,
+  isPhotoAlbumPath,
+  listPhotoAlbums,
+  readPhotoAlbum,
+  scheduleAlbumPhotos,
+  storeAlbumPhotos,
+} from '../../index-store/photo-albums.js';
+import { thumbnailFor } from '../../index-store/thumbnails.js';
 import { installPackage } from '../../packages/install.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import {
@@ -80,10 +92,13 @@ import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../projec
 import { createProjectWithLead } from '../../projects/create-project.js';
 import {
   InferProjectError,
+  checkNewProjectFolder,
   inferProjectForPath,
   listWellKnownFolders,
 } from '../../projects/infer-project.js';
+import { setUpAddedFolder } from '../../projects/recruit-crew.js';
 import { browserScriptEnv } from '../../sandbox/runner.js';
+import { setFolderNightWork } from '../../suggested-work/arm.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
@@ -97,6 +112,7 @@ import {
 } from '../../workspace/npm.js';
 import { runWorkspaceScript } from '../../workspace/runner.js';
 import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspace/scripts.js';
+import { isFirstPartyCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
@@ -148,16 +164,44 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/', async (c) => {
-    const body = CreateProjectRequestSchema.parse(await c.req.json());
+    const parsed = CreateProjectRequestSchema.parse(await c.req.json());
+    // Recruiting a folder's crew turns night work on: the person's act only.
+    const { recruitCrew, nightWork, ...rest } = parsed;
+    const body = recruitCrew && isFirstPartyCaller(c) ? parsed : rest;
+    if (body.workingDir) {
+      const refusal = await checkNewProjectFolder(inferDeps(), body.workingDir);
+      if (refusal) return c.json(refusal.body, refusal.status);
+    }
     const project = await createProjectWithLead(ctx, body);
     return c.json(project, 201);
   });
 
-  const inferDeps = () => ({
+  const inferDeps = (opts: { nightWork?: boolean } = {}) => ({
     store: ctx.store,
     home: ctx.home,
     history: ctx.history,
     createProject: (body: CreateProjectRequest) => createProjectWithLead(ctx, body),
+    recruitCrew: async (projectId: string) => {
+      const { crew } = await setUpAddedFolder(ctx, projectId, opts);
+      for (const gezel of crew.createdGezels) {
+        ctx.chatEvents.publishGlobalEvent({
+          type: 'gezel_created',
+          gezelId: gezel.id,
+          name: gezel.name,
+        });
+      }
+    },
+  });
+
+  /** The folder's "Work on this folder overnight" switch. */
+  app.post('/:id/night-work', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean')
+      return c.json({ error: 'enabled must be a boolean' }, 400);
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'not found' }, 404);
+    await setFolderNightWork(ctx, id, body.enabled);
+    return c.json({ enabled: body.enabled });
   });
 
   /**
@@ -172,8 +216,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!parsed.success) {
       return c.json({ error: 'invalid_request', issues: parsed.error.issues }, 400);
     }
+    const { recruitCrew, nightWork, ...rest } = parsed.data;
+    const request = recruitCrew && isFirstPartyCaller(c) ? parsed.data : rest;
     try {
-      return c.json(await inferProjectForPath(inferDeps(), parsed.data));
+      return c.json(
+        await inferProjectForPath(inferDeps(nightWork !== undefined ? { nightWork } : {}), request),
+      );
     } catch (err) {
       if (err instanceof InferProjectError) {
         return c.json(
@@ -186,7 +234,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   /** The user's Documents / Pictures / cloud folders, for a first-run offer. */
-  app.get('/well-known-folders', async (c) => c.json(await listWellKnownFolders(inferDeps())));
+  app.get('/well-known-folders', async (c) =>
+    c.json(await listWellKnownFolders(inferDeps(), { census: c.req.query('census') === '1' })),
+  );
 
   /**
    * Create + apply a catalog project type as one server-owned operation.
@@ -412,6 +462,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       id,
       { git: ctx.git },
     );
+    // Select before project filtering: a tagged book hidden by this project's
+    // requirements must not turn the legacy fallback back on.
+    const catalogBooks = (await ctx.catalog.list('craftbook-template')).flatMap((item) =>
+      item.manifest.kind === 'craftbook-template' ? [item.manifest] : [],
+    );
+    const starterIds = starterCraftbookIds(catalogBooks).filter((id) =>
+      items.some((item) => item.manifest.id === id),
+    );
+    const durationEstimatesMs = planDurationEstimates(await ctx.tasks.list());
     const projectItems = items.filter((it) => it.sourceId === 'project');
     // Resolve the project's type (user override → auto-detected → none) and
     // compute the curated suggested subset. Additive fields: older clients
@@ -449,6 +508,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ? { id: applied.id, label: appliedName ?? applied.id }
           : null,
       suggestedIds: [...suggested],
+      starterIds,
+      durationEstimatesMs,
       establishedCodebase,
     });
   });
@@ -747,6 +808,103 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const prefix = c.req.query('prefix') ?? '';
     const paths = await ctx.workspaceIndex.searchWorkspaceFiles(id, prefix);
     return c.json({ paths });
+  });
+
+  /** The Boekwachter's summary of one file; `summary` is null until it has read it. */
+  app.get('/:id/index/file-summary', async (c) => {
+    const path = c.req.query('path') ?? '';
+    if (!path) return c.json({ error: 'path is required' }, 400);
+    const summary = await ctx.contentIndex.fileSummary(c.req.param('id'), path);
+    return c.json({ path, summary });
+  });
+
+  /** Photos taken on this day in earlier years, for the morning; 204 before the first scan. */
+  app.get('/:id/index/on-this-day', async (c) => {
+    const result = await ctx.contentIndex.onThisDay(c.req.param('id'));
+    return result ? c.json(result) : c.body(null, 204);
+  });
+
+  /**
+   * A small JPEG of a workspace photo for grids, albums and the morning view.
+   * Cached per account outside the workspace; 404 when the path is not a
+   * photo this machine can read.
+   */
+  app.get('/:id/index/thumb', async (c) => {
+    const id = c.req.param('id');
+    const rel = c.req.query('path') ?? '';
+    if (!rel) return c.json({ error: 'path is required' }, 400);
+    const base = await ctx.store.projectWorkspaceDir(id).catch(() => null);
+    const abs = base ? safeJoin(base, rel) : null;
+    if (!base || !abs || !(await realpathContained(base, abs))) {
+      return c.json({ error: 'not found' }, 404);
+    }
+    const thumb = await thumbnailFor({
+      cacheDir: projectThumbnailsDir(ctx.home, id),
+      absPath: abs,
+      relPath: rel,
+      width: Number(c.req.query('w') ?? 320),
+    });
+    if (!thumb) return c.json({ error: 'no thumbnail for this file' }, 404);
+    if (c.req.header('if-none-match') === thumb.etag) return c.body(null, 304);
+    return c.body(new Uint8Array(thumb.bytes), 200, {
+      'content-type': thumb.mimeType,
+      'cache-control': 'private, max-age=86400',
+      etag: thumb.etag,
+    });
+  });
+
+  /**
+   * Album proposals in the artifacts drawer (`albums/*.md`), newest first. An
+   * album still linking workspace photos gets them stored in the background.
+   */
+  app.get('/:id/albums', async (c) => {
+    const id = c.req.param('id');
+    const albums = await listPhotoAlbums(ctx.store, id);
+    for (const album of albums) {
+      if (album.pending) scheduleAlbumPhotos(albumMediaDeps(ctx.store), id, album.path);
+    }
+    return c.json({ albums });
+  });
+
+  /**
+   * Store an album's photos with it now, so it plays and exports: the UI
+   * calls this before opening one. Writes only into the artifacts drawer.
+   */
+  app.post('/:id/albums/prepare', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { path?: string };
+    if (typeof body.path !== 'string' || !isPhotoAlbumPath(body.path)) {
+      return c.json({ error: 'expected { path: "albums/<name>.md" }' }, 400);
+    }
+    return c.json(await storeAlbumPhotos(albumMediaDeps(ctx.store), c.req.param('id'), body.path));
+  });
+
+  /** One album proposal, parsed; 404 when the path is not a readable album. */
+  app.get('/:id/albums/read', async (c) => {
+    const album = await readPhotoAlbum(ctx.store, c.req.param('id'), c.req.query('path') ?? '');
+    return album ? c.json(album) : c.json({ error: 'not found' }, 404);
+  });
+
+  /**
+   * Copy an album's photos into a folder of the workspace. The person's own
+   * act — `userInitiated`, so it works on a read-only folder — and closed to
+   * session tokens by the scope guard. Never replaces a file.
+   */
+  app.post('/:id/albums/copy', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { path?: string; folder?: string };
+    if (typeof body.path !== 'string' || typeof body.folder !== 'string') {
+      return c.json({ error: 'expected { path, folder }' }, 400);
+    }
+    try {
+      return c.json(await copyAlbumToFolder(ctx.store, c.req.param('id'), body.path, body.folder));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  /** What the folder holds, for the first-look card; 204 before the first scan. */
+  app.get('/:id/index/overview', async (c) => {
+    const overview = await ctx.contentIndex.overview(c.req.param('id'));
+    return overview ? c.json(overview) : c.body(null, 204);
   });
 
   app.get('/:id/index/status', async (c) => {
@@ -1203,6 +1361,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       await ctx.store.writeProjectArtifact(id, body.path, body.content, {
         initiatedByGezel: initiatedByGezel(c, body),
       });
+      // An album a gezel just wrote links workspace photos; store copies with it.
+      if (isPhotoAlbumPath(body.path))
+        scheduleAlbumPhotos(albumMediaDeps(ctx.store), id, body.path);
       return c.json({ ok: true, path: body.path });
     } catch (err) {
       if (
@@ -2380,6 +2541,26 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
     try {
       await ctx.store.renameProjectWorkspacePath(id, body.fromPath, body.toPath, {
+        ...mutationActor(c, body),
+      });
+      return c.json({ ok: true, fromPath: body.fromPath, toPath: body.toPath });
+    } catch (err) {
+      const mapped = mapWorkspaceError(err);
+      return c.json(mapped.body, mapped.status as 400 | 403 | 500);
+    }
+  });
+
+  app.post('/:id/workspace/copy', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as {
+      fromPath?: string;
+      toPath?: string;
+      gezelId?: string;
+      sessionId?: string;
+    };
+    if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
+    try {
+      await ctx.store.copyProjectWorkspacePath(id, body.fromPath, body.toPath, {
         ...mutationActor(c, body),
       });
       return c.json({ ok: true, fromPath: body.fromPath, toPath: body.toPath });

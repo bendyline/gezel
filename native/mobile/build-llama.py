@@ -189,7 +189,10 @@ def verify_stripped(text):
 
 def verify_elf_dependencies(text, packaged):
     needed = set(re.findall(r"\(NEEDED\).*\[([^\]]+)\]", text))
-    system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"}
+    # Public NDK libraries are supplied by Android, including the graphics and
+    # compression dependencies of the packaged speech runtime.
+    system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
+              "libEGL.so", "libGLESv2.so", "libjnigraphics.so", "libz.so"}
     missing = needed - set(packaged) - system
     if missing:
         raise ValueError("Android shared library has unbundled dependencies: " + ", ".join(sorted(missing)))

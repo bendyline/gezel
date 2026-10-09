@@ -111,7 +111,7 @@ export function launchReadiness(
     return options.missing
       ? {
           ready: false,
-          reason: 'This craftbook is not available here any more. Remove it or pick another.',
+          reason: 'This plan is not available here any more. Remove it or pick another.',
         }
       : { ready: false };
   }
@@ -119,7 +119,7 @@ export function launchReadiness(
     if (input.required && !launch.inputs?.[input.key]) {
       return {
         ready: false,
-        reason: `Choose the ${input.title.toLowerCase()} this craftbook works on.`,
+        reason: `Choose the ${input.title.toLowerCase()} this plan works on.`,
       };
     }
   }
@@ -291,6 +291,7 @@ export function launchRequestBody(
     ...(launch.assignee ? { assignee: launch.assignee } : {}),
     params: launch.params,
     ...(launch.inputs && Object.keys(launch.inputs).length > 0 ? { inputs: launch.inputs } : {}),
+    ...(launch.tonight ? { tonight: true } : {}),
   };
 }
 

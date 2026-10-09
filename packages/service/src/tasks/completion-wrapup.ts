@@ -6,6 +6,7 @@ import {
   type Task,
   type TaskDeliverable,
   deliverableFormatNoun,
+  isOwnerLaunchedCompletion,
   outputsWithDeliverableFirst,
   taskDeliverableCandidates,
 } from '@bendyline/gezel';
@@ -45,11 +46,7 @@ export const WRAP_UP_MAX_FILES = 6;
  * children settle without one (the host's own wrap-up covers its crew).
  */
 export function wantsWrapUp(task: Task, outcome: 'complete' | 'canceled'): boolean {
-  if (outcome !== 'complete') return false;
-  if (!task.launchSessionId) return false;
-  if (task.parentTaskRef || task.cron || task.nightShift) return false;
-  if (task.origin?.kind === 'system-job') return false;
-  return true;
+  return isOwnerLaunchedCompletion(task, outcome);
 }
 
 function canonicalArtifactPath(path: string): string {

@@ -1188,7 +1188,13 @@ async function stageVectors(args: {
   } finally {
     closeSync(fd);
   }
-  return docVectors.map((v) => Float32Array.from(l2Normalize(Array.from(v))));
+  // A document with no chunks (an article converted to nothing) has no mean
+  // vector. It carries no load either, so it keeps a zero vector — kept out
+  // of the k-means sample in `semanticShards` — instead of aborting the
+  // build on a zero-norm normalize (Qualla's "Bibliography", 2026-10-07).
+  return docVectors.map((v) =>
+    v.some((x) => x !== 0) ? Float32Array.from(l2Normalize(Array.from(v))) : v,
+  );
 }
 
 /** Semantic fill, pass 2: reads the staged vectors back in the order they were written. */
@@ -1255,7 +1261,7 @@ function semanticShards(
     return sum;
   };
   const stride = Math.max(1, Math.ceil(n / 20_000));
-  const sample = docVectors.filter((_, i) => i % stride === 0);
+  const sample = docVectors.filter((v, i) => i % stride === 0 && v.some((x) => x !== 0));
   const centers = kMeans(sample, shardCount, seed).map((c) => c.centroid);
   // k-means drops empty clusters; top up with evenly spaced documents.
   for (let i = 0; centers.length < shardCount; i++) {

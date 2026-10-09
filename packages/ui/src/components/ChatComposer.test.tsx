@@ -461,7 +461,7 @@ describe('ChatComposer attached task', () => {
       target: { value: 'Please make a PowerPoint about Mongolia.' },
     });
 
-    const strip = await screen.findByRole('group', { name: /attached task: powerpoint/i });
+    const strip = await screen.findByRole('group', { name: 'Attached task: Slide deck' });
     expect(strip).toHaveAttribute('data-origin', 'suggested');
     expect(strip).toHaveTextContent('Suggested task');
     expect(strip).toHaveTextContent('topic: Mongolia');

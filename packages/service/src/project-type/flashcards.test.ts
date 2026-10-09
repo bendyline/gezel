@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { applyProjectType } from './apply.js';
 import { resolvePageTools, resolveProjectScriptTools } from './script-tools.js';
@@ -30,6 +30,7 @@ interface Leitner {
 }
 
 let leitner: Leitner;
+let deckStoreSource = '';
 
 beforeAll(async () => {
   const catalog = new CatalogService();
@@ -38,6 +39,7 @@ beforeAll(async () => {
     throw new Error('flashcards not resolved');
   const source = detail.manifest.scripts?.['deck-store'];
   if (!source) throw new Error('deck-store script missing');
+  deckStoreSource = source;
   const start = source.indexOf('// ── leitner-rules-start ──');
   const end = source.indexOf('// ── leitner-rules-end ──');
   leitner = new Function(
@@ -46,6 +48,51 @@ beforeAll(async () => {
 });
 
 const DAY = 24 * 60 * 60 * 1000;
+
+describe('flashcards reminder (shipped bytes)', () => {
+  type Remind = (deck: unknown, nowMs: number) => Promise<void>;
+  function shippedRemind(gezel: unknown): Remind | null {
+    const block = (name: string) => {
+      const start = deckStoreSource.indexOf(`// ── ${name}-start ──`);
+      const end = deckStoreSource.indexOf(`// ── ${name}-end ──`);
+      return start < 0 || end < 0 ? null : deckStoreSource.slice(start, end);
+    };
+    const rules = block('leitner-rules');
+    const reminder = block('reminder');
+    if (!rules || !reminder) return null;
+    return new Function('gezel', `${rules}\n${reminder}\nreturn remind;`)(gezel) as Remind;
+  }
+
+  it('sets the reminder for when the next reviewed card comes due, and clears it when none will', async (ctx) => {
+    const set = vi.fn(async () => {});
+    const clear = vi.fn(async () => {});
+    const remind = shippedRemind({ reminder: { set, clear } });
+    // The pinned Gilde predates reminders; this runs once the pin carries them.
+    if (!remind) return ctx.skip();
+    const now = Date.parse('2026-10-07T12:00:00Z');
+    const card = (id: string, box: number, reviewedDaysAgo: number | null) => ({
+      id,
+      box,
+      lastReviewedAt:
+        reviewedDaysAgo === null ? null : new Date(now - reviewedDaysAgo * DAY).toISOString(),
+      createdAt: new Date(now - 30 * DAY).toISOString(),
+    });
+    await remind(
+      {
+        subject: 'Spanish verbs',
+        cards: [card('card-1', 1, 0), card('card-2', 2, 1), card('card-3', 1, null)],
+      },
+      now,
+    );
+    expect(set).toHaveBeenCalledWith({
+      at: new Date(now + DAY).toISOString(),
+      title: 'Flashcards are due',
+      body: '2 cards on "Spanish verbs" ready to review.',
+    });
+    await remind({ subject: 'Spanish verbs', cards: [card('card-3', 1, null)] }, now);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+});
 
 describe('flashcards Leitner rules (shipped bytes)', () => {
   const at = (ms: number) => new Date(ms).toISOString();
@@ -118,7 +165,11 @@ describe('Flashcards bundled project type', () => {
     const detail = await catalog.get('project-type', 'flashcards');
     if (!detail || detail.manifest.kind !== 'project-type') throw new Error('did not resolve');
     expect(detail.manifest.category).toBe('growth');
-    expect(detail.manifest.pages?.tools).toEqual(['record_review', 'finish_session']);
+    expect(detail.manifest.pages?.tools).toEqual([
+      'record_review',
+      'finish_session',
+      'forge_from_notes',
+    ]);
     const finish = detail.manifest.tools.find((t) => t.name === 'finish_session');
     expect(finish?.reaction?.gezel).toBe('study-buddy');
     for (const tool of detail.manifest.tools) {
@@ -149,6 +200,10 @@ describe('Flashcards bundled project type', () => {
     const modelTools = await resolveProjectScriptTools(catalog, detail);
     expect(modelTools.map((t) => t.name)).toEqual(['add_cards', 'deck_status', 'list_deck']);
     const pageTools = await resolvePageTools(catalog, detail);
-    expect(pageTools?.tools.map((t) => t.name)).toEqual(['record_review', 'finish_session']);
+    expect(pageTools?.tools.map((t) => t.name)).toEqual([
+      'record_review',
+      'finish_session',
+      'forge_from_notes',
+    ]);
   });
 });

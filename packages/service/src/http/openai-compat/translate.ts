@@ -115,7 +115,9 @@ export const ChatCompletionRequestSchema = z.object({
    * and one extra pre-`[DONE]` chunk carries the final usage with an
    * empty `choices` array. Without it, no usage appears in the stream.
    */
-  stream_options: z.object({ include_usage: z.boolean().optional() }).optional(),
+  stream_options: z
+    .object({ include_usage: z.boolean().optional(), include_progress: z.boolean().optional() })
+    .optional(),
   // Per-request sampling. Overlaid onto the model's resolved tuning as
   // the topmost layer (see openai-compat/request-tuning.ts), then
   // applied by every tuning-consuming provider (local engines, OpenAI,

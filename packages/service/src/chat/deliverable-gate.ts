@@ -1,7 +1,7 @@
 /**
  * Decide whether a craftbook step's `advanceWhen` deliverable is
  * satisfied at the end of an assignee's turn — the pure core of
- * `ChatManager.maybeAutoAdvanceOnObservableProgress`.
+ * `maybeAutoAdvanceOnObservableProgress` in observable-progress.ts.
  *
  * The legacy gate was "file exists + clears `minBytes` + passes the
  * optional `sniff`". That works for a step whose deliverable is a NEW

@@ -59,14 +59,43 @@ start Gezel. `list`, `inspect`, and `watch` never download weights or prepare
 system models. `prepare` needs `allowDownload: true` for missing weights; its
 promise resolves only after a terminal result and refreshed ready inventory.
 Preparing an installed catalog alias returns its canonical installed ID without
-downloading again. A saved selection never falls back unless the app explicitly
+downloading again. A hosted desktop connection still prepares the native engine
+for available weights with weight downloads disabled. A saved selection never falls back unless the app explicitly
 chooses a fallback policy.
 
 `streamText` emits deltas followed by exactly one `done` or `error`. Cancellation
 returns `done` with the partial text and `cancelled: true`; errors also reject
 the promise. Observer exceptions cannot change operation outcome. Preserve
 `finishReason`: `length` means the result may be truncated. The wrapper never
-writes the result into a document automatically.
+writes the result into a document automatically. `TextRequest` also accepts
+`temperature`, `reasoningEffort`, and optional `knowledge` budgets; options that
+inventory explicitly declares unsupported fail before inference. Events include
+`progress`, and `done` carries the final `model` and `usage`. Missing option
+metadata remains unknown rather than being guessed from the model's name.
+
+## Applications that already own their lifecycle
+
+`connectDesktopEmbedding(options, { interactive })` returns an owned connection
+with `app`, `models`, `mode`, `revoke`, and idempotent `close`. It shares the
+factory's consent/hosting policy without adding enable/suspend state. DocBlocks
+uses this surface beneath its provider-neutral `host.ai` state machine.
+`revoke` forgets the supplied stored grant even if standalone revocation fails;
+it does not stop a hosted connection. Await `close` before replacing a connection.
+
+Pass `knowledge: true` to request exactly `openai` plus `knowledge`, with no
+product authority. The factory exposes lifecycle-tracked `knowledge.state`,
+`update`, and `retrieve`; calling those without authority fails
+`knowledge_unavailable`. Constructing it still performs no connection.
+
+`withKnowledgeContext(app.knowledge, messages, options)` is also available from
+the browser-safe SDK. Supply `maxPromptCharacters`, `maxMessages`, optional
+`contextWindow`/`maxOutputTokens`, and `signal`. It uses up to four cited passages
+and 12,000 passage characters by default, accounts for serialized evidence, and
+keeps retrieval failures from blocking the original request. Cancellation still
+propagates. The helper labels retrieved evidence as untrusted, never truncates
+the task, and treats character-based context budgeting as advisory. Plain
+`app.chat` never retrieves implicitly. `streamText` opts in per request through
+its `knowledge` field, using the same budgets.
 
 ## Models and readiness
 
@@ -127,10 +156,11 @@ sign the enclosing application normally. Unsupported targets fail unless the
 build explicitly passes `allowUnavailable` and disables hosted AI.
 
 At runtime, `verifyNativeBinaries` is the side-effect-free service verifier.
-Store-mode in-process hosting invokes it before starting a service when a native
-payload is configured. Store mode clears ambient developer engine overrides
+In-process hosting invokes it before starting a service whenever a native
+payload is configured, including explicit development payloads. Store mode clears ambient developer engine overrides
 for the host lifetime and refuses executable downloads. The desktop factory
-requires a bundled engine path for store mode. Development can use the standard
+requires a bundled engine path when it actually starts a store host. Adopting a
+standalone grant does not verify or load the unused private payload. Development can use the standard
 profile. OS sandbox suitability, entitlements, architecture selection, and the
 app's signing identity remain the application's release decisions.
 

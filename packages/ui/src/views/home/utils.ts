@@ -58,6 +58,16 @@ export function timeAgo(iso: string | undefined, now: number = Date.now()): stri
   return formatRelativeTime(iso, { now });
 }
 
+/** New work uses the last project visited, or Default before one is chosen. */
+export function deriveLaunchProjectId(config: ConfigResponse | null, projects: Project[]): string {
+  const ids = new Set(projects.filter((p) => !isSharedLibraryProject(p)).map((p) => p.id));
+  const recent = (config?.recentTabs ?? []).slice().sort((a, b) => b.at - a.at);
+  for (const tab of recent) {
+    if (tab.kind === 'project' && ids.has(tab.id)) return tab.id;
+  }
+  return 'default';
+}
+
 /**
  * Which project is "on the bench" right now:
  *   1. the most-recently-touched visible project tab that still exists, else

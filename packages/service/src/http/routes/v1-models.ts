@@ -9,6 +9,7 @@ import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ProviderName } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { appleSystemModel } from '../openai-compat/apple-model.js';
 import { resolveFallbackGezelId } from '../openai-compat/chat-target.js';
 
 /**
@@ -179,7 +180,8 @@ async function buildModelEntries(
   const availableEntries = buckets.flat();
   const existingIds = new Set([...gezelEntries, ...availableEntries].map((entry) => entry.id));
   const downloadable = await downloadableCatalogEntries(ctx, created, existingIds);
-  return [...gezelEntries, ...availableEntries, ...downloadable];
+  const apple = await appleSystemModel(created);
+  return [...gezelEntries, ...apple, ...availableEntries, ...downloadable];
 }
 
 export function v1ModelsRoutes(ctx: ServiceContext, options: V1ModelsRouteOptions = {}): Hono {

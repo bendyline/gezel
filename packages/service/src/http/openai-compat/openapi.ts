@@ -181,7 +181,11 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
             'structured outputs, and streaming via `stream: true`. Connected apps may opt ' +
             'into a read-only Gezel transcript by sending a stable ' +
             '`x-gezel-external-conversation-id`; optional working-directory and project ' +
-            'headers route that thread to one unambiguous project.',
+            'headers route that thread to one unambiguous project. Set ' +
+            '`stream_options.include_progress` to receive additional chunks with empty ' +
+            '`choices` and `gezel_progress`: phase, percent (loading/prefill only), ' +
+            'outputTokens and tokensPerSecond. Unavailable measurements are null; ' +
+            'private reasoning text is never included.',
           security: [{ bearerAuth: ['openai'] }],
           parameters: [
             {
@@ -492,7 +496,14 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
             stream: { type: 'boolean' },
             stream_options: {
               type: 'object',
-              properties: { include_usage: { type: 'boolean' } },
+              properties: {
+                include_usage: { type: 'boolean' },
+                include_progress: {
+                  type: 'boolean',
+                  description:
+                    'Gezel extension: request scoped phase, measured percentage and token counters in gezel_progress chunks.',
+                },
+              },
             },
             tools: {
               type: 'array',

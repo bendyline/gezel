@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyBinaryDocumentBytes } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
+import { minimalMediaFixture } from '../fixtures/media.ts';
 import { readStoredZip } from '../fixtures/office-documents.ts';
 import {
   evaluateMockExpectations,
@@ -58,6 +59,8 @@ describe('mock MCP file fixtures', () => {
       ['minimal-pptx', 'out/deck.pptx', minimalPptxFixture()],
       ['minimal-docx', 'out/report.docx', minimalDocxFixture()],
       ['minimal-pdf', 'out/report.pdf', minimalPdfFixture()],
+      ['minimal-media', 'out/slideshow.mp4', minimalMediaFixture('slideshow.mp4')],
+      ['minimal-media', 'out/slideshow.gif', minimalMediaFixture('slideshow.gif')],
     ] as const;
 
     for (const [fixture, path, expected] of cases) {
@@ -75,6 +78,11 @@ describe('mock MCP file fixtures', () => {
     // …and the fixtures are genuinely different containers.
     expect(Buffer.from(minimalDocxFixture())).not.toEqual(Buffer.from(minimalPptxFixture()));
     expect(verifyBinaryDocumentBytes('x.pdf', minimalPptxFixture()).ok).toBe(false);
+    expect(verifyBinaryDocumentBytes('x.mp4', minimalMediaFixture('x.gif')).ok).toBe(false);
+    expect(
+      verifyBinaryDocumentBytes('x.gif', new TextEncoder().encode('# Not a slideshow')).ok,
+    ).toBe(false);
+    expect(() => minimalMediaFixture('out.txt')).toThrow('MP4 or GIF');
   });
 
   it('builds PPTX and DOCX fixtures from the converted source instead of a placeholder', async () => {

@@ -484,7 +484,10 @@ describe('AI-shadow tier + review drain event', () => {
 
 describe('on-demand drives + night catch-up', () => {
   function makeDriveFixture(
-    opts: { projects?: Array<{ id: string; indexingEnabled?: boolean }> } = {},
+    opts: {
+      projects?: Array<{ id: string; indexingEnabled?: boolean }>;
+      catchUpSliceMs?: number;
+    } = {},
   ) {
     const calls: string[] = [];
     const refreshStatic = vi.fn(async (_id: string) => {
@@ -562,6 +565,7 @@ describe('on-demand drives + night catch-up', () => {
       resolveBoekwachter: async () => BOOK,
       refreshStatic,
       shadowProducers: { describeImage: async () => ({ body: 'x' }) },
+      ...(opts.catchUpSliceMs !== undefined ? { catchUpSliceMs: opts.catchUpSliceMs } : {}),
     });
     return { mgr, calls, refreshStatic, enrich, review, oneShotCompletion };
   }
@@ -706,6 +710,71 @@ describe('on-demand drives + night catch-up', () => {
     });
     await expect(mgr.catchUpAll()).resolves.toBeUndefined();
   });
+
+  it('shares the night between projects in slices and releases the dispatch hold after one round', async () => {
+    // 'big' needs many slow batches (a first-night photo library); 'small'
+    // finishes at once. Without slicing, 'small' and every queued night task
+    // would wait for all of 'big'.
+    const { mgr, refreshStatic, enrich } = makeDriveFixture({
+      projects: [{ id: 'big' }, { id: 'small' }],
+      catchUpSliceMs: 60,
+    });
+    let bigBatches = 0;
+    const holdDuringLaterRounds: boolean[] = [];
+    enrich.mockReset().mockImplementation(async (projectId: string) => {
+      if (projectId !== 'big' || bigBatches >= 6) return { files: 0, summarized: 0, embedded: 0 };
+      bigBatches++;
+      const round = refreshStatic.mock.calls.filter((c) => c[0] === 'big').length;
+      if (round > 1) holdDuringLaterRounds.push(mgr.isCatchUpActive());
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return { files: 1, summarized: 1, embedded: 1 };
+    });
+    const caughtUp: string[] = [];
+    mgr.setOnProjectCaughtUp((projectId) => {
+      caughtUp.push(projectId);
+    });
+
+    const run = mgr.catchUpAll();
+    expect(mgr.isCatchUpActive()).toBe(true);
+    await run;
+
+    const order = refreshStatic.mock.calls.map((c) => c[0]);
+    expect(order.slice(0, 3)).toEqual(['big', 'small', 'big']); // small got its turn mid-sweep
+    expect(caughtUp).toEqual(['small', 'big']);
+    expect(bigBatches).toBe(6); // the slices together finished big
+    expect(holdDuringLaterRounds.length).toBeGreaterThan(0);
+    expect(holdDuringLaterRounds.every((held) => held === false)).toBe(true);
+    await vi.waitFor(() => expect(mgr.isNightWorkRunning()).toBe(false));
+  });
+
+  it('reports night work as running until the hand-off hooks finish', async () => {
+    const { mgr } = makeDriveFixture({ projects: [{ id: 'a' }] });
+    let release!: () => void;
+    mgr.setOnProjectCaughtUp(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await mgr.catchUpAll();
+    expect(mgr.isCatchUpActive()).toBe(false);
+    expect(mgr.isNightWorkRunning()).toBe(true); // planner still drafting
+    release();
+    await vi.waitFor(() => expect(mgr.isNightWorkRunning()).toBe(false));
+  });
+
+  it('does not hand off a project the window closed on mid-slice', async () => {
+    const { mgr, enrich } = makeDriveFixture({ projects: [{ id: 'a' }] });
+    const caughtUp = vi.fn();
+    mgr.setOnProjectCaughtUp(caughtUp);
+    enrich.mockReset().mockImplementation(async () => {
+      mgr.cancelCatchUp();
+      return { files: 1, summarized: 1, embedded: 1 };
+    });
+    await mgr.catchUpAll();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(caughtUp).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildEnrichDeps enricher override', () => {
@@ -842,6 +911,32 @@ describe('buildEnrichDeps enricher override', () => {
     const [summarizeMs, reviewMs] = oneShotCompletion.mock.calls.map((c) => c[1] as number);
     expect(reviewMs).toBeGreaterThan(summarizeMs!);
     expect(reviewMs).toBeGreaterThanOrEqual(180_000);
+  });
+
+  it('defers, rather than charges, a summary that timed out still waiting behind other work', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const timeout = () =>
+      Object.assign(new Error('one-shot timed out after 365s'), { name: 'TimeoutError' });
+    const { chat, store, oneShotCompletion } = makeDepsFixture();
+    const outcomes: string[] = [];
+    const deps = await buildEnrichDeps(store, chat, { onOutcome: (o) => outcomes.push(o) });
+
+    // Queued behind a long task turn until the deadline: the model never saw it.
+    oneShotCompletion.mockImplementationOnce(async (_p, _ms, opts) => {
+      opts.onQueueWait({ aheadOf: 1 });
+      throw timeout();
+    });
+    expect(await deps.summarize('p')).toMatchObject({ text: '', deferred: true });
+
+    // Admitted and answering, then too slow: a real timeout, charged as before.
+    oneShotCompletion.mockImplementationOnce(async (_p, _ms, opts) => {
+      opts.onQueueWait({ aheadOf: 1 });
+      opts.onDelta('The file');
+      throw timeout();
+    });
+    expect(await deps.summarize('p')).toBe('');
+    expect(outcomes).toEqual(['unavailable', 'timeout']);
   });
 
   it('omits the review completion when no local model is configured', async () => {

@@ -13,7 +13,8 @@ import {
   readEnrichableText,
   resolveEnrichCompletion,
 } from './enrich.js';
-import type { FileRecord, IndexStore } from './index-store.js';
+import type { FileRecord } from './index-store-types.js';
+import type { IndexStore } from './index-store.js';
 import { isSpuriousTruncationClaim } from './review-claims.js';
 import type { ResolvedRubric } from './rubrics.js';
 

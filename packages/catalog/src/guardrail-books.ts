@@ -13,7 +13,7 @@ import type { CraftbookDoc } from '@bendyline/gezel';
 
 export const GUARDRAIL_RELEASED_AT = '2026-08-10T00:00:00Z';
 export const CAREFUL_MODE_VERSION = '1.2.0';
-export const FREEZE_SCOPE_VERSION = '1.3.0';
+export const FREEZE_SCOPE_VERSION = '1.4.0';
 const GSTACK_BASED_ON = {
   name: 'gstack',
   url: 'https://github.com/garrytan/gstack',
@@ -177,10 +177,12 @@ async function main(): Promise<void> {
   }
 
   // Only write destinations count. Source paths may live elsewhere and are
-  // safe to read (copy_artifact_to_workspace and extract_archive).
+  // safe to read (copy_path, copy_artifact_to_workspace and extract_archive).
   const candidateKeys =
     toolName === 'rename'
       ? ['fromPath', 'toPath']
+      : toolName === 'copy_path'
+        ? ['toPath']
       : toolName === 'copy_artifact_to_workspace'
         ? ['dest']
         : toolName === 'extract_archive'
@@ -221,7 +223,7 @@ await main();
 `;
 
 const WRITE_TOOL_MATCHER =
-  '^(write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker|copy_artifact_to_workspace|make_dir|delete_path|rename|extract_archive|npm_install|run_package_script|run_npx|run_nodejs_script|derive_file|run_playwright_script|run_installed_script|apply_project_type)$';
+  '^(write_file|append_to_file|replace_in_file|replace_lines|apply_patch|insert_at_marker|copy_artifact_to_workspace|make_dir|delete_path|rename|copy_path|extract_archive|npm_install|run_package_script|run_npx|run_nodejs_script|derive_file|run_playwright_script|run_installed_script|apply_project_type)$';
 const COMMAND_TOOL_MATCHER =
   '^(delete_path|run_package_script|run_npx|run_nodejs_script|derive_file|run_playwright_script|run_installed_script)$';
 
@@ -258,6 +260,29 @@ export const CAREFUL_MODE: CraftbookDoc = {
   releasedAt: GUARDRAIL_RELEASED_AT,
 };
 
+/**
+ * Step tool policies, explicit so the source serializes to exactly what the
+ * writer commits (it would otherwise derive them). From 1.4.0.
+ */
+const FREEZE_DISALLOWED_TOOLSETS = [
+  'ai-apps',
+  'archives',
+  'audio',
+  'craftbooks',
+  'data-tables',
+  'entity-intel',
+  'git',
+  'image-intel',
+  'images',
+  'role-delegation',
+  'role-delegation-escalation',
+  'security-intel',
+  'team-management',
+  'videos',
+  'web',
+  'workspace-fs-write',
+] as const;
+
 export const FREEZE_SCOPE: CraftbookDoc = {
   id: 'freeze-scope',
   name: 'Freeze Scope',
@@ -284,6 +309,14 @@ export const FREEZE_SCOPE: CraftbookDoc = {
       prompt:
         'Confirm with the user which single workspace directory edits are allowed in — use `ask_user_question` if the kickoff didn’t name one. Then record it by writing `.gezel/freeze.json` with exactly:\n\n```json\n{ "dir": "<workspace-relative-directory>" }\n```\n\nUse a relative path with no leading `./` and no trailing slash (e.g. `src/billing`). Tell the user the freeze is on and advance.',
       next: 'frozen',
+      toolPolicy: {
+        disallowBuiltinToolsets: [
+          ...FREEZE_DISALLOWED_TOOLSETS,
+          'browser-automation',
+          'code-execution',
+        ].sort(),
+        outputMedium: 'none',
+      },
     },
     {
       id: 'frozen',
@@ -292,6 +325,10 @@ export const FREEZE_SCOPE: CraftbookDoc = {
       prompt:
         'The built-in write boundary is active: direct file mutations outside the frozen directory are denied automatically — you will see the denial as a tool error naming the boundary. Opaque built-in execution tools (`npm_install`, package/npx/Node/Playwright/installed scripts, `derive_file`, and project-type application) are blocked because their extra write targets cannot be proven. Custom project-type and third-party tools are not covered by this hook and must not be called while frozen. Work with direct workspace tools inside the directory. If the work genuinely needs an executor, custom tool, or outside path, do NOT fight the boundary: explain why and let the user widen `.gezel/freeze.json` or end this task.',
       terminal: true,
+      toolPolicy: {
+        disallowBuiltinToolsets: [...FREEZE_DISALLOWED_TOOLSETS],
+        outputMedium: 'none',
+      },
     },
   ],
   scripts: { 'check-freeze': CHECK_FREEZE },

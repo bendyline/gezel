@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   MODEL_CATALOG_ID,
   ROLE_CATALOG_ID,
-  TOOLSET_CATALOG_ID,
   type SiteCatalogSource,
+  TOOLSET_CATALOG_ID,
   buildSiteCatalog,
   demoSectionHtml,
   insertAfterTitle,
@@ -15,7 +15,10 @@ function summary(kind: CatalogKind, manifest: Record<string, unknown>, sourceId 
   return { sourceId, kind, manifest } as unknown as CatalogItemSummary;
 }
 
-function stubCatalog(items: Partial<Record<CatalogKind, CatalogItemSummary[]>>, files: Record<string, string>) {
+function stubCatalog(
+  items: Partial<Record<CatalogKind, CatalogItemSummary[]>>,
+  files: Record<string, string>,
+) {
   const source: SiteCatalogSource = {
     list: async (kind) => items[kind] ?? [],
     listItemFiles: async (kind, id) =>
@@ -23,7 +26,9 @@ function stubCatalog(items: Partial<Record<CatalogKind, CatalogItemSummary[]>>, 
         .filter((k) => k.startsWith(`${kind}/${id}/`))
         .map((k) => k.slice(`${kind}/${id}/`.length)),
     readItemFile: async (kind, id, relPath, _sourceId, version) => {
-      const key = version ? `${kind}/${id}/versions/${version}/${relPath}` : `${kind}/${id}/${relPath}`;
+      const key = version
+        ? `${kind}/${id}/versions/${version}/${relPath}`
+        : `${kind}/${id}/${relPath}`;
       return key in files ? Buffer.from(files[key]!) : null;
     },
   };
@@ -55,7 +60,11 @@ const catalog = stubCatalog(
     ],
     toolset: [
       summary('toolset', { id: 'builtin.memory', name: 'Memory', description: 'x' }, 'builtin'),
-      summary('toolset', { id: 'docblocks', name: 'DocBlocks Documents', description: 'Office files.' }),
+      summary('toolset', {
+        id: 'docblocks',
+        name: 'DocBlocks Documents',
+        description: 'Office files.',
+      }),
       ...Array.from({ length: 1234 }, (_, i) =>
         summary('toolset', { id: `c${i}`, name: `C${i}`, description: '' }, 'community'),
       ),
@@ -87,12 +96,23 @@ const catalog = stubCatalog(
       }),
     ],
     'craftbook-template': [
-      summary('craftbook-template', { id: 'pitch-deck', name: 'Pitch Deck', description: 'Make a deck. More.', logo: 'logo.webp' }),
-      summary('craftbook-template', { id: 'odd-logo', name: 'Odd', description: 'x', logo: '../../etc/passwd' }),
+      summary('craftbook-template', {
+        id: 'pitch-deck',
+        name: 'Pitch Deck',
+        description: 'Make a deck. More.',
+        logo: 'logo.webp',
+      }),
+      summary('craftbook-template', {
+        id: 'odd-logo',
+        name: 'Odd',
+        description: 'x',
+        logo: '../../etc/passwd',
+      }),
     ],
   },
   {
-    'gezel-template/aanjager/versions/1.0.0/about.md': '# Who you are\n\nYou keep the drive moving.',
+    'gezel-template/aanjager/versions/1.0.0/about.md':
+      '# Who you are\n\nYou keep the drive moving.',
     'project-type/with-demo/versions/1.0.0/pages/dashboard/index.html': '<h1>demo</h1>',
     'project-type/with-demo/versions/1.0.0/pages/dashboard/app.js': 'void 0',
     'project-type/with-demo/versions/1.0.0/about.md': 'not a page file',
@@ -140,7 +160,9 @@ describe('buildSiteCatalog', () => {
     const { pages, craftbookArt } = await buildSiteCatalog(catalog);
     const gallery = pages.find((p) => p.entry.id === 'craftbooks-index')!;
     expect(gallery.replaces).toBe(true);
-    expect(gallery.html).toContain('<a href="../craftbook/pitch-deck/"><img src="../craftbook/pitch-deck/logo.webp"');
+    expect(gallery.html).toContain(
+      '<a href="../craftbook/pitch-deck/"><img src="../craftbook/pitch-deck/logo.webp"',
+    );
     expect([...craftbookArt.keys()]).toEqual(['pitch-deck']);
   });
 

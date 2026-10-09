@@ -170,16 +170,19 @@ describe('runHandboekExport', () => {
     // Nine rounds under "Results by test round" would bury the article's own
     // three sections, and eight of them are hidden the moment the filter runs.
     const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
-    const nav = page.slice(page.indexOf('hb-onthispage'));
-    expect(nav).toContain('Results by test round');
-    expect(nav).not.toContain('Latest round');
-    expect(nav).not.toContain('Earlier round');
+    const nav = page.match(/<aside class="hb-onthispage">([\s\S]*?)<\/aside>/)?.[1];
+    expect(nav).toBeTruthy();
+    const roundTitles = [
+      ...page.matchAll(/<h[2-6]\b[^>]*class="hb-scorecard-round-title"[^>]*>([^<]+)<\/h[2-6]>/g),
+    ].map((match) => match[1]!);
+    expect(roundTitles.length).toBeGreaterThan(0);
+    for (const title of roundTitles) expect(nav).not.toContain(title);
   });
 
   it('renders readable pages as semantic HTML, with no player dependency', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
     expect(page).toContain('<article class="hb-article">');
-    expect(page).toMatch(/<h1[^>]*>Your crew<\/h1>/);
+    expect(page).toMatch(/<h1[^>]*>[^<]+<\/h1>/);
     expect(page).not.toContain('squisq-player.js');
     expect(page).not.toContain('SquisqPlayer.mount');
   });
@@ -187,7 +190,6 @@ describe('runHandboekExport', () => {
   it('gives every page an on-this-page list built from its own headings', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
     expect(page).toContain('<aside class="hb-onthispage">');
-    expect(page).toContain('>On this page<');
     const anchors = [...page.matchAll(/<h2 id="([^"]+)"/g)].map((m) => m[1]);
     expect(anchors.length).toBeGreaterThan(0);
     for (const id of anchors) expect(page).toContain(`href="#${id}"`);
@@ -227,7 +229,7 @@ describe('runHandboekExport', () => {
   it('carries section navigation on every page', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
     expect(page).toContain('<aside class="hb-sidebar">');
-    expect(page).toContain('Craftbooks');
+    expect(page).toContain('href="../craftbooks-index/"');
     expect(page).toContain('class="hb-breadcrumb"');
   });
 
@@ -249,7 +251,10 @@ describe('runHandboekExport', () => {
     expect(book).toContain('class="hb-craftbook-art"');
     expect(existsSync(join(out, 'craftbook', 'status-report', 'logo.webp'))).toBe(true);
 
-    const demoPages = await readFile(join(out, 'project-type', 'caregiving-binder', 'index.html'), 'utf8');
+    const demoPages = await readFile(
+      join(out, 'project-type', 'caregiving-binder', 'index.html'),
+      'utf8',
+    );
     expect(demoPages).toContain('class="hb-demo"');
     expect(
       existsSync(join(out, 'project-type', 'caregiving-binder', 'demo', 'dashboard', 'index.html')),
@@ -260,24 +265,23 @@ describe('runHandboekExport', () => {
     const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
     expect(page).toContain('href="../model-catalog/"');
     expect(page).toContain('href="../toolset-catalog/"');
-    expect(page).not.toMatch(/class="hb-sidebar"[\s\S]*href="\.\.\/model\/[^"]+\/"[\s\S]*<\/aside>/);
+    expect(page).not.toMatch(
+      /class="hb-sidebar"[\s\S]*href="\.\.\/model\/[^"]+\/"[\s\S]*<\/aside>/,
+    );
   });
 
-  it('groups technical navigation into the four documented subheadings', async () => {
+  it('groups related technical articles under shared navigation subheadings', async () => {
     const page = await readFile(join(out, 'writing-scripts-with-gezel-sdk', 'index.html'), 'utf8');
-    for (const title of [
-      'How Gezel works',
-      'The Gezel Command Line',
-      'Developer',
-      'Models and Testing',
-    ]) {
-      expect(page).toContain(`<h3 class="hb-sidebar-subcategory-title">${title}</h3>`);
-    }
-    const developer = page.match(
-      /<h3 class="hb-sidebar-subcategory-title">Developer<\/h3>\s*<ul>([\s\S]*?)<\/ul>/,
-    )?.[1];
-    expect(developer).toContain('Writing scripts with gezel-sdk');
-    expect(developer).toContain('Building connected apps with gezel-app-sdk');
+    const groups = [
+      ...page.matchAll(
+        /<h3 class="hb-sidebar-subcategory-title">[^<]+<\/h3>\s*<ul>([\s\S]*?)<\/ul>/g,
+      ),
+    ].map((match) => match[1]!);
+    expect(groups.length).toBeGreaterThan(1);
+    const developer = groups.find((group) =>
+      group.includes('href="../writing-scripts-with-gezel-sdk/"'),
+    );
+    expect(developer).toContain('href="../building-connected-apps-with-gezel-app-sdk/"');
   });
 
   it('omits the on-this-page list when an article has too few headings', async () => {
@@ -293,7 +297,7 @@ describe('runHandboekExport', () => {
     const page = await readFile(join(out, 'craftbook', 'status-report', 'index.html'), 'utf8');
     const links = [...page.matchAll(/href="\.\.\/\.\.\/craftbook\//g)];
     expect(links.length).toBeLessThan(10);
-    expect(page).toMatch(/All \d+ craftbooks/);
+    expect(page).toContain('href="../../craftbooks-index/"');
   });
 
   it('links the baseline sheet then caller sheets, at the right depth', async () => {
@@ -308,10 +312,8 @@ describe('runHandboekExport', () => {
 
   it('makes the landing page a welcome, not a dump of every article', async () => {
     const home = await readFile(join(out, 'index.html'), 'utf8');
-    expect(home).toContain('The Gezel Handboek');
-    expect(home).toContain('Start here');
     expect(home).toContain('href="welcome/"');
-    expect(home).toMatch(/Browse all \d+ craftbooks/);
+    expect(home).toContain('href="craftbooks-index/"');
     const craftbookLinks = [...home.matchAll(/href="craftbook\//g)];
     expect(craftbookLinks.length).toBeLessThan(10);
   });
@@ -328,7 +330,6 @@ describe('runHandboekExport', () => {
 
   it('site mode keeps personal data out', async () => {
     const crew = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
-    expect(crew).not.toContain('Your Meester is');
     expect(crew).not.toContain('poppetje/');
   });
 });

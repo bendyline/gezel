@@ -29,16 +29,21 @@ that want media:
   revision, every file sha256-pinned: the text model (314 MB), the vision
   encoder (195 MB) and the audio encoder (340 MB, fetched only when a video or
   recording is first indexed). Google warns against float16 for this model;
-  never pin an fp16 graph. The community conversion should be mirrored to a
-  Bendyline-controlled repository before defaults depend on it staying put.
+  never pin an fp16 graph. The files are downloaded from that repository,
+  not a Bendyline mirror (see Alternatives).
 - **512 dimensions by prefix truncation.** The profile records
   `truncation: { method: 'prefix', sourceDimensions: 768 }`; one gezk function,
   `profileUnitVector`, keeps the first 512 values and re-normalizes, for
   passages, queries and media alike.
-- **Centered sign bits.** The 512-entry center is the mean of 13,500 catalog
-  chunks (|c| = 0.763). Stage-1 recall of the top 24 was 94.9% raw versus
-  95.0% centered at 192 candidates on mixed corpora, and centering helps on
-  narrow ones, so the profile keeps `centered-sign`.
+- **Centered sign bits.** The 512-entry center is the mean of the 49,474
+  passage vectors of a real build of this profile (gezel's compiler over
+  Wikipedia Food & Drink, Azure docs and the Handboek; |c| = 0.763, split-half
+  agreement 0.99998). With the reader's 1,024 candidates, stage-1 recall of
+  the exact top 24 is 98.7% centered against 98.3% raw, and the full
+  two-stage reader returns 99.0% of an exhaustive int8 search's top 10 at
+  about 10 ms a query. Centering matters little on mixed corpora and a lot on
+  narrow ones (85% raw against 99% centered on gezel's own docs), so the
+  profile keeps `centered-sign`.
 - **Format 0.8, index schema 5.** Profiles gain `model.files` (every
   additional file the runtime loads, so the 314 MB of weights is verified, not
   only the 0.5 MB graph), `truncation` and `media`. Shard `chunks` gain
@@ -85,6 +90,18 @@ that want media:
   most 120 windows.
 
 ## Alternatives considered
+
+- **Mirror the model to a Bendyline-controlled repository.** Declined: owning
+  a copy of a third-party model is a distribution commitment, and the pins
+  already cover the risk that matters most. Each file is fetched at an exact
+  revision and must match its sha256, so the content cannot change under a
+  build. What remains is availability: if the repository or that revision
+  disappears, installs that have the files keep working (the media lane
+  loads local files only), while new installs, and the audio encoder on first
+  video work, report a failed download in Settings and catalog media search
+  falls back to keyword-only. `onnx-community` is the organization that
+  publishes transformers.js conversions, the same source as the Kokoro voice
+  gezel already downloads.
 
 - **Keep CLIP and add a text tower.** CLIP's text↔image gap (0.31 versus 0.95
   against captions) makes one ranked list of text and images impossible, and

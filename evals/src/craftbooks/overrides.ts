@@ -1552,10 +1552,10 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'The latest sidecar checks the one-H1-per-scene Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset and dual MP4/GIF artifact gates; the revised workflow has not yet been run on a local model.',
+        'The 1.1.8 sidecar runs the full workflow against deterministic DocBlocks tools, checks grounded scene Markdown, and requires valid saved MP4 and GIF containers plus a terminal task. Local-model validation is pending.',
     },
     gaps: [
-      'Add a fake DocBlocks MCP/media runtime that returns deterministic MP4/GIF artifacts and previews, then assert both saved binaries.',
+      'Run a real-converter visual and audio smoke test; deterministic media fixtures prove orchestration and binary format, not rendered content.',
     ],
   },
   'newsletter-issue': {
@@ -1677,6 +1677,16 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
+  },
+  'photo-library-nightly': {
+    mode: 'workflow',
+    timeoutMs: 30 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'The test.json sidecar can seed only text, so it proves the honest empty pass. photo-albums-real-photos (scenarios/photo-albums.ts) seeds JPEGs with EXIF capture dates and checks the look-back window; neither has run on a local model yet.',
+    },
+    gaps: ['Run photo-albums-real-photos on a local model and record the result.'],
   },
   'physics-toy': {
     coverage: {
@@ -1926,20 +1936,19 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'The latest sidecar checks the source-grounded report.md that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset, real PDF artifact gate, and absence of the legacy HTML path; the revised workflow has not yet been run on a local model.',
+        'The 1.1.8 sidecar runs the full workflow against deterministic DocBlocks tools, requires grounded Markdown, convert/preview/save calls, a valid saved PDF, and a terminal task. Local-model validation is pending.',
     },
-    gaps: [
-      'Add a fake DocBlocks MCP that returns a deterministic PDF artifact and page previews, then assert the saved binary and tool-call sequence.',
-    ],
+    gaps: ['Run a real-converter rendering smoke test for layout and content fidelity.'],
   },
   'research-report': {
+    mode: 'workflow',
+    timeoutMs: 30 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
+        'The 1.0.4 sidecar now requires the complete multi-role workflow and a terminal task. Earlier direct-worker passes do not validate this stronger test.',
     },
-    gaps: ['Add citation-resolution and word-band gates for this prose class.'],
+    gaps: ['Measure the full workflow on both reference local models.'],
   },
   'research-to-document': {
     timeoutMs: 30 * 60_000,
@@ -1948,7 +1957,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Upgraded from a Markdown-source smoke eval to a real DocBlocks artifact-surface eval: a fake DocBlocks MCP serves the template family (list_templates / describe_template) plus convert/preview/save, save_artifact materializes a real DOCX into the artifacts drawer, and a binaryDocument check asserts the saved bytes are a ZIP rather than the Markdown renamed. Not yet run on a local model.',
     },
-    gaps: ['Run the upgraded artifact-surface scenario on at least one local model.'],
+    gaps: [
+      'Run the complete workflow sidecar on the two reference local models; binary fixtures do not measure rendering fidelity.',
+    ],
   },
   'rest-api': {
     coverage: {

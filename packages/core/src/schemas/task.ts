@@ -588,6 +588,12 @@ export const TaskSchema = z.object({
         key: z.string().regex(/^craftbook-root-v1:[a-f0-9]{64}$/),
       }),
       z.object({
+        /** Durable workflow request identity, including completed and canceled tasks. */
+        kind: z.literal('workflow-invocation'),
+        key: z.string().regex(/^workflow-v1:[a-f0-9]{64}$/),
+        requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+      }),
+      z.object({
         /**
          * A host materialized from a gezel template's `suggestedCraftbooks`
          * entry via the suggested-work layer. `suggestionKey` is the
@@ -794,10 +800,19 @@ export const CreateTaskRequestSchema = z
      * it into service-owned Task.origin provenance; ordinary create_task
      * callers omit it.
      */
+    /** CLI workflow replay identity; reuse never resets task state or gates. */
+    workflowInvocationKey: z
+      .string()
+      .regex(/^workflow-v1:[a-f0-9]{64}$/)
+      .optional(),
     craftbookInvocationKey: z
       .string()
       .regex(/^craftbook-root-v1:[a-f0-9]{64}$/)
       .optional(),
+  })
+  .refine((v) => !(v.workflowInvocationKey && v.craftbookInvocationKey), {
+    message: 'Use only one invocation key',
+    path: ['workflowInvocationKey'],
   })
   .refine((v) => !!v.craftbookId !== !!(v.steps && v.steps.length > 0), {
     message: 'exactly one of craftbookId or steps must be provided for the main craftbook',

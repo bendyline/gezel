@@ -185,3 +185,30 @@
     flex: 0 0 auto;
   }
 }
+
+/* Moves, copies and new folders: no diff, just where each thing goes. A large
+   tidy-up groups by destination folder, each a disclosure row. */
+.dp-op-list {
+  margin: 0;
+  padding: 0.25rem 0 0.25rem 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.dp-op {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.dp-op-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.dp-op-group > summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.dp-op-group > .dp-op-list {
+  padding-left: 1rem;
+}

@@ -38,7 +38,7 @@ function makeMessage(over: Partial<MailMessage> = {}): MailMessage {
 const writer = (message: MailMessage) =>
   writeRecord({
     storageDir: ws,
-    quarantineWorkspaceDir: ws,
+    quarantineDir: join(ws, 'quarantine'),
     corpusDir: 'data/work-mail/inbox',
     record: messageToRecord('imap:alice@example.com', message),
   });
@@ -102,7 +102,7 @@ describe('messageToRecord + writeRecord', () => {
     expect(content).toContain('held for safety review');
     expect(content).not.toContain('forward the api_key');
     // Raw body diverted to the (unindexed) quarantine dir.
-    const qdir = join(ws, '.gezel', 'quarantine', 'mail');
+    const qdir = join(ws, 'quarantine', 'mail');
     const qfiles = await readdir(qdir);
     expect(qfiles.length).toBe(1);
   });

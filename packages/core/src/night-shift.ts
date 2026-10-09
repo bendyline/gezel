@@ -153,13 +153,74 @@ export function nextNightShiftStart(now: Date, window: NightShiftWindow): Date {
 }
 
 function countOf(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
+  return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+}
+
+/** What the nightly sweep got through, from the night-shift tally. */
+export interface NightShiftIndexing {
+  filesIndexed: number;
+  filesReviewed: number;
+  mediaDescribed: number;
+}
+
+/** Whether the sweep did anything worth a line on the morning card. */
+export function hasNightShiftIndexing(indexing: NightShiftIndexing | undefined): boolean {
+  return indexingParts(indexing).length > 0;
+}
+
+function indexingParts(indexing: NightShiftIndexing | undefined): string[] {
+  if (!indexing) return [];
+  const parts: string[] = [];
+  if (indexing.filesIndexed > 0) parts.push(`read ${countOf(indexing.filesIndexed, 'file')}`);
+  if (indexing.filesReviewed > 0) {
+    parts.push(`reviewed ${countOf(indexing.filesReviewed, 'file')}`);
+  }
+  if (indexing.mediaDescribed > 0) {
+    parts.push(
+      `described ${countOf(indexing.mediaDescribed, 'photo or recording', 'photos and recordings')}`,
+    );
+  }
+  return parts;
 }
 
 /** "a", "a and b", "a, b and c". */
 function joinList(items: string[]): string {
   if (items.length <= 1) return items[0] ?? '';
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Why a night window produced nothing, for the morning card:
+ *  - `asleep` — gezel never saw the window open: the computer slept through
+ *    it, or gezel wasn't running.
+ *  - `stopped` — the person stopped the shift.
+ *  - `quota-held` — everything owed was waiting on a cloud plan's quota reserve.
+ *  - `on-battery` — the shift waited because the computer ran on battery.
+ *  - `no-work` — it ran, and nothing it touched needed doing.
+ */
+export const NIGHT_SHIFT_QUIET_REASONS = [
+  'asleep',
+  'stopped',
+  'quota-held',
+  'on-battery',
+  'no-work',
+] as const;
+export type NightShiftQuietReason = (typeof NIGHT_SHIFT_QUIET_REASONS)[number];
+
+/** One plain sentence for a night that produced nothing, and why. */
+export function describeQuietNight(reason: NightShiftQuietReason): string {
+  switch (reason) {
+    case 'asleep':
+      return "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.";
+    case 'stopped':
+      return 'The night shift was stopped last night, so nothing ran.';
+    case 'quota-held':
+      return "Last night's work waited because your cloud plan's quota reserve was reached.";
+    case 'on-battery':
+      return 'Your crew waited last night because the computer was running on battery.';
+    case 'no-work':
+      return 'The night shift ran, but nothing came of it.';
+  }
 }
 
 /**
@@ -176,7 +237,14 @@ export function formatNightShiftSummary(counts: {
   proposals?: number;
   /** Report-embedded actions still in the `suggested` state. */
   actions?: number;
+  /** Why the window produced nothing, when it didn't. */
+  quiet?: { reason: NightShiftQuietReason };
+  /** The nightly oversight review is paused and won't run until resumed. */
+  pausedReview?: boolean;
+  /** What the sweep got through: files summarized, files reviewed, photos and recordings described. */
+  indexing?: NightShiftIndexing;
 }): string {
+  const swept = indexingParts(counts.indexing);
   const leftBehind: string[] = [];
   if (counts.reports > 0) leftBehind.push(countOf(counts.reports, 'report'));
   if ((counts.proposals ?? 0) > 0) {
@@ -190,11 +258,21 @@ export function formatNightShiftSummary(counts: {
     summary = `The night shift finished ${countOf(counts.tasks, 'task')}.`;
   } else if (leftBehind.length > 0) {
     summary = `The night shift left ${joinList(leftBehind)} for you.`;
+  } else if (swept.length > 0) {
+    summary = `Overnight your crew ${joinList(swept)}.`;
   } else {
-    summary = 'The night shift ran, but nothing came of it.';
+    summary = describeQuietNight(counts.quiet?.reason ?? 'no-work');
+  }
+  if (swept.length > 0 && (counts.tasks > 0 || leftBehind.length > 0)) {
+    summary = `${summary} Along the way it ${joinList(swept)}.`;
   }
 
   const actions = counts.actions ?? 0;
-  if (actions === 0) return summary;
-  return `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+  if (actions > 0) {
+    summary = `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+  }
+  if (counts.pausedReview) {
+    summary = `${summary} Your nightly review didn't finish; it tries again tonight on its own.`;
+  }
+  return summary;
 }

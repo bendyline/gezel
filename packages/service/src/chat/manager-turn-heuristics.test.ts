@@ -42,15 +42,10 @@ describe('lean game turn recovery', () => {
   );
 
   it('never refreshes for a page seed, a handoff or text that already carries the board', () => {
-    expect(turnStateWanted('Your opponent played c3-d4. It is your turn.', 'system')).toBe(
-      false,
-    );
+    expect(turnStateWanted('Your opponent played c3-d4. It is your turn.', 'system')).toBe(false);
     expect(turnStateWanted('Please make a move.', 'cross-gezel')).toBe(false);
     expect(
-      turnStateWanted(
-        'Board now:\n...\nLegal moves: b6-c5\nPlease make a move.',
-        'direct-user',
-      ),
+      turnStateWanted('Board now:\n...\nLegal moves: b6-c5\nPlease make a move.', 'direct-user'),
     ).toBe(false);
   });
 

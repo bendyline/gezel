@@ -8,6 +8,7 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { LevelBadge } from '../components/LevelBadge.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
+import { useSocialMode } from '../components/useSocialMode.js';
 import { Dialog, Tabs } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelDetail as GezelDetailView } from './GezelDetail.js';
@@ -28,6 +29,7 @@ export function GezellenView({
   const [agents, setAgents] = useState<GezelSummary[]>([]);
   const [meesterId, setMeesterId] = useState<string | undefined>(undefined);
   const [boringMode, setBoringMode] = useState(false);
+  const social = useSocialMode();
   const [selectedGezelId, setSelectedGezelId] = useState<string | undefined>(undefined);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -260,7 +262,7 @@ export function GezellenView({
                   <span className="gezel-row-text">
                     <span className="gezel-row-name">
                       {a.name}
-                      {a.growth && (
+                      {social && a.growth && (
                         <LevelBadge level={a.growth.level} pending={!!a.growth.pending} />
                       )}
                       {a.storageScope === 'machine-shared' && (

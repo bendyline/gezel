@@ -330,6 +330,16 @@ export const CraftbookStepPromptProfileSchema = z.enum(['focused']);
 export type CraftbookStepPromptProfile = z.infer<typeof CraftbookStepPromptProfileSchema>;
 
 /**
+ * The document format a step writes, when it is one the runtime teaches.
+ * The step's prompt gets the canonical notes (core `squisqAuthoringNote`):
+ * `squisq` for Squisq extended markdown, `squisq-slideshow` for scenes,
+ * photos and motion. Books declare it instead of copying syntax, so one
+ * source stays right when Squisq changes.
+ */
+export const CraftbookStepAuthoringSchema = z.enum(['squisq', 'squisq-slideshow']);
+export type CraftbookStepAuthoring = z.infer<typeof CraftbookStepAuthoringSchema>;
+
+/**
  * Run a step only when an earlier answer from the owner asked for it. The
  * runtime checks it when the step activates, against the answered question
  * the `answerOf` step asked; a step the answer did not call for completes
@@ -382,6 +392,8 @@ export const CraftbookStepSchema = z.object({
   retrieval: RetrievalPolicySchema.optional(),
   /** Optional reduced prompt context for tightly bounded procedure-only work. */
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
+  /** The document format this step writes; the runtime adds its authoring notes. */
+  authoring: CraftbookStepAuthoringSchema.optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -1167,6 +1179,8 @@ export const NewCraftbookStepSchema = z.object({
   retrieval: RetrievalPolicySchema.optional(),
   /** See {@link CraftbookStepSchema.shape.promptProfile}. */
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.authoring}. */
+  authoring: CraftbookStepAuthoringSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
@@ -1401,6 +1415,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.capabilityFloor ? { capabilityFloor: s.capabilityFloor } : {}),
       ...(s.retrieval ? { retrieval: s.retrieval } : {}),
       ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
+      ...(s.authoring ? { authoring: s.authoring } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),

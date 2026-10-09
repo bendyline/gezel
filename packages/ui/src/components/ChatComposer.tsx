@@ -1674,6 +1674,19 @@ export function ChatComposer({
           stale={taskLaunch.stale}
           onOpen={() => setTaskDialogOpen(true)}
           onDismiss={() => void taskLaunch.dismiss()}
+          {...(runtimeCapabilities().background
+            ? {
+                onToggleTonight: () => {
+                  const current = taskLaunch.attached;
+                  if (!current) return;
+                  void taskLaunch.attach({
+                    ...current,
+                    origin: 'user',
+                    tonight: !current.tonight,
+                  });
+                },
+              }
+            : {})}
         />
       )}
       <div className="chat-composer-to">
@@ -1889,7 +1902,7 @@ export function ChatComposer({
                     onClick={() => setTaskDialogOpen(true)}
                     disabled={engagementOff || draftSubmissionPending}
                     aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
-                    title="Attach a craftbook task to this message"
+                    title="Attach a plan to this message"
                   >
                     Task
                   </button>

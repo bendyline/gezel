@@ -44,6 +44,34 @@ async function fixture() {
 }
 
 describe('buildPortableInstructions', () => {
+  it('keeps what the crew knows about the person in front of every gezel', async () => {
+    const { store, wren, project, profile } = await fixture();
+    await store.saveMemory({
+      scope: 'user',
+      id: 'user',
+      kind: 'fact',
+      text: 'Is travelling to Valencia in May.',
+    });
+    const session = await store.createSession({
+      gezelId: wren.id,
+      projectId: project.id,
+      providerName: 'llama-cpp',
+    });
+    const built = await buildPortableInstructions({
+      store,
+      config: await store.readConfig(),
+      session,
+      context: await store.getProjectContext(project.id, wren.id),
+      modelId: 'gemma4-e4b-q4',
+      tier: 'small',
+      profile,
+      toolNames: [],
+      minimalContext: true,
+    });
+    expect(built.full).toContain('### About the person');
+    expect(built.full).toContain('- Is travelling to Valencia in May.');
+  });
+
   it("is the desktop builder over the phone's store, fed the way the chat manager feeds it", async () => {
     const { store, noor, wren, project, task, profile } = await fixture();
     const session = await store.createSession({

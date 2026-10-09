@@ -94,7 +94,7 @@ html[data-keyboard="open"] {
 }
 html[data-keyboard="open"]
   .app-compact
-  :is(.app-header, .home-workshop-greeting, .chat-rail-banner) {
+  :is(.app-header, .home-workshop-greeting, .home-workshop-actions, .chat-rail-banner) {
   display: none;
 }
 /* Scroll-container padding is an unshrinkable floor in WebKit flex layouts.

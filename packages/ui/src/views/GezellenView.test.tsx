@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type GezelDetail, type GezelSummary, pickRandomNameWithGender } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -288,6 +288,9 @@ describe('GezellenView', () => {
   });
 
   it('shows a level badge (with pending dot) from the inlined growth summary', async () => {
+    act(() => {
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: { social: true } }));
+    });
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
         { id: 'gz-1', name: 'Maya', growth: { level: 4, pending: true } } as GezelSummary,

@@ -1019,6 +1019,7 @@ export class SearchService {
             projectName: p.name,
             retrievalSource: 'project-memory',
             arm,
+            memory: { day: r.day, kind: r.kind },
             ...scoreResult('memory', relevance),
           });
         }
@@ -1046,6 +1047,7 @@ export class SearchService {
               snippet: r.text,
               retrievalSource: 'gezel-memory' as const,
               arm,
+              memory: { day: r.day, kind: r.kind },
               ...scoreResult('memory', relevance),
             }));
           },
@@ -1074,6 +1076,7 @@ export class SearchService {
                 snippet: r.text,
                 retrievalSource: 'user-memory' as const,
                 arm,
+                memory: { day: r.day, kind: r.kind },
                 ...scoreResult('memory', relevance),
               }));
             },

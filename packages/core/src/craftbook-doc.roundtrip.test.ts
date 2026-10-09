@@ -67,6 +67,7 @@ const FULL_BOOK: Craftbook = {
       name: 'Fan out',
       prompt: 'Read the item list.',
       promptProfile: 'focused',
+      authoring: 'squisq-slideshow',
       spawnFanout: true,
       next: 'done',
     },
@@ -138,6 +139,7 @@ describe('markdown codec round-trip', () => {
     expect(parsed.doc.diffpackCapable).toBe(true);
     expect(parsed.doc.capabilityFloor).toBe('medium');
     expect(parsed.doc.steps.find((s) => s.id === 'host')?.promptProfile).toBe('focused');
+    expect(parsed.doc.steps.find((s) => s.id === 'host')?.authoring).toBe('squisq-slideshow');
     expect(parsed.doc.steps.find((s) => s.id === 'host')?.spawnFanout).toBe(true);
   });
 

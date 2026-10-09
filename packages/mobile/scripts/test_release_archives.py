@@ -131,6 +131,13 @@ class AndroidReleaseTests(unittest.TestCase):
                 self.assertEqual(result["abis"], ["arm64-v8a"])
                 self.assertEqual(result["elfLibraries"], 5)
 
+    def test_apk_and_bundle_accept_android_graphics_and_compression_dependencies(self):
+        for suffix in [".apk", ".aab"]:
+            for dependency in ["libEGL.so", "libGLESv2.so", "libjnigraphics.so", "libz.so"]:
+                with self.subTest(suffix=suffix, dependency=dependency):
+                    result = self.verify(self.archive(suffix), dependency=dependency)
+                    self.assertEqual(result["elfLibraries"], 5)
+
     def test_rejects_missing_license_or_jni(self):
         for missing in ["assets/public/licenses/native/LICENSE-ggml.txt", "lib/arm64-v8a/libgezel_mobile.so", "lib/arm64-v8a/libgezel_llama_jni.so"]:
             with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, "Missing"):

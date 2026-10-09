@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import { type Store, boekwachterIssueFingerprint } from '../fs/store.js';
@@ -117,7 +118,9 @@ async function seedCode(): Promise<void> {
     join(dir, 'src', 'a.ts'),
     'export function foo(x: string) {\n  return x.length;\n}\n',
   );
-  await runWorkspaceContentIndex(dir, 'c', artifacts);
+  await runWorkspaceContentIndex(dir, 'c', artifacts, {
+    dbPath: projectContentIndexDbFile(home, 'c', dir),
+  });
 }
 
 describe('ContentIndex.review end-to-end', () => {
@@ -126,7 +129,9 @@ describe('ContentIndex.review end-to-end', () => {
     await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1;\n');
     await writeFile(join(dir, 'README.md'), '# Readme\n\nSome docs.\n');
     await writeFile(join(dir, 'config.json'), '{"a": 1}\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     // Fenced + preamble on purpose: the parser must tolerate both.
     const review = vi.fn(async () => `Sure!\n\`\`\`json\n${VALID_REPLY}\n\`\`\`\nHope that helps.`);
@@ -165,7 +170,9 @@ describe('ContentIndex.review end-to-end', () => {
     await mkdir(join(dir, 'src'), { recursive: true });
     await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1;\n');
     await writeFile(join(dir, 'src', 'b.ts'), 'export const two = 2;\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     await ci.review(
       'c',
       deps(async () => VALID_REPLY),
@@ -205,7 +212,9 @@ describe('ContentIndex.review end-to-end', () => {
     expect(immediatelyAfterEdit.trackedIssues).toEqual([
       expect.objectContaining({ ref: 'BW-1', line: 1, stale: true }),
     ]);
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const afterEdit = await ci.fileReview('c', 'src/a.ts');
     expect(afterEdit.found).toBe(false);
@@ -226,7 +235,9 @@ describe('ContentIndex.review end-to-end', () => {
         (_, i) => `export const v${String(i + 1).padStart(3, '0')} = ${'1'.repeat(24)};`,
       ).join('\n');
       await writeFile(join(dir, 'src', 'big.ts'), body);
-      await runWorkspaceContentIndex(dir, 'c', artifacts);
+      await runWorkspaceContentIndex(dir, 'c', artifacts, {
+        dbPath: projectContentIndexDbFile(home, 'c', dir),
+      });
 
       let call = 0;
       const review = vi.fn(async (prompt: string) => {
@@ -273,7 +284,9 @@ describe('ContentIndex.review end-to-end', () => {
         (_, i) => `export const v${String(i + 1).padStart(3, '0')} = ${'1'.repeat(24)};`,
       ).join('\n');
       await writeFile(join(dir, 'src', 'big.ts'), body);
-      await runWorkspaceContentIndex(dir, 'c', artifacts);
+      await runWorkspaceContentIndex(dir, 'c', artifacts, {
+        dbPath: projectContentIndexDbFile(home, 'c', dir),
+      });
 
       // Mid windows carry the continuation marker; the EOF window does not.
       // A model that ignores it and reports truncation must not set the file's
@@ -310,7 +323,9 @@ describe('ContentIndex.review end-to-end', () => {
         (_, i) => `export const v${String(i + 1).padStart(3, '0')} = ${'1'.repeat(24)};`,
       ).join('\n');
       await writeFile(join(dir, 'src', 'big.ts'), body);
-      await runWorkspaceContentIndex(dir, 'c', artifacts);
+      await runWorkspaceContentIndex(dir, 'c', artifacts, {
+        dbPath: projectContentIndexDbFile(home, 'c', dir),
+      });
 
       // The EOF window really can see a broken ending — its claim is honest.
       const review = vi.fn(async (prompt: string) => {
@@ -370,7 +385,9 @@ describe('ContentIndex.review end-to-end', () => {
     // so no shadow sidecar ever exists.
     await writeFile(join(dir, 'empty.md'), '');
     await writeFile(join(dir, 'report.docx'), 'not-a-real-docx');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     const review = vi.fn(async () => VALID_REPLY);
     const rubrics = await builtinRubrics();
@@ -389,7 +406,9 @@ describe('ContentIndex.review end-to-end', () => {
   it('reviews HTML as code and tells never-reviewed apart from not-yet-reviewed', async () => {
     await writeFile(join(dir, 'index.html'), '<!doctype html>\n<title>Rambo Arcade</title>\n');
     await writeFile(join(dir, 'scores.csv'), 'name,score\nrambo,9001\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
 
     // Before the sweep: the HTML file is an honest "not yet"; the CSV (kind
     // 'data', no rubric) must NOT promise a review that never comes.
@@ -410,7 +429,9 @@ describe('ContentIndex.review end-to-end', () => {
 
   it('reviews plain-text documents with the text rubric', async () => {
     await writeFile(join(dir, 'notes.txt'), 'Some plane text with a typo.\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     const review = vi.fn(async (_prompt: string) => VALID_REPLY);
     const result = await ci.review('c', deps(review), 10, await builtinRubrics());
     expect(result).toEqual({ files: 1, reviewed: 1 });
@@ -446,7 +467,9 @@ describe('ContentIndex.review end-to-end', () => {
     // A re-review with bare deps (no provenance) overwrites to NULLs — the
     // row always reflects its LAST writer, never a stale identity.
     await writeFile(join(dir, 'src', 'a.ts'), 'export function foo() {\n  return 2;\n}\n');
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     await ci.review(
       'c',
       deps(async () => VALID_REPLY),
@@ -502,7 +525,9 @@ describe('ContentIndex.review end-to-end', () => {
       join(dir, 'src', 'a.ts'),
       'export function foo(x: string) {\n  return x.length + 1;\n}\n',
     );
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     expect((await ci.fileContext('c', 'src/a.ts')).review).toBeUndefined();
 
     await ci.review(
@@ -545,7 +570,9 @@ describe('ContentIndex.review end-to-end', () => {
     for (let i = 0; i < 5; i++) {
       await writeFile(join(dir, 'src', `f${i}.ts`), `export const v${i} = ${i};\n`);
     }
-    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     const rubrics = await builtinRubrics();
 
     const dead = vi.fn(async () => '');

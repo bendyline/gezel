@@ -40,7 +40,7 @@ const EXTRACT_EXAMPLES = [
   'PROJECT/FACT: Sessions are stored as JSON files under the data directory.',
   'PROJECT/DECISION: Chose sqlite-vec over Vectra for the memory index.',
   'USER/PREF: The user prefers terse replies without emojis.',
-  'GEZEL/CORRECTION: Read a file before patching it; edits made from memory missed.',
+  'GEZEL/CORRECTION: The user wrote "recieve"; it is "receive".',
   'PROJECT/STATUS: The OpenAI API key is currently missing from config.',
 ] as const;
 
@@ -58,7 +58,7 @@ KIND is one of:
 - DECISION — a choice that was made, and why.
 - PREF — a preference or working style.
 - STATUS — a temporary condition that is true right now.
-- CORRECTION — something that was wrong, and what is right.
+- CORRECTION — something that was wrong, and what is right: the wrong form first, in quotes.
 - EXAMPLE — an approach or answer the user confirmed worked.
 
 Examples:

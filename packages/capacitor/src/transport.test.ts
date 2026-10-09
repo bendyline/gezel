@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GezelRuntimePlugin } from './definitions.js';
+import { createRuntimeEmbedding } from './embedding.js';
 import { connectRuntime } from './transport.js';
 
 function fixture() {
@@ -139,6 +140,46 @@ describe('GezelApp native transport', () => {
       },
     );
   }
+
+  it.each([undefined, 8192, 16384])(
+    'uses the advertised reply ceiling and fitted context %s for generation',
+    async (contextTokens) => {
+      const { plugin } = fixture();
+      const { providers } = await plugin.providers();
+      vi.mocked(plugin.providers).mockResolvedValue({
+        providers: [{ ...providers[0]!, contextTokens: 16384, maxOutputTokens: 4096 }],
+      });
+      vi.mocked(plugin.listModels).mockResolvedValue({
+        models: [
+          {
+            id: 'local',
+            name: 'Fixture',
+            sizeBytes: 4,
+            ...(contextTokens ? { contextTokens } : {}),
+          },
+        ],
+      });
+      const app = connectRuntime(plugin);
+      try {
+        const model = (await app.models()).data[0]!;
+        expect(model.context_window).toBe(contextTokens ?? 4096);
+        expect(model.max_output_tokens).toBe(contextTokens ? 4096 : 3967);
+        await app.chat({ ...request, max_tokens: model.max_output_tokens });
+        expect(plugin.generate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            contextSize: model.context_window,
+            maxTokens: model.max_output_tokens,
+          }),
+        );
+        await expect(
+          app.chat({ ...request, max_tokens: model.max_output_tokens! + 1 }),
+        ).rejects.toMatchObject({ code: 'invalid_request' });
+        expect(plugin.generate).toHaveBeenCalledTimes(1);
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it('streams only the current request and reconciles the final suffix without fabricating usage', async () => {
     const { plugin } = fixture();
@@ -325,3 +366,204 @@ it.each([true, false])(
     }
   },
 );
+
+describe('embedding text through the native transport', () => {
+  it('accepts shared stream metadata, scopes native progress and preserves unknown usage', async () => {
+    const { plugin } = fixture();
+    const listeners = new Map<string, (event: unknown) => void>();
+    vi.mocked(plugin.addListener).mockImplementation(async (name, listener) => {
+      listeners.set(name, listener as (event: unknown) => void);
+      return {
+        remove: async () => {
+          listeners.delete(name);
+        },
+      };
+    });
+    vi.mocked(plugin.listModelDownloads).mockResolvedValue({ downloads: [] });
+    vi.mocked(plugin.generate).mockImplementation(async ({ requestId }) => {
+      const phase = listeners.get('enginePhase')!;
+      phase({ requestId: 'stale', phase: 'prefill', progress: 0.1 });
+      phase({ requestId, phase: 'loading_model', progress: 0.5 });
+      phase({ requestId, phase: 'cooling' });
+      phase({ requestId, phase: 'generating', outputTokens: 3, tokensPerSec: 12 });
+      return { text: 'Ready.', stopReason: 'stop' };
+    });
+    const host = createRuntimeEmbedding(plugin, { catalog: [] });
+    await host.setEnabled(true);
+    const events: unknown[] = [];
+    try {
+      const result = await host.streamText(request, { onEvent: (event) => events.push(event) });
+      expect(result).toMatchObject({ text: 'Ready.', finishReason: 'stop', usage: null });
+      expect(events).toEqual([
+        {
+          type: 'progress',
+          progress: {
+            phase: 'loading_model',
+            percent: 50,
+            outputTokens: null,
+            tokensPerSecond: null,
+          },
+        },
+        {
+          type: 'progress',
+          progress: { phase: 'queued', percent: null, outputTokens: null, tokensPerSecond: null },
+        },
+        {
+          type: 'progress',
+          progress: { phase: 'generating', percent: null, outputTokens: 3, tokensPerSecond: 12 },
+        },
+        { type: 'delta', text: 'Ready.' },
+        result,
+      ]);
+      expect(listeners.size).toBe(0);
+    } finally {
+      await host.close();
+    }
+  });
+  it.each([null, [], { include_progress: 'yes' }, { injected: true }])(
+    'rejects malformed stream options before native generation: %j',
+    async (stream_options) => {
+      const { plugin } = fixture();
+      const app = connectRuntime(plugin);
+      try {
+        await expect(
+          app.chat({ ...request, stream: true, stream_options } as never),
+        ).rejects.toMatchObject({ code: 'unsupported_capability' });
+        expect(plugin.generate).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+});
+
+describe('native chat parity with desktop', () => {
+  function nativeChatFixture() {
+    const { plugin } = fixture();
+    const listeners = new Map<string, (event: unknown) => void>();
+    const providers = plugin.providers;
+    plugin.providers = async () => {
+      const result = await providers();
+      result.providers[0]!.capabilities.structuredChat = true;
+      return result;
+    };
+    vi.mocked(plugin.addListener).mockImplementation(async (name, listener) => {
+      listeners.set(name, listener as (event: unknown) => void);
+      return {
+        remove: async () => {
+          listeners.delete(name);
+        },
+      };
+    });
+    plugin.chat = vi.fn<NonNullable<GezelRuntimePlugin['chat']>>(async ({ requestId }) => {
+      listeners.get('chatChunk')!({
+        requestId: 'stale',
+        chunks: [JSON.stringify({ choices: [{ index: 0, delta: { content: 'wrong' } }] })],
+      });
+      listeners.get('chatChunk')!({
+        requestId,
+        chunks: [
+          JSON.stringify({
+            choices: [{ index: 0, delta: { reasoning_content: 'private reasoning' } }],
+          }),
+          JSON.stringify({ choices: [{ index: 0, delta: { content: 'Ready.' } }] }),
+          JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+        ],
+      });
+      return { status: 'ok' };
+    });
+    return { plugin, listeners };
+  }
+  it('uses native chat templates and reasoning controls while streaming only answer content', async () => {
+    const { plugin, listeners } = nativeChatFixture();
+    const app = connectRuntime(plugin);
+    try {
+      expect((await app.models()).data[0]!.supported_options).toContain('reasoning_effort');
+      const events = [];
+      for await (const event of await app.chat({
+        stream: true,
+        ...request,
+        temperature: 0.2,
+        reasoning_effort: 'none',
+      }))
+        events.push(event);
+      expect(JSON.stringify(events)).toContain('Ready.');
+      expect(JSON.stringify(events)).not.toContain('private reasoning');
+      expect(JSON.stringify(events)).not.toContain('wrong');
+      expect(plugin.generate).not.toHaveBeenCalled();
+      expect(JSON.parse(vi.mocked(plugin.chat!).mock.calls[0]![0].requestJson)).toMatchObject({
+        messages: request.messages,
+        temperature: 0.2,
+        reasoning_effort: 'none',
+        stream: true,
+      });
+      expect(listeners.size).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+  it.each(['error', 'missing-finish', 'tool-call'])(
+    'rejects native chat failures without reporting success: %s',
+    async (failure) => {
+      const { plugin, listeners } = nativeChatFixture();
+      plugin.chat = vi.fn<NonNullable<GezelRuntimePlugin['chat']>>(async ({ requestId }) => {
+        const chunk =
+          failure === 'error'
+            ? { error: { message: 'Engine unavailable' } }
+            : {
+                choices: [
+                  {
+                    index: 0,
+                    delta: failure === 'tool-call' ? { tool_calls: [{}] } : { content: 'partial' },
+                  },
+                ],
+              };
+        listeners.get('chatChunk')!({ requestId, chunks: [JSON.stringify(chunk)] });
+        return { status: 'ok' };
+      });
+      const app = connectRuntime(plugin);
+      try {
+        await expect(app.chat(request)).rejects.toBeInstanceOf(Error);
+        expect(listeners.size).toBe(0);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+  it('cancels native chat and releases its listeners before closing', async () => {
+    const { plugin, listeners } = nativeChatFixture();
+    let complete!: (reply: { status: 'cancelled' }) => void;
+    plugin.chat = vi.fn<NonNullable<GezelRuntimePlugin['chat']>>(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    vi.mocked(plugin.cancel).mockImplementation(async () => {
+      complete({ status: 'cancelled' });
+    });
+    const app = connectRuntime(plugin);
+    const controller = new AbortController();
+    const stream = await app.chat({ ...request, stream: true }, { signal: controller.signal });
+    await vi.waitFor(() => expect(plugin.chat).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(stream[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await app.close();
+    expect(plugin.cancel).toHaveBeenCalledOnce();
+    expect(listeners.size).toBe(0);
+  });
+  it('keeps reasoning controls unsupported on legacy native bridges', async () => {
+    const { plugin } = fixture();
+    const app = connectRuntime(plugin);
+    try {
+      await expect(app.chat({ ...request, reasoning_effort: 'none' })).rejects.toMatchObject({
+        code: 'unsupported_capability',
+      });
+      expect(plugin.generate).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});

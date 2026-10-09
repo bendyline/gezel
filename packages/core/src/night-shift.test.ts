@@ -210,4 +210,45 @@ describe('formatNightShiftSummary', () => {
       'The night shift ran, but nothing came of it.',
     );
   });
+
+  it('explains a quiet night by its reason', () => {
+    expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'asleep' } })).toBe(
+      "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.",
+    );
+    expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'stopped' } })).toBe(
+      'The night shift was stopped last night, so nothing ran.',
+    );
+  });
+
+  it('ignores a quiet reason when the night produced something', () => {
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, quiet: { reason: 'asleep' } })).toBe(
+      'The night shift finished 1 task.',
+    );
+  });
+
+  it('says when the nightly review is paused, after the rest of the night', () => {
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, pausedReview: true })).toBe(
+      "The night shift finished 1 task. Your nightly review didn't finish; it tries again tonight on its own.",
+    );
+    expect(
+      formatNightShiftSummary({
+        tasks: 0,
+        reports: 0,
+        quiet: { reason: 'no-work' },
+        pausedReview: true,
+      }),
+    ).toBe(
+      "The night shift ran, but nothing came of it. Your nightly review didn't finish; it tries again tonight on its own.",
+    );
+  });
+
+  it('reports a night that only swept the folders as work, not a quiet night', () => {
+    const indexing = { filesIndexed: 1204, filesReviewed: 0, mediaDescribed: 312 };
+    expect(
+      formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'no-work' }, indexing }),
+    ).toBe('Overnight your crew read 1,204 files and described 312 photos and recordings.');
+    expect(formatNightShiftSummary({ tasks: 1, reports: 0, indexing })).toBe(
+      'The night shift finished 1 task. Along the way it read 1,204 files and described 312 photos and recordings.',
+    );
+  });
 });

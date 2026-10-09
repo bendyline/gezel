@@ -122,7 +122,8 @@ export function resolveProjectBoekwachter(
  * user-initiated paths use. Overnight bug fixing turns itself on from crew
  * composition, so conjuring the very gezel that unlocks it would make the
  * gate meaningless and start spending model time on a project the user never
- * staffed for it.
+ * staffed for it. The one place crew is added for a folder is the person
+ * adding it (`recruitCrewForFolder`).
  */
 export function resolveProjectDeveloper(
   store: Store,

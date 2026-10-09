@@ -183,6 +183,8 @@ class StallProfiler {
   private running = false;
   private disabled = false;
   private chain: Promise<unknown> = Promise.resolve();
+  /** When the current profile began, so a capture can tell if it covers a block. */
+  private profileStartedAt = 0;
 
   constructor(
     private readonly dir: string,
@@ -191,6 +193,19 @@ class StallProfiler {
 
   get active(): boolean {
     return this.running;
+  }
+
+  /**
+   * Start or stop to match `wanted()` without restarting a running profile.
+   * Boot calls this the moment debug mode is known: waiting for the first
+   * window roll left every boot block unprofiled (2026-10-08).
+   */
+  sync(): void {
+    this.enqueue(async () => {
+      const want = this.wantNow();
+      if (want && !this.running) await this.begin();
+      else if (!want && this.running) await this.end();
+    });
   }
 
   /** Called every window: start, stop, or roll the profile per `wanted()`. */
@@ -206,10 +221,17 @@ class StallProfiler {
     });
   }
 
-  /** Save the current window's profile. Resolves to the file name, or null. */
+  /**
+   * Save the current window's profile. Resolves to the file name, or null.
+   * A profile that began after the block did is not saved: it holds only the
+   * tail, and a 263 ms profile filed as "the 2.7s block" sent the reader after
+   * the profiler's own startup cost.
+   */
   capture(at: number, durationMs: number): Promise<string | null> {
     return this.enqueue(async () => {
       if (!this.running || !this.session) return null;
+      // `at` is the last beat before the block, up to a beat ahead of it.
+      if (this.profileStartedAt > at + BEAT_MS) return null;
       const { profile } = await this.session.post('Profiler.stop');
       this.running = false;
       const stamp = new Date(at).toISOString().replace(/[:.]/g, '-');
@@ -247,7 +269,9 @@ class StallProfiler {
     }
     await this.session.post('Profiler.enable');
     await this.session.post('Profiler.setSamplingInterval', { interval: PROFILE_SAMPLING_US });
+    const startedAt = Date.now();
     await this.session.post('Profiler.start');
+    this.profileStartedAt = startedAt;
     this.running = true;
   }
 
@@ -287,6 +311,8 @@ export interface ResponsivenessMonitorOptions {
   logsDir: string;
   /** Record a rolling CPU profile so the next stall can be explained. Read every minute. */
   profileWhen?: () => boolean;
+  /** Length of one rolling profile window. Tests shorten it. */
+  profileWindowMs?: number;
 }
 
 class ResponsivenessMonitor {
@@ -306,6 +332,13 @@ class ResponsivenessMonitor {
   private readonly watchdogAsked = new Int32Array(new SharedArrayBuffer(4));
   private watchdog: Worker | null = null;
   private readonly profiler: StallProfiler;
+  /**
+   * Gaps sent to the watchdog and not yet answered. The window timer comes due
+   * during a long block and fires in the same tick as the beat that reports
+   * it, so rolling then discarded the very profile the answer would save.
+   */
+  private awaitingVerdicts = 0;
+  private rollDeferred = false;
 
   constructor(opts: ResponsivenessMonitorOptions) {
     this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
@@ -315,15 +348,31 @@ class ResponsivenessMonitor {
       opts.profileWhen ?? (() => false),
     );
     this.windowTimer = setInterval(() => {
-      this.profiler.roll();
+      this.rollProfile();
       if (Date.now() - this.delayWindowStartedAt >= DELAY_WINDOW_MS) {
         this.delay.reset();
         this.delayWindowStartedAt = Date.now();
       }
-    }, PROFILE_WINDOW_MS);
+    }, opts.profileWindowMs ?? PROFILE_WINDOW_MS);
     this.windowTimer.unref?.();
     this.profiler.roll();
     this.startWatchdog();
+  }
+
+  /** Match profiling to the current debug setting now, not at the next window. */
+  syncProfiling(): void {
+    this.profiler.sync();
+  }
+
+  private rollProfile(): void {
+    // A stale beat is a gap about to be reported: the window timer can fire
+    // ahead of the beat that reports it.
+    if (this.awaitingVerdicts > 0 || Date.now() - this.lastBeatAt >= STALL_RECORD_MS) {
+      this.rollDeferred = true;
+      return;
+    }
+    this.rollDeferred = false;
+    this.profiler.roll();
   }
 
   begin(label: string): (outcome?: { status?: number; method?: string; path?: string }) => void {
@@ -401,7 +450,11 @@ class ResponsivenessMonitor {
     this.lastBeatAt = now;
     const gapMs = now - startedAt;
     this.delay.record(Math.max(1, Math.round((gapMs - BEAT_MS) * 1e6)));
-    if (gapMs < STALL_RECORD_MS || !this.watchdog) return;
+    if (gapMs < STALL_RECORD_MS || !this.watchdog) {
+      if (this.rollDeferred && this.awaitingVerdicts === 0) this.rollProfile();
+      return;
+    }
+    this.awaitingVerdicts += 1;
     this.watchdog.postMessage({ startedAt, durationMs: gapMs });
     Atomics.store(this.watchdogAsked, 0, 1);
     Atomics.notify(this.watchdogAsked, 0);
@@ -436,6 +489,12 @@ class ResponsivenessMonitor {
   }
 
   private onWatchdogReport(report: WatchdogReport): void {
+    this.awaitingVerdicts = Math.max(0, this.awaitingVerdicts - 1);
+    this.handleReport(report);
+    if (this.awaitingVerdicts === 0 && this.rollDeferred) this.rollProfile();
+  }
+
+  private handleReport(report: WatchdogReport): void {
     if (!isMainThreadBlock(report)) return;
     const now = Date.now();
     const stall: PerfStall = {
@@ -531,6 +590,11 @@ export function startResponsivenessMonitor(
     if (monitor === mine) monitor = null;
     await mine.dispose();
   };
+}
+
+/** Start or stop the stall profiler to match its condition now. */
+export function syncPerfProfiling(): void {
+  monitor?.syncProfiling();
 }
 
 /**

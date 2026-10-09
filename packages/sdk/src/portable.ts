@@ -498,9 +498,34 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
      *   saves it to the gezel whose chat called the script instead — how a
      *   scored activity decides what its gezel remembers (a learner's mistake
      *   as a `correction`, a strong answer as an `example`). Those entries need
-     *   a `kind` and at most 200 characters. Other fields are ignored.
+     *   a `kind` and at most 200 characters. Write a correction with the wrong
+     *   form first, in quotes (`Said "soy cansado"; it is "estoy cansado"`):
+     *   when the person repeats it, recall says so. Other fields are ignored.
      */
     save(text: string, meta?: Record<string, unknown>): Promise<void>;
+  };
+
+  /**
+   * **Reminder** — the project's one reminder, for a time this script
+   * computed from the project's own state (the next flashcard coming due),
+   * never a time picked for its own sake. The app turns it into a
+   * notification, within the person's daily allowance. Requires the
+   * `reminders` capability.
+   *
+   * @example
+   * ```ts
+   * await gezel.reminder.set({ at: nextDue.toISOString(), title: 'Cards are due', body: '4 cards to review' });
+   * ```
+   */
+  reminder: {
+    /**
+     * Set the project's reminder, replacing any earlier one.
+     * @param reminder - `at`: a future ISO date-time, at most 30 days ahead;
+     *   `title`: up to 80 characters; `body`: up to 160.
+     */
+    set(reminder: { at: string; title: string; body?: string }): Promise<void>;
+    /** Clear the project's reminder (nothing is due). */
+    clear(): Promise<void>;
   };
 
   /**
@@ -709,6 +734,10 @@ export function createGezelSDK(rpc: ScriptTransport, options: GezelSDKOptions = 
     memory: {
       search: (query) => rpc.call<unknown[]>('memory.search', { query }),
       save: (text, meta) => rpc.call<void>('memory.save', { text, meta }),
+    },
+    reminder: {
+      set: (reminder) => rpc.call<void>('reminder.set', reminder),
+      clear: () => rpc.call<void>('reminder.clear', {}),
     },
     llm: {
       oneShot: (prompt, opts) => rpc.call<string>('llm.oneShot', { prompt, opts }),

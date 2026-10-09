@@ -3,6 +3,7 @@ import {
   type GezelConfig,
   resolveSandboxCopilot,
   resolveShowWorkInProgressFeatures,
+  resolveSocialMode,
 } from '@bendyline/gezel';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 
@@ -49,6 +50,9 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     resetTemplatesOnStartup: config.resetTemplatesOnStartup === true,
     roleBasedNameOnlyMode: config.roleBasedNameOnlyMode === true,
     showPoppetjes: config.showPoppetjes !== false,
+    // The desktop's default is off, so the daemon answers resolved.
+    social: resolveSocialMode(config, 'desktop'),
+    notifications: config.notifications,
     narrateAssistantReplies: config.narrateAssistantReplies === true,
     narrateProgressUpdates: config.narrateProgressUpdates !== false,
     aiEngagementMode: config.aiEngagementMode ?? 'proactive',
@@ -63,6 +67,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     inlineGrammarChecking: config.inlineGrammarChecking !== false,
     sidebarSide: config.sidebarSide,
     homeGreetingCollapsed: config.homeGreetingCollapsed === true,
+    onboarding: config.onboarding,
     workshopTempo: config.workshopTempo ?? 'bedrijvig',
     nightShift: config.nightShift,
     toolFilterMode: config.toolFilterMode ?? 'always',

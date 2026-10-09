@@ -26,6 +26,7 @@ import {
 } from '@bendyline/gezel';
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { CharacterEditor } from '../components/CharacterEditor.js';
 import { FixedFunctionAboutPanel } from '../components/FixedFunctionAboutPanel.js';
 import { GezelActionsMenu } from '../components/GezelActionsMenu.js';
 import { GezelChatTab } from '../components/GezelChatTab.js';
@@ -42,6 +43,7 @@ import { useGenerationEngineLabel } from '../components/generation-engine-label.
 import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
+import { useSocialMode } from '../components/useSocialMode.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -86,8 +88,14 @@ export function GezelDetail({
   const renameActiveRef = useRef(false);
   const restoreRenameFocusRef = useRef(false);
   const isFixedFunction = selected?.fixedFunction !== undefined;
+  // Growth is on display only in social mode; XP keeps accruing either way.
+  const social = useSocialMode();
+  const growthVisible = runtimeCapabilities().growth && social;
   const activeDetailTab =
-    isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories') ? 'chat' : detailTab;
+    (isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories')) ||
+    (detailTab === 'growth' && !growthVisible)
+      ? 'chat'
+      : detailTab;
   const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
 
   const selectedRef = useRef<GezelDetailData | null>(null);
@@ -138,10 +146,8 @@ export function GezelDetail({
   }, [gezelId, aboutAutosave.hydrate]);
 
   useEffect(() => {
-    if (isFixedFunction && detailTab !== activeDetailTab) {
-      setDetailTab(activeDetailTab);
-    }
-  }, [activeDetailTab, detailTab, isFixedFunction]);
+    if (detailTab !== activeDetailTab) setDetailTab(activeDetailTab);
+  }, [activeDetailTab, detailTab]);
 
   const applyUpdate = useCallback((updated: GezelDetailData) => {
     selectedRef.current = updated;
@@ -248,7 +254,7 @@ export function GezelDetail({
                 : 'Click to manage appearance'
             }
           />
-          {selected.growth && (
+          {social && selected.growth && (
             <LevelBadge level={selected.growth.level} pending={!!selected.growth.pending} overlay />
           )}
         </span>
@@ -339,7 +345,7 @@ export function GezelDetail({
             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
             <Tabs.Trigger value="about">About</Tabs.Trigger>
             <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
-            {runtimeCapabilities().background && (
+            {growthVisible && (
               <Tabs.Trigger value="growth">
                 Growth
                 {selected.growth?.pending && (
@@ -499,6 +505,7 @@ function AppearancePanel({
 }) {
   const [rerolling, setRerolling] = useState(false);
   const [savingOverride, setSavingOverride] = useState(false);
+  const social = useSocialMode();
   const [savingFont, setSavingFont] = useState(false);
   const [showAccessories, setShowAccessories] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -611,6 +618,7 @@ function AppearancePanel({
           overridden.
         </span>
       </section>
+      {social && <CharacterEditor gezel={gezel} onUpdated={onUpdated} />}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { openAddFolder } from '../../components/AddFolderSheet.js';
 import { SproutGlyph } from './glyphs.js';
 import type { HomeNavView } from './utils.js';
 
@@ -6,7 +7,21 @@ import type { HomeNavView } from './utils.js';
  * Tip of the day — a gentle nudge to tend/grow your crew. Static pool for
  * v1; the inline action link routes into the relevant flow. `↻` cycles.
  */
-const TIPS: ReadonlyArray<{ body: ReactNode; action: string; view: HomeNavView }> = [
+const TIPS: ReadonlyArray<{
+  body: ReactNode;
+  action: string;
+  view: HomeNavView | 'add-folder';
+}> = [
+  {
+    body: (
+      <>
+        Give your crew a folder to look after &mdash; your photos, your documents. They read it
+        overnight and leave you answers in the morning, and never change a file.
+      </>
+    ),
+    action: 'Add a folder',
+    view: 'add-folder',
+  },
   {
     body: (
       <>
@@ -85,7 +100,7 @@ export function TipOfDay({ onNavigate }: { onNavigate?: (view: HomeNavView) => v
           <button
             type="button"
             className="home-workshop-tip-action"
-            onClick={() => onNavigate?.(tip.view)}
+            onClick={() => (tip.view === 'add-folder' ? openAddFolder() : onNavigate?.(tip.view))}
           >
             {tip.action} →
           </button>

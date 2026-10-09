@@ -413,6 +413,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ? { inputs: launch.inputs }
             : {}),
           ...(launch.assignee ? { assignee: launch.assignee } : {}),
+          ...(launch.tonight ? { nightShift: { enabled: true } } : {}),
           createdBy: { kind: 'user' },
           launchSessionId: id,
         },

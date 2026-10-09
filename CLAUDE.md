@@ -101,6 +101,8 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       │                    creation, shared by fanout children; craftbooks
 │       │                    address it via the {{task.dir}} token
 │       ├── workspace/       internal fallback when no external dir
+│       ├── index/           content index (index.db) — always here, never in workingDir
+│       ├── quarantine/      connector content the safety scanner refused
 │       └── memories/        same structure as gezel memories
 ├── memories/                the person's own memories ("About you"), read by every gezel:
 │                            daily/YYYY-MM-DD.md + index/mem.db
@@ -242,7 +244,7 @@ the item still resolves and the no-regression gate passes.
 
 A named AI agent. Fields worth knowing:
 
-- **Frontmatter** (in `gezel.md`): `id, name, description?, role?, model?, provider?, reasoningEffort?, iconOverride?`
+- **Frontmatter** (in `gezel.md`): `id, name, description?, role?, model?, provider?, reasoningEffort?, iconOverride?, character?` — see "Character, social mode, and growth" below
 - **`about.md`**: injected verbatim into the model's system prompt when this gezel runs
 - **`poppetje.json`**: a parametric carved-figure character. Body shape, skin, hair, hat, accessories, expression — see "Poppetje" below. The primary visual identity.
 - **`icon.svg`**: an optional LLM-generated abstract sigil. When `iconOverride: true` in frontmatter, the UI shows this instead of the poppetje. Off by default.
@@ -261,6 +263,23 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 - **The renderer reads one struct.** Variants (`full`, `headshot`, `icon`) are different `viewBox` crops of the same SVG content tree — no duplicated geometry.
 - **No body-shape-to-identity mapping.** Shapes, skin, and hair mix freely across the cast — never bound to gender or craft.
 - **Whorls are organic, not identity markers.** ~25% of figures get knot marks deterministically from the seed; never assign one to a specific gezel as an identity stamp.
+
+### Character, social mode, and growth
+
+**Social mode** (`config.social`) decides how much personality shows. `resolveSocialMode(config, host)` in [core character/](packages/core/src/character/index.ts) is the only reader: the person's choice, else on for phones and off for the desktop. The desktop's config response returns it resolved; the phone's returns raw config. Off must reproduce the plain register exactly — no character block in any prompt, no Growth tab or level badges, no visit card, no growth announcements in chat. It is a separate switch from "Show gezel names and poppetjes"; never merge them.
+
+**`character`** is a frontmatter record `{ temperament, quirk, style, sociability: 0-4 }` from a small fixed vocabulary in [schemas/character.ts](packages/core/src/schemas/character.ts). It follows the poppetje contract: seeded from the id at creation (`seedCharacter`), **persisted explicitly**, backfilled once by `ensureLayout` on both hosts, so adding values later never changes an existing gezel. The schema is lenient (`.catch(undefined)`), so a bad hand edit drops the field rather than hiding the gezel. Every value has one effect line in `TEMPERAMENT_EFFECTS` / `QUIRK_EFFECTS` / `STYLE_EFFECTS`; those lines ARE the `### Character` prompt block (at most 60 tokens, stable band after traits, kept at the `minimal` footprint) and what the character editor shows, so the UI and the model cannot disagree. Mechanical effects: sociability and the temperament/quirk length factor cap a turn tool's `say` through `withCharacterChatCap`. `traits` (growth-learned rules) and `voice` (the TTS id) are different fields — don't reuse them.
+
+**Growth** (XP, levels, user-approved proposals, cosmetics) lives in [core growth/](packages/core/src/growth/): XP math, the refresher, proposal generation over injected `GrowthProposalSources`, and the level-up transitions as pure functions. The desktop's [service growth/](packages/service/src/growth/) files are shims and adapters (store, MemoryManager, `oneShotCompletion`); the phone runs the same code through `PortableGrowth` ([runtime/growth-engine.ts](packages/core/src/runtime/growth-engine.ts)), counting consultations from messages with `from` (the phone keeps no history log) and generating proposals with a Klerk one-shot in the engine's background ambient lane, aborted on suspend. The phone has no sweep, so a completed task is what creates a pending level-up there. Growth keeps accruing with social mode off; only its display and announcements are held. A person's own progress (a Spanish level, a streak) is project data, never gezel XP.
+
+### Earned notifications
+
+A notification must be earned by something durable that happened. The sources are: a question (`question_asked`), work the person asked for finishing (`task_settled`, owner-launched only: `isOwnerLaunchedCompletion`), a level-up (social mode only), the night's review card, and a project reminder. The policy lives once in [core notifications/](packages/core/src/notifications/). `earnedItemFor` decides what an event is worth and in which register (social mode names the gezel, otherwise plain status text). `NotificationGate` folds what arrives within 4 s into one notification, stays quiet while the person is watching, and holds the rest once `config.notifications.dailyCap` (default 3, 0 = off) is spent. The cap is enforced through a per-host ledger that also dedupes replays. `EarnedNotifier` feeds the gate from the event stream and keeps reminders scheduled. Nothing fires on the clock alone, and the gate tests pin that. Two hosts run it:
+
+- **Electron main** ([earned-notifications.ts](packages/app/src/earned-notifications.ts) `startEarnedNotifications`) owns desktop notifications, so they arrive with the window closed. Its ledger is `notification-ledger.json` in Electron's userData. The renderer never raises one.
+- **The phone's UI** ([useHostNotifications.ts](packages/ui/src/components/useHostNotifications.ts)) drives `window.__GEZEL__.earnedNotifications`, the mobile bridge over `@capacitor/local-notifications` ([mobile/src/notifications.ts](packages/mobile/src/notifications.ts)). Its ledger is localStorage. It asks the OS for permission the first time something earned happens while the person is in the app, and clears the tray when they return.
+
+**Reminders** are the only time-based source, and the time must come from the project's own state. A script with the `reminders` capability calls `gezel.reminder.set({ at, title, body })` / `clear()`; `parseReminderRequest` enforces a future time at most 30 days out. The host stores one per project (`projects/{id}/reminder.json` through `Store` / `PortableStore`), announces `reminders_updated`, and `GET /api/reminders` lists them. `planReminders` schedules the week ahead, at most the cap per day. The desktop arms one timer and re-checks on resume; the phone hands them to the OS. Flashcards 1.1.2 is the reference content.
 
 ### Project
 
@@ -363,7 +382,8 @@ Each OpenAI or Mock session that has `mcpServer` set spawns the `@bendyline/geze
 Tool categories (`packages/mcp/src/server.ts`):
 
 - **Memory**: `search_memory`, `save_memory`, `list_memories`
-- **Workspace** (read-write workspace files): `list_dir`, `read_file`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`
+- **Workspace** (read-write workspace files): `list_dir`, `read_file`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`, `copy_path`
+- **Photos** (`image-intel`, read from the index): `list_photos`, `photo_groups` (events, byte-identical duplicates, lookalikes). Locations are returned only to the person's app and to sessions on an on-device provider
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`
@@ -485,12 +505,29 @@ Three pieces make it work:
   them would need a writer on every external edit — and the edit that matters
   is the one made outside gezel. Same call the Boekwachter issue's `stale` bit
   makes.
+- **Moves, copies and new folders are proposed too.** While drafting,
+  `rename`, `copy_path` and `make_dir` record an operation in the pack's
+  `operations.json` instead of touching the tree ([diffpack/draft-store.ts](packages/service/src/diffpack/draft-store.ts)'s
+  `proposeOperation`). They seal as `files` rows with `change` of `move`,
+  `copy` or `mkdir` and a `from`, carry a `stat:<size>:<mtime>` source
+  fingerprint rather than a hash (a photo tidy-up can name thousands of large
+  files), apply after every content edit in the order drafted, and never
+  replace an existing file whatever `allowDrifted` says. An edit to a path an
+  operation lands on is refused: edit the file where it is now.
 
 Applying passes `userInitiated` to `Store.assertWorkspaceWritable`, which
 waives **only** the external-consent branch: the gezel never wrote, so the
 user's click is the write. That flag must never be passed from an MCP tool or
 any other model-reachable surface — [http/routes/diffpacks.ts](packages/service/src/http/routes/diffpacks.ts)
 is its only caller.
+
+Boekwachter issues follow the proposal, not the task that drafted it
+([diffpack/issue-lifecycle.ts](packages/service/src/diffpack/issue-lifecycle.ts)):
+a drafting task that completes leaves its claimed issues in progress while a
+live proposal covers their file and reopens the rest; applying a file resolves
+the issues on it; dismissing a proposal reopens what no other live proposal
+from the same run covers. The link is the file path, because a pack records
+only the first issue that seeded it.
 
 Ids are always the drafting task's `num`, including a fanout shard's — nothing
 to mint, and no second numbering scheme beside `BW-n`. A shard addresses its
@@ -499,14 +536,71 @@ own pack through the `{{diffpack.dir}}` token, **not** `{{task.num}}`, which
 the spawn template.
 
 Overnight, [diffpack/night-fix-planner.ts](packages/service/src/diffpack/night-fix-planner.ts)
-runs when the night shift's index catch-up drains (so it plans against tonight's
+runs as each project's index catch-up drains (so it plans against tonight's
 findings) and hands each qualifying project's open Boekwachter issues to its
 developer. The gate is crew composition, per the `resolveProjectAutonomousGezel`
 convention: a **Boekwachter** and a **developer** on the roster, plus
-`projectAllowsAmbientWork` and the `nightlyFixesEnabled` opt-out (missing =
-on). It never recruits — conjuring the gezel that unlocks the feature would
-make the gate meaningless. The developer clusters the issues and the runtime
-fans out one shard, and therefore one proposal, per cluster.
+`projectAllowsAmbientWork`, the `nightlyFixesEnabled` opt-out (missing =
+on), and a **code folder** (`gezel.folderKind` of `code`, else a detected coding
+type or a linked GitHub repo — a review of a Word file is not a fix anyone
+asked for). It never recruits — conjuring the gezel that unlocks the feature
+would make the gate meaningless. Crew is added only when the person adds a
+folder: `recruitCrewForFolder` ([projects/recruit-crew.ts](packages/service/src/projects/recruit-crew.ts))
+runs for a `recruitCrew: true` request from the app's own credential
+(`isFirstPartyCaller`; dropped from model, CLI and add-in callers), once per
+project, and gives a code folder the Builder, a photo folder the **Curator**
+(gilde template `curator`, only where the catalog carries it), and every other
+kind a Boekwachter lead ([ADR 0021](docs/decisions/0021-read-only-folders.md)). The
+developer clusters the issues and the runtime fans out one shard, and
+therefore one proposal, per cluster. Adding a folder also arms its resident
+night work ([suggested-work/arm.ts](packages/service/src/suggested-work/arm.ts)):
+only report- and proposal-only books on a per-kind allowlist, only where the
+sponsor runs on an on-device model (cloud ones come back as `needsOk` for the
+person to approve), once per project. The folder's one off-switch is the
+`gezel.nightWork` property (`setFolderNightWork`, `POST /api/projects/:id/night-work`,
+the Overview's "Work on this folder overnight"): off stands the nightly sweep,
+fix planning and the folder's night hosts down, and on resumes only the hosts
+the switch paused.
+
+Each project's drained night work also writes a **model-free report** by kind,
+read from the index so it runs on any machine and costs nothing: a photo
+folder gets `reports/photos-<date>.md` (recent outings, on this day, byte-for-byte
+duplicates; never a location), a documents or mixed folder
+`reports/documents-<date>.md` (what changed, each with its Boekwachter summary),
+a code folder `reports/codebase-<date>.md` (hotspots by churn × findings ×
+dependents, load-bearing files, open issues by severity). One per day, nothing
+written when there is nothing to say, never for the shared library; the
+morning review finds them under `reports/`.
+
+**Albums are Squisq slideshows.** The `photo-library-nightly` book writes
+`artifacts/albums/<date>-<slug>.md`: frontmatter (`title`, `squisq-theme`,
+`album-from`/`album-to`), the `#` title and story as the cover, then one slide
+per moment (`{[imageWithCaption]}` or `{[photoGrid]}` with `ambientMotion` and
+`transition`). The person plays it, edits it and exports it to video in the
+ordinary document editor, which reads images only from the document's
+companion folder — so the gezel links photos by their workspace path and
+[index-store/photo-albums.ts](packages/service/src/index-store/photo-albums.ts)'s
+`storeAlbumPhotos` replaces each link with a 2048px copy in `<stem>_files/`
+(`makePhotoRendition`: upright, re-encoded, no EXIF and so no location — `sips`
+alone keeps GPS) and records the copy's original under the
+`gezel-photo-originals` frontmatter key. It runs after a gezel writes an album
+(the artifact write route), when a listing finds one still linking the
+workspace, before the UI opens one (`POST /albums/prepare`), and in the
+night's drained work. "Copy to a folder…" copies the full-size *originals*
+into the workspace — a `userInitiated` write the scope guard closes to session
+tokens, which never replaces a file.
+
+**Squisq syntax is taught from one place.** A craftbook step that writes a
+Squisq document declares `authoring: 'squisq'` or `'squisq-slideshow'`, and
+the task prompt appends the matching note from
+[core transform/squisq-dialect.ts](packages/core/src/transform/squisq-dialect.ts)
+(`squisqAuthoringNote`) after the step's procedure, ending with a line that
+the procedure decides heading levels and slide breaks (a deck splits slides on
+`#`, a report uses `##` sections, and an example in the note must never
+override that). Books declare the format instead of copying syntax:
+`photo-library-nightly`, `narrated-slideshow`, `powerpoint-deck`, `report-pdf`
+and `research-to-document` do. A Squisq change is one edit here; verify any new
+syntax against squisq's `docs/SquigglySquare.md` and template registry first.
 
 ### Generalist mode
 
@@ -573,9 +667,11 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/ai-apps/` — installed AI App (.gezapp) packages: `registry.json` (the atomic activation point) plus immutable `{appId}/{version}/` slices with receipts, owned by [project-type/gezapp.ts](packages/service/src/project-type/gezapp.ts) (`importGezapp`/`listGezapps`/`setGezappEnabled`/`removeGezapp`, all serialized on its install lock); surfaced at `/api/ai-apps` and `gezel app`
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` and `~/.gezel/memories/index/` — sqlite-vec indexes (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
-  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006), which is forced home-side so no database rides the user's — possibly cloud-synced — documents folder
+  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006)
+  - `~/.gezel/projects/{id}/index/` — the project's content index (`index.db` + WAL), owned by [ContentIndex](packages/service/src/index-store/content-index.ts). Home-side for **every** project, so adding a folder writes nothing into it; earlier builds' `<workingDir>/.gezel/index/` is moved here once at boot by [index-placement.ts](packages/service/src/index-store/index-placement.ts) — moved, never rebuilt, because it holds hours of model output. Device-tier, excluded from backups. `~/.gezel/projects/{id}/quarantine/` beside it holds connector content the scanner refused (`Store.projectQuarantineDir`). See [ADR 0021](docs/decisions/0021-read-only-folders.md)
   - `~/.gezel/projects/{id}/artifacts/shadow/` — the reserved shadow-file cache: markdown twins of workspace content (sandboxed squisq conversions of office docs from the static index pass; vision descriptions and STT transcripts from the AI tier), laid out as `<parent>/<basename>_files/<stem>.md` and owned by the content indexer ([index-store/docs.ts](packages/service/src/index-store/docs.ts) + [index-store/ai-shadow.ts](packages/service/src/index-store/ai-shadow.ts)). Lives under artifacts — never the (possibly read-only) workspace — write-denied through the artifact store, hidden from listings, orphan-swept, regenerable, safe to delete. See [ADR 0005](docs/decisions/0005-indexing-3.0.md).
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
+  - `~/.gezel/projects/{id}/thumbs/` (`projectThumbnailsDir`, the per-account private sidecar) — small JPEG thumbnails of workspace photos for grids, albums, search and the morning view, owned by [index-store/thumbnails.ts](packages/service/src/index-store/thumbnails.ts) and served by `GET /api/projects/:id/index/thumb`. Keyed by path, size, mtime and width (160/320/640), least-recently-served pruned past 512 MB, made by `sips` on macOS and pure JS elsewhere. Deliberately not under `artifacts/shadow/` (orphan-swept, readable by gezels) nor the workspace. Regenerable, safe to delete
   - `~/.gezel/handboek/narration/` — content-hash-keyed TTS narration WAVs + duration sidecars for Handboek articles, owned by [handboek/narration.ts](packages/service/src/handboek/narration.ts); derived cache, safe to delete
   - `~/.gezel/gezels/{id}/poppetje.json` — the resolved Poppetje struct (body shape, skin, hair, hat, etc.) driving the parametric figure renderer, owned by [PoppetjeManager](packages/service/src/poppetje/manager.ts). Persisted explicitly so adding new catalog entries or tuning slot odds later never drifts existing characters.
   - `~/.gezel/system-toolsets/` — two classes of pinned entry. **Eager** ones (Playwright + its Chromium) install at boot via [system-toolsets/bootstrap.ts](packages/service/src/system-toolsets/bootstrap.ts). **On-demand** ones (`onDemand: true` in the manifest — today only `@github/copilot-sdk`) install only when the user asks, through [system-toolsets/install-registry.ts](packages/service/src/system-toolsets/install-registry.ts). Read them back with `resolveInstalledSystemLibrary`, not `resolveSystemLibraryPath`: the strict resolver returns `null` on a version mismatch, which is right for eager entries the bootstrap upgrades in place, and would un-install every existing user of an on-demand entry the moment its pin moved.
@@ -749,7 +845,7 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | Search returns the same documents for every query | The vector arm lost its floor. KNN always returns its k nearest rows, and rank fusion scores a rank-0 vector hit at a flat 1.0, so an unfloored arm outranks genuine keyword matches with the whole corpus |
 | A chat turn injected indexed context that has nothing to do with the request | Read the turn's `retrieval.context-injected` history event — it lists every hit with its score and the per-arm timings. Injection is round-robin across corpora ([project-retrieval.ts](packages/service/src/search/project-retrieval.ts)'s `diversify`), so a corpus that returned anything gets a slot; the guards are `clearsInjectionFloor` and, for keyword arms, `isGrounded`. If the hit is keyword-derived, check what the query actually became — `queryTerms` ([query-terms.ts](packages/service/src/index-store/query-terms.ts)) applies the one stopword list, `QUERY_STOP_WORDS` ([query-stopwords.ts](packages/gezk/src/query-stopwords.ts), shared with the knowledge-catalog reader and the phone's memory recall), and FTS5 sees an OR of prefix terms, not the sentence. For a knowledge hit, the trace's `similarity` against its catalog's floor in [knowledge/vector-floors.ts](packages/service/src/knowledge/vector-floors.ts) says whether the floor or the relevance model let it through |
 | The relevance check is on but changes nothing | The service log's `[relevance] resolved enabled= model= source= surfaces= installed=` line, then the event's `relevanceModel.status`: `cold` means the model was still loading (it never holds a turn — the next one gets scores), `unavailable` means it failed its load-time self-check or its graph pin. An uncalibrated model (registry `thresholds: null`) only reorders; nothing is dropped until the bench has calibrated it |
-| A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |
+| A `.gezel/` dir, `*.db`, or any new file appeared in a folder the person added | Something wrote into a read-only workspace. The index belongs home-side (`projectContentIndexDbFile`); a stale `.gezel/index/` that survives a boot is one the migration could not take sole ownership of (another process held it — look for `[index] <id>: workspace index copied`/`left-in-place`). Anything else is a new write path: `index-store/read-only-promise.test.ts` is where to reproduce it (ADR 0021) |
 | A spreadsheet or big CSV never became a table | Check `tabular_state` in the project index: `blocked` is terminal for that content hash (empty file, unreadable, unsafe path), `deferred` means it was too large for the interactive pass and the night shift has it. A CSV under `MAX_INDEXABLE_BYTES` is deliberately left alone — it is already chunked and readable |
 | A spreadsheet's numbers are wrong by 100x, or dates are text | Something read the markdown shadow instead of the typed path. `formattedNumberText` renders `0.15` as `"15.0%"`; the data path is squisq's `xlsxToTables` via `convertInSandbox(path, 'xlsx', 'tables')` |
 | A gezel says a data table is empty, or `query_table` errors | Is there a corpus? `GET /api/projects/<id>/connectors` shows `tables[]` per binding. The tools are registered only when `GEZEL_TABLES_ENABLED` is set, which the chat manager does after probing for `artifacts/data/*/tables/` — a project with no tabular corpus has no query tools at all, by design |

@@ -13,7 +13,7 @@ const log = createLogger('memory-diagnostics');
 
 export function startMemoryDiagnostics(): () => void {
   if (process.env.GEZEL_MEMORY_DIAGNOSTICS !== '1') return () => {};
-  let lastReport = -Infinity;
+  let lastReport = Number.NEGATIVE_INFINITY;
   const report = () => {
     const memory = process.memoryUsage();
     const limit = getHeapStatistics().heap_size_limit;

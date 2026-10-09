@@ -460,9 +460,7 @@ test('the Visual C++ redistributable is disclosed wherever Windows ships', async
     /Microsoft Visual C\+\+ 2015-2022 Redistributable/,
     'the EULA names every component whose terms differ from the MIT License',
   );
-  const includedComponents = eula.match(
-    /3\. Third-party components included with Gezel\n\n([\s\S]*?)\n\nWhere a bundled component's license/,
-  )?.[1];
+  const includedComponents = eula.match(/(?:^|\n)3\.[^\n]+\n\n([\s\S]*?)(?=\n\d+\.|$)/)?.[1];
   assert.ok(includedComponents, 'the EULA must retain its bundled-components disclosure section');
   assert.doesNotMatch(
     includedComponents,

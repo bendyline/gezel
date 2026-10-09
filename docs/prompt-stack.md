@@ -40,7 +40,9 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 2 | Routing guardrail (`## Your job is to ROUTE, not to BUILD`) | pure-delegation roles (meester/voorman/planner); with generalist kickoff off it is emitted only on `anthropic-cli`/`codex-cli` (their vendor prompts are build-biased coding agents); with generalist kickoff on (`config.generalistMode`, see docs/generalist-mode.md) it is emitted for any delegation role | ~2.3K ch |
 | 3 | About intro + **the gezel's `about.md`, verbatim** | always | meester template ~4.6K ch |
 | 4 | `### Traits` | frontmatter traits present | varies |
+| 4b | `### Character` — the gezel's style + temperament, quirk, and a small-talk word cap, rendered from its persisted `character` record by `renderCharacterBlock` ([core character/](../packages/core/src/character/index.ts)); kept at every footprint, including `minimal` | **social mode on** (`resolveSocialMode`: `config.social`, else on for phones, off for the desktop) | ≤ 60 tok |
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
+| 5b | `### About the person` — what the crew has learned about the person (the "About you" memory scope), durable kinds only, newest first (`selectPersonNotes` in [memory-notes.ts](../packages/core/src/memory-notes.ts)); kept at every footprint, never in a visitor session | notes about the person exist | ≤ 700 / 450 / 260 ch (standard / compact / minimal) |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
 | 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large), the deep pass has produced summaries, AND the role gets specialist workspace orientation | ≤ ~300 tok |
 | 7 | Role-scoped `### Workspace files` listing (cap 100): developer-family roles see code/config, writers see prose sources, researchers see prose/text data, designers see editable design sources, and reviewers see their union. Coordinators, generalists, generators, and unknown roles get no standing inventory. Dependency/build/cache directories, lockfiles, minified/source-map output, and binary formats are removed before the cap. With `prompt.retrieval-first` on the profile (tier-default tiny/small/medium), a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface. | project has relevant files and role is eligible | varies |
@@ -195,8 +197,8 @@ even "hi there" before generating a token. On the desktop,
 the provider's reported window for native-tool providers) and, when it is `minimal`,
 early-returns a stripped prompt instead of the layer stack. There are two forms:
 
-- **Text-only** (talkie): header + capped about.md + one "you have no tools, just
-  converse" line. Everything else is dropped: guardrail, project context,
+- **Text-only** (talkie): header + capped about.md + the character block (social mode
+  only) + one "you have no tools, just converse" line. Everything else is dropped: guardrail, project context,
   workspace/documents, task blocks, recall, the full conduct core, and the tools block.
   The floor falls from ~2.7K tokens to ~350. This is deliberately lossy; pair it with the
   `just-chat` project type, which hides the work-oriented tabs to match.
@@ -282,8 +284,25 @@ while they stream.
   The phone has no embedder: a person's message there gets a lexical memory
   block instead (`recallPortableMemories` in
   [runtime/memory-recall.ts](../packages/core/src/runtime/memory-recall.ts)),
-  within the same `contextBudgetCeiling` and with a one-line header, since a
-  4K window's 160 tokens cannot carry the desktop's.
+  within the same `contextBudgetCeiling`.
+- **Memories are notes, not evidence.** Every memory a model sees — recalled
+  with a turn on either host, or returned by `search`, `search_memory` or
+  `save_memory` — goes through one renderer,
+  [memory-notes.ts](../packages/core/src/memory-notes.ts): a
+  `[Your notes from earlier sessions …]` header and lines like
+  `- Your note (correction, 2026-10-01): …` / `- About the person: …`. On the
+  desktop they come after the indexed evidence, nearest the person's words,
+  and never under its "untrusted evidence" warning. Under that warning a 4B
+  tutor recalled the learner's exact recurring mistake and still let it pass,
+  in every trial (memory-tutor A/B, 2026-10-07). A correction note quotes the
+  wrong form first; when the person's message contains it, the line says
+  `— this message repeats it` and moves to the top (`noteRepeatsInMessage`),
+  because a small model in the middle of a role-play let the bare note pass.
+  Over three trials per arm on Gemma E4B, notes framing plus the standing
+  `### About the person` block plus this marker took the remembered tutor
+  from 5.9 to 7.8 against a fresh tutor's 6.6–7.1 (personalisation 8.3 vs
+  4.3, correction level with the fresh tutor), where the evidence framing
+  had left it below the fresh tutor.
   In a factual-mode session each row carries its session-wide evidence
   number (`[7] [knowledge] …`), and evidence tool results get the same
   `[n]` header in the bridge ([factual-writing.md](factual-writing.md)).

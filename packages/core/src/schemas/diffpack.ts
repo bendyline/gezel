@@ -78,12 +78,43 @@ export const DiffpackOriginSchema = z.discriminatedUnion('kind', [
 ]);
 export type DiffpackOrigin = z.infer<typeof DiffpackOriginSchema>;
 
-export const DiffpackFileChangeSchema = z.enum(['modify', 'add', 'delete']);
+export const DiffpackFileChangeSchema = z.enum([
+  'modify',
+  'add',
+  'delete',
+  /** File operations: no diff; applied after every edit, in the order drafted. */
+  'move',
+  'copy',
+  'mkdir',
+]);
 export type DiffpackFileChange = z.infer<typeof DiffpackFileChangeSchema>;
 
+/** The changes that move files around rather than edit their contents. */
+export const DiffpackFileOperationSchema = z.enum(['move', 'copy', 'mkdir']);
+export type DiffpackFileOperation = z.infer<typeof DiffpackFileOperationSchema>;
+
+export function isDiffpackFileOperation(
+  change: DiffpackFileChange,
+): change is DiffpackFileOperation {
+  return change === 'move' || change === 'copy' || change === 'mkdir';
+}
+
+/**
+ * One file operation a drafting session proposed, in the order it was asked
+ * for. `to` is where a move or copy lands, or the folder `mkdir` creates.
+ */
+export const DiffpackDraftOperationSchema = z.object({
+  op: DiffpackFileOperationSchema,
+  from: z.string().min(1).optional(),
+  to: z.string().min(1),
+});
+export type DiffpackDraftOperation = z.infer<typeof DiffpackDraftOperationSchema>;
+
 export const DiffpackFileSchema = z.object({
-  /** Workspace-relative target. */
+  /** Workspace-relative target: for a move or copy, where it lands. */
   path: z.string().min(1),
+  /** Move and copy: the workspace path it comes from. */
+  from: z.string().min(1).optional(),
   /**
    * Artifacts-relative sidecar holding this file's unified diff. Empty for a
    * `delete`, which has no diff: a patch that removes every line applies, but
@@ -93,7 +124,9 @@ export const DiffpackFileSchema = z.object({
   /**
    * sha256 of the workspace file at seal time — empty string for an `add`.
    * The apply precondition compares it to the file's current hash so a
-   * drifted pack is explained before `applyPatch` rejects a hunk.
+   * drifted pack is explained before `applyPatch` rejects a hunk. A move or
+   * copy records its source's `stat:<size>:<mtime>` instead: a tidy-up can
+   * name thousands of photos, and hashing every one at seal would take hours.
    */
   baseHash: z.string(),
   additions: z.number().int().nonnegative(),

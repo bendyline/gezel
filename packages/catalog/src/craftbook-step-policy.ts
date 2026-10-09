@@ -20,7 +20,7 @@ const BUILTIN_BY_ID = new Map(BUILTIN_TOOLSETS.map((group) => [group.id, group])
 const SPECIALIZED_GROUP_SIGNALS: Readonly<Record<string, RegExp>> = {
   'security-intel': /\b(?:security|vulnerabilit|threat|attack surface|taint|secret scan)\b/i,
   'image-intel':
-    /\b(?:image library|photo library|similar images|search_images|describe_folder)\b/i,
+    /\b(?:image library|photo library|similar images|search_images|describe_folder|list_photos|photo_groups)\b/i,
   'entity-intel': /\b(?:find_entity|entity mentions|cross-file entit)\b/i,
   archives: /\b(?:archive|zip|tar|extract_archive|list_archive)\b/i,
   'data-tables': /\b(?:sql|query_table|describe_table|list_tables|data table)\b/i,

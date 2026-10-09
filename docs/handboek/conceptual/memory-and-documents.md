@@ -17,7 +17,7 @@ A note belongs to one of three places:
 - **The project's** — facts and decisions every gezel working on that project shares.
 - **Yours** — what the crew has learned about you: your name, your preferences, what you're working toward. Every gezel reads these, so you don't have to tell each one again.
 
-Before answering a message, a gezel looks for notes that bear on it, preferring ones from the project at hand. This works on phones too, and keeps working while the search model is still loading.
+Every gezel keeps the most recent things it knows about you in front of it all the time, so it doesn't have to ask again. Before answering a message, a gezel also looks for older notes that bear on it, preferring ones from the project at hand. This works on phones too, and keeps working while the search model is still loading.
 
 Everything is editable. **Settings → About you** shows what your gezels know about you; correct or remove anything there. A gezel's **Memories** tab holds its own notes and its lessons — the short list of habits it carries into every conversation. Lines you put under a `## Pinned` heading in the lessons are kept exactly as you wrote them; the rest is refreshed as the gezel learns.
 

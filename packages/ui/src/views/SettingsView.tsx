@@ -9,12 +9,7 @@ import {
   normalizeCodexPermissionMode,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
-import type {
-  ConfigResponse,
-  ProviderUsage,
-  QuotaBucket,
-  UsageResponse,
-} from '@bendyline/gezel-client';
+import type { ConfigResponse, UsageResponse } from '@bendyline/gezel-client';
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AppleFoundationModelsStatus } from '../components/AppleFoundationModelsStatus.js';
@@ -31,7 +26,10 @@ import {
   ModelPicker,
   useReasoningSupport,
 } from '../components/ModelPicker.js';
+import { NotificationsSetting } from '../components/NotificationsSetting.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import { SocialModeToggle } from '../components/SocialModeToggle.js';
+import { StartAtLoginToggle } from '../components/StartAtLoginToggle.js';
 import { shortModelName } from '../components/model-display-name.js';
 import { providerLabel } from '../components/provider-label.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
@@ -48,6 +46,8 @@ import {
 } from './EngagementModePanel.js';
 import { GeneralistModeSection } from './GeneralistModeSection.js';
 import { HostModelSettings } from './HostModelSettings.js';
+import { MemorySection } from './MemorySection.js';
+import { ProviderUsagePanel } from './ProviderUsagePanel.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
 import { SettingsLegalSection } from './SettingsLegal.js';
 import { SettingsSectionPicker } from './SettingsSectionPicker.js';
@@ -71,7 +71,6 @@ import {
 const loadAmbientDashboardModule = () => import('../components/AmbientDashboardCard.js');
 const loadConnectedAppsModule = () => import('../components/ConnectedAppsPanel.js');
 const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCard.js');
-const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
 const loadMediaSearchModule = () => import('../components/MediaSearchCard.js');
 const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
 const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
@@ -99,9 +98,6 @@ const AmbientDashboardCard = lazy(() =>
 );
 const ConnectedAppsPanel = lazy(() =>
   loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
-);
-const RelevanceModelCard = lazy(() =>
-  loadRelevanceModelModule().then(({ RelevanceModelCard }) => ({ default: RelevanceModelCard })),
 );
 const MediaSearchCard = lazy(() =>
   loadMediaSearchModule().then(({ MediaSearchCard }) => ({ default: MediaSearchCard })),
@@ -722,6 +718,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ provider });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus('saved — open chats restart on their next message.');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -877,6 +874,7 @@ function DaemonSettingsView() {
       window?: { startHour: number; endHour: number };
       keepAwakeWhileRunning?: boolean;
       wakeOnStart?: boolean;
+      pauseOnBattery?: boolean;
       modelOverride?: {
         enabled?: boolean;
         provider?: ProviderName;
@@ -1022,6 +1020,7 @@ function DaemonSettingsView() {
         ...(openaiOrgDraft.trim() ? { openaiOrganization: openaiOrgDraft.trim() } : {}),
       });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setOpenaiKeyDraft('');
       setStatus('saved — any open chat threads have been reset');
     } catch (err) {
@@ -1034,6 +1033,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ openaiApiKey: '' });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setOpenaiKeyDraft('');
       setStatus('OpenAI key cleared');
     } catch (err) {
@@ -1047,6 +1047,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ anthropicApiKey: anthropicKeyDraft.trim() });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setAnthropicKeyDraft('');
       setStatus('saved — any open chat threads have been reset');
     } catch (err) {
@@ -1059,6 +1060,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ anthropicApiKey: '' });
       setConfig(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setAnthropicKeyDraft('');
       setStatus('Anthropic key cleared');
     } catch (err) {
@@ -1453,20 +1455,11 @@ function DaemonSettingsView() {
     nightShiftProvider === 'copilot' ||
     copilotAvailability?.available !== false;
 
-  // The API-key OpenAI and Anthropic surfaces are untested and stay hidden for
-  // now; their CLI counterparts (codex-cli, anthropic-cli) are unaffected and
-  // remain on offer. Same escape hatch as ds4/Copilot above: an already-chosen
-  // provider — or one that already has a key on file — keeps its tab and pill
-  // so a configured user is never stranded without a way to change it.
-  const showOpenaiProvider =
-    provider === 'openai' || nightShiftProvider === 'openai' || hasOpenaiKey;
   // Apple's own on-device model needs no download, only an Apple silicon Mac
   // with the helper installed; a chosen provider stays on offer regardless.
   const showAppleProvider =
     provider === 'apple-foundation-models' ||
     config?.appleFoundationModelsStatus?.installed === true;
-  const showAnthropicProvider =
-    provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
   // Super Lockdown — and any custom posture with external chat switched off —
   // refuses to build a non-local provider at all: `ChatManager.ensureProvider`
@@ -1566,9 +1559,9 @@ function DaemonSettingsView() {
         ]
       : []),
     ...(showCopilotProvider ? [{ id: 'copilot' as const, label: 'GitHub Copilot' }] : []),
-    ...(showOpenaiProvider ? [{ id: 'openai' as const, label: 'OpenAI' }] : []),
+    { id: 'openai', label: 'OpenAI' },
     { id: 'codex-cli', label: 'OpenAI Codex CLI' },
-    ...(showAnthropicProvider ? [{ id: 'anthropic' as const, label: 'Anthropic Claude' }] : []),
+    { id: 'anthropic', label: 'Anthropic Claude' },
     { id: 'anthropic-cli', label: 'Anthropic Claude CLI' },
     { id: 'ollama', label: 'Ollama' },
   ];
@@ -1582,8 +1575,6 @@ function DaemonSettingsView() {
       // matter on Windows, where ds4 has no native build but remains usable
       // through an external server.
       if (s.id === 'ds4' && !showDs4Provider) return false;
-      if (s.id === 'openai' && !showOpenaiProvider) return false;
-      if (s.id === 'anthropic' && !showAnthropicProvider) return false;
       // A posture with external chat off can't run these at all, so their
       // setup tabs are dead ends — sign-in flows and CLI permission modes for
       // a provider the daemon refuses to construct. The greyed pill on the
@@ -1601,8 +1592,6 @@ function DaemonSettingsView() {
     uiPlatform,
     isDarwin,
     showDs4Provider,
-    showOpenaiProvider,
-    showAnthropicProvider,
     externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
@@ -1783,6 +1772,14 @@ function DaemonSettingsView() {
                   })()}
                 </div>
               </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Social mode</h3>
+                <SocialModeToggle />
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Notifications</h3>
+                <NotificationsSetting />
+              </section>
               <section style={{ marginTop: '2rem' }}>
                 <h3>Documents</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
@@ -1933,22 +1930,35 @@ function DaemonSettingsView() {
                   />
                   <span>Keep this machine awake while night-shift work is running</span>
                 </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.4rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.pauseOnBattery !== false}
+                    onChange={(e) => void saveNightShift({ pauseOnBattery: e.target.checked })}
+                  />
+                  <span>Pause night work while this computer runs on battery</span>
+                </label>
+                <StartAtLoginToggle
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.4rem',
+                  }}
+                />
                 {isDarwin && (
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      marginTop: '0.4rem',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={config?.nightShift?.wakeOnStart === true}
-                      onChange={(e) => void saveNightShift({ wakeOnStart: e.target.checked })}
-                    />
-                    <span>Wake this machine when the window opens</span>
-                  </label>
+                  <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.6rem' }}>
+                    macOS lets only administrators schedule a wake, so Gezel can't wake a sleeping
+                    Mac for the night shift. It works through the night while the Mac stays awake
+                    and plugged in.
+                  </p>
                 )}
               </section>
               <section style={{ marginTop: '2rem' }}>
@@ -2506,18 +2516,12 @@ function DaemonSettingsView() {
                                   Copilot{hasGithubToken ? ' ✓' : ''}
                                 </Select.Item>
                               )}
-                              {(showAnthropicProvider ||
-                                config?.keurmeester?.providerName === 'anthropic') && (
-                                <Select.Item value="anthropic">
-                                  Anthropic{hasAnthropicKey ? ' ✓' : ''}
-                                </Select.Item>
-                              )}
-                              {(showOpenaiProvider ||
-                                config?.keurmeester?.providerName === 'openai') && (
-                                <Select.Item value="openai">
-                                  OpenAI{hasOpenaiKey ? ' ✓' : ''}
-                                </Select.Item>
-                              )}
+                              <Select.Item value="anthropic">
+                                Anthropic{hasAnthropicKey ? ' ✓' : ''}
+                              </Select.Item>
+                              <Select.Item value="openai">
+                                OpenAI{hasOpenaiKey ? ' ✓' : ''}
+                              </Select.Item>
                               <Select.Item value="anthropic-cli">Anthropic CLI</Select.Item>
                               <Select.Item value="codex-cli">Codex CLI</Select.Item>
                             </Select.Content>
@@ -2730,17 +2734,15 @@ function DaemonSettingsView() {
                       GitHub Copilot
                     </button>
                   )}
-                  {showOpenaiProvider && (
-                    <button
-                      type="button"
-                      className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
-                      onClick={() => void setProvider('openai')}
-                      disabled={providerBlocked('openai')}
-                      title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
-                    >
-                      OpenAI
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('openai')}
+                    disabled={providerBlocked('openai')}
+                    title={providerBlocked('openai') ? blockedProviderTitle('openai') : undefined}
+                  >
+                    OpenAI
+                  </button>
                   <button
                     type="button"
                     className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
@@ -2754,19 +2756,17 @@ function DaemonSettingsView() {
                   >
                     OpenAI Codex CLI
                   </button>
-                  {showAnthropicProvider && (
-                    <button
-                      type="button"
-                      className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
-                      onClick={() => void setProvider('anthropic')}
-                      disabled={providerBlocked('anthropic')}
-                      title={
-                        providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
-                      }
-                    >
-                      Anthropic Claude
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('anthropic')}
+                    disabled={providerBlocked('anthropic')}
+                    title={
+                      providerBlocked('anthropic') ? blockedProviderTitle('anthropic') : undefined
+                    }
+                  >
+                    Anthropic Claude
+                  </button>
                   <button
                     type="button"
                     className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
@@ -3427,7 +3427,7 @@ function DaemonSettingsView() {
                     >
                       platform.openai.com/api-keys
                     </a>{' '}
-                    and create a secret key with All Permissions.
+                    and create a secret key with access to the models you want to use.
                   </li>
                   <li>Paste it below. Organization ID is optional.</li>
                 </ol>
@@ -3689,12 +3689,12 @@ function DaemonSettingsView() {
                 <li>
                   Go to{' '}
                   <a
-                    href="https://console.anthropic.com/settings/keys"
+                    href="https://platform.claude.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
                     style={{ color: 'var(--accent)' }}
                   >
-                    console.anthropic.com/settings/keys
+                    platform.claude.com/settings/keys
                   </a>{' '}
                   and create an API key.
                 </li>
@@ -4482,237 +4482,5 @@ function CopilotConnectionStatus({
         Test connection
       </button>
     </div>
-  );
-}
-
-function ProviderUsagePanel({ label, data }: { label: string; data: ProviderUsage }) {
-  return (
-    <div className="provider-usage-panel">
-      <h4 className="provider-usage-heading">{label}</h4>
-      <div className="usage-grid">
-        {data.quotaBuckets.map((b) => (
-          <QuotaBucketCard key={b.name} bucket={b} />
-        ))}
-        <div className="usage-card">
-          <div className="usage-label">Today</div>
-          <div className="usage-value">{data.todayTurns} turns</div>
-          <div className="usage-detail">
-            <span>
-              {data.todayTokensIn.toLocaleString()} in / {data.todayTokensOut.toLocaleString()} out
-              tokens
-            </span>
-          </div>
-        </div>
-        <div className="usage-card">
-          <div className="usage-label">Since startup</div>
-          <div className="usage-value">{data.totalTurns} turns</div>
-          <div className="usage-detail">
-            <span>
-              {data.totalTokensIn.toLocaleString()} in / {data.totalTokensOut.toLocaleString()} out
-              tokens
-            </span>
-          </div>
-        </div>
-        {/* Decode speed. Only the on-device engines report throughput, so this
-            card is omitted entirely for cloud providers rather than showing a
-            zero that reads as a measurement. */}
-        {typeof data.medianOutputTokensPerSec === 'number' && (
-          <div className="usage-card">
-            <div className="usage-label">Decode speed</div>
-            <div className="usage-value">{data.medianOutputTokensPerSec} tok/s</div>
-            <div className="usage-detail">
-              <span>median across turns, generation only</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function QuotaBucketCard({ bucket }: { bucket: QuotaBucket }) {
-  if (bucket.isUnlimited) {
-    return (
-      <div className="usage-card usage-card-wide">
-        <div className="usage-label">{humanizeBucketName(bucket.name)}</div>
-        <div className="usage-value">Unlimited</div>
-      </div>
-    );
-  }
-  const used = Math.round((1 - bucket.remainingPercent) * 100);
-  return (
-    <div className="usage-card usage-card-wide">
-      <div className="usage-label">{humanizeBucketName(bucket.name)}</div>
-      <div className="usage-bar-track">
-        <div
-          className={`usage-bar-fill${used > 80 ? ' usage-bar-warn' : ''}`}
-          style={{ width: `${Math.min(used, 100)}%` }}
-        />
-      </div>
-      <div className="usage-detail">
-        <span>
-          {bucket.used.toLocaleString()} / {bucket.limit.toLocaleString()} ({used}%)
-        </span>
-        <span>
-          {bucket.remaining.toLocaleString()} remaining
-          {bucket.resetDate ? ` · resets ${bucket.resetDate}` : ''}
-        </span>
-      </div>
-      {bucket.overage > 0 && (
-        <div className="usage-overage">{bucket.overage.toLocaleString()} overage</div>
-      )}
-    </div>
-  );
-}
-
-function humanizeBucketName(name: string): string {
-  return name.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-interface MemorySectionProps {
-  config: ConfigResponse | null;
-  onRetrievalChange: (
-    patch: Omit<Partial<NonNullable<ConfigResponse['retrieval']>>, 'maxTokens'> & {
-      maxTokens?: number | null;
-    },
-  ) => Promise<void>;
-  onTaskReferencesChange: (enabled: boolean) => Promise<void>;
-  onSummarizationChange: (
-    patch: Partial<NonNullable<ConfigResponse['summarization']>>,
-  ) => Promise<void>;
-}
-
-function MemorySection({
-  config,
-  onRetrievalChange,
-  onTaskReferencesChange,
-  onSummarizationChange,
-}: MemorySectionProps) {
-  const retrievalMode =
-    config?.retrieval?.mode ?? (config?.autoRecall?.enabled === false ? 'off' : 'balanced');
-  const summarizeEnabled = config?.summarization?.enabled !== false;
-  const retrievalBudget = config?.retrieval?.maxTokens;
-  const minUserTurns = config?.summarization?.minUserTurns ?? 2;
-  const idleHours = config?.summarization?.idleHours ?? 24;
-  return (
-    <section style={{ marginTop: '2rem' }}>
-      <h3>Project knowledge &amp; memory</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Ground relevant turns in indexed project files, artifacts, memories, and shared documents.
-        Finished threads can also be distilled into project memory for future work.
-      </p>
-
-      <div style={{ marginBottom: '1.25rem' }}>
-        <strong>Indexed context per turn</strong>
-        <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
-          Higher settings provide more direct evidence. Lower settings preserve context space on
-          memory-constrained models. The gezel can still call <code>search</code> when this is Off.
-        </p>
-        <div
-          className="gz-tray"
-          role="radiogroup"
-          aria-label="Indexed context per turn"
-          style={{ marginTop: '0.5rem' }}
-        >
-          {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-              role="radio"
-              aria-checked={retrievalMode === mode}
-              className={`gz-key${retrievalMode === mode ? ' gz-key-active' : ''}`}
-              onClick={() => void onRetrievalChange({ mode })}
-            >
-              {mode[0]!.toUpperCase() + mode.slice(1)}
-            </button>
-          ))}
-        </div>
-        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted small">Optional token cap</label>
-          <input
-            type="number"
-            min={0}
-            max={16000}
-            value={retrievalBudget ?? ''}
-            placeholder="Mode default"
-            onChange={(e) => {
-              if (e.target.value === '') {
-                void onRetrievalChange({ maxTokens: null });
-                return;
-              }
-              const v = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v >= 0) void onRetrievalChange({ maxTokens: v });
-            }}
-            style={{ width: '8rem' }}
-            disabled={retrievalMode === 'off'}
-          />
-        </div>
-      </div>
-
-      <Suspense fallback={null}>
-        <RelevanceModelCard />
-      </Suspense>
-
-      <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={config?.taskReferences?.enabled !== false}
-            onChange={(e) => void onTaskReferencesChange(e.target.checked)}
-          />
-          <strong>Look up references when a task starts.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          A task started from a request searches your knowledge catalogs and shared documents for
-          its subject once, and gives every step what it found.
-        </p>
-      </div>
-
-      <div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={summarizeEnabled}
-            onChange={(e) => void onSummarizationChange({ enabled: e.target.checked })}
-          />
-          <strong>Summarize threads into project memory.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          Runs when a thread is archived, and on an hourly sweep for any thread that's been idle
-          past the threshold. Short threads are skipped.
-        </p>
-        <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted small">Idle after (hours)</label>
-          <input
-            type="number"
-            min={1}
-            max={720}
-            value={idleHours}
-            onChange={(e) => {
-              const v = Number.parseFloat(e.target.value);
-              if (Number.isFinite(v) && v > 0) void onSummarizationChange({ idleHours: v });
-            }}
-            style={{ width: '5rem' }}
-            disabled={!summarizeEnabled}
-          />
-          <label className="muted small" style={{ marginLeft: '1rem' }}>
-            Min user turns
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={minUserTurns}
-            onChange={(e) => {
-              const v = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v > 0) void onSummarizationChange({ minUserTurns: v });
-            }}
-            style={{ width: '5rem' }}
-            disabled={!summarizeEnabled}
-          />
-        </div>
-      </div>
-    </section>
   );
 }

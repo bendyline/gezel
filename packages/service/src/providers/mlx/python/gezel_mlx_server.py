@@ -3847,7 +3847,15 @@ def _build_prompt(
     use_tokenizer = (
         tokenizer is not None
         and hasattr(tokenizer, "apply_chat_template")
-        and (bool(tools) or bool(chat_template_override) or any(m.images for m in messages))
+        # Connected apps often send no tools or images. Their reasoning
+        # controls still need the canonical renderer; the text-only fallback
+        # drops these kwargs and silently reopens Qwen's thinking block.
+        and (
+            bool(tools)
+            or bool(chat_template_override)
+            or bool(chat_template_kwargs)
+            or any(m.images for m in messages)
+        )
     )
     if use_tokenizer:
         base_kwargs: Dict[str, Any] = dict(
@@ -3926,7 +3934,7 @@ def _build_prompt(
                         flush=True,
                     )
 
-    # No tools + no override, no tokenizer template, or tools-render
+    # No tools, override or template controls, no tokenizer template, or tools-render
     # failed: text-only path. apply_chat_template signature varies across
     # mlx-vlm versions; the (processor, config, messages) form is stable.
     # The mlx_lm tower has no vlm processor/config pair — its tokenizer

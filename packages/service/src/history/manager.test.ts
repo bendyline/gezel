@@ -34,6 +34,15 @@ describe('HistoryManager', () => {
     expect(events[0]?.at).toBeTruthy();
   });
 
+  it('reads every project when Finder left a .DS_Store among them', async () => {
+    await history.log({ kind: 'project.created', projectId: 'pics', summary: 'Created' });
+    await writeFile(join(home, 'projects', '.DS_Store'), 'finder');
+    await writeFile(join(home, 'projects', 'notes.txt'), 'stray');
+
+    const events = await history.listEvents();
+    expect(events.map((e) => e.projectId)).toEqual(['pics']);
+  });
+
   it('logs project-scoped events to the project file', async () => {
     await history.log({
       kind: 'project.created',

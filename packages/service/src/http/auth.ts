@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import type { TokenStore } from './token-store.js';
 
 declare module 'hono' {
@@ -86,6 +86,16 @@ export function requireScope(scope: string): MiddlewareHandler {
     if (auth.scopes.includes('root') || auth.scopes.includes(scope)) return next();
     return c.json({ error: `missing_scope:${scope}` }, 403);
   };
+}
+
+/**
+ * Whether the caller is the daemon's own root token or the app's per-launch
+ * credential. For request fields that only the person's own app may set,
+ * where the route itself stays open to other callers.
+ */
+export function isFirstPartyCaller(c: Context): boolean {
+  const auth = c.get('auth');
+  return Boolean(auth && (auth.scopes.includes('root') || auth.scopes.includes('ui')));
 }
 
 /**

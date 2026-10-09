@@ -9,6 +9,9 @@
  * dedicated public subpath. Product-service internals remain outside this contract.
  */
 
+import type { AppChatProgress } from '@bendyline/gezel-client/app-models';
+export type { AppChatProgress } from '@bendyline/gezel-client/app-models';
+
 export interface DetectResult {
   /**
    * The daemon has been launched at least once on this machine and
@@ -299,8 +302,17 @@ export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   stream?: boolean;
+  /** Older daemons ignore include_progress; percentages/counters are never estimated. */
+  stream_options?: { include_usage?: boolean; include_progress?: boolean };
   temperature?: number;
   max_tokens?: number;
+  /**
+   * OpenAI's reasoning control. `none` or `minimal` turns a local model's
+   * thinking phase off. Apps never receive that reasoning, so for a thinking
+   * model it is silent time before the first token; send `none` unless the
+   * extra depth is worth the wait.
+   */
+  reasoning_effort?: string;
   /**
    * Tool definitions advertised to the model. The daemon halts on the
    * first tool call and returns the calls in the response — the
@@ -335,6 +347,8 @@ export interface ChatCompletionResponse {
 }
 
 export interface ChatCompletionChunk {
+  /** Opt-in, validated metadata; choices is empty on a progress-only chunk. */
+  gezel_progress?: AppChatProgress;
   id: string;
   object: 'chat.completion.chunk';
   created: number;
@@ -351,9 +365,9 @@ export interface ChatCompletionChunk {
         function: { name: string; arguments: string };
       }>;
     };
-    finish_reason: 'stop' | 'tool_calls' | null;
+    finish_reason: 'stop' | 'tool_calls' | 'length' | null;
   }>;
-  usage?: ChatCompletionResponse['usage'];
+  usage?: ChatCompletionResponse['usage'] | null;
 }
 
 /** Opt-in cross-host replies: native providers may not report token usage. */

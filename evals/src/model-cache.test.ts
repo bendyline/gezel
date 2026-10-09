@@ -64,11 +64,12 @@ function writeInstall(
   modelId: string,
   manifest: Record<string, unknown>,
   extraFiles: string[] = [],
-  engine: 'llama-cpp' | 'ds4' = 'llama-cpp',
+  engine: 'llama-cpp' | 'ds4' | 'mlx' = 'llama-cpp',
 ): string {
   const dir = join(root, 'engines', engine, 'models', modelId);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
+  if (manifest.weightsFilename)
+    writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   for (const f of extraFiles) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
@@ -711,6 +712,62 @@ describe('staleInstallReason', () => {
     await expect(
       staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
     ).resolves.toBeNull();
+  });
+
+  it('compares the complete MLX file hashes across metadata-only releases', async () => {
+    const hashes = { 'config.json': 'a'.repeat(64), 'model.safetensors': 'b'.repeat(64) };
+    useSyntheticIndex([
+      {
+        id: 'm',
+        version: '2.0.0',
+        mlx: {
+          huggingfaceRepo: 'example/model',
+          files: Object.entries(hashes).map(([name, sha256]) => ({ name, sha256 })),
+        },
+      },
+    ]);
+    const r = root();
+    const check = () => staleInstallReason({ cacheRoot: r, engine: 'mlx', modelId: 'm' });
+    const manifest = {
+      catalogVersion: '1.0.0',
+      huggingfaceRepo: 'example/model',
+      fileSha256: hashes,
+    };
+    writeInstall(r, 'm', manifest, Object.keys(hashes), 'mlx');
+    await expect(check()).resolves.toBeNull();
+    // Same-version installs can carry sanctioned template rewrites; this
+    // release-drift check must not invent a stricter install contract.
+    writeInstall(
+      r,
+      'm',
+      {
+        ...manifest,
+        catalogVersion: '2.0.0',
+        fileSha256: { ...hashes, 'config.json': 'c'.repeat(64) },
+      },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toBeNull();
+    writeInstall(
+      r,
+      'm',
+      { ...manifest, fileSha256: { ...hashes, 'config.json': 'c'.repeat(64) } },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toMatch(/config.json sha256 differs/);
+    writeInstall(
+      r,
+      'm',
+      { ...manifest, fileSha256: { 'config.json': hashes['config.json'] } },
+      [],
+      'mlx',
+    );
+    await expect(check()).resolves.toMatch(/catalogVersion/);
+    writeInstall(r, 'm', manifest, [], 'mlx');
+    rmSync(join(r, 'engines', 'mlx', 'models', 'm', 'model.safetensors'));
+    await expect(check()).resolves.toMatch(/missing payload file/);
   });
 
   it('compares a historical directory against the current catalog id', async () => {

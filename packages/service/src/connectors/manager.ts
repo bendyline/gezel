@@ -153,7 +153,7 @@ export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
   /** Project artifacts root where this connector's corpus lands. */
   storageDir: string;
   /** Resolved workspace root used only for quarantined raw bodies. */
-  quarantineWorkspaceDir: string;
+  quarantineDir: string;
   /** Top dir under artifacts where this connector's corpus lands. */
   corpusDir: string;
   /**
@@ -198,7 +198,7 @@ export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
    */
   write?: (input: {
     storageDir: string;
-    quarantineWorkspaceDir: string;
+    quarantineDir: string;
     corpusDir: string;
     record: Rec;
   }) => Promise<WriteRecordResult>;
@@ -343,7 +343,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
             if (typeof recordId === 'string') seenHashes.add(sha8(recordId));
             const w = await write({
               storageDir: opts.storageDir,
-              quarantineWorkspaceDir: opts.quarantineWorkspaceDir,
+              quarantineDir: opts.quarantineDir,
               corpusDir: scopeCorpusDir,
               record,
             });
@@ -1001,7 +1001,7 @@ export class ConnectorManager {
         projectId: project.id,
       });
       const corpusDir = await this.ensureCorpusDir(project, binding);
-      const { storageDir, quarantineWorkspaceDir, migrated } = await connectorCorpusStorage(
+      const { storageDir, quarantineDir, migrated } = await connectorCorpusStorage(
         this.opts.store,
         project.id,
         corpusDir,
@@ -1025,7 +1025,7 @@ export class ConnectorManager {
 
       const r = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
         storageDir,
-        quarantineWorkspaceDir,
+        quarantineDir,
         corpusDir,
         // Prune deletes records the source no longer returns, keyed off the
         // markdown filename grammar. An append-only observation corpus has

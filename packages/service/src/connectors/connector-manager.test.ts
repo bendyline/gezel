@@ -82,6 +82,7 @@ function harness(extra?: {
     },
     projectWorkspaceDir: async () => ws,
     projectArtifactsDir: () => join(ws, 'artifacts'),
+    projectQuarantineDir: () => join(ws, 'private', 'quarantine'),
     get historyManager() {
       return undefined;
     },

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { scriptRunText } from '../tools/results.js';
 import {
   DELIVERABLE_READY_FOOTER_LIMIT,
   DELIVERABLE_READY_GRACE_ITERATIONS,
@@ -70,6 +71,37 @@ describe('terminalToolClosingText', () => {
         'ERROR: Illegal move. Legal moves: b6-c5',
       ),
     ).toBeNull();
+  });
+});
+
+describe('terminalToolClosingText — app-composed replies (turn.show)', () => {
+  const tutor = {
+    toolNames: ['reply'],
+    closingArgByTool: { reply: 'say' },
+    closingOutputByTool: { reply: 'display' },
+    fallbackText: 'Your turn.',
+    maxClosingChars: 60,
+  };
+  const ran = (output: unknown) =>
+    scriptRunText({ runId: 'r1', status: 'ok', output, callsSummary: [] }).text;
+
+  it('shows what the script composed, beyond the sociability cap', () => {
+    const display =
+      '¡Claro! Un café con leche. ¿Algo más? — Corrections: "una café" → "un café"; "quiero un" → "quisiera un".';
+    expect(
+      terminalToolClosingText(
+        tutor,
+        'reply',
+        { say: '¡Claro! Un café con leche. ¿Algo más?' },
+        ran({ display }),
+      ),
+    ).toBe(display);
+  });
+
+  it('falls back to the argument when the script returned no text to show', () => {
+    expect(terminalToolClosingText(tutor, 'reply', { say: '¿Algo más?' }, ran({ turns: 2 }))).toBe(
+      '¿Algo más?',
+    );
   });
 });
 

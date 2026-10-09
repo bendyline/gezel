@@ -12,7 +12,7 @@ import { projectPrivateDir } from '@bendyline/gezel/paths';
  * leaving a user's hand-edited files untouched.
  */
 
-export type WorkspaceJournalOp = 'write' | 'delete' | 'mkdir' | 'rename';
+export type WorkspaceJournalOp = 'write' | 'delete' | 'mkdir' | 'rename' | 'copy';
 
 export interface WorkspaceJournalEntry {
   at: string;

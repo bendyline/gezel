@@ -43,8 +43,10 @@ import {
   KnowledgeNearbyRequestSchema,
   ListEntityMentionsRequestSchema,
   ListFileIssuesRequestSchema,
+  ListPhotosRequestSchema,
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
+  PhotoGroupsRequestSchema,
   ProjectSearchRequestSchema,
   QueryTableRequestSchema,
   ReadDocAsMarkdownRequestSchema,
@@ -70,6 +72,7 @@ import {
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   createLogger,
+  isLocalProvider,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -1193,6 +1196,31 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = FindSimilarImagesRequestSchema.parse(await c.req.json());
     return c.json(await ctx.contentIndex.findSimilarImages(id, body.path, body.maxResults));
+  });
+
+  // A photo's coordinates say where someone lives: the person's own app and
+  // an on-device session see them; a session on a cloud model does not.
+  const callerMaySeeLocation = async (c: Context): Promise<boolean> => {
+    const auth = c.get('auth');
+    if (!auth?.appId.startsWith('session:')) return true;
+    const session = await ctx.chat
+      .getSessionRecord(auth.appId.slice('session:'.length))
+      .catch(() => null);
+    return session?.providerName ? isLocalProvider(session.providerName) : false;
+  };
+
+  app.post('/:id/tools/list-photos', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = ListPhotosRequestSchema.parse(await c.req.json());
+    return c.json(await ctx.contentIndex.listPhotos(id, body, await callerMaySeeLocation(c)));
+  });
+
+  app.post('/:id/tools/photo-groups', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = PhotoGroupsRequestSchema.parse(await c.req.json());
+    return c.json(await ctx.contentIndex.photoGroups(id, body, await callerMaySeeLocation(c)));
   });
 
   app.post('/:id/tools/describe-folder', async (c) => {

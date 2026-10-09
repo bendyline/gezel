@@ -11,7 +11,7 @@ import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { isEngineBusyError } from '../providers/native/capacity-broker.js';
+import { EngineBusyError, isEngineBusyError } from '../providers/native/capacity-broker.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
 import {
@@ -23,12 +23,8 @@ import {
   resolveEnrichThroughput,
 } from './enrich-budget.js';
 import { parseFrontmatter } from './frontmatter.js';
-import {
-  type FileRecord,
-  type IndexProvenance,
-  type IndexStore,
-  MAX_ENRICH_ATTEMPTS,
-} from './index-store.js';
+import type { FileRecord, IndexProvenance } from './index-store-types.js';
+import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -400,23 +396,35 @@ export async function buildEnrichDeps(
       budget: EnrichBudget,
       jobLabel: string,
     ) =>
-    async (prompt: string, activity?: string): Promise<EnrichCompletion> => ({
-      text: await chat.oneShotCompletion(
-        prompt,
-        enrichTimeoutMs(prompt.length, throughputFor(target), budget),
-        {
-          providerName: target.providerName,
-          model: target.model,
-          ...gezelOpts,
-          ...(opts.projectId ? { projectId: opts.projectId } : {}),
-          jobLabel: activity?.trim() || jobLabel,
-          tuningProfileId: INDEX_TUNING_PROFILE,
-          ...(opts.ambient ? { ambient: true } : {}),
-        },
-      ),
-      model: target.model,
-      provenance: provenanceFor(target.providerName),
-    });
+    async (prompt: string, activity?: string): Promise<EnrichCompletion> => {
+      const queue = new QueueWatch();
+      try {
+        const text = await chat.oneShotCompletion(
+          prompt,
+          enrichTimeoutMs(prompt.length, throughputFor(target), budget),
+          {
+            providerName: target.providerName,
+            model: target.model,
+            ...gezelOpts,
+            ...(opts.projectId ? { projectId: opts.projectId } : {}),
+            jobLabel: activity?.trim() || jobLabel,
+            tuningProfileId: INDEX_TUNING_PROFILE,
+            ...(opts.ambient ? { ambient: true } : {}),
+            onQueueWait: () => queue.waiting(),
+            onDelta: () => queue.answered(),
+            onReasoningDelta: () => queue.answered(),
+          },
+        );
+        return { text, model: target.model, provenance: provenanceFor(target.providerName) };
+      } catch (err) {
+        if (queue.stillWaiting() && classifyEnrichFailure(err) === 'timeout') {
+          throw new EngineBusyError(
+            `${errorMessage(err)} while still waiting behind other work; it never reached the model`,
+          );
+        }
+        throw err;
+      }
+    };
   // Blocked-content fallback: a cloud enricher can refuse a file outright on
   // policy grounds (isPolicyBlockMessage). Local engines carry no such filter,
   // so when one is configured it takes over exactly those files. Each
@@ -503,6 +511,43 @@ export async function buildEnrichDeps(
       ? () => chat.oneShotQueueWidth(providerName)
       : undefined;
   return { summarize, embed, model, review, provenance, ...(oneShotWidth ? { oneShotWidth } : {}) };
+}
+
+/**
+ * Whether a one-shot was still queued when it failed. The provider queue and
+ * the engine's own batch admission repeat a wait notice every 5s while a
+ * request waits; a notice inside this window with no output since means the
+ * request never reached the model.
+ */
+const QUEUE_NOTICE_FRESH_MS = 12_000;
+
+/**
+ * Tells a summarizer that waited out its deadline in a queue from one the
+ * model failed to answer. The first is the night's ordinary contention: on
+ * 2026-10-08 a dozen handboek files each lost an attempt, and the breaker
+ * paused the AI tiers six times, while the engine served an 80k-token review
+ * turn and never saw those requests. Charged as timeouts, a busy night retires
+ * files a model never read.
+ */
+class QueueWatch {
+  private lastNoticeAt: number | undefined;
+  private output = false;
+
+  waiting(): void {
+    this.lastNoticeAt = Date.now();
+  }
+
+  answered(): void {
+    this.output = true;
+  }
+
+  stillWaiting(): boolean {
+    return (
+      !this.output &&
+      this.lastNoticeAt !== undefined &&
+      Date.now() - this.lastNoticeAt <= QUEUE_NOTICE_FRESH_MS
+    );
+  }
 }
 
 const PROMPT_CONTENT_CAP = 6000;

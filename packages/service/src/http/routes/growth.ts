@@ -7,14 +7,17 @@
  */
 
 import {
-  type AdoptedTraitRecord,
-  type DeclinedProposalRecord,
   type GezelGrowthResponse,
-  type GezelGrowthState,
   type GezelTrait,
   type GrowthProposal,
+  acceptedGrowthState,
   createLogger,
-  xpForLevel,
+  declinedGrowthState,
+  growthResponse,
+  levelUpTrait,
+  nudgedTemperatureTuning,
+  pendingProposal,
+  retiredTraitState,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
@@ -27,17 +30,7 @@ const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 async function buildPayload(ctx: ServiceContext, gezelId: string): Promise<GezelGrowthResponse> {
   const state = await ctx.store.readGezelGrowth(gezelId);
   const gezel = await ctx.store.getGezel(gezelId).catch(() => null);
-  const activeTraits = gezel?.parsed.frontmatter.traits ?? [];
-  const activeIds = new Set(activeTraits.map((t) => t.id));
-  const driftedTraitIds = state.adoptedTraits
-    .filter((t) => !t.removedAt && !activeIds.has(t.traitId))
-    .map((t) => t.traitId);
-  return {
-    state,
-    nextLevelXp: xpForLevel(state.level + 1),
-    activeTraits,
-    driftedTraitIds,
-  };
+  return growthResponse(state, gezel?.parsed.frontmatter.traits ?? []);
 }
 
 export function growthRoutes(ctx: ServiceContext): Hono {
@@ -81,37 +74,18 @@ export function growthRoutes(ctx: ServiceContext): Hono {
     // pending consumed, and a background refresh must not interleave.
     return ctx.growth.runExclusive(gezelId, async () => {
       const state = await ctx.store.readGezelGrowth(gezelId);
-      const pending = state.pendingLevelUp;
-      if (!pending) return c.json({ error: 'no pending level-up' }, 409);
-      const proposal = pending.proposals.find((p) => p.id === body.proposalId);
-      if (!proposal) return c.json({ error: `unknown proposal ${body.proposalId}` }, 400);
-
+      const found = pendingProposal(state, body.proposalId);
+      if (!found.ok) return c.json({ error: found.error }, found.status);
+      const { pending, proposal } = found.value;
       const now = new Date().toISOString();
-      const next: GezelGrowthState = { ...state };
-      let adoptedTraitId: string | undefined;
+      let adopted: GezelTrait | undefined;
 
       try {
         if (proposal.kind === 'trait') {
-          const trait: GezelTrait = {
-            id: `trait-${proposal.id.replace(/^prop-/, '')}`,
-            text: proposal.traitText,
-            adoptedAt: now,
-            source: 'levelup',
-          };
-          await ctx.store.addGezelTrait(gezelId, trait);
-          adoptedTraitId = trait.id;
-          const record: AdoptedTraitRecord = {
-            traitId: trait.id,
-            text: trait.text,
-            level: pending.toLevel,
-            adoptedAt: now,
-            evidence: proposal.evidence,
-          };
-          next.adoptedTraits = [...state.adoptedTraits, record];
+          adopted = levelUpTrait(proposal, now);
+          await ctx.store.addGezelTrait(gezelId, adopted);
         } else if (proposal.kind === 'tuning') {
           await applyTuning(ctx, gezelId, proposal, pending.toLevel);
-        } else {
-          next.unlockedCosmetics = appendUnlock(state.unlockedCosmetics, proposal.cosmeticId, now);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -119,24 +93,7 @@ export function growthRoutes(ctx: ServiceContext): Hono {
         throw err;
       }
 
-      // Resolve the level-up: level advances, the milestone marker always
-      // lands, non-chosen TRAIT proposals are recorded as declined so they
-      // are never re-offered.
-      next.level = pending.toLevel;
-      next.unlockedCosmetics = appendUnlock(
-        next.unlockedCosmetics ?? state.unlockedCosmetics,
-        `level-${pending.toLevel}`,
-        now,
-      );
-      next.declinedProposals = [
-        ...state.declinedProposals,
-        ...declineTraits(
-          pending.proposals.filter((p) => p.kind === 'trait' && p.id !== proposal.id),
-          pending.toLevel,
-          now,
-        ),
-      ];
-      delete next.pendingLevelUp;
+      const next = acceptedGrowthState(state, pending, proposal, now, adopted);
       try {
         await ctx.store.writeGezelGrowth(gezelId, next);
       } catch (err) {
@@ -144,10 +101,11 @@ export function growthRoutes(ctx: ServiceContext): Hono {
         // it there with the pending still live invites a second accept and a
         // double payout — roll it back so a failed persist leaves no adopted
         // trait behind.
-        if (adoptedTraitId) {
-          await ctx.store.removeGezelTrait(gezelId, adoptedTraitId).catch((rollbackErr) => {
+        if (adopted) {
+          const traitId = adopted.id;
+          await ctx.store.removeGezelTrait(gezelId, traitId).catch((rollbackErr) => {
             log.warn(
-              `[growth] could not roll back trait ${adoptedTraitId} for ${gezelId} after a failed persist:`,
+              `[growth] could not roll back trait ${traitId} for ${gezelId} after a failed persist:`,
               rollbackErr instanceof Error ? rollbackErr.message : rollbackErr,
             );
           });
@@ -164,51 +122,9 @@ export function growthRoutes(ctx: ServiceContext): Hono {
 
     return ctx.growth.runExclusive(gezelId, async () => {
       const state = await ctx.store.readGezelGrowth(gezelId);
-      const pending = state.pendingLevelUp;
-      if (!pending) return c.json({ error: 'no pending level-up' }, 409);
-      const now = new Date().toISOString();
-
-      if (body.proposalId) {
-        const proposal = pending.proposals.find((p) => p.id === body.proposalId);
-        if (!proposal) return c.json({ error: `unknown proposal ${body.proposalId}` }, 400);
-        if (pending.proposals.length <= 1) {
-          return c.json(
-            { error: 'cannot decline the last remaining option — skip the level instead' },
-            400,
-          );
-        }
-        const next: GezelGrowthState = {
-          ...state,
-          pendingLevelUp: {
-            ...pending,
-            proposals: pending.proposals.filter((p) => p.id !== proposal.id),
-          },
-          declinedProposals: [
-            ...state.declinedProposals,
-            ...declineTraits([proposal], pending.toLevel, now),
-          ],
-        };
-        await ctx.store.writeGezelGrowth(gezelId, next);
-        return c.json(await buildPayload(ctx, gezelId));
-      }
-
-      // Skip the whole level: level advances anyway (it was earned), all
-      // trait proposals are recorded as declined, the milestone unlocks.
-      const next: GezelGrowthState = {
-        ...state,
-        level: pending.toLevel,
-        unlockedCosmetics: appendUnlock(state.unlockedCosmetics, `level-${pending.toLevel}`, now),
-        declinedProposals: [
-          ...state.declinedProposals,
-          ...declineTraits(
-            pending.proposals.filter((p) => p.kind === 'trait'),
-            pending.toLevel,
-            now,
-          ),
-        ],
-      };
-      delete next.pendingLevelUp;
-      await ctx.store.writeGezelGrowth(gezelId, next);
+      const next = declinedGrowthState(state, body.proposalId, new Date().toISOString());
+      if (!next.ok) return c.json({ error: next.error }, next.status);
+      await ctx.store.writeGezelGrowth(gezelId, next.value);
       return c.json(await buildPayload(ctx, gezelId));
     });
   });
@@ -225,41 +141,15 @@ export function growthRoutes(ctx: ServiceContext): Hono {
         throw err;
       }
       const state = await ctx.store.readGezelGrowth(gezelId);
-      const next: GezelGrowthState = {
-        ...state,
-        adoptedTraits: state.adoptedTraits.map((t) =>
-          t.traitId === traitId && !t.removedAt ? { ...t, removedAt: new Date().toISOString() } : t,
-        ),
-      };
-      await ctx.store.writeGezelGrowth(gezelId, next);
+      await ctx.store.writeGezelGrowth(
+        gezelId,
+        retiredTraitState(state, traitId, new Date().toISOString()),
+      );
       return c.json(await buildPayload(ctx, gezelId));
     });
   });
 
   return app;
-}
-
-function appendUnlock(
-  unlocked: GezelGrowthState['unlockedCosmetics'],
-  id: string,
-  at: string,
-): GezelGrowthState['unlockedCosmetics'] {
-  if (unlocked.some((u) => u.id === id)) return unlocked;
-  return [...unlocked, { id, at }];
-}
-
-function declineTraits(
-  proposals: GrowthProposal[],
-  level: number,
-  declinedAt: string,
-): DeclinedProposalRecord[] {
-  return proposals.map((p) => ({
-    kind: p.kind,
-    title: p.title,
-    ...(p.kind === 'trait' ? { traitText: p.traitText } : {}),
-    level,
-    declinedAt,
-  }));
 }
 
 /** Apply a tuning payout with clamps; logs `gezel.tuning.adjusted`. */
@@ -285,17 +175,11 @@ async function applyTuning(
     return;
   }
 
-  // Temperature nudge — clamped to ±20% of the current value and the
-  // global [0.1, 1.5] envelope, resolved against the CURRENT frontmatter
-  // at accept time (not proposal time).
-  const base = fm.tuning?.sampling?.temperature ?? 0.7;
-  const lo = Math.max(0.1, base * 0.8);
-  const hi = Math.min(1.5, base * 1.2);
-  const next = Math.round(Math.min(hi, Math.max(lo, base + proposal.action.delta)) * 100) / 100;
-  const tuning = {
-    ...(fm.tuning ?? {}),
-    sampling: { ...(fm.tuning?.sampling ?? {}), temperature: next },
-  };
+  const {
+    tuning,
+    before: base,
+    after: next,
+  } = nudgedTemperatureTuning(fm.tuning, proposal.action.delta);
   await ctx.store.updateGezelSettings(gezelId, { tuning });
   await ctx.history.log({
     kind: 'gezel.tuning.adjusted',

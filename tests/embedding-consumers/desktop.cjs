@@ -3,6 +3,7 @@ const path = require('node:path');
 (async () => {
   // Electron main is commonly CommonJS; the SDK remains an external ESM import.
   const { createDesktopEmbedding } = await import('@bendyline/gezel-app-sdk/host');
+  const modelId = 'llama-cpp:fixture';
   let starts = 0;
   let stops = 0;
   const host = createDesktopEmbedding({
@@ -27,10 +28,10 @@ const path = require('node:path');
                   object: 'list',
                   data: [
                     {
-                      id: 'fixture',
+                      id: modelId,
                       object: 'model',
                       created: 0,
-                      owned_by: 'fixture',
+                      owned_by: 'llama-cpp',
                       availability: 'available',
                     },
                   ],
@@ -54,9 +55,12 @@ const path = require('node:path');
   );
   await host.setEnabled(true);
   assert.equal(starts, 0);
-  assert.equal((await host.models.list())[0].id, 'fixture');
+  assert.deepEqual(
+    (await host.models.list()).map((model) => model.id),
+    [modelId],
+  );
   const reply = await host.streamText({
-    model: 'fixture',
+    model: modelId,
     messages: [{ role: 'user', content: 'hello' }],
   });
   assert.equal(reply.text, 'consumer passed');

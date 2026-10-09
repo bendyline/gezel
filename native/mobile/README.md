@@ -1,6 +1,6 @@
 # Mobile llama.cpp libraries
 
-This is the first native feasibility slice of the [mobile plan](../../docs/mobile-plan.md).
+This build provides llama.cpp libraries for the [mobile host](../../packages/mobile/README.md).
 It builds the C API from Gezel's existing [`VERSION`](../engines/llama-cpp/VERSION)
 pin as an iOS XCFramework or Android shared libraries. It also exposes the
 versioned [`gezel_llama.h`](gezel_llama.h) C ABI for bounded text conversations.

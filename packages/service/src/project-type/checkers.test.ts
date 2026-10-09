@@ -59,6 +59,7 @@ describe('Checkers bundled project type', () => {
     });
     expect(detail.manifest.params).toMatchObject({
       properties: {
+        personality: { default: 'in-character' },
         playStyle: {
           enum: ['Opponent', 'Instructor'],
           default: 'Opponent',
@@ -113,7 +114,7 @@ describe('Checkers bundled project type', () => {
 
     const appliedProject = await store.getProject(project.id);
     const about = appliedProject?.about ?? '';
-    expect(about).toContain('peppy');
+    expect(about).toContain('in-character');
     expect(about).toContain('Opponent');
     expect(about).not.toContain('{{');
     expect(appliedProject?.tabVisibility).toEqual({
@@ -144,6 +145,6 @@ describe('Checkers bundled project type', () => {
     const pageTools = await resolvePageTools(catalog, detail);
     expect(pageTools?.typeName).toBe('Checkers');
     expect(pageTools?.tools.map((t) => t.name)).toEqual(['user_move', 'new_game']);
-    expect(pageTools?.params).toEqual({ personality: 'peppy', playStyle: 'Instructor' });
+    expect(pageTools?.params).toEqual({ personality: 'in-character', playStyle: 'Instructor' });
   });
 });

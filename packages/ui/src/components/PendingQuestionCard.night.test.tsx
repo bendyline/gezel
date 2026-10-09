@@ -12,6 +12,7 @@ const COVERAGE_JSON = '{\n  "batchNumber": 18,\n  "reviewedFiles": []\n}\n';
 vi.mock('../api.js', () => ({
   api: createMockApi({
     readDocument: vi.fn().mockResolvedValue({ content: COVERAGE_JSON, kind: 'artifact' }),
+    retryTask: vi.fn().mockResolvedValue({ dispatched: true }),
     getNightShiftReview: vi.fn().mockResolvedValue({
       windowKey: '2026-08-25',
       windowStart: '2026-08-25T22:00:00.000Z',
@@ -140,5 +141,53 @@ describe('night-shift review card', () => {
     await screen.findByText('Coverage sweep for PR-41');
     expect(container.querySelector('.pending-question-document-panel')).toBeNull();
     expect(container.querySelector('.pending-question-splitwrap')).toBeNull();
+  });
+
+  // The review is unattended plumbing: it resumes itself when the next window
+  // opens, so the card informs and asks nothing (2026-10-08).
+  it('says a paused nightly review retries tonight, with nothing to press', async () => {
+    const base = nightCard();
+    render(
+      <PendingQuestionCard
+        question={nightCard({
+          intent: {
+            ...(base.intent as object),
+            pausedReview: { projectId: 'default', num: 4 },
+          } as Question['intent'],
+        })}
+      />,
+    );
+
+    await screen.findByText(
+      /Your nightly review didn't finish; it tries again tonight on its own\./,
+    );
+    expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull();
+    expect(vi.mocked(api.retryTask)).not.toHaveBeenCalled();
+  });
+
+  it("gives a quiet night its fix, counts the sweep, and links the week's recap", async () => {
+    const base = nightCard();
+    const handler = vi.fn();
+    window.addEventListener('gezel:add-folder', handler);
+    render(
+      <PendingQuestionCard
+        question={nightCard({
+          intent: {
+            ...(base.intent as object),
+            windowKey: '2026-08-24',
+            tasksCompleted: 0,
+            reports: [],
+            quiet: { reason: 'no-work' },
+            weeklyRecap: { week: '2026-W35', path: 'reports/weekly-recap-2026-W35.md' },
+          } as unknown as Question['intent'],
+        })}
+      />,
+    );
+
+    await screen.findByText('The night shift ran, but nothing came of it.');
+    expect(screen.getByText("Your crew's week")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a folder' }));
+    expect(handler).toHaveBeenCalled();
+    window.removeEventListener('gezel:add-folder', handler);
   });
 });

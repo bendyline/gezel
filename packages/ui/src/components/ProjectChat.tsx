@@ -11,6 +11,7 @@ import { ProjectChatPlaceholder } from './ProjectChatPlaceholder.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer } from './TerminalComposer.js';
+import { VisitCard } from './VisitCard.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
 import { isFreshThreadAt } from './chat-thread-freshness.js';
 import {
@@ -620,6 +621,14 @@ function ProjectChatBody({
         onTaskReference,
       }) => (
         <>
+          {project.projectType?.id === 'just-chat' && (
+            <VisitCard
+              gezelId={selectedGezel.id}
+              gezelName={selectedName}
+              projectId={project.id}
+              onOpenTask={onTaskReference}
+            />
+          )}
           <ProjectTimeline
             projectId={project.id}
             activeSessionId={sessionId || undefined}

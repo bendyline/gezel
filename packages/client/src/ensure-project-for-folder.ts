@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import type { CreateProjectRequest } from '@bendyline/gezel';
+import { type CreateProjectRequest, forbiddenFolderPlainName } from '@bendyline/gezel';
 import { GezelApiError } from './api-error.js';
 import type { GezelClient } from './client.js';
 
@@ -62,21 +62,6 @@ export async function ensureProjectForFolder(
   }
 }
 
-/** Plain names for the folders the daemon refuses as project roots, by `reason`. */
-const FORBIDDEN_FOLDER_NAMES: Record<string, string> = {
-  'user-home': 'your home folder',
-  'home-container': 'the folder that holds user homes',
-  'gezel-home': "gezel's own data folder",
-  'temp-dir': 'the temp folder',
-  'system-dir': 'a system folder',
-  'per-user-app-data': 'an app data folder',
-  'hidden-home-dir': 'a hidden settings folder',
-  'cloud-root-parent': 'the folder that holds your cloud drives',
-  'filesystem-root': 'the top of a drive',
-  'network-root': 'the top of a network drive',
-  'mount-root': 'the top of a mounted drive',
-};
-
 /**
  * When `err` is the daemon refusing a folder as a project root (403
  * `forbidden_root`), a plain name for that folder ("your home folder"), else
@@ -87,8 +72,7 @@ export function forbiddenProjectFolderName(err: unknown): string | null {
   if (!(err instanceof GezelApiError) || err.status !== 403) return null;
   const details = err.details as { code?: unknown; reason?: unknown } | undefined;
   if (details?.code !== 'forbidden_root') return null;
-  const named = typeof details.reason === 'string' ? FORBIDDEN_FOLDER_NAMES[details.reason] : '';
-  return named || 'a folder gezel keeps out of projects';
+  return forbiddenFolderPlainName(typeof details.reason === 'string' ? details.reason : undefined);
 }
 
 /** A 404 that is the daemon saying "that folder does not exist", not "unknown route". */

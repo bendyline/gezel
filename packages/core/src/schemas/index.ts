@@ -14,6 +14,8 @@ export * from './opencode-setup.js';
 export * from './pi-setup.js';
 export * from './vscode-setup.js';
 export * from './office-setup.js';
+export * from './character.js';
+export * from './notifications.js';
 export * from './gezel.js';
 export * from './growth.js';
 export * from './hook.js';

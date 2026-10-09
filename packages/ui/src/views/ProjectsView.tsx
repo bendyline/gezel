@@ -36,6 +36,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { FileAboutLine } from '../components/FileAboutLine.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
@@ -109,6 +110,7 @@ import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
+import { consumeProjectSection } from '../components/pending-project-section.js';
 import {
   type AiProviderEditabilityConfig,
   projectUsesClaude,
@@ -1183,7 +1185,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
       setWorkspaceIndexPaneOpen(false);
-      setTab('chat');
+      setTab(consumeProjectSection(id) ?? 'chat');
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
       setGitStatus('');
@@ -3238,7 +3240,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         ) : undefined
                       }
                       viewerNotice={
-                        openFile && questionReturnPath === openFile.path ? (
+                        openFile &&
+                        questionReturnPath !== openFile.path &&
+                        openFile.source === 'workspace' &&
+                        runtimeCapabilities().index ? (
+                          <FileAboutLine projectId={selected.id} path={openFile.path} />
+                        ) : openFile && questionReturnPath === openFile.path ? (
                           <div className="file-viewer-return">
                             <button
                               type="button"

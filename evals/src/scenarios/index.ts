@@ -40,9 +40,11 @@ import {
   molenStructureAssetsScenario,
   molenStructureWorkshopScenario,
 } from './molen-structure-workshop.ts';
+import { nightInTheLifeScenario } from './night-in-the-life.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
 import { petShopScenario } from './petshop.ts';
+import { photoAlbumScenarios } from './photo-albums.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
 import { powerpointSourceScenarios } from './powerpoint-sources.ts';
 import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflow.ts';
@@ -78,6 +80,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [molenStructureAssetsScenario.id]: molenStructureAssetsScenario,
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
+  ...Object.fromEntries(photoAlbumScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(annotatedDeckScenarios().map((scenario) => [scenario.id, scenario])),
   [annotatedChatPolicyScenario.id]: annotatedChatPolicyScenario,
   [annotatedChatPolicyClosedScenario.id]: annotatedChatPolicyClosedScenario,
@@ -136,6 +139,9 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [meetingFollowupScenario.id]: meetingFollowupScenario,
   [wikipediaResearchScenario.id]: wikipediaResearchScenario,
   [opsRunbookScenario.id]: opsRunbookScenario,
+  // The overnight promise end to end: added folders, nothing queued, a real
+  // night window, graded on the morning card and untouched folders.
+  [nightInTheLifeScenario.id]: nightInTheLifeScenario,
   // Direct index-quality benchmark (no agent): golden-query
   // retrieval before/after enrichment on a pinned squisq corpus. The
   // `index-bench` bin sweeps it across models (= enricher A/B).

@@ -6,6 +6,7 @@ import {
   transferBoekwachterMembership,
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
+import { syncPerfProfiling } from '../../perf/responsiveness.js';
 import { appleFoundationModelsInstalled } from '../../providers/apple-foundation-models/provider.js';
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
@@ -496,6 +497,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       const nextDebug = body.debugMode === true;
       if (nextDebug !== ctx.debug.isEnabled()) {
         ctx.debug.set(nextDebug);
+        syncPerfProfiling();
         log.info(`[debug] verbose diagnostics ${nextDebug ? 'ON' : 'OFF'}`);
       }
     }

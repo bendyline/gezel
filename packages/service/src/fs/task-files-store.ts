@@ -38,6 +38,17 @@ export class TaskWriteConflictError extends HttpStatusError {
   }
 }
 
+/**
+ * A task record the reader would refuse. Writing it made the task vanish with
+ * no error: every later read skipped the file as unreadable.
+ */
+export class InvalidTaskWriteError extends HttpStatusError {
+  constructor(ref: string, problem: string) {
+    super(`Task ${ref} was not saved because it would not load back: ${problem}`, 400);
+    this.name = 'InvalidTaskWriteError';
+  }
+}
+
 /** Owns the file layout and legacy hydration for project task aggregates. */
 export class TaskFilesStore {
   private readonly home: string;
@@ -152,13 +163,23 @@ export class TaskFilesStore {
       throw new TaskWriteConflictError(task.ref);
     }
     const revision = (current?.revision ?? 0) + 1;
-    await mkdir(dirname(file), { recursive: true });
     // `effectiveStatus` is a runtime projection of the ancestry graph. Never
     // persist it: resuming a parent must reveal the child's unchanged own
     // status rather than a stale inherited snapshot.
     const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
     void _effectiveStatus;
-    await writeFileAtomic(file, `${JSON.stringify({ ...rest, revision }, null, 2)}\n`, {
+    const text = `${JSON.stringify({ ...rest, revision }, null, 2)}\n`;
+    // The record is checked exactly as a read will check it. An inline step
+    // whose tool policy removed a protected tool (`ask_user_question`) was
+    // created, then skipped as unreadable on every read, and the task
+    // silently disappeared (2026-10-08).
+    try {
+      checkStoredTask(JSON.parse(text), task.projectId, task.num);
+    } catch (err) {
+      throw new InvalidTaskWriteError(task.ref, err instanceof Error ? err.message : String(err));
+    }
+    await mkdir(dirname(file), { recursive: true });
+    await writeFileAtomic(file, text, {
       noReplace: createOnly,
     });
     if (description !== undefined && description.trim().length > 0) {
@@ -178,30 +199,7 @@ export class TaskFilesStore {
     const file = projectTaskFile(this.home, projectId, num, this.external);
     try {
       const raw = await readFile(file, 'utf8');
-      const normalized = normalizeLegacyTaskShape(JSON.parse(raw));
-      const validated = TaskSchema.safeParse(normalized);
-      if (!validated.success) {
-        throw new Error(
-          validated.error.issues
-            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
-            .join('; '),
-        );
-      }
-      // Validate known fields but keep additive fields (including nested
-      // ones) so an older daemon does not erase newer metadata on save.
-      const parsed = normalized as Task;
-      if (
-        parsed.projectId !== projectId ||
-        parsed.num !== num ||
-        parsed.ref !== `${projectId}/${num}`
-      ) {
-        throw new Error('task identity does not match its storage path');
-      }
-      if (
-        ![parsed.createdAt, parsed.updatedAt].every((stamp) => Number.isFinite(Date.parse(stamp)))
-      ) {
-        throw new Error('createdAt and updatedAt must be valid timestamps');
-      }
+      const parsed = checkStoredTask(JSON.parse(raw), projectId, num);
       const about = await this.readTaskAbout(projectId, num);
       if (about.length > 0) parsed.description = about;
       this.invalidTasks.delete(file);
@@ -292,6 +290,34 @@ export class TaskFilesStore {
       end();
     }
   }
+}
+
+/**
+ * The stored record as a task, or the reason it is not one. Reads and writes
+ * both go through this, so nothing is saved that would not load back.
+ */
+function checkStoredTask(raw: unknown, projectId: string, num: number): Task {
+  const normalized = normalizeLegacyTaskShape(raw);
+  const validated = TaskSchema.safeParse(normalized);
+  if (!validated.success) {
+    throw new Error(
+      validated.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '),
+    );
+  }
+  // Validate known fields but keep additive fields (including nested
+  // ones) so an older daemon does not erase newer metadata on save.
+  const parsed = normalized as Task;
+  if (
+    parsed.projectId !== projectId ||
+    parsed.num !== num ||
+    parsed.ref !== `${projectId}/${num}`
+  ) {
+    throw new Error('task identity does not match its storage path');
+  }
+  if (![parsed.createdAt, parsed.updatedAt].every((stamp) => Number.isFinite(Date.parse(stamp)))) {
+    throw new Error('createdAt and updatedAt must be valid timestamps');
+  }
+  return parsed;
 }
 
 /** Map the pre-craftbook task shape onto the current aggregate. */

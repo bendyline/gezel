@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
@@ -55,7 +56,9 @@ describe('doc-intel: docx conversion + search + read', () => {
     );
     await writeFile(join(dir, 'docs', 'spec.docx'), docx);
 
-    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     expect(stats).not.toBeNull();
     expect(stats!.docsConverted).toBe(1);
 
@@ -126,7 +129,9 @@ describe('doc-intel: pdf conversion + search + read', () => {
     const pdf = await makePdf('# Field report\n\nThe lighthouse inspection is complete.\n');
     await writeFile(join(dir, 'report.pdf'), pdf);
 
-    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const stats = await runWorkspaceContentIndex(dir, 'c', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'c', dir),
+    });
     expect(stats).not.toBeNull();
     expect(stats!.docsConverted).toBe(1);
 

@@ -41,6 +41,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   delete_path: 'Delete',
   make_dir: 'Create folder',
   rename: 'Rename',
+  copy_path: 'Copy',
   copy_artifact_to_workspace: 'Copy into the workspace',
   validate: 'Check the file works',
 
@@ -166,6 +167,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   search_images: 'Search images',
   find_similar_images: 'Find similar images',
   describe_folder: 'Summarize a folder of images',
+  list_photos: 'List photos',
+  photo_groups: 'Group photos',
 
   // Video / audio
   generate_video: 'Generate video',

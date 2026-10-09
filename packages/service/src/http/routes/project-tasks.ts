@@ -32,7 +32,7 @@ import {
   slugifyStepId,
 } from '@bendyline/gezel';
 import type { CraftbookDocError, CraftbookDocFormat } from '@bendyline/gezel';
-import { Hono } from 'hono';
+import { type Handler, Hono } from 'hono';
 import { z } from 'zod';
 import {
   type DiskProbeBudget,
@@ -163,12 +163,15 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     return c.json({ tasks, waiting: waitingFor(ctx, tasks) });
   });
 
-  app.post('/:projectId/tasks', async (c) => {
+  const createTask: Handler = async (c) => {
     const projectId = c.req.param('projectId');
-    const { dispatchEntry, craftbookInvocationKey, ...body } = CreateTaskRequestSchema.parse(
-      await c.req.json(),
-    );
-    if (body.trustScripts) {
+    if (!projectId) return c.json({ error: 'A project is required.' }, 400);
+    const { dispatchEntry, craftbookInvocationKey, workflowInvocationKey, ...body } =
+      CreateTaskRequestSchema.parse(await c.req.json());
+    if (c.req.path.endsWith('/tasks/workflow') && !workflowInvocationKey) {
+      return c.json({ error: 'A workflow request key is required.' }, 400);
+    }
+    if (body.trustScripts || workflowInvocationKey) {
       const auth = c.get('auth');
       if (
         !auth ||
@@ -176,7 +179,10 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         !auth.scopes.some((scope) => ['root', 'ui', 'cli'].includes(scope))
       ) {
         return c.json(
-          { error: 'Only an explicit owner or CLI launch may trust custom scripts.' },
+          {
+            error:
+              'Only an explicit owner or CLI launch may trust custom scripts or use workflow request keys.',
+          },
           403,
         );
       }
@@ -185,6 +191,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     try {
       launched = await ctx.taskLauncher.launch(projectId, body, {
         ...(craftbookInvocationKey ? { craftbookInvocationKey } : {}),
+        ...(workflowInvocationKey ? { workflowInvocationKey } : {}),
         ...(dispatchEntry ? { dispatchEntry: true } : {}),
       });
     } catch (err) {
@@ -193,7 +200,10 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
       throw err;
     }
     return c.json(launched.task, launched.reused ? 200 : 201);
-  });
+  };
+  app.post('/:projectId/tasks', createTask);
+  // A distinct endpoint prevents old daemons from silently ignoring the key.
+  app.post('/:projectId/tasks/workflow', createTask);
 
   app.get('/:projectId/tasks/:num', async (c) => {
     const projectId = c.req.param('projectId');

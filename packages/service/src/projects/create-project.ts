@@ -6,12 +6,13 @@ import {
   ensureFolderProjectBuilder,
   ensureProjectVoorman,
 } from '../workspace/import-sync.js';
+import { setUpAddedFolder } from './recruit-crew.js';
 
 const log = createLogger('projects');
 
 export type CreateProjectDeps = Pick<
   ServiceContext,
-  'store' | 'chat' | 'home' | 'catalog' | 'chatEvents' | 'git'
+  'store' | 'chat' | 'home' | 'catalog' | 'chatEvents' | 'git' | 'tasks' | 'history'
 >;
 
 /**
@@ -25,7 +26,11 @@ export async function createProjectWithLead(
   deps: CreateProjectDeps,
   body: CreateProjectRequest,
 ): Promise<ProjectDetail> {
-  const created = await deps.store.createProject(body);
+  const { recruitCrew: _recruitCrew, nightWork: _nightWork, ...record } = body;
+  const created = await deps.store.createProject(record);
+  // A folder the person added picks its lead by what it holds, after the
+  // folder has been classified; see recruitCrewForFolder.
+  const recruitCrew = body.recruitCrew === true && Boolean(body.workingDir);
   // Give the project its lead up front so Chat never opens on an arbitrary
   // alphabetical gezel. Folder-backed solo projects get a hands-on Builder;
   // crew projects retain their Voorman. Runs synchronously because both the
@@ -33,7 +38,7 @@ export async function createProjectWithLead(
   const ensureLead =
     body.workingDir && body.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
   const ensured =
-    body.lead === 'none'
+    body.lead === 'none' || recruitCrew
       ? ({} as EnsureProjectLeadResult)
       : await ensureLead(
           { store: deps.store, chat: deps.chat, home: deps.home, catalog: deps.catalog },
@@ -57,6 +62,21 @@ export async function createProjectWithLead(
   // suggestions need to know whether this is code, prose, data, or assets.
   if (body.workingDir) {
     await detectAndPersistProjectType({ store: deps.store }, created.id);
+  }
+  if (recruitCrew) {
+    const setUp = await setUpAddedFolder(deps, created.id, {
+      ...(body.nightWork !== undefined ? { nightWork: body.nightWork } : {}),
+    }).catch((err: unknown) => {
+      log.warn(`[projects] crew recruitment failed for ${created.id}: ${String(err)}`);
+      return null;
+    });
+    for (const gezel of setUp?.crew.createdGezels ?? []) {
+      deps.chatEvents.publishGlobalEvent({
+        type: 'gezel_created',
+        gezelId: gezel.id,
+        name: gezel.name,
+      });
+    }
   }
   // Re-read so the response carries the freshly-set voormanGezelId and
   // detected type; the UI selects the project from this payload and opens

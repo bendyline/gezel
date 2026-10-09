@@ -44,9 +44,9 @@ test('bundled Handboek opens in Knowledge with its articles and images', async (
   await expect(view).toBeVisible();
 
   // Topics and the auto-opened welcome article come from the .gezk.
-  await expect(view.getByRole('button', { name: 'Concepts', exact: false })).toBeVisible();
+  await expect(view.locator('.knowledge-doc-row').first()).toBeVisible();
   await expect(view.locator('.knowledge-reader-body')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('heading', { level: 2, name: 'What is gezel?' })).toBeVisible();
+  await expect(view.locator('.knowledge-reader-header h2')).toBeVisible();
 
   // The brand image paints from the UI bundle (`inlineBundledAssets`), so the
   // first paint never requests a path no route serves. knowledge.spec covers
@@ -61,9 +61,10 @@ test('bundled Handboek opens in Knowledge with its articles and images', async (
     undefined,
     { timeout: 15_000 },
   );
-  await view.getByRole('button', { name: 'Concepts', exact: false }).click();
-  await view
-    .getByRole('button', { name: 'Your crew: gezellen, the Meester, and the Voorman' })
-    .click();
-  await expect(view.locator('.knowledge-reader-body')).toContainText('Meester');
+  const row = view.locator('.knowledge-doc-row:not([aria-current="true"])').first();
+  const title = (await row.locator('.knowledge-doc-title').innerText()).trim();
+  const previousBody = await view.locator('.knowledge-reader-body').innerText();
+  await row.click();
+  await expect(view.locator('.knowledge-reader-header h2')).toHaveText(title);
+  await expect(view.locator('.knowledge-reader-body')).not.toHaveText(previousBody);
 });

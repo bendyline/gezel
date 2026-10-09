@@ -219,3 +219,28 @@ describe('store embedding verification', () => {
     }
   });
 });
+
+it('requires a store payload before touching the service and verifies explicit development payloads', async () => {
+  const service = stubService();
+  await expect(
+    hostInProcess('fixture', {
+      home: join(root, 'store-home'),
+      distributionProfile: 'store',
+      serviceModule: service,
+    }),
+  ).rejects.toMatchObject({ code: 'native_payload_required' });
+  expect(service.calls).toEqual([]);
+  service.verifyNativeBinaries = vi.fn(async () => ({
+    reused: false,
+    reason: 'changed development payload',
+  }));
+  await expect(
+    hostInProcess('fixture', {
+      home: join(root, 'development'),
+      nativeBinDir: join(root, 'native'),
+      serviceModule: service,
+    }),
+  ).rejects.toMatchObject({ code: 'native_verification_failed' });
+  expect(service.verifyNativeBinaries).toHaveBeenCalledWith({ candidates: [join(root, 'native')] });
+  expect(service.calls).toEqual([]);
+});
