@@ -144,6 +144,27 @@ describe('API request observation', () => {
       },
     });
   });
+
+  it('distinguishes a provider-declared incomplete response from an abandoned stream', async () => {
+    vi.stubEnv('GEZEL_EVAL_OBSERVE', '1');
+    await collect(
+      observeApiStream(
+        () =>
+          stream([
+            {
+              type: 'response.incomplete',
+              response: { incomplete_details: { reason: 'max_output_tokens' } },
+            },
+          ]),
+        { provider: 'openai', request: {}, round: 1 },
+      ),
+    );
+    expect(records()[1]).toMatchObject({
+      outcome: 'incomplete',
+      terminalEvent: 'response.incomplete',
+      incompleteReason: 'max_output_tokens',
+    });
+  });
   it('preserves SDK errors and records their status without copying error bodies', async () => {
     vi.stubEnv('GEZEL_EVAL_OBSERVE', '1');
     const error = Object.assign(new Error('private key leaked in SDK error'), { status: 429 });

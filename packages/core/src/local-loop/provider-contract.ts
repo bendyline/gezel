@@ -6,6 +6,7 @@
  */
 
 import type { FileTurnIntent } from '../schemas/file-turn-intent.js';
+import type { OpenAIPendingToolOutput } from '../schemas/session.js';
 
 export interface QuotaBucket {
   /** Bucket identifier from the provider (e.g. "premium_interactions"). */
@@ -22,6 +23,7 @@ export interface QuotaBucket {
 export interface ProviderSessionState {
   copilotSessionId?: string;
   openaiPreviousResponseId?: string;
+  openaiPendingToolOutputs?: OpenAIPendingToolOutput[];
   claudeCliSessionId?: string;
   codexCliThreadId?: string;
 }

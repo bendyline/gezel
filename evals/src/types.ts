@@ -65,6 +65,8 @@ export interface EvalContext {
    * without touching the book's `test.json`.
    */
   repairPolicy?: 'harness' | 'runtime';
+  /** When explicit, only the runner's user simulator may answer questions. */
+  userSimulation?: import('./qualification/config.ts').UserSimulation;
   /**
    * Live mock-service runtime for this trial, present when the scenario
    * declared `mockServices`. The runner boots the fake HTTPS services

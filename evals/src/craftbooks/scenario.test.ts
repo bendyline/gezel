@@ -400,6 +400,32 @@ describe('craftbook generic scenario adapter', () => {
     );
   });
 
+  it.each(['disabled', 'scripted', 'heuristic'] as const)(
+    'leaves command consent to an explicit %s user simulator',
+    async (userSimulation) => {
+      const client = {
+        listProjects: vi.fn().mockResolvedValue({
+          projects: [{ id: 'project-1', name: 'Sample Project' }],
+        }),
+        listQuestions: vi.fn().mockResolvedValue({
+          questions: [{ id: 'question-1', intent: { kind: 'command-approval' } }],
+        }),
+        answerQuestion: vi.fn(),
+      };
+      const scenario = craftbookScenarioFromSpec(directWorkerSpec());
+      await scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        userSimulation,
+        repairPolicy: 'runtime',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext);
+      expect(client.listQuestions).not.toHaveBeenCalled();
+      expect(client.answerQuestion).not.toHaveBeenCalled();
+    },
+  );
+
   it('seeds modelInput:false fixtures without exposing them as model source inputs', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),

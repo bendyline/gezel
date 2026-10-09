@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +25,12 @@ let page: Page;
 test.beforeAll(async () => {
   test.setTimeout(90_000);
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-home-e2e-'));
+  // A morning review opens its own tab and expands the band, racing the
+  // introduction's collapse. This spec exercises the ordinary greeting.
+  await writeFile(
+    join(gezelHome, 'config.json'),
+    JSON.stringify({ nightShift: { enabled: false } }),
+  );
   app = await electron.launch({
     args: [appRoot],
     env: buildLaunchEnv({

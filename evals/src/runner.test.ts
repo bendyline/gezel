@@ -70,7 +70,7 @@ import {
   usesDeliverableAnchoredCeiling,
   workspacePathSignature,
 } from './runner.ts';
-import type { EvalScenario } from './types.ts';
+import type { EvalContext, EvalScenario } from './types.ts';
 
 function terminalHandoffTestClient(): GezelClient {
   return {
@@ -221,6 +221,36 @@ describe('runaway session safety cap', () => {
 });
 
 describe('scenario terminal failure handoff', () => {
+  it('preserves the explicit user simulation policy after a controlled restart', async () => {
+    const seen: Array<EvalContext['userSimulation']> = [];
+    await pollUntilDone(
+      {
+        id: 'qualification-restart',
+        description: 'test',
+        prompt: 'test',
+        restartWhen: async (ctx) => {
+          seen.push(ctx.userSimulation);
+          return true;
+        },
+        successCheck: async (ctx) => {
+          seen.push(ctx.userSimulation);
+          return { done: true, success: true, reason: 'observed' };
+        },
+      },
+      {
+        client: terminalHandoffTestClient(),
+        meesterId: 'meester',
+        userSimulation: 'scripted',
+        restartDaemon: async () => terminalHandoffTestClient(),
+        log: vi.fn(),
+        pollIntervalMs: 10,
+        maxDurationMs: 60000,
+        hardProgressTimeoutMs: 60000,
+        softProgressTimeoutMs: 60000,
+      },
+    );
+    expect(seen).toEqual(['scripted', 'scripted']);
+  });
   it('reconnects the stable eval context after the one-shot daemon restart predicate matches', async () => {
     const firstClient = terminalHandoffTestClient();
     const restartedClient = terminalHandoffTestClient();

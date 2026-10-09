@@ -9,6 +9,9 @@ import { settle } from './helpers/determinism.js';
 import { gotoHome } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
+// The typed composer shot persists a draft and its inferred task attachment.
+test.use({ daemonGroup: 'chat' });
+
 test.describe('chat surface', () => {
   test('live tool arguments stay inside the thinking bubble', async ({ page }) => {
     await gotoHome(page);
@@ -189,8 +192,7 @@ test.describe('chat surface', () => {
       description: 'An assistant (mock) reply bubble',
     });
 
-    // Type without sending — no server mutation, so this stays deterministic
-    // regardless of spec execution order within the worker.
+    // Typing saves a draft, so this spec uses its own daemon group.
     const editor = composer.locator('.squisq-wysiwyg-editor').first();
     await editor.click();
     await page.keyboard.type('Draft a launch plan for the landing page');

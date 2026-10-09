@@ -57,6 +57,10 @@ Qualification records:
 - `lifecycle.json`, `tasks.json`, and `qualification.json`: natural completion,
   resolved task modes, artifact result, provenance, assistance and API totals.
   The result, batch summary, facts and postmortem carry the qualification result.
+  `lifecycle-scope.json` records tasks already present before scenario setup;
+  perpetual background jobs do not have to finish for an ordinary scenario to
+  pass. Their API activity remains observable. Night-shift scenarios keep the
+  existing tasks in scope. `questions.json` preserves user questions for review.
 
 Provider acquisition is restricted to the requested API inside qualification,
 including background helpers. A different requested model is detected in API
@@ -96,6 +100,23 @@ cards are ignored. Inline detection covers idle assistant replies ending in
 `--user-simulation heuristic` or `--repair-policy harness` explicitly labels
 the trial an **assisted diagnostic**, never independent qualification. Keep
 those scores separate from the primary arm.
+
+`craftbook-codemod-sweep` requests first-use permission for its `test` package
+script (`node --test`). Use the frozen
+[command-consent script](user-scripts/codemod-sweep-command-consent.json) for that
+scenario, replacing `--user-simulation disabled` with:
+
+```bash
+--user-simulation scripted --user-script evals/user-scripts/codemod-sweep-command-consent.json
+```
+
+This script answers only the exact kickoff permission question for
+`profile-cards/1`, including the command body and the fixture's package.json
+fingerprint. It does not supply repair hints or approve other questions. Use the
+same script in both provider and repair-policy arms. If the fixture or consent
+prompt changes, review and update the frozen script before comparing runs;
+there is no permissive fallback. Qualification disables the craftbook grader's
+legacy automatic command approvals for every explicit user-simulation policy.
 
 ## Available scenarios
 

@@ -1996,6 +1996,10 @@ async function approvePendingCommandQuestions(
   projectId: string,
   spec: CraftbookEvalSpec,
 ): Promise<void> {
+  // Qualification owns all user interaction, including permissions. Leave
+  // disabled/scripted/heuristic answers to that single declared policy.
+  // Undefined preserves the historical craftbook-eval auto-approval behavior.
+  if (ctx.userSimulation !== undefined) return;
   let res: Awaited<ReturnType<typeof ctx.client.listQuestions>> | null = null;
   try {
     res = await ctx.client.listQuestions({ projectId, pending: true });

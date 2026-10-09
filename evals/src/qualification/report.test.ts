@@ -103,6 +103,7 @@ describe('qualification report', () => {
   it('does not attribute broken qualification evidence to model capability', () => {
     for (const reason of [
       'Qualification failed: API request provenance is incomplete',
+      'Qualification blocked an undeclared evaluator mutation',
       'runner crashed: Qualification blocked provider codex-cli; expected openai',
     ]) {
       expect(classifyTrial({ success: false, reason })).toMatchObject({

@@ -227,7 +227,9 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
 
   if (
-    /Qualification (?:failed:|blocked evaluator|blocked provider)/.test(reason) &&
+    /Qualification (?:failed:|blocked evaluator|blocked provider|blocked an undeclared evaluator)/.test(
+      reason,
+    ) &&
     /(?:measurement|provenance|observation|unobservable|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
       reason,
     )

@@ -9170,6 +9170,12 @@ export class ChatManager extends LocalEngineRuntime {
         // trace rather than one attributed to the wrong turn.
         const snapshot = inflightTurn.salvage;
         const ownsBuffers = this.turnBufferOwner.get(sessionId) === inflightTurn;
+        // An accepted but incomplete OpenAI response still advances server-side
+        // state. Persist it before auto-advancing durable work or rebuilding the
+        // session, otherwise the next turn resumes an older, unresolved call.
+        if (!intentionallyCancelled && ownsBuffers && state.record.providerName === 'openai') {
+          state.record.providerState = state.session?.providerState() ?? state.record.providerState;
+        }
         const drainedTools =
           snapshot?.tools ?? (ownsBuffers ? (this.currentTurnTools.get(sessionId) ?? []) : []);
         const drainedWarnings =
@@ -13177,6 +13183,7 @@ export class ChatManager extends LocalEngineRuntime {
         session = await provider.createSession({
           ...sessionOpts,
           openaiPreviousResponseId: record.providerState.openaiPreviousResponseId,
+          openaiPendingToolOutputs: record.providerState.openaiPendingToolOutputs,
         });
       } catch (err) {
         log.warn(`[chat] OpenAI session seed failed: ${(err as Error).message}; starting fresh`);

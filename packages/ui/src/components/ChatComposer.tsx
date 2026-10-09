@@ -473,7 +473,12 @@ export function ChatComposer({
   // draftNonEmpty it retains the text, but remains local-only and is never an
   // alternate persistence path.
   const [intentPreviewText, setIntentPreviewText] = useState(draftRef.current);
-  const [turnIntentPlan, setTurnIntentPlan] = useState<TurnIntentPlan | null>(null);
+  const [intentPreview, setIntentPreview] = useState<{
+    message: string;
+    plan: TurnIntentPlan;
+  } | null>(null);
+  const turnIntentPlan =
+    intentPreview?.message === intentPreviewText.trim() ? intentPreview.plan : null;
   // A non-null value means the entire single-line draft is a local `/open`
   // command. Keeping the query in state lets the suggestion tray react to
   // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
@@ -651,9 +656,8 @@ export function ChatComposer({
     const addressChanged = intentPreviewAddressRef.current !== address;
     intentPreviewAddressRef.current = address;
 
-    // A confirmed plan remains accurate enough to display while the next
-    // debounced preview is pending. Clear it immediately only when routing is
-    // impossible locally or when the conversation address has changed.
+    // A suggestion belongs to the exact text it was computed for. While the
+    // next preview is pending, the old plan must not turn Send into a launch.
     // Suggestions attach only on a fresh thread, where the Task key is. In
     // an ongoing one, "turn this into a slide deck" is a reply to the gezel,
     // and a suggestion would make Enter launch a task from those words.
@@ -663,10 +667,10 @@ export function ChatComposer({
       !taskLaunchEnabled ||
       liveSessionId !== null
     ) {
-      setTurnIntentPlan(null);
+      setIntentPreview(null);
       return;
     }
-    if (addressChanged) setTurnIntentPlan(null);
+    if (addressChanged) setIntentPreview(null);
     if (!runtimeCapabilities().tasks) return;
     const timer = window.setTimeout(() => {
       void api
@@ -678,10 +682,10 @@ export function ChatComposer({
         })
         .then((plan) => {
           if (intentPreviewSequence.current !== sequence) return;
-          setTurnIntentPlan(plan.visible ? plan : null);
+          setIntentPreview(plan.visible ? { message, plan } : null);
         })
-        // Preview is advisory. A transient failure should not flicker away a
-        // previously confirmed plan; Send will recompute it authoritatively.
+        // A failed preview leaves ordinary chat available; the daemon will
+        // compute the route for the text that actually gets sent.
         .catch(() => {});
     }, 350);
     return () => window.clearTimeout(timer);
@@ -1032,7 +1036,7 @@ export function ChatComposer({
     // effect a render later: an attached task was just cleared too, and a
     // render that still held the old plan would re-attach it — and create a
     // ghost draft for the message that just went out.
-    setTurnIntentPlan(null);
+    setIntentPreview(null);
     setOpenCommandQuery(null);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
@@ -1133,7 +1137,13 @@ export function ChatComposer({
     }
     if (!gezelId || turnActive) return;
     if (engagementOff) return;
-    const attachedLaunch = taskLaunch.attached;
+    // The attachment effect may not yet have cleared an obsolete suggestion.
+    // User-picked tasks survive edits; inferred tasks need a matching preview.
+    const attachedLaunch =
+      taskLaunch.attached?.origin === 'suggested' &&
+      (!turnIntentPlan || intentPreview?.message !== draftRef.current.trim())
+        ? null
+        : taskLaunch.attached;
     if (attachedLaunch && !taskLaunch.readiness.ready) return;
     const draftSnapshot = beginDraftSubmission({ allowEmpty: attachedLaunch !== null });
     if (!draftSnapshot) return;
@@ -1413,6 +1423,8 @@ export function ChatComposer({
     onPassiveCcConsumed,
     executeOpenTarget,
     draft,
+    intentPreview,
+    turnIntentPlan,
     taskLaunch,
     taskLaunchEnabled,
     taskLaunchProps,

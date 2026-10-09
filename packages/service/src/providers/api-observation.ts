@@ -48,7 +48,7 @@ interface ObservedUsage {
 }
 interface ObservationEvent {
   type: string;
-  response?: { model?: string; usage?: ObservedUsage };
+  response?: { model?: string; usage?: ObservedUsage; incomplete_details?: { reason?: string } };
   message?: { model?: string; usage?: ObservedUsage };
   usage?: ObservedUsage;
   item?: { type: string };
@@ -111,6 +111,8 @@ export async function* observeApiStream<T>(
     reasoningTokens: null,
   };
   let outcome = 'incomplete';
+  let terminalEvent: string | null = null;
+  let incompleteReason: string | null = null;
   let responseModel: string | null = null;
   let toolCalls = 0;
   let errorStatus: number | null = null;
@@ -123,6 +125,13 @@ export async function* observeApiStream<T>(
         e.type === 'response.incomplete'
       ) {
         outcome = e.type.slice('response.'.length);
+        terminalEvent = e.type;
+        const reason = e.response?.incomplete_details?.reason;
+        if (e.type === 'response.incomplete' && reason) {
+          incompleteReason = ['max_output_tokens', 'content_filter', 'steered'].includes(reason)
+            ? reason
+            : 'other';
+        }
         const u = e.response?.usage;
         responseModel = typeof e.response?.model === 'string' ? e.response.model : null;
         if (u)
@@ -145,8 +154,14 @@ export async function* observeApiStream<T>(
           });
       }
       if (e.type === 'message_delta' && e.usage) usage.outputTokens = number(e.usage.output_tokens);
-      if (e.type === 'message_stop') outcome = 'completed';
-      if (e.type === 'error') outcome = 'failed';
+      if (e.type === 'message_stop') {
+        outcome = 'completed';
+        terminalEvent = e.type;
+      }
+      if (e.type === 'error') {
+        outcome = 'failed';
+        terminalEvent = e.type;
+      }
       if (
         (e.type === 'response.output_item.done' && e.item?.type === 'function_call') ||
         (e.type === 'content_block_start' && e.content_block?.type === 'tool_use')
@@ -167,6 +182,8 @@ export async function* observeApiStream<T>(
         model: args.request.model,
         responseModel,
         outcome,
+        terminalEvent,
+        incompleteReason,
         durationMs: Date.now() - startedAt,
         usage,
         toolCalls,

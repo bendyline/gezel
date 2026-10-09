@@ -21,6 +21,43 @@ function client(overrides: Record<string, unknown> = {}): GezelClient {
 }
 
 describe('natural completion', () => {
+  it('records pre-existing service jobs without waiting for them to finish', async () => {
+    const observed = client({
+      listTasks: async () => ({
+        tasks: [
+          { ref: 'bootstrap/1', status: 'active' },
+          { ref: 'scenario/1', status: 'complete' },
+        ],
+      }),
+    });
+    const result = await readLifecycle(observed, ['bootstrap/1']);
+    expect(result.status).toBe('complete');
+    expect(result.tasks).toEqual([{ ref: 'scenario/1', status: 'complete' }]);
+    expect(result.ignoredTasks).toEqual([{ ref: 'bootstrap/1', status: 'active' }]);
+    expect((await readLifecycle(observed)).status).toBe('incomplete');
+  });
+
+  it('still waits for newly created work and all in-flight turns with a baseline', async () => {
+    const result = await readLifecycle(
+      client({
+        listTasks: async () => ({
+          tasks: [
+            { ref: 'bootstrap/1', status: 'active' },
+            { ref: 'scenario/1', status: 'active' },
+          ],
+        }),
+      }),
+      ['bootstrap/1'],
+    );
+    expect(result.status).toBe('incomplete');
+    const inflight = await readLifecycle(
+      client({
+        listInflightTurns: async () => ({ inflight: [{ sessionId: 'background' }] }),
+      }),
+      ['bootstrap/1'],
+    );
+    expect(inflight.status).toBe('incomplete');
+  });
   it('requires settled completion, while ignoring informational finished cards', async () => {
     const listTasks = vi.fn(async () => ({ tasks: [{ ref: '1', status: 'complete' }] }));
     const result = await observeLifecycle({

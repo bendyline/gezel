@@ -96,6 +96,14 @@ export const ExternalRequestDiagnosticsSchema = z.object({
 });
 export type ExternalRequestDiagnostics = z.infer<typeof ExternalRequestDiagnosticsSchema>;
 
+/** Executed or explicitly skipped calls whose results the next OpenAI request must submit. */
+export const OpenAIPendingToolOutputSchema = z.object({
+  type: z.literal('function_call_output'),
+  call_id: z.string(),
+  output: z.string(),
+});
+export type OpenAIPendingToolOutput = z.infer<typeof OpenAIPendingToolOutputSchema>;
+
 /**
  * A chat session — one persistent thread of conversation between the user
  * and a gezel. Every session lives inside a (gezel, project) pair. The
@@ -158,6 +166,7 @@ export const ChatSessionSchema = z.object({
   providerState: z.object({
     copilotSessionId: z.string().optional(),
     openaiPreviousResponseId: z.string().optional(),
+    openaiPendingToolOutputs: z.array(OpenAIPendingToolOutputSchema).optional(),
     /**
      * `anthropic-cli`-only: the session id `claude` reports in the first
      * `system` event of its stream-json output. Persisted so the next

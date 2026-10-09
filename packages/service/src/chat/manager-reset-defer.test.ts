@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -63,6 +63,33 @@ afterEach(async () => {
 });
 
 describe('ChatManager.resetClient — deferred (model-preference) reset', () => {
+  it('persists failed-turn OpenAI continuation state and restores it after reset', async () => {
+    await store.createGezel({ name: 'Mina', role: 'Builder' });
+    const session = await manager.createSession({ gezelId: 'mina' });
+    const providerState = {
+      openaiPreviousResponseId: 'resp-incomplete',
+      openaiPendingToolOutputs: [
+        { type: 'function_call_output' as const, call_id: 'call-1', output: 'Saved result' },
+      ],
+    };
+    const createSession = mock.createSession.bind(mock);
+    vi.spyOn(mock, 'createSession').mockImplementation(async (opts) => {
+      const live = await createSession(opts);
+      vi.spyOn(live, 'providerState').mockReturnValue(providerState);
+      return live;
+    });
+    mock.scriptSendFailure('[openai] incomplete (max_output_tokens)');
+    await expect(manager.send(session.id, 'Begin')).rejects.toThrow('incomplete');
+    expect((await store.getSession('mina', session.id))?.providerState).toEqual(providerState);
+
+    await manager.resetClient();
+    mock.script('Recovered');
+    await manager.send(session.id, 'Continue');
+    expect(mock.calls.filter((call) => call.kind === 'create').at(-1)?.opts).toMatchObject(
+      providerState,
+    );
+  });
+
   it('keeps an injected provider authoritative across a hard reset', async () => {
     await store.createGezel({ name: 'Mina', role: 'Builder' });
     const session = await manager.createSession({ gezelId: 'mina' });

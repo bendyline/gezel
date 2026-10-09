@@ -6,6 +6,8 @@ export interface LifecycleObservation {
   status: 'complete' | 'incomplete' | 'unobservable' | 'interrupted';
   waitedMs: number;
   tasks: Array<{ ref: string; status: string }>;
+  /** Tasks already present before scenario setup, such as perpetual service jobs. */
+  ignoredTasks?: Array<{ ref: string; status: string }>;
   inflightSessions: string[];
   pendingQuestions: string[];
   replies: Array<{ sessionId: string; hash: string; present: boolean }>;
@@ -13,7 +15,10 @@ export interface LifecycleObservation {
   completionClaim: 'supported' | 'unverified';
 }
 
-export async function readLifecycle(client: GezelClient): Promise<LifecycleObservation> {
+export async function readLifecycle(
+  client: GezelClient,
+  baselineTaskRefs: readonly string[] = [],
+): Promise<LifecycleObservation> {
   const [taskList, turns, questions, sessionList] = await Promise.all([
     client.listTasks(),
     client.listInflightTurns(),
@@ -37,7 +42,9 @@ export async function readLifecycle(client: GezelClient): Promise<LifecycleObser
         last.content.trim().length > 0,
     });
   }
-  const tasks = taskList.tasks.map((t) => ({ ref: t.ref, status: t.status }));
+  const allTasks = taskList.tasks.map((t) => ({ ref: t.ref, status: t.status }));
+  const tasks = allTasks.filter((t) => !baselineTaskRefs.includes(t.ref));
+  const ignoredTasks = allTasks.filter((t) => baselineTaskRefs.includes(t.ref));
   const complete =
     tasks.every((t) => t.status === 'complete') &&
     turns.inflight.length === 0 &&
@@ -49,6 +56,7 @@ export async function readLifecycle(client: GezelClient): Promise<LifecycleObser
     status: complete ? 'complete' : 'incomplete',
     waitedMs: 0,
     tasks,
+    ignoredTasks,
     inflightSessions: turns.inflight.map((t) => t.sessionId),
     pendingQuestions: [
       ...inlineQuestions,
@@ -65,6 +73,7 @@ export async function observeLifecycle(args: {
   timeoutMs: number;
   signal?: AbortSignal;
   intervalMs?: number;
+  baselineTaskRefs?: readonly string[];
 }): Promise<LifecycleObservation> {
   const start = Date.now();
   let prior: string | null = null;
@@ -84,7 +93,7 @@ export async function observeLifecycle(args: {
       let onAbort: (() => void) | undefined;
       try {
         result = await Promise.race([
-          readLifecycle(args.client),
+          readLifecycle(args.client, args.baselineTaskRefs),
           new Promise<never>((_, reject) => {
             timer = setTimeout(
               () => reject(new Error('lifecycle read deadline')),
@@ -98,7 +107,7 @@ export async function observeLifecycle(args: {
         clearTimeout(timer);
         if (onAbort) args.signal?.removeEventListener('abort', onAbort);
       }
-      const signature = digest(result);
+      const signature = digest({ ...result, ignoredTasks: undefined });
       if (result.status === 'complete' && prior === signature) {
         settled = true;
         break;

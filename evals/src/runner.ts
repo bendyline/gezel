@@ -1217,6 +1217,20 @@ export async function runTrial(
     const meesterId = await ensureMeester(client);
     log(`[trial] meester=${meesterId}`);
 
+    // Boot installs perpetual service tasks. They are recorded, but are not
+    // deliverables of a scenario that has not started yet. A night-shift
+    // scenario deliberately exercises those tasks and keeps them in scope.
+    const baselineTaskRefs =
+      opts.qualification && !scenario.nightShift
+        ? (await client.listTasks()).tasks.map((task) => task.ref)
+        : [];
+    if (opts.qualification) {
+      await writeFile(
+        join(runDir, 'lifecycle-scope.json'),
+        JSON.stringify({ baselineTaskRefs }, null, 2),
+      );
+    }
+
     // A relevance arm installs (once, into the shared cache) and loads its
     // model before any work starts: a cold model passes every result
     // through, so the first turns would silently run as the model-off arm.
@@ -1239,6 +1253,7 @@ export async function runTrial(
                 scenario.setup!({
                   client: boundary.client(spawned),
                   repairPolicy: scenario.repairPolicy,
+                  userSimulation: opts.qualification?.userSimulation,
                   meesterId,
                   ...(mockRuntime ? { mocks: mockRuntime } : {}),
                   state: scenarioState,
@@ -1326,6 +1341,7 @@ export async function runTrial(
       const verdict = await pollUntilDone(scenario, {
         client: boundary?.client(spawned) ?? client,
         ...(boundary ? { qualificationBoundary: boundary } : {}),
+        userSimulation: opts.qualification?.userSimulation,
         meesterId,
         log,
         pollIntervalMs,
@@ -1352,6 +1368,7 @@ export async function runTrial(
           client,
           timeoutMs: opts.qualification.completionTimeoutMs,
           signal: opts.signal,
+          baselineTaskRefs,
         });
         await writeFile(join(runDir, 'lifecycle.json'), JSON.stringify(lifecycle, null, 2));
         const finalArtifact = await checkFinalArtifact(scenario, {
@@ -1359,6 +1376,7 @@ export async function runTrial(
           meesterId,
           state: scenarioState,
           repairPolicy: scenario.repairPolicy,
+          userSimulation: opts.qualification.userSimulation,
           log,
           logChanged: (_key, line) => log(line),
           ...(mockRuntime ? { mocks: mockRuntime } : {}),
@@ -1428,11 +1446,16 @@ export async function runTrial(
       };
     }
     try {
-      if (opts.qualification)
+      if (opts.qualification) {
         await writeFile(
           join(runDir, 'tasks.json'),
           JSON.stringify(await client.listTasks(), null, 2),
         );
+        await writeFile(
+          join(runDir, 'questions.json'),
+          JSON.stringify(await client.listQuestions(), null, 2),
+        );
+      }
       await captureFinalState({ client, trialHome, runDir, log, trialFailed: !success });
     } catch (err) {
       log(
@@ -2369,6 +2392,7 @@ export async function pollUntilDone(
   args: {
     client: GezelClient;
     qualificationBoundary?: QualificationBoundary;
+    userSimulation?: EvalContext['userSimulation'];
     meesterId: string;
     log: (line: string) => void;
     pollIntervalMs: number;
@@ -2527,6 +2551,7 @@ export async function pollUntilDone(
     client: args.client,
     meesterId: args.meesterId,
     ...(scenario.repairPolicy ? { repairPolicy: scenario.repairPolicy } : {}),
+    ...(args.userSimulation ? { userSimulation: args.userSimulation } : {}),
     log: args.log,
     logChanged,
     recordSniff,
