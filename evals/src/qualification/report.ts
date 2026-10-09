@@ -157,8 +157,19 @@ export async function writeQualificationReport(
   const lifecycle = lifecycleText
     ? parse<LifecycleObservation>(lifecycleText, 'lifecycle.json')
     : null;
-  if (lifecycle?.status !== 'complete')
-    issues.push('artifact/turn/task lifecycle did not complete observably');
+  if (!artifactSuccess) issues.push('artifact checks did not pass');
+  if (!lifecycle) issues.push('lifecycle was not observed');
+  else {
+    if (lifecycle.status === 'incomplete') issues.push('turn/task lifecycle did not complete');
+    else if (lifecycle.status === 'unobservable')
+      issues.push('turn/task lifecycle could not be observed');
+    else if (lifecycle.status === 'interrupted')
+      issues.push('turn/task lifecycle observation was interrupted');
+    else if (lifecycle.status !== 'complete') issues.push('lifecycle evidence has invalid status');
+    // A task can finish cleanly while its deliverable fails the final grade.
+    if (!artifactSuccess || lifecycle.status !== 'complete')
+      lifecycle.completionClaim = 'unverified';
+  }
   const terminalIds = new Set(results.map((r) => r.requestId));
   const incomplete =
     requests.filter((r) => !terminalIds.has(r.requestId)).length +

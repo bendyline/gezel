@@ -73,6 +73,44 @@ describe('qualification report', () => {
     expect(await writeQualificationReport(dir, true)).toMatchObject({
       passed: false,
       artifactSuccess: true,
+      issues: ['turn/task lifecycle did not complete'],
+    });
+  });
+
+  it('reports an artifact failure with a completed lifecycle independently', async () => {
+    await save('lifecycle.json', { status: 'complete', completionClaim: 'supported' });
+    expect(await writeQualificationReport(dir, false)).toMatchObject({
+      passed: false,
+      artifactSuccess: false,
+      lifecycle: { status: 'complete', completionClaim: 'unverified' },
+      issues: ['artifact checks did not pass'],
+    });
+  });
+
+  it.each([true, false])(
+    'reports missing lifecycle evidence with artifactSuccess=%s',
+    async (artifactSuccess) => {
+      await rm(join(dir, 'lifecycle.json'));
+      // A captured completed task alone cannot prove settled turns and replies.
+      await save('tasks.json', { tasks: [{ ref: 'p/1', status: 'complete' }] });
+      const report = await writeQualificationReport(dir, artifactSuccess);
+      expect(report).toMatchObject({ passed: false, artifactSuccess, lifecycle: null });
+      expect(report?.issues).toEqual([
+        ...(!artifactSuccess ? ['artifact checks did not pass'] : []),
+        'lifecycle was not observed',
+      ]);
+    },
+  );
+
+  it.each([
+    ['unobservable', 'turn/task lifecycle could not be observed'],
+    ['interrupted', 'turn/task lifecycle observation was interrupted'],
+    ['invalid', 'lifecycle evidence has invalid status'],
+  ])('distinguishes %s lifecycle evidence', async (status, issue) => {
+    await save('lifecycle.json', { status });
+    expect(await writeQualificationReport(dir, true)).toMatchObject({
+      passed: false,
+      issues: [issue],
     });
   });
 
@@ -103,6 +141,9 @@ describe('qualification report', () => {
   it('does not attribute broken qualification evidence to model capability', () => {
     for (const reason of [
       'Qualification failed: API request provenance is incomplete',
+      'Qualification failed: lifecycle was not observed',
+      'Qualification failed: turn/task lifecycle could not be observed',
+      'Qualification failed: lifecycle evidence has invalid status',
       'Qualification blocked an undeclared evaluator mutation',
       'runner crashed: Qualification blocked provider codex-cli; expected openai',
     ]) {

@@ -230,7 +230,7 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
     /Qualification (?:failed:|blocked evaluator|blocked provider|blocked an undeclared evaluator)/.test(
       reason,
     ) &&
-    /(?:measurement|provenance|observation|unobservable|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
+    /(?:measurement|provenance|observation|unobservable|not be observed|not observed|lifecycle evidence|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
       reason,
     )
   ) {

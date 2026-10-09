@@ -1,4 +1,5 @@
 import { setTimeout as wait } from 'node:timers/promises';
+import { AwakeBudget, createAwakeTimeout } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { digest } from './boundary.ts';
 
@@ -71,11 +72,18 @@ export async function readLifecycle(
 export async function observeLifecycle(args: {
   client: GezelClient;
   timeoutMs: number;
+  /** Failed artifact checks still get a bounded, independent lifecycle observation. */
+  artifactSuccess?: boolean;
   signal?: AbortSignal;
   intervalMs?: number;
   baselineTaskRefs?: readonly string[];
 }): Promise<LifecycleObservation> {
   const start = Date.now();
+  // A failed trial has already spent its execution budget. Allow two settled
+  // observations, without granting another full completion/recovery window.
+  const timeoutMs =
+    args.artifactSuccess === false ? Math.min(args.timeoutMs, 5000) : args.timeoutMs;
+  const budget = new AwakeBudget(timeoutMs);
   let prior: string | null = null;
   let settled = false;
   let result: LifecycleObservation = {
@@ -87,24 +95,25 @@ export async function observeLifecycle(args: {
     replies: [],
     completionClaim: 'unverified',
   };
-  while (Date.now() - start < args.timeoutMs && !args.signal?.aborted) {
+  while (!budget.expired() && !args.signal?.aborted) {
     try {
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = createAwakeTimeout(budget.remainingMs());
       let onAbort: (() => void) | undefined;
       try {
         result = await Promise.race([
           readLifecycle(args.client, args.baselineTaskRefs),
           new Promise<never>((_, reject) => {
-            timer = setTimeout(
+            deadline.signal.addEventListener(
+              'abort',
               () => reject(new Error('lifecycle read deadline')),
-              Math.max(1, args.timeoutMs - (Date.now() - start)),
+              { once: true },
             );
             onAbort = () => reject(new Error('lifecycle interrupted'));
             args.signal?.addEventListener('abort', onAbort, { once: true });
           }),
         ]);
       } finally {
-        clearTimeout(timer);
+        deadline.dispose();
         if (onAbort) args.signal?.removeEventListener('abort', onAbort);
       }
       const signature = digest({ ...result, ignoredTasks: undefined });
@@ -118,13 +127,12 @@ export async function observeLifecycle(args: {
       prior = null;
     }
     if (args.signal?.aborted) break;
-    await wait(
-      Math.min(args.intervalMs ?? 1000, Math.max(1, args.timeoutMs - (Date.now() - start))),
-    );
+    await wait(Math.min(args.intervalMs ?? 1000, Math.max(1, budget.remainingMs())));
   }
   if (args.signal?.aborted) result.status = 'interrupted';
   else if (result.status === 'complete' && !settled) result.status = 'incomplete';
-  if (result.status !== 'complete') result.completionClaim = 'unverified';
+  if (result.status !== 'complete' || args.artifactSuccess === false)
+    result.completionClaim = 'unverified';
   result.waitedMs = Date.now() - start;
   return result;
 }

@@ -1362,15 +1362,20 @@ export async function runTrial(
       failureMode = verdict.failureMode;
       finalSniff = verdict.finalSniff;
       diagnostics = verdict.diagnostics;
-      if (success && opts.qualification) {
-        log('[qualification] artifact gate passed; observing natural turn and task completion');
+      if (opts.qualification) {
+        log(
+          `[qualification] artifact gate ${success ? 'passed' : 'failed'}; observing natural turn and task completion`,
+        );
         const lifecycle = await observeLifecycle({
           client,
           timeoutMs: opts.qualification.completionTimeoutMs,
+          artifactSuccess: success,
           signal: opts.signal,
           baselineTaskRefs,
         });
         await writeFile(join(runDir, 'lifecycle.json'), JSON.stringify(lifecycle, null, 2));
+      }
+      if (success && opts.qualification) {
         const finalArtifact = await checkFinalArtifact(scenario, {
           client: boundary?.client(spawned) ?? client,
           meesterId,

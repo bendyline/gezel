@@ -88,6 +88,33 @@ describe('natural completion', () => {
   ])('does not call an unfinished lifecycle complete', async (overrides) => {
     expect((await readLifecycle(client(overrides))).status).toBe('incomplete');
   });
+  it('observes settled task completion even when artifact checks failed', async () => {
+    const result = await observeLifecycle({
+      client: client(),
+      artifactSuccess: false,
+      timeoutMs: 100,
+      intervalMs: 1,
+    });
+    expect(result).toMatchObject({
+      status: 'complete',
+      tasks: [{ ref: '1', status: 'complete' }],
+      completionClaim: 'unverified',
+    });
+  });
+  it('bounds failed-trial observation without another full execution window', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = observeLifecycle({
+        client: client({ listTasks: () => new Promise(() => {}) }),
+        artifactSuccess: false,
+        timeoutMs: 120_000,
+      });
+      await vi.advanceTimersByTimeAsync(5100);
+      expect(await pending).toMatchObject({ status: 'unobservable' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('bounds a hung observer and honors interruption during a hung read', async () => {
     const hung = client({ listTasks: () => new Promise(() => {}) });
     expect((await observeLifecycle({ client: hung, timeoutMs: 10 })).status).toBe('unobservable');

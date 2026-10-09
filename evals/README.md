@@ -62,6 +62,19 @@ Qualification records:
   pass. Their API activity remains observable. Night-shift scenarios keep the
   existing tasks in scope. `questions.json` preserves user questions for review.
 
+Lifecycle observation also runs after a failed artifact check, with at most five
+seconds to collect settled evidence. A completed task can therefore coexist with
+a failed artifact grade. Missing, interrupted, or unavailable lifecycle evidence
+is reported separately from observed incomplete work; none qualifies a run.
+
+Craftbook fixtures default to required source reads. Supporting execution fixtures
+can declare `modelInput: false`: they are still seeded and all content, behavior,
+and unchanged-file checks still apply, but opening them is not required. The pinned
+`codemod-sweep@1.0.4` sidecar omitted that declaration for its unchanged `src/log.js`
+helper. The evaluator applies a version-and-content-guarded metadata correction
+in `src/craftbooks/fixture-inputs.ts`; the next Gilde sidecar should carry the flag
+itself. This correction adds no repair instructions or provider-specific behavior.
+
 Provider acquisition is restricted to the requested API inside qualification,
 including background helpers. A different requested model is detected in API
 records. Recorded execution-tool calls are checked for Claude/Codex CLI usage;
