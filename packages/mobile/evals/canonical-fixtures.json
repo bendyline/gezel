@@ -128,7 +128,7 @@
   {
     "id": "tictactoe",
     "sourceFile": "tictactoe",
-    "sourceSha256": "1a0c7e9f219f96ce29ecba9c846d0ca28a01f37a14e6f05263e9f73cd96810ee",
+    "sourceSha256": "2d771b4740c813336f54ca734490e27f391a4c0979fc23fae61eed65fe40314d",
     "timeoutMs": 7200000,
     "kind": "meester",
     "files": [],

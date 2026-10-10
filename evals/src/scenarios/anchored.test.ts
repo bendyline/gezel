@@ -39,8 +39,12 @@ import { ANCHORED_SCENARIOS, SCENARIOS } from './index.ts';
 // the prompts teach moved with the product surface. Longitudinal
 // comparisons across the rename should lean on the naming A/B
 // (`ab-tool-naming`) rather than treating pre/post runs as one series.
+// Tictactoe rendered-text re-pin: winner messages may span styled inline
+// elements. The grader now reads visible subtree text to avoid rejecting
+// those valid games while still excluding script and hidden content.
+// Prompt/evidence and the requirement to display a winner are unchanged.
 const PINNED: Record<(typeof ANCHORED_SCENARIOS)[number], { semantic: string; source: string }> = {
-  tictactoe: { semantic: 'a553e5a80e5dab9f', source: '1a0c7e9f219f96ce' },
+  tictactoe: { semantic: 'a553e5a80e5dab9f', source: '2d771b4740c81333' },
   petshop: { semantic: '20a5fbfb35b86f9c', source: 'c6ae728c51d8f80c' },
   tankcombat: { semantic: 'c247df6736d31ac8', source: '9e5d0971ddadbfd2' },
 };
