@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
+import type { CraftbookEvalSpec } from '../craftbooks/types.ts';
 import type { EvalContext } from '../types.ts';
 import {
   DOCBLOCKS_CRAFTBOOK_IDS,
@@ -37,11 +38,47 @@ describe('real DocBlocks workflow coverage', () => {
       // The existing hermetic scorecard must retain its own simulator.
       expect(spec.success).not.toBe(source.success);
     }
-    const media = realDocblocksSpec(specs.get('narrated-slideshow')!);
+    const source = specs.get('narrated-slideshow')!;
+    const media = realDocblocksSpec(source);
+    const workPath = source.setup?.craftbookParams?.workPath ?? '{{task.dir}}';
     expect(media.success.checks?.map((check) => ('file' in check ? check.file : ''))).toEqual(
-      expect.arrayContaining(['{{task.dir}}/slideshow.mp4', '{{task.dir}}/slideshow.gif']),
+      expect.arrayContaining([`${workPath}/slideshow.mp4`, `${workPath}/slideshow.gif`]),
     );
   });
+
+  it.each([
+    { workPath: 'tasks/eval', expectedPath: 'tasks/eval' },
+    { workPath: '{{task.dir}}', expectedPath: '{{task.dir}}' },
+    { workPath: undefined, expectedPath: '{{task.dir}}' },
+  ])(
+    'uses $expectedPath for media gates when workPath is $workPath',
+    ({ workPath, expectedPath }) => {
+      const source: CraftbookEvalSpec = {
+        craftbookId: 'narrated-slideshow',
+        scenarioId: 'slideshow-paths',
+        mode: 'artifact-task',
+        title: 'Slideshow paths',
+        objective: 'Publish both media formats in the requested working folder',
+        setup: {
+          projectName: 'Slideshow paths',
+          craftbookParams: workPath === undefined ? {} : { workPath },
+        },
+        success: { summary: 'Publish the MP4 and GIF' },
+        coverage: { status: 'implemented' },
+        qualityFocus: [],
+      };
+      const media = realDocblocksSpec(source);
+      expect(media.success.checks).toEqual(
+        ['slideshow.mp4', 'slideshow.gif'].map((file) =>
+          expect.objectContaining({
+            kind: 'binaryDocument',
+            file: `${expectedPath}/${file}`,
+            artifact: true,
+          }),
+        ),
+      );
+    },
+  );
 
   it('observes an active workflow without pushing its researcher toward the finish step', async () => {
     const task = {

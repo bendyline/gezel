@@ -11,7 +11,7 @@
  * captures a screenshot so the visual is inspectable when the numbers
  * still pass but it "feels off".
  */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +34,11 @@ async function openMeesterChat() {
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(conversation).toBeFocused();
   await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 20_000 });
 }
 
@@ -73,6 +78,12 @@ async function sendAndWaitForReply(
 
 test.beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sticky-e2e-'));
+  // Scheduled reviews can reopen Home's intro during a send and obscure the
+  // bubbles whose layout this fixture measures.
+  await writeFile(
+    join(gezelHome, 'config.json'),
+    JSON.stringify({ aiEngagementMode: 'reactive', nightShift: { enabled: false } }),
+  );
   app = await electron.launch({
     args: [appRoot],
     env: buildLaunchEnv({
