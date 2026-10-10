@@ -41,13 +41,23 @@ export function inferCraftbookJobParams(args: {
 export function suggestedCraftbookInvocation(args: {
   craftbookId: string;
   query: string;
+  jobDescription?: string;
+  project?: string;
   paramSchema?: unknown;
 }): {
   craftbookId: string;
   description: string;
+  project?: string;
   params?: Record<string, string>;
 } {
-  const description = args.query.trim();
+  const query = args.query.trim();
+  const userRequest = args.jobDescription?.trim();
+  // Search terms may omit the destination; a short user follow-up may omit the
+  // task itself. Keep both sources instead of silently dropping either one.
+  const description =
+    userRequest && userRequest !== query
+      ? `${userRequest}\n\nTask context from craftbook search: ${query}`
+      : query;
   const params = inferCraftbookJobParams({
     paramSchema: args.paramSchema,
     jobDescription: description,
@@ -55,8 +65,22 @@ export function suggestedCraftbookInvocation(args: {
   return {
     craftbookId: args.craftbookId,
     description,
+    ...(args.project ? { project: args.project } : {}),
     ...(Object.keys(params).length > 0 ? { params } : {}),
   };
+}
+
+/** A ranking suggests a procedure; it cannot override the requested scope or destination. */
+export function craftbookSuggestionGuidance(
+  invocation: ReturnType<typeof suggestedCraftbookInvocation>,
+): string {
+  return [
+    'Compare these candidates with the full user request; choose a lower match or reject all of them if none fits.',
+    'Preserve the requested project: for a new project, use start_project; for an existing project, pass its id explicitly.',
+    'Keep the full task brief, deliverable destination, and acceptance criteria. If no candidate fits, use a generic build-loop task in the requested project.',
+    `\n\nCandidate call, only if this recipe and project fit: invoke_craftbook(${JSON.stringify(invocation)}).`,
+    'Invocation installs exact trusted zero-configuration bundled dependencies; remaining setup blocks task creation.',
+  ].join(' ');
 }
 
 /** Merge the convenience alias while normalizing either source of outputPath. */

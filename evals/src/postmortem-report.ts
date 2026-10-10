@@ -326,7 +326,7 @@ export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRub
           '',
           `Evaluator repairs delivered: ${facts.qualification.interventions.delivered}; blocked: ${facts.qualification.interventions.blocked}; unanswered questions: ${facts.qualification.interventions.unanswered}.`,
           '',
-          `API requests: ${facts.qualification.api.requests}; failures: ${facts.qualification.api.failures}; incomplete: ${facts.qualification.api.incomplete}. SDK retries: unknown.`,
+          `API requests: ${facts.qualification.api.requests}; failures: ${facts.qualification.api.failures}; provider incomplete responses: ${facts.qualification.api.incompleteResponses ?? 'unknown (legacy report)'}; missing result telemetry: ${facts.qualification.api.missingResults ?? 'unknown (legacy report)'}; streams without a terminal event: ${facts.qualification.api.unterminatedStreams ?? 'unknown (legacy report)'}. Total unfinished: ${facts.qualification.api.incomplete}. SDK retries: unknown.`,
           '',
           ...facts.qualification.issues.map((issue) => `- ${issue}`),
           '',

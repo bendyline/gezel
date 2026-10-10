@@ -29,12 +29,7 @@ export async function treeIdentity(root: string): Promise<{ sha256: string; file
   return { sha256: hash.digest('hex'), files };
 }
 
-export async function writeQualificationMetadata(
-  root: string,
-  runDir: string,
-  scenario: EvalScenario,
-  opts: TrialOptions,
-): Promise<void> {
+export async function captureQualificationIdentity(root: string) {
   const unavailable: string[] = [];
   async function capture<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
     try {
@@ -74,6 +69,16 @@ export async function writeQualificationMetadata(
     return { dataDir, version: manifest?.version ?? null, ...content };
   });
   const fixtures = await capture('fixture-source', () => treeIdentity(join(root, 'evals/src')));
+  return { source, service, gilde, fixtures, unavailable };
+}
+
+export async function writeQualificationMetadata(
+  root: string,
+  runDir: string,
+  scenario: EvalScenario,
+  opts: TrialOptions,
+): Promise<void> {
+  const identity = await captureQualificationIdentity(root);
   const treatment = {
     provider: opts.engine ?? 'llama-cpp',
     model: opts.modelId,
@@ -98,14 +103,10 @@ export async function writeQualificationMetadata(
       {
         version: 1,
         recordedAt: new Date().toISOString(),
-        source,
-        service,
-        gilde,
-        fixtures,
+        ...identity,
         scenario: { id: scenario.id, prompt: scenario.prompt, promptHash: digest(scenario.prompt) },
         treatment,
         treatmentHash: digest(treatment),
-        unavailable,
       },
       null,
       2,

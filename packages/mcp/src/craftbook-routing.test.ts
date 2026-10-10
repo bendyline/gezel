@@ -3,6 +3,7 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  craftbookSuggestionGuidance,
   inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
@@ -90,6 +91,36 @@ describe('invoke_craftbook params', () => {
         jobDescription: 'Translate this into Dutch',
       }),
     ).toEqual({});
+  });
+
+  it('preserves the full brief and project when a search query abbreviates them', () => {
+    const jobDescription =
+      'In the annual-report project, create a presentation from source/brief.md and save it as slides/annual.pptx.';
+    const invocation = suggestedCraftbookInvocation({
+      craftbookId: 'powerpoint-deck',
+      query: 'annual presentation',
+      jobDescription,
+      project: 'annual-report',
+    });
+    expect(invocation.craftbookId).toBe('powerpoint-deck');
+    expect(invocation.project).toBe('annual-report');
+    expect(invocation.description).toContain(jobDescription);
+    expect(invocation.description).toContain('annual presentation');
+    const guidance = craftbookSuggestionGuidance(invocation);
+    expect(guidance).toContain(JSON.stringify(invocation));
+    expect(guidance).toContain('reject all');
+    expect(guidance).toContain('new project, use start_project');
+    expect(guidance).not.toContain('send it now');
+  });
+
+  it('keeps task context when the latest user message is a short follow-up', () => {
+    const invocation = suggestedCraftbookInvocation({
+      craftbookId: 'report',
+      query: 'Write the quarterly research report',
+      jobDescription: 'Yes, go ahead.',
+    });
+    expect(invocation.description).toContain('Write the quarterly research report');
+    expect(invocation.description).toContain('Yes, go ahead.');
   });
 });
 

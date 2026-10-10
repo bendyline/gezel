@@ -67,6 +67,15 @@ seconds to collect settled evidence. A completed task can therefore coexist with
 a failed artifact grade. Missing, interrupted, or unavailable lifecycle evidence
 is reported separately from observed incomplete work; none qualifies a run.
 
+API totals separate provider-declared `incompleteResponses` (with safe
+`incompleteReasons`, including `max_messages`), `missingResults` (requests without
+result telemetry), and `unterminatedStreams` (recorded streams without a terminal
+event). The older `incomplete` field remains their aggregate for compatibility.
+A later successful request does not erase an earlier incomplete response; the
+campaign still stops for review, but reports the provider event rather than
+claiming its telemetry is missing. Older reports without the breakdown remain
+unknown in those categories.
+
 Craftbook fixtures default to required source reads. Supporting execution fixtures
 can declare `modelInput: false`: they are still seeded and all content, behavior,
 and unchanged-file checks still apply, but opening them is not required. The pinned
@@ -130,6 +139,54 @@ same script in both provider and repair-policy arms. If the fixture or consent
 prompt changes, review and update the frozen script before comparing runs;
 there is no permissive fallback. Qualification disables the craftbook grader's
 legacy automatic command approvals for every explicit user-simulation policy.
+
+## Paired API campaign (Phase 1)
+
+The campaign fixes `generalist on`, current product guidance/recovery, and the
+same user-simulation policy in both repair arms. It compares OpenAI `gpt-6-luna`
+and Anthropic `claude-sonnet-5-5` on `tictactoe`, `symptom-debug`, and
+`craftbook-codemod-sweep`. Runtime is the independent primary arm; harness is an
+assisted diagnostic. This does **not** turn product recovery off or test proposed
+lean/targeted prompt profiles.
+
+Prepare and inspect a 12-trial screen without API calls, then execute it:
+
+```bash
+pnpm eval:api-campaign --runs-dir evals/runs/api-phase1-2026-10-09
+pnpm eval:api-campaign --runs-dir evals/runs/api-phase1-2026-10-09 --execute
+```
+
+If the screen is viable, extend the same campaign to three trials per cell:
+
+```bash
+pnpm eval:api-campaign --runs-dir evals/runs/api-phase1-2026-10-09 --count 3
+pnpm eval:api-campaign --runs-dir evals/runs/api-phase1-2026-10-09 --count 3 --execute
+```
+
+That schedules **36 total, 24 additional**, skipping recorded attempts. Policy
+pairs are adjacent, first-policy order is balanced, and provider order alternates.
+Trials run sequentially in fresh processes and use the single-trial runner's
+qualification, native API evidence, and postmortems. Each requests a 10-minute
+execution limit and a 2-minute completion window; startup, cleanup and in-flight
+grace add time. Charges depend on actual API usage; there is no dollar cap.
+
+`plan.md` shows the schedule. `campaign.json` freezes source/build/catalog and
+environment identity, settings, and the exact consent script, and journals each
+attempt before launch. `summary.json` retains each trial's qualification, native
+usage, interventions and failure class. `report.md` shows separate artifact,
+lifecycle, independent qualification and paired outcome counts. A pair with no
+evaluator repairs is explicitly uninformative about assistance. Results from an
+identity-changing trial are flagged as invalid comparisons.
+
+Reusing the execute command resumes pending cells; it never retries failed or
+ambiguous attempts automatically. Unexpected user questions, provider/account or
+measurement failures halt the campaign. Ordinary task failures remain observations
+and do not halt it. A halted campaign requires review and a new campaign directory;
+after source changes, rebuild relevant packages and prepare a new baseline. Do not
+edit source, rebuild, update Gilde, change ambient Gezel settings, or commit between
+planning and execution of a frozen campaign. Behavior force/remove environment
+overrides are rejected. The command-consent script is scoped to codemod only;
+the other scenarios have user simulation disabled.
 
 ## Available scenarios
 

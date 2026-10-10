@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type {
   CatalogItemSummary,
@@ -16,6 +16,7 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
+import { isUnmodifiedWorkspaceBootstrap } from '../workspace/template.js';
 
 const CODEBASE_FILES = new Set([
   '.git',
@@ -112,7 +113,19 @@ export async function projectHasEstablishedCodebase(
   const base = await store.projectWorkspaceDir(projectId).catch(() => null);
   if (!base) return false;
   const root = await readdir(base, { withFileTypes: true }).catch(() => []);
-  if (workspaceEntriesLookLikeCodebase(root)) return true;
+  const project = await store.getProject(projectId).catch(() => null);
+  const unchangedBootstrap = new Set<string>();
+  if (project && !project.workingDir && !project.github?.url) {
+    await Promise.all(
+      root.map(async (entry) => {
+        if (!entry.isFile() || !['package.json', 'tsconfig.json'].includes(entry.name)) return;
+        const content = await readFile(join(base, entry.name), 'utf8').catch(() => '');
+        if (isUnmodifiedWorkspaceBootstrap(entry.name, content)) unchangedBootstrap.add(entry.name);
+      }),
+    );
+  }
+  if (workspaceEntriesLookLikeCodebase(root.filter((entry) => !unchangedBootstrap.has(entry.name))))
+    return true;
 
   const folders = root
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))

@@ -85,6 +85,64 @@ describe('consolidated MCP tools', () => {
     };
   });
 
+  it('keeps the requested project and original task brief in craftbook suggestions', async () => {
+    const brief =
+      'Create a new project for the annual report and deliver a presentation at slides/annual.pptx.';
+    handler = (url, method, body) => {
+      if (url.pathname === '/api/projects/reporting') return { id: 'reporting' };
+      if (url.pathname === '/api/projects/reporting/craftbooks')
+        return { items: [], missingToolsets: {} };
+      if (url.pathname === '/api/sessions/session-a')
+        return { messages: [{ id: 'user-1', role: 'user', content: brief }] };
+      if (method === 'POST' && url.pathname === '/api/craftbooks/suggest') {
+        expect(body).toMatchObject({ query: 'annual presentation', projectId: 'reporting' });
+        return {
+          suggestions: [
+            {
+              id: 'report',
+              name: 'Report',
+              source: 'bundled',
+              stepCount: 3,
+              score: 0.08,
+              description: 'Write a report.',
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+    const result = await client.callTool({
+      name: 'suggest_craftbook',
+      arguments: { query: 'annual presentation', project: 'reporting' },
+    });
+    expect(result.isError).not.toBe(true);
+    const text = (result.content as Array<{ text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+    const invocation = JSON.parse(text.match(/invoke_craftbook\((\{[^\n]+\})\)/)![1]!);
+    expect(invocation).toMatchObject({ craftbookId: 'report', project: 'reporting' });
+    expect(invocation.description).toContain(brief);
+    expect(invocation.description).toContain('annual presentation');
+    expect(text).toContain('reject all');
+    expect(text).toContain('new project, use start_project');
+    expect(text).not.toContain('send it now');
+  });
+
+  it('preserves the new-project route when no craftbook matches', async () => {
+    handler = (url) => {
+      if (url.pathname === '/api/projects/project-a/craftbooks')
+        return { items: [], missingToolsets: {} };
+      if (url.pathname === '/api/craftbooks/suggest') return { suggestions: [] };
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    };
+    const result = await client.callTool({
+      name: 'suggest_craftbook',
+      arguments: { query: 'a new project' },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result.content)).toContain('for a new project use start_project');
+  });
+
   it('serializes structured artifact reports without losing nested values or quotes', async () => {
     const writes: Record<string, unknown>[] = [];
     handler = (url, method, body) => {

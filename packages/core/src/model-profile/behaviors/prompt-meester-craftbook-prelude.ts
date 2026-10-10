@@ -78,14 +78,14 @@ export function looksLikeDataTransformRequest(text: string): boolean {
 const MEESTER_CRAFTBOOK_SELECT_PRELUDE =
   '(System note for this turn: the user wants an existing recipe from the craftbook library. Do this yourself — do NOT delegate it and do NOT start hand-writing files:\n' +
   ' 1. `suggest_craftbook({ query })` with a short description of the job.\n' +
-  ' 2. Pick the best match and `invoke_craftbook({ craftbookId, project })` — that creates the gated task and the crew executes its steps.\n' +
+  ' 2. Choose a recipe whose purpose fits the full request. Preserve the requested project: use `start_project` for a new project, or `invoke_craftbook({ craftbookId, project })` in the requested existing project.\n' +
   'Only if nothing in the shortlist fits should you consider authoring a new craftbook or falling back to `start_project`.)';
 
 const MEESTER_CRAFTBOOK_TRANSFORM_PRELUDE =
   '(System note for this turn: this is a data-transform job, and the craftbook library has gated recipes for exactly this class (cleaning, dedup, format conversion) whose runtime checks catch the classic integrity mistakes — renumbered ids, silent row drops. Route it through a recipe instead of delegating it raw:\n' +
   ' 1. `suggest_craftbook({ query })` with a short description of the transform.\n' +
-  ' 2. `invoke_craftbook({ craftbookId, project })` on the TOP match — the crew executes the gated steps. Recipes like dataset-clean or csv-transformer fit almost any tabular cleanup.\n' +
-  'This is a one-off job: do NOT author a new craftbook (`craftbook_write`) and do NOT hand-write task steps — invoking an existing recipe always beats both here. Only fall back to direct delegation if the shortlist is empty.)';
+  ' 2. Compare the recipes with the full request and choose one only if its purpose fits. Preserve the requested project: use `start_project` for a new project, or `invoke_craftbook({ craftbookId, project })` in the requested existing project.\n' +
+  'This is a one-off job: prefer an existing recipe over authoring one. If none fits, use a generic task or direct delegation; do not change the job to fit an unsuitable recipe.)';
 
 const MEESTER_CRAFTBOOK_AUTHOR_PRELUDE =
   '(System note for this turn: the user is asking for a REPEATABLE procedure, so the deliverable is a CRAFTBOOK — a reusable recipe — not a one-off. You have the tools for this; do it yourself, in this chat:\n' +

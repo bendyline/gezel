@@ -128,7 +128,12 @@ export async function* observeApiStream<T>(
         terminalEvent = e.type;
         const reason = e.response?.incomplete_details?.reason;
         if (e.type === 'response.incomplete' && reason) {
-          incompleteReason = ['max_output_tokens', 'content_filter', 'steered'].includes(reason)
+          incompleteReason = [
+            'max_output_tokens',
+            'max_messages',
+            'content_filter',
+            'steered',
+          ].includes(reason)
             ? reason
             : 'other';
         }

@@ -145,7 +145,13 @@ describe('API request observation', () => {
     });
   });
 
-  it('distinguishes a provider-declared incomplete response from an abandoned stream', async () => {
+  it.each([
+    'max_output_tokens',
+    'max_messages',
+    'content_filter',
+    'steered',
+    'private unexpected reason',
+  ])('records safe provider-declared incomplete reason %s', async (reason) => {
     vi.stubEnv('GEZEL_EVAL_OBSERVE', '1');
     await collect(
       observeApiStream(
@@ -153,7 +159,7 @@ describe('API request observation', () => {
           stream([
             {
               type: 'response.incomplete',
-              response: { incomplete_details: { reason: 'max_output_tokens' } },
+              response: { incomplete_details: { reason } },
             },
           ]),
         { provider: 'openai', request: {}, round: 1 },
@@ -162,8 +168,9 @@ describe('API request observation', () => {
     expect(records()[1]).toMatchObject({
       outcome: 'incomplete',
       terminalEvent: 'response.incomplete',
-      incompleteReason: 'max_output_tokens',
+      incompleteReason: reason.startsWith('private') ? 'other' : reason,
     });
+    expect(lines.join('\n')).not.toContain('private');
   });
   it('preserves SDK errors and records their status without copying error bodies', async () => {
     vi.stubEnv('GEZEL_EVAL_OBSERVE', '1');
@@ -189,7 +196,11 @@ describe('API request observation', () => {
     );
     await observed.next();
     await observed.return(undefined);
-    expect(records()[1].outcome).toBe('incomplete');
+    expect(records()[1]).toMatchObject({
+      outcome: 'incomplete',
+      terminalEvent: null,
+      incompleteReason: null,
+    });
     expect(apiToolSurface([{ name: 'a' }]).schemaHash).not.toBe(
       apiToolSurface([{ name: 'b' }]).schemaHash,
     );

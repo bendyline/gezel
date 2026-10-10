@@ -227,10 +227,23 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
 
   if (
+    /Qualification failed:/.test(reason) &&
+    /API (?:provider returned \d+ incomplete response|stream ended without a terminal event)/.test(
+      reason,
+    )
+  ) {
+    return {
+      failureClass: 'infra',
+      rule: 'api-response-incomplete',
+      evidence: reason.slice(0, 240),
+    };
+  }
+
+  if (
     /Qualification (?:failed:|blocked evaluator|blocked provider|blocked an undeclared evaluator)/.test(
       reason,
     ) &&
-    /(?:measurement|provenance|observation|unobservable|not be observed|not observed|lifecycle evidence|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
+    /(?:measurement|provenance|observation|telemetry|unobservable|not be observed|not observed|lifecycle evidence|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
       reason,
     )
   ) {

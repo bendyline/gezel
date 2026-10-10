@@ -428,7 +428,7 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
-test('PR CI runs the full browser suite the Electron release gates on', async () => {
+test('PR CI runs the full browser and Electron suites the release gates on', async () => {
   const [quality, release] = await Promise.all([
     readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
@@ -445,6 +445,15 @@ test('PR CI runs the full browser suite the Electron release gates on', async ()
     'PR CI must run every browser spec the release runs, not a subset',
   );
   assert.match(web, /if: failure\(\)[\s\S]*packages\/app\/test-results\//);
+
+  const desktop = quality.slice(webEnd);
+  assert.match(
+    desktop,
+    /run: xvfb-run -a pnpm test:e2e:run\s*\n/,
+    'PR CI must run every Electron spec the release runs, not just the desktop smoke subset',
+  );
+  assert.doesNotMatch(desktop, /continue-on-error: true/);
+  assert.match(desktop, /if: failure\(\)[\s\S]*packages\/app\/test-results\//);
 
   const releaseQualityStart = release.indexOf('  quality:');
   const releaseQualityEnd = release.indexOf('\n  build-windows:', releaseQualityStart);

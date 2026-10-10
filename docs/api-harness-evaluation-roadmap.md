@@ -1,6 +1,8 @@
 # API harness guidance evaluation roadmap
 
-Status: proposed testing roadmap, 2026-10-09. This document does not change runtime defaults or launch evals.
+Status: Phase 0 qualified on both API providers; Phase 1 campaign tooling prepared,
+2026-10-09. Later experimental controls remain proposed. This document does not
+change runtime defaults or launch evals.
 
 Find the least intrusive Gezel guidance that reliably completes real work with the Anthropic and OpenAI API providers. Start with `claude-sonnet-5-5` and `gpt-6-luna`, compare settings within each model, and preserve useful support for smaller local models. Treat generalist execution as the current frontier default and a hypothesis to verify, not as a predetermined winner.
 
@@ -77,6 +79,13 @@ retry counts, and semantic claims in unrestricted final prose have the explicit
 observability limits documented there.
 
 ## Phase 1 Quantify evaluator assistance
+
+The paired campaign is available as `pnpm eval:api-campaign`. See the
+[campaign commands and safeguards](../evals/README.md#paired-api-campaign-phase-1).
+Planning is the default; `--execute` starts paid trials. The first screen has
+12 attempts, and `--count 3` extends that same journal to 36 total. Both providers
+passed the preceding codemod qualification once, with full artifact/lifecycle
+completion and zero evaluator repairs; these are integration checks, not rates.
 
 Hold generalist **on**, current product guidance/recovery, and a frozen user-simulation policy. Compare `runtime` and `harness` on `tictactoe`, `symptom-debug`, and `craftbook-codemod-sweep` for each API model. These span artifact creation, debugging, and a multi-step workflow.
 
