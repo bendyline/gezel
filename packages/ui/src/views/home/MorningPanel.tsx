@@ -14,7 +14,7 @@ import { navigateToTab } from '../../components/nav-actions.js';
 import { NightPrimaryReport } from './NightReviewPanel.js';
 
 /**
- * The Home "This morning" tab: decisions first. The morning card leads (what
+ * The Night shift tab with an unanswered review: decisions first. The card leads (what
  * is waiting on a decision, what is new, what finished, a paused review to
  * resume, and why a quiet night was quiet), then the night's main report
  * read in place, then what is already queued for tonight.
@@ -43,7 +43,7 @@ export function MorningPanel({
   }, []);
 
   return (
-    <div className="home-workshop-status-report" role="tabpanel" data-testid="morning-panel">
+    <div className="home-workshop-status-report" data-testid="morning-panel">
       {question && <PendingQuestionCard question={question} onAnswered={onAnswered} compact />}
       <NightPrimaryReport primary={review?.reports[0]} />
       <MorningPhotos />

@@ -226,9 +226,9 @@ jobs:
             --version "${{ needs.release-preflight.outputs.version }}" \
             --sbom artifacts/gezel.cdx.json
       - name: Production dependency vulnerability gate
-        # critical matches the PR-time gate in quality.yml — the two must
+        # high matches the PR-time gate in quality.yml — the two must
         # stay in lockstep so a release never fails on something CI passed.
-        run: pnpm audit:vulnerabilities --audit-level=critical
+        run: pnpm audit:vulnerabilities --audit-level=high
       - name: Dependency license policy gate
         run: pnpm audit:licenses
       - name: Preserve supply-chain inventory
@@ -1379,6 +1379,16 @@ jobs:
           done
           [[ "$found" == "1" ]]
 
+      - name: Verify Linux runtime dependencies
+        run: |
+          set -euo pipefail
+          for extension in deb rpm; do
+            test -n "$(find packages/app/dist/installers -maxdepth 1 -name "*.$extension" -print -quit)"
+          done
+          for installer in packages/app/dist/installers/*.deb packages/app/dist/installers/*.rpm; do
+            node scripts/verify-linux-runtime-dependencies.mjs "$installer"
+          done
+
       - name: Smoke-test packaged Linux app
         env:
           GEZEL_PACKAGED_SMOKE: '1'
@@ -1544,6 +1554,16 @@ jobs:
           # before clicking a .deb. Keep in step with
           # docs/handboek/technical/verifying-your-download.md.
           body: |
+            ## Linux compatibility
+
+            Linux installers require glibc 2.38 or newer and a C++ runtime
+            providing `GLIBCXX_3.4.32` and `CXXABI_1.3.15` (GCC 14.1 or newer),
+            on x64 and arm64.
+            Ubuntu 24.04 LTS and Debian 13 meet these runtime requirements;
+            Ubuntu 22.04, Debian 12 and RHEL 9 do not. The package manager
+            enforces these dependencies for the complete desktop installation.
+            [Runtime requirements](https://github.com/bendyline/gezel/blob/main/docs/native-runtime-requirements.md).
+
             ## Verifying your download
 
             Every file below is listed in `SHA256SUMS` and carries SLSA build

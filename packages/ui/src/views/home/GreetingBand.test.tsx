@@ -1,5 +1,6 @@
 import type { MeesterStatusReport } from '@bendyline/gezel';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { GreetingBand } from './GreetingBand.js';
 import { freshStatusReport, greetingForHour } from './utils.js';
@@ -61,6 +62,8 @@ describe('GreetingBand', () => {
     renderBand();
     const expected = `${greetingForHour(new Date().getHours())}.`;
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(expected);
+    expect(screen.getByText('Tip of the day')).toBeVisible();
+    expect(screen.queryByTestId('status-report-panel')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Status report' })).toBeNull();
   });
 
@@ -81,21 +84,49 @@ describe('GreetingBand', () => {
     }
   });
 
-  it('offers a Status report tab and renders the report panel when selected', () => {
-    const onTabChange = vi.fn();
-    renderBand({ statusReport: REPORT, onTabChange });
-    fireEvent.click(screen.getByRole('button', { name: 'Status report' }));
-    expect(onTabChange).toHaveBeenCalledWith('status');
-
-    renderBand({ statusReport: REPORT, tab: 'status' });
-    expect(screen.getByTestId('status-report-panel')).toHaveTextContent('All levels ship.');
+  it('shows the status report in Good morning instead of the tip when available', () => {
+    renderBand({ statusReport: REPORT });
+    expect(screen.getByRole('tabpanel', { name: 'Good morning' })).toHaveTextContent(
+      'All levels ship.',
+    );
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Status report' })).not.toBeInTheDocument();
   });
 
-  it('shows the status headline in the collapsed row too', () => {
-    renderBand({ statusReport: REPORT, collapsed: true });
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
-      'Your space war game is done!',
-    );
+  it('keeps tabs and actionable chips visible when collapsed, hiding the content', () => {
+    renderBand({
+      statusReport: REPORT,
+      collapsed: true,
+      nightReview: {
+        windowKey: '2026-10-09',
+        windowStart: '2026-10-09T22:00:00.000Z',
+        windowEnd: '2026-10-10T06:00:00.000Z',
+        tasksCompleted: [],
+        reports: [],
+        diffpacks: [],
+      },
+      makeSomething: <div>starter cards</div>,
+      chips: [{ label: '1 waiting on you', dot: 'var(--ochre)', onClick: vi.fn() }],
+    });
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Good morning',
+      'Night shift',
+      'Make something',
+      'Handboek',
+    ]);
+    expect(screen.getByRole('button', { name: '1 waiting on you' })).toBeVisible();
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    expect(screen.queryByText('starter cards')).not.toBeInTheDocument();
+  });
+
+  it('activates a different collapsed tab by keyboard', async () => {
+    const onTabChange = vi.fn();
+    renderBand({ collapsed: true, makeSomething: <div>starter cards</div>, onTabChange });
+    screen.getByRole('tab', { name: 'Good morning' }).focus();
+    await userEvent.setup().keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Make something' })).toHaveFocus();
+    expect(onTabChange).toHaveBeenCalledWith('make');
   });
 
   it('shows the Handboek article with read and watch choices in the tour', () => {

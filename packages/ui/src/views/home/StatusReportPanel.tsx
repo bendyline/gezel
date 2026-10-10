@@ -32,7 +32,7 @@ export function StatusReportPanel({
   }, [report.report]);
 
   return (
-    <div className="home-workshop-status-report" role="tabpanel" data-testid="status-report-panel">
+    <div className="home-workshop-status-report" data-testid="status-report-panel">
       <div className="home-workshop-status-body">
         {doc ? (
           <LinearDocView

@@ -10,14 +10,14 @@ import { formatAbsoluteTime } from '../../relative-time.js';
 import { timeAgo } from './utils.js';
 
 /**
- * The Home "Last night" tab — what the most recent night window
+ * The Home "Night shift" tab — what the most recent night window
  * accomplished. The primary report (most actionable first, per the
  * review's sort) renders inline with live gezel-action cards; the rest
  * are rows that open their project.
  */
 /**
  * A night report read in place, with its suggested actions live. Shared by
- * the Last night panel and the This morning panel.
+ * the night summary and the unanswered morning review.
  */
 export function NightPrimaryReport({
   primary,
@@ -90,7 +90,7 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
   const proposals = review.diffpacks;
 
   return (
-    <div className="home-workshop-status-report" role="tabpanel" data-testid="night-review-panel">
+    <div className="home-workshop-status-report" data-testid="night-review-panel">
       <p className="home-workshop-night-summary">
         {review.tasksCompleted.length} task{review.tasksCompleted.length === 1 ? '' : 's'} finished
         overnight, {review.reports.length} report{review.reports.length === 1 ? '' : 's'} written

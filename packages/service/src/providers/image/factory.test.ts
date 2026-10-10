@@ -241,7 +241,7 @@ describe('buildSdServerArgs — aux role mapping', () => {
           { role: 'llm', path: '/tmp/ming/llm.safetensors' },
           { role: 'tokenizer', path: '/tmp/ming/tokenizer.json' },
         ]),
-        id: 'ming-image-0.1-design-int8',
+        id: 'ming-image-0.1-design-bf16',
       },
       8765,
     );

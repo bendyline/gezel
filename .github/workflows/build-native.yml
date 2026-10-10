@@ -104,7 +104,7 @@ env:
   #
   # Current values are the status quo, not a target. At 2.38 we exclude
   # Ubuntu 22.04 LTS (supported to 2027), Debian 12 and RHEL 9 — and nothing
-  # in the code needs it. The whole floor is toolchain leakage from building
+  # in the code needs it. The glibc floor is toolchain leakage from building
   # on ubuntu-24.04: four `__isoc23_strtol`-family symbols from glibc 2.38's
   # C23 redirects, plus one `_ZSt21ios_base_library_initv` from GCC 13's
   # <iostream>. For comparison NVIDIA ships libcublas/libcudart against
@@ -112,6 +112,9 @@ env:
   # a container or an older runner image — not changing any source.
   LINUX_MAX_GLIBC: '2.38'
   LINUX_MAX_GLIBCXX: '3.4.32'
+  # ARM64 llama-server-impl also imports GCC 14's CXXABI_1.3.15. Checking
+  # GLIBCXX alone incorrectly admitted GCC 13 runtimes (notably Fedora 39).
+  LINUX_MAX_CXXABI: '1.3.15'
 
 jobs:
   native_contract_tests:
@@ -1235,9 +1238,9 @@ jobs:
           echo "[guard] no unbundled OpenMP runtime dependency"
 
       # ── Linux symbol-version floor ────────────────────────────────
-      # Assert our binaries don't require newer glibc / libstdc++ symbols than
-      # LINUX_MAX_GLIBC / LINUX_MAX_GLIBCXX declare. Vendor libraries are
-      # excluded: their floor is the vendor's choice and is already lower than
+      # Assert our binaries don't require newer C, C++ library or C++ ABI
+      # symbols than LINUX_MAX_GLIBC / LINUX_MAX_GLIBCXX / LINUX_MAX_CXXABI.
+      # Vendor libraries are excluded: their floor is the vendor's choice and is already lower than
       # ours (NVIDIA targets GLIBC_2.17). Nothing else in CI notices this —
       # the runner always satisfies whatever it just built.
       - name: Assert Linux symbol-version floor
@@ -1262,6 +1265,7 @@ jobs:
             file -b "$f" 2>/dev/null | grep -q ELF || continue
             g=$(highest "$f" 'GLIBC_')
             x=$(highest "$f" 'GLIBCXX_')
+            c=$(highest "$f" 'CXXABI_')
             if [[ -n "$g" ]] && gt "$g" "${LINUX_MAX_GLIBC}"; then
               echo "::error::$(basename "$f") requires GLIBC_$g, above the declared floor ${LINUX_MAX_GLIBC}"
               objdump -T "$f" | grep "GLIBC_$g" | awk '{print "          " $NF}' | sort -u | head -20
@@ -1272,13 +1276,18 @@ jobs:
               objdump -T "$f" | grep "GLIBCXX_$x" | awk '{print "          " $NF}' | sort -u | head -20
               bad=1
             fi
-            printf '[floor] %-38s GLIBC_%-8s GLIBCXX_%s\n' "$(basename "$f")" "${g:--}" "${x:--}"
+            if [[ -n "$c" ]] && gt "$c" "${LINUX_MAX_CXXABI}"; then
+              echo "::error::$(basename "$f") requires CXXABI_$c, above the declared floor ${LINUX_MAX_CXXABI}"
+              objdump -T "$f" | grep "CXXABI_$c" | awk '{print "          " $NF}' | sort -u | head -20
+              bad=1
+            fi
+            printf '[floor] %-38s GLIBC_%-8s GLIBCXX_%-8s CXXABI_%s\n' "$(basename "$f")" "${g:--}" "${x:--}" "${c:--}"
           done
           if (( bad )); then
-            echo "::error::Raising the floor narrows which distros can run gezel. Either build against older glibc headers, or raise LINUX_MAX_GLIBC/LINUX_MAX_GLIBCXX deliberately and update docs/native-runtime-requirements.md."
+            echo "::error::Raising the floor narrows which distros can run gezel. Either build against older headers, or raise LINUX_MAX_GLIBC/LINUX_MAX_GLIBCXX/LINUX_MAX_CXXABI deliberately and update the installer dependencies, verifier and docs/native-runtime-requirements.md."
             exit 1
           fi
-          echo "[floor] within declared limits (GLIBC ${LINUX_MAX_GLIBC}, GLIBCXX ${LINUX_MAX_GLIBCXX})"
+          echo "[floor] within declared limits (GLIBC ${LINUX_MAX_GLIBC}, GLIBCXX ${LINUX_MAX_GLIBCXX}, CXXABI ${LINUX_MAX_CXXABI})"
 
       # ── macOS rpath hygiene ───────────────────────────────────────
       # The darwin build scripts delete the absolute LC_RPATH CMake bakes

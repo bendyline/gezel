@@ -77,7 +77,7 @@ describe('StableDiffusionCppProvider.generate', () => {
         return Response.json({ images: [png.toString('base64')] });
       },
     });
-    const input = { prompt: 'A transparent cat sticker', model: 'ming-image-0.1-design-int8' };
+    const input = { prompt: 'A transparent cat sticker', model: 'ming-image-0.1-design-bf16' };
     const out = await provider.generate(input);
     expect(requests[0]).toMatchObject({
       steps: 12,

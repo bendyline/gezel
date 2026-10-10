@@ -36,6 +36,7 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { verifyDeployedVulnerabilityExceptions } from './audit-vulnerability-policy.mjs';
 import { deployMlRuntime } from './deploy-ml-runtime.mjs';
 import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
 import { packDeployedGildeCommunity, verifyPackedGildeCommunity } from './pack-gilde-community.mjs';
@@ -182,6 +183,7 @@ async function main() {
 
 async function verifyBundleRuntime(root) {
   console.log(`[build-service-bundle] verifying extracted runtime: ${root}`);
+  await verifyDeployedVulnerabilityExceptions(root);
   if (!existsSync(join(root, 'dist', 'handboek.gezk'))) {
     throw new Error('[build-service-bundle] extracted runtime is missing dist/handboek.gezk');
   }

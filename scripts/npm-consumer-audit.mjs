@@ -5,11 +5,10 @@
  * WHY a separate module: the consumer check does all of its work at import
  * time, so its decision logic could not be tested.
  *
- * Critical only, like every other audit gate. Advisories land on npm's clock,
- * not ours, and a `high` threshold turned each new DoS report against a
- * transitive dependency into a red build on unrelated work. The daily
- * supply-chain workflow still reports high and below. The allowlist remains
- * for a critical advisory that is genuinely unreachable.
+ * Critical only for the separate clean npm-consumer graph. The desktop
+ * production gate blocks high advisories and verifies its applied patches;
+ * those pnpm patches do not apply to external npm consumers. Keep the clean
+ * consumer check independent rather than transferring desktop exceptions.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

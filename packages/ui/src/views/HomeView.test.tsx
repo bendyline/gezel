@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -763,6 +764,7 @@ describe('HomeView', () => {
       const chip = await screen.findByRole('button', { name: /1 waiting on you/ });
       fireEvent.click(chip);
       expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened.mock.calls[0]![0].detail).toEqual({ section: 'needs-you' });
     } finally {
       window.removeEventListener('gezel:open-updates', opened);
     }
@@ -790,6 +792,7 @@ describe('HomeView', () => {
       render(<HomeView />);
       fireEvent.click(await screen.findByRole('button', { name: /1 ready for you/ }));
       expect(opened).toHaveBeenCalledTimes(1);
+      expect(opened.mock.calls[0]![0].detail).toEqual({ section: 'ready' });
       expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
     } finally {
       window.removeEventListener('gezel:open-updates', opened);
@@ -887,7 +890,7 @@ describe('HomeView', () => {
       expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
-    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
     // The collapse preference is written through to server config so it
     // survives a relaunch (localStorage strands across the port shuffle).
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
@@ -949,7 +952,7 @@ describe('HomeView', () => {
     };
     const { rerender } = render(<HomeWorkshop config={null} {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: 'mock send' }));
-    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
 
     rerender(
       <HomeWorkshop
@@ -978,17 +981,113 @@ describe('HomeView', () => {
 
   it('switches to the "what is gezel" tour tab', async () => {
     render(<HomeView />);
-    const tourName = 'New here? What is gezel';
+    const tourName = 'Handboek';
     await waitFor(() => {
       expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     });
-    const tourTab = screen.getByRole('button', { name: tourName });
-    expect(tourTab).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(tourTab);
+    const tourTab = screen.getByRole('tab', { name: tourName });
+    expect(tourTab).toHaveAttribute('aria-selected', 'false');
+    await userEvent.setup().click(tourTab);
     // The tour content replaces the greeting + tip in the left column.
-    expect(tourTab).toHaveAttribute('aria-pressed', 'true');
+    expect(tourTab).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+  });
+
+  it('opens every intro destination directly from the collapsed tab bar', async () => {
+    const user = userEvent.setup();
+    render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    expect(screen.queryByRole('region', { name: 'Make something' })).not.toBeInTheDocument();
+    for (const name of ['Make something', 'Handboek', 'Good morning']) {
+      await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
+      await user.click(screen.getByRole('tab', { name }));
+      expect(screen.getByRole('tabpanel', { name })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeVisible();
+      expect(screen.getByTestId('chat-composer')).toBeVisible();
+      expect(screen.getByTestId('timeline').closest('[role="tabpanel"]')).toBeNull();
+    }
+    expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: false });
+    // Reopening the selected tab must work too, and hold through chat activity.
+    await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
+    await user.click(screen.getByRole('tab', { name: 'Good morning' }));
+    fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
+    expect(screen.getByText('Tip of the day')).toBeVisible();
+  });
+
+  it('rolls up the intro from the shaded chat strip, preserving the conversation', async () => {
+    const user = userEvent.setup();
+    render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    const conversation = screen.getByRole('region', { name: 'Meester chat' });
+    const composer = screen.getByTestId('chat-composer');
+    expect(conversation).toHaveAttribute('inert');
+
+    await user.click(screen.getByRole('button', { name: 'Return to Meester chat' }));
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Return to Meester chat' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Good morning' })).toBeVisible();
+    expect(screen.getByTestId('chat-composer')).toBe(composer);
+    expect(conversation).not.toHaveAttribute('inert');
+    expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+    await waitFor(() => expect(conversation).toHaveFocus());
+
+    await user.click(screen.getByRole('tab', { name: 'Make something' }));
+    expect(screen.getByRole('tabpanel', { name: 'Make something' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeVisible();
+    expect(screen.getByTestId('chat-composer')).toBe(composer);
+  });
+
+  it('returns to chat with Escape from the intro', async () => {
+    const user = userEvent.setup();
+    render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    screen.getByRole('tab', { name: 'Good morning' }).focus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Meester chat' })).toHaveFocus());
+  });
+
+  it('keeps an unread night review under Night shift and removes the tab after dismissal', async () => {
+    const question = {
+      id: 'night-review',
+      projectId: 'default',
+      gezelId: 'gz-meester',
+      sessionId: 's1',
+      prompt: 'Your overnight review is ready.',
+      createdAt: new Date().toISOString(),
+      intent: {
+        kind: 'night-shift-review',
+        windowKey: '2026-07-29',
+        reports: [],
+        tasksCompleted: 0,
+      },
+    };
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [question] } as never);
+    const user = userEvent.setup();
+    render(<HomeView />);
+    expect(await screen.findByTestId('morning-panel')).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Night shift' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
+    await user.click(screen.getByRole('tab', { name: 'Night shift' }));
+    expect(screen.getByRole('tabpanel', { name: 'Night shift' })).toBeVisible();
+    await user.click(screen.getByRole('tab', { name: 'Good morning' }));
+    expect(screen.getByText('Tip of the day')).toBeVisible();
+
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] } as never);
+    events.push({
+      sessionId: 's1',
+      gezelId: 'gz-meester',
+      projectId: 'default',
+      event: { type: 'question_answered', question: { ...question, answer: { at: 'now' } } },
+    });
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Night shift' })).toBeNull());
+    expect(screen.getByRole('tabpanel', { name: 'Good morning' })).toBeVisible();
   });
 
   it('cycles the tip of the day', async () => {

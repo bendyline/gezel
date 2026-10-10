@@ -1,3 +1,4 @@
+import type { ActivitySection } from '@bendyline/gezel';
 import { type OpenFileIntent, queueOpenFile } from './pending-open-file.js';
 import { type OpenHandboekIntent, queueOpenHandboek } from './pending-open-handboek.js';
 import { type OpenKnowledgeIntent, queueOpenKnowledge } from './pending-open-knowledge.js';
@@ -71,8 +72,13 @@ export function navigateToTab(detail: RecentTabInput): void {
 /** Opens Activity. The event name remains compatible with existing entry points. */
 export const OPEN_UPDATES_EVENT = 'gezel:open-updates';
 
-export function openUpdates(projectId?: string): void {
-  window.dispatchEvent(new CustomEvent(OPEN_UPDATES_EVENT, { detail: { projectId } }));
+export interface OpenActivityIntent {
+  projectId?: string;
+  section?: ActivitySection;
+}
+
+export function openUpdates(intent: OpenActivityIntent = {}): void {
+  window.dispatchEvent(new CustomEvent(OPEN_UPDATES_EVENT, { detail: intent }));
 }
 
 /**

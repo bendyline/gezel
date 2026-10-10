@@ -130,7 +130,7 @@ export const DISTILLED_MODEL_SAMPLE_STEPS = new Map<string, number>([
   ['krea-2-turbo-q4', 8],
   ['krea-2-turbo-q6', 8],
   ['krea-2-turbo-q8', 8],
-  ['ming-image-0.1-design-int8', 12],
+  ['ming-image-0.1-design-bf16', 12],
 ]);
 
 /**
@@ -154,12 +154,12 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['sd-turbo', 1],
   ['sdxl-turbo', 1],
   ['sdxl-lightning-4step', 1],
-  ['ming-image-0.1-design-int8', 1],
+  ['ming-image-0.1-design-bf16', 1],
 ]);
 
 /** Pin Ming's reference sampler instead of inheriting the server default. */
 export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
-  ['ming-image-0.1-design-int8', 'Euler'],
+  ['ming-image-0.1-design-bf16', 'Euler'],
 ]);
 
 /**
@@ -226,7 +226,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const modelId = input.model ?? (await this.currentDefaultModelId());
     // Ming's reference workflow starts at 1024px; 512px is the legacy SD default.
-    const defaultDimension = modelId === 'ming-image-0.1-design-int8' ? 1024 : 512;
+    const defaultDimension = modelId === 'ming-image-0.1-design-bf16' ? 1024 : 512;
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
     const steps = input.steps ?? (await this.defaultSampleSteps(modelId));

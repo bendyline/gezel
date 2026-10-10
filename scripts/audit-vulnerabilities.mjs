@@ -3,26 +3,35 @@
 
 import { requestAdvisories } from './audit-vulnerabilities-lib.mjs';
 import {
+  DEFAULT_AUDIT_LEVEL,
+  classifyAdvisories,
+  readVulnerabilityExceptions,
+} from './audit-vulnerability-policy.mjs';
+import {
   packageVersionsFromInventory,
   readProductionLicenseInventory,
 } from './production-dependency-inventory.mjs';
 
 const levels = ['info', 'low', 'moderate', 'high', 'critical'];
-const requestedLevel = valueAfter('--audit-level') ?? 'critical';
+const requestedLevel = valueAfter('--audit-level') ?? DEFAULT_AUDIT_LEVEL;
 const threshold = levels.indexOf(requestedLevel);
 if (threshold < 0) {
   throw new Error(`invalid --audit-level ${JSON.stringify(requestedLevel)}`);
 }
 
-const packages = packageVersionsFromInventory(readProductionLicenseInventory());
+const inventory = readProductionLicenseInventory();
+const packages = packageVersionsFromInventory(inventory);
 const advisories = await requestAdvisories(packages);
-const failing = advisories.filter((advisory) => severityOf(advisory) >= threshold);
+const classified = classifyAdvisories(advisories, inventory, readVulnerabilityExceptions());
+const failing = classified.filter(
+  ({ advisory, exception }) => !exception && severityOf(advisory) >= threshold,
+);
 
 if (advisories.length === 0) {
   console.log(`✓ vulnerability audit passed — ${Object.keys(packages).length} production packages`);
   process.exit(0);
 }
-for (const advisory of advisories) {
+for (const { advisory, exception } of classified) {
   const severity = String(advisory.severity ?? 'unknown');
   const id = String(advisory.id ?? 'unknown');
   const name = String(advisory.name ?? 'unknown');
@@ -36,6 +45,11 @@ for (const advisory of advisories) {
   console.log(
     `- [${severity}] ${name} (installed: ${installed}${affected}): ${title} (${id})${url}`,
   );
+  if (exception) {
+    console.log(
+      `  ${exception.state}: verified reviewed bytes; expires ${exception.expires}. ${exception.reason}`,
+    );
+  }
 }
 if (failing.length > 0) {
   console.error(
@@ -44,7 +58,7 @@ if (failing.length > 0) {
   process.exit(1);
 }
 console.log(
-  `✓ vulnerability audit passed threshold ${requestedLevel} — ${advisories.length} lower-severity advisory(s) reported`,
+  `✓ vulnerability audit passed threshold ${requestedLevel} — ${classified.filter(({ exception }) => exception).length} verified exception(s); ${classified.filter(({ exception }) => !exception).length} lower-severity advisory(s) reported`,
 );
 
 function valueAfter(flag) {

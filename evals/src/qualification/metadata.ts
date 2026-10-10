@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { gildeDataDir } from '@bendyline/gezel-catalog';
 import type { EvalScenario, TrialOptions } from '../types.ts';
 import { digest } from './boundary.ts';
+import { sourceIdentity } from './source-identity.ts';
 
 /** Content identity, not mtime; symlinks are omitted to avoid traversing user homes. */
 export async function treeIdentity(root: string): Promise<{ sha256: string; files: number }> {
@@ -39,24 +39,7 @@ export async function captureQualificationIdentity(root: string) {
       return null;
     }
   }
-  const source = await capture('source', async () => {
-    const git = (...args: string[]) =>
-      execFileSync('git', args, { cwd: root, maxBuffer: 64 * 1024 * 1024 });
-    const head = git('rev-parse', 'HEAD').toString().trim();
-    const hash = createHash('sha256').update(git('diff', '--binary', 'HEAD'));
-    const untracked = git('ls-files', '--others', '--exclude-standard', '-z')
-      .toString()
-      .split('\0')
-      .filter(Boolean)
-      .sort();
-    for (const path of untracked)
-      hash
-        .update(path)
-        .update('\0')
-        .update(await readFile(join(root, path)))
-        .update('\0');
-    return { head, workingTreeSha256: hash.digest('hex'), untrackedFiles: untracked.length };
-  });
+  const source = await capture('source', () => sourceIdentity(root));
   const service = await capture('service-build', () =>
     treeIdentity(join(root, 'packages/service/dist')),
   );

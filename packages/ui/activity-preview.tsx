@@ -1,0 +1,20 @@
+
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {ActivityControl} from './src/components/ActivityControl.tsx';
+import {ActivityProvider} from './src/components/activity-context.tsx';
+import {api} from './src/api.ts';
+import {openUpdates} from './src/components/nav-actions.ts';
+import './src/assets/fonts/fonts.css';
+import './src/styles.css';
+const at=new Date().toISOString();
+const questions=Array.from({length:4},(_,i)=>({id:'q'+i,projectId:'default',gezelId:'wren',sessionId:'s'+i,prompt:i ? 'Report '+i+' is ready for you to read.' : Array.from({length:16},()=> 'Please review this request before the crew continues working.').join(String.fromCharCode(10,10)),choices:['OK'],allowWriteIn:true,createdAt:at,...(i ? {intent:{kind:'task-finished',taskRef:'default/'+i}} : {})}));
+const items=questions.map((q,i)=>({id:q.id,section:i?'ready':'needs-you',title:q.prompt,detail:'',questionIds:[q.id]}));
+api.getActivityStatus=async()=>({at,questions,items,queues:{at,providers:{},sessions:[],cache:[],taskRunner:{pendingCount:0,pendingByGezel:{},pendingByProject:{}}}});
+api.getConfig=async()=>({provider:'copilot'});
+api.listGezels=async()=>({gezels:[]});
+api.listProjects=async()=>({projects:[]});
+api.getFetch=()=>()=>new Promise(()=>{});
+api.allEventsUrl=()=>'/preview-events';
+api.authHeader=()=>({});
+createRoot(document.getElementById('root')).render(<ActivityProvider><div style={{height:48,display:'flex',alignItems:'center',justifyContent:'flex-end',padding:12,background:'var(--titlebar)'}}><ActivityControl/></div><main style={{padding:32}}><h1>Meester</h1><p>Your conversation stays here while Activity closes.</p><button type='button' id='ready' onClick={()=>openUpdates({section:'ready'})}>3 ready for you</button><button type='button' id='needs' onClick={()=>openUpdates({section:'needs-you'})}>1 waiting on you</button></main></ActivityProvider>);

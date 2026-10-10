@@ -130,7 +130,7 @@
     "verify:npm-licenses": "node --test scripts/npm-pack-output.test.mjs && node scripts/verify-service-package-licenses.mjs && node scripts/verify-connectors-spectral-package-licenses.mjs",
     "audit:sbom": "node scripts/generate-sbom.mjs",
     "audit:vulnerabilities": "node scripts/audit-vulnerabilities.mjs",
-    "test:audit-vulnerabilities": "node --test scripts/audit-vulnerabilities.test.mjs",
+    "test:audit-vulnerabilities": "node --test scripts/audit-vulnerabilities.test.mjs scripts/audit-vulnerability-policy.test.mjs scripts/braces-security.test.mjs",
     "setup": "node scripts/setup.mjs",
     "fetch:native": "node scripts/fetch-native-binaries.mjs",
     "check:workflows": "node scripts/check-workflow-action-pins.mjs",

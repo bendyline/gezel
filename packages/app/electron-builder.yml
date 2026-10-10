@@ -543,6 +543,10 @@ deb:
   # distros use it. List explicitly so package managers refuse to
   # install on init-system-other systems instead of silently failing.
   depends:
+    # One product floor for both architectures: ARM64 also needs CXXABI_1.3.15,
+    # first provided by GCC 14.1. Keep the artifact verifier in sync.
+    - libc6 (>= 2.38)
+    - libstdc++6 (>= 14.1.0)
     - acl
     - libgtk-3-0
     - libnotify4
@@ -562,6 +566,11 @@ rpm:
   fpm:
     - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   depends:
+    # Symbol capabilities select the correct 64-bit ABI on x64 and arm64,
+    # without assuming a distro's libstdc++ package-version convention.
+    - libc.so.6(GLIBC_2.38)(64bit)
+    - libstdc++.so.6(GLIBCXX_3.4.32)(64bit)
+    - libstdc++.so.6(CXXABI_1.3.15)(64bit)
     - acl
     - libnotify
     # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.

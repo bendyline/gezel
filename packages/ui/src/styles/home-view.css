@@ -116,7 +116,7 @@
   color: var(--ink-3);
   font-weight: 500;
 }
-/* Circular collapse/expand toggle — a single symmetric chevron, no label. */
+/* A single symmetric chevron keeps the intro's toggle compact. */
 .home-workshop-collapse-btn {
   display: inline-flex;
   align-items: center;
@@ -125,7 +125,7 @@
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-md);
   border: 1px solid var(--home-border);
   background: var(--home-card);
   color: var(--ink-2);
@@ -142,17 +142,75 @@
   display: block;
 }
 /* — Greeting band — */
+.home-workshop-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  isolation: isolate;
+}
 .home-workshop-greeting {
-  border-bottom: 1px solid var(--home-hair);
-  padding: 20px 54px 32px;
-  flex: 0 0 auto;
+  display: contents;
 }
 .home-workshop-greeting-top {
+  grid-area: 1 / 1;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  padding: 12px 54px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--home-hair);
+}
+/* The conversation keeps its full layout behind the rolling intro sheet. */
+.home-workshop-intro-sheet {
+  grid-area: 2 / 1;
+  align-self: start;
+  z-index: 2;
+  height: 90%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 16px 24px -8px var(--titlebar-pane-shadow);
+  visibility: visible;
+  transition: height 160ms ease-out, visibility 0s;
+}
+.home-workshop-greeting-collapsed .home-workshop-intro-sheet {
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: height 160ms ease-out, visibility 0s 160ms;
+}
+.home-workshop-chat-shade {
+  grid-area: 2 / 1;
+  z-index: 1;
+  align-self: end;
+  height: 10%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--titlebar-pane-shadow);
+  box-shadow: none;
+  cursor: pointer;
+}
+.home-workshop-chat-shade:hover,
+.home-workshop-chat-shade:active {
+  background: var(--titlebar-pane-shadow);
+  box-shadow: none;
+}
+.home-workshop-chat-shade:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-workshop-intro-sheet,
+  .home-workshop-greeting-collapsed .home-workshop-intro-sheet {
+    transition: none;
+  }
 }
 .home-workshop-greeting-cols {
   display: flex;
@@ -160,35 +218,23 @@
   justify-content: space-between;
   gap: 32px;
   flex-wrap: wrap;
-}
-.home-workshop-greeting-left {
-  flex: 1 1 340px;
-  min-width: 280px;
-}
-/* Night reviews share the available width and leave at least half of Home
-   for the Meester conversation. Keep the tabs above one scrolling region. */
-.home-workshop-greeting-night-review {
-  display: flex;
-  flex-direction: column;
-  max-height: min(50%, 50dvh);
-  min-height: 0;
-}
-.home-workshop-greeting-night-review .home-workshop-greeting-top {
-  flex-shrink: 0;
-}
-.home-workshop-greeting-night-review .home-workshop-greeting-cols {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 14px 54px 32px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
-.home-workshop-greeting-night-review .home-workshop-greeting-left {
+.home-workshop-greeting-left {
+  flex: 1 1 340px;
   min-width: 0;
 }
-.home-workshop-greeting-night-review .home-workshop-status-report {
+/* Reports use the sheet's single scroll area, including their actions. */
+.home-workshop-greeting .home-workshop-status-report {
   max-width: none;
 }
-.home-workshop-greeting-night-review .home-workshop-status-body {
+.home-workshop-greeting .home-workshop-status-body {
   max-height: none;
   overflow-y: visible;
 }
@@ -257,29 +303,11 @@
   color: var(--ink);
 }
 
-/* Collapsed greeting — single status row */
-.home-workshop-greeting-collapsed {
-  border-bottom: 1px solid var(--home-hair);
-  padding: 16px 54px;
+/* Collapsing keeps every named destination and actionable chip available. */
+.home-workshop-collapsed-chips {
   display: flex;
-  align-items: center;
-  gap: 16px;
   flex-wrap: wrap;
-  flex: 0 0 auto;
-}
-.home-workshop-greeting-collapsed .home-workshop-headline {
-  font-size: 19px;
-  white-space: nowrap;
-}
-.home-workshop-vrule {
-  width: 1px;
-  height: 16px;
-  background: var(--home-hair);
-}
-/* The rule divides the headline from chips; with none it trails the
-   headline like a text cursor. */
-.home-workshop-vrule:has(+ :empty) {
-  display: none;
+  gap: 8px;
 }
 
 /* Tip of the day */
@@ -395,8 +423,7 @@
   color: var(--ink-3);
   font-weight: 400;
 }
-/* Greeting tabs — the date label and the "what is gezel" tour sit side
-   by side as tabs; the active one's content fills the left column. */
+/* Intro labels remain visible at narrow widths, wrapping without scrolling. */
 .home-workshop-tabs {
   border: 0;
   margin: 0;
@@ -406,18 +433,20 @@
   gap: 4px;
   min-width: 0;
   flex-wrap: wrap;
+  overflow: visible;
+  flex: 1;
 }
 .home-workshop-tab {
   font-family: var(--font-ui);
-  font-size: 10px;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--ink-3);
+  color: var(--ink-2);
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  padding: 6px 8px;
+  min-height: 32px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
@@ -426,11 +455,10 @@
   color: var(--ink-2);
   background: var(--home-card);
 }
-.home-workshop-tab.is-active {
+.home-workshop-tab[data-state="active"] {
   color: var(--ink);
   background: var(--home-card);
-  border-color: var(--home-border);
-  cursor: default;
+  border-bottom-color: var(--accent);
 }
 
 /* Tour content rendered inline in the left column (replaces the greeting
@@ -442,7 +470,8 @@
 
 /* — Body: full-width conversation — */
 .home-workshop-body {
-  flex: 1 1 auto;
+  grid-area: 2 / 1;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   /* Stretch the single row to the body's full height so the chat column
@@ -465,8 +494,7 @@
   min-height: 0;
 }
 
-/* Starters and folder setup can be taller than a phone screen. Let them
-   scroll together while reserving the rest of Home for the conversation. */
+/* Folder setup leaves the rest of Home for the conversation. */
 .home-workshop-actions {
   flex: 0 1 auto;
   min-height: 0;
@@ -535,7 +563,8 @@
 
 /* Responsive spacing for narrow widths. */
 @media (max-width: 920px) {
-  .home-workshop-greeting,
+  .home-workshop-greeting-top,
+  .home-workshop-greeting-cols,
   .home-workshop-main {
     padding-left: 28px;
     padding-right: 28px;

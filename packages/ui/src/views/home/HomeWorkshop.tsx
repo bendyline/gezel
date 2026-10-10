@@ -81,6 +81,13 @@ export function HomeWorkshop({
       return next;
     });
   }, []);
+  const conversationRef = useRef<HTMLElement>(null);
+  const returnToChat = () => {
+    userToggledCollapse.current = true;
+    setCollapsed(true);
+    void api.updateConfig({ homeGreetingCollapsed: true }).catch(() => {});
+    window.requestAnimationFrame(() => conversationRef.current?.focus({ preventScroll: true }));
+  };
   // Once the person is talking, or the meester's introduction fills the empty
   // conversation, the greeting steps aside for this visit: at full height it
   // squeezed the conversation to a third of the window, and on a phone's
@@ -98,6 +105,14 @@ export function HomeWorkshop({
   const [folderStepDone, setFolderStepDone] = useState(false);
   const offerFolderStep = !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
+  const selectTab = (next: HomeGreetingTab) => {
+    setTab(next);
+    userToggledCollapse.current = true;
+    if (collapsed) {
+      setCollapsed(false);
+      void api.updateConfig({ homeGreetingCollapsed: false }).catch(() => {});
+    }
+  };
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
   const [statusRunning, setStatusRunning] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -209,7 +224,7 @@ export function HomeWorkshop({
   // greeting rather than greeting the user with last week's news.
   const statusReport = useMemo(() => freshStatusReport(status?.report), [status]);
 
-  // Last night's review — the "Last night" tab appears only while the
+  // Last night's review — the "Night shift" tab appears only while the
   // window's end is recent (~12h) and the shift actually did something.
   const [nightReview, setNightReview] = useState<NightShiftReviewResponse | null>(null);
   const [latestReview, setLatestReview] = useState<NightShiftReviewResponse | null>(null);
@@ -232,7 +247,7 @@ export function HomeWorkshop({
     };
   }, []);
 
-  // The unanswered morning card opens Home on "This morning", once per card,
+  // The unanswered morning card opens Home on "Night shift", once per card,
   // whatever the band's saved collapse. It stays until the person dismisses
   // it: a night they have not looked at does not expire.
   const morningQuestion = useMemo(
@@ -245,11 +260,11 @@ export function HomeWorkshop({
     openedMorningFor.current = morningQuestion.id;
     reconciledCollapse.current = true;
     setCollapsed(false);
-    setTab('morning');
+    setTab('night');
   }, [morningQuestion]);
   useEffect(() => {
-    if (!morningQuestion && tab === 'morning') setTab('greeting');
-  }, [morningQuestion, tab]);
+    if (!morningQuestion && !nightReview && tab === 'night') setTab('greeting');
+  }, [morningQuestion, nightReview, tab]);
   const morningReview =
     morningQuestion?.intent?.kind === 'night-shift-review' &&
     latestReview?.windowKey === morningQuestion.intent.windowKey
@@ -298,7 +313,7 @@ export function HomeWorkshop({
       label: `${waitingOnYou} waiting on you`,
       actionLabel: activity || pendingQuestions.length > 0 ? 'Open Activity' : 'Open the task',
       onClick: () => {
-        if (activity || pendingQuestions.length > 0) openUpdates();
+        if (activity || pendingQuestions.length > 0) openUpdates({ section: 'needs-you' });
         else if (firstTask) navigateToTab({ kind: 'task', ref: firstTask.ref });
       },
     });
@@ -308,78 +323,108 @@ export function HomeWorkshop({
       dot: 'var(--sage)',
       label: `${readyForYou} ready for you`,
       actionLabel: 'Open Activity',
-      onClick: () => openUpdates(),
+      onClick: () => openUpdates({ section: 'ready' }),
     });
   }
 
   return (
     <div className="home-workshop" data-testid="home-workshop">
       {banner}
-      <GreetingBand
-        chips={chips}
-        meesterName={meesterName}
-        meesterPoppetje={meesterPoppetje}
-        meesterIcon={meesterIcon}
-        meesterIconOverride={meesterIconOverride}
-        collapsed={collapsed}
-        onToggleCollapse={toggleCollapse}
-        tab={tab}
-        onTabChange={setTab}
-        statusReport={statusReport}
-        statusRunning={statusRunning}
-        onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
-        nightReview={nightReview}
-        morning={
-          morningQuestion
-            ? { question: morningQuestion, review: morningReview, onAnswered: refreshQuestions }
-            : null
-        }
-        onNavigate={onNavigate}
-      />
-      <div className="home-workshop-body">
-        <div className="home-workshop-main">
-          {(runtimeCapabilities().tasks || offerFolderStep) && (
-            <div className="home-workshop-actions">
-              {runtimeCapabilities().tasks && (
-                <MakeSomething
-                  projectId={deriveLaunchProjectId(config, projects)}
-                  projects={projects}
-                />
-              )}
-              {offerFolderStep && (
+      <div
+        className="home-workshop-stage"
+        onKeyDown={(event) => {
+          if (
+            event.key === 'Escape' &&
+            !collapsed &&
+            !event.defaultPrevented &&
+            event.currentTarget.contains(event.target as Node)
+          ) {
+            event.preventDefault();
+            returnToChat();
+          }
+        }}
+      >
+        <GreetingBand
+          chips={chips}
+          meesterName={meesterName}
+          meesterPoppetje={meesterPoppetje}
+          meesterIcon={meesterIcon}
+          meesterIconOverride={meesterIconOverride}
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapse}
+          tab={tab}
+          onTabChange={selectTab}
+          statusReport={statusReport}
+          statusRunning={statusRunning}
+          onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
+          nightReview={nightReview}
+          morning={
+            morningQuestion
+              ? { question: morningQuestion, review: morningReview, onAnswered: refreshQuestions }
+              : null
+          }
+          makeSomething={
+            runtimeCapabilities().tasks ? (
+              <MakeSomething
+                projectId={deriveLaunchProjectId(config, projects)}
+                projects={projects}
+              />
+            ) : undefined
+          }
+          onNavigate={onNavigate}
+        />
+        <section
+          className="home-workshop-body"
+          ref={conversationRef}
+          aria-label="Meester chat"
+          tabIndex={-1}
+          inert={!collapsed}
+        >
+          <div className="home-workshop-main">
+            {offerFolderStep && (
+              <div className="home-workshop-actions">
                 <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
-              )}
-            </div>
-          )}
-          {meesterGezelId ? (
-            <MeesterConversation
-              meesterGezelId={meesterGezelId}
-              meesterName={meesterName}
-              meesterIcon={meesterIcon}
-              meesterPoppetje={meesterPoppetje}
-              meesterIconOverride={meesterIconOverride}
-              onTurnStarted={collapseForConversation}
-              onIntroductionShown={collapseForConversation}
-            />
-          ) : (
-            <section className="home-workshop-conversation">
-              <div className="home-workshop-eyebrow home-workshop-conversation-eyebrow">
-                Talk to your meester
               </div>
-              <p className="home-workshop-rail-empty">
-                No meester is designated yet. Pick one in{' '}
-                <button
-                  type="button"
-                  className="home-workshop-tip-action"
-                  onClick={() => onNavigate?.('settings')}
-                >
-                  Settings
-                </button>
-                .
-              </p>
-            </section>
-          )}
-        </div>
+            )}
+            {meesterGezelId ? (
+              <MeesterConversation
+                meesterGezelId={meesterGezelId}
+                meesterName={meesterName}
+                meesterIcon={meesterIcon}
+                meesterPoppetje={meesterPoppetje}
+                meesterIconOverride={meesterIconOverride}
+                onTurnStarted={collapseForConversation}
+                onIntroductionShown={collapseForConversation}
+              />
+            ) : (
+              <section className="home-workshop-conversation">
+                <div className="home-workshop-eyebrow home-workshop-conversation-eyebrow">
+                  Talk to your meester
+                </div>
+                <p className="home-workshop-rail-empty">
+                  No meester is designated yet. Pick one in{' '}
+                  <button
+                    type="button"
+                    className="home-workshop-tip-action"
+                    onClick={() => onNavigate?.('settings')}
+                  >
+                    Settings
+                  </button>
+                  .
+                </p>
+              </section>
+            )}
+          </div>
+        </section>
+        {!collapsed && (
+          <button
+            type="button"
+            className="home-workshop-chat-shade"
+            aria-label="Return to Meester chat"
+            title="Return to Meester chat"
+            onClick={returnToChat}
+          />
+        )}
       </div>
     </div>
   );
