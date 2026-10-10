@@ -9,6 +9,16 @@ export async function gotoHome(page: Page): Promise<void> {
   await settle(page);
 }
 
+/** Open chat through the intro sheet, regardless of the saved collapse preference. */
+export async function gotoMeesterChat(page: Page): Promise<void> {
+  await gotoHome(page);
+  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(conversation).toBeFocused();
+}
+
 /** Click a sidebar area link (tasks | craftbooks | scripts | history | settings). */
 export async function openArea(page: Page, area: string): Promise<void> {
   await page.getByTestId(`sidebar-area-${area}`).click();

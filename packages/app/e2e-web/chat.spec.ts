@@ -6,7 +6,7 @@
  */
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
-import { gotoHome } from './helpers/nav.js';
+import { gotoMeesterChat } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
 // The typed composer shot persists a draft and its inferred task attachment.
@@ -14,7 +14,7 @@ test.use({ daemonGroup: 'chat' });
 
 test.describe('chat surface', () => {
   test('live tool arguments stay inside the thinking bubble', async ({ page }) => {
-    await gotoHome(page);
+    await gotoMeesterChat(page);
 
     // Reproduce the live, tool-only phase from StreamingBubble. In this state
     // `.msg-body` is a column flexbox and every rendered event is wrapped in a
@@ -78,7 +78,7 @@ test.describe('chat surface', () => {
   test('composer uses the project-chat frame and keeps only host toolbar actions', async ({
     page,
   }) => {
-    await gotoHome(page);
+    await gotoMeesterChat(page);
 
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
@@ -151,7 +151,7 @@ test.describe('chat surface', () => {
   });
 
   test('timeline, composer, bubbles (seeded exchange)', async ({ page }) => {
-    await gotoHome(page);
+    await gotoMeesterChat(page);
     const chat = page.getByTestId('meester-chat');
     await expect(chat).toBeVisible();
 

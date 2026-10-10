@@ -17,7 +17,7 @@ import { NightPrimaryReport } from './NightReviewPanel.js';
  * The Night shift tab with an unanswered review: decisions first. The card leads (what
  * is waiting on a decision, what is new, what finished, a paused review to
  * resume, and why a quiet night was quiet), then the night's main report
- * read in place, then what is already queued for tonight.
+ * if the card does not already display it, then what is queued for tonight.
  */
 export function MorningPanel({
   question,
@@ -28,6 +28,9 @@ export function MorningPanel({
   review: NightShiftReviewResponse | null;
   onAnswered?: (q: Question) => void;
 }) {
+  const primary = review?.reports[0];
+  const primaryInCard =
+    primary && question?.documentPath === `projects/${primary.projectId}/artifacts/${primary.path}`;
   const [tonight, setTonight] = useState<NightShiftTasksResponse['upcoming']>([]);
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +48,7 @@ export function MorningPanel({
   return (
     <div className="home-workshop-status-report" data-testid="morning-panel">
       {question && <PendingQuestionCard question={question} onAnswered={onAnswered} compact />}
-      <NightPrimaryReport primary={review?.reports[0]} />
+      {!primaryInCard && <NightPrimaryReport primary={primary} />}
       <MorningPhotos />
       {tonight.length > 0 && (
         <div className="home-workshop-night-reports">
