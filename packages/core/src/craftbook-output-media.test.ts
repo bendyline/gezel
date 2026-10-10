@@ -32,6 +32,57 @@ describe('craftbook blueprint output media', () => {
     expect(outputMediumForCraftbookBlueprint(blueprint({ terminal: true }))).toBe('none');
   });
 
+  // reviewer-loop, freeze-scope and automation-recipe each shipped a step told
+  // to write a file in prose with no writer on its surface (2026-10-10).
+  it('gives a step that writes a named file in prose a writer for that drawer', () => {
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Draft the customer brief and write `brief.md` with every section.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Save the recipe to `automations/<slug>.json` before moving on.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Write the scope to `{{workPath}}/scope.md`.' }),
+      ),
+    ).toBe('artifact');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Then record it by writing `.gezel/freeze.json` with exact paths.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Slug it and write the recipe to automations/<slug>.json, one file.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Write the findings to reviews/security-review.md.' }),
+      ),
+    ).toBe('artifact');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({
+          prompt:
+            'Check each criterion, writing PASS/FAIL per criterion: every sub-question from {{workPath}}/question-scope.md.',
+        }),
+      ),
+    ).toBe('none');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({
+          prompt:
+            'Read `{{workPath}}/review.md`, then use `write_task_note` to record a DONE summary naming `{{workPath}}/verification.md`.',
+        }),
+      ),
+    ).toBe('task-note');
+  });
+
   it('lets executable gate requirements override a contradictory none policy', () => {
     const step = blueprint({
       toolPolicy: { outputMedium: 'none' },

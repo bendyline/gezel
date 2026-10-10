@@ -7482,15 +7482,23 @@ export class ChatManager extends LocalEngineRuntime {
       // evidence, and refusal counts reset. Nudges continue the turn they
       // belong to rather than starting one. Today's date counts too: the
       // turn's own clock line tells the model, and "past the current date
-      // (2026-10-07)" was refused as an invented number.
+      // (2026-10-07)" was refused as an invented number. So do the writer's
+      // own name and the project's: a report signed "Rafiq" was refused for
+      // naming a person no source mentions (2026-10-10 coverage run).
       const evidenceLedger = this.evidenceLedgers.get(sessionId);
       if (evidenceLedger && messageOrigin !== 'background-nudge' && messageOrigin !== 'system') {
+        const [self, project] = await Promise.all([
+          this.store.getGezel(state.record.gezelId).catch(() => null),
+          this.store.getProject(state.record.projectId).catch(() => null),
+        ]);
         evidenceLedger.beginTurn(
           [
             ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
             userText,
             renderCurrentDateTimeLine(),
             todayIso(),
+            self?.name ?? '',
+            project?.name ?? '',
           ].join('\n'),
         );
       }
