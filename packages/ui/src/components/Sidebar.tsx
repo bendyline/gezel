@@ -993,7 +993,7 @@ export function Sidebar({
                         className="project-row-intervene"
                         onClick={(e) => {
                           e.stopPropagation();
-                          openUpdates(p.id);
+                          openUpdates({ projectId: p.id, section: 'needs-you' });
                         }}
                         title={`${pendingCount} item${pendingCount === 1 ? ' needs' : 's need'} your attention — open Activity`}
                         aria-label={`Open Activity: ${pendingCount} item${pendingCount === 1 ? ' needs' : 's need'} you in ${p.name}`}

@@ -30,6 +30,8 @@ The minimum runs everyday models for chat, drafting and focused single tasks. Th
 
 [gezel.com](https://gezel.com/#download) picks the right installer for your machine, and every build is also on the [releases page](https://github.com/bendyline/gezel/releases). Prefer a terminal? See the [CLI reference](https://gezel.com/docs/cli-reference/).
 
+Linux installers require glibc 2.38 and the GCC 14.1 C++ runtime or newer, on both x64 and arm64. Ubuntu 24.04 LTS and Debian 13 meet these requirements; Ubuntu 22.04, Debian 12 and RHEL 9 do not. See the [native runtime requirements](docs/native-runtime-requirements.md) for details.
+
 ## What “local-first” means
 
 Gezel does not put a Bendyline cloud service between you and your models. The daemon, application state, projects, sessions, documents, memories, and rebuildable indexes live on the machine running Gezel. Primary state is stored in inspectable files where practical.

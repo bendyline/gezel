@@ -18,7 +18,7 @@ import {
 } from './QueueMeter.js';
 import { useActivity } from './activity-context.js';
 import { useHeaderDensity } from './header-density.js';
-import { OPEN_UPDATES_EVENT, navigateToTab } from './nav-actions.js';
+import { OPEN_UPDATES_EVENT, type OpenActivityIntent, navigateToTab } from './nav-actions.js';
 import { QuestionDraftProvider } from './question-drafts.js';
 import { openQuestionInChat } from './question-nav.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -49,6 +49,7 @@ export function ActivityControl() {
   const activity = useActivity();
   const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | undefined>();
+  const [sectionRequest, setSectionRequest] = useState<{ section: ActivitySection } | null>(null);
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const density = useHeaderDensity();
   const boringMode = useRoleBasedNameOnlyMode();
@@ -59,6 +60,26 @@ export function ActivityControl() {
     if (!open) clearReceipts?.();
   }, [open, clearReceipts]);
   const snapshot = activity?.snapshot;
+  const hasSnapshot = !!snapshot;
+  useEffect(() => {
+    if (!open || !sectionRequest || !hasSnapshot) return;
+    let observer: ResizeObserver | undefined;
+    // Wait for the portal, then keep the destination visible as lazy cards
+    // above it grow. The first user interaction releases this anchoring.
+    const frame = requestAnimationFrame(() => {
+      const section = document.getElementById(`activity-${sectionRequest.section}`);
+      if (!section) return;
+      section.querySelector('h3')?.focus({ preventScroll: true });
+      const scrollToSection = () => section.scrollIntoView({ block: 'start' });
+      scrollToSection();
+      observer = new ResizeObserver(scrollToSection);
+      for (const sibling of section.parentElement?.children ?? []) observer.observe(sibling);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [open, sectionRequest, hasSnapshot]);
   const allItems = snapshot?.items ?? [];
   const { liveTurns, preparingTurns, onDeviceProvider } = useQueueLiveTurns(open, snapshot?.queues);
   const needs = countSection(allItems, 'needs-you');
@@ -85,7 +106,9 @@ export function ActivityControl() {
   useEffect(() => {
     const openUpdates = (event: Event) => {
       window.dispatchEvent(new Event('gezel:close-header-popovers'));
-      setProjectId((event as CustomEvent<{ projectId?: string }>).detail?.projectId);
+      const intent = (event as CustomEvent<OpenActivityIntent>).detail;
+      setProjectId(intent?.projectId);
+      setSectionRequest(intent?.section ? { section: intent.section } : null);
       setOpen(true);
     };
     const close = () => setOpen(false);
@@ -126,6 +149,7 @@ export function ActivityControl() {
     if (value) {
       window.dispatchEvent(new Event('gezel:close-header-popovers'));
       setProjectId(undefined);
+      setSectionRequest(null);
       setNavigationError(null);
       activity.refresh();
     }
@@ -206,6 +230,10 @@ export function ActivityControl() {
           <Dialog.Content
             className="activity-panel"
             aria-describedby="activity-description"
+            onPointerDownCapture={() => setSectionRequest(null)}
+            onWheelCapture={() => setSectionRequest(null)}
+            onTouchMoveCapture={() => setSectionRequest(null)}
+            onKeyDownCapture={() => setSectionRequest(null)}
             onOpenAutoFocus={(event) => {
               event.preventDefault();
               closeRef.current?.focus();
@@ -246,9 +274,7 @@ export function ActivityControl() {
                   type="button"
                   className="btn secondary"
                   key={id}
-                  onClick={() =>
-                    document.getElementById(`activity-${id}`)?.scrollIntoView({ block: 'start' })
-                  }
+                  onClick={() => setSectionRequest({ section: id })}
                 >
                   {label} <span>{countSection(items, id)}</span>
                 </button>
@@ -292,7 +318,7 @@ export function ActivityControl() {
                       key={id}
                       aria-label={label}
                     >
-                      <h3>
+                      <h3 tabIndex={-1}>
                         {label} <span>{countSection(items, id)}</span>
                       </h3>
                       {cards.map((q) => (

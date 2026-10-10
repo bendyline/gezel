@@ -62,17 +62,24 @@ export interface NightFixPlanResult {
 }
 
 /**
- * Cancel the night fix sweeps that paused on an earlier night. Cancelling hands
- * their claimed issues back (the settle hook reopens them), so tonight's
- * planning can take them up again. A paused sweep otherwise holds its issues
- * forever: gezel-site/5 sat on 40 of them, and the planner skips claimed
- * issues (2026-10-09). A sweep that paused tonight keeps its claim until the
- * next night. One whose shards already finished a proposal is left for the
- * person, because cancelling would reopen issues that proposal covers.
+ * Cancel the night fix sweeps left over from an earlier night, paused or stuck
+ * active. Cancelling hands their claimed issues back (the settle hook reopens
+ * them), so tonight's planning can take them up again with fresh leads. A
+ * left-over sweep otherwise holds its issues forever: gezel-site/5 sat paused
+ * on 40 of them, and gezel-site/8 stayed active behind a question nobody was
+ * awake to answer, while the planner skips claimed issues (2026-10-09). Their
+ * open questions are withdrawn silently; they were never the person's.
+ *
+ * A sweep that last moved tonight keeps its claim. One whose shards already
+ * finished a proposal is left for the person, because cancelling would reopen
+ * issues that proposal covers.
  */
-export async function releasePausedNightFixes(
+export async function releaseStaleNightFixes(
   deps: {
-    store: Pick<Store, 'listProjects' | 'listProjectTasks'>;
+    store: Pick<
+      Store,
+      'listProjects' | 'listProjectTasks' | 'listProjectQuestions' | 'writeQuestion'
+    >;
     tasks: Pick<TaskManager, 'setStatus'>;
   },
   windowStartMs: number,
@@ -81,20 +88,24 @@ export async function releasePausedNightFixes(
   for (const project of await deps.store.listProjects()) {
     const projectTasks = await deps.store.listProjectTasks(project.id).catch(() => []);
     for (const host of projectTasks) {
-      if (host.status !== 'paused' || host.parentTaskRef) continue;
+      if ((host.status !== 'paused' && host.status !== 'active') || host.parentTaskRef) continue;
       if (unattendedNightWork(host) !== 'night-fix') continue;
       if (Date.parse(host.updatedAt) >= windowStartMs) continue;
-      const proposed = projectTasks.some(
-        (child) => child.parentTaskRef === host.ref && child.status === 'complete',
-      );
-      if (proposed) {
-        log.info(`[diffpack] ${host.ref}: paused with a finished proposal; left for the person`);
+      const children = projectTasks.filter((child) => child.parentTaskRef === host.ref);
+      if (children.some((child) => child.status === 'complete')) {
+        log.info(`[diffpack] ${host.ref}: left over with a finished proposal; left for the person`);
         continue;
       }
       await deps.tasks.setStatus(project.id, host.num, 'canceled');
+      const family = new Set([host.ref, ...children.map((child) => child.ref)]);
+      const at = new Date().toISOString();
+      for (const question of await deps.store.listProjectQuestions(project.id).catch(() => [])) {
+        if (question.answer || !question.taskRef || !family.has(question.taskRef)) continue;
+        await deps.store.writeQuestion({ ...question, answer: { silentSkip: true, at } });
+      }
       released.push(host.ref);
       log.info(
-        `[diffpack] ${host.ref}: paused since an earlier night; canceled to release its issues`,
+        `[diffpack] ${host.ref}: ${host.status} since an earlier night; canceled to release its issues`,
       );
     }
   }

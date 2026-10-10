@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ImageModelAuxiliaryFileSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StableDiffusionCppProvider, parseSamplingProgress } from './sd-cpp.js';
 
@@ -57,11 +58,43 @@ describe('StableDiffusionCppProvider.generate', () => {
     });
     // `test-model` isn't a known distilled/flux model → no cfg override.
     expect(calls[0]!.body.cfg_scale).toBeUndefined();
+    expect(calls[0]!.body.sampler_name).toBeUndefined();
     expect(out.png.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
     expect(out.meta.seed).toBe(7);
     expect(out.meta.steps).toBe(14);
     expect(out.meta.widthPx).toBe(256);
     expect(out.meta.heightPx).toBe(128);
+  });
+
+  it('uses Ming Design sampling defaults and preserves returned PNG bytes', async () => {
+    const png = Buffer.concat([PNG_SIGNATURE, Buffer.from('rgba-payload')]);
+    const requests: Record<string, unknown>[] = [];
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ images: [png.toString('base64')] });
+      },
+    });
+    const input = { prompt: 'A transparent cat sticker', model: 'ming-image-0.1-design-bf16' };
+    const out = await provider.generate(input);
+    expect(requests[0]).toMatchObject({
+      steps: 12,
+      cfg_scale: 1,
+      sampler_name: 'Euler',
+      width: 1024,
+      height: 1024,
+    });
+    expect(out.png).toEqual(png);
+    await provider.generate({ ...input, steps: 6, width: 768, height: 1024 });
+    expect(requests[1]).toMatchObject({
+      steps: 6,
+      cfg_scale: 1,
+      sampler_name: 'Euler',
+      width: 768,
+      height: 1024,
+    });
   });
 
   it('routes input images to img2img for a model that supports it', async () => {
@@ -697,6 +730,43 @@ describe('StableDiffusionCppProvider.pullModel', () => {
       { role: 'vae', filename: 'vae.safetensors' },
       { role: 'llm', filename: 'llm.gguf' },
     ]);
+  });
+
+  it('downloads and persists an external JSON tokenizer alongside model weights', async () => {
+    const weights = Buffer.from('ming-image-weights');
+    const tokenizer = Buffer.from('{"version":"1.0","model":{"type":"BPE"}}');
+    const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake',
+      modelsRoot,
+      fetchImpl: async (url) => {
+        const bytes = String(url).endsWith('.json') ? tokenizer : weights;
+        return new Response(bytes, { headers: { 'Content-Length': String(bytes.length) } });
+      },
+    });
+    const auxiliary = ImageModelAuxiliaryFileSchema.parse({
+      role: 'tokenizer',
+      downloadUrl: 'https://hf.invalid/ming/mllm/tokenizer.json',
+      sha256: sha(tokenizer),
+      approxSizeBytes: tokenizer.length,
+    });
+    const events = [];
+    for await (const event of provider.pullModel('ming-test', {
+      name: 'Ming test',
+      weightsKind: 'diffusion-model',
+      downloadUrl: 'https://hf.invalid/ming/weights.safetensors',
+      sha256: sha(weights),
+      approxSizeBytes: weights.length,
+      auxiliaryFiles: [auxiliary],
+    }))
+      events.push(event);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    const installed = JSON.parse(
+      await readFile(join(modelsRoot, 'ming-test/manifest.json'), 'utf8'),
+    );
+    expect(installed.auxiliaryFiles).toEqual([{ role: 'tokenizer', filename: 'tokenizer.json' }]);
+    expect(installed.fileSha256['tokenizer.json']).toBe(sha(tokenizer));
+    expect(await readFile(join(modelsRoot, 'ming-test/tokenizer.json'))).toEqual(tokenizer);
   });
 
   it('aborts the pull if an auxiliary file fails sha256 and leaves no .partial', async () => {

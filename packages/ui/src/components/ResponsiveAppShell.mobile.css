@@ -54,17 +54,13 @@
   padding-inline: 0;
 }
 
-.app.app-compact .home-workshop-greeting {
-  max-height: 30%;
-  overflow-y: auto;
-  /* The cap keeps the chat usable; spend it on words rather than the desktop
-     band's air, or the tip's last line is sliced by the chat below. */
-  padding-top: 12px;
-  padding-bottom: 14px;
+.app.app-compact .home-workshop-greeting-cols {
+  padding-block: 12px 14px;
+  padding-inline: var(--app-main-pad-inline, 0.75rem);
 }
 
 .app.app-compact .home-workshop-greeting-top {
-  margin-bottom: 8px;
+  padding: 8px var(--app-main-pad-inline, 0.75rem);
 }
 
 .app.app-compact .home-workshop-headline {
@@ -75,20 +71,19 @@
   margin-top: 10px;
 }
 
-/* Collapsed, the band stays one row at phone width too. The desktop's 54px
-   insets and the compact headline size pushed the expand key onto a second
-   line, so the collapsed band still took a fifth of the screen. */
-.app.app-compact .home-workshop-greeting-collapsed {
-  flex-wrap: nowrap;
-  gap: 12px;
-  padding: 8px var(--app-main-pad-inline, 0.75rem);
+/* Keep all intro labels visible, wrapping beside the collapse key. */
+.app.app-compact .home-workshop-greeting-top {
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.app.app-compact .home-workshop-greeting-collapsed .home-workshop-headline {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 20px;
+.app.app-compact .home-workshop-tab {
+  min-height: 44px;
+}
+
+.app.app-compact .home-workshop-collapsed-chips {
+  order: 1;
+  width: 100%;
 }
 
 /* The meester's introduction gives its words the full width: beside the
@@ -154,10 +149,10 @@
   padding-bottom: 0.5rem;
 }
 
-/* Keep the header's Navigation key reachable when a phone turns sideways.
-   Greetings, starters and chat banners can yield their space to the draft. */
+/* Folder setup and chat banners yield to the draft on short touchscreens.
+   The intro's tabs stay reachable, including when the keyboard is open. */
 @media (max-height: 500px) and (pointer: coarse) {
-  .app.app-compact :is(.home-workshop-greeting, .home-workshop-actions, .chat-rail-banner) {
+  .app.app-compact :is(.home-workshop-actions, .chat-rail-banner) {
     display: none;
   }
 }

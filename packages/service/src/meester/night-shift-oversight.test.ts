@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ChatSession, normalizeStepGate } from '@bendyline/gezel';
+import { type ChatSession, NIGHT_WORK_PROPERTY, normalizeStepGate } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -50,6 +50,44 @@ const oversightStep = async () => {
  * review had happened.
  */
 describe('night-shift oversight task', () => {
+  const reviewScope = (prompt: string) =>
+    JSON.parse(prompt.match(/Review ONLY these project IDs: (\[[^\n]*\])/u)![1]!) as string[];
+
+  it('reviews eligible projects without including Default or opted-out projects', async () => {
+    const included = await store.createProject({ name: 'Included' });
+    const excluded = await store.createProject({ name: 'Excluded' });
+    const inactive = await store.createProject({ name: 'Inactive' });
+    await store.updateProject(excluded.id, { properties: { [NIGHT_WORK_PROPERTY]: 'off' } });
+    await store.updateProject(inactive.id, { status: 'inactive' });
+
+    await ensureNightShiftOversightTask(store, tasks);
+
+    const { task, step } = await oversightStep();
+    expect(reviewScope(step.prompt!)).toEqual([included.id]);
+    expect(task.projectId).toBe('default'); // Report storage is independent of review scope.
+  });
+
+  it('has an empty review scope when Default is the only project', async () => {
+    await ensureNightShiftOversightTask(store, tasks);
+    expect(reviewScope((await oversightStep()).step.prompt!)).toEqual([]);
+  });
+
+  it('refreshes an installed review when Default is opted in and back out', async () => {
+    await ensureNightShiftOversightTask(store, tasks);
+    const original = await oversightStep();
+
+    await store.updateProject('default', { properties: { [NIGHT_WORK_PROPERTY]: 'on' } });
+    await ensureNightShiftOversightTask(store, tasks);
+    expect(reviewScope((await oversightStep()).step.prompt!)).toEqual(['default']);
+
+    await store.updateProject('default', { properties: { [NIGHT_WORK_PROPERTY]: 'off' } });
+    await ensureNightShiftOversightTask(store, tasks);
+    const updated = await oversightStep();
+    expect(reviewScope(updated.step.prompt!)).toEqual([]);
+    expect(updated.task.ref).toBe(original.task.ref);
+    expect(await store.listProjectTasks('default')).toHaveLength(1);
+  });
+
   it('installs the step with a completion gate on the report artifact', async () => {
     await ensureNightShiftOversightTask(store, tasks);
     const { step } = await oversightStep();

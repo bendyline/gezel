@@ -256,7 +256,7 @@ describe('groundText', () => {
     expect(
       groundText('**Error rate.** Baseline was 0.3% [1].', ev).sentences.map((x) => x.status),
     ).toEqual(['non-factual', 'supported']);
-    expect(groundText('Clean IC handoff by Mira Chen.', ev).sentences[0]?.missing).toEqual(['IC']);
+    expect(groundText('Clean IC handoff by Mira Chen.', ev).sentences[0]?.missing).toEqual([]);
     expect(
       groundText('The estate covered 1,426 acres [1].', [{ n: 1, text: 'It covered 1,426 acres.' }])
         .sentences[0]?.status,
@@ -321,6 +321,15 @@ describe('groundText', () => {
     ).not.toContainEqual(expect.stringContaining('next to Notes'));
     expect(groundText('p99 peaked near 5.2 s [1].', ev).sentences[0]?.status).toBe('supported');
     expect(groundText('p99 reached 5.19 s [1].', ev).sentences[0]?.status).toBe('unsupported');
+  });
+
+  it('skips bold-only heading lines and reads all-caps words as emphasis', () => {
+    const ev = [{ n: 1, text: 'The probe returned 200 for every route.' }];
+    const result = groundText(
+      '**What the dry run proved**\n\nThe probe returned 200 for every route [1]. Rollback: NOT APPLICABLE.',
+      ev,
+    );
+    expect(result.sentences.map((s) => s.status)).toEqual(['supported', 'non-factual']);
   });
 
   it('lets a sentence that says it could not verify something stand', () => {

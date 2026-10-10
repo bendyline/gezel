@@ -48,7 +48,31 @@ function isMissingValueIssue(issue: ZodIssue): boolean {
 }
 
 const VALIDATION_PREFIX_RE =
-  /(?:Input validation error: )?Invalid arguments for tool ([\w-]+):\s*(\[[\s\S]*\])/;
+  /(?:Input validation error: )?Invalid arguments for tool ([\w-]+):\s*([\s\S]*)/;
+
+/** SDK 1.31 renders Zod issues as newline-separated messages instead of JSON. */
+function tryParseFormattedTypeIssues(text: string): ZodIssue[] | null {
+  if (text.length > 16_384) return null;
+  const issues: ZodIssue[] = [];
+  for (const line of text.trim().split('\n')) {
+    const match = line.match(
+      /^Invalid input: expected (\w+), received (\w+)(?: at ([A-Za-z_][\w-]*(?:(?:\.[A-Za-z_][\w-]*)|(?:\[\d+\]))*))?$/,
+    );
+    // Preserve unrecognized messages verbatim rather than guessing their meaning
+    // or dropping another issue from a mixed validation failure.
+    if (!match) return null;
+    issues.push({
+      code: 'invalid_type',
+      expected: match[1],
+      received: match[2],
+      path: (match[3]?.match(/[A-Za-z_][\w-]*|\d+/g) ?? []).map((part) =>
+        /^\d+$/.test(part) ? Number(part) : part,
+      ),
+      message: line,
+    });
+  }
+  return issues;
+}
 
 function tryParseIssues(blob: string): ZodIssue[] | null {
   try {
@@ -275,7 +299,7 @@ export const ZodErrorTranslator: McpToolWrapper = {
     const upstreamToolName = m[1];
     const blob = m[2];
     if (!upstreamToolName || !blob) return errorText;
-    const issues = tryParseIssues(blob);
+    const issues = tryParseIssues(blob) ?? tryParseFormattedTypeIssues(blob);
     if (!issues || issues.length === 0) return errorText;
     return translateIssues(upstreamToolName, issues, args, inputSchema);
   },

@@ -7,13 +7,13 @@
  * the meester timeline; the gallery is regenerated per run so that's benign.)
  */
 import { expect, test } from './fixtures/test.js';
-import { gotoHome } from './helpers/nav.js';
+import { gotoMeesterChat } from './helpers/nav.js';
 
 test.use({ daemonGroup: 'write-flow' });
 
 test.describe('write flow', () => {
   test('compose, send, receive a reply', async ({ page }) => {
-    await gotoHome(page);
+    await gotoMeesterChat(page);
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
     await expect(composer).toBeVisible();
@@ -35,7 +35,7 @@ test.describe('write flow', () => {
   test('replacing a suggested task with a message sends chat before the next preview arrives', async ({
     page,
   }) => {
-    await gotoHome(page);
+    await gotoMeesterChat(page);
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
     const editor = composer.locator('.squisq-wysiwyg-editor').first();

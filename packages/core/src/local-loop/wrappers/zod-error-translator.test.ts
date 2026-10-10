@@ -90,6 +90,32 @@ describe('ZodErrorTranslator', () => {
     expect(out).not.toContain('got unknown');
   });
 
+  it('preserves missing-field guidance with the SDK 1.31 formatted errors', async () => {
+    const raw =
+      'MCP error -32602: Input validation error: Invalid arguments for tool write_artifact: Invalid input: expected string, received undefined at path';
+    const args = { jsonContent: { passages: [{ path: 'report.json' }] } };
+    const before = JSON.stringify(args);
+    const out = await ZodErrorTranslator.postProcessError!('write_artifact', args, raw, ctx);
+    expect(out).toContain('Missing required fields: `path`');
+    expect(out).toContain('`path` belongs at the top level');
+    expect(out).toContain('`jsonContent.passages[0].path`');
+    expect(JSON.stringify(args)).toBe(before);
+  });
+
+  it('translates all SDK formatted type issues including array positions', async () => {
+    const raw =
+      'Invalid arguments for tool create_task: Invalid input: expected string, received undefined at title\nInvalid input: expected number, received string at steps[0].count';
+    const out = await ZodErrorTranslator.postProcessError!('create_task', {}, raw, ctx);
+    expect(out).toContain('Missing required fields: `title`');
+    expect(out).toContain('`steps.0.count` (got string, expected number)');
+  });
+
+  it('preserves mixed or unrecognized SDK messages without dropping issues', async () => {
+    const raw =
+      'Invalid arguments for tool create_task: Invalid input: expected string, received undefined at title\nCustom validator rejected this task';
+    expect(await ZodErrorTranslator.postProcessError!('create_task', {}, raw, ctx)).toBe(raw);
+  });
+
   it('redirects impossible draft status changes toward plan gate authoring', async () => {
     const raw = `Invalid arguments for tool set_task_status: [
   {"received":"draft","code":"invalid_enum_value","options":["paused","active","complete","canceled"],"path":["status"],"message":"Invalid enum value. Expected 'paused' | 'active' | 'complete' | 'canceled', received 'draft'"}

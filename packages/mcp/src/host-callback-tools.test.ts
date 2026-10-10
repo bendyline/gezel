@@ -96,7 +96,8 @@ describe('host-harness callback tools', () => {
       hallucinated_argument: 1,
     });
 
-    expect(text).toContain('unrecognized_keys');
+    expect(text).toContain('MCP error -32602');
+    expect(text).toContain('Unrecognized key:');
     expect(text).toContain('hallucinated_argument');
   }, 30_000);
 });

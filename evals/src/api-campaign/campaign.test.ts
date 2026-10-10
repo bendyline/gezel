@@ -266,6 +266,63 @@ describe('campaign execution journal', () => {
     expect(stopped.stopped).toContain('changed during');
     expect(stopped.rows).toHaveLength(1);
     expect(deps!.execute).toHaveBeenCalledTimes(1);
+    const evidence = JSON.parse(
+      await readFile(join(dir, 'identity-drift-after-trial.json'), 'utf8'),
+    );
+    expect(evidence).toMatchObject({
+      cell: 'r1-openai-tictactoe-runtime',
+      changes: [{ component: 'source', paths: [] }],
+      expected: { source: 'frozen' },
+      observed: { source: 'changed' },
+    });
+  });
+  it('persists pre-trial drift and identifies paths without launching an API call', async () => {
+    const baseline = {
+      source: { algorithm: 'worktree-content-v1', sha256: 'a', manifest: { 'source.ts': 'a' } },
+    };
+    let calls = 0;
+    deps!.identity = async () =>
+      ++calls === 1
+        ? baseline
+        : {
+            source: {
+              algorithm: 'worktree-content-v1',
+              sha256: 'b',
+              manifest: { 'source.ts': 'b' },
+            },
+          };
+    const stopped = await runCampaign({ runsDir: dir, execute: true }, deps);
+    expect(stopped.stopped).toContain('before the next API trial');
+    expect(stopped.stopped).toContain('source.ts');
+    expect(deps!.execute).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(join(dir, 'summary.json'), 'utf8')).stopped).toBe(
+      stopped.stopped,
+    );
+  });
+  it('does not stop when only source revision bookkeeping changes', async () => {
+    let revision = 0;
+    deps!.identity = async () => ({
+      source: { algorithm: 'worktree-content-v1', sha256: 'same-bytes', head: String(revision++) },
+    });
+    const finished = await runCampaign({ runsDir: dir, execute: true }, deps);
+    expect(finished.stopped).toBeUndefined();
+    expect(finished.rows).toHaveLength(12);
+  });
+  it('keeps an API failure when source also changes', async () => {
+    const original = deps!.execute;
+    let changed = false;
+    deps!.identity = async () => ({ source: changed ? 'changed' : 'frozen' });
+    deps!.execute = async (...args: Parameters<typeof original>) => {
+      await original(...args);
+      const file = join(args[1], 'trial', 'result.json');
+      const failed = JSON.parse(await readFile(file, 'utf8'));
+      failed.qualification.api.failures = 1;
+      await writeFile(file, JSON.stringify(failed));
+      changed = true;
+    };
+    const stopped = await runCampaign({ runsDir: dir, execute: true }, deps);
+    expect(stopped.stopped).toContain('API failure');
+    expect(stopped.stopped).toContain('identity changed');
   });
   it('does not launch after interruption and respects the directory lock', async () => {
     const controller = new AbortController();

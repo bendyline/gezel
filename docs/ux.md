@@ -379,7 +379,9 @@ compact view's content edge lines up. Page-level panes, such as first-run
 setup, span that full width without a second indent. Home's greeting band
 steps aside for the visit, without saving that, while the meester's
 introduction fills the empty conversation, just as it does once the person
-sends. Collapsed, it is one row at any width. The introduction reads from its
+sends. Collapsed, its tab bar stays visible; selecting any tab reopens its
+content. Labels wrap on narrow screens so every destination remains visible.
+The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
 figure sits beside the title only, so the openers get the full width. The compact title bar leads with the
 navigation button, left of the brand. The button stays while the navigation is
@@ -496,17 +498,32 @@ What lives where:
 
 ### Pick a plan from Home
 
-Home's **Make something** tray offers six broad starting points: Research
+Home's intro starts with **Good morning**, followed by **Night shift** when a
+review is available, **Make something**, and **Handboek** with the "What is
+gezel?" article. Good morning shows the current status report when available,
+otherwise the tip of the day; the report has no separate tab. The named tabs
+remain visible when the intro is collapsed, and selecting any of them expands
+its content, including the already-selected tab. Unlike dense project tab rows,
+this small set wraps its labels instead of dropping them at narrow widths.
+The date belongs inside Good morning, not in a tab label. The header stays
+above the conversation. When open, its content overlays 90% of the chat area's
+height, with a shadow over the exposed chat strip below. The conversation keeps
+its full layout and draft behind the sheet. Clicking the exposed strip rolls
+the sheet up to the tab bar and returns focus to chat; that click never activates
+a chat control underneath. Escape does the same. The roll takes 160ms and skips
+motion when reduced motion is requested. Tab content scrolls inside the sheet;
+Make something uses the full content width without the figure.
+
+Home's **Make something** tab offers six broad starting points: Research
 report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
 Each key has artwork, a plain name, and a short description of the declared
 output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
-The starters and first-run folder setup share a bounded scroll area above the
-conversation, so neither can push the draft below the screen. On a short
-touchscreen or while the native keyboard is open, they yield their space to
-the conversation and return when the full viewport is available.
+The starters live only inside the intro tab. First-run folder setup keeps its
+own bounded area above the conversation and yields to the draft on short
+touchscreens. The intro tabs remain reachable while the native keyboard is open.
 
 A Home key opens a compact launch sheet with the main field focused.
 The person adds a topic, then chooses **Start now** or **Tonight**. Use the
@@ -586,6 +603,9 @@ closes or changes project, keep cards in a stable order during refresh, and
 leave an answer receipt in place until the panel closes. Answering the last
 question does not close the panel. Project attention links open the same panel
 scoped to that project, with a clear way back to all projects.
+Home's **ready for you** and **waiting on you** keys open the matching Activity
+section, scroll it into view, and move keyboard focus to its heading. Refreshes
+must not pull the person back to that section after they start reading elsewhere.
 
 A human assignment can carry its own plain-language expectation (`assignee.instructions`):
 the specific action the person should take and how to confirm they are ready.
@@ -1715,17 +1735,16 @@ overnight" switch. That switch is the folder's one off-switch for night work;
 there is no second place to look for it.
 
 **The morning leads with decisions.** While the night's review card is
-unanswered, Home opens on **This morning** whatever the band's saved
+unanswered, Home opens on **Night shift** whatever the band's saved
 collapse, and the tab stays until the card is dismissed — an unread night
 does not expire. The card leads (proposals, then reports, then what finished,
 a paused review's Resume, the quiet night's reason with its one fix), then the
 main report reads in place, then what is already queued for tonight. One
 desktop notification announces it; the renderer never raises a second.
-Both **This morning** and **Last night** use the available width beside the
-Meester's figure. The whole greeting band takes at most half the available
-Home height, capped at half the viewport, so the Meester conversation stays
-visible. Keep the tabs and collapse key above a single scroll area for the
-review, including its reports and actions.
+Both the unanswered review and the recent night summary use the available width beside the
+Meester's figure. The review uses the intro's 90% overlay, leaving the shadowed
+chat strip available to return to the conversation. Keep the tabs and collapse
+key above a single scroll area for the review, including its reports and actions.
 
 **Photos are prints on a table.** A photo anywhere in the app is a
 `PhotoThumb`: a square-cropped tile with `--radius-sm`, loaded when it scrolls

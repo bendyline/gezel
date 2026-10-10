@@ -258,3 +258,23 @@ describe('applying to a folder gezels may not write', () => {
     expect(await readFile(join(externalDir, 'parser.ts'), 'utf8')).toBe('const trailing = true;\n');
   });
 });
+
+// A drafting shard passed an absolute path to `stat` and got a bare
+// `internal_error` back (2026-10-10); the workspace routes answer 400 with why.
+describe('draft reads the path rules refuse', () => {
+  it('answer 400 with the reason, not a 500', async () => {
+    await svc.context.diffpacks.ensure(projectId, '77', {
+      title: 'Guard the token',
+      origin: { kind: 'boekwachter-issue', issueRefs: ['BW-1'] },
+      taskRef: `${projectId}/77`,
+      gezelName: 'Rex',
+    });
+    for (const route of ['stat', 'read']) {
+      const res = await api(
+        `/api/projects/${projectId}/diffpacks/77/draft/${route}?path=${encodeURIComponent('/etc/passwd')}`,
+      );
+      expect(res.status).toBe(400);
+      expect((await json(res)).error).toBeTruthy();
+    }
+  });
+});

@@ -38,6 +38,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  readVulnerabilityExceptions,
+  sbomVulnerabilityAnalyses,
+} from './audit-vulnerability-policy.mjs';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { allPlatformKeys, platformKeysForEngine } from './native-payload.mjs';
 import { mergePnpmRuntimeSbomComponents } from './pnpm-runtime-inventory.mjs';
@@ -395,6 +399,7 @@ const bom = {
   },
   components,
   dependencies,
+  vulnerabilities: sbomVulnerabilityAnalyses(components, byLicense, readVulnerabilityExceptions()),
 };
 
 await mkdir(dirname(output), { recursive: true });

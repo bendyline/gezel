@@ -4,9 +4,11 @@ import type {
   Poppetje as PoppetjeStruct,
   Question,
 } from '@bendyline/gezel';
+import { type ReactNode, useEffect, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { Poppetje } from '../../poppetje/index.js';
+import * as Tabs from '../../primitives/Tabs.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { MorningPanel } from './MorningPanel.js';
 import { NightReviewPanel } from './NightReviewPanel.js';
@@ -15,7 +17,7 @@ import { TipOfDay } from './TipOfDay.js';
 import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
 
 /** Which panel the greeting band's tab strip is showing. */
-export type HomeGreetingTab = 'greeting' | 'status' | 'morning' | 'night' | 'tour';
+export type HomeGreetingTab = 'greeting' | 'night' | 'make' | 'tour';
 
 /** Symmetric SVG chevron for the greeting's collapse / expand toggle.
  *  The Unicode arrowhead glyphs (⌃ ⌄) render asymmetrically and off-center
@@ -100,9 +102,8 @@ function Headline({
 }
 
 /**
- * The full-width hero. Three states: full (default), collapsed (single
- * status row), and a tab strip that swaps the left column between the
- * greeting, the meester's status report, and the "what is gezel" tour.
+ * The intro keeps its destinations visible when collapsed. Selecting a tab
+ * opens that panel; the parent owns the persisted collapse preference.
  * There is no stored user name, so the fallback headline is the
  * time-of-day greeting only.
  */
@@ -121,6 +122,7 @@ export function GreetingBand({
   onRunStatusReport,
   nightReview,
   morning,
+  makeSomething,
   onNavigate,
 }: {
   chips: HomeChip[];
@@ -137,14 +139,26 @@ export function GreetingBand({
   onRunStatusReport?: () => void;
   /** Last night's review, when fresh and non-empty (parent applies decay). */
   nightReview?: NightShiftReviewResponse | null;
-  /** The unanswered morning card and its night, which replace the Last night tab. */
+  /** The unanswered morning card leads the Night shift tab until dismissed. */
   morning?: {
     question: Question;
     review: NightShiftReviewResponse | null;
     onAnswered?: (q: Question) => void;
   } | null;
+  makeSomething?: ReactNode;
   onNavigate?: (view: HomeNavView) => void;
 }) {
+  // Keep the current panel in place while its sheet rolls up. The timeout
+  // also releases it when reduced motion suppresses transition events.
+  const [contentMounted, setContentMounted] = useState(!collapsed);
+  useEffect(() => {
+    if (!collapsed) {
+      setContentMounted(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setContentMounted(false), 180);
+    return () => window.clearTimeout(timeout);
+  }, [collapsed]);
   const showPoppetjes = useShowPoppetjes();
   const now = new Date();
   const hour = now.getHours();
@@ -177,166 +191,140 @@ export function GreetingBand({
     hour12: false,
   });
   const dateLabel = `${weekday} ${partOfDay} · ${time}`;
-  const showingNightReview = Boolean(
-    (tab === 'morning' && morning) || (tab === 'night' && nightReview),
-  );
-
-  if (collapsed) {
-    return (
-      <div className="home-workshop-greeting-collapsed">
-        <Headline statusReport={report} greeting={greeting} onCtaClick={handleCta} />
-        <div className="home-workshop-vrule" />
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
-          <Chips chips={chips} />
-        </div>
-        <button
-          type="button"
-          className="home-workshop-collapse-btn"
-          onClick={onToggleCollapse}
-          title="Expand the greeting"
-          aria-label="Expand the greeting"
-        >
-          <Chevron direction="down" />
-        </button>
-      </div>
-    );
-  }
+  const panels: { value: HomeGreetingTab; label: string }[] = [
+    { value: 'greeting', label: 'Good morning' },
+  ];
+  if (morning || nightReview) panels.push({ value: 'night', label: 'Night shift' });
+  if (makeSomething) panels.push({ value: 'make', label: 'Make something' });
+  panels.push({ value: 'tour', label: 'Handboek' });
+  const activeTab = panels.some((panel) => panel.value === tab) ? tab : 'greeting';
 
   return (
-    <div
-      className={`home-workshop-greeting${showingNightReview ? ' home-workshop-greeting-night-review' : ''}`}
+    <Tabs.Root
+      value={activeTab}
+      onValueChange={(value) => onTabChange(value as HomeGreetingTab)}
+      className={`home-workshop-greeting${collapsed ? ' home-workshop-greeting-collapsed' : ''}`}
       data-testid="greeting-band"
     >
       <div className="home-workshop-greeting-top">
-        {/* The date label and the tour share a tab strip — the tour reads
-            as a second tab beside the greeting rather than a panel that
-            adds height below. */}
-        <fieldset className="home-workshop-tabs" aria-label="Home view">
-          <button
-            type="button"
-            aria-pressed={tab === 'greeting'}
-            className={`home-workshop-tab${tab === 'greeting' ? ' is-active' : ''}`}
-            onClick={() => onTabChange('greeting')}
-          >
-            {dateLabel}
-          </button>
-          {report && (
-            <button
-              type="button"
-              aria-pressed={tab === 'status'}
-              className={`home-workshop-tab${tab === 'status' ? ' is-active' : ''}`}
-              onClick={() => onTabChange('status')}
+        <Tabs.List className="home-workshop-tabs" aria-label="Meester intro">
+          {panels.map(({ value, label }) => (
+            <Tabs.Trigger
+              key={value}
+              value={value}
+              className="home-workshop-tab"
+              aria-expanded={!collapsed && activeTab === value}
+              onClick={() => {
+                // Radix only changes the value for a different tab. The
+                // selected tab must also reopen its collapsed panel.
+                if (collapsed && activeTab === value) onTabChange(value);
+              }}
             >
-              Status report
-            </button>
-          )}
-          {morning && (
-            <button
-              type="button"
-              aria-pressed={tab === 'morning'}
-              className={`home-workshop-tab${tab === 'morning' ? ' is-active' : ''}`}
-              onClick={() => onTabChange('morning')}
-            >
-              This morning
-            </button>
-          )}
-          {nightReview && !morning && (
-            <button
-              type="button"
-              aria-pressed={tab === 'night'}
-              className={`home-workshop-tab${tab === 'night' ? ' is-active' : ''}`}
-              onClick={() => onTabChange('night')}
-            >
-              Last night
-            </button>
-          )}
-          <button
-            type="button"
-            aria-pressed={tab === 'tour'}
-            className={`home-workshop-tab${tab === 'tour' ? ' is-active' : ''}`}
-            onClick={() => onTabChange('tour')}
-          >
-            New here? What is gezel
-          </button>
-        </fieldset>
+              {label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+        {collapsed && chips.length > 0 && (
+          <div className="home-workshop-collapsed-chips">
+            <Chips chips={chips} />
+          </div>
+        )}
         <button
           type="button"
           className="home-workshop-collapse-btn"
           onClick={onToggleCollapse}
-          title="Collapse to a single row"
-          aria-label="Collapse the greeting"
+          title={collapsed ? 'Expand the greeting' : 'Collapse the greeting'}
+          aria-label={collapsed ? 'Expand the greeting' : 'Collapse the greeting'}
+          aria-expanded={!collapsed}
         >
-          <Chevron direction="up" />
+          <Chevron direction={collapsed ? 'down' : 'up'} />
         </button>
       </div>
 
       <div
-        className="home-workshop-greeting-cols"
-        role={showingNightReview ? 'region' : undefined}
-        aria-label={showingNightReview ? 'Night shift report' : undefined}
-        tabIndex={showingNightReview ? 0 : undefined}
+        className="home-workshop-intro-sheet"
+        aria-hidden={collapsed}
+        inert={collapsed}
+        onTransitionEnd={(event) => {
+          if (
+            collapsed &&
+            event.target === event.currentTarget &&
+            event.propertyName === 'height'
+          ) {
+            setContentMounted(false);
+          }
+        }}
       >
-        <div className="home-workshop-greeting-left">
-          {tab === 'status' && report ? (
-            <StatusReportPanel
-              report={report}
-              running={statusRunning ?? false}
-              {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
-            />
-          ) : tab === 'morning' && morning ? (
-            <MorningPanel
-              question={morning.question}
-              review={morning.review}
-              {...(morning.onAnswered ? { onAnswered: morning.onAnswered } : {})}
-            />
-          ) : tab === 'night' && nightReview ? (
-            <NightReviewPanel review={nightReview} />
-          ) : tab === 'tour' ? (
-            <div className="home-workshop-tour-inline" role="tabpanel">
-              <IntroHandboekArticle />
-            </div>
-          ) : (
-            <>
-              <Headline statusReport={report} greeting={greeting} onCtaClick={handleCta} />
-              <TipOfDay onNavigate={onNavigate} />
-            </>
-          )}
-          <div className="home-workshop-chips">
-            <Chips chips={chips} />
-          </div>
-        </div>
-
-        {/* The whole standing figure + shelf + label is a poppetje showcase;
-            when poppetjes are off (e.g. boring mode) hide it entirely rather
-            than fall back to a letter tile on a shelf. */}
-        {showPoppetjes && (
-          <div className="home-workshop-greeting-right">
-            <div className="home-workshop-figure">
-              {meesterPoppetje ? (
-                <Poppetje
-                  poppetje={meesterPoppetje}
-                  variant="full"
-                  size={64}
-                  title={`${meesterName} poppetje`}
+        {(!collapsed || contentMounted) && (
+          <Tabs.Content value={activeTab} className="home-workshop-greeting-cols">
+            <div className="home-workshop-greeting-left">
+              {activeTab === 'night' && morning ? (
+                <MorningPanel
+                  question={morning.question}
+                  review={morning.review}
+                  {...(morning.onAnswered ? { onAnswered: morning.onAnswered } : {})}
                 />
+              ) : activeTab === 'night' && nightReview ? (
+                <NightReviewPanel review={nightReview} />
+              ) : activeTab === 'make' ? (
+                makeSomething
+              ) : activeTab === 'tour' ? (
+                <div className="home-workshop-tour-inline">
+                  <IntroHandboekArticle />
+                </div>
               ) : (
-                <GezelIcon
-                  poppetje={null}
-                  svg={meesterIcon}
-                  iconOverride={meesterIconOverride}
-                  name={meesterName}
-                  size={64}
-                  variant="full"
-                />
+                <>
+                  <div className="home-workshop-eyebrow">{dateLabel}</div>
+                  <Headline statusReport={report} greeting={greeting} onCtaClick={handleCta} />
+                  {report ? (
+                    <StatusReportPanel
+                      report={report}
+                      running={statusRunning ?? false}
+                      {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
+                    />
+                  ) : (
+                    <TipOfDay onNavigate={onNavigate} />
+                  )}
+                </>
               )}
-              <div className="home-workshop-shelf" />
-              <div className="home-workshop-figure-label">
-                {meesterName} <em>- Meester</em>
+              <div className="home-workshop-chips">
+                <Chips chips={chips} />
               </div>
             </div>
-          </div>
+
+            {/* The whole standing figure + shelf + label is a poppetje showcase;
+            when poppetjes are off (e.g. boring mode) hide it entirely rather
+            than fall back to a letter tile on a shelf. */}
+            {showPoppetjes && activeTab !== 'make' && (
+              <div className="home-workshop-greeting-right">
+                <div className="home-workshop-figure">
+                  {meesterPoppetje ? (
+                    <Poppetje
+                      poppetje={meesterPoppetje}
+                      variant="full"
+                      size={64}
+                      title={`${meesterName} poppetje`}
+                    />
+                  ) : (
+                    <GezelIcon
+                      poppetje={null}
+                      svg={meesterIcon}
+                      iconOverride={meesterIconOverride}
+                      name={meesterName}
+                      size={64}
+                      variant="full"
+                    />
+                  )}
+                  <div className="home-workshop-shelf" />
+                  <div className="home-workshop-figure-label">
+                    {meesterName} <em>- Meester</em>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Tabs.Content>
         )}
       </div>
-    </div>
+    </Tabs.Root>
   );
 }

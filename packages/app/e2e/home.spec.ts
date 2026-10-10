@@ -88,16 +88,33 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await page.getByRole('button', { name: 'Expand the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
 
-  // Collapse → the tip/figure hide; a single status row remains.
+  // Collapse → the tip/figure hide; every intro destination stays available.
   await page.getByRole('button', { name: 'Collapse the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeHidden();
-  await page.getByRole('button', { name: 'Expand the greeting' }).click();
+  await page.getByRole('tab', { name: 'Good morning' }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
 
+  // The intro covers the conversation without resizing it. Clicking the
+  // exposed strip rolls it up before the underlying chat becomes interactive.
+  const conversation = page.getByRole('region', { name: 'Meester chat' });
+  const conversationBounds = await conversation.boundingBox();
+  await expect
+    .poll(async () => {
+      const sheet = await page.locator('.home-workshop-intro-sheet').boundingBox();
+      return sheet && conversationBounds ? sheet.height / conversationBounds.height : 0;
+    })
+    .toBeCloseTo(0.9, 2);
+  await page.getByRole('button', { name: 'Return to Meester chat' }).click();
+  await expect(page.getByRole('tabpanel')).toBeHidden();
+  await expect(conversation).toBeFocused();
+  expect(await conversation.boundingBox()).toEqual(conversationBounds);
+  await page.getByRole('tab', { name: 'Good morning' }).click();
+
   // The tour tab swaps the greeting + tip for the tour content in place.
-  const tour = page.getByRole('button', { name: 'New here? What is gezel' });
+  await page.getByRole('button', { name: 'Collapse the greeting' }).click();
+  const tour = page.getByRole('tab', { name: 'Handboek' });
   await tour.click();
-  await expect(tour).toHaveAttribute('aria-pressed', 'true');
+  await expect(tour).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Tip of the day')).toBeHidden();
   await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Read' })).toBeVisible();
@@ -118,7 +135,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
       .isVisible()
       .catch(() => false)
   ) {
-    await page.locator('.home-workshop-tabs').getByRole('button').first().click();
+    await page.getByRole('tab', { name: 'Good morning' }).click();
   }
 
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });

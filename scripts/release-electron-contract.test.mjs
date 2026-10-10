@@ -304,13 +304,13 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   ]) {
     assert.match(
       source,
-      /pnpm audit:vulnerabilities --audit-level=critical/,
-      `${name} workflow must reject critical production advisories`,
+      /pnpm audit:vulnerabilities --audit-level=high/,
+      `${name} workflow must reject high and critical production advisories`,
     );
     assert.doesNotMatch(
       source,
-      /pnpm audit:vulnerabilities --audit-level=(?:low|moderate|high)/,
-      `${name} workflow must report but not fail on sub-critical advisories`,
+      /pnpm audit:vulnerabilities --audit-level=critical/,
+      `${name} workflow must not allow high production advisories through a critical-only gate`,
     );
   }
   assert.match(

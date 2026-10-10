@@ -178,13 +178,25 @@ lifecycle, independent qualification and paired outcome counts. A pair with no
 evaluator repairs is explicitly uninformative about assistance. Results from an
 identity-changing trial are flagged as invalid comparisons.
 
+New campaigns identify source by the bytes, paths, executable bits and symlink
+targets of tracked and non-ignored untracked files. Staging or committing those
+same files does not change the comparison; the commit remains provenance only.
+Actual edits, additions, deletions, builds, catalog or environment changes still
+stop it. On drift, the message identifies the changed components and source
+paths, and `identity-drift-<phase>.json` saves the expected and observed hashes.
+Environment values and API keys are never included in that evidence. Older
+diff-based campaign identities require a new baseline; they are not silently
+reinterpreted or resumed under the new comparison.
+
 Reusing the execute command resumes pending cells; it never retries failed or
 ambiguous attempts automatically. Unexpected user questions, provider/account or
 measurement failures halt the campaign. Ordinary task failures remain observations
 and do not halt it. A halted campaign requires review and a new campaign directory;
 after source changes, rebuild relevant packages and prepare a new baseline. Do not
-edit source, rebuild, update Gilde, change ambient Gezel settings, or commit between
-planning and execution of a frozen campaign. Behavior force/remove environment
+edit source, rebuild, update Gilde, or change ambient Gezel settings between
+planning and completion of a frozen campaign. Concurrent development needs a
+separate checkout with its own dependencies and builds; a new runs directory
+alone does not isolate the code being tested. Behavior force/remove environment
 overrides are rejected. The command-consent script is scoped to codemod only;
 the other scenarios have user simulation disabled.
 

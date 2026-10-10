@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ObservationTableManifestSchema } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { NIGHT_WORK_PROPERTY, ObservationTableManifestSchema } from '@bendyline/gezel';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { DuckRunner } from './duck.js';
 import {
@@ -103,6 +103,36 @@ afterEach(async () => {
 });
 
 describe('nightly gating', () => {
+  it('skips Default before reading its tables or draining workspace files', async () => {
+    const drainWorkspaceTables = vi.fn();
+    const projectArtifactsDir = vi.fn();
+    const d = {
+      ...deps(),
+      store: Object.assign(makeStore({ ...PROJECT, id: 'default' }), { projectArtifactsDir }),
+      drainWorkspaceTables,
+    };
+    expect((await runProjectObservationNightly(d, 'default')).skipped).toBe('opted-out');
+    expect(drainWorkspaceTables).not.toHaveBeenCalled();
+    expect(projectArtifactsDir).not.toHaveBeenCalled();
+  });
+
+  it('allows Default to opt in and ordinary projects to opt out', async () => {
+    const unavailable = { available: () => false } as DuckRunner;
+    const optedIn = {
+      ...deps(),
+      duck: unavailable,
+      store: makeStore({ id: 'default', properties: { [NIGHT_WORK_PROPERTY]: 'on' } }),
+    };
+    expect((await runProjectObservationNightly(optedIn, 'default')).skipped).toBe(
+      'engine-unavailable',
+    );
+    const optedOut = {
+      ...deps(),
+      store: makeStore({ ...PROJECT, properties: { [NIGHT_WORK_PROPERTY]: 'off' } }),
+    };
+    expect((await runProjectObservationNightly(optedOut, PROJECT.id)).skipped).toBe('opted-out');
+  });
+
   it.each(['readonly', 'inactive', 'stable'])(
     'skips a %s project — the same ambient-work gate every background job uses',
     async (status) => {

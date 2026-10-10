@@ -21,8 +21,13 @@ export async function requestWorkspaceWritePermission(
   }
   const gate = await store.assertWorkspaceWritable(body.projectId, { initiatedByGezel: true });
   if (gate.ok) {
+    // A task step's own tool policy can leave out the file writers while the
+    // project allows edits. Saying only "already allowed" sent reviewer-loop's
+    // writer back to ask again thirty times (2026-10-10 coverage run).
     throw new Error(
-      'Project file edits are already allowed. This permission cannot fix OS, shell, or external tool restrictions.',
+      session.taskRef
+        ? `Project file edits are already allowed; this step of ${session.taskRef} does not include file writing, and no permission changes that. Say what is blocked and what you would have written, then finish the step.`
+        : 'Project file edits are already allowed. This permission cannot fix OS, shell, or external tool restrictions.',
     );
   }
   const workspaceDir = gate.workingDir;

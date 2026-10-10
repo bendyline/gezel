@@ -30,9 +30,25 @@ test('Home keeps the draft reachable beside starters and folder setup', async ({
     document.documentElement.style.setProperty('--safe-area-inset-top', '59px');
     document.documentElement.style.setProperty('--safe-area-inset-bottom', '34px');
   });
+  await page.getByRole('tab', { name: 'Make something', exact: true }).click();
   await expect(page.locator('.home-make-card').first()).toBeVisible();
+  const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
+  await expect(conversation).toHaveAttribute('inert');
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(conversation).toBeFocused();
   await expect(page.getByRole('button', { name: 'Skip for now' })).toBeVisible();
   await expectDraftInsideApp(page);
+
+  const editor = page.getByTestId('meester-chat').locator('.squisq-wysiwyg-editor').first();
+  const draft = 'Keep this draft while browsing plans';
+  await editor.fill(draft);
+  await page.getByRole('tab', { name: 'Make something', exact: true }).click();
+  await expect(page.locator('.home-make-card').first()).toBeVisible();
+  await expect(conversation).toHaveAttribute('inert');
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(editor).toHaveText(draft);
 
   // A keyboard shrinks WebKit's visual viewport without resizing its layout viewport.
   await page.evaluate(() => {
@@ -51,5 +67,12 @@ test('Home keeps the draft reachable beside starters and folder setup', async ({
   await expectDraftInsideApp(page);
 
   await page.setViewportSize({ width: 844, height: 390 });
+  // Rotation moves the notch inset to the sides and shortens the home-indicator inset.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--safe-area-inset-top', '0px');
+    document.documentElement.style.setProperty('--safe-area-inset-bottom', '21px');
+    document.documentElement.style.setProperty('--safe-area-inset-left', '59px');
+    document.documentElement.style.setProperty('--safe-area-inset-right', '59px');
+  });
   await expectDraftInsideApp(page);
 });

@@ -38,7 +38,7 @@ describe('tic-tac-toe runtime verdict', () => {
       </script>
     </body></html>`;
     const report = await renderAndAssert(html, ticTacToeAssertions());
-    expect(report.ran).toBe(true);
+    expect(report.ran, report.bootstrapError).toBe(true);
     expect(report.failed).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -49,7 +49,14 @@ describe('tic-tac-toe runtime verdict', () => {
     );
   });
 
-  it('accepts the same driven game when the winner is rendered visibly', async () => {
+  it.each([
+    { markup: 'Player X wins!', accepted: true },
+    { markup: '🎉 Player <span class="x">X</span> wins!', accepted: true },
+    { markup: '<strong>Player X <span>wi</span>ns!</strong>', accepted: true },
+    { markup: 'Playing<span hidden>Player X wins!</span>', accepted: false },
+    { markup: '<div style="opacity:0"><span>Player X wins!</span></div>', accepted: false },
+    { markup: '<div style="visibility:hidden"><span>Player X wins!</span></div>', accepted: false },
+  ])('judges rendered status text: $markup', async ({ markup, accepted }) => {
     const html = `<!doctype html><html><body>
       <div id="status">Playing</div>
       <div>${Array.from({ length: 9 }, (_, i) => `<button class="cell" data-i="${i}"></button>`).join('')}</div>
@@ -61,7 +68,7 @@ describe('tic-tac-toe runtime verdict', () => {
             if (cell.textContent) return;
             cell.textContent = turn;
             if (cells[0].textContent && cells[0].textContent === cells[1].textContent && cells[1].textContent === cells[2].textContent) {
-              document.getElementById('status').textContent = 'Player ' + turn + ' wins!';
+              document.getElementById('status').innerHTML = ${JSON.stringify(markup)};
               return;
             }
             turn = turn === 'X' ? 'O' : 'X';
@@ -70,8 +77,14 @@ describe('tic-tac-toe runtime verdict', () => {
       </script>
     </body></html>`;
     const report = await renderAndAssert(html, ticTacToeAssertions());
-    expect(report.ran).toBe(true);
-    expect(report.failed).toEqual([]);
-    expect(report.passed).toEqual(['nine-cells-rendered', 'click-marks-a-cell']);
+    expect(report.ran, report.bootstrapError).toBe(true);
+    if (accepted) {
+      expect(report.failed).toEqual([]);
+      expect(report.passed).toEqual(['nine-cells-rendered', 'click-marks-a-cell']);
+    } else {
+      expect(report.failed).toEqual([
+        { name: 'click-marks-a-cell', why: expect.stringMatching(/winner/) },
+      ]);
+    }
   });
 });

@@ -28,8 +28,8 @@
       ]
     },
     "sd-cpp": {
-      "tag": "master-919-19bbbca",
-      "commit": "19bbbca1c736bbb9538679fc0ae690cb2b46b492",
+      "tag": "master-951-f89d9b1",
+      "commit": "f89d9b13d730eabeede7314ce49dacd18d3c90c2",
       "files": [
         "LICENSE-stable-diffusion-cpp-MIT.txt",
         "LICENSE-ggml-MIT.txt",

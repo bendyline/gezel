@@ -184,29 +184,27 @@ export function ticTacToeAssertions(): RuntimeAssertion[] {
                 );
           return {
             marks: [0, 3, 1, 4, 2].map((index) => (cells[index]?.textContent ?? '').trim()),
-            statusTexts: all
-              .filter((el) => {
-                if (el.children.length !== 0) return false;
-                // Source-bearing/inert nodes are leaf elements too. Without
-                // this guard, the literal "Player X wins" inside <script>
-                // satisfied the supposed *visible* winner assertion even
-                // when no UI element was ever updated.
-                if (/^(?:script|style|template|noscript|head|meta|link)$/i.test(el.tagName)) {
-                  return false;
-                }
-                const style = window.getComputedStyle(el);
-                if (
-                  style.display === 'none' ||
-                  style.visibility === 'hidden' ||
-                  Number(style.opacity) === 0
-                ) {
-                  return false;
-                }
-                return el.getClientRects().length > 0;
-              })
-              .map((el) => (el.textContent ?? '').trim())
-              .filter(Boolean),
+            statusTexts: [visibleText(document.body)],
           };
+
+          // A status can mix direct text and styled spans. Leaf-only reads
+          // lose "Player <span>X</span> wins", while textContent leaks scripts
+          // and hidden descendants. Read rendered text throughout the subtree.
+          function visibleText(el: Element): string {
+            if (/^(?:script|style|template|noscript|head|meta|link)$/i.test(el.tagName)) return '';
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || Number(style.opacity) === 0) return '';
+            const text = Array.from(el.childNodes)
+              .map((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) return visibleText(node as Element);
+                if (node.nodeType !== Node.TEXT_NODE || style.visibility !== 'visible') return '';
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                return range.getClientRects().length ? (node.textContent ?? '') : '';
+              })
+              .join('');
+            return style.display.startsWith('inline') ? text : `\n${text}\n`;
+          }
         });
         return checkTicTacToeWinningSequence(finalState.marks, finalState.statusTexts);
       },

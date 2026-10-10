@@ -1,4 +1,4 @@
-import type { GezelDetail } from '@bendyline/gezel';
+import { type GezelDetail, NIGHT_WORK_PROPERTY } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
@@ -34,6 +34,9 @@ function agedIdleState(): SystemIdleState {
 
 function make(opts: {
   active: boolean;
+  projectId?: string;
+  night?: boolean;
+  properties?: Record<string, string>;
   indexingEnabled?: boolean;
   freshBoot?: boolean;
   engagementMode?: 'proactive' | 'scheduled' | 'reactive' | 'off';
@@ -48,7 +51,8 @@ function make(opts: {
   const store = {
     listProjects: async () => [
       {
-        id: 'p1',
+        id: opts.projectId ?? 'p1',
+        ...(opts.properties ? { properties: opts.properties } : {}),
         ...(opts.indexingEnabled !== undefined ? { indexingEnabled: opts.indexingEnabled } : {}),
       },
     ],
@@ -56,7 +60,12 @@ function make(opts: {
       ...(opts.engagementMode ? { aiEngagementMode: opts.engagementMode } : {}),
     }),
   } as unknown as Store;
-  const contentIndex = { enrich, embedOnly, embedImages } as unknown as ContentIndex;
+  const contentIndex = {
+    enrich,
+    embedOnly,
+    embedImages,
+    enrichAreas: vi.fn().mockResolvedValue({ areasUpdated: 0, architectureUpdated: false }),
+  } as unknown as ContentIndex;
   const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
   const mgr = new IndexEnrichmentManager({
     store,
@@ -64,11 +73,45 @@ function make(opts: {
     contentIndex,
     idle,
     resolveBoekwachter: async () => BOOK,
+    isNightShiftActive: () => opts.night ?? false,
   });
   return { mgr, enrich, embedOnly, embedImages, idle };
 }
 
 describe('IndexEnrichmentManager idle gating', () => {
+  it('skips Default in night ticks while preserving ordinary daytime indexing', async () => {
+    const night = make({ active: false, projectId: 'default', night: true });
+    await night.mgr.tick();
+    expect(night.embedOnly).not.toHaveBeenCalled();
+    expect(night.enrich).not.toHaveBeenCalled();
+
+    const day = make({ active: false, projectId: 'default' });
+    await day.mgr.tick();
+    expect(day.embedOnly).toHaveBeenCalledWith('default', expect.any(Number));
+    expect(day.enrich).toHaveBeenCalled();
+  });
+
+  it('respects explicit night work settings in night ticks', async () => {
+    const optedIn = make({
+      active: false,
+      projectId: 'default',
+      night: true,
+      properties: { [NIGHT_WORK_PROPERTY]: 'on' },
+    });
+    optedIn.enrich.mockResolvedValue({ files: 0, summarized: 0, embedded: 0 });
+    await optedIn.mgr.tick();
+    expect(optedIn.embedOnly).toHaveBeenCalledWith('default', expect.any(Number));
+
+    const optedOut = make({
+      active: false,
+      night: true,
+      properties: { [NIGHT_WORK_PROPERTY]: 'off' },
+    });
+    await optedOut.mgr.tick();
+    expect(optedOut.embedOnly).not.toHaveBeenCalled();
+    expect(optedOut.enrich).not.toHaveBeenCalled();
+  });
+
   it('does not run while a chat turn is in flight', async () => {
     const { mgr, enrich } = make({ active: true });
     await mgr.tick();
@@ -485,7 +528,11 @@ describe('AI-shadow tier + review drain event', () => {
 describe('on-demand drives + night catch-up', () => {
   function makeDriveFixture(
     opts: {
-      projects?: Array<{ id: string; indexingEnabled?: boolean }>;
+      projects?: Array<{
+        id: string;
+        indexingEnabled?: boolean;
+        properties?: Record<string, string>;
+      }>;
       catchUpSliceMs?: number;
     } = {},
   ) {
@@ -569,6 +616,22 @@ describe('on-demand drives + night catch-up', () => {
     });
     return { mgr, calls, refreshStatic, enrich, review, oneShotCompletion };
   }
+
+  it('excludes Default from catch-up and downstream night hooks unless opted in', async () => {
+    const projects = [{ id: 'default' }, { id: 'work' }];
+    const excluded = makeDriveFixture({ projects });
+    const caughtUp = vi.fn();
+    excluded.mgr.setOnProjectCaughtUp(caughtUp);
+    await excluded.mgr.catchUpAll();
+    expect(excluded.refreshStatic.mock.calls.map(([id]) => id)).toEqual(['work']);
+    expect(caughtUp.mock.calls.map(([id]) => id)).toEqual(['work']);
+
+    const included = makeDriveFixture({
+      projects: [{ id: 'default', properties: { [NIGHT_WORK_PROPERTY]: 'on' } }],
+    });
+    await included.mgr.catchUpAll();
+    expect(included.refreshStatic).toHaveBeenCalledWith('default');
+  });
 
   it('full drive: static first, then shadows → enrich → areas → reviews, non-ambient night batches', async () => {
     const { mgr, calls, enrich, review, oneShotCompletion } = makeDriveFixture();

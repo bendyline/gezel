@@ -30,4 +30,4 @@ jobs:
       - name: Verify lockfile supply-chain policies
         run: pnpm audit:lockfile
       - name: Production dependency vulnerability audit
-        run: pnpm audit:vulnerabilities --audit-level=critical
+        run: pnpm audit:vulnerabilities --audit-level=high

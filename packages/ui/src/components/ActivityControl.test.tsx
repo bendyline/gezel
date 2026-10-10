@@ -1,7 +1,12 @@
-import type { ActivityStatusResponse, Question, Task } from '@bendyline/gezel';
+import {
+  type ActivityStatusResponse,
+  type Question,
+  type Task,
+  isReadyQuestion,
+} from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
@@ -32,7 +37,7 @@ function snapshot(questions: Question[] = [question()]): ActivityStatusResponse 
     questions,
     items: questions.map((q) => ({
       id: `question:${q.id}`,
-      section: 'needs-you',
+      section: isReadyQuestion(q) ? 'ready' : 'needs-you',
       title: q.prompt,
       detail: 'Waiting for your response.',
       projectId: q.projectId,
@@ -67,6 +72,14 @@ async function refresh() {
 }
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   vi.mocked(api.getActivityStatus).mockResolvedValue(snapshot());
   vi.mocked(api.answerQuestion).mockImplementation(async (id, answer) => ({
     ...question(id),
@@ -74,7 +87,91 @@ beforeEach(() => {
   }));
 });
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('Activity', () => {
+  it('opens Ready ahead of pending advice and follows new destinations without stealing focus on refresh', async () => {
+    const finished: Question[] = [1, 2, 3].map((i) => ({
+      ...question(`ready-${i}`),
+      prompt: `Report ${i} is finished.`,
+      intent: { kind: 'task-finished', taskRef: `shop/${i}` },
+    }));
+    vi.mocked(api.getActivityStatus).mockResolvedValue(snapshot([question(), ...finished]));
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    const trigger = await screen.findByRole('button', { name: 'Activity — 1 needs you' });
+    act(() => openUpdates({ section: 'ready' }));
+    const ready = await screen.findByRole('heading', { name: 'Ready 3' });
+    await waitFor(() => expect(ready).toHaveFocus());
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.instances.at(-1)).toBe(
+      screen.getByRole('region', { name: 'Ready' }),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Needs you 1' }));
+    const needs = screen.getByRole('heading', { name: 'Needs you 1' });
+    await waitFor(() => expect(needs).toHaveFocus());
+    await refresh();
+    expect(needs).toHaveFocus();
+
+    act(() => openUpdates({ section: 'ready' }));
+    await waitFor(() => expect(ready).toHaveFocus());
+    act(() => openUpdates({ section: 'needs-you' }));
+    await waitFor(() => expect(needs).toHaveFocus());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close Activity' }));
+    await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Close Activity' })).toHaveFocus();
+  });
+
+  it('keeps the requested section until Activity finishes loading', async () => {
+    let finish!: (value: ActivityStatusResponse) => void;
+    vi.mocked(api.getActivityStatus).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    act(() => openUpdates({ section: 'ready' }));
+    expect(await screen.findByText('Checking your work…')).toBeVisible();
+    await act(async () => finish(snapshot()));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Ready 0' })).toHaveFocus());
+  });
+
+  it('keeps Ready in view as cards load, then releases it when the user scrolls', async () => {
+    let resized!: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+    await mount();
+    act(() => openUpdates({ section: 'ready' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Ready 0' })).toHaveFocus());
+    const scroll = vi.mocked(Element.prototype.scrollIntoView);
+    scroll.mockClear();
+    act(() => resized());
+    expect(scroll.mock.instances).toEqual([screen.getByRole('region', { name: 'Ready' })]);
+
+    fireEvent.wheel(screen.getByRole('heading', { name: 'Ready 0' }));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    scroll.mockClear();
+    await refresh();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
   it('keeps live work visible in the headline while automatic tasks are held', async () => {
     const current = snapshot([]);
     current.items = [
@@ -184,7 +281,7 @@ describe('Activity', () => {
     );
     await mount();
     await userEvent.type(screen.getAllByRole('textbox')[0]!, 'Shop draft');
-    act(() => openUpdates('cafe'));
+    act(() => openUpdates({ projectId: 'cafe' }));
     expect(screen.getAllByRole('textbox')).toHaveLength(1);
     expect(screen.getByRole('dialog')).toHaveTextContent('What should we call it?');
     await userEvent.click(screen.getByRole('button', { name: 'Show all projects' }));

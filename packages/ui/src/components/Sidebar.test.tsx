@@ -578,7 +578,7 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens Activity scoped to the project when the attention button is clicked', async () => {
+  it('opens the Needs you section of Activity for the project when the attention button is clicked', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [{ id: 'p1', name: 'Alpha' } as Project],
     } as never);
@@ -599,7 +599,10 @@ describe('Sidebar', () => {
         screen.getByRole('button', { name: /Open Activity: 1 item needs you in Alpha/ }),
       );
       expect(opened).toHaveBeenCalledTimes(1);
-      expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ projectId: 'p1' });
+      expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+        projectId: 'p1',
+        section: 'needs-you',
+      });
     } finally {
       window.removeEventListener('gezel:open-updates', opened);
     }

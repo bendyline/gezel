@@ -37,6 +37,7 @@ import {
   nightShiftDayKey,
   nowIso,
   projectAllowsAmbientWork,
+  projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -97,7 +98,7 @@ export interface ObservationNightlyResult {
   /** Work the per-night caps left behind, so truncation is never silent. */
   deferred: number;
   errors: string[];
-  skipped?: 'inactive' | 'no-tables' | 'engine-unavailable' | 'already-run';
+  skipped?: 'inactive' | 'opted-out' | 'no-tables' | 'engine-unavailable' | 'already-run';
 }
 
 function emptyResult(projectId: string): ObservationNightlyResult {
@@ -157,6 +158,7 @@ export async function runProjectObservationNightly(
   // The same ambient-work opt-out that gates every other background job. A
   // project the user has told to stay quiet stays quiet.
   if (!projectAllowsAmbientWork(project)) return skip('inactive');
+  if (!projectNightWorkEnabled(project)) return skip('opted-out');
   if (!deps.duck.available()) return skip('engine-unavailable');
 
   // BEFORE the no-tables check, deliberately. A project whose only tabular

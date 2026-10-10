@@ -106,7 +106,14 @@ export function citedSentences(markdown: string): Array<{ text: string; cites: n
       inFence = !inFence;
       continue;
     }
-    if (inFence || /^\s*(?:#{1,6}\s|\||<!--|---\s*$|\*\*\*\s*$)/.test(line)) continue;
+    // A line that is all bold is a heading by another name ("**What the dry
+    // run proved**"), not a sentence to check.
+    if (
+      inFence ||
+      /^\s*(?:#{1,6}\s|\||<!--|---\s*$|\*\*\*\s*$)/.test(line) ||
+      /^\s*(?:[-*+]\s+)?\*\*[^*]+\*\*:?\s*$/.test(line)
+    )
+      continue;
     const body = line.replace(/^\s*(?:[-*+]|\d+[.)]|>)\s+/, '').trim();
     if (body) units.push(body);
   }
@@ -271,6 +278,9 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   tokens.forEach((token, i) => {
     if (
       /^\p{Lu}[\p{L}'’-]*$/u.test(token) &&
+      // All capitals is emphasis or an acronym ("NOT APPLICABLE", "PASS"),
+      // not a name a source has to state.
+      !/^\p{Lu}{2,}$/u.test(token) &&
       !isFormula(i) &&
       !(opensClause(i) && COMMON_CAPITALIZED.has(token.toLowerCase()))
     ) {

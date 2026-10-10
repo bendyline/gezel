@@ -6,6 +6,7 @@ import {
   NIGHT_WORK_ARMED_AT_PROPERTY,
   NIGHT_WORK_PROPERTY,
   type SuggestedWorkItem,
+  projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -134,8 +135,19 @@ describe('setFolderNightWork', () => {
     expect((await tasks.get(projectId, a.num))?.status).toBe('paused');
 
     await setFolderNightWork({ store, tasks }, projectId, true);
-    expect((await store.getProject(projectId))?.properties?.[NIGHT_WORK_PROPERTY]).toBeUndefined();
+    expect((await store.getProject(projectId))?.properties?.[NIGHT_WORK_PROPERTY]).toBe('on');
     expect((await tasks.get(projectId, a.num))?.status).toBe('active');
     expect((await tasks.get(projectId, b.num))?.status).toBe('paused');
+  });
+
+  it('persists an explicit opt-in for Default and can turn it off again', async () => {
+    await store.ensureDefaultProject();
+    expect(projectNightWorkEnabled((await store.getProject('default'))!)).toBe(false);
+
+    await setFolderNightWork({ store, tasks }, 'default', true);
+    expect(projectNightWorkEnabled((await store.getProject('default'))!)).toBe(true);
+
+    await setFolderNightWork({ store, tasks }, 'default', false);
+    expect(projectNightWorkEnabled((await store.getProject('default'))!)).toBe(false);
   });
 });

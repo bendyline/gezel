@@ -2085,7 +2085,7 @@ export type ImageModelHardwareTier = z.infer<typeof ImageModelHardwareTierSchema
 
 /**
  * Stable-diffusion.cpp's launch flags for files external to the unet:
- *   --vae, --clip_l, --clip_g, --t5xxl, --llm
+ *   --vae, --clip_l, --clip_g, --t5xxl, --llm, --tokenizer
  * FLUX and SD3 distributions ship these as separate downloads because the
  * unet is quantized but the encoders/VAE are not, and bundling them all
  * would waste bandwidth for users mixing-and-matching quants.
@@ -2095,8 +2095,16 @@ export type ImageModelHardwareTier = z.infer<typeof ImageModelHardwareTierSchema
  * Mistral-Small-3.2 for FLUX.2 dev). sd-cpp's `--llm <path>` flag accepts
  * a GGUF. The aux role name maps 1:1 onto the sd-server flag name, so
  * adding the enum value here is enough — no launcher code change needed.
+ * Ming-Image also needs Ling's external tokenizer JSON via --tokenizer.
  */
-export const ImageModelAuxiliaryRoleSchema = z.enum(['vae', 'clip_l', 'clip_g', 't5xxl', 'llm']);
+export const ImageModelAuxiliaryRoleSchema = z.enum([
+  'vae',
+  'clip_l',
+  'clip_g',
+  't5xxl',
+  'llm',
+  'tokenizer',
+]);
 export type ImageModelAuxiliaryRole = z.infer<typeof ImageModelAuxiliaryRoleSchema>;
 
 export const ImageModelAuxiliaryFileSchema = z.object({

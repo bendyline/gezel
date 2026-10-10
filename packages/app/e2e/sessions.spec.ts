@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +33,12 @@ const SECOND_LINE = 'still drafting';
 // home and create the conversation it needs without relying on an earlier test.
 test.beforeEach(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sessions-e2e-'));
+  // A scheduled morning review can reopen Home's intro over the composer,
+  // including after restart. Session tests need a quiet, predictable home.
+  await writeFile(
+    join(gezelHome, 'config.json'),
+    JSON.stringify({ aiEngagementMode: 'reactive', nightShift: { enabled: false } }),
+  );
 });
 
 test.afterEach(async () => {
@@ -59,6 +65,11 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   const brand = page.locator('.app-header-brand');
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
+  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(conversation).toBeFocused();
   await expect(page.locator('.squisq-wysiwyg-editor').first()).toBeVisible({ timeout: 20_000 });
   return { app, page };
 }
@@ -159,6 +170,8 @@ test("sessions — the picker's New thread row starts a fresh thread", async () 
     const prompt = 'hello from the session picker test';
     const editor = page.locator('.squisq-wysiwyg-editor').first();
     await editor.fill(prompt);
+    await expect(editor).toHaveText(prompt);
+    await expect(editor).toBeFocused();
     await editor.press('Enter');
     await expect(
       page

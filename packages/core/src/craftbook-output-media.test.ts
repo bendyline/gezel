@@ -32,6 +32,57 @@ describe('craftbook blueprint output media', () => {
     expect(outputMediumForCraftbookBlueprint(blueprint({ terminal: true }))).toBe('none');
   });
 
+  // reviewer-loop, freeze-scope and automation-recipe each shipped a step told
+  // to write a file in prose with no writer on its surface (2026-10-10).
+  it('gives a step that writes a named file in prose a writer for that drawer', () => {
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Draft the customer brief and write `brief.md` with every section.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Save the recipe to `automations/<slug>.json` before moving on.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Write the scope to `{{workPath}}/scope.md`.' }),
+      ),
+    ).toBe('artifact');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Then record it by writing `.gezel/freeze.json` with exact paths.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Slug it and write the recipe to automations/<slug>.json, one file.' }),
+      ),
+    ).toBe('workspace');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({ prompt: 'Write the findings to reviews/security-review.md.' }),
+      ),
+    ).toBe('artifact');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({
+          prompt:
+            'Check each criterion, writing PASS/FAIL per criterion: every sub-question from {{workPath}}/question-scope.md.',
+        }),
+      ),
+    ).toBe('none');
+    expect(
+      outputMediumForCraftbookBlueprint(
+        blueprint({
+          prompt:
+            'Read `{{workPath}}/review.md`, then use `write_task_note` to record a DONE summary naming `{{workPath}}/verification.md`.',
+        }),
+      ),
+    ).toBe('task-note');
+  });
+
   it('lets executable gate requirements override a contradictory none policy', () => {
     const step = blueprint({
       toolPolicy: { outputMedium: 'none' },
@@ -78,6 +129,49 @@ describe('craftbook blueprint output media', () => {
       'task-note',
       'workspace',
     ]);
+  });
+
+  it.each<Partial<NewCraftbookStep>>([
+    { deliverable: { path: 'security/review.md', kind: 'markdown-report', artifact: true } },
+    { advanceWhen: { file: 'security/review.md', artifact: true } },
+    {
+      gate: {
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'security/review.md', bytes: 100, artifact: true }],
+      },
+    },
+  ])('uses the declared drawer for a prose output path: %j', (contract) => {
+    const step = blueprint({
+      ...contract,
+      prompt:
+        'Write the completed result to `security/review.md` in the artifacts drawer with `write_artifact`.',
+    });
+
+    expect(additionalOutputMediaForStep(step, 'artifact')).toEqual([]);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['artifact']);
+    expect([...outputMediaForStep({ ...step, toolPolicy: { outputMedium: 'artifact' } })]).toEqual([
+      'artifact',
+    ]);
+  });
+
+  it('keeps a separate prose workspace output beside an artifact handoff', () => {
+    const step = blueprint({
+      prompt:
+        'Save the recipe to `automations/recipe.json`. Write the report with `write_artifact`.',
+      advanceWhen: { file: 'reports/recipe.md', artifact: true },
+    });
+
+    expect(additionalOutputMediaForStep(step, 'artifact')).toEqual(['workspace']);
+  });
+
+  it('lets a workspace declaration override an artifact-like path prefix', () => {
+    const step = blueprint({
+      prompt: 'Write the completed result to `reports/review.md`.',
+      advanceWhen: { file: 'reports/review.md' },
+    });
+
+    expect(additionalOutputMediaForStep(step, 'workspace')).toEqual([]);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['workspace']);
   });
 
   it('recognizes an implementation plus regression-test phase as workspace mutation', () => {

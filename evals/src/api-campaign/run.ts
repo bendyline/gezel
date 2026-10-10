@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { repoRoot } from '../native-bin.ts';
-import { captureQualificationIdentity } from '../qualification/metadata.ts';
 import type { TrialResult } from '../types.ts';
+import { campaignIdentity, describeIdentityChanges, identityChanges } from './identity.ts';
 import {
   CONSENT_SCRIPT,
   type CampaignCell,
@@ -16,6 +16,8 @@ import {
 } from './plan.ts';
 import { type CampaignRow, campaignReport, campaignStopReason } from './report.ts';
 
+export { campaignIdentity } from './identity.ts';
+
 interface CampaignState {
   version: 1;
   createdAt: string;
@@ -26,17 +28,6 @@ interface CampaignState {
   rows: CampaignRow[];
   running?: string;
   stopped?: string;
-}
-
-export async function campaignIdentity() {
-  const identity = await captureQualificationIdentity(repoRoot());
-  if (identity.unavailable.length)
-    throw new Error(`Cannot freeze campaign: ${identity.unavailable.join(', ')}`);
-  // Hash ambient Gezel settings without recording values or credentials.
-  const environment = Object.entries(process.env)
-    .filter(([key]) => key.startsWith('GEZEL_') && !key.startsWith('GEZEL_DEPENDENCY_LEASE_'))
-    .sort(([a], [b]) => a.localeCompare(b));
-  return { ...identity, environmentHash: hash(environment) };
 }
 
 async function atomicJson(path: string, value: unknown) {
@@ -139,6 +130,20 @@ export async function runCampaign(
     const path = join(opts.runsDir, 'campaign.json');
     const definition = campaignDefinition(await deps.script());
     const identity = await deps.identity();
+    const drift = async (expected: unknown, observed: unknown, phase: string, cell?: string) => {
+      const changes = identityChanges(expected, observed);
+      if (!changes.length) return undefined;
+      const evidence = `identity-drift-${phase}.json`;
+      await atomicJson(join(opts.runsDir, evidence), {
+        detectedAt: new Date().toISOString(),
+        phase,
+        cell,
+        changes,
+        expected,
+        observed,
+      });
+      return `${describeIdentityChanges(changes)} (details: ${evidence})`;
+    };
     let state: CampaignState;
     const existing = await readFile(path, 'utf8').catch((error) => {
       if (error.code !== 'ENOENT') throw error;
@@ -146,13 +151,10 @@ export async function runCampaign(
     });
     if (existing) {
       state = JSON.parse(existing);
-      if (
-        state.version !== 1 ||
-        hash(state.definition) !== hash(definition) ||
-        hash(state.identity) !== hash(identity)
-      )
+      const changed = await drift(state.identity, identity, 'resume', state.running);
+      if (state.version !== 1 || hash(state.definition) !== hash(definition) || changed)
         throw new Error(
-          'Campaign definition, source/build/catalog, consent, or environment changed. Use a new --runs-dir for a new baseline.',
+          `Campaign ${changed ? `identity changed: ${changed}` : 'definition or consent changed'}. Use a new --runs-dir for a new baseline.`,
         );
       if (hash(state.cells) !== hash(campaignCells(state.count)))
         throw new Error('Campaign schedule was modified');
@@ -189,19 +191,24 @@ export async function runCampaign(
         campaignReport(state.cells, state.rows, state.stopped),
       );
     };
-    const record = async (cell: CampaignCell) => {
+    const record = async (cell: CampaignCell, observed: unknown) => {
       const result = await readResult(join(opts.runsDir, cell.id), cell);
-      const row = { cell, result };
+      const row: CampaignRow = { cell, result };
       state.rows.push(row);
       delete state.running;
       state.stopped = campaignStopReason(row);
+      const changed = await drift(state.identity, observed, 'after-trial', cell.id);
+      if (changed) {
+        row.comparisonIssue = `Campaign identity changed during the trial: ${changed}; results are not a frozen comparison`;
+        state.stopped = [state.stopped, row.comparisonIssue].filter(Boolean).join('; ');
+      }
       await save();
     };
     if (state.running) {
       const cell = state.cells.find((c) => c.id === state.running);
       if (!cell || state.rows.some((r) => r.cell.id === cell.id))
         throw new Error('Inconsistent campaign journal');
-      await record(cell);
+      await record(cell, identity);
     }
     await save();
     const remaining = state.cells.filter((c) => !state.rows.some((r) => r.cell.id === c.id));
@@ -222,8 +229,13 @@ export async function runCampaign(
       );
     for (const cell of remaining) {
       if (opts.signal?.aborted) break;
-      if (hash(await deps.identity()) !== hash(state.identity))
-        throw new Error('Campaign identity drifted; stopped before the next API trial');
+      const changed = await drift(state.identity, await deps.identity(), 'before-trial', cell.id);
+      if (changed) {
+        state.stopped = `Campaign identity changed before the next API trial: ${changed}`;
+        await save();
+        deps.log(`[api-campaign] Stopped: ${state.stopped}`);
+        break;
+      }
       const dir = join(opts.runsDir, cell.id);
       // An unjournaled directory may contain evidence of an earlier paid attempt.
       await mkdir(dir);
@@ -231,13 +243,7 @@ export async function runCampaign(
       await save();
       deps.log(`[api-campaign] Starting ${cell.id}`);
       await deps.execute(cell, dir, scriptPath, opts.signal);
-      await record(cell);
-      if (hash(await deps.identity()) !== hash(state.identity)) {
-        state.stopped =
-          'Source/build/catalog or environment changed during the trial; results are not a frozen comparison';
-        state.rows.at(-1)!.comparisonIssue = state.stopped;
-        await save();
-      }
+      await record(cell, await deps.identity());
       if (state.stopped) {
         deps.log(`[api-campaign] Stopped: ${state.stopped}`);
         break;

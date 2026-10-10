@@ -66,6 +66,27 @@
   overflow: hidden;
   font-size: var(--text-md);
 }
+/* Keep this header drawer anchored during dismissal. The shared dialog's
+   exit keyframes translate by -50%, which would jump it toward the center. */
+.activity-panel.gz-dialog[data-state="closed"] {
+  animation: activity-panel-out 140ms ease-out both;
+  pointer-events: none;
+}
+@keyframes activity-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-panel.gz-dialog[data-state="closed"] {
+    animation: none;
+  }
+}
 .activity-panel-header {
   display: flex;
   align-items: start;

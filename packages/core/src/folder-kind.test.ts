@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { FOLDER_KIND_PROPERTY, folderKindOf, inferFolderKind } from './folder-kind.js';
+import {
+  FOLDER_KIND_PROPERTY,
+  NIGHT_WORK_PROPERTY,
+  folderKindOf,
+  inferFolderKind,
+  projectNightWorkEnabled,
+} from './folder-kind.js';
+
+describe('projectNightWorkEnabled', () => {
+  it.each([
+    ['default', undefined, false],
+    ['default', '', false],
+    ['default', 'on', true],
+    ['default', 'off', false],
+    ['default', 'unexpected', false],
+    ['codebase', undefined, true],
+    ['codebase', 'on', true],
+    ['codebase', 'off', false],
+  ])('%s with setting %s allows night work: %s', (id, setting, expected) => {
+    expect(
+      projectNightWorkEnabled({
+        id,
+        ...(setting === undefined ? {} : { properties: { [NIGHT_WORK_PROPERTY]: setting } }),
+      }),
+    ).toBe(expected);
+  });
+});
 
 describe('inferFolderKind', () => {
   it('trusts a well-known Pictures or Documents folder over its file mix', () => {

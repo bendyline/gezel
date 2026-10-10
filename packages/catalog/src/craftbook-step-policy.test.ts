@@ -71,6 +71,25 @@ describe('craftbook step policy defaults', () => {
     expect(step.toolPolicy?.disallowBuiltinToolsets).not.toContain('artifacts');
   });
 
+  it('keeps workspace writes denied for an artifact handoff outside familiar prefixes', () => {
+    const doc: CraftbookDoc = {
+      name: 'Security review',
+      steps: [
+        {
+          name: 'Map assets and trust boundaries',
+          prompt:
+            'Write the completed result to `security/review-scope.md` in the artifacts drawer with `write_artifact`.',
+          advanceWhen: { file: 'security/review-scope.md', artifact: true },
+        },
+      ],
+    };
+
+    const step = applyDefaultCraftbookStepPolicies(doc).steps[0]!;
+    expect(step.toolPolicy?.outputMedium).toBe('artifact');
+    expect(step.toolPolicy?.additionalOutputMedia).toBeUndefined();
+    expect(step.toolPolicy?.disallowBuiltinToolsets).toContain('workspace-fs-write');
+  });
+
   it('never denies artifact reads, even to a step whose prose never names the drawer', () => {
     const doc: CraftbookDoc = {
       name: 'Evaluate',

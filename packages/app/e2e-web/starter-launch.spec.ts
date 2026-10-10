@@ -4,8 +4,9 @@ import { shot } from './helpers/shot.js';
 
 test.use({ daemonGroup: 'starter-launch' });
 
-test('Home starts a research report with two clicks and a topic', async ({ page }) => {
+test('Home starts a research report from Make something with a topic', async ({ page }) => {
   await gotoHome(page);
+  await page.getByRole('tab', { name: 'Make something', exact: true }).click();
   const tray = page.getByRole('region', { name: 'Make something' });
   await expect(tray).toBeVisible();
   await tray.getByRole('button', { name: /Research report/ }).click();

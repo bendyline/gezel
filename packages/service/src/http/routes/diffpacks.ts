@@ -13,6 +13,7 @@ import {
   DiffpackNotFoundError,
   DiffpackNotReviewableError,
 } from '../../diffpack/manager.js';
+import { PathSafetyError } from '../../fs/safe-paths.js';
 import { WorkspaceWriteDeniedError } from '../../workspace/errors.js';
 import type { ServiceContext } from '../context.js';
 import { buildDiffpackZip } from './diffpack-export.js';
@@ -145,19 +146,31 @@ export function diffpackRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/diffpacks/:packId/draft/read', async (c) => {
     const path = c.req.query('path');
     if (!path) return c.json({ error: 'query parameter "path" is required' }, 400);
-    const content = await ctx.diffpacks.drafts.read(c.req.param('id'), c.req.param('packId'), path);
-    if (content === null) return c.json({ error: 'not found' }, 404);
-    return c.json({ path, content, size: Buffer.byteLength(content) });
+    return draftRead(c, async () => {
+      const content = await ctx.diffpacks.drafts.read(
+        c.req.param('id'),
+        c.req.param('packId'),
+        path,
+      );
+      if (content === null) return c.json({ error: 'not found' }, 404);
+      return c.json({ path, content, size: Buffer.byteLength(content) });
+    });
   });
 
   app.get('/:id/diffpacks/:packId/draft/stat', async (c) => {
     const path = c.req.query('path');
     if (!path) return c.json({ error: 'query parameter "path" is required' }, 400);
-    const content = await ctx.diffpacks.drafts.read(c.req.param('id'), c.req.param('packId'), path);
-    if (content !== null) return c.json({ kind: 'file', size: Buffer.byteLength(content) });
-    // Not a drafted file — fall back to the real workspace so directory
-    // stats and untouched paths still answer truthfully.
-    return c.json(await ctx.store.statProjectWorkspacePath(c.req.param('id'), path));
+    return draftRead(c, async () => {
+      const content = await ctx.diffpacks.drafts.read(
+        c.req.param('id'),
+        c.req.param('packId'),
+        path,
+      );
+      if (content !== null) return c.json({ kind: 'file', size: Buffer.byteLength(content) });
+      // Not a drafted file — fall back to the real workspace so directory
+      // stats and untouched paths still answer truthfully.
+      return c.json(await ctx.store.statProjectWorkspacePath(c.req.param('id'), path));
+    });
   });
 
   app.put('/:id/diffpacks/:packId/draft/file', async (c) => {
@@ -255,6 +268,20 @@ export function diffpackRoutes(ctx: ServiceContext): Hono {
  * try again"). Flattening them to a generic error would make the drafting
  * surface measurably worse at recovering than the workspace one.
  */
+/**
+ * A draft read the path rules refuse answers 400 with their message, as the
+ * workspace routes do. Unmapped, an absolute path reached the model as a bare
+ * `internal_error` it could do nothing with (2026-10-10).
+ */
+async function draftRead(c: Context, run: () => Promise<Response>): Promise<Response> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof PathSafetyError) return c.json({ error: err.message, code: err.code }, 400);
+    throw err;
+  }
+}
+
 async function draftEdit(
   c: Context,
   run: () => Promise<{
