@@ -89,6 +89,7 @@
     "pretest:e2e:web": "node scripts/run-with-dependency-lease.mjs pw:install:unleased",
     "test:e2e:web": "node scripts/run-with-dependency-lease.mjs test:e2e:web:unleased",
     "test:e2e:web:unleased": "pnpm build && pnpm test:e2e:web:run",
+    "eval:api-campaign": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/api-campaign.ts",
     "eval:run": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/run.ts",
     "eval:run:unleased": "pnpm --filter @bendyline/gezel-evals run run",
     "eval:batch": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/batch.ts",

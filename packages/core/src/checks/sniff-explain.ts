@@ -8,7 +8,7 @@
  * can never disagree with the verdict.
  */
 
-import { detectUnclosedScript, inlineJsBytes } from './html.js';
+import { detectUnclosedScript, hasHtmlGameSurface, inlineJsBytes } from './html.js';
 import { jsonValid } from './text.js';
 
 export type ExplainableSniff =
@@ -24,7 +24,11 @@ export type ExplainableSniff =
  * that actually passes, a generic line is returned rather than lying
  * about a defect.
  */
-export function explainSniff(name: ExplainableSniff, content: string): string {
+export function explainSniff(
+  name: ExplainableSniff,
+  content: string,
+  minGameJsBytes = 400,
+): string {
   switch (name) {
     case 'html-complete': {
       const scripts = detectUnclosedScript(content);
@@ -38,25 +42,19 @@ export function explainSniff(name: ExplainableSniff, content: string): string {
       return 'the document is incomplete — finish and close it.';
     }
     case 'html-game': {
-      const lower = content.toLowerCase();
-      const hasRenderTarget = /<canvas\b/.test(lower) || /<svg\b/.test(lower);
-      const hasFrameLoop =
-        /requestanimationframe\s*\(/.test(lower) ||
-        /set(?:interval|timeout)\s*\(/.test(lower) ||
-        /\bfunction\s+(?:tick|update|loop|gameloop|gametick|step|render|frame)\b/.test(lower);
-      if (!hasRenderTarget && !hasFrameLoop) {
-        return 'no render surface (<canvas>/<svg>) and no frame loop (requestAnimationFrame / setInterval / a tick()/update() function) — add the game loop.';
-      }
       const scripts = detectUnclosedScript(content);
-      if (scripts.opens === 0) {
-        return 'no <script> block — the page has no game logic; add the inline script.';
-      }
       if (scripts.unclosed) {
         return `${scripts.opens} <script> tag${scripts.opens === 1 ? '' : 's'} open but only ${scripts.closes} close${scripts.closes === 1 ? 's' : ''} — truncated mid-script; close the script.`;
       }
+      if (!hasHtmlGameSurface(content)) {
+        return 'no render surface, frame loop, or interactive DOM controls that update the display — connect the game state to a visible playable surface.';
+      }
+      if (scripts.opens === 0) {
+        return 'no <script> block — the page has no game logic; add the inline script.';
+      }
       const js = inlineJsBytes(content);
-      if (js < 400) {
-        return `inline JavaScript is ${js} bytes, need >= 400 — the page has no substantive game logic yet.`;
+      if (js < minGameJsBytes) {
+        return `inline JavaScript is ${js} bytes, need >= ${minGameJsBytes} — the page has no substantive game logic yet.`;
       }
       return 'the page does not read as a working game yet — check the script and game loop.';
     }

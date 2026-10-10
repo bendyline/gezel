@@ -9,7 +9,7 @@ import { type ElectronApplication, test } from '@playwright/test';
 const SHUTDOWN_WALL_MS = 30_000;
 
 /**
- * Close the Electron app from an `afterAll`, leaving Electron's real
+ * Close the Electron app from a test or `afterAll`, leaving Electron's real
  * before-quit path room to finish.
  *
  * Playwright's default hook budget is *also* 30s, so any spec that leaves the
@@ -25,6 +25,9 @@ const SHUTDOWN_WALL_MS = 30_000;
  * headroom that only teardown needs.
  */
 export async function closeApp(app: ElectronApplication | undefined): Promise<void> {
-  test.setTimeout(SHUTDOWN_WALL_MS + 30_000);
+  // A restart test closes midway through its lifecycle budget. Replacing
+  // that budget with 60s can time out an otherwise healthy second launch.
+  const timeout = test.info().timeout;
+  if (timeout !== 0) test.setTimeout(Math.max(timeout, SHUTDOWN_WALL_MS + 30_000));
   await app?.close();
 }

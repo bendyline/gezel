@@ -57,6 +57,8 @@ export interface KokoroInputIds {
 }
 
 export interface KokoroTTSInstance {
+  /** Release ONNX sessions before removing an installation, including on Windows. */
+  model?: { dispose(): Promise<void> };
   generate(text: string, opts?: { voice?: string; speed?: number }): Promise<KokoroAudioOutput>;
   /**
    * Synthesize from phoneme ids. This is the entry point Gezel uses: it skips
@@ -134,6 +136,8 @@ export interface KokoroBackend {
 /** Settings the worker needs; plain data, because it crosses `workerData`. */
 export interface KokoroEngineConfig {
   cacheDir: string;
+  /** Complete pinned model and tokenizer metadata, loaded locally. */
+  modelDirectory?: string;
   lexiconDir?: string;
   dtype: 'q4' | 'q8' | 'fp16' | 'fp32';
   inferenceTimeoutMs: number;
@@ -248,9 +252,11 @@ export class KokoroEngine {
     return voiceTable(await this.ensureLoaded(opts.deadline));
   }
 
-  unload(): void {
+  async unload(): Promise<void> {
+    const loaded = this.cachedTts ?? (await this.loading?.catch(() => null));
     this.cachedTts = null;
     this.loading = null;
+    await loaded?.model?.dispose();
   }
 
   /**
@@ -322,7 +328,9 @@ export class KokoroEngine {
       // pinned here (see transformers-cache.ts for why this is mandatory).
       await pinTransformersCacheDir(this.config.cacheDir, this.loadTransformersEnv);
       const mod = await this.module();
-      const loading = mod.KokoroTTS.from_pretrained(KOKORO_HF_REPO, { dtype: this.config.dtype });
+      const loading = mod.KokoroTTS.from_pretrained(this.config.modelDirectory ?? KOKORO_HF_REPO, {
+        dtype: this.config.dtype,
+      });
       // A pull downloads ~88 MB of weights; a deadline there would only
       // punish a slow connection.
       const tts = deadline
@@ -406,10 +414,10 @@ export class InProcessKokoroBackend implements KokoroBackend {
   }
 
   async unload(): Promise<void> {
-    this.engine.unload();
+    await this.engine.unload();
   }
 
   async shutdown(): Promise<void> {
-    this.engine.unload();
+    await this.engine.unload();
   }
 }

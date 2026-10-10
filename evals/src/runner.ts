@@ -4845,7 +4845,11 @@ async function finalize(args: {
   // Tag the trial with who-broke-it accountability so pass-rate tables
   // can separate model failures from infra/operator noise. Log-signature
   // rules read the daemon log; classification must never block finalize.
-  let classification = classifyTrial({ success: args.success, reason: args.reason });
+  let classification = classifyTrial({
+    success: args.success,
+    reason: args.reason,
+    qualificationIssues: qualification?.issues,
+  });
   let nativeIncidentLog: string | null = null;
   let sessionTelemetry: SessionTelemetryListResponse | null = null;
   let engineContext: EngineContextRecord | null = null;
@@ -4868,6 +4872,7 @@ async function finalize(args: {
     classification = classifyTrial({
       success: args.success,
       reason: args.reason,
+      qualificationIssues: qualification?.issues,
       failureMode: args.failureMode ?? null,
       daemonLog,
       nativeIncidentLog,

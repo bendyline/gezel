@@ -186,6 +186,7 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  craftbookSuggestionGuidance,
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
@@ -5455,7 +5456,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: 'No craftbook matched. Call invoke_craftbook with the generic "build-loop" procedure (design → build → evaluate → loop), or create_task with explicit phase steps. Do not call suggest_craftbook again with a rephrased query and do not claim work started until the action call succeeds.',
+            text: 'No craftbook matched. Preserve the full user request and its destination: for a new project use start_project; for an existing project, invoke the generic "build-loop" procedure with that project id and the full task brief. Do not claim work started until the action call succeeds.',
           },
         ],
       };
@@ -5473,25 +5474,21 @@ server.tool(
       })
       .join('\n');
     const top = res.suggestions[0]!;
-    const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
     const topManifest = projectCraftbooks?.items.find(
       (item) => item.manifest.kind === 'craftbook-template' && item.manifest.id === top.id,
     );
+    const rootTurn = await currentRootTurnContext();
     const nextInvocation = suggestedCraftbookInvocation({
       craftbookId: top.id,
       query,
+      jobDescription: rootTurn?.userText,
+      project: resolvedProject,
       paramSchema:
         topManifest?.manifest.kind === 'craftbook-template'
           ? topManifest.manifest.paramSchema
           : undefined,
     });
-    const nextCall = nextInvocation.params
-      ? `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)},"params":${JSON.stringify(nextInvocation.params)}})`
-      : `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)}})`;
-    const nextAction =
-      topMissing.length > 0
-        ? `Next call: ${nextCall}. It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
-        : `Next call: ${nextCall} — send it now unless a lower match clearly fits the job better. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
+    const nextAction = craftbookSuggestionGuidance(nextInvocation);
     return {
       content: [
         {
@@ -5597,7 +5594,12 @@ server.tool(
     craftbookId: z
       .string()
       .describe('Craftbook id from list_craftbooks (e.g. "pull-request-review", "ship").'),
-    project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        'Existing project id or name. Defaults to the current project; this tool does not create a new project. Use start_project when the user requests a new project.',
+      ),
     title: z.string().optional().describe('Optional task title. Defaults to the craftbook name.'),
     description: z
       .string()

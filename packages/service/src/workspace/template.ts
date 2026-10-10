@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 /**
  * Minimal template seeded into an internal project workspace on first
@@ -43,6 +44,34 @@ build/
 .DS_Store
 `;
 
+function packageTemplate(name: string) {
+  return {
+    name,
+    private: true,
+    version: '0.0.0',
+    type: 'module',
+    engines: { node: '>=24.0.0' },
+  };
+}
+
+/** Only use for internal workspaces: user-owned repositories keep their own semantics. */
+export function isUnmodifiedWorkspaceBootstrap(name: string, content: string): boolean {
+  if (name === '.gitignore') return content === GITIGNORE;
+  try {
+    const value = JSON.parse(content);
+    if (name === 'tsconfig.json') return isDeepStrictEqual(value, TSCONFIG);
+    // A project can be renamed after creation; the original package name stays on disk.
+    return (
+      name === 'package.json' &&
+      typeof value?.name === 'string' &&
+      value.name === slugifyForPackageName(value.name) &&
+      isDeepStrictEqual(value, packageTemplate(value.name))
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Idempotent: each file is only created if missing, so re-running the
  * bootstrap (e.g. after a user deletes package.json) never overwrites
@@ -56,13 +85,7 @@ export async function bootstrapWorkspace(opts: BootstrapWorkspaceOptions): Promi
 
   const pkgJsonPath = join(workspaceDir, 'package.json');
   if (!existsSync(pkgJsonPath)) {
-    const pkg = {
-      name: slugifyForPackageName(projectName ?? projectId),
-      private: true,
-      version: '0.0.0',
-      type: 'module',
-      engines: { node: '>=24.0.0' },
-    };
+    const pkg = packageTemplate(slugifyForPackageName(projectName ?? projectId));
     await writeFile(pkgJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
     written.push('package.json');
   }

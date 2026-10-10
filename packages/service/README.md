@@ -103,3 +103,31 @@ Public API under semver. The HTTP API is versioned separately under `/api`;
 prefer `@bendyline/gezel-client` over calling it directly.
 
 MIT © Bendyline
+
+## Shared speech models
+
+Desktop speech weights use the Node-only `@bendyline/gezel/speech-models` API,
+shared with DocBlocks. The catalog pins Whisper GGML models, the timestamped
+Kokoro q8 ONNX export, and the eight curated English voices by revision, size,
+and SHA-256. The normal q8 provider loads a complete local model directory;
+its tiny tokenizer metadata ships with the API so adopting DocBlocks' model
+needs no network. Other explicitly configured quantizations retain their
+existing loader. Older standard Kokoro exports require an explicit model pull
+to update; a health check never downloads the new export.
+
+The per-user cache is `<GEZEL_HOME>/engines/speech-assets/<sha256>`. Each app
+keeps its own installation manifest and hard links to those verified bytes.
+A different filesystem falls back to copying verified bytes without another
+download. Downloads and cache collection coordinate through process locks;
+removing one installation releases only its links, and cache bytes are removed
+when no installation references them. Discovery reads legacy Gezel model
+folders, configured read-only model homes, and the public machine assets
+overlay. It never probes the machine service's private state. Machine-scope
+writes use `<GEZEL_SHARED_ASSETS_DIR>/models/speech-assets`.
+
+Existing local Whisper files join the cache when used. The first app to pull
+a model publishes the cache for the other app; use acquires independent file
+references before launching an engine. The speech runtime remains local to
+each application: reuse starts no daemon or consent flow. Sandboxed embedders
+can disable shared storage entirely. Release the core package containing the
+`./speech-models` export before updating a consumer's registry pin.

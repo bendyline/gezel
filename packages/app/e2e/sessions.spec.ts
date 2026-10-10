@@ -29,11 +29,13 @@ let gezelHome: string;
 const FIRST_LINE = 'hello from e2e';
 const SECOND_LINE = 'still drafting';
 
-test.beforeAll(async () => {
+// Playwright replaces the worker after a failure, so each test must own its
+// home and create the conversation it needs without relying on an earlier test.
+test.beforeEach(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sessions-e2e-'));
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -154,10 +156,21 @@ test("sessions — the picker's New thread row starts a fresh thread", async () 
 
   const { app, page } = await launch();
   try {
-    // Home opens on a fresh thread, so pick the restored one first: leaving a
-    // thread is the behavior under test, and comparing "New thread" with
-    // itself would prove nothing.
-    const threadTitle = deriveThreadTitle(`${FIRST_LINE}\n${SECOND_LINE}`);
+    const prompt = 'hello from the session picker test';
+    const editor = page.locator('.squisq-wysiwyg-editor').first();
+    await editor.fill(prompt);
+    await editor.press('Enter');
+    await expect(
+      page
+        .locator('.msg-from-gezel, .msg-assistant')
+        .filter({ hasText: 'Mock reply:' })
+        .filter({ hasText: prompt })
+        .last(),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Leave a populated thread: comparing "New thread" with itself would
+    // prove nothing, even if the picker opened successfully.
+    const threadTitle = deriveThreadTitle(prompt);
     const sessionTrigger = page.locator('.gezel-chat-session-select').first();
     await sessionTrigger.click();
     await page

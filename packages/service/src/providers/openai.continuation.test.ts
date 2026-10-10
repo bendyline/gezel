@@ -1,7 +1,8 @@
 import type OpenAI from 'openai';
 import { describe, expect, it, vi } from 'vitest';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
-import { OpenAISession } from './openai.js';
+import { OpenAISession, type OpenAISessionDeps } from './openai.js';
 import { ProviderQueue } from './queue.js';
 import { TERMINAL_ACTION_SKIPPED_OUTPUT } from './terminal-tool-policy.js';
 
@@ -20,7 +21,10 @@ const terminal = (id: string, status = 'completed') => ({
 });
 const text = (delta: string) => ({ type: 'response.output_text.delta', delta });
 
-async function harness(rounds: Array<unknown[] | Error>) {
+async function harness(
+  rounds: Array<unknown[] | Error>,
+  overrides: Partial<OpenAISessionDeps> = {},
+) {
   const requests: Array<Record<string, unknown>> = [];
   const openai = {
     responses: {
@@ -49,6 +53,7 @@ async function harness(rounds: Array<unknown[] | Error>) {
     systemMessage: 'Test assistant',
     previousResponseId: null,
     queue: new ProviderQueue({ concurrency: 1 }),
+    ...overrides,
   };
   return { session: new OpenAISession(deps), deps, requests, execute };
 }
@@ -72,7 +77,7 @@ describe('OpenAI continuation state', () => {
     });
     expect(session.providerState()).toEqual({ openaiPreviousResponseId: 'resp-incomplete' });
     expect(usage).toHaveBeenCalledWith(
-      expect.objectContaining({ inputTokens: 20, outputTokens: 4 }),
+      expect.objectContaining({ inputTokens: 40, outputTokens: 8 }),
     );
 
     await expect(session.sendAndWait('Continue')).resolves.toBe('Recovered');
@@ -214,5 +219,84 @@ describe('OpenAI continuation state', () => {
         { role: 'user', content: 'Retry' },
       ],
     });
+  });
+});
+
+describe('OpenAI checkpoint and loop budgets', () => {
+  const terminalToolPolicy = {
+    toolNames: ['write_artifact'],
+    onlyWhenArgEquals: { arg: 'path', value: 'tasks/4/notes.md' },
+    fallbackText: 'Checkpoint saved.',
+  };
+
+  it('closes only after the configured successful checkpoint and preserves its receipt', async () => {
+    const { session, requests, execute } = await harness(
+      [
+        [call('other', 'write_artifact', '{"path":"other.md"}'), terminal('r1')],
+        [call('failed', 'write_artifact', '{"path":"tasks/4/notes.md"}'), terminal('r2')],
+        [
+          call('saved', 'write_artifact', '{"path":"tasks/4/notes.md"}'),
+          call('stale'),
+          terminal('r3'),
+        ],
+        [text('Next step'), terminal('r4')],
+      ],
+      { terminalToolPolicy },
+    );
+    execute
+      .mockResolvedValueOnce({ text: 'Saved', images: [], isError: false })
+      .mockResolvedValueOnce({ text: 'Permission denied', images: [], isError: true });
+    await expect(session.sendAndWait('Write checkpoint')).resolves.toBe('Checkpoint saved.');
+    expect(requests).toHaveLength(3);
+    expect(execute).toHaveBeenCalledTimes(3);
+    await session.sendAndWait('Continue');
+    expect(requests[3]).toMatchObject({
+      previous_response_id: 'r3',
+      input: [
+        { type: 'function_call_output', call_id: 'saved', output: 'Saved result' },
+        { type: 'function_call_output', call_id: 'stale', output: TERMINAL_ACTION_SKIPPED_OUTPUT },
+        { role: 'user', content: 'Continue' },
+      ],
+    });
+  });
+
+  it('allows more than twelve productive rounds and accounts for every response', async () => {
+    const rounds = Array.from({ length: 14 }, (_, i) => [
+      call(`c${i}`, 'read_artifact', JSON.stringify({ path: `${i}.md` })),
+      terminal(`r${i}`),
+    ]);
+    const { session, requests } = await harness([...rounds, [text('Done'), terminal('final')]]);
+    const usage = vi.fn();
+    session.onUsage(usage);
+    await expect(session.sendAndWait('Review files')).resolves.toBe('Done');
+    expect(requests).toHaveLength(15);
+    expect(usage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ inputTokens: 300, outputTokens: 60 }),
+    );
+  });
+
+  it('keeps an absolute limit, reports usage, and saves the last tool receipt on exhaustion', async () => {
+    const rounds = Array.from({ length: CLOUD_TOOL_ROUND_LIMIT }, (_, i) => [
+      call(`c${i}`),
+      terminal(`r${i}`),
+    ]);
+    const { session, requests } = await harness(rounds);
+    const usage = vi.fn();
+    session.onUsage(usage);
+    await expect(session.sendAndWait('Review')).rejects.toThrow('too many tool-call loops');
+    expect(requests).toHaveLength(CLOUD_TOOL_ROUND_LIMIT);
+    expect(session.providerState().openaiPendingToolOutputs).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: `c${CLOUD_TOOL_ROUND_LIMIT - 1}`,
+        output: 'Saved result',
+      },
+    ]);
+    expect(usage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        inputTokens: 20 * CLOUD_TOOL_ROUND_LIMIT,
+        outputTokens: 4 * CLOUD_TOOL_ROUND_LIMIT,
+      }),
+    );
   });
 });

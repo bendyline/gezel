@@ -175,5 +175,8 @@ describe('looksLikeDataTransformRequest (one-off transform-class gating)', () =>
     );
     expect(out).toContain('data-transform job');
     expect(out).toContain('suggest_craftbook');
+    expect(out).toContain('only if its purpose fits');
+    expect(out).toContain('requested existing project');
+    expect(out).toContain('If none fits');
   });
 });

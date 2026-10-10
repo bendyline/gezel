@@ -40,6 +40,7 @@ describe('CraftbookSuggestionCompactor', () => {
     expect(compact.recommendedCraftbook).toEqual({
       id: 'powerpoint-deck',
       name: 'PowerPoint from Content',
+      description: 'Turn source content into a real editable PowerPoint file.',
       matchPercent: 49,
       setupRequired: ['docblocks'],
     });
@@ -51,7 +52,9 @@ describe('CraftbookSuggestionCompactor', () => {
         params: { topic: 'create a PowerPoint presentation about Honduras' },
       },
     });
-    expect(compact.instruction).toContain('Do not call suggest_craftbook again');
+    expect(compact.instruction).toContain('Reject an unsuitable match');
+    expect(compact.instruction).toContain('new project, use start_project');
+    expect(compact.instruction).not.toContain('Call invoke_craftbook now');
     expect(result.text).not.toContain('content-deck');
   });
 
@@ -89,4 +92,31 @@ describe('CraftbookSuggestionCompactor', () => {
     ).resolves.toBe(original);
     expect(compactCraftbookSuggestion('not a suggestion')).toBeNull();
   });
+
+  it('preserves the target project and full brief in a conditional candidate call', () => {
+    const args = {
+      craftbookId: 'report',
+      description: 'Write the annual report in the reporting project.',
+      project: 'reporting',
+    };
+    const result = compactCraftbookSuggestion(
+      `1. Report (id: report) [bundled, 2 step(s), 8% match] — Draft a report.\n\nCandidate call, only if this recipe and project fit: invoke_craftbook(${JSON.stringify(args)}).`,
+    );
+    expect(JSON.parse(result!).nextCall.arguments).toEqual(args);
+    expect(JSON.parse(result!).recommendedCraftbook.description).toBe('Draft a report.');
+  });
+
+  it('keeps the full result if the candidate description cannot be preserved', () => {
+    expect(
+      compactCraftbookSuggestion(
+        '1. Report (id: report) [bundled, 2 step(s), 8% match]\ninvoke_craftbook({"craftbookId":"report"})',
+      ),
+    ).toBeNull();
+  });
+});
+
+it('does not turn unbound recipe details into an executable launch', () => {
+  const text =
+    '1. Report (id: report) [bundled, 2 step(s), 8% match] — Draft a report.\n\nCandidate recipe details (not a launch call): {"craftbookId":"report","description":"Create a new project for the report."}\nSearch scope: "default". The search scope does not select a destination.';
+  expect(compactCraftbookSuggestion(text)).toBeNull();
 });

@@ -288,8 +288,11 @@ test.describe('Knowledge catalogs', () => {
     await page.getByLabel('Catalog file path or URL').fill(archivePath);
     await page.getByRole('button', { name: 'Install', exact: true }).click();
 
-    await expect(page.getByText('Shop Notes')).toBeVisible({ timeout: 30_000 });
+    // The download card also has this title, even before installation finishes.
     const installedRow = page.getByTestId('knowledge-catalog-shop-notes');
+    await expect(installedRow.getByText('Shop Notes', { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(installedRow.getByRole('checkbox')).toBeChecked({ timeout: 10_000 });
     await captureScreenshot(page, {
       path: join(screenshotDir, 'knowledge-settings.png'),

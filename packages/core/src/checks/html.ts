@@ -195,17 +195,33 @@ export function htmlCompleteSniff(html: string): boolean {
  * is one way to be a game, not the definition. The closed-script +
  * substantial-JS floors still exclude static pages and truncated stubs.
  */
-export function htmlGameSniff(html: string, minJsBytes = 400): boolean {
+export function hasHtmlGameSurface(html: string): boolean {
   const lower = html.toLowerCase();
   const hasRenderTarget = /<canvas\b/.test(lower) || /<svg\b/.test(lower);
   const hasFrameLoop =
     /requestanimationframe\s*\(/.test(lower) ||
     /set(?:interval|timeout)\s*\(/.test(lower) ||
     /\bfunction\s+(?:tick|update|loop|gameloop|gametick|step|render|frame)\b/.test(lower);
-  const hasSurface = hasRenderTarget || hasFrameLoop;
+  const scripts = extractInlineScripts(html)
+    .map((script) => script.body)
+    .join('\n');
+  // Turn-based DOM games render in input handlers, without an animation loop.
+  const hasDomInteraction =
+    /<(?:button|input|select)\b|\b(?:tabindex|role)\s*=/i.test(html) &&
+    /\.addEventListener\s*\(\s*['"](?:click|pointerdown|pointerup|mousedown|mouseup|keydown|keyup|touchstart|touchend|change)['"]|\.on(?:click|keydown|pointerdown)\s*=/.test(
+      scripts,
+    ) &&
+    /\.(?:textContent|innerHTML|innerText)\s*=|\.(?:replaceChildren|appendChild|setAttribute)\s*\(|\.classList\.(?:add|remove|toggle)\s*\(/.test(
+      scripts,
+    );
+  return hasRenderTarget || hasFrameLoop || hasDomInteraction;
+}
+
+export function htmlGameSniff(html: string, minJsBytes = 400): boolean {
+  const lower = html.toLowerCase();
   const opens = (lower.match(/<script\b/g) ?? []).length;
   const closes = (lower.match(/<\/script>/g) ?? []).length;
   const scriptClosed = opens > 0 && opens === closes;
   const jsSubstantial = inlineJsBytes(html) >= minJsBytes;
-  return hasSurface && scriptClosed && jsSubstantial;
+  return hasHtmlGameSurface(html) && scriptClosed && jsSubstantial;
 }

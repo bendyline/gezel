@@ -1,7 +1,8 @@
-import { createLogger } from '@bendyline/gezel';
+import { AwakeBudget, createLogger } from '@bendyline/gezel';
 import type OpenAI from 'openai';
 import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
 import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
@@ -130,6 +131,7 @@ export class OpenAIProvider implements LLMProvider {
       bridges,
       previousResponseId: opts.openaiPreviousResponseId ?? null,
       pendingToolOutputs: opts.openaiPendingToolOutputs,
+      terminalToolPolicy: opts.terminalToolPolicy,
       queue: this.queue,
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.externalTools && opts.externalTools.length > 0
@@ -169,6 +171,7 @@ export class OpenAIProvider implements LLMProvider {
 
 /** @internal Exported alongside {@link OpenAISession} for unit tests. */
 export interface OpenAISessionDeps {
+  terminalToolPolicy?: SessionOpts['terminalToolPolicy'];
   observationContext?: ApiObservationContext;
   openai: OpenAI;
   model: string;
@@ -264,7 +267,7 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
     // emitting tool calls. Timeout bounds the entire multi-turn exchange.
     // Clock starts AFTER queue acquire so a queued request doesn't
     // fail from waiting.
-    const deadline = Date.now() + (opts?.timeoutMs ?? 120_000);
+    const budget = new AwakeBudget(opts?.timeoutMs ?? 120_000);
     const start = Date.now();
 
     // Tools list combines gezel's MCP bridge tools (existing) with
@@ -309,280 +312,253 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
       ];
     }
     let fullText = '';
-    let lastUsage: {
-      input_tokens: number;
-      output_tokens: number;
-      total_tokens?: number;
-      input_tokens_details?: { cached_tokens?: number };
-    } | null = null;
+    let usageObserved = false;
+    const totalUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+    try {
+      // Hard bound on tool-call loops so a runaway model can't hang forever.
+      for (let turn = 0; turn < CLOUD_TOOL_ROUND_LIMIT; turn++) {
+        if (budget.expired()) {
+          throw new Error(
+            `[openai] timed out after ${Math.round((opts?.timeoutMs ?? 120_000) / 1000)}s`,
+          );
+        }
 
-    // Hard bound on tool-call loops so a runaway model can't hang forever.
-    for (let turn = 0; turn < 12; turn++) {
-      if (Date.now() > deadline) {
-        throw new Error(
-          `[openai] timed out after ${Math.round((opts?.timeoutMs ?? 120_000) / 1000)}s`,
+        const request: Record<string, unknown> = {
+          model: this.deps.model,
+          input,
+          stream: true,
+          store: true,
+        };
+        // `previous_response_id` carries conversation items server-side but
+        // NOT `instructions` — the Responses API docs: instructions "will not
+        // be carried over to the next response". Omitting them here means the
+        // session runs without any system prompt from the second request
+        // onward (and about.md edits never reach the model). Re-send every
+        // request.
+        request.instructions = this.deps.systemMessage;
+        if (this.previousResponseId) {
+          request.previous_response_id = this.previousResponseId;
+        }
+        if (tools && tools.length > 0) request.tools = tools;
+        if (this.deps.reasoningEffort && isReasoningModel(this.deps.model)) {
+          request.reasoning = { effort: this.deps.reasoningEffort };
+        }
+        // Per-model tuning. Sampling (temperature/top_p/max_tokens/seed/
+        // freq+pres penalty), structured output (response_format /
+        // json_schema), tool_choice, and a tuning-block effort override
+        // land here. A `tuning.reasoning.effort` overwrites the legacy
+        // `request.reasoning.effort` set above when both apply.
+        if (this.deps.tuning) {
+          applyTuning(request, this.deps.tuning, OPENAI_TUNING_MAP);
+        }
+
+        this.toolSurface = apiToolSurface(tools ?? []);
+        const stream = observeApiStream(
+          () =>
+            (
+              this.deps.openai as unknown as {
+                responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
+              }
+            ).responses.stream(request),
+          { provider: 'openai', request, round: turn + 1, context: this.deps.observationContext },
         );
-      }
 
-      const request: Record<string, unknown> = {
-        model: this.deps.model,
-        input,
-        stream: true,
-        store: true,
-      };
-      // `previous_response_id` carries conversation items server-side but
-      // NOT `instructions` — the Responses API docs: instructions "will not
-      // be carried over to the next response". Omitting them here means the
-      // session runs without any system prompt from the second request
-      // onward (and about.md edits never reach the model). Re-send every
-      // request.
-      request.instructions = this.deps.systemMessage;
-      if (this.previousResponseId) {
-        request.previous_response_id = this.previousResponseId;
-      }
-      if (tools && tools.length > 0) request.tools = tools;
-      if (this.deps.reasoningEffort && isReasoningModel(this.deps.model)) {
-        request.reasoning = { effort: this.deps.reasoningEffort };
-      }
-      // Per-model tuning. Sampling (temperature/top_p/max_tokens/seed/
-      // freq+pres penalty), structured output (response_format /
-      // json_schema), tool_choice, and a tuning-block effort override
-      // land here. A `tuning.reasoning.effort` overwrites the legacy
-      // `request.reasoning.effort` set above when both apply.
-      if (this.deps.tuning) {
-        applyTuning(request, this.deps.tuning, OPENAI_TUNING_MAP);
-      }
+        const turnTextParts: string[] = [];
+        const pendingCalls: OpenAIToolCall[] = [];
+        let responseId: string | null = null;
+        let terminalType: string | undefined;
+        let terminalReason: string | undefined;
 
-      this.toolSurface = apiToolSurface(tools ?? []);
-      const stream = observeApiStream(
-        () =>
-          (
-            this.deps.openai as unknown as {
-              responses: { stream: (r: unknown) => AsyncIterable<OpenAIStreamEvent> };
+        for await (const event of stream) {
+          const type = event.type;
+          if (type === 'response.output_text.delta') {
+            const delta = (event as { delta?: string }).delta ?? '';
+            if (delta) {
+              turnTextParts.push(delta);
+              this.emitDelta(delta);
             }
-          ).responses.stream(request),
-        { provider: 'openai', request, round: turn + 1, context: this.deps.observationContext },
-      );
-
-      const turnTextParts: string[] = [];
-      const pendingCalls: OpenAIToolCall[] = [];
-      let responseId: string | null = null;
-      let terminalType: string | undefined;
-      let terminalReason: string | undefined;
-
-      for await (const event of stream) {
-        const type = event.type;
-        if (type === 'response.output_text.delta') {
-          const delta = (event as { delta?: string }).delta ?? '';
-          if (delta) {
-            turnTextParts.push(delta);
-            this.emitDelta(delta);
-          }
-        } else if (type === 'response.output_item.done') {
-          const item = (event as { item?: Record<string, unknown> }).item;
-          if (item && item.type === 'function_call') {
-            pendingCalls.push({
-              call_id: (item.call_id as string) ?? '',
-              name: (item.name as string) ?? '',
-              arguments: (item.arguments as string) ?? '{}',
-            });
-          }
-        } else if (
-          type === 'response.completed' ||
-          type === 'response.incomplete' ||
-          type === 'response.failed'
-        ) {
-          terminalType = type;
-          const resp = (
-            event as {
-              response?: {
-                id?: string;
-                output?: Array<OpenAIToolCall & { type: string }>;
-                incomplete_details?: { reason?: string };
-                error?: { code?: string };
-                usage?: {
-                  input_tokens: number;
-                  output_tokens: number;
-                  total_tokens?: number;
-                  input_tokens_details?: { cached_tokens?: number };
+          } else if (type === 'response.output_item.done') {
+            const item = (event as { item?: Record<string, unknown> }).item;
+            if (item && item.type === 'function_call') {
+              pendingCalls.push({
+                call_id: (item.call_id as string) ?? '',
+                name: (item.name as string) ?? '',
+                arguments: (item.arguments as string) ?? '{}',
+              });
+            }
+          } else if (
+            type === 'response.completed' ||
+            type === 'response.incomplete' ||
+            type === 'response.failed'
+          ) {
+            terminalType = type;
+            const resp = (
+              event as {
+                response?: {
+                  id?: string;
+                  output?: Array<OpenAIToolCall & { type: string }>;
+                  incomplete_details?: { reason?: string };
+                  error?: { code?: string };
+                  usage?: {
+                    input_tokens: number;
+                    output_tokens: number;
+                    total_tokens?: number;
+                    input_tokens_details?: { cached_tokens?: number };
+                  };
                 };
-              };
+              }
+            ).response;
+            if (resp?.id) responseId = resp.id;
+            if (resp?.output) {
+              // The final snapshot also includes calls cut off before an
+              // output_item.done event. They still need non-execution results
+              // when continuing an incomplete response.
+              pendingCalls.splice(
+                0,
+                pendingCalls.length,
+                ...resp.output.filter((item) => item.type === 'function_call'),
+              );
             }
-          ).response;
-          if (resp?.id) responseId = resp.id;
-          if (resp?.output) {
-            // The final snapshot also includes calls cut off before an
-            // output_item.done event. They still need non-execution results
-            // when continuing an incomplete response.
-            pendingCalls.splice(
-              0,
-              pendingCalls.length,
-              ...resp.output.filter((item) => item.type === 'function_call'),
+            if (resp?.usage) {
+              usageObserved = true;
+              totalUsage.inputTokens += resp.usage.input_tokens;
+              totalUsage.outputTokens += resp.usage.output_tokens;
+              totalUsage.cachedInputTokens += resp.usage.input_tokens_details?.cached_tokens ?? 0;
+            }
+            terminalReason = resp?.incomplete_details?.reason ?? resp?.error?.code;
+          } else if (type === 'error') {
+            terminalType = 'error';
+            terminalReason = (event as { code?: string }).code;
+          }
+        }
+
+        if (responseId) {
+          // Even an incomplete response acknowledges the submitted tool results.
+          // Keeping the older id reopens those calls on the next task handoff.
+          this.previousResponseId = responseId;
+          this.pendingToolOutputs = [];
+        }
+        if (terminalType !== 'response.completed' || !responseId) {
+          // A partial generation must not execute tools or count as a successful
+          // turn. Close any emitted calls with explicit non-execution results so
+          // a later retry can continue this response without replaying effects.
+          if (responseId) {
+            this.pendingToolOutputs = pendingCalls.map((call) => ({
+              type: 'function_call_output',
+              call_id: call.call_id,
+              output: 'Tool was not executed because the model response did not complete.',
+            }));
+          }
+          const status =
+            terminalType?.replace('response.', '') ?? 'stream ended without a terminal response';
+          throw new Error(
+            `[openai] ${status}${terminalReason ? ` (${terminalReason})` : ''}${responseId ? '' : '; no response id received'}`,
+          );
+        }
+        fullText += turnTextParts.join('');
+
+        // External tool capture: when the model called any caller-supplied
+        // external tool, halt the loop and surface ALL pending calls (both
+        // external and bridge) so the caller sees the full set. Any bridge
+        // tools the model called alongside externals are NOT executed —
+        // the caller owns the next turn and decides how to satisfy each.
+        const externalCalls = pendingCalls.filter((c) => this.externalToolNames.has(c.name));
+        if (externalCalls.length > 0) {
+          this.capturedCalls = pendingCalls.map((c) => ({
+            id: c.call_id,
+            name: c.name,
+            arguments: c.arguments,
+          }));
+          return fullText;
+        }
+
+        if (pendingCalls.length === 0) {
+          // Done — record usage and return.
+          return fullText;
+        }
+
+        // Execute tools; feed the outputs back as the next turn's input.
+        const outputs: ResponsesInputItem[] = [];
+        this.pendingToolOutputs = outputs;
+        const toolImages: Array<{ base64: string; mimeType: string }> = [];
+        let terminalActionClosing: string | null = null;
+        for (const call of pendingCalls) {
+          if (terminalActionClosing) {
+            outputs.push({
+              type: 'function_call_output',
+              call_id: call.call_id,
+              output: TERMINAL_ACTION_SKIPPED_OUTPUT,
+            } satisfies ResponsesInputItem);
+            continue;
+          }
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(call.arguments);
+          } catch {
+            /* leave empty */
+          }
+          let output: string;
+          let outputIsError = false;
+          if (this.deps.bridges.hasTool(call.name)) {
+            try {
+              const rich = await this.deps.bridges.callToolRich(call.name, args);
+              output = rich.text;
+              outputIsError = rich.isError;
+              toolImages.push(...rich.images);
+            } catch (err) {
+              output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              outputIsError = true;
+            }
+          } else {
+            output = `ERROR: tool ${call.name} is not available`;
+            outputIsError = true;
+          }
+          if (!outputIsError) {
+            terminalActionClosing ??= terminalToolClosingText(
+              this.deps.terminalToolPolicy,
+              call.name,
+              args,
+              output,
             );
           }
-          if (resp?.usage) lastUsage = resp.usage;
-          terminalReason = resp?.incomplete_details?.reason ?? resp?.error?.code;
-        } else if (type === 'error') {
-          terminalType = 'error';
-          terminalReason = (event as { code?: string }).code;
-        }
-      }
-
-      if (responseId) {
-        // Even an incomplete response acknowledges the submitted tool results.
-        // Keeping the older id reopens those calls on the next task handoff.
-        this.previousResponseId = responseId;
-        this.pendingToolOutputs = [];
-      }
-      if (terminalType !== 'response.completed' || !responseId) {
-        // A partial generation must not execute tools or count as a successful
-        // turn. Close any emitted calls with explicit non-execution results so
-        // a later retry can continue this response without replaying effects.
-        if (responseId) {
-          this.pendingToolOutputs = pendingCalls.map((call) => ({
-            type: 'function_call_output',
-            call_id: call.call_id,
-            output: 'Tool was not executed because the model response did not complete.',
-          }));
-        }
-        if (lastUsage) {
-          this.emitUsage(
-            buildTurnUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.input_tokens,
-              outputTokens: lastUsage.output_tokens,
-              durationMs: Date.now() - start,
-              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
-            }),
-          );
-        }
-        const status =
-          terminalType?.replace('response.', '') ?? 'stream ended without a terminal response';
-        throw new Error(
-          `[openai] ${status}${terminalReason ? ` (${terminalReason})` : ''}${responseId ? '' : '; no response id received'}`,
-        );
-      }
-      fullText += turnTextParts.join('');
-
-      // External tool capture: when the model called any caller-supplied
-      // external tool, halt the loop and surface ALL pending calls (both
-      // external and bridge) so the caller sees the full set. Any bridge
-      // tools the model called alongside externals are NOT executed —
-      // the caller owns the next turn and decides how to satisfy each.
-      const externalCalls = pendingCalls.filter((c) => this.externalToolNames.has(c.name));
-      if (externalCalls.length > 0) {
-        this.capturedCalls = pendingCalls.map((c) => ({
-          id: c.call_id,
-          name: c.name,
-          arguments: c.arguments,
-        }));
-        if (lastUsage) {
-          this.emitUsage(
-            buildTurnUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.input_tokens,
-              outputTokens: lastUsage.output_tokens,
-              durationMs: Date.now() - start,
-              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
-            }),
-          );
-        }
-        return fullText;
-      }
-
-      if (pendingCalls.length === 0) {
-        // Done — record usage and return.
-        if (lastUsage) {
-          this.emitUsage(
-            buildTurnUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.input_tokens,
-              outputTokens: lastUsage.output_tokens,
-              durationMs: Date.now() - start,
-              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
-            }),
-          );
-        }
-        return fullText;
-      }
-
-      // Execute tools; feed the outputs back as the next turn's input.
-      const outputs: ResponsesInputItem[] = [];
-      this.pendingToolOutputs = outputs;
-      const toolImages: Array<{ base64: string; mimeType: string }> = [];
-      let terminalActionClosing: string | null = null;
-      for (const call of pendingCalls) {
-        if (terminalActionClosing) {
           outputs.push({
             type: 'function_call_output',
             call_id: call.call_id,
-            output: TERMINAL_ACTION_SKIPPED_OUTPUT,
+            output,
           } satisfies ResponsesInputItem);
-          continue;
         }
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(call.arguments);
-        } catch {
-          /* leave empty */
+        if (terminalActionClosing) {
+          return terminalActionClosing;
         }
-        let output: string;
-        let outputIsError = false;
-        if (this.deps.bridges.hasTool(call.name)) {
-          try {
-            const rich = await this.deps.bridges.callToolRich(call.name, args);
-            output = rich.text;
-            outputIsError = rich.isError;
-            toolImages.push(...rich.images);
-          } catch (err) {
-            output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
-            outputIsError = true;
-          }
-        } else {
-          output = `ERROR: tool ${call.name} is not available`;
-          outputIsError = true;
+        // If any tool returned an image block, surface it to the model as a
+        // follow-up user-message input_image so vision-capable runs can
+        // actually *see* what the tool produced. Text-only runs still get
+        // the textual output via the function_call_output items above.
+        const nextInput: unknown[] = [...outputs];
+        if (toolImages.length > 0) {
+          nextInput.push({
+            role: 'user',
+            content: toolImages.map((img) => ({
+              type: 'input_image',
+              image_url: `data:${img.mimeType};base64,${img.base64}`,
+            })),
+          });
         }
-        if (!outputIsError) {
-          terminalActionClosing ??= terminalToolClosingText(undefined, call.name, args, output);
-        }
-        outputs.push({
-          type: 'function_call_output',
-          call_id: call.call_id,
-          output,
-        } satisfies ResponsesInputItem);
+        input = nextInput;
       }
-      if (terminalActionClosing) {
-        if (lastUsage) {
-          this.emitUsage(
-            buildTurnUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.input_tokens,
-              outputTokens: lastUsage.output_tokens,
-              durationMs: Date.now() - start,
-              cachedInputTokens: lastUsage.input_tokens_details?.cached_tokens,
-            }),
-          );
-        }
-        return terminalActionClosing;
-      }
-      // If any tool returned an image block, surface it to the model as a
-      // follow-up user-message input_image so vision-capable runs can
-      // actually *see* what the tool produced. Text-only runs still get
-      // the textual output via the function_call_output items above.
-      const nextInput: unknown[] = [...outputs];
-      if (toolImages.length > 0) {
-        nextInput.push({
-          role: 'user',
-          content: toolImages.map((img) => ({
-            type: 'input_image',
-            image_url: `data:${img.mimeType};base64,${img.base64}`,
-          })),
-        });
-      }
-      input = nextInput;
-    }
 
-    throw new Error('[openai] too many tool-call loops; aborting');
+      throw new Error('[openai] too many tool-call loops; aborting');
+    } finally {
+      if (usageObserved) {
+        this.emitUsage(
+          buildTurnUsage({
+            model: this.deps.model,
+            ...totalUsage,
+            durationMs: Date.now() - start,
+          }),
+        );
+      }
+    }
   }
 
   /**

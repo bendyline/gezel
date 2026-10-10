@@ -11,18 +11,23 @@
  *
  *   <home>/engines/kokoro/models/<id>/
  *   ├── manifest.json          (id, name, modelRepo, dtype, installedAt)
- *   └── snapshots/<commit>/    (`kokoro-js`'s HF cache layout — ONNX +
- *                               voice .bin files extracted by Transformers.js)
+ *   ├── onnx/model_quantized.onnx (hard link into the shared speech cache)
+ *   ├── voices/*.bin              (verified shared English voice vectors)
+ *   └── *.json                    (bundled model/tokenizer metadata)
  *
- * The engine pins `@huggingface/transformers`'s `env.cacheDir` to a
- * writable engine-scoped directory before each `from_pretrained()` call
- * (via the shared `pinTransformersCacheDir` — see transformers-cache.ts
- * for why this is mandatory). kokoro-js requires the same transformers
- * singleton, so the pin redirects its model download into our tree.
+ * Production q8 loads this complete pinned local directory without network.
+ * Explicit alternative quantizations retain the Transformers.js cache path.
  */
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import {
+  KOKORO_MODEL_ID,
+  KOKORO_TRANSFORMERS_METADATA,
+  type SpeechAssetOptions,
+  SpeechAssetStore,
+  catalogEntry,
+} from '@bendyline/gezel/speech-models';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import type { LoadTransformersEnv } from '../../transformers-cache.js';
 import {
@@ -35,6 +40,12 @@ import {
   type KokoroVoiceTable,
 } from './kokoro-engine.js';
 import { KokoroWorkerBackend } from './kokoro-worker-host.js';
+import {
+  ensureSpeechModel,
+  sharedSpeechModelInfo,
+  speechPullEvents,
+  writeSpeechMetadata,
+} from './managed-speech-model.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -59,6 +70,8 @@ export {
 export interface KokoroProviderOptions {
   /** Absolute path to `~/.gezel/engines/kokoro/models`. */
   modelsRoot: string;
+  /** Shared pinned q8 model storage. Other quantizations retain their existing loader. */
+  assets?: SpeechAssetOptions;
   /**
    * Writable directory to pin `@huggingface/transformers`'s `env.cacheDir`
    * to (see the file header for why this is mandatory). Defaults to a
@@ -213,6 +226,7 @@ const DEFAULT_VOICE_ID = 'af_heart';
 export class KokoroProvider implements TextToSpeechProvider {
   readonly name = 'kokoro';
   private readonly modelsRoot: string;
+  private readonly assets?: SpeechAssetStore;
   private readonly cacheDir: string;
   private readonly defaultDtype: 'q4' | 'q8' | 'fp16' | 'fp32';
   private readonly backend: KokoroBackend;
@@ -225,8 +239,10 @@ export class KokoroProvider implements TextToSpeechProvider {
     // future in-process transformers.js user shares one managed HF cache.
     this.cacheDir = opts.cacheDir ?? join(dirname(dirname(opts.modelsRoot)), 'hf-cache');
     this.defaultDtype = opts.defaultDtype ?? 'q8';
+    if (opts.assets && this.defaultDtype === 'q8') this.assets = new SpeechAssetStore(opts.assets);
     const config: KokoroEngineConfig = {
       cacheDir: this.cacheDir,
+      ...(this.assets ? { modelDirectory: join(this.modelsRoot, KOKORO_MODEL_ID) } : {}),
       dtype: this.defaultDtype,
       inferenceTimeoutMs: opts.inferenceTimeoutMs ?? DEFAULT_INFERENCE_TIMEOUT_MS,
       loadTimeoutMs: opts.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
@@ -301,6 +317,14 @@ export class KokoroProvider implements TextToSpeechProvider {
   }
 
   async listInstalledModels(): Promise<InstalledAudioModelInfo[]> {
+    if (this.assets) {
+      const info = await sharedSpeechModelInfo(
+        this.assets,
+        catalogEntry(KOKORO_MODEL_ID)!,
+        this.modelsRoot,
+      );
+      return info ? [info] : [];
+    }
     let entries: string[] = [];
     try {
       entries = await readdir(this.modelsRoot);
@@ -336,6 +360,16 @@ export class KokoroProvider implements TextToSpeechProvider {
   }
 
   async *pullModel(id: string, spec: AudioModelPullSpec): AsyncIterable<AudioModelPullEvent> {
+    if (this.assets) {
+      if (id !== KOKORO_MODEL_ID) throw new Error(`Unknown pinned Kokoro model: ${id}`);
+      yield* speechPullEvents(id, async (progress) => {
+        await ensureSpeechModel(this.assets!, catalogEntry(id)!, this.modelsRoot, true, progress);
+        await this.prepareMetadata();
+        this.voices = (await this.backend.load({ deadline: true })) ?? this.voices;
+        this.installVerified = true;
+      });
+      return;
+    }
     // kokoro-js handles the actual download via Transformers.js's
     // own cache fetcher, into the cache dir the engine pins. We then
     // drop a manifest so list/health agree on "installed". Progress
@@ -386,13 +420,13 @@ export class KokoroProvider implements TextToSpeechProvider {
 
   async deleteModel(id: string): Promise<void> {
     const itemDir = resolveModelDirectory(this.modelsRoot, id);
-    await rm(itemDir, { recursive: true, force: true });
-    // If we deleted the loaded model out from under us, drop it so the
-    // next synthesize re-checks the install (and fails loudly if no
-    // replacement is installed).
     this.installVerified = false;
     this.voices = undefined;
     await this.backend.unload();
+    await rm(itemDir, { recursive: true, force: true });
+    if (this.assets && id === KOKORO_MODEL_ID) {
+      for (const file of catalogEntry(id)!.files) await this.assets.collect(file);
+    }
   }
 
   async listVoices(): Promise<AudioVoiceInfo[]> {
@@ -429,14 +463,29 @@ export class KokoroProvider implements TextToSpeechProvider {
     await this.backend.shutdown();
   }
 
-  /**
-   * Require a manifest from a prior pull so synthesize doesn't silently
-   * trigger a model download on the first turn. If none exists, surface
-   * a clear error (the route layer turns this into a 503 the UI guides
-   * on). The weights themselves live in @huggingface/transformers's
-   * cache, not in our managed dir — see pullModel for context.
-   */
+  /** Shipped metadata keeps adoption and model loading entirely offline. */
+  private async prepareMetadata(): Promise<void> {
+    const directory = join(this.modelsRoot, KOKORO_MODEL_ID);
+    for (const [name, bytes] of Object.entries(KOKORO_TRANSFORMERS_METADATA)) {
+      await writeSpeechMetadata(directory, name, bytes);
+    }
+  }
+
   private async ensureInstalled(): Promise<void> {
+    if (this.assets) {
+      if (
+        !(await ensureSpeechModel(
+          this.assets,
+          catalogEntry(KOKORO_MODEL_ID)!,
+          this.modelsRoot,
+          false,
+        ))
+      ) {
+        throw new Error('Download or update Kokoro from Settings → Audio before synthesizing.');
+      }
+      await this.prepareMetadata();
+      return;
+    }
     if (this.installVerified) return;
     const installed = await this.listInstalledModels();
     if (installed.length === 0) {

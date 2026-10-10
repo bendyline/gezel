@@ -11,6 +11,8 @@ interface ApiRecord {
   sessionId?: string;
   round?: number;
   outcome?: string;
+  terminalEvent?: string | null;
+  incompleteReason?: string | null;
   usage?: Record<string, number | null>;
   [key: string]: unknown;
 }
@@ -30,6 +32,11 @@ export interface QualificationReport {
     results: number;
     failures: number;
     incomplete: number;
+    /** Breakdown added after v1 initially combined all unfinished requests. */
+    incompleteResponses?: number;
+    missingResults?: number;
+    unterminatedStreams?: number;
+    incompleteReasons?: Record<string, number>;
     sdkRetries: null;
     usage: Record<string, number | null>;
   };
@@ -171,10 +178,37 @@ export async function writeQualificationReport(
       lifecycle.completionClaim = 'unverified';
   }
   const terminalIds = new Set(results.map((r) => r.requestId));
-  const incomplete =
-    requests.filter((r) => !terminalIds.has(r.requestId)).length +
-    results.filter((r) => r.outcome === 'incomplete').length;
-  if (incomplete) issues.push('API request observation ended before a terminal result');
+  const missingResults = requests.filter((r) => !terminalIds.has(r.requestId)).length;
+  const incompleteResults = results.filter((r) => r.outcome === 'incomplete');
+  const providerIncomplete = incompleteResults.filter(
+    (r) => r.terminalEvent === 'response.incomplete',
+  );
+  const incompleteResponses = providerIncomplete.length;
+  const unterminatedStreams = incompleteResults.length - incompleteResponses;
+  // Keep the original aggregate for readers of older v1 reports, but never label
+  // a provider's recorded terminal response as missing observation evidence.
+  const incomplete = missingResults + incompleteResults.length;
+  const incompleteReasons: Record<string, number> = {};
+  for (const result of providerIncomplete) {
+    const reason = ['max_output_tokens', 'max_messages', 'content_filter', 'steered'].includes(
+      result.incompleteReason ?? '',
+    )
+      ? result.incompleteReason!
+      : 'other';
+    incompleteReasons[reason] = (incompleteReasons[reason] ?? 0) + 1;
+  }
+  if (missingResults)
+    issues.push(`API result telemetry is missing for ${missingResults} request(s)`);
+  if (unterminatedStreams)
+    issues.push(`API stream ended without a terminal event for ${unterminatedStreams} request(s)`);
+  if (incompleteResponses)
+    issues.push(
+      `API provider returned ${incompleteResponses} incomplete response(s): ${Object.entries(
+        incompleteReasons,
+      )
+        .map(([reason, count]) => `${reason}=${count}`)
+        .join(', ')}`,
+    );
   const usage: Record<string, number | null> = {};
   for (const key of [
     'inputTokens',
@@ -228,6 +262,10 @@ export async function writeQualificationReport(
       results: results.length,
       failures: results.filter((r) => r.outcome === 'failed').length,
       incomplete,
+      incompleteResponses,
+      missingResults,
+      unterminatedStreams,
+      incompleteReasons,
       sdkRetries: null,
       usage,
     },

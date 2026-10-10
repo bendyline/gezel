@@ -77,6 +77,93 @@ describe('qualification report', () => {
     });
   });
 
+  it.each([
+    {
+      label: 'missing result telemetry',
+      terminal: null,
+      expected: { missingResults: 1, incompleteResponses: 0, unterminatedStreams: 0 },
+      issue: 'API result telemetry is missing for 1 request(s)',
+      failureClass: 'grader',
+    },
+    {
+      label: 'provider-declared incomplete response',
+      terminal: {
+        outcome: 'incomplete',
+        terminalEvent: 'response.incomplete',
+        incompleteReason: 'max_messages',
+      },
+      expected: {
+        missingResults: 0,
+        incompleteResponses: 1,
+        unterminatedStreams: 0,
+        incompleteReasons: { max_messages: 1 },
+      },
+      issue: 'API provider returned 1 incomplete response(s): max_messages=1',
+      failureClass: 'infra',
+    },
+    {
+      label: 'unterminated stream',
+      terminal: { outcome: 'incomplete', terminalEvent: null },
+      expected: { missingResults: 0, incompleteResponses: 0, unterminatedStreams: 1 },
+      issue: 'API stream ended without a terminal event for 1 request(s)',
+      failureClass: 'infra',
+    },
+  ])(
+    'distinguishes $label even if a subsequent request succeeds',
+    async ({ terminal, expected, issue, failureClass }) => {
+      const events = [
+        request,
+        ...(terminal ? [{ ...result, ...terminal }] : []),
+        { ...request, requestId: 'r2' },
+        { ...result, requestId: 'r2' },
+      ];
+      await writeFile(
+        join(dir, 'daemon.log'),
+        events.map((event) => `measurement.api ${JSON.stringify(event)}`).join('\n'),
+      );
+      const report = await writeQualificationReport(dir, true);
+      expect(report).toMatchObject({
+        passed: false,
+        artifactSuccess: true,
+        lifecycle: { status: 'complete' },
+        api: { requests: 2, incomplete: 1, ...expected },
+        issues: [issue],
+      });
+      expect(
+        classifyTrial({ success: false, reason: `Qualification failed: ${issue}` }).failureClass,
+      ).toBe(failureClass);
+    },
+  );
+
+  it('counts provider responses and missing observations independently in the same run', async () => {
+    const events = [
+      request,
+      {
+        ...result,
+        outcome: 'incomplete',
+        terminalEvent: 'response.incomplete',
+        incompleteReason: 'private unknown reason',
+      },
+      { ...request, requestId: 'r2' },
+      { ...request, requestId: 'r3' },
+      { ...result, requestId: 'r3', outcome: 'incomplete', terminalEvent: null },
+    ];
+    await writeFile(
+      join(dir, 'daemon.log'),
+      events.map((event) => `measurement.api ${JSON.stringify(event)}`).join('\n'),
+    );
+    const report = await writeQualificationReport(dir, false);
+    expect(report?.api).toMatchObject({
+      incomplete: 3,
+      incompleteResponses: 1,
+      missingResults: 1,
+      unterminatedStreams: 1,
+      incompleteReasons: { other: 1 },
+    });
+    expect(report?.issues).toHaveLength(4);
+    expect(JSON.stringify(report)).not.toContain('private unknown');
+  });
+
   it('reports an artifact failure with a completed lifecycle independently', async () => {
     await save('lifecycle.json', { status: 'complete', completionClaim: 'supported' });
     expect(await writeQualificationReport(dir, false)).toMatchObject({

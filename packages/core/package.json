@@ -96,6 +96,10 @@
     "./app-models": {
       "types": "./dist/schemas/app-models.d.ts",
       "import": "./dist/schemas/app-models.js"
+    },
+    "./speech-models": {
+      "types": "./dist/speech-models/index.d.ts",
+      "import": "./dist/speech-models/index.js"
     }
   },
   "files": ["dist", "!dist/**/*.map"],

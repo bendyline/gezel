@@ -1,9 +1,14 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { CatalogItemSummary } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
+import { bootstrapWorkspace } from '../workspace/template.js';
 import {
   craftbookContextForProject,
   listApplicableCraftbooks,
+  projectHasEstablishedCodebase,
   workspaceEntriesLookLikeCodebase,
 } from './applicable.js';
 
@@ -186,5 +191,78 @@ describe('project-aware craftbook roles', () => {
       hasGitHub: true,
       branch: null,
     });
+  });
+});
+
+describe('fresh internal workspaces', () => {
+  let dir: string;
+  let project: { id: string; name: string; workingDir?: string; github?: { url: string } };
+  let store: Store;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-craftbook-fresh-'));
+    project = { id: 'project', name: 'Renamed project' };
+    store = {
+      projectWorkspaceDir: async () => dir,
+      getProject: async () => project,
+      readConfig: async () => ({}),
+    } as unknown as Store;
+    await bootstrapWorkspace({
+      workspaceDir: dir,
+      projectId: 'project',
+      projectName: 'Original name',
+    });
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('offers project starters when only unchanged bootstrap files exist', async () => {
+    const catalog = {
+      list: async () => [book('new-site', 'project-starter'), book('research', 'general')],
+    };
+    expect(await projectHasEstablishedCodebase(store, project.id)).toBe(false);
+    const items = await listApplicableCraftbooks(catalog as never, store, project.id);
+    expect(items.map((item) => item.manifest.id)).toEqual(['new-site', 'research']);
+  });
+
+  it.each(['workingDir', 'github'] as const)(
+    'does not exempt bootstrap-shaped files in an external %s project',
+    async (kind) => {
+      if (kind === 'workingDir') project.workingDir = dir;
+      else project.github = { url: 'https://example.com/repository' };
+      expect(await projectHasEstablishedCodebase(store, project.id)).toBe(true);
+    },
+  );
+
+  it.each(['package.json', 'tsconfig.json'])(
+    'recognizes customized %s as existing work',
+    async (name) => {
+      const data = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      if (name === 'package.json') data.scripts = { test: 'node --test' };
+      else data.compilerOptions.target = 'esnext';
+      await writeFile(join(dir, name), JSON.stringify(data));
+      expect(await projectHasEstablishedCodebase(store, project.id)).toBe(true);
+      const items = await listApplicableCraftbooks(
+        { list: async () => [book('new-site', 'project-starter')] } as never,
+        store,
+        project.id,
+      );
+      expect(items).toEqual([]);
+    },
+  );
+
+  it.each(['index.html', 'nested/main.py', 'nested/package.json', '.git/config'])(
+    'keeps recognizing real work at %s alongside bootstrap files',
+    async (path) => {
+      const parts = path.split('/');
+      if (parts.length > 1) await mkdir(join(dir, parts[0]!), { recursive: true });
+      await writeFile(join(dir, path), 'real project content');
+      expect(await projectHasEstablishedCodebase(store, project.id)).toBe(true);
+    },
+  );
+
+  it('does not treat an unreadable or malformed package file as untouched scaffolding', async () => {
+    await writeFile(join(dir, 'package.json'), '{');
+    expect(await projectHasEstablishedCodebase(store, project.id)).toBe(true);
   });
 });

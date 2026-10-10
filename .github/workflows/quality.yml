@@ -377,10 +377,12 @@ jobs:
           retention-days: 14
 
   desktop-smoke:
+    # Keep the existing check name for branch-protection rules.
     name: Electron and spawned-daemon smoke E2E
     needs: workflow-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The full suite takes ~13 min, plus build and the smoke repeat.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -388,7 +390,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
-      - name: Exercise Electron shell and child-daemon supervision
+      - name: Run the full Electron suite
+        # Release run 38003585468 caught a knowledge-catalog regression that
+        # the two-spec smoke subset never exercised. Match the release gate.
+        run: xvfb-run -a pnpm test:e2e:run
+      - name: Repeat Electron shell and child-daemon supervision without retries
         run: xvfb-run -a pnpm test:e2e:desktop:smoke
       - name: Preserve failure diagnostics
         if: failure()

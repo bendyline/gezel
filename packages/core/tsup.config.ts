@@ -1,3 +1,4 @@
+import { copyFile, mkdir } from 'node:fs/promises';
 import { defineConfig } from 'tsup';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
@@ -16,6 +17,7 @@ export default defineConfig({
     // identity per consumer and the UI never bundles it.
     'src/local-loop/index.ts',
     'src/kokoro/index.ts',
+    'src/speech-models/index.ts',
     'src/poppetje/index.ts',
     'src/markdown/index.ts',
     // `./native` ships the llama-cpp backend probe + bundled-engine
@@ -56,5 +58,9 @@ export default defineConfig({
   // gave a consumer of two entries two copies of each class. Shared modules
   // now live in chunks every entry imports.
   splitting: true,
-  onSuccess: () => stripSourcemapCommentsFromBuild(),
+  onSuccess: async () => {
+    await stripSourcemapCommentsFromBuild();
+    await mkdir('dist/speech-models', { recursive: true });
+    await copyFile('src/speech-models/LICENSE.kokoro.txt', 'dist/speech-models/LICENSE.kokoro.txt');
+  },
 });

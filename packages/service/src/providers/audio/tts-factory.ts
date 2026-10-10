@@ -16,7 +16,9 @@
 
 // patient-fetch-exempt: KokoroProvider runs the model locally (ONNX on a worker thread), not
 // over HTTP — there is no request for a fetch timeout to cut.
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { speechAssetOptions } from '@bendyline/gezel/speech-models';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from '../../transformers-cache.js';
 import { KokoroProvider } from './kokoro.js';
 import { MockTextToSpeechProvider } from './mock-tts.js';
@@ -37,8 +39,26 @@ export async function createTextToSpeechProvider(
     return new MockTextToSpeechProvider({ modelsRoot });
   }
 
+  const assets = speechAssetOptions({ home: opts.home, env });
+  // kokoro-js already ships the voice vectors. Adopt their verified bytes
+  // instead of fetching another copy just to make them available to embedders.
+  let packagedVoices: string | undefined;
+  try {
+    packagedVoices = join(dirname(fileURLToPath(import.meta.resolve('kokoro-js'))), '..');
+  } catch {
+    /* Optional runtime absent. */
+  }
   return new KokoroProvider({
     modelsRoot,
+    assets: {
+      ...assets,
+      candidates: (model, file) => [
+        ...(assets.candidates?.(model, file) ?? []),
+        ...(packagedVoices && file.name.startsWith('voices/')
+          ? [join(packagedVoices, ...file.name.split('/'))]
+          : []),
+      ],
+    },
     cacheDir: env[HF_CACHE_DIR_ENV] ?? transformersCacheDir(opts.home),
   });
 }

@@ -3,6 +3,7 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  craftbookSuggestionGuidance,
   inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
@@ -90,6 +91,55 @@ describe('invoke_craftbook params', () => {
         jobDescription: 'Translate this into Dutch',
       }),
     ).toEqual({});
+  });
+
+  it('preserves the full brief and project when a search query abbreviates them', () => {
+    const jobDescription =
+      'In the annual-report project, create a presentation from source/brief.md and save it as slides/annual.pptx.';
+    const invocation = suggestedCraftbookInvocation({
+      craftbookId: 'powerpoint-deck',
+      query: 'annual presentation',
+      jobDescription,
+      project: 'annual-report',
+    });
+    expect(invocation.craftbookId).toBe('powerpoint-deck');
+    expect(invocation.project).toBe('annual-report');
+    expect(invocation.description).toContain(jobDescription);
+    expect(invocation.description).toContain('annual presentation');
+    const guidance = craftbookSuggestionGuidance(invocation);
+    expect(guidance).toContain('Search scope: "annual-report"');
+    expect(guidance).toContain('Candidate recipe details (not a launch call)');
+    expect(guidance).toContain(jobDescription);
+    expect(guidance).not.toContain('invoke_craftbook(');
+    expect(guidance).toContain('reject all');
+    expect(guidance).toContain('new project, use start_project');
+    expect(guidance).not.toContain('send it now');
+  });
+
+  it('keeps task context when the latest user message is a short follow-up', () => {
+    const invocation = suggestedCraftbookInvocation({
+      craftbookId: 'report',
+      query: 'Write the quarterly research report',
+      jobDescription: 'Yes, go ahead.',
+    });
+    expect(invocation.description).toContain('Write the quarterly research report');
+    expect(invocation.description).toContain('Yes, go ahead.');
+  });
+
+  it('does not turn the current search project into a new-project destination', () => {
+    const brief = 'Create a new project for a recipe collection.';
+    const text = craftbookSuggestionGuidance(
+      suggestedCraftbookInvocation({
+        craftbookId: 'report',
+        query: 'recipe collection',
+        jobDescription: brief,
+        project: 'default',
+      }),
+    );
+    expect(text).toContain(brief);
+    expect(text).toContain('new project, use start_project');
+    expect(text).not.toContain('"project":"default"');
+    expect(text).not.toContain('invoke_craftbook(');
   });
 });
 
