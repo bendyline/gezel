@@ -234,7 +234,8 @@
 .home-workshop-greeting .home-workshop-status-report {
   max-width: none;
 }
-.home-workshop-greeting .home-workshop-status-body {
+.home-workshop-greeting .home-workshop-status-body,
+.home-workshop-greeting .pending-question-document-full .pending-question-document-preview {
   max-height: none;
   overflow-y: visible;
 }

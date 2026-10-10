@@ -1668,7 +1668,15 @@ function ContextStrip({ question }: { question: Question }) {
     <div className="pending-question-context">
       {question.taskRef && <TaskContext taskRef={question.taskRef} />}
       {showDocument && question.documentPath && (
-        <DocumentContext projectId={question.projectId} documentPath={question.documentPath} />
+        <DocumentContext
+          projectId={question.projectId}
+          documentPath={question.documentPath}
+          layout={
+            question.intent?.kind === 'night-shift-review' && isProseDocument(question.documentPath)
+              ? 'full'
+              : 'inline'
+          }
+        />
       )}
     </div>
   );
@@ -1752,11 +1760,13 @@ function DocumentContext({
   /**
    * `inline` sits inside the card's context strip and shows a ten-line
    * teaser with an expand toggle. `panel` is the hoisted right-hand
-   * column: the whole document, scrolling in place, no toggle.
+   * column: the whole document, scrolling in place, no toggle. `full`
+   * keeps the whole report in the context strip without a toggle.
    */
-  layout?: 'inline' | 'panel';
+  layout?: 'inline' | 'panel' | 'full';
 }) {
   const panel = layout === 'panel';
+  const fullDocument = layout !== 'inline';
   const [content, setContent] = useState<string | null>(null);
   const [resolvedKind, setResolvedKind] = useState<
     'document' | 'project-document' | 'artifact' | null
@@ -1803,14 +1813,14 @@ function DocumentContext({
 
   const previewLines = useMemo(() => {
     if (!content) return '';
-    const body = panel || expanded ? content : content.split('\n').slice(0, 10).join('\n');
+    const body = fullDocument || expanded ? content : content.split('\n').slice(0, 10).join('\n');
     // Anything that isn't prose goes through the markdown renderer as a
     // fenced block: a raw JSON literal rendered AS markdown is neither
     // readable nor honest about what it is.
     return isProseDocument(documentPath)
       ? body
       : `\`\`\`${fenceLanguage(documentPath)}\n${body}\n\`\`\``;
-  }, [content, expanded, panel, documentPath]);
+  }, [content, expanded, fullDocument, documentPath]);
 
   const kindLabel =
     resolvedKind === 'artifact'
@@ -1841,7 +1851,9 @@ function DocumentContext({
   };
 
   return (
-    <div className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}`}>
+    <div
+      className={`pending-question-document${panel ? ' pending-question-document-panel' : ''}${layout === 'full' ? ' pending-question-document-full' : ''}`}
+    >
       <div className="pending-question-context-row">
         <span className="muted">{kindLabel}</span>
         <span className="pending-question-context-title">{documentPath.split('/').pop()}</span>
@@ -1855,7 +1867,7 @@ function DocumentContext({
           <div className="pending-question-document-preview">
             <RenderedMarkdown markdown={previewLines} />
           </div>
-          {!panel && content.split('\n').length > 10 && (
+          {!fullDocument && content.split('\n').length > 10 && (
             <button
               type="button"
               className="pending-question-document-expand subtle"

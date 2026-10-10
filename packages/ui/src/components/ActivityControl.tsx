@@ -45,14 +45,6 @@ function countSection(items: ActivityItem[], section: ActivitySection) {
     .reduce((sum, item) => sum + Math.max(1, item.questionIds.length), 0);
 }
 
-function focusSection(id: ActivitySection): boolean {
-  const section = document.getElementById(`activity-${id}`);
-  if (!section) return false;
-  section.querySelector('h3')?.focus({ preventScroll: true });
-  section.scrollIntoView({ block: 'start' });
-  return true;
-}
-
 export function ActivityControl() {
   const activity = useActivity();
   const [open, setOpen] = useState(false);
@@ -68,15 +60,26 @@ export function ActivityControl() {
     if (!open) clearReceipts?.();
   }, [open, clearReceipts]);
   const snapshot = activity?.snapshot;
+  const hasSnapshot = !!snapshot;
   useEffect(() => {
-    if (!open || !sectionRequest || !snapshot) return;
-    // Wait for the portal to mount; retain the destination if Activity is
-    // still loading, and consume it once so polling never steals focus.
+    if (!open || !sectionRequest || !hasSnapshot) return;
+    let observer: ResizeObserver | undefined;
+    // Wait for the portal, then keep the destination visible as lazy cards
+    // above it grow. The first user interaction releases this anchoring.
     const frame = requestAnimationFrame(() => {
-      if (focusSection(sectionRequest.section)) setSectionRequest(null);
+      const section = document.getElementById(`activity-${sectionRequest.section}`);
+      if (!section) return;
+      section.querySelector('h3')?.focus({ preventScroll: true });
+      const scrollToSection = () => section.scrollIntoView({ block: 'start' });
+      scrollToSection();
+      observer = new ResizeObserver(scrollToSection);
+      for (const sibling of section.parentElement?.children ?? []) observer.observe(sibling);
     });
-    return () => cancelAnimationFrame(frame);
-  }, [open, sectionRequest, snapshot]);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [open, sectionRequest, hasSnapshot]);
   const allItems = snapshot?.items ?? [];
   const { liveTurns, preparingTurns, onDeviceProvider } = useQueueLiveTurns(open, snapshot?.queues);
   const needs = countSection(allItems, 'needs-you');
@@ -227,6 +230,10 @@ export function ActivityControl() {
           <Dialog.Content
             className="activity-panel"
             aria-describedby="activity-description"
+            onPointerDownCapture={() => setSectionRequest(null)}
+            onWheelCapture={() => setSectionRequest(null)}
+            onTouchMoveCapture={() => setSectionRequest(null)}
+            onKeyDownCapture={() => setSectionRequest(null)}
             onOpenAutoFocus={(event) => {
               event.preventDefault();
               closeRef.current?.focus();

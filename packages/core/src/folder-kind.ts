@@ -56,17 +56,24 @@ export function inferFolderKind(input: {
 }
 
 /**
- * Project property: `off` when the person switched this folder's overnight
- * work off. One switch: the nightly sweep, fix planning and the folder's
- * armed night work all stand down.
+ * Project property: `on` or `off` when the person explicitly chooses overnight
+ * work. Unset means on for ordinary projects, off for the Default catch-all.
+ * One switch: the nightly sweep, fix planning and the folder's armed night
+ * work all stand down.
  */
 export const NIGHT_WORK_PROPERTY = 'gezel.nightWork';
 
 /** When resident night work was armed for an added folder; arming runs once. */
 export const NIGHT_WORK_ARMED_AT_PROPERTY = 'gezel.nightWorkArmedAt';
 
-export function projectNightWorkEnabled(project: { properties?: Record<string, string> }): boolean {
-  return project.properties?.[NIGHT_WORK_PROPERTY] !== 'off';
+export function projectNightWorkEnabled(project: {
+  id: string;
+  properties?: Record<string, string>;
+}): boolean {
+  const setting = project.properties?.[NIGHT_WORK_PROPERTY];
+  if (setting === 'on') return true;
+  if (setting === 'off') return false;
+  return project.id !== 'default';
 }
 
 /**

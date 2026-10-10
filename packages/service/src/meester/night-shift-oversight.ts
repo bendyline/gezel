@@ -1,5 +1,11 @@
-import type { StepGate, Task } from '@bendyline/gezel';
-import { REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
+import type { Project, StepGate, Task } from '@bendyline/gezel';
+import {
+  REPORT_ACTION_AUTHORING_GUIDE,
+  createLogger,
+  isSharedLibraryProject,
+  projectAllowsAmbientWork,
+  projectNightWorkEnabled,
+} from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 
@@ -52,13 +58,30 @@ const OVERSIGHT_GATE: StepGate = {
 export const OVERSIGHT_QUESTION_DECLINED =
   'Nobody is awake to answer during the nightly review, so this question was not posted. Write what blocked you in the report, then finish the run with advance_task_step.';
 
-const OVERSIGHT_PROMPT = `You are running the nightly **Meester oversight** review. The machine is idle and this is low-priority background work — be thorough but do not kick any project back into action.
+function oversightPrompt(projects: Project[]): string {
+  const projectIds = projects
+    .filter(
+      (project) =>
+        projectAllowsAmbientWork(project) &&
+        projectNightWorkEnabled(project) &&
+        !isSharedLibraryProject(project),
+    )
+    .map((project) => project.id)
+    .sort();
+  return `You are running the nightly **Meester oversight** review. The machine is idle and this is low-priority background work — be thorough but do not kick any project back into action.
 
-For EACH active project:
+Review ONLY these project IDs: ${JSON.stringify(projectIds)}.
+This scope comes from the projects' overnight-work settings. Do not inspect content, history, artifacts, or tasks outside this list. If the list is empty, write a short report saying there are no projects eligible for review and finish without inspecting any project content.
+
+For EACH listed project that is still active and allows overnight work:
 1. Read its \`about.md\` and \`missionObjectives.md\` (the documents tools), plus recent history/artifacts, to gauge progress toward the stated objectives.
 2. Note where the project is drifting, stuck, or where its structure could be improved — craftbook structure, project layout, a stale \`about.md\`, recurring problems that deserve a documented solution.
 
-**The Default project is a deliberate catch-all and gets a narrower review.** Unrelated one-off items live there by design, so review only the state of its artifacts and loose work items — stale, half-finished, superseded, misfiled, or grown big enough to deserve a project of their own. Do NOT critique its structure, coherence, or objectives, do NOT judge its items against each other, and do NOT report its \`about.md\` or \`missionObjectives.md\` as thin, generic, or missing: they say "this is a grab bag" on purpose. This report itself lives in the Default project — its own scaffolding is not a finding.
+${
+  projectIds.includes('default')
+    ? '**Default has explicitly opted in.** It is a deliberate catch-all: review only its artifacts and loose work items on their own terms. Do not critique its coherence, structure, or objectives, compare unrelated items, or treat this review itself as a finding.'
+    : '**Default is excluded.** Its one-off questions, scratch work, artifacts, and loose tasks are outside this review. Saving this report in Default does not make its contents eligible for inspection or recommendations.'
+}
 
 Then write ONE consolidated report to \`artifacts/${OVERSIGHT_REPORT_PATH}\` (overwrite any prior copy). Structure it as a list of concrete, approvable recommendations grouped by project, each with: what to change, why, and (where useful) a short ready-to-apply draft (e.g. a rewritten about.md paragraph). These are suggestions for the user to approve in the morning — do NOT apply them, do NOT message voormen, do NOT start or advance tasks.
 
@@ -73,6 +96,7 @@ Suggest changes that genuinely move projects toward their objectives; do not gil
 Nobody is awake to answer questions, so never ask the user anything. If something blocks you, say what in the report and finish.
 
 When the report is written, call \`advance_task_step\` to finish this run. The task re-arms automatically for tomorrow night.`;
+}
 
 /**
  * The bundled review is the runtime's own work, not the person's: it never
@@ -154,9 +178,10 @@ export async function ensureNightShiftOversightTask(
   const meesterId = config?.meesterGezelId;
   if (!meesterId) return; // no meester yet; ensureDefaultMeester runs first, so rare
 
+  const prompt = oversightPrompt(await store.listProjects());
   const installed = await findNightShiftOversightTask(store);
   if (installed) {
-    await migrateOversightTask(store, installed.num).catch((err) => {
+    await migrateOversightTask(store, installed.num, prompt).catch((err) => {
       log.warn(
         '[night-shift] failed to update oversight task in place:',
         err instanceof Error ? err.message : err,
@@ -181,13 +206,13 @@ export async function ensureNightShiftOversightTask(
     await tasks.create('default', {
       title: OVERSIGHT_TITLE,
       description:
-        'Nightly Meester review of every active project against its objectives, producing an approvable report of suggested changes.',
+        'Nightly Meester review of active projects with overnight work enabled, producing an approvable report of suggested changes.',
       assignee: { kind: 'gezel', gezelId: meesterId },
       steps: [
         {
           id: OVERSIGHT_STEP_ID,
           name: 'Review active projects',
-          prompt: OVERSIGHT_PROMPT,
+          prompt,
           // Deliverable declaration: feeds the morning review's report
           // discovery AND lets the run self-advance on the written file.
           advanceWhen: { file: OVERSIGHT_REPORT_PATH, artifact: true, requireChange: true },
@@ -219,12 +244,12 @@ export async function ensureNightShiftOversightTask(
  * request surface doesn't cover advanceWhen edits on self-looping inline
  * steps) — a targeted, idempotent stamp.
  */
-async function migrateOversightTask(store: Store, num: number): Promise<void> {
+async function migrateOversightTask(store: Store, num: number, prompt: string): Promise<void> {
   const task = await store.readTask('default', num);
   if (!task) return;
   const step = task.craftbook.steps.find((s) => s.id === OVERSIGHT_STEP_ID);
   if (!step) return;
-  const promptCurrent = step.prompt === OVERSIGHT_PROMPT;
+  const promptCurrent = step.prompt === prompt;
   const advanceCurrent =
     step.advanceWhen?.file === OVERSIGHT_REPORT_PATH && step.advanceWhen?.artifact === true;
   // Installs that predate the completion gate carry a step that advances on
@@ -236,7 +261,7 @@ async function migrateOversightTask(store: Store, num: number): Promise<void> {
     s.id === OVERSIGHT_STEP_ID
       ? {
           ...s,
-          prompt: OVERSIGHT_PROMPT,
+          prompt,
           advanceWhen: {
             file: OVERSIGHT_REPORT_PATH,
             artifact: true,

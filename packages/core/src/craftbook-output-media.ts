@@ -31,10 +31,25 @@ const INPUT_PATH_LEAD =
 /** Artifacts-drawer paths: the task folder and the accessory prefixes. */
 const ARTIFACT_PATH = /^(?:\{\{(?:workPath|task\.dir)\}\}|tasks\/|notes\/|reviews\/|reports\/)/;
 
-function proseFileOutputMedium(text: string): CraftbookStepWritableOutputMedium | null {
+function proseFileOutputMedium(
+  text: string,
+  step: NewCraftbookStep,
+): CraftbookStepWritableOutputMedium | null {
   for (const m of text.matchAll(PROSE_FILE_OUTPUT)) {
     const path = m[2] ?? m[3];
     if (!path || INPUT_PATH_LEAD.test(m[1] ?? '')) continue;
+    // Paths are relative to their declared drawer. An artifact handoff such
+    // as security/review.md must not acquire workspace writes just because
+    // its prefix is unfamiliar (nor should a workspace reports/ path drift
+    // into artifacts). Only undeclared paths need the prefix heuristic.
+    if (step.deliverable?.path === path) {
+      return step.deliverable.artifact ? 'artifact' : 'workspace';
+    }
+    if (step.advanceWhen?.file === path) {
+      return step.advanceWhen.artifact ? 'artifact' : 'workspace';
+    }
+    const check = gateChecks(step).find((check) => check.file === path);
+    if (check) return check.artifact === true ? 'artifact' : 'workspace';
     return ARTIFACT_PATH.test(path) ? 'artifact' : 'workspace';
   }
   return null;
@@ -89,7 +104,7 @@ export function outputMediumForCraftbookBlueprint(
     return 'workspace';
   }
   if (/\bwrite_artifact\b/i.test(text)) return 'artifact';
-  const prose = proseFileOutputMedium(text);
+  const prose = proseFileOutputMedium(text, step);
   if (prose) return prose;
   return TASK_NOTE_OUTPUT_SIGNAL.test(text) ? 'task-note' : 'none';
 }
@@ -122,7 +137,7 @@ export function additionalOutputMediaForStep(
     out.add('workspace');
   }
   if (/\bwrite_artifact\b/i.test(text)) out.add('artifact');
-  const prose = proseFileOutputMedium(text);
+  const prose = proseFileOutputMedium(text, step);
   if (prose) out.add(prose);
   if (TASK_NOTE_OUTPUT_SIGNAL.test(text)) out.add('task-note');
   out.delete(primary as CraftbookStepWritableOutputMedium);

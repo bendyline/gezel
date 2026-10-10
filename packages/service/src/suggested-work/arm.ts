@@ -144,9 +144,9 @@ export async function setFolderNightWork(
       await deps.tasks.setStatus(projectId, host.num, 'active');
     }
   }
-  // An empty value removes the property.
+  // Persist the opt-in: clearing it would restore Default's off-by-default policy.
   await deps.store.updateProject(projectId, {
-    properties: { [NIGHT_WORK_PROPERTY]: '', [NIGHT_WORK_PAUSED_PROPERTY]: '' },
+    properties: { [NIGHT_WORK_PROPERTY]: 'on', [NIGHT_WORK_PAUSED_PROPERTY]: '' },
   });
 }
 

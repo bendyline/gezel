@@ -2020,6 +2020,8 @@ export async function startProductService(
     nightShiftWindow: () => nightShift.currentWindow(),
   };
   const runProjectNightWork = async (projectId: string): Promise<void> => {
+    const project = await store.getProject(projectId);
+    if (!project || !projectNightWorkEnabled(project)) return;
     const plan = await planProjectNightFixes(nightFixDeps, projectId).catch((err) => {
       log.warn(`[diffpack] night fix planning failed for ${projectId}: ${String(err)}`);
       return null;

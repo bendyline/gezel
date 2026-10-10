@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BoekwachterIssue, Task } from '@bendyline/gezel';
-import { DEFAULT_NIGHT_SHIFT_WINDOW, FOLDER_KIND_PROPERTY } from '@bendyline/gezel';
+import {
+  DEFAULT_NIGHT_SHIFT_WINDOW,
+  FOLDER_KIND_PROPERTY,
+  NIGHT_WORK_PROPERTY,
+} from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -166,6 +170,20 @@ describe('the project gates', () => {
     expect(await planProjectNightFixes(makeDeps(), projectId)).toMatchObject({
       skipped: 'opted-out',
     });
+  });
+
+  it('requires an explicit opt-in before planning fixes for Default', async () => {
+    await store.ensureDefaultProject();
+    projectId = 'default';
+    await store.updateProject(projectId, { properties: { [FOLDER_KIND_PROPERTY]: 'code' } });
+    await recruit('Default Bo', 'Boekwachter');
+    await recruit('Default Rex', 'Developer');
+
+    expect((await planProjectNightFixes(makeDeps(), projectId)).skipped).toBe('opted-out');
+    expect(created).toHaveLength(0);
+
+    await store.updateProject(projectId, { properties: { [NIGHT_WORK_PROPERTY]: 'on' } });
+    expect((await planProjectNightFixes(makeDeps(), projectId)).taskRef).toBeTruthy();
   });
 
   it('treats an unset flag as on', async () => {

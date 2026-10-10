@@ -6,7 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
@@ -73,12 +73,21 @@ async function refresh() {
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   vi.mocked(api.getActivityStatus).mockResolvedValue(snapshot());
   vi.mocked(api.answerQuestion).mockImplementation(async (id, answer) => ({
     ...question(id),
     answer: { ...answer, at: '2026-10-02T12:01:00Z' },
   }));
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Activity', () => {
   it('opens Ready ahead of pending advice and follows new destinations without stealing focus on refresh', async () => {
@@ -133,6 +142,34 @@ describe('Activity', () => {
     expect(await screen.findByText('Checking your work…')).toBeVisible();
     await act(async () => finish(snapshot()));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Ready 0' })).toHaveFocus());
+  });
+
+  it('keeps Ready in view as cards load, then releases it when the user scrolls', async () => {
+    let resized!: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+    await mount();
+    act(() => openUpdates({ section: 'ready' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Ready 0' })).toHaveFocus());
+    const scroll = vi.mocked(Element.prototype.scrollIntoView);
+    scroll.mockClear();
+    act(() => resized());
+    expect(scroll.mock.instances).toEqual([screen.getByRole('region', { name: 'Ready' })]);
+
+    fireEvent.wheel(screen.getByRole('heading', { name: 'Ready 0' }));
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    scroll.mockClear();
+    await refresh();
+    expect(scroll).not.toHaveBeenCalled();
   });
 
   it('keeps live work visible in the headline while automatic tasks are held', async () => {

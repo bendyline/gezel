@@ -131,6 +131,49 @@ describe('craftbook blueprint output media', () => {
     ]);
   });
 
+  it.each<Partial<NewCraftbookStep>>([
+    { deliverable: { path: 'security/review.md', kind: 'markdown-report', artifact: true } },
+    { advanceWhen: { file: 'security/review.md', artifact: true } },
+    {
+      gate: {
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'security/review.md', bytes: 100, artifact: true }],
+      },
+    },
+  ])('uses the declared drawer for a prose output path: %j', (contract) => {
+    const step = blueprint({
+      ...contract,
+      prompt:
+        'Write the completed result to `security/review.md` in the artifacts drawer with `write_artifact`.',
+    });
+
+    expect(additionalOutputMediaForStep(step, 'artifact')).toEqual([]);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['artifact']);
+    expect([...outputMediaForStep({ ...step, toolPolicy: { outputMedium: 'artifact' } })]).toEqual([
+      'artifact',
+    ]);
+  });
+
+  it('keeps a separate prose workspace output beside an artifact handoff', () => {
+    const step = blueprint({
+      prompt:
+        'Save the recipe to `automations/recipe.json`. Write the report with `write_artifact`.',
+      advanceWhen: { file: 'reports/recipe.md', artifact: true },
+    });
+
+    expect(additionalOutputMediaForStep(step, 'artifact')).toEqual(['workspace']);
+  });
+
+  it('lets a workspace declaration override an artifact-like path prefix', () => {
+    const step = blueprint({
+      prompt: 'Write the completed result to `reports/review.md`.',
+      advanceWhen: { file: 'reports/review.md' },
+    });
+
+    expect(additionalOutputMediaForStep(step, 'workspace')).toEqual([]);
+    expect([...outputMediaForCraftbookBlueprint(step)]).toEqual(['workspace']);
+  });
+
   it('recognizes an implementation plus regression-test phase as workspace mutation', () => {
     const step = blueprint({
       name: 'Implement the smallest fix and verify it',

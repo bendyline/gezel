@@ -21,6 +21,13 @@ questions raised for you. During the day the same line tells you when
 the next window opens. You can start a shift manually too — stepping out
 for lunch is a perfectly good night.
 
+**Default is excluded from automatic night work unless you explicitly turn
+its overnight work on.** Its one-off questions, scratch work, and artifacts
+stay out of the nightly project review and content sweep. The consolidated
+nightly report is still saved there; storing it in Default does not put
+Default's contents in scope. Tasks you deliberately queue for tonight still
+run.
+
 ## Tonight, not now
 
 Some work is better done while you sleep. When you attach a task to a

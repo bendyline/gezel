@@ -1026,6 +1026,7 @@ export class IndexEnrichmentManager {
         // merely a request to skip the cheap structural pass. Do not consume
         // an older on-disk index if the project was disabled after a scan.
         if (p.indexingEnabled === false) continue;
+        if (night && !projectNightWorkEnabled(p)) continue;
         if (this.chat.isProjectActive(p.id)) continue;
         // Always-on embed-only tier, ahead of the roster gate: the embedder
         // is local and LLM-free, so every indexing-enabled project gets
