@@ -74,11 +74,13 @@ export function suggestedCraftbookInvocation(args: {
 export function craftbookSuggestionGuidance(
   invocation: ReturnType<typeof suggestedCraftbookInvocation>,
 ): string {
+  const { project: searchProject, ...recipe } = invocation;
   return [
     'Compare these candidates with the full user request; choose a lower match or reject all of them if none fits.',
     'Preserve the requested project: for a new project, use start_project; for an existing project, pass its id explicitly.',
     'Keep the full task brief, deliverable destination, and acceptance criteria. If no candidate fits, use a generic build-loop task in the requested project.',
-    `\n\nCandidate call, only if this recipe and project fit: invoke_craftbook(${JSON.stringify(invocation)}).`,
+    `\n\nCandidate recipe details (not a launch call): ${JSON.stringify(recipe)}`,
+    `${searchProject ? `Search scope: ${JSON.stringify(searchProject)}. ` : ''}The search scope does not select a destination. Resolve the destination from the user request before launching; never copy the search scope into a launch call by default.`,
     'Invocation installs exact trusted zero-configuration bundled dependencies; remaining setup blocks task creation.',
   ].join(' ');
 }

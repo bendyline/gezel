@@ -19,6 +19,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  SPEECH_MODEL_CATALOG,
+  SpeechAssetStore,
+  speechAssetOptions,
+} from '@bendyline/gezel/speech-models';
+import {
   type ModelStorageRoots,
   findModelRoot,
   listOverlayModelIds,
@@ -28,6 +33,7 @@ import {
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
+import { ensureSpeechModel } from './managed-speech-model.js';
 import { MockSpeechToTextProvider } from './mock-stt.js';
 import type { SpeechToTextProvider } from './types.js';
 import { WhisperCppProvider } from './whisper-cpp.js';
@@ -50,6 +56,8 @@ export async function createSpeechToTextProvider(
   const env = opts.env ?? process.env;
   const storageRoots = modelStorageRoots({ home: opts.home, engine: 'whisper-cpp', env });
   const modelsRoot = storageRoots.writableRoot;
+  const assets = speechAssetOptions({ home: opts.home, env });
+  const assetStore = new SpeechAssetStore(assets);
 
   if (env.GEZEL_MOCK_PROVIDER === '1') {
     return new MockSpeechToTextProvider({ modelsRoot });
@@ -60,6 +68,7 @@ export async function createSpeechToTextProvider(
       baseUrl: env.GEZEL_WHISPER_SERVER_URL,
       modelsRoot,
       storageRoots,
+      assets,
       fetchImpl: patientFetch(),
     });
   }
@@ -76,6 +85,11 @@ export async function createSpeechToTextProvider(
       resolveLaunch: async () => {
         const port = cachedPort ?? (await pickFreePort());
         cachedPort = port;
+        // Acquire our own links even for legacy Gezel downloads before handing
+        // their path to the engine. This also discovers DocBlocks-first installs.
+        for (const entry of SPEECH_MODEL_CATALOG.filter((entry) => entry.kind === 'stt')) {
+          await ensureSpeechModel(assetStore, entry, modelsRoot, false);
+        }
         const model = await selectWhisperModel(storageRoots, opts.defaultModelId);
         if (!model) {
           throw new Error(
@@ -93,6 +107,7 @@ export async function createSpeechToTextProvider(
       baseUrl: 'http://127.0.0.1:9082',
       modelsRoot,
       storageRoots,
+      assets,
       supervisor,
       fetchImpl: patientFetch(),
     });
@@ -102,6 +117,7 @@ export async function createSpeechToTextProvider(
     baseUrl: 'http://127.0.0.1:9082',
     modelsRoot,
     storageRoots,
+    assets,
     configured: false,
   });
 }

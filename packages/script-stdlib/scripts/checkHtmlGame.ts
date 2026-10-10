@@ -1,5 +1,6 @@
 import { type InferredInput, defineScript, gezel } from '@bendyline/gezel-sdk';
 import {
+  explainSniff,
   gateResult,
   htmlGameSniff,
   inlineJsBytes,
@@ -9,7 +10,7 @@ import {
 export const meta = defineScript({
   name: 'checkHtmlGame',
   description:
-    'Gate: an HTML file is plausibly a real browser game — a <canvas>/<svg> render surface, closed <script> tags, and non-trivial inline JavaScript.',
+    'Gate: an HTML file is plausibly a real browser game — a canvas/SVG, frame loop, or interactive DOM surface, closed script tags, and non-trivial inline JavaScript.',
   kind: 'gate',
   inputs: {
     file: { type: 'string', description: 'HTML file to check.', default: 'index.html' },
@@ -42,7 +43,7 @@ if (content === null) {
       ok,
       ok
         ? `${file} has a render surface and ${js} bytes of inline JS`
-        : `${file} is not yet a working game page: it needs a <canvas> or <svg> render surface, every <script> closed, and at least ${minJs} bytes of inline JavaScript (currently ${js}).`,
+        : `${file} is not yet a working game page: ${explainSniff('html-game', content, minJs)}`,
     ),
   );
 }

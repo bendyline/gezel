@@ -1,11 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { createLogger } from '@bendyline/gezel';
+import { AwakeBudget, createLogger } from '@bendyline/gezel';
 import {
   anthropicDefaultReasoningEffort,
   anthropicReasoningEfforts,
   buildAnthropicGenerationOptions,
 } from './anthropic-options.js';
 import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
@@ -113,6 +114,7 @@ export class AnthropicProvider implements LLMProvider {
       anthropic: this.anthropic,
       model: opts.model ?? this.defaultModel,
       observationContext: opts.observationContext,
+      terminalToolPolicy: opts.terminalToolPolicy,
       reasoningEffort: opts.reasoningEffort,
       systemMessage: opts.systemMessage,
       bridges,
@@ -154,6 +156,7 @@ export class AnthropicProvider implements LLMProvider {
 
 /** @internal Exported alongside {@link AnthropicSession} for unit tests. */
 export interface AnthropicSessionDeps {
+  terminalToolPolicy?: SessionOpts['terminalToolPolicy'];
   observationContext?: ApiObservationContext;
   anthropic: Anthropic;
   model: string;
@@ -289,7 +292,7 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
     this.capturedCalls = [];
     this.lastTurnReasoning = '';
 
-    const deadline = Date.now() + (opts?.timeoutMs ?? 120_000);
+    const budget = new AwakeBudget(opts?.timeoutMs ?? 120_000);
     const start = Date.now();
     const bridgeTools = this.deps.bridges.isEmpty() ? [] : this.deps.bridges.getAnthropicTools();
     const externalToolsAsAnthropic = (this.deps.externalTools ?? []).map((t) => ({
@@ -324,8 +327,8 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
     let totalCacheReadTokens = 0;
     let totalCacheCreationTokens = 0;
 
-    for (let turn = 0; turn < 12; turn++) {
-      if (Date.now() > deadline) {
+    for (let turn = 0; turn < CLOUD_TOOL_ROUND_LIMIT; turn++) {
+      if (budget.expired()) {
         throw new Error(
           `[anthropic] timed out after ${Math.round((opts?.timeoutMs ?? 120_000) / 1000)}s`,
         );
@@ -531,7 +534,12 @@ export class AnthropicSession extends StreamingSessionBase implements LLMSession
           ...(isError ? { is_error: true } : {}),
         });
         if (!isError) {
-          terminalActionClosing ??= terminalToolClosingText(undefined, call.name, call.input, text);
+          terminalActionClosing ??= terminalToolClosingText(
+            this.deps.terminalToolPolicy,
+            call.name,
+            call.input,
+            text,
+          );
         }
       }
       this.messages.push({ role: 'user', content: resultBlocks });

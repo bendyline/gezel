@@ -119,8 +119,13 @@ describe('consolidated MCP tools', () => {
     const text = (result.content as Array<{ text?: string }>)
       .map((item) => item.text ?? '')
       .join('\n');
-    const invocation = JSON.parse(text.match(/invoke_craftbook\((\{[^\n]+\})\)/)![1]!);
-    expect(invocation).toMatchObject({ craftbookId: 'report', project: 'reporting' });
+    const invocation = JSON.parse(
+      text.match(/Candidate recipe details \(not a launch call\): (\{[^\n]+\})/)![1]!,
+    );
+    expect(invocation).toMatchObject({ craftbookId: 'report' });
+    expect(invocation).not.toHaveProperty('project');
+    expect(text).not.toContain('invoke_craftbook(');
+    expect(text).toContain('Search scope: "reporting"');
     expect(invocation.description).toContain(brief);
     expect(invocation.description).toContain('annual presentation');
     expect(text).toContain('reject all');

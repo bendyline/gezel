@@ -503,3 +503,85 @@ describe('AnthropicSession — priorMessages translation', () => {
     expect(msgs.length).toBe(3);
   });
 });
+
+describe('Anthropic checkpoint and loop budgets', () => {
+  it('stops after a successful matching checkpoint, preserving results for the next step', async () => {
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const execute = vi
+      .spyOn(bridges, 'callToolRich')
+      .mockResolvedValue({ text: 'Saved', images: [], isError: false })
+      .mockResolvedValueOnce({ text: 'Saved elsewhere', images: [], isError: false })
+      .mockResolvedValueOnce({ text: 'Permission denied', images: [], isError: true });
+    const requests: unknown[] = [];
+    const session = await makeSession([], {
+      bridges,
+      terminalToolPolicy: {
+        toolNames: ['write_artifact'],
+        onlyWhenArgEquals: { arg: 'path', value: 'tasks/4/notes.md' },
+        fallbackText: 'Checkpoint saved.',
+      },
+      anthropic: stubAnthropicTurns(
+        [
+          toolUseStream('other', 'write_artifact', { path: 'other.md' }),
+          toolUseStream('failed', 'write_artifact', { path: 'tasks/4/notes.md' }),
+          toolUseStream('saved', 'write_artifact', { path: 'tasks/4/notes.md' }),
+          textStream('Next step'),
+        ],
+        (request) => requests.push(structuredClone(request)),
+      ),
+    });
+    await expect(session.sendAndWait('Write checkpoint')).resolves.toBe('Checkpoint saved.');
+    expect(requests).toHaveLength(3);
+    expect(execute).toHaveBeenCalledTimes(3);
+    await expect(session.sendAndWait('Continue')).resolves.toBe('Next step');
+    expect(requests[3]).toMatchObject({
+      messages: expect.arrayContaining([
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'saved', content: 'Saved' }],
+        },
+      ]),
+    });
+  });
+
+  it('allows more than twelve productive rounds', async () => {
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    vi.spyOn(bridges, 'callToolRich').mockResolvedValue({
+      text: 'Contents',
+      images: [],
+      isError: false,
+    });
+    let count = 0;
+    const session = await makeSession([], {
+      bridges,
+      anthropic: stubAnthropicTurns(
+        [
+          ...Array.from({ length: 14 }, (_, i) =>
+            toolUseStream(`c${i}`, 'read_artifact', { path: `${i}.md` }),
+          ),
+          textStream('Done'),
+        ],
+        () => count++,
+      ),
+    });
+    await expect(session.sendAndWait('Review files')).resolves.toBe('Done');
+    expect(count).toBe(15);
+  });
+
+  it('still stops at the absolute round limit', async () => {
+    const { CLOUD_TOOL_ROUND_LIMIT } = await import('./cloud-tool-limits.js');
+    const bridges = await emptyBridge();
+    vi.spyOn(bridges, 'hasTool').mockReturnValue(true);
+    const execute = vi
+      .spyOn(bridges, 'callToolRich')
+      .mockResolvedValue({ text: 'Contents', images: [], isError: false });
+    const session = await makeSession(
+      toolUseStream('repeated', 'read_artifact', { path: 'notes.md' }),
+      { bridges },
+    );
+    await expect(session.sendAndWait('Review')).rejects.toThrow('too many tool-call loops');
+    expect(execute).toHaveBeenCalledTimes(CLOUD_TOOL_ROUND_LIMIT);
+  });
+});

@@ -39,7 +39,7 @@ async function handle(msg: Exclude<KokoroWorkerRequest, { kind: 'cancel' }>): Pr
       return;
     }
     if (msg.kind === 'unload' || cancelled.has(msg.id)) {
-      if (msg.kind === 'unload') engine.unload();
+      if (msg.kind === 'unload') await engine.unload();
       reply({ id: msg.id, kind: 'done' });
       return;
     }

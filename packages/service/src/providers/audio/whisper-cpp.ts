@@ -22,6 +22,12 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import {
+  SPEECH_MODEL_CATALOG,
+  type SpeechAssetOptions,
+  SpeechAssetStore,
+  catalogEntry,
+} from '@bendyline/gezel/speech-models';
 import { FormData } from 'undici';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import {
@@ -38,6 +44,11 @@ import {
 } from '../../models/storage-roots.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import {
+  ensureSpeechModel,
+  sharedSpeechModelInfo,
+  speechPullEvents,
+} from './managed-speech-model.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -52,6 +63,7 @@ export interface WhisperCppProviderOptions {
   baseUrl: string;
   modelsRoot: string;
   storageRoots?: ModelStorageRoots;
+  assets?: SpeechAssetOptions;
   /** Per-request timeout in ms. Defaults to 5 minutes — long enough for
    *  small models on a 30-minute audio file on weak hardware. */
   timeoutMs?: number;
@@ -82,40 +94,21 @@ export const WHISPER_MODEL_CATALOG: ReadonlyArray<{
   downloadUrl: string;
   sha256: string;
   filename: string;
-}> = [
-  {
-    id: 'whisper-tiny.en',
-    name: 'Whisper Tiny (English)',
-    description: 'Fastest English-only model. ~75MB. Good for short voice memos.',
-    approxSizeBytes: 77_700_000,
-    downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin',
-    sha256: '921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f',
-    filename: 'ggml-tiny.en.bin',
-  },
-  {
-    id: 'whisper-base.en',
-    name: 'Whisper Base (English)',
-    description: 'Recommended default. ~140MB. Realtime on most laptop CPUs.',
-    approxSizeBytes: 147_900_000,
-    downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin',
-    sha256: 'a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002',
-    filename: 'ggml-base.en.bin',
-  },
-  {
-    id: 'whisper-small.en',
-    name: 'Whisper Small (English)',
-    description: 'Higher accuracy, ~466MB. Slower but better on hard audio.',
-    approxSizeBytes: 487_700_000,
-    downloadUrl: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
-    sha256: 'c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d',
-    filename: 'ggml-small.en.bin',
-  },
-];
+}> = SPEECH_MODEL_CATALOG.filter((entry) => entry.kind === 'stt').map((entry) => ({
+  id: entry.id,
+  name: entry.label,
+  description: entry.description,
+  approxSizeBytes: entry.files[0]!.size,
+  downloadUrl: entry.files[0]!.url,
+  sha256: entry.files[0]!.sha256,
+  filename: entry.files[0]!.name,
+}));
 
 export class WhisperCppProvider implements SpeechToTextProvider {
   readonly name = 'whisper-cpp';
   private readonly baseUrl: string;
   private readonly modelsRoot: string;
+  private readonly assets?: SpeechAssetStore;
   private readonly storageRoots: ModelStorageRoots;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -125,6 +118,8 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   constructor(opts: WhisperCppProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.modelsRoot = opts.modelsRoot;
+    if (opts.assets)
+      this.assets = new SpeechAssetStore({ ...opts.assets, fetchImpl: opts.fetchImpl });
     this.storageRoots = opts.storageRoots ?? {
       writableRoot: opts.modelsRoot,
       readOnlyRoots: [],
@@ -256,11 +251,30 @@ export class WhisperCppProvider implements SpeechToTextProvider {
         /* skip malformed entries */
       }
     }
+    if (this.assets)
+      for (const entry of SPEECH_MODEL_CATALOG.filter((entry) => entry.kind === 'stt')) {
+        if (out.some((model) => model.id === entry.id)) continue;
+        const info = await sharedSpeechModelInfo(this.assets, entry, this.modelsRoot);
+        if (info) out.push(info);
+      }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
   }
 
   async *pullModel(id: string, spec: AudioModelPullSpec): AsyncIterable<AudioModelPullEvent> {
+    const pinned = catalogEntry(id);
+    if (
+      this.assets &&
+      pinned?.kind === 'stt' &&
+      spec.files.length === 1 &&
+      spec.files[0]?.sha256.toLowerCase() === pinned.files[0]?.sha256
+    ) {
+      yield* speechPullEvents(id, async (progress) => {
+        await ensureSpeechModel(this.assets!, pinned, this.modelsRoot, true, progress);
+        await makeSharedModelReadable(join(this.modelsRoot, id));
+      });
+      return;
+    }
     const itemDir = join(this.modelsRoot, id);
     await mkdir(this.modelsRoot, { recursive: true });
     await assertModelStorePathSafe(this.modelsRoot, itemDir);
@@ -322,6 +336,8 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       throw readOnlyModelError(id);
     }
     await rm(itemDir, { recursive: true, force: true });
+    const pinned = catalogEntry(id);
+    if (this.assets && pinned) for (const file of pinned.files) await this.assets.collect(file);
   }
 
   async health(): Promise<AudioEngineHealth> {

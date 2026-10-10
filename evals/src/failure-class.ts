@@ -76,6 +76,8 @@ export interface ClassifyTrialInput {
   success: boolean;
   reason?: string | null;
   failureMode?: string | null;
+  /** Independent qualification evidence remains relevant when artifact checks fail first. */
+  qualificationIssues?: readonly string[];
   /** daemon.log text (tail is fine). Log-signature rules skip when absent. */
   daemonLog?: string | null;
   /** Structured JSONL copied from the trial home's native incident log. */
@@ -226,31 +228,37 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
     return { failureClass: 'operator', rule: 'operator-interrupt', evidence: reason.slice(0, 140) };
   }
 
+  const qualificationIssues = input.qualificationIssues?.filter(
+    (issue) => !issue.startsWith('assisted diagnostic;'),
+  );
+  const qualificationReason = qualificationIssues?.length
+    ? `Qualification failed: ${qualificationIssues.join('; ')}`
+    : reason;
   if (
-    /Qualification failed:/.test(reason) &&
+    /Qualification failed:/.test(qualificationReason) &&
     /API (?:provider returned \d+ incomplete response|stream ended without a terminal event)/.test(
-      reason,
+      qualificationReason,
     )
   ) {
     return {
       failureClass: 'infra',
       rule: 'api-response-incomplete',
-      evidence: reason.slice(0, 240),
+      evidence: qualificationReason.slice(0, 240),
     };
   }
 
   if (
     /Qualification (?:failed:|blocked evaluator|blocked provider|blocked an undeclared evaluator)/.test(
-      reason,
+      qualificationReason,
     ) &&
     /(?:measurement|provenance|observation|telemetry|unobservable|not be observed|not observed|lifecycle evidence|undeclared evaluator|blocked evaluator|blocked provider|assisted diagnostic)/.test(
-      reason,
+      qualificationReason,
     )
   ) {
     return {
       failureClass: 'grader',
       rule: 'qualification-evidence',
-      evidence: reason.slice(0, 240),
+      evidence: qualificationReason.slice(0, 240),
     };
   }
 

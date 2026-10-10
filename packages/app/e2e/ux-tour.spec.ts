@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,12 @@ test.beforeAll(async () => {
   await mkdir(shotDir, { recursive: true });
 
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-ux-tour-e2e-'));
+  // A pending morning review replaces the greeting and reopens the band.
+  // This tour needs the ordinary Home state regardless of when it runs.
+  await writeFile(
+    join(gezelHome, 'config.json'),
+    JSON.stringify({ nightShift: { enabled: false } }),
+  );
   app = await electron.launch({
     args: [appRoot],
     env: buildLaunchEnv({

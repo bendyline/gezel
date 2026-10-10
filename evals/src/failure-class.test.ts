@@ -430,3 +430,53 @@ describe('classifyTrial — ungradable trials', () => {
     expect(c.failureClass).toBe('pass');
   });
 });
+
+describe('qualification evidence alongside an artifact failure', () => {
+  const failedArtifact = {
+    success: false,
+    failureMode: 'chat-stalled',
+    reason: 'chat stalled for 301s',
+  };
+  it('retains provider incompleteness even when the main failure is a stall', () => {
+    expect(
+      classifyTrial({
+        ...failedArtifact,
+        qualificationIssues: [
+          'artifact checks did not pass',
+          'API provider returned 2 incomplete response(s): max_messages=2',
+        ],
+      }),
+    ).toMatchObject({ failureClass: 'infra', rule: 'api-response-incomplete' });
+  });
+  it('separates absent telemetry from an incomplete provider response', () => {
+    expect(
+      classifyTrial({
+        ...failedArtifact,
+        qualificationIssues: [
+          'artifact checks did not pass',
+          'API result telemetry is missing for 1 request(s)',
+        ],
+      }),
+    ).toMatchObject({ failureClass: 'grader', rule: 'qualification-evidence' });
+  });
+  it('does not excuse a task failure just because the policy is assisted', () => {
+    expect(
+      classifyTrial({
+        ...failedArtifact,
+        qualificationIssues: [
+          'artifact checks did not pass',
+          'assisted diagnostic; not independent product qualification',
+        ],
+      }),
+    ).toMatchObject({ failureClass: 'model', rule: 'model-default' });
+  });
+  it('preserves operator interruption precedence', () => {
+    expect(
+      classifyTrial({
+        ...failedArtifact,
+        failureMode: 'interrupted',
+        qualificationIssues: ['API provider returned 1 incomplete response(s): max_messages=1'],
+      }),
+    ).toMatchObject({ failureClass: 'operator' });
+  });
+});

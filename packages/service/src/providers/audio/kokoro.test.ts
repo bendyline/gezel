@@ -128,6 +128,22 @@ describe('KokoroProvider.synthesize', () => {
     });
   }
 
+  it('disposes the native model before removing its installation', async () => {
+    const { module } = makeModule();
+    const instance = await module.KokoroTTS.from_pretrained('test');
+    const dispose = vi.fn(async () => {
+      // The model directory must still exist while ONNX releases its mapping.
+      const { stat } = await import('node:fs/promises');
+      expect((await stat(join(modelsRoot, KOKORO_DEFAULT_MODEL_ID))).isDirectory()).toBe(true);
+    });
+    instance.model = { dispose };
+    const speech = provider(module);
+    await speech.synthesize({ text: 'Hello world.' });
+    await speech.deleteModel(KOKORO_DEFAULT_MODEL_ID);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(await speech.listInstalledModels()).toEqual([]);
+  });
+
   it('runs one inference per sentence and concatenates the audio', async () => {
     const { module, calls } = makeModule();
     const out = await provider(module).synthesize({ text: 'Hello world. Hello cat.' });

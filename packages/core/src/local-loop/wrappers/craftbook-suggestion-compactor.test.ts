@@ -114,3 +114,9 @@ describe('CraftbookSuggestionCompactor', () => {
     ).toBeNull();
   });
 });
+
+it('does not turn unbound recipe details into an executable launch', () => {
+  const text =
+    '1. Report (id: report) [bundled, 2 step(s), 8% match] — Draft a report.\n\nCandidate recipe details (not a launch call): {"craftbookId":"report","description":"Create a new project for the report."}\nSearch scope: "default". The search scope does not select a destination.';
+  expect(compactCraftbookSuggestion(text)).toBeNull();
+});

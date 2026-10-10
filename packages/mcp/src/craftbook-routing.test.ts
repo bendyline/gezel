@@ -107,7 +107,10 @@ describe('invoke_craftbook params', () => {
     expect(invocation.description).toContain(jobDescription);
     expect(invocation.description).toContain('annual presentation');
     const guidance = craftbookSuggestionGuidance(invocation);
-    expect(guidance).toContain(JSON.stringify(invocation));
+    expect(guidance).toContain('Search scope: "annual-report"');
+    expect(guidance).toContain('Candidate recipe details (not a launch call)');
+    expect(guidance).toContain(jobDescription);
+    expect(guidance).not.toContain('invoke_craftbook(');
     expect(guidance).toContain('reject all');
     expect(guidance).toContain('new project, use start_project');
     expect(guidance).not.toContain('send it now');
@@ -121,6 +124,22 @@ describe('invoke_craftbook params', () => {
     });
     expect(invocation.description).toContain('Write the quarterly research report');
     expect(invocation.description).toContain('Yes, go ahead.');
+  });
+
+  it('does not turn the current search project into a new-project destination', () => {
+    const brief = 'Create a new project for a recipe collection.';
+    const text = craftbookSuggestionGuidance(
+      suggestedCraftbookInvocation({
+        craftbookId: 'report',
+        query: 'recipe collection',
+        jobDescription: brief,
+        project: 'default',
+      }),
+    );
+    expect(text).toContain(brief);
+    expect(text).toContain('new project, use start_project');
+    expect(text).not.toContain('"project":"default"');
+    expect(text).not.toContain('invoke_craftbook(');
   });
 });
 
