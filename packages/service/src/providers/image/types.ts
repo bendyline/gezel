@@ -1,3 +1,7 @@
+import type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
+
+export type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
+
 /**
  * ImageProvider — the service-side abstraction for local image generation.
  *
@@ -114,8 +118,6 @@ export type ImageModelPullEvent =
     }
   | { type: 'error'; error: string }
   | { type: 'done'; id: string };
-
-export type ImageModelAuxiliaryRole = 'vae' | 'clip_l' | 'clip_g' | 't5xxl' | 'llm';
 
 export interface ImageModelAuxiliaryPullSpec {
   role: ImageModelAuxiliaryRole;

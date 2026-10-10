@@ -233,6 +233,24 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(args[args.indexOf('--listen-port') + 1]).toBe('8765');
   });
 
+  it('launches Ming Design with its tokenizer, VAE, text encoder, and 12 steps', () => {
+    const args = buildSdServerArgs(
+      {
+        ...modelWithAux([
+          { role: 'vae', path: '/tmp/ming/vae.safetensors' },
+          { role: 'llm', path: '/tmp/ming/llm.safetensors' },
+          { role: 'tokenizer', path: '/tmp/ming/tokenizer.json' },
+        ]),
+        id: 'ming-image-0.1-design-int8',
+      },
+      8765,
+    );
+    expect(args[args.indexOf('--tokenizer') + 1]).toBe('/tmp/ming/tokenizer.json');
+    expect(args[args.indexOf('--llm') + 1]).toBe('/tmp/ming/llm.safetensors');
+    expect(args[args.indexOf('--vae') + 1]).toBe('/tmp/ming/vae.safetensors');
+    expect(args[args.indexOf('--steps') + 1]).toBe('12');
+  });
+
   it('skips --vae-tiling for models whose VAE seams under tiling (Krea)', () => {
     // Krea 2's Qwen-Image VAE shows tile-boundary streaks under
     // --vae-tiling, so the flag is gated off for it.

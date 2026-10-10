@@ -72,6 +72,7 @@ import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
 import { installRendererPermissionPolicy } from './renderer-permissions.js';
+import { RendererMemoryLog, RendererRecovery } from './renderer-recovery.js';
 import { splashStage } from './splash-stage.js';
 import { getStartAtLogin, launchedAtLogin, setStartAtLogin } from './start-at-login.js';
 import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
@@ -779,12 +780,6 @@ async function createWindow(): Promise<void> {
       const location = event.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
       writeProcessOutput(process.stderr, `[renderer ${tag}] ${event.message}${location}\n`);
     });
-    wc.on('render-process-gone', (_e, details) => {
-      writeProcessOutput(
-        process.stderr,
-        `[renderer CRASH] reason=${details.reason} exitCode=${details.exitCode}\n`,
-      );
-    });
     wc.on('preload-error', (_e, preloadPath, err) => {
       writeProcessOutput(
         process.stderr,
@@ -818,6 +813,19 @@ async function createWindow(): Promise<void> {
         .catch(() => {});
     });
   }
+
+  // A dead renderer leaves the window on its bare sage background until the
+  // app is quit. Reload it, a few times; see renderer-recovery.ts.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    const reload = rendererRecovery.shouldReload(details.reason);
+    rendererMemory.reset();
+    writeProcessOutput(
+      process.stderr,
+      `[renderer] gone (${details.reason}, exit ${details.exitCode}): ${reload ? 'reloading' : 'not reloading, it keeps crashing'}\n`,
+    );
+    if (reload) mainWindow?.webContents.reload();
+  });
+  startRendererMemoryLog();
 
   // Close-to-tray: when the tray is active, the window's X button hides
   // the window and keeps Gezel resident (so the tray stays a live locus
@@ -2117,6 +2125,25 @@ async function monitorTrayActivity(client: GezelClient, signal: AbortSignal): Pr
 
 function syncTrayActivity(): void {
   tray?.setWorking(trayActiveSessions.size > 0);
+}
+
+const rendererRecovery = new RendererRecovery();
+const rendererMemory = new RendererMemoryLog();
+let rendererMemoryTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Log the window renderer's memory at each new high step; see renderer-recovery.ts. */
+function startRendererMemoryLog(): void {
+  if (rendererMemoryTimer) return;
+  rendererMemoryTimer = setInterval(() => {
+    const pid = mainWindow?.webContents.getOSProcessId();
+    if (!pid) return;
+    const metric = app.getAppMetrics().find((m) => m.pid === pid);
+    if (!metric) return;
+    // Electron reports working set in kilobytes.
+    const line = rendererMemory.reading(metric.memory.workingSetSize / 1024);
+    if (line) writeProcessOutput(process.stderr, `${line}\n`);
+  }, 10 * 60_000);
+  rendererMemoryTimer.unref?.();
 }
 
 let idleReportTimer: ReturnType<typeof setInterval> | null = null;

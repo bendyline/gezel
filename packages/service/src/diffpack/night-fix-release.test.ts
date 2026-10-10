@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from '../tasks/manager.js';
-import { releasePausedNightFixes } from './night-fix-planner.js';
+import { releaseStaleNightFixes } from './night-fix-planner.js';
 
 let home: string;
 let store: Store;
@@ -83,7 +83,7 @@ describe('releasing paused night fix sweeps', () => {
     });
     const own = await make('Plan the launch', { status: 'paused', updatedAt: EARLIER_NIGHT });
 
-    const released = await releasePausedNightFixes({ store, tasks }, WINDOW_START);
+    const released = await releaseStaleNightFixes({ store, tasks }, WINDOW_START);
 
     expect(released).toEqual([stale.ref]);
     const status = async (t: Task) => (await store.readTask('default', t.num))?.status;
@@ -91,5 +91,30 @@ describe('releasing paused night fix sweeps', () => {
     expect(await status(tonight)).toBe('paused');
     expect(await status(proposed)).toBe('paused');
     expect(await status(own)).toBe('paused');
+  });
+
+  // gezel-site/8 stayed active behind a question nobody was awake to answer.
+  it('also releases a sweep stuck active since an earlier night, and withdraws its question', async () => {
+    const stuck = await make('Nightly fixes — 3 open issues', {
+      sweep: true,
+      status: 'active',
+      updatedAt: EARLIER_NIGHT,
+    });
+    await store.writeQuestion({
+      id: 'q-stuck',
+      projectId: 'default',
+      gezelId: 'esra',
+      sessionId: 'sweep-session',
+      prompt: 'Workspace writes are disabled. What should I do?',
+      choices: ['Allow project file edits and continue', 'Keep current permissions'],
+      allowWriteIn: false,
+      multiSelect: false,
+      taskRef: stuck.ref,
+      createdAt: EARLIER_NIGHT,
+    });
+
+    expect(await releaseStaleNightFixes({ store, tasks }, WINDOW_START)).toEqual([stuck.ref]);
+    expect((await store.readTask('default', stuck.num))?.status).toBe('canceled');
+    expect((await store.getQuestion('default', 'q-stuck'))?.answer?.silentSkip).toBe(true);
   });
 });

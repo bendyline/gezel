@@ -69,7 +69,7 @@ import {
   settleIssuesForDraftingTask,
 } from './diffpack/issue-lifecycle.js';
 import { DiffpackManager } from './diffpack/manager.js';
-import { planProjectNightFixes, releasePausedNightFixes } from './diffpack/night-fix-planner.js';
+import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
@@ -1661,8 +1661,8 @@ export async function startProductService(
       opts.nightShiftNow?.() ?? new Date(),
       nightShift.currentWindow(),
     ).start;
-    await releasePausedNightFixes({ store, tasks }, windowStart.getTime()).catch((err) =>
-      log.warn(`[night-shift] could not release paused night fixes: ${String(err)}`),
+    await releaseStaleNightFixes({ store, tasks }, windowStart.getTime()).catch((err) =>
+      log.warn(`[night-shift] could not release left-over night fixes: ${String(err)}`),
     );
   });
   // The morning review card; see tasks/night-review-card.ts.
