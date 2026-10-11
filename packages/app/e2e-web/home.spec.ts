@@ -4,7 +4,7 @@
  */
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
-import { gotoHome } from './helpers/nav.js';
+import { gotoHome, openGreetingTab } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
 test.use({ daemonGroup: 'home' });
@@ -12,7 +12,7 @@ test.use({ daemonGroup: 'home' });
 test.describe('home / workshop', () => {
   test('workshop and greeting', async ({ page }) => {
     await gotoHome(page);
-    await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+    await openGreetingTab(page);
 
     // The frozen clock pins the greeting to the afternoon.
     await expect(page.getByTestId('greeting-band')).toContainText('afternoon', {

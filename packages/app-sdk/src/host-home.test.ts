@@ -259,6 +259,7 @@ it('clears inherited model borrowing and native backend overrides for an isolate
   const env = {
     GEZEL_READONLY_MODEL_HOMES: '/outside',
     GGML_BACKEND_PATH: '/developer',
+    GEZEL_MXC_EXEC: 'C:/developer/wxc-exec.exe',
     GEZEL_HOME: '/personal',
   };
   const original = { ...env };
@@ -276,6 +277,7 @@ it('clears inherited model borrowing and native backend overrides for an isolate
   );
   expect(env.GEZEL_READONLY_MODEL_HOMES).toBeUndefined();
   expect(env.GGML_BACKEND_PATH).toBeUndefined();
+  expect(env.GEZEL_MXC_EXEC).toBeUndefined();
   applied.restore();
   expect(env).toEqual(original);
 });

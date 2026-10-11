@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -79,5 +79,65 @@ describe('source content identity', () => {
         { source: current },
       ),
     ).toEqual([{ component: 'source', paths: [] }]);
+  });
+
+  it('scopes campaigns to live eval inputs while retaining full repository provenance', async () => {
+    await mkdir(join(dir, 'evals/src'), { recursive: true });
+    await writeFile(join(dir, 'evals/src/runner.ts'), 'runner');
+    const before = await sourceIdentity(dir, 'eval');
+    const provenance = await sourceIdentity(dir);
+    for (const path of [
+      'docs/note.md',
+      '.github/workflows/build.yml',
+      'packages/service/src/worker.ts',
+      'scratch.txt',
+      'pnpm-lock.yaml',
+      'evals/src/worker.test.ts',
+      'evals/src/worker.ts.tmp',
+    ]) {
+      const { dirname } = await import('node:path');
+      await mkdir(dirname(join(dir, path)), { recursive: true });
+      await writeFile(join(dir, path), 'unrelated change');
+    }
+    expect((await sourceIdentity(dir)).sha256).not.toBe(provenance.sha256);
+    expect(
+      identityChanges({ source: before }, { source: await sourceIdentity(dir, 'eval') }),
+    ).toEqual([]);
+    await rm(join(dir, 'scratch.txt'));
+    await rm(join(dir, 'evals/src/worker.ts.tmp'));
+    git('add', '.');
+    commit();
+    expect(
+      identityChanges({ source: before }, { source: await sourceIdentity(dir, 'eval') }),
+    ).toEqual([]);
+  });
+
+  it('still detects changed, added and deleted evaluator code, fixtures, consent and launch inputs', async () => {
+    const { dirname } = await import('node:path');
+    const paths = [
+      'evals/src/runner.ts',
+      'evals/src/fixtures/brief.md',
+      'evals/src/fixtures/data.json',
+      'evals/user-scripts/consent.json',
+      'scripts/dependency-lease.mjs',
+      'evals/tsconfig.json',
+    ];
+    for (const path of paths) {
+      await mkdir(dirname(join(dir, path)), { recursive: true });
+      await writeFile(join(dir, path), 'before');
+    }
+    const before = await sourceIdentity(dir, 'eval');
+    for (const path of paths) await writeFile(join(dir, path), 'after');
+    await rm(join(dir, paths[0]!));
+    await writeFile(join(dir, 'evals/src/new.ts'), 'new');
+    expect(
+      identityChanges({ source: before }, { source: await sourceIdentity(dir, 'eval') }),
+    ).toEqual([{ component: 'source', paths: [...paths, 'evals/src/new.ts'].sort() }]);
+    expect(
+      identityChanges(
+        { source: await sourceIdentity(dir) },
+        { source: await sourceIdentity(dir, 'eval') },
+      ),
+    ).toHaveLength(1);
   });
 });

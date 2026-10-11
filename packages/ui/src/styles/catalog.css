@@ -195,9 +195,9 @@
 }
 
 /* Active-model radio in an installed-models table. The column holds nothing
-   but the control, so it takes only the width it needs; the nudge down lines
-   the dot up with the first line of the model id beside it, which is
-   top-aligned like every other cell. */
+   but the control, so it takes only the width its header needs and centers
+   the dot under it; the nudge down lines the dot up with the first line of
+   the model id beside it, which is top-aligned like every other cell. */
 .ollama-model-table .gz-active-model-radio {
   margin: 0.2rem 0 0;
   accent-color: var(--accent);
@@ -208,6 +208,7 @@
 .ollama-model-table td.gz-active-model-column {
   width: 1%;
   white-space: nowrap;
+  text-align: center;
 }
 
 /* Installed-model rows use two deliberate lines instead of wrapping based on
@@ -240,6 +241,14 @@
   gap: var(--space-sm);
   min-height: 1.15rem;
   white-space: nowrap;
+}
+
+/* Pill-only meta (no inline text beside it): one pill per line keeps the
+   name column narrow when a hint and an update notice both apply. */
+.model-name-meta--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
 }
 
 /* Tooltip trigger wrapping the on-disk size + memory headline; block so

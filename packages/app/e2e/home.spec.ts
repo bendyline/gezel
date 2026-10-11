@@ -91,7 +91,7 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   // Collapse → the tip/figure hide; every intro destination stays available.
   await page.getByRole('button', { name: 'Collapse the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeHidden();
-  await page.getByRole('tab', { name: 'Good morning' }).click();
+  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
 
   // The intro covers the conversation without resizing it. Clicking the
@@ -108,7 +108,7 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await expect(page.getByRole('tabpanel')).toBeHidden();
   await expect(conversation).toBeFocused();
   expect(await conversation.boundingBox()).toEqual(conversationBounds);
-  await page.getByRole('tab', { name: 'Good morning' }).click();
+  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
 
   // The tour tab swaps the greeting + tip for the tour content in place.
   await page.getByRole('button', { name: 'Collapse the greeting' }).click();
@@ -135,7 +135,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
       .isVisible()
       .catch(() => false)
   ) {
-    await page.getByRole('tab', { name: 'Good morning' }).click();
+    await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
   }
 
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });

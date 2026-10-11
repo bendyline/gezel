@@ -291,6 +291,23 @@ export const HealthResponseSchema = z.object({
    */
   childProcessSpawn: z.enum(['ok', 'denied']).optional(),
   /**
+   * The Windows script container (Microsoft MXC), as the daemon's own probe
+   * found it. `probing` at boot, then `active`, `unavailable` (with the
+   * reason the probe gave: no launcher, an older Windows, a session with no
+   * usable desktop) or `disabled` (the Settings switch or `GEZEL_MXC=off`).
+   *
+   * Windows-only; `undefined` elsewhere, on the machine-engine role, and on
+   * daemons predating the container.
+   */
+  scriptSandbox: z
+    .object({
+      boundary: z.literal('windows-mxc'),
+      state: z.enum(['active', 'disabled', 'unavailable', 'probing']),
+      reason: z.string().optional(),
+      tier: z.string().optional(),
+    })
+    .optional(),
+  /**
    * The HTTP contract generation this daemon speaks (`current`) and the
    * oldest one it still serves (`floor`). See `GEZEL_API_GENERATION`.
    *
@@ -2629,6 +2646,14 @@ export const GezelConfigSchema = z.object({
    * explicit false is the deliberate unrestricted-SDK escape hatch.
    */
   sandboxCopilot: z.boolean().optional(),
+  /**
+   * Script sandbox switches. `windowsContainer` (missing = on) lets Windows
+   * run sandboxed Node scripts inside Microsoft's MXC process container
+   * whenever the daemon's probe finds one that works. Off restores the
+   * behavior without it: scripts that need a network boundary fail closed.
+   * Kept out of `securityPolicy` so the presets never toggle it.
+   */
+  scriptSandbox: z.object({ windowsContainer: z.boolean().optional() }).optional(),
   /**
    * Settings for the `anthropic-cli` provider — the wrapper that drives
    * the local `claude` CLI per chat turn. Auth is whatever the CLI is

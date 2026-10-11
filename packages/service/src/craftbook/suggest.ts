@@ -48,7 +48,7 @@ export interface CraftbookCandidate {
 // minus the relevance fields the ranker adds.
 export type { CraftbookSuggestion };
 
-interface CraftbookSuggestionDeps {
+export interface CraftbookSuggestionDeps {
   catalog: CatalogService;
   store: Store;
   git?: ProjectGitStatusReader;

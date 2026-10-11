@@ -1,4 +1,4 @@
-import { readFileSync, writeSync } from 'node:fs';
+import { readFileSync, readSync, writeSync } from 'node:fs';
 import { Socket } from 'node:net';
 import type { ScriptInit as InitMessage, ScriptTransport } from './transport.js';
 
@@ -12,7 +12,18 @@ import type { ScriptInit as InitMessage, ScriptTransport } from './transport.js'
  * This lets the SDK resolve `gezel.input` synchronously at module load
  * time without threading async semantics through the rest of the
  * script.
+ *
+ * A sandbox that passes only the standard pipes (Windows MXC) sets
+ * `GEZEL_SCRIPT_RPC=stdio`: init is the first line of stdin, replies follow
+ * on stdin, and frames go to stdout behind a per-run marker. The marker shape
+ * must match `packages/service/src/sandbox/stdio-rpc.ts`.
  */
+const STDIO_RPC = process.env.GEZEL_SCRIPT_RPC === 'stdio';
+const RPC_FD = STDIO_RPC ? 1 : 3;
+const FRAME_PREFIX = STDIO_RPC
+  ? `\u001egezel-rpc:${process.env.GEZEL_SCRIPT_RPC_NONCE ?? ''}:`
+  : '';
+let stdioLeftover = '';
 
 export type { ScriptInit as InitMessage } from './transport.js';
 
@@ -59,7 +70,7 @@ function readInitSync(): InitMessage {
   }
   let raw = '';
   try {
-    raw = readFileSync(0, 'utf8');
+    raw = STDIO_RPC ? readFirstLineSync(0) : readFileSync(0, 'utf8');
   } catch {
     return DEFAULT_INIT;
   }
@@ -69,6 +80,39 @@ function readInitSync(): InitMessage {
   } catch {
     return DEFAULT_INIT;
   }
+}
+
+/**
+ * Stdin stays open for replies in stdio mode, so init cannot be read to EOF.
+ * Nothing follows init until the script's first call, but keep any bytes past
+ * the newline for the reply reader rather than dropping them.
+ */
+function readFirstLineSync(fd: number): string {
+  const chunk = Buffer.alloc(64 * 1024);
+  const parts: Buffer[] = [];
+  for (;;) {
+    let read: number;
+    try {
+      read = readSync(fd, chunk, 0, chunk.length, null);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EOF') break;
+      if (code === 'EAGAIN') {
+        Atomics.wait(WRITE_BACKPRESSURE_SIGNAL, 0, 0, WRITE_BACKPRESSURE_RETRY_MS);
+        continue;
+      }
+      throw error;
+    }
+    if (read === 0) break;
+    const newline = chunk.subarray(0, read).indexOf(0x0a);
+    if (newline >= 0) {
+      parts.push(Buffer.from(chunk.subarray(0, newline)));
+      stdioLeftover = chunk.subarray(newline + 1, read).toString('utf8');
+      break;
+    }
+    parts.push(Buffer.from(chunk.subarray(0, read)));
+  }
+  return Buffer.concat(parts).toString('utf8');
 }
 
 export class RpcClient implements ScriptTransport {
@@ -94,7 +138,9 @@ export class RpcClient implements ScriptTransport {
    */
   private get socket(): Socket {
     if (!this._socket) {
-      this._socket = new Socket({ fd: 3, readable: true, writable: true });
+      this._socket = STDIO_RPC
+        ? new Socket({ fd: 0, readable: true, writable: false })
+        : new Socket({ fd: 3, readable: true, writable: true });
       this._socket.setEncoding('utf8');
       this._socket.unref();
     }
@@ -110,8 +156,7 @@ export class RpcClient implements ScriptTransport {
   private ensureStarted(): void {
     if (this.started) return;
     this.started = true;
-    this.socket.on('data', (chunk: string | Buffer) => {
-      this.buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    const drain = () => {
       let newline = this.buffer.indexOf('\n');
       while (newline >= 0) {
         const line = this.buffer.slice(0, newline);
@@ -121,7 +166,14 @@ export class RpcClient implements ScriptTransport {
         }
         newline = this.buffer.indexOf('\n');
       }
+    };
+    this.buffer += stdioLeftover;
+    stdioLeftover = '';
+    this.socket.on('data', (chunk: string | Buffer) => {
+      this.buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      drain();
     });
+    drain();
     this.socket.on('error', (err) => {
       for (const pending of this.pending.values()) {
         pending.reject(err instanceof Error ? err : new Error(String(err)));
@@ -220,12 +272,12 @@ export class RpcClient implements ScriptTransport {
 function writeFrame(payload: string): void {
   // Encode once to bytes so writeSync can count them and re-issue if the
   // OS short-writes (rare on pipes but defined behavior).
-  const buf = Buffer.from(payload, 'utf8');
+  const buf = Buffer.from(`${FRAME_PREFIX}${payload}`, 'utf8');
   let offset = 0;
   const startedAt = Date.now();
   while (offset < buf.length) {
     try {
-      const written = writeSync(3, buf, offset, buf.length - offset);
+      const written = writeSync(RPC_FD, buf, offset, buf.length - offset);
       if (written > 0) {
         offset += written;
         continue;

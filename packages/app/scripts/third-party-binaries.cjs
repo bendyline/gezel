@@ -95,6 +95,12 @@ const THIRD_PARTY_PATTERNS = [
     pattern: '(?:^|/)dist/node-bundle/node\\.exe$',
     source: 'OpenJS Node.js (prebuilt release)',
   },
+  // Microsoft-signed MXC launcher from the @microsoft/mxc-sdk npm package.
+  // The release gate asserts Microsoft's signature on it by name.
+  {
+    pattern: '(?:^|/)dist/mxc-bundle/wxc-exec\\.exe$',
+    source: 'Microsoft MXC launcher (@microsoft/mxc-sdk)',
+  },
   {
     pattern: '(?:^|/)node_modules/@vscode/ripgrep(?:-win32-x64)?/(?:[^/]+/)*rg\\.exe$',
     source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)',

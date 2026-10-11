@@ -19,6 +19,7 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { ProviderQueueDescription } from '@bendyline/gezel/queue-status';
+import { AbortedWhileQueuedError } from '../queue.js';
 import type { LLMProvider } from '../types.js';
 import {
   type CapacityBroker,
@@ -117,10 +118,12 @@ export interface ProviderPoolOptions {
   /**
    * How long a non-forced {@link evict} waits for a busy engine to
    * drain its in-flight turns before giving up with a "model is busy"
-   * error. Deliberately short: an indefinite wait can deadlock via
-   * cross-model ask-specialist chains (a turn on engine X blocks on a
-   * consultation that needs engine Y, whose spawn is waiting for X to
-   * go idle). Default 30s.
+   * error, for a caller that does not choose its own
+   * {@link EngineWaitOpts.drainWaitMs}. Deliberately short: an indefinite
+   * wait can deadlock via cross-model ask-specialist chains (a turn on
+   * engine X blocks on a consultation that needs engine Y, whose spawn is
+   * waiting for X to go idle). Only a caller that knows no running turn
+   * is waiting on it may wait longer. Default 30s.
    */
   drainWaitMs?: number;
   /** Test seam for the drain poll — defaults to a real setTimeout sleep. */
@@ -156,6 +159,33 @@ export interface ProviderPoolOptions {
    * reading is the only thing that sees a tenant the ledger cannot.
    */
   vramHeadroom?: () => Promise<{ freeBytes?: number; totalBytes?: number }>;
+}
+
+/**
+ * How one caller waits when the model it needs must replace a busy one.
+ * Each caller waits on its own terms: two requests can wait on the same
+ * engine with different patience, and the engine stays draining while
+ * either still waits.
+ */
+export interface EngineWaitOpts {
+  /**
+   * How long to wait for the busy engine's turns to finish. Infinity waits
+   * for the engine's next idle moment — a turn boundary, since a turn holds
+   * its queue slot for its whole tool loop. Defaults to the pool's
+   * `drainWaitMs`.
+   */
+  drainWaitMs?: number;
+  /** Ends the wait with {@link AbortedWhileQueuedError}: the caller gave up. */
+  signal?: AbortSignal;
+  /** Fired when the wait begins and every few seconds while it lasts. */
+  onDrainWait?: (wait: EngineDrainWait) => void;
+}
+
+/** The engine a caller is waiting on, and whose turns it is waiting for. */
+export interface EngineDrainWait {
+  engineKey: string;
+  modelId: string;
+  holders: Array<{ sessionId?: string; gezelId?: string; job?: string; actorLabel?: string }>;
 }
 
 export interface PoolEntrySnapshot {
@@ -252,6 +282,8 @@ interface PoolEntry {
   createdAt: number;
   /** See {@link PoolEntrySnapshot.draining}. */
   draining: boolean;
+  /** Callers currently waiting for this entry to drain; the last to give up clears `draining`. */
+  drainClaims: number;
   /**
    * Recent use timestamps (pruned to {@link DEMAND_WINDOW_MS}). Drives
    * demand-weighted eviction: under memory pressure the pool evicts the
@@ -267,6 +299,8 @@ const DEMAND_WINDOW_MS = 60_000;
 
 const DEFAULT_DRAIN_WAIT_MS = 30_000;
 const DRAIN_POLL_MS = 500;
+/** Matches the provider queue's wait-notice cadence. */
+const DRAIN_NOTICE_REPEAT_MS = 5_000;
 
 /**
  * In-flight work check, via the provider's own queue. A provider
@@ -280,6 +314,25 @@ function isBusy(entry: PoolEntry): boolean {
   const snap = entry.provider.queue?.snapshot();
   if (!snap) return false;
   return snap.running + snap.queuedInteractive + snap.queuedBackground > 0;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new AbortedWhileQueuedError();
+}
+
+function drainWaitInfo(key: string, entry: PoolEntry): EngineDrainWait {
+  const queue = entry.provider.queue;
+  const active = typeof queue?.describe === 'function' ? queue.describe().active : [];
+  return {
+    engineKey: key,
+    modelId: entry.parsed.modelId,
+    holders: active.map((a) => ({
+      ...(a.sessionId !== undefined ? { sessionId: a.sessionId } : {}),
+      ...(a.gezelId !== undefined ? { gezelId: a.gezelId } : {}),
+      ...(a.job !== undefined ? { job: a.job } : {}),
+      ...(a.actorLabel !== undefined ? { actorLabel: a.actorLabel } : {}),
+    })),
+  };
 }
 
 /** Native-child state for providers backed by a supervised local engine. */
@@ -369,7 +422,7 @@ export class ProviderPool {
     modelId: string,
     replicaIdx: number,
     residentBytes: number,
-    opts: { drainWaitMs?: number } = {},
+    opts: EngineWaitOpts = {},
   ): Promise<LLMProvider> {
     if (this.retiring) {
       throw new Error('local engine pool retired after machine engine adoption');
@@ -383,11 +436,12 @@ export class ProviderPool {
     }
     if (hit?.draining) {
       // The entry is being torn down to make room elsewhere. Handing
-      // it out would keep it busy forever (starvation); instead wait
-      // for the eviction to settle, then rebuild below. If the drain
-      // timed out (eviction threw) the entry survives — return it
-      // rather than double-building over a still-reserved key.
-      await this.evicting.get(key)?.catch(() => {});
+      // it out would keep it busy forever (starvation); instead wait,
+      // on this caller's terms, for the eviction to settle, then
+      // rebuild below. If every drain gave up, or this caller's own
+      // wait ran out first, the entry survives — return it rather
+      // than double-building over a still-reserved key.
+      await this.waitForDrainToSettle(key, hit, opts);
       const survived = this.entries.get(key);
       if (survived) {
         survived.lastUsedAt = this.now();
@@ -420,7 +474,7 @@ export class ProviderPool {
     modelId: string,
     replicaIdx: number,
     residentBytes: number,
-    opts: { drainWaitMs?: number },
+    opts: EngineWaitOpts,
   ): Promise<LLMProvider> {
     const builder = this.builders[provider];
     if (!builder) {
@@ -436,7 +490,12 @@ export class ProviderPool {
         panicDecision.reason ?? 'Local models are paused after a recent GPU kernel panic.',
       );
     }
-    const evictedOwnEngine = await this.makeRoom(residentBytes, opts.drainWaitMs);
+    const evictedOwnEngine = await this.makeRoom(residentBytes, opts);
+    // A caller may wait a whole turn for room; the service can begin
+    // shutting down in that time, and must not get a new engine for it.
+    if (this.retiring) {
+      throw new Error('local engine pool retired after machine engine adoption');
+    }
     const key = makeEngineKey(provider, modelId, replicaIdx);
     // Pre-flight: makeRoom evicts what it can, but on a memory-tight
     // machine a model larger than the whole budget can never fit (no
@@ -497,7 +556,7 @@ export class ProviderPool {
       await built.provider.shutdown().catch((err) => {
         log.warn(`shutdown after failed reserve for ${key}: ${err}`);
       });
-      await this.makeRoom(finalBytes, opts.drainWaitMs);
+      await this.makeRoom(finalBytes, opts);
       const r2 = this.broker.reserve(key, finalBytes);
       if (!r2.granted) {
         const c = this.broker.committed();
@@ -559,6 +618,7 @@ export class ProviderPool {
       lastUsedAt: at,
       createdAt: at,
       draining: false,
+      drainClaims: 0,
       recentHits: [at],
     });
     // Registration is lazy: most providers do not launch their native child
@@ -585,6 +645,15 @@ export class ProviderPool {
   /** Returns true if the pool currently holds an entry for `key`. */
   has(key: string): boolean {
     return this.entries.has(key);
+  }
+
+  /**
+   * True while a waiting request is draining `key` so another model can
+   * load. A turn bound to it that can rebind should step aside rather than
+   * start — see `SendAndWaitOpts.queue.yieldToSwap`.
+   */
+  isDraining(key: string): boolean {
+    return this.entries.get(key)?.draining === true;
   }
 
   /**
@@ -724,30 +793,144 @@ export class ProviderPool {
    *
    * When the engine has in-flight or queued turns and `force` is not
    * set, the entry is marked `draining` (no new `ensure` hits, no new
-   * binds) and the eviction waits up to `drainWaitMs` for the queue to
-   * empty. On timeout it throws a "model is busy" error instead of
-   * killing live work — the caller (typically `makeRoom` on behalf of
-   * a request for a *different* model) surfaces that as a clear
-   * temporary-failure to its own caller. `force: true` (service
+   * binds) and the eviction waits up to the caller's `drainWaitMs` for
+   * the queue to empty. On timeout it throws a "model is busy" error
+   * instead of killing live work — the caller (typically `makeRoom` on
+   * behalf of a request for a *different* model) surfaces that as a
+   * clear temporary-failure to its own caller. `force: true` (service
    * shutdown) skips the wait entirely.
    *
-   * Parallel `evict` calls for the same key join the same teardown.
+   * Parallel `evict` calls for the same key wait independently, each
+   * with its own deadline and signal, and join the same teardown.
    */
-  async evict(
+  async evict(key: string, opts: EngineWaitOpts & { force?: boolean } = {}): Promise<void> {
+    if (opts.force) {
+      const entry = this.entries.get(key);
+      return entry ? this.teardown(key, entry) : this.evicting.get(key);
+    }
+    const waitMs = opts.drainWaitMs ?? this.drainWaitMs;
+    const deadline = this.now() + waitMs;
+    for (;;) {
+      const entry = this.entries.get(key);
+      if (!entry) {
+        await this.evicting.get(key);
+        return;
+      }
+      // Idle check and teardown share a tick, so no turn can start between them.
+      if (!isBusy(entry)) return this.teardown(key, entry);
+      await this.drainFor(key, entry, waitMs, deadline, opts);
+    }
+  }
+
+  /**
+   * Hold `entry` draining until its queue empties, the entry is replaced,
+   * or this caller's deadline or signal ends the wait. The last caller to
+   * give up clears `draining`, so the engine serves hits again; a caller
+   * that saw it drain leaves the flag set for the teardown that follows.
+   */
+  private async drainFor(
     key: string,
-    opts?: {
-      force?: boolean;
-      /** Adoption drain has no turn-length deadline. */
-      drainWaitMs?: number;
-    },
+    entry: PoolEntry,
+    waitMs: number,
+    deadline: number,
+    opts: EngineWaitOpts,
   ): Promise<void> {
-    const inFlight = this.evicting.get(key);
-    if (inFlight && !opts?.force) return inFlight;
-    const run = this.evictInner(
-      key,
-      opts?.force === true,
-      opts?.drainWaitMs ?? this.drainWaitMs,
-    ).finally(() => {
+    entry.drainClaims += 1;
+    if (!entry.draining) {
+      entry.draining = true;
+      this.fireChange();
+    }
+    log.info(
+      `evict ${key}: engine busy — draining (${Number.isFinite(waitMs) ? `cap ${waitMs}ms` : 'until idle'})`,
+    );
+    const notice = this.drainNotifier(key, entry, opts);
+    let drained = false;
+    try {
+      while (isBusy(entry)) {
+        // A force-evict (service shutdown) may have torn the entry
+        // down underneath this drain — if our entry is no longer the
+        // resident one, the eviction is done.
+        if (this.entries.get(key) !== entry) return;
+        throwIfAborted(opts.signal);
+        if (this.now() >= deadline) {
+          throw new EngineBusyError(
+            `engine ${key} is busy serving requests and did not drain within ${Math.round(
+              waitMs / 1000,
+            )}s — not evicting. Retry shortly, or wait for current turns to finish.`,
+          );
+        }
+        notice();
+        await this.sleep(DRAIN_POLL_MS);
+      }
+      drained = true;
+    } finally {
+      entry.drainClaims -= 1;
+      if (!drained && entry.drainClaims === 0 && this.entries.get(key) === entry) {
+        entry.draining = false;
+        this.fireChange();
+      }
+    }
+  }
+
+  /**
+   * Wait for someone else's drain of `entry` to end — evicted, or given
+   * up — within this caller's own deadline and signal. Returning while
+   * the entry is still draining is the deadline: the caller takes the
+   * resident engine as it is.
+   */
+  private async waitForDrainToSettle(
+    key: string,
+    entry: PoolEntry,
+    opts: EngineWaitOpts,
+  ): Promise<void> {
+    const deadline = this.now() + (opts.drainWaitMs ?? this.drainWaitMs);
+    const notice = this.drainNotifier(key, entry, opts);
+    while (this.entries.get(key) === entry && entry.draining) {
+      throwIfAborted(opts.signal);
+      if (this.now() >= deadline) return;
+      notice();
+      await this.sleep(DRAIN_POLL_MS);
+    }
+    await this.evicting.get(key);
+  }
+
+  /** Rate-limited {@link EngineWaitOpts.onDrainWait}: once at the start, then every few seconds. */
+  private drainNotifier(key: string, entry: PoolEntry, opts: EngineWaitOpts): () => void {
+    const notify = opts.onDrainWait;
+    if (!notify) return () => {};
+    let lastAt = Number.NEGATIVE_INFINITY;
+    return () => {
+      const now = this.now();
+      if (now - lastAt < DRAIN_NOTICE_REPEAT_MS) return;
+      lastAt = now;
+      try {
+        notify(drainWaitInfo(key, entry));
+      } catch (err) {
+        log.warn(`onDrainWait threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+  }
+
+  /**
+   * Remove `entry` and shut its provider down. The removal is synchronous,
+   * so nothing can bind to it once this is called; the shutdown is shared
+   * by every caller evicting the same entry.
+   */
+  private teardown(key: string, entry: PoolEntry): Promise<void> {
+    if (this.entries.get(key) !== entry) return this.evicting.get(key) ?? Promise.resolve();
+    this.entries.delete(key);
+    const prior = this.evicting.get(key);
+    const run = (async () => {
+      await prior;
+      try {
+        await entry.provider.shutdown();
+      } catch (err) {
+        log.warn(`shutdown threw for ${key}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      this.broker.release(key);
+      log.info(`evicted ${key}`);
+      this.fireChange();
+    })().finally(() => {
       if (this.evicting.get(key) === run) this.evicting.delete(key);
     });
     this.evicting.set(key, run);
@@ -838,52 +1021,13 @@ export class ProviderPool {
     return { reason, message };
   }
 
-  private async evictInner(key: string, force: boolean, drainWaitMs: number): Promise<void> {
-    const entry = this.entries.get(key);
-    if (!entry) return;
-    if (!force && isBusy(entry)) {
-      entry.draining = true;
-      this.fireChange();
-      const deadline = this.now() + drainWaitMs;
-      log.info(
-        `evict ${key}: engine busy — draining (${Number.isFinite(drainWaitMs) ? `cap ${drainWaitMs}ms` : 'until idle'})`,
-      );
-      while (isBusy(entry)) {
-        // A force-evict (service shutdown) may have torn the entry
-        // down underneath this drain — if our entry is no longer the
-        // resident one, the eviction is done.
-        if (this.entries.get(key) !== entry) return;
-        if (this.now() >= deadline) {
-          entry.draining = false;
-          this.fireChange();
-          throw new EngineBusyError(
-            `engine ${key} is busy serving requests and did not drain within ${Math.round(
-              drainWaitMs / 1000,
-            )}s — not evicting. Retry shortly, or wait for current turns to finish.`,
-          );
-        }
-        await this.sleep(DRAIN_POLL_MS);
-      }
-      if (this.entries.get(key) !== entry) return;
-    }
-    this.entries.delete(key);
-    try {
-      await entry.provider.shutdown();
-    } catch (err) {
-      log.warn(`shutdown threw for ${key}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    this.broker.release(key);
-    log.info(`evicted ${key}`);
-    this.fireChange();
-  }
-
   /**
    * Evict entries until the broker reports headroom for `needed`
    * bytes (or the pool is empty). Victim order: oldest *idle* entries
-   * first; only when every candidate is busy does it pick the oldest
-   * busy one — whose eviction then drains (bounded) rather than
-   * killing in-flight turns. Pool-internal; callers never invoke
-   * directly.
+   * first; only when every candidate is busy does it pick a busy one —
+   * one already draining for another caller first — whose eviction
+   * then drains on this caller's terms rather than killing in-flight
+   * turns. Pool-internal; callers never invoke directly.
    *
    * Idle victims are evicted *concurrently* (a model switch on a
    * memory-tight box often has to clear several idle resident models
@@ -892,7 +1036,7 @@ export class ProviderPool {
    * of paying each one serially before the new model can spawn. The
    * busy path stays serial to preserve the bounded-drain semantics.
    */
-  private async makeRoom(needed: number, drainWaitMs?: number): Promise<boolean> {
+  private async makeRoom(needed: number, opts: EngineWaitOpts = {}): Promise<boolean> {
     let evictedOwnEngine = false;
     while (!this.broker.canReserve(needed) && this.entries.size > 0) {
       const idleBatch = this.idleVictimsFor(needed);
@@ -919,17 +1063,17 @@ export class ProviderPool {
         continue;
       }
       // No idle candidates — evict a single busy/draining victim. This
-      // path keeps the bounded-drain semantics (and may throw on a busy
-      // engine that won't drain in time, which propagates to the caller).
+      // path waits on the caller's terms (and may throw on a busy engine
+      // that won't drain in time, which propagates to the caller).
       const victim = this.lruKey();
       if (!victim) {
-        // Everything is already draining under other evictions — wait
-        // for one to settle and re-check the budget.
+        // Only teardowns are left in flight — wait for one to release
+        // its memory and re-check the budget.
         if (this.evicting.size === 0) break;
         await Promise.race([...this.evicting.values()]).catch(() => {});
         continue;
       }
-      await this.evict(victim, drainWaitMs === undefined ? undefined : { drainWaitMs });
+      await this.evict(victim, opts);
       evictedOwnEngine = true;
     }
     return evictedOwnEngine;
@@ -981,9 +1125,15 @@ export class ProviderPool {
 
   private lruKey(): string | null {
     let oldestIdle: { key: string; at: number } | null = null;
+    let draining: string | null = null;
     let oldestBusy: { key: string; at: number } | null = null;
     for (const [key, entry] of this.entries) {
-      if (entry.draining) continue; // already being torn down elsewhere
+      // Joining a drain already under way frees memory that is leaving
+      // anyway; starting a second one would unload more than needed.
+      if (entry.draining) {
+        draining ??= key;
+        continue;
+      }
       if (isBusy(entry)) {
         if (oldestBusy === null || entry.lastUsedAt < oldestBusy.at) {
           oldestBusy = { key, at: entry.lastUsedAt };
@@ -992,7 +1142,7 @@ export class ProviderPool {
         oldestIdle = { key, at: entry.lastUsedAt };
       }
     }
-    return oldestIdle?.key ?? oldestBusy?.key ?? null;
+    return oldestIdle?.key ?? draining ?? oldestBusy?.key ?? null;
   }
 
   /**

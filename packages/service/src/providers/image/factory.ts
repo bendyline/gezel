@@ -44,7 +44,7 @@ import { GoogleAiImageProvider } from './google-ai.js';
 import { MockImageProvider } from './mock.js';
 import { OpenAIImageProvider } from './openai-image.js';
 import {
-  DISTILLED_MODEL_SAMPLE_STEPS,
+  MODEL_SAMPLE_STEP_DEFAULTS,
   StableDiffusionCppProvider,
   VAE_TILING_INCOMPATIBLE_MODELS,
 } from './sd-cpp.js';
@@ -320,12 +320,20 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
   for (const aux of model.auxiliaryFiles) {
     args.push(`--${aux.role}`, aux.path);
   }
-  const steps = DISTILLED_MODEL_SAMPLE_STEPS.get(model.id);
+  const steps = MODEL_SAMPLE_STEP_DEFAULTS.get(model.id);
   if (steps) args.push('--steps', String(steps));
   // Tiling avoids VAE-decode OOM on large images, but produces visible
   // tile-boundary seams with some VAEs (Krea 2's Qwen-Image VAE). Skip
   // it for those models — see VAE_TILING_INCOMPATIBLE_MODELS.
-  if (!VAE_TILING_INCOMPATIBLE_MODELS.has(model.id)) args.push('--vae-tiling');
+  if (model.id === 'iris-3b-f32') {
+    // Iris generates pixels directly: no VAE to tile. Upstream's Iris
+    // recipe enables diffusion flash attention for the 1024px sequence.
+    // The publisher stores F32 but runs with BF16 autocast. Convert only
+    // diffusion weights at load time, preserving the quantized encoder.
+    args.push('--diffusion-fa', '--tensor-type-rules', '^model\\.diffusion_model\\.=bf16');
+  } else if (!VAE_TILING_INCOMPATIBLE_MODELS.has(model.id)) {
+    args.push('--vae-tiling');
+  }
   args.push('--listen-ip', '127.0.0.1', '--listen-port', String(port));
   return args;
 }

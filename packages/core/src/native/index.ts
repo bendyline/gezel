@@ -100,3 +100,22 @@ export {
   duckdbInstalledBinary,
   duckdbPlatformKey,
 } from './duckdb-pin.js';
+export type { MxcArch, MxcVerifiedSentinel } from './mxc-pin.js';
+export {
+  MXC_EXECUTOR_NAME,
+  MXC_EXECUTOR_SHA256,
+  MXC_LICENSE_SHA256,
+  MXC_NPM_PACKAGE,
+  MXC_TARBALL_INTEGRITY,
+  MXC_TARBALL_LICENSE_ENTRY,
+  MXC_TARBALL_SHA256,
+  MXC_TARBALL_URL,
+  MXC_VERIFIED_SENTINEL,
+  MXC_VERSION,
+  MXC_WINDOWS_PUBLISHER,
+  mxcArch,
+  mxcInstallDir,
+  mxcInstalledExecutor,
+  mxcTarballEntry,
+  readVerifiedMxcExecutor,
+} from './mxc-pin.js';

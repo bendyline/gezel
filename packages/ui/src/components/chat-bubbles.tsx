@@ -18,12 +18,14 @@ import {
   handoffContextLine,
   handoffHeadline,
   handoffKindLabel,
+  isContextMaintenanceNotice,
   parseTaskHandoffNote,
   promoteBareChannelNames,
 } from '@bendyline/gezel';
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatDebugBundle } from './chat-debug-bundle.js';
+import { humanizeChatError } from './chat-error-copy.js';
 import { queueNoticeIsFresh } from './chat-live-slot.js';
 import { formatContextWindow } from './model-context.js';
 
@@ -1898,7 +1900,7 @@ export function WarningBanner({ warnings }: { warnings: WarningValue[] }) {
         const settingsIndex = action ? warning.message.lastIndexOf('Settings') : -1;
         return (
           <div key={warningKey(warning)}>
-            ⚠{' '}
+            {!isContextMaintenanceNotice(warning.message) && '⚠ '}
             {action && settingsIndex >= 0 ? (
               <>
                 {warning.message.slice(0, settingsIndex)}
@@ -2510,7 +2512,7 @@ export function StreamingBubble({
           )}
         {failed && (
           <div className="msg-failed-banner">
-            <div>✗ Turn stopped before finishing. {error}</div>
+            <div>✗ Turn stopped before finishing. {error ? humanizeChatError(error) : error}</div>
             {errorActions ??
               (!isUserCancelledTurnError(error) && (
                 <ReportErrorLink

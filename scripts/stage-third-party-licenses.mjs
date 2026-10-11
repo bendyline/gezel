@@ -454,6 +454,30 @@ export async function stageBundledRuntimeLicenses(expected, { outputRoot = desti
       ],
     },
   ];
+  // DuckDB and the MXC launcher reach an installer only where their fetch
+  // script staged a bundle (MXC on Windows targets alone, either one absent
+  // under its *_SKIP flag), so their texts follow the bundle rather than the
+  // platform. Each bundle carries the license its fetch script verified
+  // against the pin.
+  for (const vendored of [
+    { name: 'DuckDB', bundle: 'duckdb-bundle', target: 'duckdb-LICENSE.txt' },
+    { name: 'MXC launcher', bundle: 'mxc-bundle', target: 'mxc-LICENSE.txt' },
+  ]) {
+    const root = join(appRoot, 'dist', vendored.bundle);
+    const versionPath = join(root, 'version.txt');
+    if (!existsSync(versionPath)) continue;
+    const version = (await readFile(versionPath, 'utf8')).trim();
+    if (version !== expected.versions[vendored.name]) {
+      throw new Error(
+        `${vendored.name} legal material is for ${version}; NOTICE/runtime pin expects ${expected.versions[vendored.name]}`,
+      );
+    }
+    entries.push({
+      name: vendored.name,
+      version,
+      files: [{ source: join(root, 'LICENSE.txt'), target: vendored.target }],
+    });
+  }
   for (const entry of entries) {
     for (const file of entry.files) {
       if (file.content) {

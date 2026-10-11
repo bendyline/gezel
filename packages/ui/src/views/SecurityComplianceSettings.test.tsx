@@ -100,3 +100,70 @@ describe('SecurityComplianceSettings', () => {
     expect(screen.queryByText(/^saved$/i)).not.toBeInTheDocument();
   });
 });
+
+describe('Windows sandbox setting', () => {
+  const withSandbox = (scriptSandbox: Record<string, unknown>) =>
+    vi.mocked(api.health).mockResolvedValue({
+      ok: true,
+      version: 'test',
+      scriptSandbox,
+    } as unknown as Awaited<ReturnType<typeof api.health>>);
+
+  it('stays hidden where the daemon reports no Windows sandbox', async () => {
+    vi.mocked(api.health).mockResolvedValue({ ok: true, version: 'test' } as Awaited<
+      ReturnType<typeof api.health>
+    >);
+    render(
+      <SecurityComplianceSettings
+        config={configWithPolicy(securityPolicyForLevel('lockdown'))}
+        onConfigChanged={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(api.health).toHaveBeenCalled());
+    expect(screen.queryByText('Windows sandbox')).not.toBeInTheDocument();
+  });
+
+  it('says why the sandbox is unavailable on this PC', async () => {
+    withSandbox({
+      boundary: 'windows-mxc',
+      state: 'unavailable',
+      reason: 'the Windows sandbox launcher is not installed',
+    });
+    render(
+      <SecurityComplianceSettings
+        config={configWithPolicy(securityPolicyForLevel('lockdown'))}
+        onConfigChanged={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        'Not available on this PC: the Windows sandbox launcher is not installed.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('turns the sandbox off and reports the new state', async () => {
+    withSandbox({ boundary: 'windows-mxc', state: 'active', tier: 'base-container' });
+    const onConfigChanged = vi.fn();
+    vi.mocked(api.updateConfig).mockImplementation(async (patch) => {
+      withSandbox({ boundary: 'windows-mxc', state: 'disabled', reason: 'turned off in Settings' });
+      return {
+        ...configWithPolicy(securityPolicyForLevel('lockdown')),
+        ...patch,
+      } as ConfigResponse;
+    });
+    render(
+      <SecurityComplianceSettings
+        config={configWithPolicy(securityPolicyForLevel('lockdown'))}
+        onConfigChanged={onConfigChanged}
+      />,
+    );
+    expect(await screen.findByText('Active on this PC.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('checkbox', { name: /Windows sandbox/ }));
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ scriptSandbox: { windowsContainer: false } }),
+    );
+    expect(await screen.findByText('Off.')).toBeInTheDocument();
+    expect(onConfigChanged).toHaveBeenCalled();
+  });
+});

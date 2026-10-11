@@ -13,6 +13,7 @@ import { inspectWindowsDependencyLocks } from './windows-dependency-locks.mjs';
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptsDir, '..');
 const SERIALIZED_INSTALL_ENV = 'GEZEL_SERIALIZED_PNPM_INSTALL';
+const DANGLING_REPORT_LIMIT = 10;
 
 export const pnpmInstallLockPath = dependencyLeasePath;
 
@@ -274,6 +275,67 @@ export function staleWorkspaceDependencyLinks(repoRoot) {
   return stale;
 }
 
+function readDirents(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/** `name@version` of the package a virtual-store entry holds, or null. */
+function virtualStorePackageLabel(modulesDir) {
+  for (const entry of readDirents(modulesDir)) {
+    if (entry.isSymbolicLink() || !entry.isDirectory() || entry.name === '.bin') continue;
+    const candidates = entry.name.startsWith('@')
+      ? readDirents(join(modulesDir, entry.name))
+          .filter((scoped) => scoped.isDirectory() && !scoped.isSymbolicLink())
+          .map((scoped) => join(modulesDir, entry.name, scoped.name))
+      : [join(modulesDir, entry.name)];
+    for (const candidate of candidates) {
+      try {
+        const manifest = JSON.parse(readFileSync(join(candidate, 'package.json'), 'utf8'));
+        if (manifest.name) return `${manifest.name}@${manifest.version ?? '0.0.0'}`;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Dependency links inside the virtual store whose target no longer exists:
+ * one package's own dependency on a version pnpm has since pruned. The
+ * importer-level checks cannot see these — the workspace package's direct
+ * link is fine, and only something beneath it is broken. A filtered install
+ * after a lockfile change produced exactly this: it pruned axios 1.18.1
+ * store-wide but relinked only the filtered importers, so
+ * `@prismatic-io/spectral` kept a link to the deleted version and every
+ * connectors-spectral test failed with "Cannot find module 'axios'".
+ */
+export function danglingVirtualStoreLinks(repoRoot) {
+  const virtualStore = join(repoRoot, 'node_modules', '.pnpm');
+  const dangling = [];
+  for (const storeEntry of readDirents(virtualStore)) {
+    if (!storeEntry.isDirectory() || storeEntry.name === 'node_modules') continue;
+    const modulesDir = join(virtualStore, storeEntry.name, 'node_modules');
+    const links = [];
+    for (const entry of readDirents(modulesDir)) {
+      if (entry.isSymbolicLink()) {
+        links.push(entry.name);
+      } else if (entry.isDirectory() && entry.name.startsWith('@')) {
+        for (const scoped of readDirents(join(modulesDir, entry.name))) {
+          if (scoped.isSymbolicLink()) links.push(`${entry.name}/${scoped.name}`);
+        }
+      }
+    }
+    const broken = links.filter((link) => !existsSync(join(modulesDir, ...link.split('/'))));
+    if (broken.length === 0) continue;
+    const packageName = virtualStorePackageLabel(modulesDir) ?? storeEntry.name;
+    for (const dependency of broken) dangling.push({ packageName, dependency });
+  }
+  return dangling;
+}
+
 function workspaceDependencyMarkersReady(repoRoot) {
   const binSuffix = process.platform === 'win32' ? '.cmd' : '';
   return (
@@ -295,15 +357,22 @@ export function dependencyStatus(repoRoot) {
   const markersReady = workspaceDependencyMarkersReady(repoRoot);
   const missingLinks = missingWorkspaceDependencyLinks(repoRoot);
   const staleLinks = staleWorkspaceDependencyLinks(repoRoot);
+  const danglingLinks = danglingVirtualStoreLinks(repoRoot);
   const installedIssue = installedLockfileIssue(repoRoot);
   const workspaceIssue = workspaceStructureIssue(repoRoot);
   const usable = markersReady && missingLinks.length === 0;
   return {
     usable,
-    synchronized: usable && staleLinks.length === 0 && !installedIssue && !workspaceIssue,
+    synchronized:
+      usable &&
+      staleLinks.length === 0 &&
+      danglingLinks.length === 0 &&
+      !installedIssue &&
+      !workspaceIssue,
     markersReady,
     missingLinks,
     staleLinks,
+    danglingLinks,
     installedLockfileIssue: installedIssue,
     lockfileValidationIssue: lockfileValidationIssue(repoRoot),
     workspaceStructureIssue: workspaceIssue,
@@ -323,6 +392,15 @@ export function reportDependencyStatus(repoRoot, options = {}) {
     write(
       `[deps:status] stale ${stale.dependency} for ${stale.packageName}: installed ${stale.installed}, lockfile wants ${stale.expected}`,
     );
+  }
+  const dangling = status.danglingLinks ?? [];
+  for (const link of dangling.slice(0, DANGLING_REPORT_LIMIT)) {
+    write(
+      `[deps:status] broken ${link.dependency} for ${link.packageName}: link target is missing`,
+    );
+  }
+  if (dangling.length > DANGLING_REPORT_LIMIT) {
+    write(`[deps:status] ...and ${dangling.length - DANGLING_REPORT_LIMIT} more broken links`);
   }
   if (status.installedLockfileIssue) {
     write(`[deps:status] synchronization required: ${status.installedLockfileIssue}`);
@@ -366,19 +444,26 @@ export function unsynchronizedWorkspaceDependencyLinks(repoRoot) {
   return [...missingWorkspaceDependencyLinks(repoRoot), ...staleWorkspaceDependencyLinks(repoRoot)];
 }
 
-function missingInstallArgs(repoRoot, args) {
+function missingInstallArgs(repoRoot, args, status) {
   const repairedArgs = [...args];
   if (!repairedArgs.includes('--config.optimistic-repeat-install=false')) {
     repairedArgs.push('--config.optimistic-repeat-install=false');
   }
 
   // A missing root marker means the whole generated tree is incomplete. When
-  // the markers are intact, constrain reconciliation to packages whose direct
-  // links are absent or point at the wrong version, so one damaged symlink or
-  // one bumped pin does not trigger a full workspace reinstall.
-  if (!workspaceDependencyMarkersReady(repoRoot)) return repairedArgs;
+  // the markers are intact and the lockfile is the one already installed,
+  // constrain reconciliation to packages whose direct links are absent or
+  // point at the wrong version, so one damaged symlink does not relink every
+  // workspace package. After a lockfile change, or with links already broken
+  // inside the virtual store, a filter is unsafe: pnpm prunes store-wide but
+  // relinks only the filtered importers, so a shared transitive bump leaves
+  // every other importer pointing at a deleted version. Unfiltered is still
+  // incremental under a frozen lockfile, not a reinstall.
+  if (!status.markersReady || status.installedLockfileIssue || status.danglingLinks.length > 0) {
+    return repairedArgs;
+  }
   const filters = new Set(
-    unsynchronizedWorkspaceDependencyLinks(repoRoot).map(({ packageDir }) => {
+    [...status.missingLinks, ...status.staleLinks].map(({ packageDir }) => {
       const packagePath = relative(repoRoot, packageDir).replaceAll('\\', '/');
       return packagePath ? `./${packagePath}` : '.';
     }),
@@ -553,12 +638,13 @@ export async function runSerializedPnpmInstall(options = {}) {
   return withPnpmInstallLock(
     repoRoot,
     async ({ setChildPid, leaseEnv }) => {
-      if (!repair && dependencyStatus(repoRoot).synchronized) {
+      const status = dependencyStatus(repoRoot);
+      if (!repair && status.synchronized) {
         console.log('[pnpm-install] dependencies already present');
         return 0;
       }
 
-      const installArgs = repair ? args : missingInstallArgs(repoRoot, args);
+      const installArgs = repair ? args : missingInstallArgs(repoRoot, args, status);
 
       const lockOwners = (options.dependencyLockProbeFn ?? inspectWindowsDependencyLocks)(repoRoot);
       if (lockOwners.length > 0) {
@@ -584,7 +670,8 @@ export async function runSerializedPnpmInstall(options = {}) {
       // now matches the lockfile" and go straight on to build and test, so
       // that claim is verified rather than assumed.
       const unsynchronized = unsynchronizedWorkspaceDependencyLinks(repoRoot);
-      if (unsynchronized.length > 0) {
+      const dangling = danglingVirtualStoreLinks(repoRoot);
+      if (unsynchronized.length > 0 || dangling.length > 0) {
         console.error(`[pnpm-install] ${command} finished but the tree still differs:`);
         for (const entry of unsynchronized) {
           console.error(
@@ -592,6 +679,9 @@ export async function runSerializedPnpmInstall(options = {}) {
               ? `  ${entry.dependency} for ${entry.packageName}: installed ${entry.installed}, lockfile wants ${entry.expected}`
               : `  ${entry.dependency} for ${entry.packageName}: link is missing`,
           );
+        }
+        for (const entry of dangling) {
+          console.error(`  ${entry.dependency} for ${entry.packageName}: link target is missing`);
         }
         console.error('[pnpm-install] run `pnpm deps:repair` to rebuild the affected packages');
         return 1;

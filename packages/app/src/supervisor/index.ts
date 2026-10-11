@@ -29,6 +29,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { describeOwnedChildState, formatDiagnosticError } from './diagnostics.js';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
 import { defaultDuckdbBundleDir, installDuckdbIfNeeded } from './extract-duckdb.js';
+import { defaultMxcBundleDir, provisionMxcExecutor } from './extract-mxc.js';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 import { readHomeUsageSignals, readHostingPin, writeHostingPin } from './home-signals.js';
@@ -1471,6 +1472,18 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
       // over a subsystem most projects never touch.
       opts.logger?.warn?.(`[supervisor] duckdb install failed: ${String(err)}`);
     }
+  }
+  if (!skipBundledRuntimeInstall) {
+    // Microsoft's MXC launcher (Windows only), the containment boundary for
+    // sandboxed scripts. Installed into the same version-keyed directory the
+    // service's engine resolver downloads into for npm / CLI installs.
+    await provisionMxcExecutor({
+      home: opts.home,
+      bundleDir: defaultMxcBundleDir(import.meta.url),
+      packaged: opts.packaged,
+      runInPlace,
+      ...(opts.logger ? { logger: opts.logger } : {}),
+    });
   }
 
   const mode = await resolveMode({

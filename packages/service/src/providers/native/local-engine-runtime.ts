@@ -44,6 +44,14 @@ import {
   makeEngineKey,
   parseEngineKey,
 } from './engine-key.js';
+import type { EngineWaitOpts } from './provider-pool.js';
+
+/** How a bind waits when its model must replace a busy one; see {@link EngineWaitOpts}. */
+export interface LocalEngineBindOpts {
+  engineDrainWaitMs?: number;
+  signal?: AbortSignal;
+  onDrainWait?: EngineWaitOpts['onDrainWait'];
+}
 
 export interface EngineConfigStore {
   readonly homePath: string;
@@ -2031,8 +2039,7 @@ export class LocalEngineRuntime {
     opts: {
       sessionId: string;
       priorEngineKey?: string | undefined;
-      engineDrainWaitMs?: number;
-    },
+    } & LocalEngineBindOpts,
   ): Promise<{ engineKey: string; provider: LLMProvider }> {
     // Pre-populate the bytes cache so the router's sync resolver
     // hits on the first ensure.
@@ -2048,6 +2055,8 @@ export class LocalEngineRuntime {
         sessionId: opts.sessionId,
         sessionsPerKey,
         ...(opts.engineDrainWaitMs !== undefined ? { drainWaitMs: opts.engineDrainWaitMs } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(opts.onDrainWait ? { onDrainWait: opts.onDrainWait } : {}),
       },
       opts.priorEngineKey,
     );

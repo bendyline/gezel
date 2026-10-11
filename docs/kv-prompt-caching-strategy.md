@@ -672,8 +672,17 @@ to completion before the next starts), so a request that arrives mid-wave waits 
   by `engineKey = provider:modelId:replicaIdx`. `ensure` does spawn/adopt/reuse; `makeRoom`
   LRU-evicts idle engines to free headroom. Critically, **`evict` awaits `provider.shutdown()`
   so the disk-cache flush completes before the broker releases capacity**, and a *busy* engine is
-  marked `draining` and given up to `drainWaitMs` (30 s) to finish in-flight turns rather than
-  being killed mid-stream — the busy engine's KV is never sacrificed to an impatient model switch.
+  marked `draining` and allowed to finish its in-flight turns rather than being killed
+  mid-stream — the busy engine's KV is never sacrificed to an impatient model switch.
+- **How long a switch waits is the caller's choice.** A chat turn, handoff, or task step whose
+  model needs a busy engine's memory waits for that engine's next idle moment — the end of its
+  current turn, since a turn holds its queue slot for the whole tool loop — and shows "Waiting for
+  *name* to finish before switching models". While anyone waits, a turn bound to the draining
+  engine steps aside before it starts (`SendAndWaitOpts.queue.yieldToSwap`, checked again after
+  queue admission), rebinds, and runs once the swap is done. A consultation the asker's turn is
+  blocked on and ambient chores keep the pool's bounded `drainWaitMs` (30 s) and never step
+  aside: the first would deadlock, the second must not line a swap up behind the person's turn.
+  Policy in `chat/engine-swap-wait.ts`; Stop ends the wait.
 
 ### 5.4 `EngineRouter` — session stickiness for KV locality
 

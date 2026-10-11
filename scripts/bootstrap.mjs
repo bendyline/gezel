@@ -14,9 +14,13 @@ export function runBootstrap(options = {}) {
   const status = (options.statusFn ?? dependencyStatus)(root);
   if (status.usable) {
     const staleLinks = status.staleLinks ?? [];
+    const danglingLinks = status.danglingLinks ?? [];
     const metadataIssues = [
       staleLinks.length > 0
         ? `${staleLinks.length} dependency link(s) resolve to a version the lockfile has moved off, including ${staleLinks[0].dependency} for ${staleLinks[0].packageName} (installed ${staleLinks[0].installed}, lockfile wants ${staleLinks[0].expected}); run \`pnpm deps:install\``
+        : null,
+      danglingLinks.length > 0
+        ? `${danglingLinks.length} link(s) inside the virtual store point at a removed package, including ${danglingLinks[0].dependency} for ${danglingLinks[0].packageName}; run \`pnpm deps:install\``
         : null,
       status.installedLockfileIssue,
       status.workspaceStructureIssue,

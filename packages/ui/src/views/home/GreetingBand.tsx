@@ -4,7 +4,7 @@ import type {
   Poppetje as PoppetjeStruct,
   Question,
 } from '@bendyline/gezel';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { Poppetje } from '../../poppetje/index.js';
@@ -192,12 +192,19 @@ export function GreetingBand({
   });
   const dateLabel = `${weekday} ${partOfDay} · ${time}`;
   const panels: { value: HomeGreetingTab; label: string }[] = [
-    { value: 'greeting', label: 'Good morning' },
+    { value: 'greeting', label: greeting },
   ];
   if (morning || nightReview) panels.push({ value: 'night', label: 'Night shift' });
   if (makeSomething) panels.push({ value: 'make', label: 'Make something' });
   panels.push({ value: 'tour', label: 'Handboek' });
   const activeTab = panels.some((panel) => panel.value === tab) ? tab : 'greeting';
+  // Radix selects a tab on mousedown (and on Enter/Space keydown), so by the
+  // click a newly chosen tab is already the open one. Record what the press
+  // found, or switching tabs would open the new panel and roll it straight up.
+  const pressed = useRef<{ value: HomeGreetingTab; open: boolean } | null>(null);
+  const notePress = (value: HomeGreetingTab) => {
+    pressed.current = { value, open: !collapsed && activeTab === value };
+  };
 
   return (
     <Tabs.Root
@@ -214,10 +221,20 @@ export function GreetingBand({
               value={value}
               className="home-workshop-tab"
               aria-expanded={!collapsed && activeTab === value}
+              onMouseDown={() => notePress(value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') notePress(value);
+              }}
               onClick={() => {
-                // Radix only changes the value for a different tab. The
-                // selected tab must also reopen its collapsed panel.
-                if (collapsed && activeTab === value) onTabChange(value);
+                // Radix only reports a different tab. Choosing the selected
+                // one toggles its panel: a collapsed panel reopens, an open
+                // one rolls up.
+                const press = pressed.current;
+                pressed.current = null;
+                const wasOpen =
+                  press?.value === value ? press.open : !collapsed && activeTab === value;
+                if (wasOpen) onToggleCollapse();
+                else if (activeTab === value) onTabChange(value);
               }}
             >
               {label}

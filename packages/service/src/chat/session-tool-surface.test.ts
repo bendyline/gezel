@@ -1,12 +1,18 @@
 import type { ChatSession } from '@bendyline/gezel';
 import { resolveSecurityPolicy, securityPolicyForLevel } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   availableBuiltinToolsForAllowlist,
   resolveSessionToolSurface,
   stepAllowsOnlyBuiltinTools,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
+
+const windowsMxc = vi.hoisted(() => ({ state: 'unavailable' as 'active' | 'unavailable' }));
+vi.mock('../sandbox/windows-mxc.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sandbox/windows-mxc.js')>()),
+  windowsMxcState: () => ({ state: windowsMxc.state }),
+}));
 
 describe('built-in-only authored steps', () => {
   it('suppresses external servers only for a nonempty exact built-in roster', () => {
@@ -399,6 +405,26 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
         .sort(),
     ).toEqual(['derive_file', 'run_nodejs_script']);
   });
+
+  it.runIf(process.platform === 'win32')(
+    'offers the deny-net script tools on Windows exactly while the container is active',
+    () => {
+      // Reads the state the service resolved; never probes on this path.
+      const allowlist = new Set(['run_nodejs_script', 'derive_file']);
+      const names = () =>
+        availableBuiltinToolsForAllowlist(allowlist, [], undefined, { networkAllowed: false })
+          .map((tool) => tool.name)
+          .sort();
+      try {
+        windowsMxc.state = 'unavailable';
+        expect(names()).toEqual([]);
+        windowsMxc.state = 'active';
+        expect(names()).toEqual(['derive_file', 'run_nodejs_script']);
+      } finally {
+        windowsMxc.state = 'unavailable';
+      }
+    },
+  );
 
   it('admits the social post trio only when granted, and strips it under a no-services posture', async () => {
     const granted = await resolveSessionToolSurface({

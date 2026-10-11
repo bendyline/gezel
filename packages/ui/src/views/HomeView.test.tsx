@@ -138,6 +138,9 @@ const { HomeWorkshop } = await import('./home/HomeWorkshop.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 
+/** The greeting tab is named for the time of day the test happens to run. */
+const GREETING_TAB = /^Good (morning|afternoon|evening)$/;
+
 /** Configure a "warm + onboarded" state so HomeView renders the workshop. */
 function onboard() {
   (window as unknown as { __GEZEL__: { mode?: string } }).__GEZEL__ = {
@@ -963,6 +966,35 @@ describe('HomeView', () => {
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
   });
 
+  // A fast boot shows the open band before the empty conversation has loaded.
+  // The introduction landing a moment later must not roll the band up — and
+  // "Return to Meester chat" with it — from under the person who just chose a
+  // tab. (Choosing the tab already open rolls the band up on purpose.)
+  it('holds the intro open when the introduction loads after a tab was chosen', async () => {
+    const props = {
+      projects: [],
+      meesterGezelId: 'gz-meester',
+      meesterName: 'Brigitte',
+      meesterIcon: null,
+      meesterPoppetje: null,
+      meesterIconOverride: false,
+    };
+    const config = { provider: 'copilot' } as never;
+    const { rerender } = render(<HomeWorkshop config={config} {...props} />);
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Handboek' }));
+
+    timeline.empty = true;
+    try {
+      rerender(<HomeWorkshop config={config} {...props} />);
+      await screen.findByText(/your meester\./);
+      expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeInTheDocument();
+    } finally {
+      timeline.empty = false;
+    }
+  });
+
   it('starts collapsed when the saved preference says so', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'copilot',
@@ -999,7 +1031,7 @@ describe('HomeView', () => {
     render(<HomeView />);
     await screen.findByText('Tip of the day');
     expect(screen.queryByRole('region', { name: 'Make something' })).not.toBeInTheDocument();
-    for (const name of ['Make something', 'Handboek', 'Good morning']) {
+    for (const name of ['Make something', 'Handboek', GREETING_TAB]) {
       await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
       await user.click(screen.getByRole('tab', { name }));
       expect(screen.getByRole('tabpanel', { name })).toBeVisible();
@@ -1010,7 +1042,7 @@ describe('HomeView', () => {
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: false });
     // Reopening the selected tab must work too, and hold through chat activity.
     await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
-    await user.click(screen.getByRole('tab', { name: 'Good morning' }));
+    await user.click(screen.getByRole('tab', { name: GREETING_TAB }));
     fireEvent.click(screen.getByRole('button', { name: 'mock send' }));
     expect(screen.getByText('Tip of the day')).toBeVisible();
   });
@@ -1028,7 +1060,7 @@ describe('HomeView', () => {
     expect(
       screen.queryByRole('button', { name: 'Return to Meester chat' }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Good morning' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: GREETING_TAB })).toBeVisible();
     expect(screen.getByTestId('chat-composer')).toBe(composer);
     expect(conversation).not.toHaveAttribute('inert');
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
@@ -1040,11 +1072,20 @@ describe('HomeView', () => {
     expect(screen.getByTestId('chat-composer')).toBe(composer);
   });
 
+  it('rolls the intro up when its open tab is chosen again', async () => {
+    render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    await userEvent.setup().click(screen.getByRole('tab', { name: GREETING_TAB }));
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+    expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+  });
+
   it('returns to chat with Escape from the intro', async () => {
     const user = userEvent.setup();
     render(<HomeView />);
     await screen.findByText('Tip of the day');
-    screen.getByRole('tab', { name: 'Good morning' }).focus();
+    screen.getByRole('tab', { name: GREETING_TAB }).focus();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('region', { name: 'Meester chat' })).toHaveFocus());
@@ -1076,7 +1117,7 @@ describe('HomeView', () => {
     await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
     await user.click(screen.getByRole('tab', { name: 'Night shift' }));
     expect(screen.getByRole('tabpanel', { name: 'Night shift' })).toBeVisible();
-    await user.click(screen.getByRole('tab', { name: 'Good morning' }));
+    await user.click(screen.getByRole('tab', { name: GREETING_TAB }));
     expect(screen.getByText('Tip of the day')).toBeVisible();
 
     vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] } as never);
@@ -1087,7 +1128,7 @@ describe('HomeView', () => {
       event: { type: 'question_answered', question: { ...question, answer: { at: 'now' } } },
     });
     await waitFor(() => expect(screen.queryByRole('tab', { name: 'Night shift' })).toBeNull());
-    expect(screen.getByRole('tabpanel', { name: 'Good morning' })).toBeVisible();
+    expect(screen.getByRole('tabpanel', { name: GREETING_TAB })).toBeVisible();
   });
 
   it('cycles the tip of the day', async () => {

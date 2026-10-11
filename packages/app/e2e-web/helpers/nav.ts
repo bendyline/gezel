@@ -9,10 +9,24 @@ export async function gotoHome(page: Page): Promise<void> {
   await settle(page);
 }
 
+/**
+ * Open the Home greeting band on its greeting panel, whatever state the page
+ * opened in. Choosing the tab whose panel is already open rolls the band up,
+ * and whether the band starts open depends on the saved preference and on
+ * whether the meester's introduction has landed yet. Any press latches the
+ * band against that auto-collapse, so a second press settles it.
+ */
+export async function openGreetingTab(page: Page): Promise<void> {
+  const tab = page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ });
+  await tab.click();
+  if ((await tab.getAttribute('aria-expanded')) !== 'true') await tab.click();
+  await expect(tab).toHaveAttribute('aria-expanded', 'true');
+}
+
 /** Open chat through the intro sheet, regardless of the saved collapse preference. */
 export async function gotoMeesterChat(page: Page): Promise<void> {
   await gotoHome(page);
-  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await openGreetingTab(page);
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');

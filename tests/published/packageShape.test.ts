@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { npmPackPayload } from '../../scripts/npm-pack-output.mjs';
+import { serviceFontLegalSources } from '../../scripts/service-font-legal.mjs';
 import {
   RELEASE_IGNORED_PACKAGE_PATHS,
   REPO_ROOT,
@@ -327,7 +328,7 @@ describe('published package payloads', () => {
     expect(files.some((file) => /\/(?:[^/]+_test|[^/]+_modeltest)\.py$/.test(file))).toBe(false);
   });
 
-  it('ships attribution and license texts for every service UI font', () => {
+  it('ships attribution and license texts for every service UI font', async () => {
     const service = packages.find((pkg) => pkg.name === '@bendyline/gezel-service')!;
     const files = new Set(
       packed.get(service.name)!.files.map((file) => file.path.replace(/\\/g, '/')),
@@ -346,10 +347,13 @@ describe('published package payloads', () => {
       expect(files.has(`dist/licenses/fonts/${file}`), file).toBe(true);
     }
 
+    // Font Awesome arrives through squisq-editor-react and moves with every
+    // squisq bump; name the version that is actually bundled.
+    const { fontAwesomeVersion } = await serviceFontLegalSources();
     const notice = readFileSync(resolve(service.dist, 'NOTICE.md'), 'utf8');
     for (const attribution of [
       'OpenMoji attribution note',
-      'Font Awesome Free 7.2.0',
+      `Font Awesome Free ${fontAwesomeVersion}`,
       'Visual Studio Code icons',
       'Microsoft Corporation',
     ]) {

@@ -70,6 +70,8 @@ files:
   - dist/pnpm-bundle/**/*
   - dist/node-bundle/**/*
   - dist/duckdb-bundle/**/*
+  # Microsoft's MXC launcher; fetch-mxc.mjs stages it on Windows targets only.
+  - dist/mxc-bundle/**/*
   - dist/ui/**/*
   # The Office task pane and the LibreOffice extension, served and handed out
   # by the daemon beside the UI (packages/service/src/office-host/assets.ts).
@@ -156,6 +158,7 @@ asarUnpack:
   - dist/pnpm-bundle/**/*
   - dist/node-bundle/**/*
   - dist/duckdb-bundle/**/*
+  - dist/mxc-bundle/**/*
   - dist/ui/**/*
   # Same reason as dist/ui: the daemon reads the pane pages and the .oxt with
   # plain fs, and unopkg needs the .oxt as a real file.

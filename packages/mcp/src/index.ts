@@ -38,6 +38,7 @@ export {
   type ValidateResult,
 } from './validate.js';
 export {
+  SCRIPT_DENY_NET_BOUNDARY_ENV,
   SCRIPT_NETWORK_ALLOWED_ENV,
   canUseLinuxSystemdDenyNet,
   unavailableToolsForPlatform,

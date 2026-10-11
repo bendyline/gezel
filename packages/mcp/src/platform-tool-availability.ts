@@ -49,8 +49,17 @@ export function canUseLinuxSystemdDenyNet(): boolean {
 }
 
 /**
+ * Set to `windows-mxc` on the MCP child when the service's own executable
+ * probe found a working Windows process container. The service decides once,
+ * asynchronously; this child only reads the answer, so registering tools never
+ * starts a container on anyone's event loop.
+ */
+export const SCRIPT_DENY_NET_BOUNDARY_ENV = 'GEZEL_SCRIPT_DENY_NET_BOUNDARY';
+
+/**
  * The deny-net tools this host cannot offer. Without an enforceable network
- * boundary (Windows; Linux without the probed systemd manager) they are
+ * boundary (Windows without a probed MXC container; Linux without the probed
+ * systemd manager) they are
  * withheld — unless `networkAllowed`: when the policy already lets gezellen
  * reach the network, the boundary has nothing left to protect, and the
  * service runs these scripts without it. Where a boundary exists it is always
@@ -58,10 +67,20 @@ export function canUseLinuxSystemdDenyNet(): boolean {
  */
 export function unavailableToolsForPlatform(
   platform: NodeJS.Platform,
-  options: { linuxSystemdAvailable?: boolean; networkAllowed?: boolean } = {},
+  options: {
+    linuxSystemdAvailable?: boolean;
+    windowsMxcAvailable?: boolean;
+    networkAllowed?: boolean;
+  } = {},
 ): readonly string[] {
   if (platform === 'darwin') return [];
   if (platform === 'linux' && (options.linuxSystemdAvailable ?? canUseLinuxSystemdDenyNet())) {
+    return [];
+  }
+  if (
+    platform === 'win32' &&
+    (options.windowsMxcAvailable ?? process.env[SCRIPT_DENY_NET_BOUNDARY_ENV] === 'windows-mxc')
+  ) {
     return [];
   }
   if (options.networkAllowed) return [];

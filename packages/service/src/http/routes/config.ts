@@ -11,6 +11,7 @@ import { appleFoundationModelsInstalled } from '../../providers/apple-foundation
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
+import { setWindowsMxcEnabled } from '../../sandbox/windows-mxc.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
@@ -405,7 +406,13 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // so treating the whole field as a hard boundary is intentional.
       'codexCli',
       'securityPolicy',
+      // Decides whether gezel-mcp children offer run_nodejs_script on Windows;
+      // live children were told the old answer at spawn.
+      'scriptSandbox',
     ];
+    if (body.scriptSandbox !== undefined) {
+      setWindowsMxcEnabled(updated.scriptSandbox?.windowsContainer !== false);
+    }
     // Model preferences and native-vision launch inputs also need a reset because
     // live session objects bake the model in at construction — a plain
     // config write won't flow through to an already-resumed session until

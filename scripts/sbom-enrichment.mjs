@@ -696,6 +696,43 @@ export async function runtimeArtifacts({ repoRoot, versions }) {
       );
     }),
   };
+
+  // One npm tarball carries both Windows launchers; only Windows installers
+  // ship one, so the component is scoped to those targets.
+  const mxcSource = await readFile(
+    join(repoRoot, 'packages', 'core', 'src', 'native', 'mxc-pin.ts'),
+    'utf8',
+  );
+  const mxcTarballUrl = parseStringConstant(mxcSource, 'MXC_TARBALL_URL');
+  const mxcTarballSha = parseStringConstant(mxcSource, 'MXC_TARBALL_SHA256');
+  const mxcIntegrity = parseStringConstant(mxcSource, 'MXC_TARBALL_INTEGRITY');
+  const mxcExecutors = parseStringRecord(mxcSource, 'MXC_EXECUTOR_SHA256');
+  const mxcTargets = targets.filter((platform) => platform.startsWith('win32-'));
+  if (!mxcIntegrity.startsWith('sha512-')) {
+    throw new Error('mxc-pin.ts MXC_TARBALL_INTEGRITY is not a sha512 integrity');
+  }
+  result['MXC launcher'] = {
+    platforms: mxcTargets.flatMap((target) => platformKeysForTarget(target)),
+    externalReferences: [
+      {
+        type: 'distribution',
+        url: mxcTarballUrl,
+        comment: 'npm tarball wxc-exec.exe is taken from, unmodified',
+        hashes: [
+          sha256Hash(mxcTarballSha),
+          {
+            alg: 'SHA-512',
+            content: Buffer.from(mxcIntegrity.slice('sha512-'.length), 'base64').toString('hex'),
+          },
+        ],
+      },
+    ],
+    components: mxcTargets.map((target) => {
+      const arch = target.split('-')[1];
+      if (!mxcExecutors[arch]) throw new Error(`mxc-pin.ts pins no launcher for ${target}`);
+      return fileComponent('wxc-exec.exe', mxcExecutors[arch], platformKeysForTarget(target));
+    }),
+  };
   return result;
 }
 

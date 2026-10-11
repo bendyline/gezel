@@ -11,9 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { runBootstrap } from './bootstrap.mjs';
 import { dependencyLeasePath, withDependencyReadLease } from './dependency-lease.mjs';
 import {
+  danglingVirtualStoreLinks,
   dependencyStatus,
   parsePnpmInstallArgs,
   pnpmInstallLockPath,
+  reportDependencyStatus,
   runPnpmFetchChild,
   runPnpmInstallChild,
   runPreparedFrozenInstall,
@@ -222,6 +224,25 @@ test('bootstrap diagnoses incomplete dependencies without launching an installer
   assert.match(messages.join('\n'), /no install was started/);
 });
 
+test('bootstrap warns about a broken virtual-store link without installing', () => {
+  const warnings = [];
+  const code = runBootstrap({
+    repoRoot: 'unused',
+    statusFn: () => ({
+      usable: true,
+      staleLinks: [],
+      danglingLinks: [{ packageName: '@prismatic-io/spectral@10.23.0', dependency: 'axios' }],
+    }),
+    warn: (message) => warnings.push(message),
+  });
+  assert.equal(code, 0);
+  assert.match(
+    warnings.join('\n'),
+    /axios for @prismatic-io\/spectral@10\.23\.0; run `pnpm deps:install`/,
+  );
+  assert.match(warnings.join('\n'), /no install or repair was started/);
+});
+
 test('does not mistake a partial virtual store for a complete workspace install', async (t) => {
   const root = await fixture(t);
   await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
@@ -233,6 +254,10 @@ test('installs a missing direct dependency link only in the affected workspace p
   const binSuffix = process.platform === 'win32' ? '.cmd' : '';
   await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
   await writeFile(join(root, 'node_modules', '.modules.yaml'), 'layoutVersion: 5\n');
+  // The lockfile is the one already installed, so the damage is local and a
+  // filter cannot strand another importer.
+  await writeFile(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  await writeFile(join(root, 'node_modules', '.pnpm', 'lock.yaml'), 'lockfileVersion: 9\n');
   await mkdir(join(root, 'packages', 'ui', 'node_modules', '.bin'), { recursive: true });
   await writeFile(join(root, 'packages', 'ui', 'node_modules', '.bin', `vite${binSuffix}`), '');
   await mkdir(join(root, 'packages', 'app', 'node_modules', '.bin'), { recursive: true });
@@ -372,6 +397,92 @@ importers:
   );
 }
 
+/** A pnpm stand-in: fetch exits 0 at once; install runs `onInstall`, then exits 0. */
+function stubPnpm(onInstall = async () => {}) {
+  return (args) => {
+    const child = new EventEmitter();
+    child.pid = 2_147_483_647;
+    child.killed = false;
+    child.kill = () => true;
+    const work = args[0] === 'install' ? onInstall(args) : Promise.resolve();
+    work.then(() => child.emit('close', 0, null));
+    return child;
+  };
+}
+
+/** What pnpm does to the catalog's gilde link when it reconciles a pin. */
+async function relinkGilde(root, version) {
+  const store = join(
+    root,
+    'node_modules',
+    '.pnpm',
+    `@bendyline+gilde@${version}`,
+    'node_modules',
+    '@bendyline',
+    'gilde',
+  );
+  const link = join(root, 'packages', 'catalog', 'node_modules', '@bendyline', 'gilde');
+  await mkdir(store, { recursive: true });
+  await writeFile(
+    join(store, 'package.json'),
+    JSON.stringify({ name: '@bendyline/gilde', version }),
+  );
+  await rm(link, { force: true });
+  await symlink(store, link);
+}
+
+/**
+ * What a filtered install after a lockfile change leaves behind: a package in
+ * the virtual store still linked to dependency versions pnpm has pruned, while
+ * every workspace package's own links stay healthy. Returns the pruned targets.
+ */
+async function brokenStoreLink(root) {
+  const modules = join(
+    root,
+    'node_modules',
+    '.pnpm',
+    '@prismatic-io+spectral@10.23.0',
+    'node_modules',
+  );
+  const spectral = join(modules, '@prismatic-io', 'spectral');
+  await mkdir(spectral, { recursive: true });
+  await writeFile(
+    join(spectral, 'package.json'),
+    JSON.stringify({ name: '@prismatic-io/spectral', version: '10.23.0' }),
+  );
+  const link = async (name, version) => {
+    const storeDir = join(root, 'node_modules', '.pnpm', `${name.replace('/', '+')}@${version}`);
+    const target = join(storeDir, 'node_modules', ...name.split('/'));
+    const linkPath = join(modules, ...name.split('/'));
+    await mkdir(target, { recursive: true });
+    await mkdir(dirname(linkPath), { recursive: true });
+    // pnpm links directories with junctions on Windows; elsewhere the type is ignored.
+    await symlink(target, linkPath, 'junction');
+    return { storeDir, target };
+  };
+  await link('form-data', '4.0.6');
+  await link('@types/node', '24.13.3');
+  const pruned = [await link('axios', '1.18.1'), await link('@xmldom/xmldom', '0.8.13')];
+  for (const { storeDir } of pruned) await rm(storeDir, { recursive: true });
+  return pruned.map(({ target }) => target);
+}
+
+/** One workspace package whose direct link is missing: alone, a filtered case. */
+async function missingClientLink(root) {
+  await mkdir(join(root, 'packages', 'client'), { recursive: true });
+  await writeFile(
+    join(root, 'packages', 'client', 'package.json'),
+    JSON.stringify({ name: '@bendyline/gezel-client', dependencies: { undici: '8.9.0' } }),
+  );
+}
+
+const UNFILTERED_INSTALL = [
+  'install',
+  '--config.optimistic-repeat-install=false',
+  '--offline',
+  '--frozen-lockfile',
+];
+
 test('a link left on the previous version of a bumped pin reads as stale, not as present', async (t) => {
   const root = await fixture(t);
   await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
@@ -406,38 +517,10 @@ test('deps:install synchronizes a stale pin that byte-identical lockfiles call s
   const code = await runSerializedPnpmInstall({
     repoRoot: root,
     dependencyLockProbeFn: () => [],
-    spawnPnpmFn: (args) => {
-      const child = new EventEmitter();
-      child.pid = 2_147_483_647;
-      child.killed = false;
-      child.kill = () => true;
-      if (args[0] !== 'install') {
-        queueMicrotask(() => child.emit('close', 0, null));
-        return child;
-      }
+    spawnPnpmFn: stubPnpm(async (args) => {
       childArgs = args;
-      const store = join(
-        root,
-        'node_modules',
-        '.pnpm',
-        '@bendyline+gilde@0.1.45',
-        'node_modules',
-        '@bendyline',
-        'gilde',
-      );
-      const link = join(root, 'packages', 'catalog', 'node_modules', '@bendyline', 'gilde');
-      mkdir(store, { recursive: true })
-        .then(() =>
-          writeFile(
-            join(store, 'package.json'),
-            JSON.stringify({ name: '@bendyline/gilde', version: '0.1.45' }),
-          ),
-        )
-        .then(() => rm(link, { force: true }))
-        .then(() => symlink(store, link))
-        .then(() => child.emit('close', 0, null));
-      return child;
-    },
+      await relinkGilde(root, '0.1.45');
+    }),
   });
 
   assert.equal(code, 0);
@@ -480,6 +563,112 @@ test('deps:install refuses to report success while the tree still differs', asyn
   assert.equal(code, 1);
   assert.match(errors.join('\n'), /still differs/);
   assert.match(errors.join('\n'), /@bendyline\/gilde.*0\.1\.41.*0\.1\.45/);
+});
+
+test('deps:install relinks every importer after a lockfile change instead of filtering', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
+  // A pulled pin bump: the committed lockfile has moved on from the installed
+  // one, and whatever else it changed is shared by importers no filter names.
+  await writeFile(
+    join(root, 'node_modules', '.pnpm', 'lock.yaml'),
+    'lockfileVersion: 9\n# previous\n',
+  );
+
+  let childArgs;
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    dependencyLockProbeFn: () => [],
+    spawnPnpmFn: stubPnpm(async (args) => {
+      childArgs = args;
+      await relinkGilde(root, '0.1.45');
+    }),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(childArgs, UNFILTERED_INSTALL);
+});
+
+test('a virtual-store link whose target was pruned reads as broken behind healthy direct links', async (t) => {
+  const root = await fixture(t);
+  await readyWorkspace(root);
+  await writeFile(
+    join(root, 'node_modules', '.pnpm-workspace-state-v1.json'),
+    JSON.stringify({
+      lastValidatedTimestamp: Date.now() + 10_000,
+      projects: { [root]: { name: 'fixture', version: '1.0.0' } },
+    }),
+  );
+  assert.equal(dependencyStatus(root).synchronized, true);
+  await brokenStoreLink(root);
+
+  assert.deepEqual(
+    danglingVirtualStoreLinks(root).sort((a, b) => a.dependency.localeCompare(b.dependency)),
+    [
+      { packageName: '@prismatic-io/spectral@10.23.0', dependency: '@xmldom/xmldom' },
+      { packageName: '@prismatic-io/spectral@10.23.0', dependency: 'axios' },
+    ],
+    'healthy links beside them, scoped or not, are not reported',
+  );
+  const status = dependencyStatus(root);
+  assert.equal(status.usable, true);
+  assert.equal(status.synchronized, false);
+  const lines = [];
+  reportDependencyStatus(root, { write: (line) => lines.push(line) });
+  assert.match(
+    lines.join('\n'),
+    /broken axios for @prismatic-io\/spectral@10\.23\.0: link target is missing/,
+  );
+});
+
+test('deps:install does not filter while links inside the virtual store are broken', async (t) => {
+  const root = await fixture(t);
+  await readyWorkspace(root);
+  const pruned = await brokenStoreLink(root);
+  await missingClientLink(root);
+
+  let childArgs;
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    dependencyLockProbeFn: () => [],
+    spawnPnpmFn: stubPnpm(async (args) => {
+      childArgs = args;
+      await mkdir(join(root, 'packages', 'client', 'node_modules', 'undici'), {
+        recursive: true,
+      });
+      for (const target of pruned) await mkdir(target, { recursive: true });
+    }),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(childArgs, UNFILTERED_INSTALL);
+  assert.deepEqual(danglingVirtualStoreLinks(root), []);
+});
+
+test('deps:install refuses to report success while a virtual-store link is still broken', async (t) => {
+  const root = await fixture(t);
+  await readyWorkspace(root);
+  await brokenStoreLink(root);
+  const errors = [];
+  const restore = console.error;
+  console.error = (message) => errors.push(message);
+  let code;
+  try {
+    code = await runSerializedPnpmInstall({
+      repoRoot: root,
+      dependencyLockProbeFn: () => [],
+      spawnPnpmFn: stubPnpm(),
+    });
+  } finally {
+    console.error = restore;
+  }
+
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /still differs/);
+  assert.match(
+    errors.join('\n'),
+    /axios for @prismatic-io\/spectral@10\.23\.0: link target is missing/,
+  );
 });
 
 test('a failed fetch leaves node_modules untouched', async (t) => {

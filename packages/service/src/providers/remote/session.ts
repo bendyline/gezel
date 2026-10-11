@@ -11,7 +11,7 @@
  * appends the result to `priorMessages`, and POSTs again. B stays stateless.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { autoCompactedNotice, createLogger } from '@bendyline/gezel';
 import {
   isLlamaCppGrammarParseError,
   simplifyJsonSchemaForLlamaCpp,
@@ -510,9 +510,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         role: 'assistant',
         content: result.syntheticContent,
       });
-      this.emitWarning(
-        `Auto-compacted ${currentTurnStartIdx} earlier message${currentTurnStartIdx === 1 ? '' : 's'} in this ${this.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
-      );
+      this.emitWarning(autoCompactedNotice(currentTurnStartIdx, this.numCtx));
       log.info(
         `[remote] mid-loop compacted ${currentTurnStartIdx} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
       );

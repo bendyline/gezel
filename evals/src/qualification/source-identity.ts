@@ -3,8 +3,29 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+/** Files loaded directly by evals. App source is compiled; its build is checked separately. */
+export function isEvalInputPath(path: string): boolean {
+  const name = path.replaceAll('\\', '/');
+  if (
+    /(^|\/)(__tests__|__pycache__|tmp|temp)(\/|$)/.test(name) ||
+    /\.(test|spec)\.[cm]?[jt]sx?$/.test(name) ||
+    /(?:\.(tmp|bak|swp|pyc)|~)$/.test(name)
+  )
+    return false;
+  return (
+    name.startsWith('evals/src/') ||
+    name.startsWith('evals/user-scripts/') ||
+    name.startsWith('packages/script-stdlib/scripts/') ||
+    name === 'evals/tsconfig.json' ||
+    name === 'tsconfig.base.json' ||
+    name === 'scripts/run-with-dependency-lease.mjs' ||
+    name === 'scripts/dependency-lease.mjs' ||
+    name === 'scripts/pnpm-cli.mjs'
+  );
+}
+
 /** Git selects source paths; file bytes, not index/commit bookkeeping, identify them. */
-export async function sourceIdentity(root: string) {
+export async function sourceIdentity(root: string, scope: 'repository' | 'eval' = 'repository') {
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: root, maxBuffer: 64 * 1024 * 1024 }).toString();
   const head = git('rev-parse', 'HEAD').trim();
@@ -12,7 +33,7 @@ export async function sourceIdentity(root: string) {
     ...new Set(
       git('ls-files', '--cached', '--others', '--exclude-standard', '-z')
         .split('\0')
-        .filter(Boolean),
+        .filter((path) => path && (scope === 'repository' || isEvalInputPath(path))),
     ),
   ].sort();
   const manifest: Record<string, string> = {};
@@ -43,7 +64,7 @@ export async function sourceIdentity(root: string) {
   }
   const sha256 = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   return {
-    algorithm: 'worktree-content-v1',
+    algorithm: scope === 'eval' ? 'eval-inputs-v1' : 'worktree-content-v1',
     head,
     sha256,
     files: Object.keys(manifest).length,

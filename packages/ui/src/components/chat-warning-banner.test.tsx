@@ -1,3 +1,4 @@
+import { CONDENSED_TOOL_OUTPUT_NOTICE, autoCompactedNotice } from '@bendyline/gezel';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { takePendingSettingsSection } from '../settings-nav.js';
@@ -43,5 +44,20 @@ describe('WarningBanner', () => {
 
     expect(screen.getAllByText(/Provider is busy/)).toHaveLength(1);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('drops the warning glyph for context-maintenance notes only', () => {
+    const { container } = render(
+      <WarningBanner
+        warnings={[
+          autoCompactedNotice(34, 40_960),
+          CONDENSED_TOOL_OUTPUT_NOTICE,
+          'Provider is busy.',
+        ]}
+      />,
+    );
+
+    const rows = Array.from(container.querySelectorAll('.msg-warning-banner > div'));
+    expect(rows.map((row) => row.textContent?.startsWith('⚠'))).toEqual([false, false, true]);
   });
 });

@@ -138,13 +138,16 @@ describe('Poppetje', () => {
     expect(stripIds(first.container.innerHTML)).toBe(stripIds(second.container.innerHTML));
   });
 
-  it('renders every body archetype, hat, dress, and accessory without crashing', () => {
-    // 100 seeds covers the full slot space comfortably.
-    for (let n = 0; n < 100; n++) {
-      const p = poppetjeFromSeed(n);
-      expect(() => render(<Poppetje poppetje={p} variant="full" size={120} />)).not.toThrow();
-    }
-  });
+  // Keep each seed in its own test so cleanup runs between DOM mounts and
+  // the full sweep does not share one timeout on busy runners.
+  it.each(Array.from({ length: 100 }, (_, seed) => seed))(
+    'renders generated poppetje seed %i without crashing',
+    (seed) => {
+      const p = poppetjeFromSeed(seed);
+      const { container } = render(<Poppetje poppetje={p} variant="full" size={120} />);
+      expect(container.querySelector('svg')).toBeInTheDocument();
+    },
+  );
 
   it('encodes the wood-grain seed deterministically from the key', () => {
     const p1 = poppetjeFromSeed(7, { key: 'alpha', name: 'A' });

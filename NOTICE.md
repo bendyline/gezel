@@ -75,6 +75,7 @@ attribution file is taken from the exact Electron distribution being packaged.
 | **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
 | **pnpm** | `11.27.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 | **DuckDB** | `1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
+| **MXC launcher** | `1.0.0` | MIT | [microsoft/mxc](https://github.com/microsoft/mxc) — Microsoft eXecution Containers' `wxc-exec.exe`, taken unmodified from the [`@microsoft/mxc-sdk`](https://www.npmjs.com/package/@microsoft/mxc-sdk) npm package; Windows installers only |
 
 ### pnpm embedded dependency graph
 
@@ -146,7 +147,7 @@ the built `packages/service/dist/ui/assets/` tree where they actually ship.
 
 | Asset | License | Arrives via | Source |
 |---|---|---|---|
-| **Font Awesome Free 7.2.0** (`fa-solid-900`, `fa-regular-400`, `fa-brands-400` WOFF2) | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); fonts SIL OFL 1.1; code MIT — upstream expression `(CC-BY-4.0 AND OFL-1.1 AND MIT)` | `@bendyline/squisq-editor-react`, whose stylesheet bundles `@fortawesome/fontawesome-free` | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome) |
+| **Font Awesome Free 7.3.1** (`fa-solid-900`, `fa-regular-400`, `fa-brands-400` WOFF2) | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); fonts SIL OFL 1.1; code MIT — upstream expression `(CC-BY-4.0 AND OFL-1.1 AND MIT)` | `@bendyline/squisq-editor-react`, whose stylesheet bundles `@fortawesome/fontawesome-free` | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome) |
 | **Visual Studio Code icons** (`codicon.ttf`) | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the carrying package is MIT | `monaco-editor`, which embeds the codicon font in its distribution | [microsoft/vscode-codicons](https://github.com/microsoft/vscode-codicons) |
 
 Attribution notice, as CC BY 4.0 requires: Font Awesome Free is by
@@ -180,7 +181,7 @@ is available at the links below.
 
 | Component | Version | License | Carried by | Source Code Form |
 |---|---|---|---|---|
-| **Mediabunny** (`mediabunny`) | 1.57.0 | MPL-2.0 | `@bendyline/squisq-video-react` (media-edit worker), which bundles it into its own dist | [npm tarball, includes `src/`](https://registry.npmjs.org/mediabunny/-/mediabunny-1.57.0.tgz); [Vanilagy/mediabunny at v1.57.0](https://github.com/Vanilagy/mediabunny/tree/v1.57.0) |
+| **Mediabunny** (`mediabunny`) | 1.61.0 | MPL-2.0 | `@bendyline/squisq-video-react` (media-edit worker), which bundles it into its own dist | [npm tarball, includes `src/`](https://registry.npmjs.org/mediabunny/-/mediabunny-1.61.0.tgz); [Vanilagy/mediabunny at v1.61.0](https://github.com/Vanilagy/mediabunny/tree/v1.61.0) |
 
 The complete MPL-2.0 text ships with it, in squisq-video-react's
 `THIRD_PARTY_LICENSES.txt`.
@@ -739,9 +740,10 @@ row, and a package under a strong-copyleft license alone is refused.
 dependency inlines.
 
 The **Bundled application runtimes** table is checked against Electron's exact
-installed package version and the Node.js/pnpm pins compiled into the desktop
-app. Packaging also fails unless all three runtime license inventories are
-present in the generated legal bundle.
+installed package version and the Node.js, pnpm, DuckDB and MXC launcher pins
+compiled into the desktop app. Packaging also fails unless the license text of
+every runtime the installer carries is present in the generated legal bundle
+(DuckDB's and the MXC launcher's only where their bundle was staged).
 
 The **Native engines**, **Runtime-downloaded models**, and **Catalog
 models** sections are also hand-maintained, since none of those

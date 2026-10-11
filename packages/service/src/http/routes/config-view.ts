@@ -73,6 +73,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     toolFilterMode: config.toolFilterMode ?? 'always',
     channels: config.channels,
     sandboxCopilot: resolveSandboxCopilot(config.sandboxCopilot),
+    scriptSandbox: { windowsContainer: config.scriptSandbox?.windowsContainer !== false },
     fetchUrl: config.fetchUrl,
     webSearch: config.webSearch,
     playwrightHeadless: config.playwrightHeadless !== false,

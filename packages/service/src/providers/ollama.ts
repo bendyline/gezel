@@ -1,4 +1,5 @@
 import {
+  autoCompactedNotice,
   createLogger,
   isOllamaReasoningModel,
   leaksUntaggedReasoning,
@@ -634,9 +635,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
     log.info(
       `[ollama] mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
     );
-    this.emitWarning(
-      `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
-    );
+    this.emitWarning(autoCompactedNotice(removed, this.deps.numCtx));
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {

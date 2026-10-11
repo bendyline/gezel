@@ -191,7 +191,7 @@ for (const runtime of notice.runtimes.components) {
     ...(artifacts.hashes ? { hashes: artifacts.hashes } : {}),
     properties: [
       { name: 'gezel:component-kind', value: 'bundled-runtime' },
-      { name: 'gezel:platforms', value: allPlatformKeys().join(',') },
+      { name: 'gezel:platforms', value: (artifacts.platforms ?? allPlatformKeys()).join(',') },
     ],
     externalReferences: [
       ...(runtime.source ? [{ type: 'vcs', url: runtime.source }] : []),

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   HttpStatusError,
   type NativeEngineResolveEvent,
@@ -17,11 +17,26 @@ import {
   DUCKDB_BINARY_SHA256,
   DUCKDB_VERSION,
   DUCKDB_WINDOWS_PUBLISHER,
+  MXC_EXECUTOR_NAME,
+  MXC_EXECUTOR_SHA256,
+  MXC_LICENSE_SHA256,
+  MXC_TARBALL_INTEGRITY,
+  MXC_TARBALL_LICENSE_ENTRY,
+  MXC_TARBALL_SHA256,
+  MXC_TARBALL_URL,
+  MXC_VERIFIED_SENTINEL,
+  MXC_VERSION,
+  MXC_WINDOWS_PUBLISHER,
+  type MxcArch,
+  type MxcVerifiedSentinel,
   type NativeBinaryName,
   duckdbAssetUrl,
   duckdbBinaryName,
   duckdbInstallDir,
   duckdbPlatformKey,
+  mxcArch,
+  mxcInstallDir,
+  mxcTarballEntry,
   resolvePlatformKey,
   windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
@@ -372,6 +387,246 @@ async function* resolveVendoredDuckdb(
     version: DUCKDB_VERSION,
     assetPlatformKey: platformKey,
   };
+}
+
+export interface ResolveVendoredMxcOptions {
+  /**
+   * `false` returns only an install that is already verified and never touches
+   * the network — what a caller passes when the security policy forbids app
+   * network access. Defaults to `true`.
+   */
+  allowDownload?: boolean;
+  signal?: AbortSignal;
+  // ── test seams ──
+  platform?: NodeJS.Platform;
+  arch?: MxcArch | null;
+  fetchImpl?: typeof fetch;
+  tarballUrl?: string;
+  expectedIntegrity?: string;
+  expectedTarballSha256?: string;
+  expectedExecutorSha256?: string;
+  expectedLicenseSha256?: string;
+  verifyOverride?: typeof verifyCodeSignature;
+}
+
+/** Ceiling on the tarball download; the pinned 1.0.0 tarball is ~38 MB. */
+const MXC_TARBALL_MAX_BYTES = 128 * 1024 * 1024;
+
+const mxcResolutions = new Map<string, Promise<string | null>>();
+
+/**
+ * Resolve Microsoft's MXC launcher (`wxc-exec.exe`) for an npm / CLI install,
+ * which has no Electron bundle to install it from. Windows only.
+ *
+ * Returns the verified launcher path, or `null` when there is none: another
+ * platform, an arch MXC ships nothing for, a store build, `allowDownload:
+ * false` with nothing installed, or any failed check. Never throws — without a
+ * launcher, sandboxed scripts run uncontained and the sandbox status says so.
+ *
+ * Unlike {@link resolveVendoredDuckdb} it does not stamp an environment
+ * variable: whether the launcher is used is the caller's decision, and the
+ * sandbox's lookup finds a verified install through `readVerifiedMxcExecutor`.
+ *
+ * The chain is entirely pinned in this build (`core/src/native/mxc-pin.ts`):
+ * npm's sha512 integrity and the sha256 of the tarball, the per-arch
+ * executable digest, the license digest, and Microsoft's Authenticode
+ * signature under policy `require`. Only the launcher and the license leave
+ * the tarball. The result lands in the directory the Electron installer also
+ * uses, with the same sentinel, so either installer satisfies the other.
+ */
+export function resolveVendoredMxc(
+  home: string,
+  opts: ResolveVendoredMxcOptions = {},
+): Promise<string | null> {
+  // Concurrent callers share one download; a no-download probe never waits on
+  // or rides a download it did not ask for.
+  const key = `${home}\0${opts.allowDownload !== false}`;
+  const pending = mxcResolutions.get(key);
+  if (pending) return pending;
+  const run = resolveVendoredMxcOnce(home, opts)
+    .catch((err: unknown) => {
+      log.warn(`[engine-resolver] mxc launcher unavailable: ${String(err)}`);
+      return null;
+    })
+    .finally(() => mxcResolutions.delete(key));
+  mxcResolutions.set(key, run);
+  return run;
+}
+
+async function resolveVendoredMxcOnce(
+  home: string,
+  opts: ResolveVendoredMxcOptions,
+): Promise<string | null> {
+  if ((opts.platform ?? process.platform) !== 'win32') return null;
+  const arch = opts.arch !== undefined ? opts.arch : mxcArch();
+  if (!arch) {
+    log.info('[engine-resolver] MXC ships no launcher for this machine architecture');
+    return null;
+  }
+  const expectedExecutorSha = (
+    opts.expectedExecutorSha256 ?? MXC_EXECUTOR_SHA256[arch]
+  ).toLowerCase();
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+  const verifyOptions = {
+    policy: 'require' as SignaturePolicy,
+    expectedPublisher: MXC_WINDOWS_PUBLISHER,
+  } as const;
+
+  const installDir = mxcInstallDir(home);
+  const executor = join(installDir, MXC_EXECUTOR_NAME);
+  const sentinelPath = join(installDir, MXC_VERIFIED_SENTINEL);
+
+  if (existsSync(executor) && existsSync(sentinelPath)) {
+    const sentinel = await readMxcSentinel(sentinelPath);
+    if (
+      sentinel?.version === MXC_VERSION &&
+      sentinel.sha256?.toLowerCase() === expectedExecutorSha &&
+      (await sha256File(executor)) === expectedExecutorSha
+    ) {
+      const { result, accepted } = await verifyAuthenticity(executor, verifyOptions);
+      if (accepted) return executor;
+      // The bytes are already the pinned ones, so downloading them again
+      // would meet the same verdict.
+      log.warn(
+        `[engine-resolver] installed mxc launcher failed signature policy 'require': ${result.status}${result.detail ? ` (${result.detail})` : ''}`,
+      );
+      return null;
+    }
+  }
+
+  if (opts.allowDownload === false) return null;
+  const distribution = resolveDistributionProfile();
+  if (!distribution.allowEngineBinaryDownloads) {
+    log.info(`[engine-resolver] ${distribution.refusalReason('engine-download')}`);
+    return null;
+  }
+
+  const expectedIntegrity = opts.expectedIntegrity ?? MXC_TARBALL_INTEGRITY;
+  const expectedTarballSha = (opts.expectedTarballSha256 ?? MXC_TARBALL_SHA256).toLowerCase();
+  const expectedLicenseSha = (opts.expectedLicenseSha256 ?? MXC_LICENSE_SHA256).toLowerCase();
+  const enginesDir = dirname(installDir);
+  await mkdir(enginesDir, { recursive: true });
+  const tarballPath = join(enginesDir, `mxc-sdk-${MXC_VERSION}.tgz.download`);
+  const partialPath = `${tarballPath}.partial`;
+  const stagingDir = `${installDir}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    const dl = downloadWithRetry({
+      url: opts.tarballUrl ?? MXC_TARBALL_URL,
+      destPath: tarballPath,
+      approxSizeBytes: 0,
+      maxBytes: MXC_TARBALL_MAX_BYTES,
+      fetchImpl: opts.fetchImpl ?? globalThis.fetch,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    let outcome: DownloadResult | undefined;
+    while (true) {
+      const step = await dl.next();
+      if (step.done) {
+        outcome = step.value;
+        break;
+      }
+    }
+    if (!outcome || outcome.kind === 'aborted') return null;
+    if (outcome.kind === 'error') throw new Error(`download failed: ${outcome.error}`);
+
+    const digests = await tarballDigests(partialPath);
+    if (digests.integrity !== expectedIntegrity || digests.sha256 !== expectedTarballSha) {
+      await rm(partialPath, { force: true });
+      throw new Error(
+        `mxc-sdk ${MXC_VERSION} tarball failed integrity check: expected ${expectedIntegrity}, got ${digests.integrity}`,
+      );
+    }
+
+    const executorEntry = mxcTarballEntry(arch);
+    await mkdir(stagingDir, { recursive: true });
+    try {
+      await tar.extract({ file: partialPath, cwd: stagingDir, strict: true }, [
+        executorEntry,
+        MXC_TARBALL_LICENSE_ENTRY,
+      ]);
+    } finally {
+      await rm(partialPath, { force: true });
+    }
+
+    const stagedExecutor = join(stagingDir, MXC_EXECUTOR_NAME);
+    const stagedLicense = join(stagingDir, 'LICENSE.txt');
+    const extractedExecutor = join(stagingDir, ...executorEntry.split('/'));
+    const extractedLicense = join(stagingDir, ...MXC_TARBALL_LICENSE_ENTRY.split('/'));
+    if (!existsSync(extractedExecutor) || !existsSync(extractedLicense)) {
+      throw new Error(`mxc-sdk ${MXC_VERSION} tarball lacks ${executorEntry} or its license`);
+    }
+    await rename(extractedExecutor, stagedExecutor);
+    await rename(extractedLicense, stagedLicense);
+    await rm(join(stagingDir, 'package'), { recursive: true, force: true });
+
+    const executorSha = await sha256File(stagedExecutor);
+    if (executorSha !== expectedExecutorSha) {
+      throw new Error(
+        `${executorEntry} failed integrity check: expected ${expectedExecutorSha.slice(0, 16)}…, got ${executorSha.slice(0, 16)}…`,
+      );
+    }
+    const licenseSha = await sha256File(stagedLicense);
+    if (licenseSha !== expectedLicenseSha) {
+      throw new Error(`mxc-sdk ${MXC_VERSION} license differs from the pinned text`);
+    }
+
+    await stripQuarantine(stagedExecutor);
+    const { result: signature, accepted } = await verifyAuthenticity(stagedExecutor, verifyOptions);
+    if (!accepted) {
+      throw new Error(
+        `mxc launcher failed signature policy 'require': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+      );
+    }
+
+    const sentinel: MxcVerifiedSentinel = {
+      engine: 'mxc',
+      version: MXC_VERSION,
+      arch,
+      sha256: executorSha,
+      source: 'npm-download',
+      verifiedAt: nowIso(),
+    };
+    await writeFile(
+      join(stagingDir, MXC_VERIFIED_SENTINEL),
+      `${JSON.stringify({ ...sentinel, integrity: digests.integrity, signature }, null, 2)}\n`,
+      'utf8',
+    );
+    // The staged directory already holds the launcher, its license and its
+    // sentinel, so one rename publishes all three together.
+    await rm(installDir, { recursive: true, force: true });
+    await rename(stagingDir, installDir);
+    log.info(
+      `[engine-resolver] resolved mxc launcher ${MXC_VERSION} (${arch}) → ${executor} [sig=${signature.status}]`,
+    );
+    return executor;
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true });
+  }
+}
+
+async function readMxcSentinel(path: string): Promise<Partial<MxcVerifiedSentinel> | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as Partial<MxcVerifiedSentinel>;
+  } catch {
+    return null;
+  }
+}
+
+/** npm's `sha512-<base64>` integrity and the hex sha256, in one read. */
+async function tarballDigests(path: string): Promise<{ integrity: string; sha256: string }> {
+  const sha512 = createHash('sha512');
+  const sha256 = createHash('sha256');
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
+    stream.on('data', (chunk) => {
+      sha512.update(chunk);
+      sha256.update(chunk);
+    });
+    stream.on('end', () => resolve());
+    stream.on('error', reject);
+  });
+  return { integrity: `sha512-${sha512.digest('base64')}`, sha256: sha256.digest('hex') };
 }
 
 export async function* resolveEngine(

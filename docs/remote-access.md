@@ -78,6 +78,13 @@ re-copy it after a remote restart (durable remote credentials are
 first-class-design scope, below). Misconfiguration stays loud by contract:
 a failed probe is an error, never a silent fall-through to embedded mode.
 
+Windows hosts: a daemon started from an SSH logon is expected to run without
+a desktop the Windows script container can use (see
+[ADR 0022](decisions/0022-windows-mxc-sandbox.md)). Its probe then reports the
+container unavailable, and scripts that need a network boundary fail closed;
+Settings → Security & Compliance says why. Start the daemon from a signed-in
+session (the autostart task does) to keep the container.
+
 ### Browser web UI
 
 On the remote host: `gezel start --web` (mints the `runtime/web-ui-token`

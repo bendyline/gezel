@@ -191,6 +191,17 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
       true,
     );
     assert.equal(
+      isThirdPartyBinary('C:\\app\\resources\\app.asar.unpacked\\dist\\mxc-bundle\\wxc-exec.exe'),
+      true,
+    );
+    assert.match(
+      thirdPartyMetadata('C:\\app\\resources\\app.asar.unpacked\\dist\\mxc-bundle\\wxc-exec.exe')
+        .source,
+      /Microsoft MXC/,
+    );
+    // The exemption is the bundle path, not the file name.
+    assert.equal(isThirdPartyBinary('C:\\bundle\\wxc-exec.exe'), false);
+    assert.equal(
       isThirdPartyBinary(
         'C:\\app\\resources\\app.asar.unpacked\\dist\\pnpm-bundle\\node_modules\\@pnpm\\fastlist-win32-x64\\fastlist-win32-x64.exe',
       ),

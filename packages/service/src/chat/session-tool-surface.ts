@@ -19,6 +19,7 @@ import {
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
 import { outputMediaForStep } from '../craftbook/step-toolsets.js';
+import { windowsMxcState } from '../sandbox/windows-mxc.js';
 import {
   sessionHasCoordinatorScope,
   withoutCoordinatorOnlyTools,
@@ -277,14 +278,24 @@ export function applyActiveStepToolPolicy(
   return applyStepToolPolicy(allowlist, step, allModelFacingBuiltinTools);
 }
 
-/** Keyed by `networkAllowed`: the platform probe runs once, the policy varies. */
-const platformUnavailableToolNames = new Map<boolean, ReadonlySet<string>>();
+/**
+ * Keyed by `networkAllowed` and whether the Windows container is active: the
+ * platform probe runs once, the policy and the container switch vary. Reads
+ * the container state the service already resolved, the same snapshot the
+ * session's gezel-mcp child is told, so the prompt never lists a tool the
+ * child withholds — and never probes synchronously here.
+ */
+const platformUnavailableToolNames = new Map<string, ReadonlySet<string>>();
 
 function unavailableBuiltinNamesOnThisPlatform(networkAllowed: boolean): ReadonlySet<string> {
-  let names = platformUnavailableToolNames.get(networkAllowed);
+  const windowsMxcAvailable = windowsMxcState().state === 'active';
+  const key = `${networkAllowed}|${windowsMxcAvailable}`;
+  let names = platformUnavailableToolNames.get(key);
   if (!names) {
-    names = new Set(unavailableToolsForPlatform(process.platform, { networkAllowed }));
-    platformUnavailableToolNames.set(networkAllowed, names);
+    names = new Set(
+      unavailableToolsForPlatform(process.platform, { networkAllowed, windowsMxcAvailable }),
+    );
+    platformUnavailableToolNames.set(key, names);
   }
   return names;
 }

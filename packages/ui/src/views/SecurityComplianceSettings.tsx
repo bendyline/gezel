@@ -1,4 +1,5 @@
 import {
+  type HealthResponse,
   type SecurityCapabilities,
   type SecurityLevel,
   type SecurityPresetLevel,
@@ -7,7 +8,7 @@ import {
   securityPolicyForLevel,
 } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 // Shared with the first-run picker so the posture copy never drifts.
 import { SECURITY_LEVEL_PRESETS as LEVELS } from '../security-levels.js';
@@ -188,6 +189,11 @@ export function SecurityComplianceSettings({
             </span>
           </label>
         ))}
+        <WindowsSandboxSetting
+          config={config}
+          onConfigChanged={onConfigChanged}
+          onStatus={setStatus}
+        />
       </div>
 
       {status && (
@@ -196,5 +202,93 @@ export function SecurityComplianceSettings({
         </p>
       )}
     </section>
+  );
+}
+
+type ScriptSandboxHealth = NonNullable<HealthResponse['scriptSandbox']>;
+
+function describeScriptSandbox(sandbox: ScriptSandboxHealth): string {
+  switch (sandbox.state) {
+    case 'active':
+      return 'Active on this PC.';
+    case 'probing':
+      return 'Checking whether this PC can run it…';
+    case 'disabled':
+      return sandbox.reason === 'turned off in Settings'
+        ? 'Off.'
+        : `Off: ${sandbox.reason ?? 'turned off'}.`;
+    case 'unavailable':
+      return `Not available on this PC: ${sandbox.reason ?? 'the check did not pass'}.`;
+  }
+}
+
+/**
+ * The Windows script container. Shown only where the daemon reports one,
+ * which is a Windows daemon that runs scripts; everywhere else the platform's
+ * own sandbox applies and there is nothing to choose.
+ */
+function WindowsSandboxSetting({
+  config,
+  onConfigChanged,
+  onStatus,
+}: {
+  config: ConfigResponse | null;
+  onConfigChanged: (config: ConfigResponse) => void;
+  onStatus: (status: string) => void;
+}) {
+  const [sandbox, setSandbox] = useState<ScriptSandboxHealth | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      setSandbox((await api.health()).scriptSandbox ?? null);
+    } catch {
+      // Health is advisory here; without it the setting stays hidden.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  useEffect(() => {
+    if (sandbox?.state !== 'probing') return;
+    const timer = setTimeout(() => void refresh(), 1_500);
+    return () => clearTimeout(timer);
+  }, [sandbox, refresh]);
+
+  if (!sandbox) return null;
+  const enabled = config?.scriptSandbox?.windowsContainer !== false;
+
+  const save = async (next: boolean) => {
+    onStatus('saving…');
+    try {
+      const res = await api.updateConfig({ scriptSandbox: { windowsContainer: next } });
+      onConfigChanged(res);
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+      onStatus('saved — open chats restart on their next message.');
+      await refresh();
+    } catch (err) {
+      onStatus(`save failed: ${(err as Error).message}`);
+    }
+  };
+
+  return (
+    <label
+      className="debug-toggle"
+      style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginTop: '0.6rem' }}
+    >
+      <input type="checkbox" checked={enabled} onChange={(e) => void save(e.target.checked)} />
+      <span>
+        <strong>Windows sandbox</strong>
+        <br />
+        <span className="muted small">
+          Run the scripts gezellen write inside Windows&rsquo; process container, which limits them
+          to their project folder and blocks the network for scripts that shouldn&rsquo;t use it.
+          Off, those scripts don&rsquo;t run.
+        </span>
+        <br />
+        <span className="muted small" aria-live="polite">
+          {describeScriptSandbox(sandbox)}
+        </span>
+      </span>
+    </label>
   );
 }

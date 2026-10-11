@@ -1,8 +1,9 @@
 import type { MeesterStatusReport } from '@bendyline/gezel';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { GreetingBand } from './GreetingBand.js';
+import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { freshStatusReport, greetingForHour } from './utils.js';
 
 vi.mock('../../components/useShowPoppetjes.js', () => ({
@@ -30,6 +31,9 @@ vi.mock('./IntroHandboekArticle.js', () => ({
     </div>
   ),
 }));
+
+/** The greeting tab is named for the time of day the test happens to run. */
+const GREETING = /^Good (morning|afternoon|evening)$/;
 
 const REPORT: MeesterStatusReport = {
   headline: 'Your space war game is done! Click to play it!',
@@ -84,11 +88,21 @@ describe('GreetingBand', () => {
     }
   });
 
-  it('shows the status report in Good morning instead of the tip when available', () => {
+  it('names the greeting tab for the time of day', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 9, 10, 18, 0));
+      renderBand();
+      expect(screen.getByRole('tab', { name: 'Good evening' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Good morning' })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the status report in the greeting tab instead of the tip when available', () => {
     renderBand({ statusReport: REPORT });
-    expect(screen.getByRole('tabpanel', { name: 'Good morning' })).toHaveTextContent(
-      'All levels ship.',
-    );
+    expect(screen.getByRole('tabpanel', { name: GREETING })).toHaveTextContent('All levels ship.');
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Status report' })).not.toBeInTheDocument();
   });
@@ -109,7 +123,7 @@ describe('GreetingBand', () => {
       chips: [{ label: '1 waiting on you', dot: 'var(--ochre)', onClick: vi.fn() }],
     });
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      'Good morning',
+      greetingForHour(new Date().getHours()),
       'Night shift',
       'Make something',
       'Handboek',
@@ -123,10 +137,54 @@ describe('GreetingBand', () => {
   it('activates a different collapsed tab by keyboard', async () => {
     const onTabChange = vi.fn();
     renderBand({ collapsed: true, makeSomething: <div>starter cards</div>, onTabChange });
-    screen.getByRole('tab', { name: 'Good morning' }).focus();
+    screen.getByRole('tab', { name: GREETING }).focus();
     await userEvent.setup().keyboard('{ArrowRight}');
     expect(screen.getByRole('tab', { name: 'Make something' })).toHaveFocus();
     expect(onTabChange).toHaveBeenCalledWith('make');
+  });
+
+  // Radix selects a tab on mousedown, so by the click a newly chosen tab is
+  // already the active one; deciding "was it open?" at click time would roll
+  // every freshly chosen panel straight back up.
+  it('rolls up the open tab when it is chosen again, and only that one', async () => {
+    function StatefulBand() {
+      const [tab, setTab] = useState<HomeGreetingTab>('greeting');
+      const [collapsed, setCollapsed] = useState(false);
+      return (
+        <GreetingBand
+          chips={[]}
+          meesterName="Wren"
+          meesterPoppetje={null}
+          meesterIcon={null}
+          meesterIconOverride={false}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+          tab={tab}
+          onTabChange={(next) => {
+            setTab(next);
+            setCollapsed(false);
+          }}
+        />
+      );
+    }
+    const user = userEvent.setup();
+    render(<StatefulBand />);
+    const handboek = screen.getByRole('tab', { name: 'Handboek' });
+
+    await user.click(handboek);
+    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
+
+    await user.click(handboek);
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+    expect(handboek).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(handboek);
+    expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
+
+    handboek.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
   });
 
   it('shows the Handboek article with read and watch choices in the tour', () => {

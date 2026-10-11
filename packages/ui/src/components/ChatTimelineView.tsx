@@ -33,6 +33,7 @@ import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { requestSettingsSection } from '../settings-nav.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -56,6 +57,7 @@ import {
   StreamingBubble,
   type ToolActivity,
 } from './chat-bubbles.js';
+import { humanizeChatError } from './chat-error-copy.js';
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
   erroredSlotsWithPersistedTwin,
@@ -87,6 +89,7 @@ import {
 } from './chat-timeline-helpers.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
+import { modelSetupAction } from './model-setup-action.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
@@ -3227,6 +3230,7 @@ export function ChatTimelineView({
     const action = sessionErrorActions.get(sessionId);
     const busy = action?.busy;
     const retryable = isRetryableFailedTurn(errorMessage, errorDetail);
+    const setup = modelSetupAction(errorMessage);
     return (
       <>
         <div className="timeline-session-error-actions" aria-label="Failed turn actions">
@@ -3240,7 +3244,31 @@ export function ChatTimelineView({
               {busy === 'retry' ? 'Retrying…' : 'Retry'}
             </button>
           )}
-          {isModelUnavailableError(errorMessage) && (
+          {setup && (
+            <button
+              type="button"
+              className="timeline-session-error-action secondary"
+              disabled={busy !== undefined}
+              onClick={() => {
+                const { target } = setup;
+                if (target.kind === 'home') {
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
+                  );
+                  return;
+                }
+                requestSettingsSection(target.section);
+                window.dispatchEvent(
+                  new CustomEvent('gezel:navigate', {
+                    detail: { view: 'settings', section: target.section },
+                  }),
+                );
+              }}
+            >
+              {setup.label}
+            </button>
+          )}
+          {!setup && isModelUnavailableError(errorMessage) && (
             <button
               type="button"
               className="timeline-session-error-action secondary"
@@ -3407,7 +3435,7 @@ export function ChatTimelineView({
         <div className="timeline-session-error-body">
           <span aria-hidden="true">✗</span>
           <span>
-            <strong>Last turn failed.</strong> {error}
+            <strong>Last turn failed.</strong> {humanizeChatError(error)}
           </span>
         </div>
         {failedTurnActions(sid, error, errorDetail, projectId, 'session-error')}

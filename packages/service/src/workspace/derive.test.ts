@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { canApplyLinuxSystemdSandbox } from '../sandbox/runner.js';
+import { canApplyWindowsMxcSandbox } from '../sandbox/windows-mxc.js';
 import { deriveWorkspaceFile } from './derive.js';
 
 let home: string;
@@ -31,6 +32,7 @@ describe('deriveWorkspaceFile', () => {
     'fails closed before running the inline transform without an OS network boundary',
     async () => {
       if (process.platform === 'linux' && (await canApplyLinuxSystemdSandbox())) return;
+      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
       const res = await deriveWorkspaceFile(store, {
         projectId: 'default',
         script: `throw new Error('must not execute');`,

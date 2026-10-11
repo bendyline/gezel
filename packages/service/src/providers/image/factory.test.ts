@@ -260,6 +260,23 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(args).toContain('--listen-port');
   });
 
+  it('launches Iris with its text encoder, flash attention, and no VAE flags', () => {
+    const args = buildSdServerArgs(
+      {
+        ...modelWithAux([{ role: 'llm', path: '/tmp/iris/qwen3-vl.gguf' }]),
+        id: 'iris-3b-f32',
+      },
+      8765,
+    );
+    expect(args[args.indexOf('--llm') + 1]).toBe('/tmp/iris/qwen3-vl.gguf');
+    expect(args[args.indexOf('--steps') + 1]).toBe('100');
+    expect(args).toContain('--diffusion-fa');
+    expect(args[args.indexOf('--tensor-type-rules') + 1]).toBe('^model\\.diffusion_model\\.=bf16');
+    expect(args).not.toContain('--type');
+    expect(args).not.toContain('--vae');
+    expect(args).not.toContain('--vae-tiling');
+  });
+
   it('launches distilled checkpoint models with their fast sample-step default', () => {
     const args = buildSdServerArgs(
       {

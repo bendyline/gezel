@@ -111,7 +111,7 @@ test('02 - the home tour tab shows the intro article', async () => {
   });
   await shot('03-home-tour-article.png');
   // Back to the default greeting tab for later dark-mode shots.
-  await page.getByRole('tab', { name: 'Good morning' }).click();
+  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
 });
 
 test('03 - sidebar groups expand and list entities', async () => {

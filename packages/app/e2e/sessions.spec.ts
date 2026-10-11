@@ -12,6 +12,7 @@ import { deriveThreadTitle } from '@bendyline/gezel';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
+import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
@@ -65,7 +66,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   const brand = page.locator('.app-header-brand');
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
-  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await openGreetingTab(page);
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');

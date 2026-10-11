@@ -417,7 +417,18 @@ function NightShiftReviewCard({
     ...(pausedReview ? { pausedReview: true } : {}),
     ...(intent.indexing ? { indexing: intent.indexing } : {}),
   });
-  const quietFix = intent.quiet ? quietNightFix(intent.quiet.reason) : null;
+  const quietFix = useQuietNightFix(intent.quiet?.reason);
+  const [fixNote, setFixNote] = useState<string | null>(null);
+  const runQuietFix = async () => {
+    if (!quietFix) return;
+    setError(null);
+    try {
+      const note = await quietFix.run();
+      if (typeof note === 'string') setFixNote(note);
+    } catch (err) {
+      setError((err as Error).message ?? "Couldn't change that setting.");
+    }
+  };
 
   // The lead report is already open in the column beside the card — a row
   // linking to what the reader is looking at is noise.
@@ -530,13 +541,14 @@ function NightShiftReviewCard({
           </button>
         </div>
       )}
+      {fixNote && <p className="pending-question-hold muted">{fixNote}</p>}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
-        {quietFix && (
+        {quietFix && !fixNote && (
           <button
             type="button"
             className="pending-question-skip subtle"
-            onClick={() => void quietFix.run()}
+            onClick={() => void runQuietFix()}
             disabled={submitting}
           >
             {quietFix.label}
@@ -560,10 +572,35 @@ function NightShiftReviewCard({
  * running at login, plugged in and awake. Nothing to do: give the crew a
  * folder. Quota held: the reserve lives in Settings. Battery and a deliberate
  * stop need no fix.
+ *
+ * A fix that resolves to a string is a settings change the card cannot show
+ * any other way, so the card says what changed in place of the button.
  */
-function quietNightFix(
-  reason: NonNullable<NightShiftReviewIntent['quiet']>['reason'],
-): { label: string; run: () => Promise<void> | void } | null {
+type QuietNightFix = { label: string; run: () => unknown };
+
+function useQuietNightFix(
+  reason: NonNullable<NightShiftReviewIntent['quiet']>['reason'] | undefined,
+): QuietNightFix | null {
+  // The bridge exists in every Electron build but registers a login item only
+  // when packaged, and once both settings are on the button has nothing left
+  // to change. Offering it then is a button that silently does nothing.
+  const [keepRunningOffered, setKeepRunningOffered] = useState(false);
+  useEffect(() => {
+    const bridge = window.__GEZEL__?.startAtLogin;
+    if (reason !== 'asleep' || !bridge) return;
+    let cancelled = false;
+    void Promise.all([bridge.get(), api.getConfig()])
+      .then(([login, config]) => {
+        if (cancelled) return;
+        const alreadyOn = login.enabled && config.nightShift?.keepAwakeWhileRunning === true;
+        setKeepRunningOffered(login.supported && !alreadyOn);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reason]);
+
   if (reason === 'no-work') return { label: 'Add a folder', run: () => openAddFolder() };
   if (reason === 'quota-held') {
     return {
@@ -571,17 +608,17 @@ function quietNightFix(
       run: () => navigateToTab({ kind: 'area', area: 'settings' }),
     };
   }
-  if (reason === 'asleep' && window.__GEZEL__?.startAtLogin) {
+  if (reason === 'asleep' && keepRunningOffered) {
     return {
       label: 'Keep gezel running at night',
       run: async () => {
-        await window.__GEZEL__?.startAtLogin?.set(true).catch(() => undefined);
-        const config = await api.getConfig().catch(() => null);
-        await api
-          .updateConfig({
-            nightShift: { ...(config?.nightShift ?? {}), keepAwakeWhileRunning: true },
-          })
-          .catch(() => undefined);
+        const login = await window.__GEZEL__?.startAtLogin?.set(true);
+        if (!login?.enabled) throw new Error("Couldn't set gezel to start when you sign in.");
+        const config = await api.getConfig();
+        await api.updateConfig({
+          nightShift: { ...(config.nightShift ?? {}), keepAwakeWhileRunning: true },
+        });
+        return 'Gezel now starts when you sign in and keeps the computer awake while your crew works.';
       },
     };
   }

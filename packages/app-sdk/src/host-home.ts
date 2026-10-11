@@ -159,6 +159,7 @@ export function computeHostEnvironment(
       'GEZEL_APPLE_FM_BIN',
       'GEZEL_UV_BIN',
       'GEZEL_DUCKDB_BIN',
+      'GEZEL_MXC_EXEC',
       'GGML_BACKEND_PATH',
     ])
       variables.set(key, undefined);

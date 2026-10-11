@@ -31,7 +31,9 @@ let sessionOpts: SessionOpts[];
 let beforeCreate: (() => Promise<void>) | undefined;
 let afterCreate: ((session: LLMSession) => Promise<void>) | undefined;
 let previewLog: PreviewLogBuffer;
+let builtBytes: number;
 const key = 'llama-cpp:worker-8b:0';
+const otherKey = 'llama-cpp:other-27b:0';
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-provider-eviction-'));
@@ -45,6 +47,7 @@ beforeEach(async () => {
   sessionOpts = [];
   beforeCreate = undefined;
   afterCreate = undefined;
+  builtBytes = 1e9;
   const builder: ProviderBuilder = async () => {
     const provider = new LlamaCppProvider({
       baseUrl: 'http://llama.test',
@@ -69,11 +72,12 @@ beforeEach(async () => {
       return session;
     });
     generations.push(provider);
-    return { provider, residentBytes: 1e9 };
+    return { provider, residentBytes: builtBytes };
   };
   const broker = new CapacityBroker({ budgetBytes: 2e9 });
   const builders = { 'llama-cpp': builder };
-  const pool = new ProviderPool({ broker, builders });
+  // A short default drain, so a wait that outlives it is visibly unbounded.
+  const pool = new ProviderPool({ broker, builders, drainWaitMs: 200 });
   router = new EngineRouter({ broker, pool, builders, resolveResidentBytes: () => 1e9 });
   events = new ChatEventBus();
   previewLog = new PreviewLogBuffer();
@@ -234,6 +238,76 @@ describe('chat recovery after local engine eviction', () => {
     await expect(manager.send(record.id, 'Review this')).rejects.toThrow();
     expect(generations).toHaveLength(1);
     expect(requests).toHaveLength(0);
+  });
+
+  it('waits for a turn on another model to finish instead of failing, then swaps', async () => {
+    builtBytes = 1.5e9; // only one model fits the budget
+    const vendula = await store.createGezel({ name: 'Vendula' });
+    const record = await manager.createSession({ gezelId: 'worker' });
+    const other = await router.ensure('llama-cpp', 'other-27b', 0);
+    const releaseTaskTurn = await other.queue!.acquire({
+      lane: 'background',
+      gezelId: vendula.id,
+      sessionId: 'task-session',
+    });
+    const labels: string[] = [];
+    events.subscribe(record.id, (event) => {
+      if (event.type === 'heartbeat' && event.label) labels.push(event.label);
+    });
+
+    let settled = false;
+    const reply = manager.send(record.id, 'Review this').finally(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(settled).toBe(false);
+    expect(router.pool.isDraining(otherKey)).toBe(true);
+    expect(labels).toContain('Waiting for Vendula to finish before switching models');
+
+    releaseTaskTurn();
+    await expect(reply).resolves.toMatchObject({ content: 'Review complete.' });
+    expect(router.pool.has(otherKey)).toBe(false);
+    expect(router.pool.has(key)).toBe(true);
+  });
+
+  it('stopping a turn that waits for a swap leaves the other model running', async () => {
+    builtBytes = 1.5e9;
+    const record = await manager.createSession({ gezelId: 'worker' });
+    const other = await router.ensure('llama-cpp', 'other-27b', 0);
+    const releaseTaskTurn = await other.queue!.acquire({ lane: 'background' });
+
+    const reply = manager.send(record.id, 'Review this');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await manager.cancelInflight(record.id);
+
+    await expect(reply).rejects.toThrow();
+    expect(router.pool.isDraining(otherKey)).toBe(false);
+    expect(router.pool.has(otherKey)).toBe(true);
+    expect(requests).toHaveLength(0);
+    releaseTaskTurn();
+  });
+
+  it('a turn on a model another request is waiting to swap out steps aside, then runs', async () => {
+    builtBytes = 1.5e9;
+    const record = await manager.createSession({ gezelId: 'worker' });
+    await manager.send(record.id, 'First review');
+    const releaseRunningTurn = await generations[0]!.queue.acquire({ lane: 'background' });
+    const swap = router.ensure('llama-cpp', 'other-27b', 0, {
+      drainWaitMs: Number.POSITIVE_INFINITY,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.pool.isDraining(key)).toBe(true);
+
+    const reply = manager.send(record.id, 'Second review');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseRunningTurn();
+
+    // The waiting swap got its model at the turn boundary, before the new turn.
+    const swapped = await swap;
+    expect(swapped).toBe(generations[1]);
+    await expect(reply).resolves.toMatchObject({ content: 'Review complete.' });
+    expect(generations).toHaveLength(3);
+    expect(requests).toHaveLength(2);
   });
 
   it('does not replay an ordinary mid-turn failure with the same error text', async () => {
