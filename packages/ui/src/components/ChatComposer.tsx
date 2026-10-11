@@ -56,6 +56,7 @@ import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayou
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+import { useWaitingForModel } from './useWaitingForModel.js';
 
 export type ComposerTurnState = 'idle' | 'streaming' | 'queued' | 'error';
 
@@ -610,6 +611,8 @@ export function ChatComposer({
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
   }, []);
   const engagementOff = engagementMode === 'off';
+  // The draft can still be written; it just can't go anywhere yet.
+  const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
   const localTurnRef = useRef<LocalTurnStream | null>(null);
   const localTurnSequenceRef = useRef(0);
   // Live session id — initialized from the prop and updated the first time
@@ -1137,7 +1140,7 @@ export function ChatComposer({
       return;
     }
     if (!gezelId || turnActive) return;
-    if (engagementOff) return;
+    if (engagementOff || waitingForModel) return;
     // The attachment effect may not yet have cleared an obsolete suggestion.
     // User-picked tasks survive edits; inferred tasks need a matching preview.
     const attachedLaunch =
@@ -1409,6 +1412,7 @@ export function ChatComposer({
     projectId,
     turnActive,
     engagementOff,
+    waitingForModel,
     beginDraftSubmission,
     clearAcceptedDraft,
     ensureSessionId,
@@ -1626,6 +1630,24 @@ export function ChatComposer({
             }
           >
             Open Settings
+          </button>
+        </div>
+      )}
+      {waitingForModel && !engagementOff && (
+        <div
+          className="chat-composer-waiting"
+          aria-live="polite"
+          data-testid="chat-waiting-for-model"
+        >
+          <span>{gezelName} can start talking once a model is downloaded.</span>
+          <button
+            type="button"
+            className="gz-key"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent('gezel:navigate', { detail: { view: 'home' } }))
+            }
+          >
+            Get started
           </button>
         </div>
       )}
@@ -1917,7 +1939,7 @@ export function ChatComposer({
                     className="chat-task-btn"
                     data-testid="chat-task"
                     onClick={() => setTaskDialogOpen(true)}
-                    disabled={engagementOff || draftSubmissionPending}
+                    disabled={engagementOff || waitingForModel || draftSubmissionPending}
                     aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
                     title="Attach a plan to this message"
                   >
@@ -1980,6 +2002,7 @@ export function ChatComposer({
                   disabled={
                     !gezelId ||
                     engagementOff ||
+                    waitingForModel ||
                     draftSubmissionPending ||
                     (taskLaunch.attached !== null && !taskLaunch.readiness.ready)
                   }
@@ -1999,11 +2022,13 @@ export function ChatComposer({
                   title={
                     engagementOff
                       ? 'AI is disabled in Settings → General'
-                      : taskLaunch.attached && !taskLaunch.readiness.ready
-                        ? taskLaunch.readiness.reason
-                        : taskLaunch.attached
-                          ? 'Enter to start the task with this message as its brief'
-                          : 'Enter to send, Shift+Enter for newline'
+                      : waitingForModel
+                        ? `${gezelName} can start talking once a model is downloaded`
+                        : taskLaunch.attached && !taskLaunch.readiness.ready
+                          ? taskLaunch.readiness.reason
+                          : taskLaunch.attached
+                            ? 'Enter to start the task with this message as its brief'
+                            : 'Enter to send, Shift+Enter for newline'
                   }
                 >
                   <SubmitArrow />

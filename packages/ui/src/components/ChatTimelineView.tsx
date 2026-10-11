@@ -3295,12 +3295,14 @@ export function ChatTimelineView({
               {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
             </button>
           )}
-          {!isUserCancelledTurnError(errorMessage) && !isExpectedAvailabilityError(errorDetail) && (
-            <ReportErrorLink
-              className="timeline-session-error-link"
-              report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
-            />
-          )}
+          {!setup &&
+            !isUserCancelledTurnError(errorMessage) &&
+            !isExpectedAvailabilityError(errorDetail) && (
+              <ReportErrorLink
+                className="timeline-session-error-link"
+                report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
+              />
+            )}
         </div>
         {action?.error && (
           <p className="timeline-session-error-action-error" role="alert">
@@ -3492,6 +3494,17 @@ export function ChatTimelineView({
     const attachedQuestion =
       explicitQuestion ??
       fallbackQuestionsByMessage.get(`${m.sessionId}\u0000${m.at}\u0000${m.role}`);
+    // A turn that failed before it began is told on its session's "Last turn
+    // failed" card, and its salvage bubble carried the same sentence word for
+    // word. While that card shows, the bubble keeps only its placeholder line;
+    // once acknowledged, the bubble is where the reason stays readable.
+    const failureOnCard =
+      m.synthetic === 'turn-aborted' &&
+      !!m.sessionLastTurnError &&
+      !acknowledgedErrorProjects.has(m.projectId) &&
+      !liveRef.current.has(m.sessionId) &&
+      (m.warnings ?? []).every((w) => w.slice(0, 500) === m.sessionLastTurnError);
+    const bubbleWarnings = failureOnCard ? undefined : m.warnings;
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3554,7 +3567,7 @@ export function ChatTimelineView({
         {...(opts?.suppressHeader ? { suppressHeader: true } : {})}
         {...(opts?.timestampLabel ? { timestampLabel: opts.timestampLabel } : {})}
         {...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {})}
-        {...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {})}
+        {...(bubbleWarnings && bubbleWarnings.length > 0 ? { warnings: bubbleWarnings } : {})}
         {...(m.synthetic ? { synthetic: m.synthetic } : {})}
         {...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {})}
         {...(attachedQuestion

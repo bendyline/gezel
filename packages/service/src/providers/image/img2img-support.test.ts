@@ -14,7 +14,7 @@ describe('resolveImg2ImgSupport', () => {
   });
 
   it('assessment map covers the shipped catalog models', () => {
-    for (const id of ['sd-1.5', 'sdxl-base-1.0', 'sdxl-turbo', 'flux-1-schnell-q4']) {
+    for (const id of ['sd-1.5', 'sdxl-base-1.0', 'sdxl-turbo', 'animagine-xl-4']) {
       expect(resolveImg2ImgSupport({ modelId: id }).supported).toBe(true);
     }
     for (const id of ['flux-2-klein-4b-q4', 'krea-2-turbo-q4', 'krea-2-turbo-q8']) {

@@ -1,5 +1,6 @@
 import { ChatTurnErrorDetailSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import { notReadyError } from '../providers/active-install-message.js';
 import { CapacityDeniedError } from '../providers/native/capacity-broker.js';
 import { TurnAbortError } from '../providers/turn-abort-error.js';
 import { describeTurnError } from './turn-error.js';
@@ -18,6 +19,11 @@ function nativeCrash() {
 }
 
 describe('describeTurnError', () => {
+  it('carries the not-ready class the failure card keys on', () => {
+    const err = notReadyError('Local model: no model is installed yet.', 'model-not-ready');
+    expect(describeTurnError(err)).toEqual({ code: 'model-not-ready' });
+  });
+
   it('extracts every field a native engine crash carries', () => {
     expect(describeTurnError(nativeCrash())).toEqual({
       code: 'native-engine-crash',

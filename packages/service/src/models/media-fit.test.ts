@@ -99,7 +99,7 @@ describe('sdServerRequirement', () => {
       files,
     });
     const flux = sdServerRequirement({
-      modelId: 'flux-1-schnell-q4',
+      modelId: 'flux-2-klein-4b-q4',
       weightsKind: 'diffusion-model',
       pool: 'unified',
       files,

@@ -2169,7 +2169,7 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
   /**
    * Whether the upstream license permits commercial use. When false, the
    * UI shows a prominent "Non-commercial" badge so the user makes an
-   * informed choice (e.g. SDXL Turbo, FLUX.1-dev).
+   * informed choice (e.g. SDXL Turbo).
    */
   commercialUse: z.boolean(),
 });

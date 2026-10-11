@@ -86,7 +86,13 @@ export function isModelUnavailableError(message: string): boolean {
 }
 
 export function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
-  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
+  return (
+    detail?.code === 'capacity-denied' ||
+    detail?.code === 'engine-busy' ||
+    // Waiting on a first download is not a defect to report.
+    detail?.code === 'model-not-ready' ||
+    detail?.code === 'engine-not-ready'
+  );
 }
 
 /**
@@ -100,6 +106,10 @@ export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDet
   if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
   if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
   if (detail?.code === 'native-engine-crash') return true;
+  if (detail?.code === 'engine-not-ready') return true;
+  // A download under way will finish; with nothing downloading, Retry would
+  // only fail the same way and the setup key is the answer.
+  if (detail?.code === 'model-not-ready') return !/no model is installed/i.test(message);
   return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
     message,
   );

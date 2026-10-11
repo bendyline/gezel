@@ -39,6 +39,21 @@ export function localDeviceSettingsLabel(platform: NodeJS.Platform = process.pla
 }
 
 /**
+ * Why an on-device chat can't answer yet. Not a fault: the person is waiting
+ * on a download, so the turn's failure card offers the fix and no bug report.
+ * `describeTurnError` copies the code into the turn's error detail.
+ */
+export type NotReadyCode = 'model-not-ready' | 'engine-not-ready';
+
+/** An actionable error for a chat that can't answer yet. */
+export function notReadyError(message: string, code: NotReadyCode): Error {
+  const err = new Error(message) as Error & { isActionable: boolean; code: NotReadyCode };
+  err.isActionable = true;
+  err.code = code;
+  return err;
+}
+
+/**
  * Compose the user-facing message for a chat turn that found no model.
  *
  * `active` is whichever install is in flight for this engine, or null. The

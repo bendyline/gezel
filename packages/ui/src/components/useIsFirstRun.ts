@@ -1,6 +1,7 @@
 import { isLocalProvider } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { MODEL_INVENTORY_CHANGED_EVENT } from '../model-inventory.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
@@ -67,11 +68,40 @@ export function useIsFirstRun(enabled = true): boolean {
     if (!enabled) return;
     let cancelled = false;
     let revision = 0;
+    let inFlight = false;
+    let againAfter = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    const schedulePoll = (stillFirstRun: boolean) => {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = null;
+      // A model can finish downloading while the person is on another page,
+      // where nothing announces it. Chat is held until this flips, so look
+      // again now and then rather than leave the composer locked.
+      if (stillFirstRun && !cancelled) pollTimer = setTimeout(recheck, FIRST_RUN_POLL_MS);
+    };
     const recheck = () => {
+      // An inventory answer can take a minute on a machine with large
+      // models; stacking requests behind it only slows them all. A change
+      // that lands meanwhile gets one fresh look once this answer is in.
+      if (inFlight) {
+        againAfter = true;
+        return;
+      }
+      inFlight = true;
       const current = ++revision;
-      void estimateFirstRun().then((v) => {
-        if (!cancelled && current === revision) setFirstRun(v);
-      });
+      void estimateFirstRun()
+        .then((v) => {
+          if (cancelled || current !== revision) return;
+          setFirstRun(v);
+          schedulePoll(v);
+        })
+        .finally(() => {
+          inFlight = false;
+          if (againAfter && !cancelled) {
+            againAfter = false;
+            recheck();
+          }
+        });
     };
     recheck();
 
@@ -80,16 +110,23 @@ export function useIsFirstRun(enabled = true): boolean {
       if (detail && typeof detail.firstRun === 'boolean') {
         revision++;
         setFirstRun(detail.firstRun);
+        schedulePoll(detail.firstRun);
       }
     };
     window.addEventListener('gezel:first-run', onFirstRun);
     window.addEventListener('gezel:config-updated', recheck);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, recheck);
     return () => {
       cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
       window.removeEventListener('gezel:first-run', onFirstRun);
       window.removeEventListener('gezel:config-updated', recheck);
+      window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, recheck);
     };
   }, [enabled]);
 
   return firstRun;
 }
+
+/** How often a first-run install looks again for a model that has landed. */
+const FIRST_RUN_POLL_MS = 15_000;

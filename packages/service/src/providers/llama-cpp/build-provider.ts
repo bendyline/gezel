@@ -13,7 +13,11 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { engineInstallPhase } from '../../engines/registry.js';
-import { localDeviceSettingsLabel, noModelYetMessage } from '../active-install-message.js';
+import {
+  localDeviceSettingsLabel,
+  noModelYetMessage,
+  notReadyError,
+} from '../active-install-message.js';
 import {
   resolveCatalogLlamaCppEngineConfig,
   resolveCatalogReasoningBudget,
@@ -67,6 +71,17 @@ import { resolveSpecDraft } from './spec-draft.js';
 
 const log = createLogger('chat');
 
+/** What the engine-resolver hook reports for a turn that found no engine binary. */
+export interface EngineStatus {
+  detail: string;
+  /** The download failed: a fault, not a wait. */
+  failed?: boolean;
+}
+
+function activeLlamaInstall(models: import('./index.js').LlamaCppModelManager | undefined) {
+  return models?.getActiveInstalls().find((i) => i.phase !== undefined) ?? null;
+}
+
 /**
  * Lazy on-device engine-resolver hook for {@link buildLlamaCppProvider}.
  * Kicks (or attaches to) a background download of llama-server for the
@@ -77,7 +92,7 @@ const log = createLogger('chat');
 export function ensureLlamaEngineStatus(
   registry: import('../../engines/registry.js').EngineBinaryRegistry,
   config: GezelConfig,
-): { detail: string } | undefined {
+): EngineStatus | undefined {
   if (config.autoDownloadEngines === false) return undefined;
   // No release pinned (and no dev override) → auto-download can't succeed;
   // stay dormant so the caller shows the existing "install / external
@@ -90,7 +105,7 @@ export function ensureLlamaEngineStatus(
       : process.env.GEZEL_LLAMA_DETECTED_BACKEND || undefined;
   const { snapshot } = registry.ensure('llama-server', backend);
   if (snapshot.error) {
-    return { detail: `On-device engine couldn't be downloaded: ${snapshot.error}` };
+    return { detail: `On-device engine couldn't be downloaded: ${snapshot.error}`, failed: true };
   }
   const where = backend ? `, ${backend}` : '';
   return {
@@ -132,7 +147,7 @@ export async function buildLlamaCppProvider(opts: {
    * may kick a background download and return an actionable status to
    * surface this turn. Absent → the plain "install the engine" error.
    */
-  ensureEngine?: () => { detail: string } | undefined;
+  ensureEngine?: () => EngineStatus | undefined;
   /**
    * Capacity broker (pool path only). When present, the supervised slot
    * ceiling subtracts already-committed co-resident model reservations
@@ -256,7 +271,22 @@ export async function buildLlamaCppProvider(opts: {
     // surface its progress as an actionable error this turn. A later turn
     // — once the resolver stamps GEZEL_LLAMA_SERVER_BIN — skips this branch.
     const ensured = opts.ensureEngine?.();
+    // With no model on disk the turn has nothing to answer with, whatever
+    // the engine is doing. Saying "the engine will be ready shortly" sent a
+    // first-run person to retry into the same failure. The download above
+    // still started, so the engine is in place by the time the model is.
+    const pinnedPath = process.env.GEZEL_LLAMA_CPP_MODEL ?? config.llamaCppModelPath;
+    if (!opts.modelOverride && !pinnedPath && opts.llamaCppModels) {
+      const installed = await opts.llamaCppModels.listInstalled().catch(() => null);
+      if (installed?.length === 0) {
+        throw notReadyError(
+          noModelYetMessage('Local model', activeLlamaInstall(opts.llamaCppModels)),
+          'model-not-ready',
+        );
+      }
+    }
     if (ensured) {
+      if (!ensured.failed) throw notReadyError(ensured.detail, 'engine-not-ready');
       const dErr = new Error(ensured.detail);
       (dErr as Error & { isActionable: boolean }).isActionable = true;
       throw dErr;
@@ -331,23 +361,23 @@ export async function buildLlamaCppProvider(opts: {
     // while they wait. Consult the live install so the failure can say what is
     // actually happening instead of telling them to start the download that is
     // already running.
-    const activeInstall = () =>
-      opts.llamaCppModels?.getActiveInstalls().find((i) => i.phase !== undefined) ?? null;
-    let message: string;
     if (defaultModelId && !modelCatalogInfo) {
       const installed = opts.llamaCppModels ? await opts.llamaCppModels.listInstalled() : [];
-      message = installed.length
-        ? `Local model: the selected model "${defaultModelId}" is no longer available. ` +
-          `Pick a local model in Settings → ${localDeviceSettingsLabel()} (${installed
-            .map((m) => m.id)
-            .join(', ')}), or download "${defaultModelId}" again.`
-        : noModelYetMessage('Local model', activeInstall());
-    } else {
-      message = noModelYetMessage('Local model', activeInstall());
+      if (installed.length > 0) {
+        const err = new Error(
+          `Local model: the selected model "${defaultModelId}" is no longer available. ` +
+            `Pick a local model in Settings → ${localDeviceSettingsLabel()} (${installed
+              .map((m) => m.id)
+              .join(', ')}), or download "${defaultModelId}" again.`,
+        );
+        (err as Error & { isActionable: boolean }).isActionable = true;
+        throw err;
+      }
     }
-    const err = new Error(message);
-    (err as Error & { isActionable: boolean }).isActionable = true;
-    throw err;
+    throw notReadyError(
+      noModelYetMessage('Local model', activeLlamaInstall(opts.llamaCppModels)),
+      'model-not-ready',
+    );
   }
 
   // Per Phase 0 measurements on a cold Mac: Metal library compile is

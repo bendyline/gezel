@@ -285,6 +285,35 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     expect(banner).not.toHaveTextContent(/model_not_loaded|HTTP 404/);
   });
 
+  it('tells a turn that could not start once, with the fix and no bug report', async () => {
+    const error =
+      'Local model: no model is installed yet. Download one from Settings → Artificial Intelligence, then try again.';
+    const failed = {
+      sessionLastTurnError: error,
+      sessionLastTurnErrorDetail: { code: 'model-not-ready' },
+    };
+    renderTimeline(vi.fn(), [
+      message({ content: 'Hi Kenji!', ...failed }),
+      message({
+        role: 'assistant',
+        content: '',
+        at: '2026-07-25T10:00:01.000Z',
+        synthetic: 'turn-aborted',
+        warnings: [error],
+        ...failed,
+      }),
+    ]);
+
+    expect(await screen.findByRole('button', { name: 'Set up a model' })).toBeInTheDocument();
+    expect(screen.getAllByText(/no model is installed yet/)).toHaveLength(1);
+    // The one copy left is the failure card's.
+    expect(screen.getByText(/no model is installed yet/).closest('[data-session-error]')).not.toBe(
+      null,
+    );
+    expect(screen.getByText('(this turn was stopped before the model wrote a reply)')).toBeTruthy();
+    expect(screen.queryByText(/Report error on GitHub/)).toBeNull();
+  });
+
   it('offers to set up a model when none is installed', async () => {
     const navigate = vi.fn();
     const onNavigate = (event: Event) => navigate((event as CustomEvent).detail);

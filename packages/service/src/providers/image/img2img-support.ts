@@ -4,9 +4,8 @@
  * stable-diffusion.cpp's `/sdapi/v1/img2img` endpoint accepts
  * `init_images` for any loaded model, but whether the *architecture*
  * actually honors the init latents varies: the classic SD 1.x / SDXL
- * denoising path is mature, FLUX.1's flow-matching img2img is supported
- * upstream, while newer diffusion-model architectures (FLUX.2's
- * LLM-encoder family, Krea 2's Qwen-Image lineage) are unverified on
+ * denoising path is mature, while newer diffusion-model architectures
+ * (FLUX.2's LLM-encoder family, Krea 2's Qwen-Image lineage) are unverified on
  * the pinned sd-server — the same server build that already ignores
  * per-request step overrides for Krea (see MODEL_SAMPLE_STEP_DEFAULTS).
  *
@@ -33,9 +32,6 @@ export const MODEL_IMG2IMG_SUPPORT = new Map<string, boolean>([
   ['sdxl-turbo', true],
   ['sdxl-lightning-4step', true],
   ['animagine-xl-4', true],
-  // FLUX.1 — img2img documented working in upstream stable-diffusion.cpp.
-  ['flux-1-schnell-q4', true],
-  ['flux-1-dev-q4', true],
   // FLUX.2 Klein — LLM-text-encoder flow model; img2img unverified on the
   // pinned sd-server. Treat as txt2img-only until assessed.
   ['flux-2-klein-4b-q4', false],

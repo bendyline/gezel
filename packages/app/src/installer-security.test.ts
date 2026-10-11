@@ -671,6 +671,36 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
+  it('guards the data-root and shared-product sweeps against descendant junctions', () => {
+    // The data root and the world-writable shared product tree had no descendant
+    // reparse guard, so a planted child junction made SanitizeDescendants' elevated
+    // /setowner /T and /reset /T act on the junction's target outside ProgramData.
+    for (const path of ['"${GEZEL_DATA_DIR}"', '"${GEZEL_SHARED_DIR}"']) {
+      expect(
+        hook.indexOf(`!insertmacro RejectReparseDescendants ${path} `),
+        `${path} sweep must be guarded by RejectReparseDescendants`,
+      ).toBeLessThan(position(`!insertmacro SanitizeDescendants ${path} `));
+    }
+  });
+
+  it('precedes every recursive sweep with a same-path descendant reparse guard', () => {
+    // The recursive /T sweep follows a descendant junction to its target under
+    // elevation, so no call site may run it on a path it has not first proven
+    // reparse-free. This pins the invariant for every current and future site.
+    const sweeps = [...hook.matchAll(/!insertmacro SanitizeDescendants ("[^"]*")/g)];
+    expect(sweeps.length, 'expected SanitizeDescendants call sites').toBeGreaterThanOrEqual(4);
+    for (const sweep of sweeps) {
+      const path = sweep[1];
+      const sweepAt = sweep.index ?? -1;
+      const guardAt = hook.indexOf(`!insertmacro RejectReparseDescendants ${path} `);
+      expect(
+        guardAt,
+        `SanitizeDescendants ${path} must be preceded by RejectReparseDescendants ${path}`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(guardAt, `guard for ${path} must precede its sweep`).toBeLessThan(sweepAt);
+    }
+  });
+
   it('captures the reparse-check last error atomically with the call', () => {
     // A standalone GetLastError() System::Call reads a leftover code, because
     // the plugin's marshalling clobbers the thread's last error in between.

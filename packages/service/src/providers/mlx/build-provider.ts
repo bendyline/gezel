@@ -7,7 +7,7 @@ import {
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { Store } from '../../fs/store.js';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
-import { noModelYetMessage } from '../active-install-message.js';
+import { noModelYetMessage, notReadyError } from '../active-install-message.js';
 import { estimateExactPerSlotKvBytesF16 } from '../llama-cpp/offload-planner.js';
 import {
   CapacityDeniedError,
@@ -186,21 +186,20 @@ export async function buildMlxProvider(opts: {
     // them to start a download that is already running.
     const activeInstall = () =>
       opts.mlxModels?.getActiveInstalls().find((i) => i.phase !== undefined) ?? null;
-    let message: string;
     if (defaultModelId && !modelCatalogInfo) {
       const installed = opts.mlxModels ? await opts.mlxModels.listInstalled() : [];
-      message = installed.length
-        ? `Apple MLX: the selected model "${defaultModelId}" is no longer available. ` +
-          `Pick a local model in Settings → This Mac (${installed
-            .map((m) => m.id)
-            .join(', ')}), or download "${defaultModelId}" again.`
-        : noModelYetMessage('Apple MLX', activeInstall());
-    } else {
-      message = noModelYetMessage('Apple MLX', activeInstall());
+      if (installed.length > 0) {
+        const err = new Error(
+          `Apple MLX: the selected model "${defaultModelId}" is no longer available. ` +
+            `Pick a local model in Settings → This Mac (${installed
+              .map((m) => m.id)
+              .join(', ')}), or download "${defaultModelId}" again.`,
+        );
+        (err as Error & { isActionable: boolean }).isActionable = true;
+        throw err;
+      }
     }
-    const err = new Error(message);
-    (err as Error & { isActionable: boolean }).isActionable = true;
-    throw err;
+    throw notReadyError(noModelYetMessage('Apple MLX', activeInstall()), 'model-not-ready');
   }
 
   // Text-only until a request carries pixels — see vision-mode.ts for why the
