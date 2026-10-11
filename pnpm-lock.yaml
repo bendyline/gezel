@@ -887,8 +887,8 @@ importers:
         specifier: 2.11.2
         version: 2.11.2(@ironcalc/wasm@0.8.4)
       '@bendyline/squisq-editor-react':
-        specifier: 2.11.22
-        version: 2.11.22(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.11.23
+        version: 2.11.23(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-formats':
         specifier: 2.6.19
         version: 2.6.19(supports-color@8.1.1)
@@ -1143,8 +1143,8 @@ packages:
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-editor-react@2.11.22':
-    resolution: {integrity: sha512-YGS3HLtPuhKIvktANbl1PUhCAwjIziP4bs4tOOzdCLMUPB/uZd6pSyGpqRYvNq97CNdDNxkZKVrXf9YGCyeZ8w==}
+  '@bendyline/squisq-editor-react@2.11.23':
+    resolution: {integrity: sha512-DablpJTLlGy5ps20E4qSm6CHrr1jecw/1iX5TIjMcH4I5JQ5PbhqjadypfbW/CR3R+MJ3M1pJViDATBukJBosw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       harper.js: ^2.7.0
@@ -8552,7 +8552,7 @@ snapshots:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-editor-react@2.11.22(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-editor-react@2.11.23(@ironcalc/wasm@0.8.4)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.11.19(supports-color@8.1.1)
       '@bendyline/squisq-calc': 2.11.2(@ironcalc/wasm@0.8.4)

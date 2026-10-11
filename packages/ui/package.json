@@ -25,7 +25,7 @@
     "@bendyline/gezel-client": "workspace:*",
     "@bendyline/squisq": "2.11.19",
     "@bendyline/squisq-calc": "2.11.2",
-    "@bendyline/squisq-editor-react": "2.11.22",
+    "@bendyline/squisq-editor-react": "2.11.23",
     "@bendyline/squisq-formats": "2.6.19",
     "@bendyline/squisq-react": "2.11.21",
     "@ironcalc/wasm": "0.8.4",
