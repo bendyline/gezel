@@ -170,7 +170,7 @@ qualification, native API evidence, and postmortems. Each requests a 10-minute
 execution limit and a 2-minute completion window; startup, cleanup and in-flight
 grace add time. Charges depend on actual API usage; there is no dollar cap.
 
-`plan.md` shows the schedule. `campaign.json` freezes source/build/catalog and
+`plan.md` shows the schedule. `campaign.json` freezes eval inputs/build/catalog and
 environment identity, settings, and the exact consent script, and journals each
 attempt before launch. `summary.json` retains each trial's qualification, native
 usage, interventions and failure class. `report.md` shows separate artifact,
@@ -178,25 +178,28 @@ lifecycle, independent qualification and paired outcome counts. A pair with no
 evaluator repairs is explicitly uninformative about assistance. Results from an
 identity-changing trial are flagged as invalid comparisons.
 
-New campaigns identify source by the bytes, paths, executable bits and symlink
-targets of tracked and non-ignored untracked files. Staging or committing those
-same files does not change the comparison; the commit remains provenance only.
-Actual edits, additions, deletions, builds, catalog or environment changes still
-stop it. On drift, the message identifies the changed components and source
-paths, and `identity-drift-<phase>.json` saves the expected and observed hashes.
+Campaigns check the files they execute: live evaluator code and fixtures,
+consent scripts, launch helpers, the service and its workspace dependency builds,
+installed dependency metadata, catalog content, and environment settings.
+Repository docs, CI/release scripts, unit tests, temporary files, unbuilt app
+source, and lockfile-only edits do not stop a campaign. Staging or committing
+unchanged inputs is also safe; the commit remains provenance only. Python caches
+are excluded only when their source exists. Real changes to executed inputs
+still stop it. On drift, the message identifies the changed components and paths,
+and `identity-drift-<phase>.json` saves the expected and observed hashes.
 Environment values and API keys are never included in that evidence. Older
-diff-based campaign identities require a new baseline; they are not silently
-reinterpreted or resumed under the new comparison.
+campaign identities are not silently reinterpreted. A reviewed recovery must
+preserve the original journal and raw trial evidence and document the correction.
 
 Reusing the execute command resumes pending cells; it never retries failed or
 ambiguous attempts automatically. Unexpected user questions, provider/account or
 measurement failures halt the campaign. Ordinary task failures remain observations
 and do not halt it. A halted campaign requires review and a new campaign directory;
-after source changes, rebuild relevant packages and prepare a new baseline. Do not
-edit source, rebuild, update Gilde, or change ambient Gezel settings between
-planning and completion of a frozen campaign. Concurrent development needs a
-separate checkout with its own dependencies and builds; a new runs directory
-alone does not isolate the code being tested. Behavior force/remove environment
+after changes to executed code, prepare a new baseline. Do not edit live eval
+inputs, rebuild, update Gilde, or change ambient Gezel settings between planning
+and completion of a frozen campaign. Source-only development and cleanup can
+continue; concurrent builds need a separate checkout with its own dependencies.
+A new runs directory alone does not isolate the code being tested. Behavior force/remove environment
 overrides are rejected. The command-consent script is scoped to codemod only;
 the other scenarios have user simulation disabled.
 
@@ -357,6 +360,58 @@ wall-clock gap is per-(model, member) and swings both ways.
 **Probe before committing a model to a full run.** A model far below the floor books
 six hours of zeros. Run the smoke subset at `--count 1` first and skip the full suite
 on 0/3, recording it as unmeasured. That is honest and it is cheap.
+
+## Comparing CLI, API, and local providers
+
+`eval:scorecard-campaign` runs a private, resumable comparison using the standard
+scorecard gates and fixed rubric. The six-provider preset covers Claude Sonnet 5.5
+via CLI/API, GPT-6 Luna via Codex CLI/OpenAI API, and Qwen 3.8 27B Q4/Gemma 4 31B Q4
+via MLX. Its four suites have 43 entries (41 distinct scenarios; planning and
+conflict synthesis belong to two suites). Three repetitions make **774 trials**.
+
+```bash
+# Prepare only — no inference calls, downloads, or published dataset changes.
+pnpm eval:scorecard-campaign \
+  --config evals/campaigns/scorecard-six-providers.json \
+  --runs-dir evals/runs/scorecard-six-providers \
+  --source-home "$HOME/.gezel-dev"
+
+# Run from a terminal with OPENAI_API_KEY and ANTHROPIC_API_KEY exported.
+# The preset's CLI arms use existing logins; API keys are removed from their env.
+pnpm eval:scorecard-campaign \
+  --config evals/campaigns/scorecard-six-providers.json \
+  --runs-dir evals/runs/scorecard-six-providers \
+  --source-home "$HOME/.gezel-dev" --execute
+```
+
+Repeat the same command to resume **pending** cells. `--limit 6` runs at most six
+new trials and stops between them, allowing sittings without changing the plan.
+Attempts are journaled before launch; missing/partial results are never retried
+automatically. Source/build/catalog, local install metadata, device, and CLI
+version changes stop the comparison. Keep this checkout and its runtime installs
+stable until completion; use a new output directory after a change.
+
+Trials run sequentially with target order rotated across scenarios/repetitions.
+Generalist is on for all six; standard scenario repair policies and user simulation
+remain in place. Local admission and throughput-scaled timeouts remain enabled.
+Chromium is checked before execution and browser gates cannot fall back to a
+static-only pass. Large model weights are tracked by install manifest, size and
+modification time; small install files are content-hashed.
+This compares complete integrations, including each CLI's own harness; it does
+not replace the separate API independence/lifecycle qualification campaign.
+
+Each cell retains raw evidence, `score.json`, and `postmortem.md`. The campaign
+writes `plan.md`, `campaign.json`, `summary.json`, `trials.csv`, and `report.md`.
+Capability excludes infra/operator/grader failures, which stop for review.
+Performance reports duration (including a successful-only median), first action
+and artifact latency, tool calls, usage/cost when reported, and actual local
+decode/prefill/RAM/GPU measurements. Missing measurements remain unknown; CLI
+subscription costs and provider cache accounting are not interchangeable with
+API token billing. No dollar cap is enforced.
+
+Use the eval-run skill after completion for advisory inline judging of declared
+artifact axes; save `codex-inline-judge.json` separately from frozen raw evidence
+and fixed scores. Nothing from this command is published into the shipped dataset.
 
 ## The published scorecard
 

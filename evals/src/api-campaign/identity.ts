@@ -1,15 +1,20 @@
 import { repoRoot } from '../native-bin.ts';
 import { captureQualificationIdentity } from '../qualification/metadata.ts';
+import { workspaceRuntimeIdentity } from '../qualification/runtime-identity.ts';
 import { hash } from './plan.ts';
 
 export async function campaignIdentity() {
-  const identity = await captureQualificationIdentity(repoRoot());
+  const identity = await captureQualificationIdentity(repoRoot(), 'eval');
   if (identity.unavailable.length)
     throw new Error(`Cannot freeze campaign: ${identity.unavailable.join(', ')}`);
   const environment = Object.entries(process.env)
     .filter(([key]) => key.startsWith('GEZEL_') && !key.startsWith('GEZEL_DEPENDENCY_LEASE_'))
     .sort(([a], [b]) => a.localeCompare(b));
-  return { ...identity, environmentHash: hash(environment) };
+  return {
+    ...identity,
+    runtime: await workspaceRuntimeIdentity(repoRoot()),
+    environmentHash: hash(environment),
+  };
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -21,7 +26,7 @@ function comparable(component: string, value: unknown): unknown {
   // Older diff-based identities cannot be migrated without their original bytes.
   if (
     component === 'source' &&
-    source.algorithm === 'worktree-content-v1' &&
+    ['worktree-content-v1', 'eval-inputs-v1'].includes(String(source.algorithm)) &&
     typeof source.sha256 === 'string'
   )
     return { algorithm: source.algorithm, sha256: source.sha256 };

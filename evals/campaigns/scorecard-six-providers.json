@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "count": 3,
+  "suites": ["core", "productivity", "developer", "complex-work"],
+  "generalist": "on",
+  "cliAuth": "login",
+  "targets": [
+    { "id": "claude-cli", "provider": "anthropic-cli", "model": "claude-sonnet-5-5" },
+    { "id": "claude-api", "provider": "anthropic", "model": "claude-sonnet-5-5" },
+    { "id": "codex-cli", "provider": "codex-cli", "model": "gpt-6-luna" },
+    { "id": "openai-api", "provider": "openai", "model": "gpt-6-luna" },
+    { "id": "qwen-mlx", "provider": "mlx", "model": "qwen3.8-27b-q4" },
+    { "id": "gemma-mlx", "provider": "mlx", "model": "gemma4-31b-q4" }
+  ]
+}

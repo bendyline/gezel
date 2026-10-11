@@ -1,35 +1,79 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
 import { gildeDataDir } from '@bendyline/gezel-catalog';
 import type { EvalScenario, TrialOptions } from '../types.ts';
 import { digest } from './boundary.ts';
-import { sourceIdentity } from './source-identity.ts';
+import { isEvalInputPath, sourceIdentity } from './source-identity.ts';
+
+export interface TreeIdentity {
+  sha256: string;
+  files: number;
+  manifest?: Record<string, string>;
+}
+
+/** Ignore only source-backed Python caches, not arbitrary files in a cache directory. */
+async function generatedPythonBytecode(path: string): Promise<boolean> {
+  if (!path.endsWith('.pyc')) return false;
+  const dir = dirname(path);
+  const cached = basename(dir) === '__pycache__';
+  const match = cached ? /^(.+?)\.[^.]+(?:\.opt-\d+)?\.pyc$/.exec(basename(path)) : null;
+  if (cached && !match) return false;
+  const source = cached ? join(dirname(dir), `${match![1]}.py`) : path.slice(0, -1);
+  return lstat(source).then(
+    (stat) => stat.isFile(),
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return false;
+    },
+  );
+}
 
 /** Content identity, not mtime; symlinks are omitted to avoid traversing user homes. */
-export async function treeIdentity(root: string): Promise<{ sha256: string; files: number }> {
+export async function treeIdentity(
+  root: string,
+  options: {
+    ignorePythonBytecode?: boolean;
+    includeManifest?: boolean;
+    includePath?: (path: string) => boolean;
+  } = {},
+): Promise<TreeIdentity> {
   const hash = createHash('sha256');
+  const manifest: Record<string, string> = {};
   let files = 0;
   async function visit(dir: string): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const path = join(dir, entry.name);
+      if (options.includePath && !options.includePath(relative(root, path))) continue;
       if (entry.isDirectory()) await visit(path);
       else if (entry.isFile()) {
-        hash
-          .update(relative(root, path))
-          .update('\0')
-          .update(await readFile(path))
-          .update('\0');
+        if (options.ignorePythonBytecode && (await generatedPythonBytecode(path))) continue;
+        const name = relative(root, path);
+        const bytes = await readFile(path);
+        hash.update(name).update('\0').update(bytes).update('\0');
+        if (options.includeManifest)
+          manifest[name] = createHash('sha256').update(bytes).digest('hex');
         files++;
       }
     }
   }
   await visit(root);
-  return { sha256: hash.digest('hex'), files };
+  return { sha256: hash.digest('hex'), files, ...(options.includeManifest ? { manifest } : {}) };
 }
 
-export async function captureQualificationIdentity(root: string) {
+/** Python imports rewrite .pyc files during normal MLX startup; their .py source is authoritative. */
+export async function serviceBuildIdentity(root: string) {
+  return {
+    algorithm: 'service-content-v2',
+    ...(await treeIdentity(root, { ignorePythonBytecode: true, includeManifest: true })),
+  };
+}
+
+export async function captureQualificationIdentity(
+  root: string,
+  scope: 'repository' | 'eval' = 'repository',
+) {
   const unavailable: string[] = [];
   async function capture<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
     try {
@@ -39,9 +83,9 @@ export async function captureQualificationIdentity(root: string) {
       return null;
     }
   }
-  const source = await capture('source', () => sourceIdentity(root));
+  const source = await capture('source', () => sourceIdentity(root, scope));
   const service = await capture('service-build', () =>
-    treeIdentity(join(root, 'packages/service/dist')),
+    serviceBuildIdentity(join(root, 'packages/service/dist')),
   );
   const gilde = await capture('gilde-content', async () => {
     const dataDir = gildeDataDir();
@@ -51,7 +95,17 @@ export async function captureQualificationIdentity(root: string) {
       .catch(() => null);
     return { dataDir, version: manifest?.version ?? null, ...content };
   });
-  const fixtures = await capture('fixture-source', () => treeIdentity(join(root, 'evals/src')));
+  const fixtures = await capture('fixture-source', () =>
+    treeIdentity(
+      join(root, 'evals/src'),
+      scope === 'eval'
+        ? {
+            includeManifest: true,
+            includePath: (path) => isEvalInputPath(`evals/src/${path}`),
+          }
+        : {},
+    ),
+  );
   return { source, service, gilde, fixtures, unavailable };
 }
 
