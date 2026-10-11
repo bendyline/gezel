@@ -12,7 +12,7 @@ test.use({ daemonGroup: 'home' });
 test.describe('home / workshop', () => {
   test('workshop and greeting', async ({ page }) => {
     await gotoHome(page);
-    await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+    await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
 
     // The frozen clock pins the greeting to the afternoon.
     await expect(page.getByTestId('greeting-band')).toContainText('afternoon', {

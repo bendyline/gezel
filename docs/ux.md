@@ -379,7 +379,8 @@ compact view's content edge lines up. Page-level panes, such as first-run
 setup, span that full width without a second indent. Home's greeting band
 steps aside for the visit, without saving that, while the meester's
 introduction fills the empty conversation, just as it does once the person
-sends. Collapsed, its tab bar stays visible; selecting any tab reopens its
+sends. A tab the person chose, including the one already open, holds it open
+through that. Collapsed, its tab bar stays visible; selecting any tab reopens its
 content. Labels wrap on narrow screens so every destination remains visible.
 The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
@@ -498,14 +499,17 @@ What lives where:
 
 ### Pick a plan from Home
 
-Home's intro starts with **Good morning**, followed by **Night shift** when a
-review is available, **Make something**, and **Handboek** with the "What is
-gezel?" article. Good morning shows the current status report when available,
-otherwise the tip of the day; the report has no separate tab. The named tabs
-remain visible when the intro is collapsed, and selecting any of them expands
-its content, including the already-selected tab. Unlike dense project tab rows,
-this small set wraps its labels instead of dropping them at narrow widths.
-The date belongs inside Good morning, not in a tab label. The header stays
+Home's intro starts with the greeting tab, named for the time of day like the
+headline inside it (**Good morning**, **Good afternoon**, **Good evening**),
+followed by **Night shift** when a review is available, **Make something**, and
+**Handboek** with the "What is gezel?" article. The greeting tab shows the
+current status report when available, otherwise the tip of the day; the report
+has no separate tab. The named tabs remain visible when the intro is collapsed,
+and selecting any of them expands its content, including the already-selected
+tab. A collapsed intro shows no tab as selected, since no panel is showing.
+Unlike dense project tab rows, this small set wraps its labels instead of
+dropping them at narrow widths. The date belongs inside the greeting tab, not in
+a tab label. The header stays
 above the conversation. When open, its content overlays 90% of the chat area's
 height, with a shadow over the exposed chat strip below. The conversation keeps
 its full layout and draft behind the sheet. Clicking the exposed strip rolls

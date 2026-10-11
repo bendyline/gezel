@@ -9,6 +9,7 @@ export * from './project-local-id.js';
 export * from './markdown/index.js';
 export * from './fonts.js';
 export * from './engagement.js';
+export * from './context-notices.js';
 export * from './activity.js';
 export * from './backup-policy.js';
 export * from './entity-id.js';

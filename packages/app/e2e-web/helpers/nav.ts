@@ -12,7 +12,7 @@ export async function gotoHome(page: Page): Promise<void> {
 /** Open chat through the intro sheet, regardless of the saved collapse preference. */
 export async function gotoMeesterChat(page: Page): Promise<void> {
   await gotoHome(page);
-  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');

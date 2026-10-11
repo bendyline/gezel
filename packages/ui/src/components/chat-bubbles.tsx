@@ -18,6 +18,7 @@ import {
   handoffContextLine,
   handoffHeadline,
   handoffKindLabel,
+  isContextMaintenanceNotice,
   parseTaskHandoffNote,
   promoteBareChannelNames,
 } from '@bendyline/gezel';
@@ -1898,7 +1899,7 @@ export function WarningBanner({ warnings }: { warnings: WarningValue[] }) {
         const settingsIndex = action ? warning.message.lastIndexOf('Settings') : -1;
         return (
           <div key={warningKey(warning)}>
-            ⚠{' '}
+            {!isContextMaintenanceNotice(warning.message) && '⚠ '}
             {action && settingsIndex >= 0 ? (
               <>
                 {warning.message.slice(0, settingsIndex)}

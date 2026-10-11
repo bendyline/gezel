@@ -401,7 +401,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           <td className="model-name-table-cell">
                             <div className="model-name-cell">
                               <code>{m.id}</code>
-                              <div className="model-name-meta">
+                              <div className="model-name-meta model-name-meta--stacked">
                                 {hint && (
                                   <span
                                     className={`gz-status-pill${hint.kind === 'moe-good-match' ? ' gz-status-pill--ok' : ''}`}

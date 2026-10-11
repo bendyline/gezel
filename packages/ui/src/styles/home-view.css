@@ -445,7 +445,9 @@
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  /* Square bottom corners keep the active underline a straight bar; a
+     radius there bends the border up at both ends. */
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   padding: 6px 8px;
   min-height: 32px;
   cursor: pointer;
@@ -456,7 +458,9 @@
   color: var(--ink-2);
   background: var(--home-card);
 }
-.home-workshop-tab[data-state="active"] {
+/* A collapsed band shows no panel, so no tab reads as selected. */
+.home-workshop-greeting:not(.home-workshop-greeting-collapsed)
+  .home-workshop-tab[data-state="active"] {
   color: var(--ink);
   background: var(--home-card);
   border-bottom-color: var(--accent);

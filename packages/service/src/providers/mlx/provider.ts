@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   AwakeBudget,
+  autoCompactedNotice,
   createAwakeTimeout,
   createLogger,
   leaksUntaggedReasoning,
@@ -1103,10 +1104,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           this.currentTurnStartIdx = start + 1;
         },
         warn: (error) => log.warn('Mid-loop compaction failed', { error: String(error) }),
-        completed: (removed) =>
-          this.emitWarning(
-            `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
-          ),
+        completed: (removed) => this.emitWarning(autoCompactedNotice(removed, this.deps.numCtx)),
       },
       opts?.force,
     );

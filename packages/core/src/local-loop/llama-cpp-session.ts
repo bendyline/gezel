@@ -8,6 +8,7 @@
  * and the engine host; nothing else differs between them.
  */
 
+import { CONDENSED_TOOL_OUTPUT_NOTICE, autoCompactedNotice } from '../context-notices.js';
 import { createLogger } from '../log.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
 import type { ProviderQueue } from '../runtime/provider-queue.js';
@@ -1901,10 +1902,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           this.currentTurnStartIdx = start + 1;
         },
         warn: (error) => log.warn('Mid-loop compaction failed', { error: String(error) }),
-        completed: (removed) =>
-          this.emitWarning(
-            `Auto-compacted ${removed} earlier message${removed === 1 ? '' : 's'} in this ${this.deps.numCtx.toLocaleString('en-US')}-token context window so the current turn could continue.`,
-          ),
+        completed: (removed) => this.emitWarning(autoCompactedNotice(removed, this.deps.numCtx)),
       },
       opts?.force,
     );
@@ -1976,9 +1974,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       log.info(
         `[llama-cpp] in-turn condensation reclaimed ${reclaimed} chars across ${candidates.length} tool result(s) (kept the newest ${KEEP_INTACT} intact)`,
       );
-      this.emitWarning(
-        'Condensed this turn’s older tool output to stay inside the context window. The most recent results are untouched.',
-      );
+      this.emitWarning(CONDENSED_TOOL_OUTPUT_NOTICE);
     }
     return reclaimed;
   }

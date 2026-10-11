@@ -192,7 +192,7 @@ export function GreetingBand({
   });
   const dateLabel = `${weekday} ${partOfDay} · ${time}`;
   const panels: { value: HomeGreetingTab; label: string }[] = [
-    { value: 'greeting', label: 'Good morning' },
+    { value: 'greeting', label: greeting },
   ];
   if (morning || nightReview) panels.push({ value: 'night', label: 'Night shift' });
   if (makeSomething) panels.push({ value: 'make', label: 'Make something' });
@@ -215,9 +215,12 @@ export function GreetingBand({
               className="home-workshop-tab"
               aria-expanded={!collapsed && activeTab === value}
               onClick={() => {
-                // Radix only changes the value for a different tab. The
-                // selected tab must also reopen its collapsed panel.
-                if (collapsed && activeTab === value) onTabChange(value);
+                // Radix only reports a different tab, but choosing the
+                // selected one is a choice too: it reopens a collapsed panel,
+                // and it keeps an open one from rolling up when the meester's
+                // introduction loads a moment later (a fast boot shows the
+                // band before the empty conversation has loaded).
+                if (activeTab === value) onTabChange(value);
               }}
             >
               {label}

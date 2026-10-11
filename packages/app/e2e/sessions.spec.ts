@@ -65,7 +65,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   const brand = page.locator('.app-header-brand');
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
-  await page.getByRole('tab', { name: 'Good morning', exact: true }).click();
+  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');

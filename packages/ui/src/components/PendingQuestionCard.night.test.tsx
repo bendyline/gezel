@@ -1,6 +1,6 @@
 import type { Question } from '@bendyline/gezel';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 // Same jsdom gap the nav spec papers over: the markdown renderer reaches
@@ -189,5 +189,91 @@ describe('night-shift review card', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add a folder' }));
     expect(handler).toHaveBeenCalled();
     window.removeEventListener('gezel:add-folder', handler);
+  });
+});
+
+// The fix for a night the computer slept through used to show in dev builds,
+// where the login item is unsupported, and after both settings were already
+// on — a button that changed nothing and said nothing (2026-10-10).
+describe('night-shift review card for a night spent asleep', () => {
+  const KEEP_RUNNING = 'Keep gezel running at night';
+
+  function asleepCard(): Question {
+    const base = nightCard();
+    return nightCard({
+      intent: {
+        ...(base.intent as object),
+        windowKey: '2026-08-24',
+        tasksCompleted: 0,
+        reports: [],
+        quiet: { reason: 'asleep' },
+      } as unknown as Question['intent'],
+    });
+  }
+
+  function withLoginItem(state: { supported: boolean; enabled: boolean }) {
+    const set = vi.fn().mockResolvedValue({ supported: state.supported, enabled: state.supported });
+    window.__GEZEL__ = {
+      ...window.__GEZEL__,
+      token: 'test-token',
+      startAtLogin: { get: vi.fn().mockResolvedValue(state), set },
+    };
+    return set;
+  }
+
+  // The offer resolves after the first paint, so absence is only meaningful
+  // once those reads have landed.
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  afterEach(() => {
+    if (window.__GEZEL__) window.__GEZEL__ = { ...window.__GEZEL__, startAtLogin: undefined };
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+    vi.mocked(api.updateConfig).mockClear();
+  });
+
+  it('turns on start at login and keep-awake, then says so', async () => {
+    const set = withLoginItem({ supported: true, enabled: false });
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      nightShift: { pauseOnBattery: true },
+    } as never);
+    render(<PendingQuestionCard question={asleepCard()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: KEEP_RUNNING }));
+
+    await screen.findByText(
+      'Gezel now starts when you sign in and keeps the computer awake while your crew works.',
+    );
+    expect(set).toHaveBeenCalledWith(true);
+    expect(vi.mocked(api.updateConfig)).toHaveBeenCalledWith({
+      nightShift: { pauseOnBattery: true, keepAwakeWhileRunning: true },
+    });
+    expect(screen.queryByRole('button', { name: KEEP_RUNNING })).toBeNull();
+  });
+
+  it('offers nothing where the app cannot start at login', async () => {
+    withLoginItem({ supported: false, enabled: false });
+    render(<PendingQuestionCard question={asleepCard()} />);
+
+    await screen.findByText(/the computer was asleep or gezel wasn't running/);
+    await settle();
+    expect(screen.queryByRole('button', { name: KEEP_RUNNING })).toBeNull();
+  });
+
+  it('offers nothing once both settings are already on', async () => {
+    withLoginItem({ supported: true, enabled: true });
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      nightShift: { keepAwakeWhileRunning: true },
+    } as never);
+    render(<PendingQuestionCard question={asleepCard()} />);
+
+    await screen.findByRole('button', { name: 'Dismiss' });
+    await waitFor(() => expect(vi.mocked(api.getConfig)).toHaveBeenCalled());
+    await settle();
+    expect(screen.queryByRole('button', { name: KEEP_RUNNING })).toBeNull();
   });
 });
