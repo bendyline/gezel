@@ -967,10 +967,10 @@ describe('HomeView', () => {
   });
 
   // A fast boot shows the open band before the empty conversation has loaded.
-  // Clicking the tab already open was a no-op, so the introduction landing a
-  // moment later rolled the band up — and "Return to Meester chat" with it —
-  // from under the person who had just chosen it.
-  it('holds the intro open when the introduction loads after its open tab was chosen', async () => {
+  // The introduction landing a moment later must not roll the band up — and
+  // "Return to Meester chat" with it — from under the person who just chose a
+  // tab. (Choosing the tab already open rolls the band up on purpose.)
+  it('holds the intro open when the introduction loads after a tab was chosen', async () => {
     const props = {
       projects: [],
       meesterGezelId: 'gz-meester',
@@ -981,12 +981,13 @@ describe('HomeView', () => {
     };
     const config = { provider: 'copilot' } as never;
     const { rerender } = render(<HomeWorkshop config={config} {...props} />);
-    await userEvent.setup().click(await screen.findByRole('tab', { name: GREETING_TAB }));
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Handboek' }));
 
     timeline.empty = true;
     try {
       rerender(<HomeWorkshop config={config} {...props} />);
       await screen.findByText(/your meester\./);
+      expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeInTheDocument();
     } finally {
@@ -1069,6 +1070,15 @@ describe('HomeView', () => {
     expect(screen.getByRole('tabpanel', { name: 'Make something' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeVisible();
     expect(screen.getByTestId('chat-composer')).toBe(composer);
+  });
+
+  it('rolls the intro up when its open tab is chosen again', async () => {
+    render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    await userEvent.setup().click(screen.getByRole('tab', { name: GREETING_TAB }));
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+    expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
   });
 
   it('returns to chat with Escape from the intro', async () => {

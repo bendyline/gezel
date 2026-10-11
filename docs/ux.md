@@ -506,7 +506,8 @@ followed by **Night shift** when a review is available, **Make something**, and
 current status report when available, otherwise the tip of the day; the report
 has no separate tab. The named tabs remain visible when the intro is collapsed,
 and selecting any of them expands its content, including the already-selected
-tab. A collapsed intro shows no tab as selected, since no panel is showing.
+tab. Selecting the tab whose panel is open rolls the intro up, like the chevron.
+A collapsed intro shows no tab as selected, since no panel is showing.
 Unlike dense project tab rows, this small set wraps its labels instead of
 dropping them at narrow widths. The date belongs inside the greeting tab, not in
 a tab label. The header stays

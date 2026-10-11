@@ -1761,21 +1761,20 @@ describe('ChatComposer transport resilience', () => {
     expect(screen.queryByText(/network error/i)).toBeNull();
   });
 
-  it('names an unavailable model plainly instead of showing the broker JSON', async () => {
-    // Wild-caught: an install default pinned a download that never finished, so
-    // every send painted `[remote] /v1/remote/admit returned HTTP 404
-    // {"error":"model_not_loaded","model":"llama-cpp:qwen3.6-27b-q8"}` in red
-    // under the composer. The service humanizes this at its source now; the
-    // composer is the backstop for older daemons and other paths that
-    // stringify the rejection.
+  it('leaves a failed turn to the timeline instead of repeating it under the composer', async () => {
+    // The timeline shows a failed turn on the live bubble and again as the
+    // "Last turn failed" card with Retry; a copy here put one engine-busy
+    // sentence on screen three times. The plain wording and the setup button
+    // live on that card now (ChatTimelineView.focus-error.test.tsx).
     vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
     vi.mocked(streamChatEvents).mockImplementation(() =>
       (async function* rejectedTurn() {
         yield {
           type: 'error' as const,
           error:
-            '[remote] /v1/remote/admit returned HTTP 404 {"error":"model_not_loaded","model":"llama-cpp:qwen3.6-27b-q8"}',
+            'engine llama-cpp:qwen3.8-27b-q2:0 is busy serving requests and did not drain within 30s — not evicting.',
         };
+        yield { type: 'done' as const };
       })(),
     );
 
@@ -1786,13 +1785,13 @@ describe('ChatComposer transport resilience', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
     fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
 
-    const message = await screen.findByText(/isn't available on this device/i, undefined, {
-      timeout: 3_000,
+    await waitFor(() => expect(streamChatEvents).toHaveBeenCalled(), { timeout: 3_000 });
+    expect(await screen.findByRole('button', { name: /^send$/i }, { timeout: 3_000 })).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(message.textContent).toContain('qwen3.6-27b-q8');
-    expect(message.textContent).toMatch(/Settings → Artificial Intelligence/);
-    expect(screen.queryByText(/model_not_loaded/)).toBeNull();
-    expect(screen.queryByText(/HTTP 404/)).toBeNull();
+    expect(screen.queryByText(/did not drain/)).toBeNull();
+    expect(document.querySelector('.chat-composer-error')).toBeNull();
   });
 
   it('gives up after repeated transport failures with a readable message, not the raw error', async () => {

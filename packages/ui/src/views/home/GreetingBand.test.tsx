@@ -1,8 +1,9 @@
 import type { MeesterStatusReport } from '@bendyline/gezel';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { GreetingBand } from './GreetingBand.js';
+import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { freshStatusReport, greetingForHour } from './utils.js';
 
 vi.mock('../../components/useShowPoppetjes.js', () => ({
@@ -140,6 +141,50 @@ describe('GreetingBand', () => {
     await userEvent.setup().keyboard('{ArrowRight}');
     expect(screen.getByRole('tab', { name: 'Make something' })).toHaveFocus();
     expect(onTabChange).toHaveBeenCalledWith('make');
+  });
+
+  // Radix selects a tab on mousedown, so by the click a newly chosen tab is
+  // already the active one; deciding "was it open?" at click time would roll
+  // every freshly chosen panel straight back up.
+  it('rolls up the open tab when it is chosen again, and only that one', async () => {
+    function StatefulBand() {
+      const [tab, setTab] = useState<HomeGreetingTab>('greeting');
+      const [collapsed, setCollapsed] = useState(false);
+      return (
+        <GreetingBand
+          chips={[]}
+          meesterName="Wren"
+          meesterPoppetje={null}
+          meesterIcon={null}
+          meesterIconOverride={false}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+          tab={tab}
+          onTabChange={(next) => {
+            setTab(next);
+            setCollapsed(false);
+          }}
+        />
+      );
+    }
+    const user = userEvent.setup();
+    render(<StatefulBand />);
+    const handboek = screen.getByRole('tab', { name: 'Handboek' });
+
+    await user.click(handboek);
+    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
+
+    await user.click(handboek);
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+    expect(handboek).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(handboek);
+    expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
+
+    handboek.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
   });
 
   it('shows the Handboek article with read and watch choices in the tour', () => {

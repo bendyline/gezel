@@ -1,7 +1,7 @@
 import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
-import { CapacityBroker } from './capacity-broker.js';
+import { CapacityBroker, EngineBusyError } from './capacity-broker.js';
 import { makeEngineKey } from './engine-key.js';
 import { EngineRouter, resolveLocalRoute } from './engine-router.js';
 import { type ProviderBuilder, ProviderPool } from './provider-pool.js';
@@ -134,6 +134,45 @@ describe('EngineRouter', () => {
     );
     expect(engineKey).toBe(makeEngineKey('mlx', 'gemma4-26b', 2));
     expect(router.pool.has(engineKey)).toBe(true);
+  });
+
+  it('binds a resident sibling replica rather than making room to re-spawn the lost one', async () => {
+    const router = makeRouter(10 * GB, 20 * GB);
+    await router.ensure('mlx', 'gemma4-26b', 0);
+    await router.ensure('mlx', 'gemma4-26b', 1);
+    await router.pool.evict(makeEngineKey('mlx', 'gemma4-26b', 0));
+    await router.ensure('mlx', 'other-model', 0);
+
+    const { engineKey } = await router.bindForSession(
+      'mlx',
+      'gemma4-26b',
+      { sessionId: 's1' },
+      makeEngineKey('mlx', 'gemma4-26b', 0),
+    );
+
+    expect(engineKey).toBe(makeEngineKey('mlx', 'gemma4-26b', 1));
+    expect(router.pool.has(makeEngineKey('mlx', 'other-model', 0))).toBe(true);
+  });
+
+  it('does not repeat a busy-engine wait on another replica', async () => {
+    const router = makeRouter();
+    const ensure = vi
+      .spyOn(router, 'ensure')
+      .mockRejectedValue(
+        new EngineBusyError(
+          'engine mlx:other:0 is busy serving requests and did not drain within 30s',
+        ),
+      );
+
+    await expect(
+      router.bindForSession(
+        'mlx',
+        'gemma4-26b',
+        { sessionId: 's1' },
+        makeEngineKey('mlx', 'gemma4-26b', 0),
+      ),
+    ).rejects.toMatchObject({ code: 'engine-busy' });
+    expect(ensure).toHaveBeenCalledTimes(1);
   });
 
   it('reconcileClones spawns and evicts to match the target map', async () => {

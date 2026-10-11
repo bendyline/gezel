@@ -213,10 +213,14 @@ import {
   parseEngineKey,
 } from '../providers/native/engine-key.js';
 import { installedModelInfos } from '../providers/native/inference.js';
-import { LocalEngineRuntime } from '../providers/native/local-engine-runtime.js';
+import {
+  type LocalEngineBindOpts,
+  LocalEngineRuntime,
+} from '../providers/native/local-engine-runtime.js';
+import type { EngineDrainWait } from '../providers/native/provider-pool.js';
 import { OllamaProvider } from '../providers/ollama.js';
 import { OpenAIProvider } from '../providers/openai.js';
-import { ProviderDisposedError } from '../providers/provider-disposal.js';
+import { ProviderDisposedError, ProviderDrainingError } from '../providers/provider-disposal.js';
 import type { Lane } from '../providers/queue.js';
 import { makeRemoteModelId, parseRemoteModelId } from '../providers/remote/model-id.js';
 import { RemoteGezelProvider } from '../providers/remote/provider.js';
@@ -347,6 +351,11 @@ import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
 } from './deliverable-paths.js';
+import {
+  MAX_ENGINE_REBINDS_PER_SEND,
+  engineSwapWaitLabel,
+  turnWaitsForEngineSwap,
+} from './engine-swap-wait.js';
 import type { ChatEventBus, PublishScope } from './events.js';
 import { EvidenceLedger } from './evidence-ledger.js';
 import {
@@ -2735,8 +2744,8 @@ export class ChatManager extends LocalEngineRuntime {
     // effect. Providers that don't honor the signal (older
     // implementations) fall back to the `disconnect()` below.
     //
-    // `entry.abort` is wired as soon as a live session exists, before optional
-    // first-turn recall, so stop can release an embedding wait too. Only
+    // `entry.abort` is wired before the session binds its engine, so stop can
+    // release a model-swap wait or an embedding wait too. Only
     // disconnect the provider session after `providerStarted` flips: recall
     // still holds `state.session`, and nulling it there races runSend's next
     // capture. An aborted prologue exits before issuing a provider request.
@@ -7016,8 +7025,16 @@ export class ChatManager extends LocalEngineRuntime {
         });
       }
     }
+    // Wired before ensureState: binding a local model can wait for another
+    // model's turn to finish, and Stop has to end that wait too. Auto-recall
+    // and the provider seam below observe the same signal; a stop pressed
+    // before this point aborts it here.
+    const turnAbort = new AbortController();
+    inflightTurn.abort = turnAbort;
+    if (inflightTurn.cancelled) turnAbort.abort();
+    const engineBind = this.turnEngineBind(sessionId, preflightScope, opts, turnAbort.signal);
     try {
-      state = await this.ensureState(sessionId, userText);
+      state = await this.ensureState(sessionId, userText, true, engineBind);
     } catch (err) {
       if (preflightScope && !inflightTurn.cancelled) {
         await this.recordPreTurnFailure(sessionId, userText, opts, err, preflightScope);
@@ -7111,12 +7128,6 @@ export class ChatManager extends LocalEngineRuntime {
     if (!state.session) {
       fail(new Error('[chat] no live session after ensureState — this should not happen'));
     }
-    // Wire cancellation before auto-recall. The embedding worker cannot abort
-    // an ONNX call already in native code, but the interactive wait can stop
-    // immediately and the provider seam below observes the same aborted signal.
-    const turnAbort = new AbortController();
-    inflightTurn.abort = turnAbort;
-    if (inflightTurn.cancelled) turnAbort.abort();
 
     // Auto-recall: if this is the session's first USER turn and nothing
     // has been recalled yet, search memories now and rebuild the live
@@ -7144,12 +7155,6 @@ export class ChatManager extends LocalEngineRuntime {
     // their next message can start.
     if (!inflightTurn.cancelled) {
       this.inflight.set(sessionId, inflightTurn);
-    }
-    // Honor a stop pressed during ensureState, before this controller existed.
-    // The cancellation flag lives on this exact turn object; abort now so
-    // auto-recall/provider work sees the parked cancellation immediately.
-    if (inflightTurn.cancelled) {
-      turnAbort.abort();
     }
     /**
      * Subscribe to all the live-session signals we forward into the
@@ -7843,6 +7848,7 @@ export class ChatManager extends LocalEngineRuntime {
         // bypassing is safe — we just lose this session's affinity
         // bonus for the consultation turn (one turn; negligible).
         const isAskTarget = this.isInflightAskTarget(sessionId);
+        const yieldsToSwap = turnWaitsForEngineSwap(opts, isAskTarget);
         const sendOpts: SendAndWaitOpts = {
           timeoutMs: turnTimeoutMs,
           ...(continuations === 0 && opts?.fileTurnIntent
@@ -7863,6 +7869,7 @@ export class ChatManager extends LocalEngineRuntime {
             ...(turnJob ? { job: turnJob } : {}),
             ...(continuations > 0 ? { affinity: false } : {}),
             ...(isAskTarget ? { bypassQueue: true } : {}),
+            ...(yieldsToSwap ? { yieldToSwap: () => this.boundEngineDraining(state.record) } : {}),
             signal: turnAbort.signal,
             onQueueWait: ({ aheadOf }) => {
               this.queueWaitingSince.set(sessionId, Date.now());
@@ -7893,33 +7900,59 @@ export class ChatManager extends LocalEngineRuntime {
           finalContent = await liveSession.sendAndWait(providerPrompt(), sendOpts);
         } catch (err) {
           if (err instanceof ProviderDisposedError && !inflightTurn.cancelled) {
-            // Only the provider's pre-start guard uses this error type. A
+            // Only the provider's pre-start guards use this error type. A
             // mid-tool-loop failure must never replay already executed work.
-            log.info(`local engine evicted before send; rebinding session ${sessionId}`);
-            liveUnsub();
-            try {
-              await liveSession.disconnect();
-            } catch {
-              /* the retired provider may already have closed its bridges */
+            // One rebind for an evicted engine; a turn stepping aside for a
+            // swap may have to again, since the engine can change hands
+            // between this turn getting its model back and starting on it.
+            let cause: ProviderDisposedError = err;
+            for (let rebinds = 1; ; rebinds++) {
+              log.info(
+                cause instanceof ProviderDrainingError
+                  ? `local engine is switching models; session ${sessionId} waits, then rebinds`
+                  : `local engine evicted before send; rebinding session ${sessionId}`,
+              );
+              liveUnsub();
+              try {
+                await liveSession.disconnect();
+              } catch {
+                /* the retired provider may already have closed its bridges */
+              }
+              state.session = null;
+              const fresh = await this.createFreshSessionForRecord(
+                state.record,
+                {
+                  pendingUserText: userText,
+                  omitLastUserFromPriorMessages: continuations === 0,
+                  bind: engineBind,
+                },
+                false,
+              );
+              fresh.onUsage((usage) => {
+                this.usageTracker.recordTurn(state.record.providerName, usage);
+                this.accountTaskBudget(state.record, usage);
+              });
+              state.session = fresh;
+              liveSession = fresh;
+              liveUnsub = subscribeLive(fresh);
+              if (inflightTurn.cancelled) {
+                throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
+              }
+              this.telemetry.noteProviderRequestStart(sessionId);
+              try {
+                finalContent = await fresh.sendAndWait(providerPrompt(), sendOpts);
+                break;
+              } catch (retryErr) {
+                if (
+                  !(retryErr instanceof ProviderDrainingError) ||
+                  inflightTurn.cancelled ||
+                  rebinds >= MAX_ENGINE_REBINDS_PER_SEND
+                ) {
+                  throw retryErr;
+                }
+                cause = retryErr;
+              }
             }
-            state.session = null;
-            const fresh = await this.createFreshSessionForRecord(
-              state.record,
-              { pendingUserText: userText, omitLastUserFromPriorMessages: continuations === 0 },
-              false,
-            );
-            fresh.onUsage((usage) => {
-              this.usageTracker.recordTurn(state.record.providerName, usage);
-              this.accountTaskBudget(state.record, usage);
-            });
-            state.session = fresh;
-            liveSession = fresh;
-            liveUnsub = subscribeLive(fresh);
-            if (inflightTurn.cancelled) {
-              throw new Error(turnCancelledMessage(inflightTurn.cancelReason));
-            }
-            this.telemetry.noteProviderRequestStart(sessionId);
-            finalContent = await fresh.sendAndWait(providerPrompt(), sendOpts);
           } else if (
             isContextOverflowError(err) &&
             compactionsThisSend < this.maxCompactionsPerSend
@@ -10020,13 +10053,22 @@ export class ChatManager extends LocalEngineRuntime {
    */
   private async createFreshSessionForRecord(
     record: ChatSession,
-    runtime?: { pendingUserText?: string; omitLastUserFromPriorMessages?: boolean },
+    runtime?: {
+      pendingUserText?: string;
+      omitLastUserFromPriorMessages?: boolean;
+      bind?: LocalEngineBindOpts;
+    },
     retryEvictedProvider = true,
   ): Promise<LLMSession> {
     const gezel = await this.store.getGezel(record.gezelId);
     if (!gezel) throw new Error(`agent ${record.gezelId} not found`);
     const effectiveModel = await this.resolveEffectiveSessionModel(record, gezel);
-    const provider = await this.ensureProviderForSession(record, gezel, effectiveModel);
+    const provider = await this.ensureProviderForSession(
+      record,
+      gezel,
+      effectiveModel,
+      runtime?.bind,
+    );
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
@@ -11997,6 +12039,7 @@ export class ChatManager extends LocalEngineRuntime {
     record: ChatSession,
     gezel?: { parsed: { frontmatter: { model?: string } } } | null,
     effectiveModel?: string,
+    bind?: LocalEngineBindOpts,
   ): Promise<LLMProvider> {
     const name = record.providerName;
     assertQualificationProvider(name);
@@ -12030,11 +12073,65 @@ export class ChatManager extends LocalEngineRuntime {
     const { engineKey, provider } = await this.bindLocalReplica(router, name, modelId, {
       sessionId: record.id,
       priorEngineKey: record.engineKey,
+      ...bind,
     });
     if (record.engineKey !== engineKey) {
       record.engineKey = engineKey;
     }
     return provider;
+  }
+
+  /** How a turn's bind waits when its model must replace a busy one; see engine-swap-wait.ts. */
+  private turnEngineBind(
+    sessionId: string,
+    scope: PublishScope | undefined,
+    opts: { ambient?: boolean } | undefined,
+    signal: AbortSignal,
+  ): LocalEngineBindOpts {
+    if (!turnWaitsForEngineSwap(opts, this.isInflightAskTarget(sessionId))) return { signal };
+    return {
+      engineDrainWaitMs: Number.POSITIVE_INFINITY,
+      signal,
+      ...(scope
+        ? { onDrainWait: (wait: EngineDrainWait) => void this.publishEngineSwapWait(scope, wait) }
+        : {}),
+    };
+  }
+
+  /** True while a waiting request is draining the engine `record` is bound to. */
+  private boundEngineDraining(record: ChatSession): boolean {
+    const key = record.engineKey;
+    if (!key) return false;
+    return (this.engineRouter ?? this.engineRouterCache)?.pool.isDraining(key) ?? false;
+  }
+
+  /** Name who the waiting turn is waiting on, as a liveness heartbeat. */
+  private async publishEngineSwapWait(scope: PublishScope, wait: EngineDrainWait): Promise<void> {
+    const names: string[] = [];
+    try {
+      const gezelIds = [...new Set(wait.holders.flatMap((h) => (h.gezelId ? [h.gezelId] : [])))];
+      if (gezelIds.length > 0) {
+        const config = await this.store.readConfig();
+        const boring =
+          this.states.get(scope.sessionId)?.record.roleBasedNameOnlyMode ??
+          config.roleBasedNameOnlyMode ??
+          false;
+        for (const id of gezelIds) {
+          const gezel = await this.store.getGezel(id);
+          if (gezel) {
+            names.push(
+              displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, boring),
+            );
+          }
+        }
+      }
+    } catch (err) {
+      log.debug(
+        `engine swap wait: could not name holders: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      names.length = 0;
+    }
+    this.events.publish(scope, { type: 'heartbeat', label: engineSwapWaitLabel(names) });
   }
   protected override sessionsPerEngineKey(): Map<string, number> {
     const sessionsPerKey = new Map<string, number>();
@@ -12945,6 +13042,7 @@ export class ChatManager extends LocalEngineRuntime {
     sessionId: string,
     pendingUserText?: string,
     retryEvictedProvider = true,
+    bind?: LocalEngineBindOpts,
   ): Promise<LiveSessionState> {
     const existing = this.states.get(sessionId);
     if (existing?.session?.isDisposed) {
@@ -13114,7 +13212,7 @@ export class ChatManager extends LocalEngineRuntime {
     }
 
     const effectiveModel = await this.resolveEffectiveSessionModel(record, gezel);
-    const provider = await this.ensureProviderForSession(record, gezel, effectiveModel);
+    const provider = await this.ensureProviderForSession(record, gezel, effectiveModel, bind);
     // Pool-route may have rebound the session; persist the new
     // engineKey so a restart routes consistently.
     if (record.engineKey) await this.store.writeSession(record);
@@ -13245,7 +13343,7 @@ export class ChatManager extends LocalEngineRuntime {
       } catch (err) {
         // Prompt and bridge preparation can outlive this pool generation.
         if (!(err instanceof ProviderDisposedError) || !retryEvictedProvider) throw err;
-        return this.ensureState(sessionId, pendingUserText, false);
+        return this.ensureState(sessionId, pendingUserText, false, bind);
       }
       if (resumeFailed) {
         record.resumeFailed = true;

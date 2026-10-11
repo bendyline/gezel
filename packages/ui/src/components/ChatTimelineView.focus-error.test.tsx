@@ -261,6 +261,49 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     },
   );
 
+  it('names an unavailable model plainly instead of showing the broker JSON', async () => {
+    // Wild-caught: an install default pinned a download that never finished, so
+    // every send failed with `[remote] /v1/remote/admit returned HTTP 404
+    // {"error":"model_not_loaded",…}`. The service humanizes this at its source
+    // now; the card is the backstop for older daemons and other paths that
+    // stringify the rejection.
+    renderTimeline(vi.fn(), [
+      message({
+        sessionLastTurnError:
+          '[remote] /v1/remote/admit returned HTTP 404 {"error":"model_not_loaded","model":"llama-cpp:qwen3.6-27b-q8"}',
+      }),
+    ]);
+
+    const banner = await waitFor(() => {
+      const el = document.querySelector('[data-session-error="s1"]');
+      if (!el) throw new Error('banner not rendered yet');
+      return el as HTMLElement;
+    });
+    expect(banner).toHaveTextContent(/isn't available on this device/);
+    expect(banner).toHaveTextContent('qwen3.6-27b-q8');
+    expect(banner).toHaveTextContent(/Settings → Artificial Intelligence/);
+    expect(banner).not.toHaveTextContent(/model_not_loaded|HTTP 404/);
+  });
+
+  it('offers to set up a model when none is installed', async () => {
+    const navigate = vi.fn();
+    const onNavigate = (event: Event) => navigate((event as CustomEvent).detail);
+    window.addEventListener('gezel:navigate', onNavigate);
+    try {
+      renderTimeline(vi.fn(), [
+        message({
+          sessionLastTurnError:
+            'Local model: no chat model is installed. Download one in Settings → Local Models.',
+        }),
+      ]);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Set up a model' }));
+      expect(navigate).toHaveBeenCalledWith({ view: 'home' });
+    } finally {
+      window.removeEventListener('gezel:navigate', onNavigate);
+    }
+  });
+
   it('acknowledges the alert without retrying the turn', async () => {
     vi.mocked(api.clearProjectErrors).mockResolvedValue({ cleared: 1 } as never);
     renderTimeline();

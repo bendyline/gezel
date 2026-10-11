@@ -20,15 +20,21 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import { AbortedWhileQueuedError } from '../queue.js';
 import type { LLMProvider } from '../types.js';
-import { CapacityBroker } from './capacity-broker.js';
+import { CapacityBroker, isEngineBusyError } from './capacity-broker.js';
 import {
   type LocalProviderName,
   isLocalProvider,
   makeEngineKey,
   parseEngineKey,
 } from './engine-key.js';
-import type { PoolSnapshot, ProviderBuilder, ProviderPool } from './provider-pool.js';
+import type {
+  EngineWaitOpts,
+  PoolSnapshot,
+  ProviderBuilder,
+  ProviderPool,
+} from './provider-pool.js';
 
 const log = createLogger('engine-router');
 
@@ -78,13 +84,19 @@ export interface BindResult {
   provider: LLMProvider;
 }
 
-export interface BindContext {
+export interface BindContext extends EngineWaitOpts {
   /** The session's id, used by the chat layer to weight `pickReplicaForBind`. */
   sessionId: string;
   /** Active session count per existing engine key — drives load balancing. */
   sessionsPerKey?: ReadonlyMap<string, number>;
-  /** Override the pool's bounded busy-engine drain for this bind attempt. */
-  drainWaitMs?: number;
+}
+
+function waitOptsOf(ctx: EngineWaitOpts): EngineWaitOpts {
+  return {
+    ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    ...(ctx.onDrainWait ? { onDrainWait: ctx.onDrainWait } : {}),
+  };
 }
 
 const DEFAULT_FALLBACK_APPROX_BYTES = 8 * 1024 ** 3;
@@ -129,28 +141,40 @@ export class EngineRouter {
     ctx: BindContext,
     priorEngineKey?: string,
   ): Promise<BindResult> {
+    const waitOpts = waitOptsOf(ctx);
     if (priorEngineKey) {
       const parsed = parseEngineKey(priorEngineKey);
       if (parsed && parsed.provider === provider && parsed.modelId === modelId) {
         if (this.pool.has(priorEngineKey)) {
           this.pool.touch(priorEngineKey);
-          const p = await this.ensureExisting(priorEngineKey);
+          const p = await this.ensureExisting(priorEngineKey, waitOpts);
           if (p) return { engineKey: priorEngineKey, provider: p };
         }
         // Prior key was valid but the replica is gone (LRU-evicted,
         // clones reduced, etc.). Re-spawn at the same index if budget
-        // allows; otherwise fall through to least-loaded pick.
-        try {
-          const provider = await this.ensure(parsed.provider, parsed.modelId, parsed.replicaIdx, {
-            ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
-          });
-          return { engineKey: priorEngineKey, provider };
-        } catch (err) {
-          log.warn(
-            `bindForSession: prior key ${priorEngineKey} unavailable (${
-              err instanceof Error ? err.message : String(err)
-            }); rebinding to least-loaded replica`,
-          );
+        // allows; otherwise fall through to least-loaded pick — at once
+        // when a sibling replica is resident, rather than waiting for room.
+        const fits = this.broker.canReserve(this.resolveBytes(provider, modelId));
+        if (fits || !this.hasResidentSibling(provider, modelId, parsed.replicaIdx, ctx)) {
+          try {
+            const provider = await this.ensure(
+              parsed.provider,
+              parsed.modelId,
+              parsed.replicaIdx,
+              waitOpts,
+            );
+            return { engineKey: priorEngineKey, provider };
+          } catch (err) {
+            // With no resident sibling, the least-loaded pick needs the same
+            // busy engine's memory and would only repeat the wait — and a
+            // stopped caller is done.
+            if (isEngineBusyError(err) || err instanceof AbortedWhileQueuedError) throw err;
+            log.warn(
+              `bindForSession: prior key ${priorEngineKey} unavailable (${
+                err instanceof Error ? err.message : String(err)
+              }); rebinding to least-loaded replica`,
+            );
+          }
         }
       }
     }
@@ -160,11 +184,21 @@ export class EngineRouter {
       ctx.sessionsPerKey ?? new Map(),
     );
     const engineKey = makeEngineKey(provider, modelId, replicaIdx);
-    const instance = await this.ensure(provider, modelId, replicaIdx, {
-      ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
-    });
+    const instance = await this.ensure(provider, modelId, replicaIdx, waitOpts);
     log.info(`bind ${ctx.sessionId} → ${engineKey}`);
     return { engineKey, provider: instance };
+  }
+
+  /** Whether the least-loaded pick would land on another resident, non-draining replica. */
+  private hasResidentSibling(
+    provider: LocalProviderName,
+    modelId: string,
+    replicaIdx: number,
+    ctx: BindContext,
+  ): boolean {
+    const idx = this.pool.pickReplicaForBind(provider, modelId, ctx.sessionsPerKey ?? new Map());
+    const key = makeEngineKey(provider, modelId, idx);
+    return idx !== replicaIdx && this.pool.has(key) && !this.pool.isDraining(key);
   }
 
   /**
@@ -176,7 +210,7 @@ export class EngineRouter {
     provider: LocalProviderName,
     modelId: string,
     replicaIdx: number,
-    opts: { drainWaitMs?: number } = {},
+    opts: EngineWaitOpts = {},
   ): Promise<LLMProvider> {
     if (!this.builders[provider]) {
       throw new Error(`EngineRouter: no builder registered for provider '${provider}'`);
@@ -192,16 +226,18 @@ export class EngineRouter {
    * Returns null when the key is absent from the pool (caller falls
    * back to a fresh bind).
    */
-  async ensureExisting(engineKey: string): Promise<LLMProvider | null> {
+  async ensureExisting(engineKey: string, opts: EngineWaitOpts = {}): Promise<LLMProvider | null> {
     const parsed = parseEngineKey(engineKey);
     if (!parsed) return null;
     if (!this.pool.has(engineKey)) return null;
-    // ensure on an existing entry is a fast O(1) hit.
+    // ensure on an existing entry is a fast O(1) hit — unless it is draining
+    // for a swap, when it waits on `opts` and may rebuild.
     return this.pool.ensure(
       parsed.provider,
       parsed.modelId,
       parsed.replicaIdx,
       this.resolveBytes(parsed.provider, parsed.modelId),
+      opts,
     );
   }
 

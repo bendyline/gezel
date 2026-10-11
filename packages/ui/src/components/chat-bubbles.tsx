@@ -25,6 +25,7 @@ import {
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatDebugBundle } from './chat-debug-bundle.js';
+import { humanizeChatError } from './chat-error-copy.js';
 import { queueNoticeIsFresh } from './chat-live-slot.js';
 import { formatContextWindow } from './model-context.js';
 
@@ -2511,7 +2512,7 @@ export function StreamingBubble({
           )}
         {failed && (
           <div className="msg-failed-banner">
-            <div>✗ Turn stopped before finishing. {error}</div>
+            <div>✗ Turn stopped before finishing. {error ? humanizeChatError(error) : error}</div>
             {errorActions ??
               (!isUserCancelledTurnError(error) && (
                 <ReportErrorLink

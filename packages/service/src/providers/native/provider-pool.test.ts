@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { AbortedWhileQueuedError } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import { CapacityBroker, CapacityDeniedError } from './capacity-broker.js';
 import { makeEngineKey } from './engine-key.js';
 import {
+  type EngineDrainWait,
   type ProviderBuilder,
   ProviderPool,
   capacityDenialLogLine,
@@ -722,6 +724,127 @@ describe('ProviderPool', () => {
     expect(rebuilt).not.toBe(original);
     expect(made).toHaveLength(2);
     expect(pool.has(key)).toBe(true);
+  });
+
+  it('a caller with no deadline waits out a long turn, then swaps at its end', async () => {
+    const t = { now: 1000 };
+    const made: QueueFakeProvider[] = [];
+    const residentKey = makeEngineKey('mlx', 'busy-model', 0);
+    let polls = 0;
+    let drainingWhileWaiting = false;
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkQueueBuilder(10 * GB, made) },
+      now: () => t.now,
+      drainWaitMs: 30_000,
+      sleep: async () => {
+        // Each poll is a minute of the other model's tool loop; it ends after ten.
+        t.now += 60_000;
+        polls += 1;
+        drainingWhileWaiting ||= pool.isDraining(residentKey);
+        if (polls === 10) made[0]!.desc = mkDesc({});
+      },
+    });
+    await pool.ensure('mlx', 'busy-model', 0, 10 * GB);
+    made[0]!.desc = mkDesc({
+      running: 1,
+      active: [{ gezelId: 'vendula', sessionId: 's-task', job: 'atari/3 · plan', runningForMs: 0 }],
+    });
+
+    const waits: EngineDrainWait[] = [];
+    const swapped = await pool.ensure('mlx', 'wanted-model', 0, 10 * GB, {
+      drainWaitMs: Number.POSITIVE_INFINITY,
+      onDrainWait: (wait) => waits.push(wait),
+    });
+
+    expect(swapped).toBe(made[1]);
+    expect(made[0]!.shutdownCalls).toBe(1);
+    expect(pool.has(residentKey)).toBe(false);
+    expect(drainingWhileWaiting).toBe(true);
+    expect(waits.length).toBeGreaterThan(1);
+    expect(waits[0]).toEqual({
+      engineKey: residentKey,
+      modelId: 'busy-model',
+      holders: [{ gezelId: 'vendula', sessionId: 's-task', job: 'atari/3 · plan' }],
+    });
+  });
+
+  it('a stopped swap wait leaves the busy engine resident and serving', async () => {
+    const made: BusyFakeProvider[] = [];
+    const stop = new AbortController();
+    const residentKey = makeEngineKey('mlx', 'busy-model', 0);
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      sleep: async () => {
+        stop.abort();
+      },
+    });
+    await pool.ensure('mlx', 'busy-model', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    await expect(
+      pool.ensure('mlx', 'wanted-model', 0, 10 * GB, {
+        drainWaitMs: Number.POSITIVE_INFINITY,
+        signal: stop.signal,
+      }),
+    ).rejects.toBeInstanceOf(AbortedWhileQueuedError);
+    expect(pool.isDraining(residentKey)).toBe(false);
+    expect(made[0]!.shutdownCalls).toBe(0);
+    expect(await pool.ensure('mlx', 'busy-model', 0, 10 * GB)).toBe(made[0]);
+  });
+
+  it('keeps draining for a waiting caller after a less patient one gives up', async () => {
+    const t = { now: 0 };
+    const made: BusyFakeProvider[] = [];
+    const residentKey = makeEngineKey('mlx', 'resident', 0);
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      now: () => t.now,
+      sleep: async () => {
+        t.now += 1_000;
+        if (t.now >= 120_000) made[0]!.busy = false;
+      },
+    });
+    await pool.ensure('mlx', 'resident', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    const patient = pool.ensure('mlx', 'patient', 0, 10 * GB, {
+      drainWaitMs: Number.POSITIVE_INFINITY,
+    });
+    const hasty = pool.ensure('mlx', 'hasty', 0, 10 * GB, { drainWaitMs: 30_000 });
+
+    await expect(hasty).rejects.toMatchObject({ code: 'engine-busy' });
+    expect(pool.isDraining(residentKey)).toBe(true);
+    await patient;
+    expect(made[0]!.shutdownCalls).toBe(1);
+    expect(pool.has(makeEngineKey('mlx', 'patient', 0))).toBe(true);
+  });
+
+  it('a caller still waiting for room when the pool shuts down never loads its model', async () => {
+    const made: BusyFakeProvider[] = [];
+    let wake!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      sleep: () => gate,
+    });
+    await pool.ensure('mlx', 'resident', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    const waiting = pool.ensure('mlx', 'wanted', 0, 10 * GB, {
+      drainWaitMs: Number.POSITIVE_INFINITY,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pool.shutdown();
+    wake();
+
+    await expect(waiting).rejects.toThrow(/retired/);
+    expect(made).toHaveLength(1);
   });
 
   it('shutdown force-evicts busy entries without draining', async () => {

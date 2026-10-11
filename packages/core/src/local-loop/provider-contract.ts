@@ -208,6 +208,15 @@ export interface SendAndWaitOpts {
      * matters — this flag only bypasses the TS-side FIFO queue.
      */
     bypassQueue?: boolean;
+    /**
+     * Asked before the turn starts, and again once it has a queue slot.
+     * True means a waiting request needs this engine's memory for another
+     * model, so the turn rejects with `ProviderDrainingError` instead of
+     * starting; the caller rebinds and resumes once that swap is done. Only
+     * a caller that can rebind and wait sets it — never a consultation the
+     * running turn is blocked on, which would deadlock the swap it yields to.
+     */
+    yieldToSwap?: () => boolean;
   };
 }
 
