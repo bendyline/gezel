@@ -66,7 +66,10 @@ describe('StableDiffusionCppProvider.generate', () => {
     expect(out.meta.heightPx).toBe(128);
   });
 
-  it('uses Ming Design sampling defaults and preserves returned PNG bytes', async () => {
+  it.each([
+    { model: 'ming-image-0.1-design-bf16', steps: 12, cfg: 1 },
+    { model: 'iris-3b-f32', steps: 100, cfg: 3 },
+  ])('uses $model sampling defaults and preserves PNG bytes', async ({ model, steps, cfg }) => {
     const png = Buffer.concat([PNG_SIGNATURE, Buffer.from('rgba-payload')]);
     const requests: Record<string, unknown>[] = [];
     const provider = new StableDiffusionCppProvider({
@@ -77,11 +80,11 @@ describe('StableDiffusionCppProvider.generate', () => {
         return Response.json({ images: [png.toString('base64')] });
       },
     });
-    const input = { prompt: 'A transparent cat sticker', model: 'ming-image-0.1-design-bf16' };
+    const input = { prompt: 'An illustrated cat sticker', model };
     const out = await provider.generate(input);
     expect(requests[0]).toMatchObject({
-      steps: 12,
-      cfg_scale: 1,
+      steps,
+      cfg_scale: cfg,
       sampler_name: 'Euler',
       width: 1024,
       height: 1024,
@@ -90,7 +93,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     await provider.generate({ ...input, steps: 6, width: 768, height: 1024 });
     expect(requests[1]).toMatchObject({
       steps: 6,
-      cfg_scale: 1,
+      cfg_scale: cfg,
       sampler_name: 'Euler',
       width: 768,
       height: 1024,

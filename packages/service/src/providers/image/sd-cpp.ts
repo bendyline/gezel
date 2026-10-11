@@ -109,13 +109,11 @@ export interface StableDiffusionCppProviderOptions {
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_SAMPLE_STEPS = 20;
 /**
- * Step-distilled models that produce a clean image in ~4 steps; running
- * them at the 20-step default wastes a 5× multiple of render time for
- * no quality gain. Shared with the factory's `buildSdServerArgs` (which
- * bakes the same value into the server's `--steps` launch default) so
- * the two call sites can't drift apart.
+ * Model-specific step counts, from fast distilled models to Iris's
+ * 100-step quality default. Shared with `buildSdServerArgs`, which sets
+ * the same server launch default for endpoints that ignore request steps.
  */
-export const DISTILLED_MODEL_SAMPLE_STEPS = new Map<string, number>([
+export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
   ['flux-1-schnell-q4', 4],
   ['flux-2-klein-4b-q4', 4],
   ['sd-turbo', 4],
@@ -131,6 +129,7 @@ export const DISTILLED_MODEL_SAMPLE_STEPS = new Map<string, number>([
   ['krea-2-turbo-q6', 8],
   ['krea-2-turbo-q8', 8],
   ['ming-image-0.1-design-bf16', 12],
+  ['iris-3b-f32', 100],
 ]);
 
 /**
@@ -155,11 +154,13 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['sdxl-turbo', 1],
   ['sdxl-lightning-4step', 1],
   ['ming-image-0.1-design-bf16', 1],
+  ['iris-3b-f32', 3],
 ]);
 
-/** Pin Ming's reference sampler instead of inheriting the server default. */
+/** Pin samplers validated with the native engine for these models. */
 export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
   ['ming-image-0.1-design-bf16', 'Euler'],
+  ['iris-3b-f32', 'Euler'],
 ]);
 
 /**
@@ -225,8 +226,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
 
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const modelId = input.model ?? (await this.currentDefaultModelId());
-    // Ming's reference workflow starts at 1024px; 512px is the legacy SD default.
-    const defaultDimension = modelId === 'ming-image-0.1-design-bf16' ? 1024 : 512;
+    // Ming and Iris target 1024px; 512px is the legacy SD default.
+    const defaultDimension =
+      modelId === 'ming-image-0.1-design-bf16' || modelId === 'iris-3b-f32' ? 1024 : 512;
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
     const steps = input.steps ?? (await this.defaultSampleSteps(modelId));
@@ -704,7 +706,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
     ) {
       return fields.recommendedSteps;
     }
-    return DISTILLED_MODEL_SAMPLE_STEPS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
+    return MODEL_SAMPLE_STEP_DEFAULTS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
   }
 
   /**

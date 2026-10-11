@@ -3,7 +3,7 @@
  * Run from packages/service with the existing tsx runtime:
  * node --import tsx scripts/smoke-image-engine.ts --binary <sd-server>
  *   --models-home <gezel-home> --model <id> --output <directory>
- *   --prompt <text> [--width 1024] [--height 1024] [--expect-alpha]
+ *   --prompt <text> [--width 1024] [--height 1024] [--steps 20] [--expect-alpha]
  *
  * Model files are adopted through the read-only overlay and checksum-verified.
  * The temporary product home is removed; PNG and JSON evidence are retained.
@@ -28,6 +28,7 @@ const { values } = parseArgs({
     width: { type: 'string', default: '1024' },
     height: { type: 'string', default: '1024' },
     seed: { type: 'string', default: '42' },
+    steps: { type: 'string' },
     'expect-alpha': { type: 'boolean', default: false },
   },
 });
@@ -38,8 +39,10 @@ assert(
 const width = Number(values.width);
 const height = Number(values.height);
 const seed = Number(values.seed);
+const steps = values.steps === undefined ? undefined : Number(values.steps);
 assert(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0);
 assert(Number.isInteger(seed));
+assert(steps === undefined || (Number.isInteger(steps) && steps > 0));
 const output = resolve(values.output);
 await mkdir(output, { recursive: true });
 const home = await mkdtemp(join(tmpdir(), 'gezel-image-smoke-'));
@@ -80,6 +83,7 @@ try {
     width,
     height,
     seed,
+    ...(steps === undefined ? {} : { steps }),
     inline: true,
     saveAs: 'smoke/image.png',
   });
@@ -88,7 +92,7 @@ try {
   assert.equal(response.meta.widthPx, width);
   assert.equal(response.meta.heightPx, height);
   if (catalog.manifest.kind === 'image-model') {
-    assert.equal(response.meta.steps, catalog.manifest.recommendedSteps);
+    assert.equal(response.meta.steps, steps ?? catalog.manifest.recommendedSteps);
   }
   const artifact = await service.context.store.readProjectArtifactBinary(
     'default',

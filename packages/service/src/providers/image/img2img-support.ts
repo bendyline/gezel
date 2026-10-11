@@ -8,7 +8,7 @@
  * upstream, while newer diffusion-model architectures (FLUX.2's
  * LLM-encoder family, Krea 2's Qwen-Image lineage) are unverified on
  * the pinned sd-server — the same server build that already ignores
- * per-request step overrides for Krea (see DISTILLED_MODEL_SAMPLE_STEPS).
+ * per-request step overrides for Krea (see MODEL_SAMPLE_STEP_DEFAULTS).
  *
  * Resolution ladder, most explicit wins:
  *   1. `supportsImg2Img` declared on the catalog manifest (persisted
