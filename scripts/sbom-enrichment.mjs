@@ -707,7 +707,7 @@ export async function runtimeArtifacts({ repoRoot, versions }) {
   const mxcTarballSha = parseStringConstant(mxcSource, 'MXC_TARBALL_SHA256');
   const mxcIntegrity = parseStringConstant(mxcSource, 'MXC_TARBALL_INTEGRITY');
   const mxcExecutors = parseStringRecord(mxcSource, 'MXC_EXECUTOR_SHA256');
-  const mxcTargets = targets.filter((target) => target.startsWith('win32-'));
+  const mxcTargets = targets.filter((platform) => platform.startsWith('win32-'));
   if (!mxcIntegrity.startsWith('sha512-')) {
     throw new Error('mxc-pin.ts MXC_TARBALL_INTEGRITY is not a sha512 integrity');
   }

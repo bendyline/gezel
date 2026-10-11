@@ -51,7 +51,7 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
-import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
+import { ConnectorManager } from './connectors/manager.js';
 import {
   registerProductConnectorAdapters,
   wireProductConnectorTaskPreparation,
@@ -59,10 +59,7 @@ import {
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
-import {
-  clearCraftbookSuggestVectorCache,
-  listGlobalCraftbookCandidates,
-} from './craftbook/suggest.js';
+import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import {
   reopenIssuesForDismissedPack,
@@ -74,7 +71,6 @@ import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
-import { resolveVendoredMxc } from './engines/resolver.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
@@ -134,7 +130,6 @@ import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
-import { mailCatalogEntries } from './mail/search-catalog.js';
 import {
   ensureNightShiftOversightTask,
   isNightShiftOversightTask,
@@ -190,18 +185,12 @@ import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { writeRuntime } from './runtime-discovery.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
 import {
-  resolveMxcExecutor,
-  resolveWindowsMxcState,
-  setWindowsMxcEnabled,
-  setWindowsMxcHome,
-  windowsMxcState,
-} from './sandbox/windows-mxc.js';
+  startWindowsScriptSandbox,
+  windowsScriptSandboxStatus,
+} from './sandbox/windows-mxc-boot.js';
 import { ScriptRunner } from './scripts/runner.js';
-import {
-  CATALOG_RELEVANT_HISTORY_KINDS,
-  type ExtraSearchCatalogs,
-  SearchService,
-} from './search/search-service.js';
+import { buildExtraSearchCatalogs } from './search/extra-catalogs.js';
+import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-service.js';
 import { MemorySecretStore, openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import type { RunningService, StartServiceOptions } from './service-options.js';
@@ -2313,46 +2302,9 @@ export async function startProductService(
     catalog,
     device: createDaemonDeviceInfo({ store, chat }),
   });
-  // Late-boot name-catalog arms for the titlebar search: Handboek articles
-  // (previously the least findable content in the app) plus globally
-  // invokable craftbooks. Tasks ride the Store directly inside SearchService.
-  search.setExtraCatalogs({
-    handboekEntries: async () => {
-      const toc = await handboek.toc();
-      return toc.areas.flatMap((area) =>
-        area.entries.map((entry) => ({
-          id: entry.id,
-          title: entry.title,
-          keywords: [area.title, ...(entry.summary ? [entry.summary] : [])],
-        })),
-      );
-    },
-    craftbookEntries: async () =>
-      (await listGlobalCraftbookCandidates({ catalog, store, git })).map((c) => ({
-        id: c.id,
-        name: c.name,
-        source: c.source,
-      })),
-    // Mail messages by subject/sender: derived entirely from the connector
-    // corpus paths in the artifacts index — zero file reads. Bodies are
-    // already searchable through the artifacts content arm; this is the
-    // mail-shaped quick-open layer on top.
-    mailEntries: async () => {
-      const projects = await store.listProjects().catch(() => []);
-      const all: Awaited<ReturnType<NonNullable<ExtraSearchCatalogs['mailEntries']>>> = [];
-      for (const summary of projects) {
-        const project = await store.getProject(summary.id).catch(() => null);
-        const bindings = project?.connectors ?? [];
-        const corpusDirs = bindings
-          .filter((b) => b.type.startsWith('mail-'))
-          .map((b) => corpusDirFor(bindings, b));
-        if (corpusDirs.length === 0) continue;
-        const paths = await contentIndex.listArtifactIndexFiles(summary.id).catch(() => []);
-        all.push(...mailCatalogEntries(summary.id, corpusDirs, paths));
-      }
-      return all;
-    },
-  });
+  search.setExtraCatalogs(
+    buildExtraSearchCatalogs({ handboek, catalog, store, git, contentIndex }),
+  );
 
   // Ask once, at boot, whether this process may create children at all —
   // before any feature discovers the answer the expensive way. A denied
@@ -2360,21 +2312,7 @@ export async function startProductService(
   // all three at once, each at a different call site. See spawn-capability.ts.
   const childProcessSpawn = await probeChildProcessSpawn();
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
-  // Start the Windows container probe now, off the request path, so the
-  // first session's tool list already knows whether scripts can run.
-  else if (process.platform === 'win32') {
-    const sandboxConfig = await store.readConfig().catch(() => ({}) as GezelConfig);
-    setWindowsMxcEnabled(sandboxConfig.scriptSandbox?.windowsContainer !== false);
-    setWindowsMxcHome(home);
-    void resolveWindowsMxcState().then(async (state) => {
-      if (state.state !== 'unavailable' || resolveMxcExecutor()) return;
-      // npm and CLI installs have no supervisor to lay the launcher down.
-      const launcher = await resolveVendoredMxc(home, {
-        allowDownload: resolveSecurityPolicy(sandboxConfig).allowAppNetwork,
-      });
-      if (launcher) await resolveWindowsMxcState();
-    });
-  }
+  else if (process.platform === 'win32') await startWindowsScriptSandbox(store, home);
 
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
@@ -2475,9 +2413,7 @@ export async function startProductService(
     ensureModel,
     startedAt: nowIso(),
     childProcessSpawn,
-    ...(process.platform === 'win32'
-      ? { scriptSandbox: () => ({ boundary: 'windows-mxc' as const, ...windowsMxcState() }) }
-      : {}),
+    ...(process.platform === 'win32' ? { scriptSandbox: windowsScriptSandboxStatus } : {}),
     uiDir: opts.uiDir,
     folderJobs,
     storageJobs,

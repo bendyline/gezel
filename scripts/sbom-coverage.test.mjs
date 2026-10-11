@@ -768,7 +768,7 @@ test('every bundled runtime carries pinned digests for every installer target', 
   // The MXC launcher ships only in Windows installers, one per Windows arch,
   // and its tarball keeps npm's own sha512 beside the sha256.
   const mxc = artifacts['MXC launcher'];
-  const windowsTargets = [...targets].filter((target) => target.startsWith('win32-'));
+  const windowsTargets = [...targets].filter((platform) => platform.startsWith('win32-'));
   assert.ok(mxc.platforms.length > 0);
   assert.ok(mxc.platforms.every((key) => key.startsWith('win32-')));
   const mxcPins = parseStringRecord(
