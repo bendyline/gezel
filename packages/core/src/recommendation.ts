@@ -368,11 +368,10 @@ export function pickRecommendedModel(
 /**
  * Fast-memory budget available to a VIDEO generation, in bytes.
  *
- * Unlike the general {@link RecoDevice.usableBytes} (which reserves ~40% of
- * unified memory as headroom for a *coexisting* chat model), video generation
- * evicts the chat model first (the GPU arbiter's swap policy), so on Apple
- * unified memory it can use most of RAM — reserving only OS/process overhead.
- * Discrete GPUs are still bounded by their VRAM; CPU-only can't run these.
+ * @deprecated Disagrees with the daemon's own admission check. Read the
+ * daemon's verdict instead (`GET /api/video-gen/models/fit`), which prices the
+ * model with `videoMemoryRequirement` against the capacity the launch path
+ * actually admits. Kept only for semver; nothing in this repo calls it.
  */
 const VIDEO_UNIFIED_MEMORY_FRACTION = 0.8;
 export function videoMemoryBudgetBytes(device: RecoDevice): number {
@@ -384,14 +383,14 @@ export function videoMemoryBudgetBytes(device: RecoDevice): number {
 }
 
 /**
- * Simple fit check for a MEDIA model (image / video). Image generation leans
- * on system RAM (sd-cpp runs partly on CPU), so it gates on `minRamGB`; video
- * generation needs real GPU VRAM (or Apple unified memory), so it gates on
- * `minVramGB` against the video-specific budget above. A field left undefined
- * isn't checked. Audio models carry neither floor, so callers treat them as
- * always fitting. Deliberately coarser than the chat picker — there's one
- * recommended model per media modality, so this only answers "can this device
- * run it at all?".
+ * Fit check for a MEDIA model against the catalog's hand-authored
+ * `minRamGB` / `minVramGB`.
+ *
+ * @deprecated Those catalog figures are no longer authoritative and are being
+ * removed from the catalog. Read the daemon's verdict instead
+ * (`GET /api/image-gen/models/fit`, `GET /api/video-gen/models/fit`), which
+ * prices the model from its weight files with `media-memory.ts`. Kept only
+ * for semver; nothing in this repo calls it.
  */
 export function mediaModelFits(
   device: RecoDevice,

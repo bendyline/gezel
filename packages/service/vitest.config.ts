@@ -165,6 +165,10 @@ export default defineConfig({
       // the same thing on a workstation and on the runner; the tests that
       // exercise the constrained floor set it themselves.
       GEZEL_MIN_CONTEXT_TOKENS: '65536',
+      // Every test home is fresh; without this each one would be a new install
+      // whose background indexing waits half an hour. The first-use tests
+      // unset it themselves.
+      GEZEL_DISABLE_FIRST_USE_GRACE: '1',
     },
     projects: [
       {

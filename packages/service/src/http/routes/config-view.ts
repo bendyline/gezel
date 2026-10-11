@@ -169,6 +169,8 @@ export const CONFIG_RESPONSE_OMITTED: Readonly<Record<string, string>> = {
   externalFolders: 'owned by /api/folders (moves go through the move worker)',
   sharedProjectId: 'internal id of the shared-library project, resolved by the Store',
   executionDensity: 'legacy field migrated to generalistMode by Store.ensureLayout',
+  firstUseAt: 'install-age stamp written by Store.ensureLayout; read by the first-use graces',
+  firstUseIndexingReleasedAt: 'latch written by the first-use indexing hold',
   recognitionProvider: 'served by the /api/recognition routes',
   defaultRecognitionModel: 'served by the /api/recognition routes',
   modelFitness: SERVICE_OWNED,

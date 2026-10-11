@@ -68,6 +68,12 @@ export interface MemoryProfile {
   budgetBytes: number;
   /** GPU vendor when a GPU backs the budget — lets the UI say "AMD GPU". */
   gpuVendor?: GpuVendor;
+  /**
+   * Memory of the largest single NVIDIA card. `gpuVramBytes` sums every card,
+   * which is right for llama.cpp's layer split and wrong for an engine that
+   * runs on one device (the image and video engines).
+   */
+  gpuLargestDeviceBytes?: number;
 }
 
 interface CachedMemoryProfile {
@@ -138,6 +144,7 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
       source: 'gpu-nvidia',
       ...gpuBudget(nvidia.vramBytes, unified),
       gpuVendor: 'nvidia',
+      gpuLargestDeviceBytes: nvidia.largestDeviceBytes,
     };
   }
 
@@ -666,6 +673,8 @@ function clamp(value: number, min: number, max: number): number {
 
 export interface NvidiaMemoryProbe {
   vramBytes: number;
+  /** The largest single card: what a one-device engine can use. */
+  largestDeviceBytes: number;
   memoryKind: 'discrete' | 'unified';
   deviceNames: string[];
 }
@@ -704,6 +713,7 @@ export function parseNvidiaMemoryProbe(
   const unified = devices.every((device) => isKnownUnifiedNvidiaDevice(device.name));
   return {
     vramBytes: devices.reduce((sum, device) => sum + device.bytes, 0),
+    largestDeviceBytes: Math.max(...devices.map((device) => device.bytes)),
     memoryKind: unified ? 'unified' : 'discrete',
     deviceNames: devices.map((device) => device.name),
   };

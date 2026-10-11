@@ -41,6 +41,8 @@ export interface WorkspaceWatchManagerOptions {
    * device changed — and it has no tab activity to earn an MRU slot.
    */
   pinnedProjects?: () => string[];
+  /** Whether a file change waits to reach the index (a new install's first-use hold). */
+  holdsRefresh?: (projectId: string) => Promise<boolean>;
   watchImpl?: typeof watch;
 }
 
@@ -68,6 +70,7 @@ export class WorkspaceWatchManager {
   private readonly debounceMs: number;
   private readonly reconcileIntervalMs: number;
   private readonly pinnedProjects: () => string[];
+  private readonly holdsRefresh: (projectId: string) => Promise<boolean>;
   private readonly watchImpl: typeof watch;
 
   private readonly watchers = new Map<string, { dir: string; watcher: FSWatcher }>();
@@ -88,6 +91,7 @@ export class WorkspaceWatchManager {
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.reconcileIntervalMs = opts.reconcileIntervalMs ?? RECONCILE_INTERVAL_MS;
     this.pinnedProjects = opts.pinnedProjects ?? (() => []);
+    this.holdsRefresh = opts.holdsRefresh ?? (async () => false);
     this.watchImpl = opts.watchImpl ?? watch;
   }
 
@@ -202,9 +206,12 @@ export class WorkspaceWatchManager {
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       this.debounces.delete(projectId);
-      void this.indexManager
-        .refresh(projectId)
-        .catch((err) => log.warn(`refresh for ${projectId} failed: ${describe(err)}`));
+      void (async () => {
+        // A held change is not lost: the project reads as stale once the hold
+        // releases, and the background tick rescans it then.
+        if (await this.holdsRefresh(projectId)) return;
+        await this.indexManager.refresh(projectId);
+      })().catch((err) => log.warn(`refresh for ${projectId} failed: ${describe(err)}`));
     }, this.debounceMs);
     unref(timer);
     this.debounces.set(projectId, timer);

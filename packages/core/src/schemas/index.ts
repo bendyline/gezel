@@ -71,6 +71,7 @@ export * from './retrieval.js';
 export * from './retrieval-trace.js';
 export * from './relevance-model.js';
 export * from './video.js';
+export * from './media-fit.js';
 export * from './audio.js';
 export * from './script-input.js';
 export * from './handboek.js';

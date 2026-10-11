@@ -180,6 +180,38 @@ export const VAE_TILING_INCOMPATIBLE_MODELS = new Set<string>([
   'krea-2-turbo-q8',
 ]);
 
+/**
+ * The launch choices that change what sd-server holds in memory for one
+ * model. Read by the launch argv and by memory pricing, so the price is for
+ * the process that actually starts.
+ */
+export interface SdServerLoadProfile {
+  vaeDecode: 'tiled' | 'untiled' | 'none';
+  /** A `--tensor-type-rules` pattern whose tensors load as bfloat16. */
+  bf16TensorPattern?: string;
+  diffusionFlashAttention: boolean;
+}
+
+export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
+  if (modelId === 'iris-3b-f32') {
+    // Iris generates pixels directly: no VAE to tile. Upstream's Iris recipe
+    // enables diffusion flash attention for the 1024px sequence. The
+    // publisher stores F32 but runs with BF16 autocast, so only the diffusion
+    // weights convert at load, preserving the quantized encoder.
+    return {
+      vaeDecode: 'none',
+      bf16TensorPattern: '^model\\.diffusion_model\\.',
+      diffusionFlashAttention: true,
+    };
+  }
+  // Tiling avoids VAE-decode OOM on large images, but produces visible
+  // tile-boundary seams with some VAEs — see VAE_TILING_INCOMPATIBLE_MODELS.
+  return {
+    vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
+    diffusionFlashAttention: false,
+  };
+}
+
 export class StableDiffusionCppProvider implements ImageProvider {
   readonly name = 'sd-cpp';
   private readonly baseUrl: string;

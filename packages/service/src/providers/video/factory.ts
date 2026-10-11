@@ -19,8 +19,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GezelConfig, VideoAccelerator } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { videoMediaPool } from '../../models/media-fit.js';
 import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
+import { measuredCapacityBudget } from '../native/measured-budget.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
@@ -29,7 +31,7 @@ import { MockVideoProvider } from './mock.js';
 import { type InstalledVideoModel, VideoModelManager, VideoModelSelector } from './models.js';
 import type { VideoProvider } from './types.js';
 import { VIDEO_VENV_NAME, detectVideoAccelerator, videoVenvSpec } from './venv.js';
-import { estimateVideoWorkingSet } from './working-set.js';
+import { estimateVideoRequirement } from './working-set.js';
 
 export interface VideoProviderFactoryOptions {
   home: string;
@@ -77,18 +79,23 @@ export async function createVideoProvider(
     capacity: {
       home: opts.home,
       exclusive: true,
-      // Price the bound model from its own weights at load precision; the
-      // generic disk-size estimate refuses every LTX-2.x model on a 128 GB Mac.
+      // Price the bound model from its own weights at load precision — the
+      // same pricing the download page used — and say what sits on the card.
+      // Without an explicit gpuBytes the ledger clamps a discrete request to
+      // the card's size, so it could never refuse a model whose weights do not
+      // fit it.
       requirement: async () => {
         const model = selector.launchedId ? await models.resolveModel(selector.launchedId) : null;
         if (!model) return undefined;
-        const { bytes } = await estimateVideoWorkingSet({
+        const budget = await measuredCapacityBudget();
+        const { bytes, gpuBytes } = await estimateVideoRequirement({
           modelDir: model.modelDir,
           family: model.family,
           accelerator,
+          pool: videoMediaPool(accelerator, budget.kind),
           ...(model.load?.vaeDtype ? { vaeDtype: model.load.vaeDtype } : {}),
         });
-        return { bytes };
+        return { bytes, gpuBytes };
       },
     },
     logPrefix: '[video-server]',

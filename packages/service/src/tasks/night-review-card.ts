@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
   type GezelConfig,
+  QUIET_NIGHT_GRACE_MS,
   type Question,
   createLogger,
   formatNightShiftSummary,
   hasNightShiftIndexing,
+  isWithinFirstUse,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { DiffpackManager } from '../diffpack/manager.js';
@@ -95,17 +97,25 @@ export async function postNightShiftReviewCard(
       }
     : undefined;
   const swept = hasNightShiftIndexing(indexing);
+  const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+  const empty =
+    review.tasksCompleted.length === 0 &&
+    review.reports.length === 0 &&
+    review.diffpacks.length === 0 &&
+    !swept;
+  // A new install hears about the nights that produced something, never the
+  // ones that didn't: on day one the "night before" predates the crew, and
+  // for a few days after there is rarely anything it was owed.
+  if (empty && isWithinFirstUse(config.firstUseAt, settledAt.getTime(), QUIET_NIGHT_GRACE_MS)) {
+    log.debug(`[night-shift] ${windowKey}: quiet night during first use; no card`);
+    return;
+  }
   const weeklyRecap = await writeWeeklyRecap({ store, history }, settledAt).catch(
     (err: unknown) => {
       log.warn(`[night-shift] weekly recap failed: ${String(err)}`);
       return null;
     },
   );
-  const empty =
-    review.tasksCompleted.length === 0 &&
-    review.reports.length === 0 &&
-    review.diffpacks.length === 0 &&
-    !swept;
   if (empty && !pausedReview && !weeklyRecap) {
     // A night that produced nothing still gets a card saying why — but only
     // when work was owed. An install with no folders and nothing queued
@@ -118,7 +128,6 @@ export async function postNightShiftReviewCard(
     if (!owed) return;
   }
   const quiet = empty ? { reason: outcome.reason ?? ('no-work' as const) } : undefined;
-  const config = await store.readConfig().catch(() => ({}) as GezelConfig);
   // `suggested`, not `total`: the tally is a call to action, and an
   // action already fired or dismissed is not one the user still owes
   // a look. Same count Home's "Last night" panel names.

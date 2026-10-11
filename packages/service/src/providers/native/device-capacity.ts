@@ -20,6 +20,7 @@ import {
   availableSystemRamBytes,
   liveRamOsReserveBytes,
 } from './capacity-broker.js';
+import type { CapacityBudget } from './capacity-budget.js';
 import { DeviceCapacityLedger, type DeviceCapacitySample } from './device-capacity-ledger.js';
 import { measuredCapacityBudget } from './measured-budget.js';
 import type { NativeEngineLaunch } from './supervisor.js';
@@ -180,15 +181,46 @@ export async function measureAvailableGpuBytes(): Promise<number | undefined> {
   );
 }
 
+/** The engine memory limit the person set in Settings, in bytes, when they set one. */
+export function configuredEngineMemoryBytes(config: {
+  localEngineMemoryGb?: number | null | undefined;
+}): number | undefined {
+  return typeof config.localEngineMemoryGb === 'number' && config.localEngineMemoryGb > 0
+    ? config.localEngineMemoryGb * GIB
+    : undefined;
+}
+
+/**
+ * The ledger's static ceilings: a request above either is refused at acquire,
+ * whatever else is running. Shared with the media fit check so a model the
+ * download pages hide is exactly one the launch path refuses. Omit
+ * `configuredBytes` for the machine's automatic ceilings.
+ */
+export function staticCapacityCeilings(
+  budget: Pick<CapacityBudget, 'budgetBytes' | 'fastBytes' | 'kind'>,
+  ramBytes: number,
+  configuredBytes?: number,
+): { budgetBytes: number; gpuBudgetBytes: number } {
+  const budgetBytes =
+    configuredBytes === undefined
+      ? budget.budgetBytes
+      : Math.min(configuredBytes, budget.budgetBytes);
+  return {
+    budgetBytes,
+    // Keep non-reclaimable accelerator commitments on the conservative curve;
+    // a larger RAM budget is not permission to wire the whole machine.
+    gpuBudgetBytes: Math.min(
+      budgetBytes,
+      budget.kind === 'unified' ? Math.min(budget.fastBytes, ramBytes * 0.75) : budget.fastBytes,
+    ),
+  };
+}
+
 export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacitySample> {
   const budget = await measuredCapacityBudget();
   const ram = totalmem();
   const config = home ? await new ConfigStore(home).readConfig() : {};
-  const configuredBytes =
-    typeof config.localEngineMemoryGb === 'number' && config.localEngineMemoryGb > 0
-      ? config.localEngineMemoryGb * GIB
-      : budget.budgetBytes;
-  const budgetBytes = Math.min(configuredBytes, budget.budgetBytes);
+  const ceilings = staticCapacityCeilings(budget, ram, configuredEngineMemoryBytes(config));
   // The ledger's RAM ceiling and the OS's currently reclaimable RAM answer
   // different questions. Checking both catches tenants outside this protocol.
   //
@@ -202,13 +234,7 @@ export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacit
   const availableGpuBytes =
     budget.kind === 'discrete-gpu' ? await measureAvailableGpuBytes() : undefined;
   return {
-    budgetBytes,
-    // Keep non-reclaimable accelerator commitments on the conservative curve;
-    // a larger RAM budget is not permission to wire the whole machine.
-    gpuBudgetBytes: Math.min(
-      budgetBytes,
-      budget.kind === 'unified' ? Math.min(budget.fastBytes, ram * 0.75) : budget.fastBytes,
-    ),
+    ...ceilings,
     availableBytes,
     ...(availableGpuBytes !== undefined ? { availableGpuBytes } : {}),
     serializeLoads: process.platform === 'darwin',

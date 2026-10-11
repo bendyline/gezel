@@ -1,6 +1,8 @@
 import type {
   CatalogItemSummary,
   ChatModelManifest,
+  MediaFitVerdict,
+  MediaModelFitResponse,
   NativeEngineName,
   RecoDevice,
 } from '@bendyline/gezel';
@@ -9,7 +11,6 @@ import {
   formatModelAttribution,
   isMoEFromTags,
   isRecommendedModel,
-  mediaModelFits,
   pickRecommendedModel,
 } from '@bendyline/gezel';
 
@@ -45,6 +46,14 @@ export interface AccessoryInputs {
   };
   recognition: Array<AccessoryCatalogModel>;
   installed: Partial<Record<AccessoryKind, ReadonlySet<string>>>;
+  /**
+   * The daemon's verdict per catalog id (`/models/fit`). Null when it could
+   * not answer: then no image or video model is recommended.
+   */
+  fit: {
+    image: ReadonlyMap<string, MediaFitVerdict> | null;
+    video: ReadonlyMap<string, MediaFitVerdict> | null;
+  };
 }
 
 interface AccessoryCatalogModel {
@@ -53,9 +62,15 @@ interface AccessoryCatalogModel {
   approxSizeBytes: number;
   recoScore?: number;
   licenseClass?: string;
-  minRamGB?: number;
-  minVramGB?: number;
+  tags?: string[];
   auxiliaryFiles?: Array<{ sizeBytes?: number }>;
+}
+
+/** Verdicts by catalog id from a `/models/fit` answer, or null without one. */
+export function fitVerdicts(
+  res: MediaModelFitResponse | null,
+): ReadonlyMap<string, MediaFitVerdict> | null {
+  return res ? new Map(res.models.map((m) => [m.id, m.verdict])) : null;
 }
 
 const CHAT_MEMORY_OVERHEAD: Record<BootstrapChatProvider, number> = {
@@ -165,12 +180,9 @@ export function bootstrapChatModelLabel(model: BootstrapChatModel): string {
 }
 
 /** Recommended accessory models that fit, excluding anything already installed. */
-export function pickAccessoryModels(
-  input: AccessoryInputs,
-  device: RecoDevice,
-): BootstrapAccessoryModel[] {
+export function pickAccessoryModels(input: AccessoryInputs): BootstrapAccessoryModel[] {
   const output: BootstrapAccessoryModel[] = [];
-  const image = pickCatalogMedia(input.imageItems, device, 'image');
+  const image = pickCatalogMedia(input.imageItems, input.fit.image);
   if (image && !input.installed.image?.has(image.id)) {
     output.push({
       kind: 'image',
@@ -211,7 +223,7 @@ export function pickAccessoryModels(
       approxSizeBytes: tts.approxSizeBytes,
     });
   }
-  const video = pickCatalogMedia(input.videoItems, device, 'video');
+  const video = pickCatalogMedia(input.videoItems, input.fit.video);
   if (video && !input.installed.video?.has(video.id)) {
     output.push({
       kind: 'video',
@@ -242,20 +254,14 @@ function fitOrder(fit: BootstrapChatModel['fit']): number {
   }
 }
 
+/** The best recommended image or video model the daemon says fits outright. */
 function pickCatalogMedia(
   items: readonly CatalogItemSummary[],
-  device: RecoDevice,
-  kind: 'image' | 'video',
+  verdicts: ReadonlyMap<string, MediaFitVerdict> | null,
 ): AccessoryCatalogModel | null {
   const models = items
     .map((item) => item.manifest as unknown as AccessoryCatalogModel)
-    .filter((model) => {
-      if (model.licenseClass !== 'open' || !model.recoScore) return false;
-      return mediaModelFits(
-        device,
-        kind === 'image' ? { minRamGB: model.minRamGB } : { minVramGB: model.minVramGB },
-      );
-    });
+    .filter((model) => isRecommendedModel(model) && verdicts?.get(model.id) === 'fits');
   return pickScoredOpen(models);
 }
 

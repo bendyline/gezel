@@ -341,7 +341,9 @@ describe('IndexEnrichmentManager idle gating', () => {
 
 describe('review tier scheduling', () => {
   function makeReviewFixture(
-    opts: { drained: boolean; paused?: boolean; night?: boolean } = { drained: true },
+    opts: { drained: boolean; paused?: boolean; held?: boolean; night?: boolean } = {
+      drained: true,
+    },
   ) {
     const enrich = vi
       .fn()
@@ -378,6 +380,7 @@ describe('review tier scheduling', () => {
       idle,
       ...(opts.night ? { isNightShiftActive: () => true } : {}),
       ...(opts.paused ? { isPaused: () => true } : {}),
+      ...(opts.held ? { isBackgroundHeld: async () => true } : {}),
       resolveBoekwachter: async () => BOOK,
     });
     return { mgr, enrich, enrichAreas, review };
@@ -400,6 +403,13 @@ describe('review tier scheduling', () => {
 
   it('paused → neither enrich nor review runs', async () => {
     const { mgr, enrich, review } = makeReviewFixture({ drained: true, paused: true });
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  it('first-use hold → the background loop waits, even at night', async () => {
+    const { mgr, enrich, review } = makeReviewFixture({ drained: true, held: true, night: true });
     await mgr.tick();
     expect(enrich).not.toHaveBeenCalled();
     expect(review).not.toHaveBeenCalled();

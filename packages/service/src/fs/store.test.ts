@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Project, TaskSchema, isSharedLibraryProject, seedCharacter } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigCorruptionError, Store, pickRoleBasedName } from './store.js';
 
 let home: string;
@@ -25,6 +25,41 @@ describe('ensureLayout', () => {
     expect(existsSync(join(home, 'projects'))).toBe(true);
     expect(existsSync(join(home, 'runtime'))).toBe(true);
     expect(existsSync(join(home, 'logs'))).toBe(true);
+  });
+
+  describe('first use', () => {
+    let fresh: string;
+    beforeEach(async () => {
+      // The suite runs with the grace off; these tests are about the stamp.
+      vi.stubEnv('GEZEL_DISABLE_FIRST_USE_GRACE', '');
+      fresh = await mkdtemp(join(tmpdir(), 'lv-first-use-'));
+    });
+    afterEach(async () => {
+      vi.unstubAllEnvs();
+      await rm(fresh, { recursive: true, force: true });
+    });
+
+    it('stamps an empty home and keeps the first stamp on reboot', async () => {
+      await new Store({ home: fresh }).ensureLayout();
+      const { firstUseAt } = await new Store({ home: fresh }).readConfig();
+      expect(firstUseAt).toBeDefined();
+      expect(Date.now() - Date.parse(firstUseAt!)).toBeLessThan(60_000);
+
+      await new Store({ home: fresh }).ensureLayout();
+      expect((await new Store({ home: fresh }).readConfig()).firstUseAt).toBe(firstUseAt);
+    });
+
+    it('never stamps a home that already has gezels', async () => {
+      await mkdir(join(fresh, 'gezels', 'old-timer'), { recursive: true });
+      await new Store({ home: fresh }).ensureLayout();
+      expect((await new Store({ home: fresh }).readConfig()).firstUseAt).toBeUndefined();
+    });
+
+    it('leaves a harness home established when the grace is turned off', async () => {
+      vi.stubEnv('GEZEL_DISABLE_FIRST_USE_GRACE', '1');
+      await new Store({ home: fresh }).ensureLayout();
+      expect((await new Store({ home: fresh }).readConfig()).firstUseAt).toBeUndefined();
+    });
   });
 
   it.runIf(process.platform !== 'win32')('repairs an existing per-user home to 0700', async () => {

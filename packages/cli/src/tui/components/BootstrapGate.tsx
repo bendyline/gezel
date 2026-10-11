@@ -22,6 +22,7 @@ import {
   type BootstrapChatProvider,
   NATIVE_TOOLKIT,
   bootstrapChatModelLabel,
+  fitVerdicts,
   formatDownloadSize,
   pickAccessoryModels,
   rankChatModels,
@@ -141,6 +142,8 @@ export function BootstrapGate(props: {
         installedStt,
         installedTts,
         installedRecognition,
+        imageFit,
+        videoFit,
       ] = await Promise.all([
         client.listCatalogItems('image-model').catch(() => ({ items: [] })),
         client.listCatalogItems('video-model').catch(() => ({ items: [] })),
@@ -151,6 +154,8 @@ export function BootstrapGate(props: {
         client.listInstalledSttModels().catch(() => ({ models: [] })),
         client.listInstalledTtsModels().catch(() => ({ models: [] })),
         client.listInstalledRecognitionModels().catch(() => ({ models: [] })),
+        client.getImageModelFit().catch(() => null),
+        client.getVideoModelFit().catch(() => null),
       ]);
       const installedIds = new Set(installedChat.models.map((model) => model.id));
       const rankedChatModels = rankChatModels(
@@ -176,22 +181,20 @@ export function BootstrapGate(props: {
         });
         return;
       }
-      const accessories = pickAccessoryModels(
-        {
-          imageItems: imageCatalog.items,
-          videoItems: videoCatalog.items,
-          audio: audioCatalog,
-          recognition: recognitionCatalog.models,
-          installed: {
-            image: idSet(installedImage.models),
-            video: idSet(installedVideo.models),
-            stt: idSet(installedStt.models),
-            tts: idSet(installedTts.models),
-            recognition: idSet(installedRecognition.models),
-          },
+      const accessories = pickAccessoryModels({
+        imageItems: imageCatalog.items,
+        videoItems: videoCatalog.items,
+        audio: audioCatalog,
+        recognition: recognitionCatalog.models,
+        installed: {
+          image: idSet(installedImage.models),
+          video: idSet(installedVideo.models),
+          stt: idSet(installedStt.models),
+          tts: idSet(installedTts.models),
+          recognition: idSet(installedRecognition.models),
         },
-        context.device,
-      );
+        fit: { image: fitVerdicts(imageFit), video: fitVerdicts(videoFit) },
+      });
       setScreen({
         kind: 'model-choice',
         plan: {

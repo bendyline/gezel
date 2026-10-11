@@ -40,13 +40,13 @@ import {
   resolvePlatformKey,
   windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
-import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import {
   type DownloadResult,
   downloadWithRetry,
   friendlyErrors,
 } from '../utils/download-with-retry.js';
+import { extractZip } from '../utils/extract-zip.js';
 import {
   NATIVE_ENGINE_ARCHIVE_SHA256,
   SHA256SUMS_DIGEST,
@@ -104,7 +104,19 @@ export class EngineUnavailableError extends Error {
   }
 }
 
-export type EngineResolveEvent = NativeEngineResolveEvent;
+/**
+ * Unpacking progress. Deliberately not in NativeEngineResolveEventSchema: the
+ * install stream's clients parse that schema strictly, so a new event type on
+ * the wire would fail an older CLI mid-install. The registry snapshot carries
+ * it instead, and the stream route sends only a heartbeat for it.
+ */
+export interface EngineExtractingEvent {
+  type: 'extracting';
+  bytesWritten: number;
+  totalBytes: number;
+}
+
+export type EngineResolveEvent = NativeEngineResolveEvent | EngineExtractingEvent;
 
 export interface ResolveEngineOptions {
   engine: NativeBinaryName;
@@ -314,7 +326,9 @@ async function* resolveVendoredDuckdb(
 
   await mkdir(tmpExtractDir, { recursive: true });
   try {
-    new AdmZip(partialPath).extractAllTo(tmpExtractDir, /* overwrite */ true);
+    yield* extractWithProgress((onProgress) =>
+      extractZip(partialPath, tmpExtractDir, { ...signalOpt(opts.signal), onProgress }),
+    );
   } finally {
     await rm(partialPath, { force: true });
   }
@@ -859,11 +873,11 @@ export async function* resolveEngine(
   // ── 5. Extract into a temp dir ──
   await mkdir(tmpExtractDir, { recursive: true });
   try {
-    if (ext === 'zip') {
-      new AdmZip(partialPath).extractAllTo(tmpExtractDir, /* overwrite */ true);
-    } else {
-      await tar.extract({ file: partialPath, cwd: tmpExtractDir });
-    }
+    yield* extractWithProgress((onProgress) =>
+      ext === 'zip'
+        ? extractZip(partialPath, tmpExtractDir, { ...signalOpt(opts.signal), onProgress })
+        : tar.extract({ file: partialPath, cwd: tmpExtractDir }),
+    );
   } finally {
     await rm(partialPath, { force: true });
   }
@@ -945,6 +959,39 @@ export async function resolveEngineToCompletion(
 }
 
 // ── helpers ──
+
+const EXTRACT_PROGRESS_INTERVAL_MS = 500;
+
+/**
+ * Run an archive extraction, yielding `extracting` progress until it settles.
+ * A tar extraction reports no byte counts, so its events carry zeros and the
+ * person sees the phase without a percentage.
+ */
+async function* extractWithProgress(
+  run: (onProgress: (bytesWritten: number, totalBytes: number) => void) => Promise<void>,
+): AsyncGenerator<EngineResolveEvent, void, void> {
+  let progress = { bytesWritten: 0, totalBytes: 0 };
+  const work = run((bytesWritten, totalBytes) => {
+    progress = { bytesWritten, totalBytes };
+  });
+  const settled = work.then(
+    () => true,
+    () => true,
+  );
+  const tick = () =>
+    new Promise<false>((resolve) => {
+      setTimeout(() => resolve(false), EXTRACT_PROGRESS_INTERVAL_MS).unref?.();
+    });
+  yield { type: 'extracting', ...progress };
+  while (!(await Promise.race([settled, tick()]))) {
+    yield { type: 'extracting', ...progress };
+  }
+  await work;
+}
+
+function signalOpt(signal: AbortSignal | undefined): { signal?: AbortSignal } {
+  return signal ? { signal } : {};
+}
 
 /** Yield a terminal error event, then throw on the next pull. */
 async function* fail(message: string): AsyncGenerator<EngineResolveEvent, never, void> {

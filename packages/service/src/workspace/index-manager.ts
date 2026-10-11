@@ -6,6 +6,7 @@ import {
   type DiscoveredInstruction,
   type DiscoveredSkill,
   KeyedLock,
+  type Project,
   type WorkspaceCommandIndex,
   type WorkspaceIndexMeta,
   type WorkspaceIndexStatus,
@@ -114,6 +115,11 @@ export interface WorkspaceIndexManagerOptions {
    * folder, instead of waiting for the 3-minute OS-idle background tick.
    */
   onScanComplete?: (projectId: string) => void;
+  /**
+   * Whether the background tick skips this project for now (a new install's
+   * first-use hold). Explicit `refresh` / `refreshAndWait` never consult it.
+   */
+  holdsBackgroundScan?: (project: Project) => Promise<boolean>;
 }
 
 export class WorkspaceIndexManager {
@@ -126,6 +132,7 @@ export class WorkspaceIndexManager {
   private readonly intervalMs: number;
   private readonly startupDelayMs: number;
   private onScanComplete: ((projectId: string) => void) | undefined;
+  private readonly holdsBackgroundScan: ((project: Project) => Promise<boolean>) | undefined;
   private readonly state = new Map<string, ProjectIndexState>();
   /** Per-project promise chain so two concurrent scans on the same
    *  project serialize rather than racing on the disk. */
@@ -156,6 +163,7 @@ export class WorkspaceIndexManager {
     this.intervalMs = opts.intervalMs ?? TICK_INTERVAL_MS;
     this.startupDelayMs = opts.startupDelayMs ?? STARTUP_DELAY_MS;
     this.onScanComplete = opts.onScanComplete;
+    this.holdsBackgroundScan = opts.holdsBackgroundScan;
   }
 
   /**
@@ -411,6 +419,7 @@ export class WorkspaceIndexManager {
       const project = projects.find((candidate) => candidate.id === projectId);
       if (project?.indexingEnabled === false) continue;
       if (this.chat.isProjectActive(projectId)) continue;
+      if (project && (await this.holdsBackgroundScan?.(project))) continue;
       const status = await this.status(projectId);
       if (status.state === 'fresh' || status.state === 'indexing') continue;
       const threshold = thresholdFor(i);

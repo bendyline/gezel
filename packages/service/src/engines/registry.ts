@@ -37,11 +37,27 @@ export interface EngineBinarySnapshot {
   startedAt: string;
   bytesWritten: number;
   totalBytes: number;
-  phase: 'downloading' | 'verifying';
+  phase: 'downloading' | 'verifying' | 'extracting';
+  /** Unpacking progress; `totalBytes` is 0 when the archive format reports none. */
+  extracted?: { bytesWritten: number; totalBytes: number };
   retrying?: { attempt: number; maxAttempts: number; delayMs: number; reason: string };
   finished: boolean;
   error?: string;
   binPath?: string;
+}
+
+/** What an engine install is doing right now, in words a person can read. */
+export function engineInstallPhase(
+  snapshot: Pick<EngineBinarySnapshot, 'phase' | 'bytesWritten' | 'totalBytes' | 'extracted'>,
+): string {
+  const pct = (done: number, total: number) =>
+    total > 0 ? ` (${Math.floor((done / total) * 100)}%)` : '';
+  if (snapshot.phase === 'extracting') {
+    const { bytesWritten = 0, totalBytes = 0 } = snapshot.extracted ?? {};
+    return `is unpacking${pct(bytesWritten, totalBytes)}`;
+  }
+  if (snapshot.phase === 'verifying') return 'is being checked';
+  return `is downloading${pct(snapshot.bytesWritten, snapshot.totalBytes)}`;
 }
 
 type Listener = (event: EngineResolveEvent) => void;
@@ -225,6 +241,9 @@ export class EngineBinaryRegistry {
     } else if (event.type === 'verifying') {
       s.phase = 'verifying';
       delete s.retrying;
+    } else if (event.type === 'extracting') {
+      s.phase = 'extracting';
+      s.extracted = { bytesWritten: event.bytesWritten, totalBytes: event.totalBytes };
     } else if (event.type === 'done') {
       s.binPath = event.binPath;
       delete s.retrying;

@@ -17,7 +17,6 @@ const imageItem = {
     recoScore: 20,
     licenseClass: 'open',
     approxSizeBytes: 2.46 * GB,
-    minRamGB: 16,
     auxiliaryFiles: [{ sizeBytes: 0.25 * GB }, { sizeBytes: 2.5 * GB }],
   },
 };
@@ -29,9 +28,32 @@ const videoItem = {
     recoScore: 20,
     licenseClass: 'open',
     approxSizeBytes: 34 * GB,
-    minVramGB: 24,
   },
 };
+
+/** The daemon's verdict for one model, as `/models/fit` reports it. */
+function fitResponse(id: string, verdict: string) {
+  return {
+    pool: 'unified',
+    budgetBytes: 48 * GB,
+    gpuBudgetBytes: 48 * GB,
+    totalRamBytes: 64 * GB,
+    models: [
+      {
+        id,
+        verdict,
+        pool: 'unified',
+        weightBytes: GB,
+        bytes: GB,
+        gpuBytes: GB,
+        exact: true,
+        neededBytes: GB,
+        availableBytes: 48 * GB,
+        reason: '',
+      },
+    ],
+  };
+}
 const audioCatalog = {
   stt: [
     {
@@ -61,13 +83,22 @@ const recognitionModel = {
   recoScore: 20,
 };
 
-function seedApi(mem: {
-  platform: string;
-  gpuVramBytes: number | null;
-  totalRamBytes: number;
-  usableBytes: number;
-}) {
+function seedApi(
+  mem: {
+    platform: string;
+    gpuVramBytes: number | null;
+    totalRamBytes: number;
+    usableBytes: number;
+  },
+  verdicts: { image?: string; video?: string } = {},
+) {
   vi.mocked(api.getMemoryProfile).mockResolvedValue(mem as never);
+  vi.mocked(api.getImageModelFit).mockResolvedValue(
+    fitResponse(imageItem.manifest.id, verdicts.image ?? 'fits') as never,
+  );
+  vi.mocked(api.getVideoModelFit).mockResolvedValue(
+    fitResponse(videoItem.manifest.id, verdicts.video ?? 'fits') as never,
+  );
   vi.mocked(api.listCatalogItems).mockImplementation(((kind: string) =>
     Promise.resolve({
       items: kind === 'image-model' ? [imageItem] : kind === 'video-model' ? [videoItem] : [],
@@ -123,21 +154,42 @@ describe('RecommendedMediaDownloads', () => {
     expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).toBeInTheDocument();
   });
 
-  it('hides the video model when the device lacks the VRAM floor', async () => {
-    seedApi({
-      platform: 'linux',
-      gpuVramBytes: null,
-      totalRamBytes: 32 * GB,
-      usableBytes: 16 * GB,
-    });
+  it('recommends only a model the daemon says fits outright', async () => {
+    seedApi(
+      {
+        platform: 'linux',
+        gpuVramBytes: null,
+        totalRamBytes: 32 * GB,
+        usableBytes: 16 * GB,
+      },
+      { video: 'tight' },
+    );
     render(<RecommendedMediaDownloads />);
-    // Image (RAM 32 ≥ 16) + both audio still appear in the plan dialog…
+    // Image + both audio still appear in the plan dialog…
     fireEvent.click(
       await screen.findByRole('button', { name: /Also download the optional media models/ }),
     );
     expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
-    // …but the 24 GB-VRAM video model is hidden on a GPU-less box.
+    // …but a video model that may run short is never the recommendation.
+    expect(screen.queryByRole('checkbox', { name: /Wan 2\.2/ })).not.toBeInTheDocument();
+  });
+
+  it('recommends no image or video model when the daemon cannot say what fits', async () => {
+    seedApi({
+      platform: 'darwin',
+      gpuVramBytes: null,
+      totalRamBytes: 64 * GB,
+      usableBytes: 40 * GB,
+    });
+    vi.mocked(api.getImageModelFit).mockRejectedValue(new Error('404'));
+    vi.mocked(api.getVideoModelFit).mockRejectedValue(new Error('404'));
+    render(<RecommendedMediaDownloads />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+    );
+    expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /FLUX\.2 Klein/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Wan 2\.2/ })).not.toBeInTheDocument();
   });
 

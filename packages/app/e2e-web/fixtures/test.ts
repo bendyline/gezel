@@ -73,6 +73,9 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       // extraction prompt or start embedding work after a test has begun.
       process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = '1';
       process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
+      // The seeded world is an established install: no first-use hold on its
+      // background indexing, no first-use quiet on its night reports.
+      process.env.GEZEL_DISABLE_FIRST_USE_GRACE = '1';
 
       const home = await mkdtemp(
         join(tmpdir(), `gezel-web-e2e-${daemonGroup}-w${workerInfo.workerIndex}-`),

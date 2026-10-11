@@ -12,6 +12,7 @@ import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
+import { engineInstallPhase } from '../../engines/registry.js';
 import { localDeviceSettingsLabel, noModelYetMessage } from '../active-install-message.js';
 import {
   resolveCatalogLlamaCppEngineConfig,
@@ -91,15 +92,9 @@ export function ensureLlamaEngineStatus(
   if (snapshot.error) {
     return { detail: `On-device engine couldn't be downloaded: ${snapshot.error}` };
   }
-  const pct =
-    snapshot.totalBytes > 0
-      ? Math.floor((snapshot.bytesWritten / snapshot.totalBytes) * 100)
-      : null;
   const where = backend ? `, ${backend}` : '';
   return {
-    detail: `On-device engine (llama-server${where}) is downloading${
-      pct !== null ? ` (${pct}%)` : ''
-    }. It'll be ready shortly — try again in a moment.`,
+    detail: `On-device engine (llama-server${where}) ${engineInstallPhase(snapshot)}. It'll be ready shortly — try again in a moment.`,
   };
 }
 

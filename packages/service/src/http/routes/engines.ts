@@ -353,6 +353,12 @@ async function subscribeEngineSse(
   const unsubscribe = ctx.engineBinaries.subscribe(key, (event) => {
     if (done) return;
     writes = writes.then(async () => {
+      if (event.type === 'extracting') {
+        // Off the wire (see EngineExtractingEvent). The comment keeps the
+        // client's stall timer from firing during a long unpack.
+        await stream.write(': extracting\n\n').catch(() => {});
+        return;
+      }
       if (event.type === 'done' && engine) {
         // A refresh failure must not break the write chain: the 'done'
         // write and the finished latch below still have to run, and a

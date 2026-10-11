@@ -27,6 +27,7 @@
 
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
+import { imageMediaPool, sdServerRequirement } from '../../models/media-fit.js';
 import {
   type ModelStorageRoots,
   findModelRoot,
@@ -34,9 +35,11 @@ import {
   modelStorageRoots,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
+import { localSdCppWeightFiles } from '../../models/weight-facts.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeCapacityOptions } from '../native/device-capacity.js';
+import { measuredCapacityBudget } from '../native/measured-budget.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
@@ -46,7 +49,7 @@ import { OpenAIImageProvider } from './openai-image.js';
 import {
   MODEL_SAMPLE_STEP_DEFAULTS,
   StableDiffusionCppProvider,
-  VAE_TILING_INCOMPATIBLE_MODELS,
+  sdServerLoadProfile,
 } from './sd-cpp.js';
 import type { ImageProvider, InstalledImageModelInfo } from './types.js';
 
@@ -148,8 +151,26 @@ export async function createImageProvider(
     // provider sets this to the requested model and stops the server
     // when it changes; resolveLaunch reads it on the next start.
     const launchState: { modelId: string | undefined } = { modelId: undefined };
+    let launchedModel: ResolvedInstalledModel | undefined;
     const supervisor = new NativeEngineSupervisor({
-      capacity: sdServerCapacity(opts.home),
+      capacity: {
+        ...sdServerCapacity(opts.home),
+        // Price the launched model from its own weight files — the same
+        // pricing the download page used — and say what sits on the card.
+        // The generic fallback priced disk bytes x 1.5 and let the ledger
+        // clamp a discrete request to the card's size.
+        requirement: async () => {
+          if (!launchedModel) return undefined;
+          const budget = await measuredCapacityBudget();
+          const { bytes, gpuBytes } = sdServerRequirement({
+            modelId: launchedModel.id,
+            weightsKind: launchedModel.weightsKind,
+            files: await localSdCppWeightFiles(launchedModel),
+            pool: imageMediaPool(budget.kind),
+          });
+          return { bytes, gpuBytes };
+        },
+      },
       logPrefix: '[sd-server]',
       // sd-server doesn't expose `/health`; the master-587 build serves
       // either an HTML file (when --serve-html-path is set) or a 404 at
@@ -181,6 +202,7 @@ export async function createImageProvider(
             'No image model is available locally. Download one from Settings → Image generation before generating.',
           );
         }
+        launchedModel = model;
         return {
           command: binary,
           args: buildSdServerArgs(model, port),
@@ -322,18 +344,12 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
   }
   const steps = MODEL_SAMPLE_STEP_DEFAULTS.get(model.id);
   if (steps) args.push('--steps', String(steps));
-  // Tiling avoids VAE-decode OOM on large images, but produces visible
-  // tile-boundary seams with some VAEs (Krea 2's Qwen-Image VAE). Skip
-  // it for those models — see VAE_TILING_INCOMPATIBLE_MODELS.
-  if (model.id === 'iris-3b-f32') {
-    // Iris generates pixels directly: no VAE to tile. Upstream's Iris
-    // recipe enables diffusion flash attention for the 1024px sequence.
-    // The publisher stores F32 but runs with BF16 autocast. Convert only
-    // diffusion weights at load time, preserving the quantized encoder.
-    args.push('--diffusion-fa', '--tensor-type-rules', '^model\\.diffusion_model\\.=bf16');
-  } else if (!VAE_TILING_INCOMPATIBLE_MODELS.has(model.id)) {
-    args.push('--vae-tiling');
+  const profile = sdServerLoadProfile(model.id);
+  if (profile.diffusionFlashAttention) args.push('--diffusion-fa');
+  if (profile.bf16TensorPattern) {
+    args.push('--tensor-type-rules', `${profile.bf16TensorPattern}=bf16`);
   }
+  if (profile.vaeDecode === 'tiled') args.push('--vae-tiling');
   args.push('--listen-ip', '127.0.0.1', '--listen-port', String(port));
   return args;
 }

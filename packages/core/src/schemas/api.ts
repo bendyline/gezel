@@ -1847,6 +1847,21 @@ export const GezelConfigSchema = z.object({
    */
   firstRunCompleted: z.boolean().optional(),
   /**
+   * ISO time this home was first used, stamped once by `Store.ensureLayout`
+   * when it boots an empty home. Absent on every install that predates the
+   * stamp, which is what marks an established install: the first-use grace
+   * periods in `first-use.ts` (deferred background indexing, no quiet-night
+   * reports yet) apply only to a home that has it.
+   */
+  firstUseAt: z.string().optional(),
+  /**
+   * ISO time the first-use indexing hold released: half an hour in and a chat
+   * model ready. Latched so a later state without a model (one removed, the
+   * inventory briefly unreadable) never holds an established home's indexing
+   * again.
+   */
+  firstUseIndexingReleasedAt: z.string().optional(),
+  /**
    * Centralized security & compliance posture. See
    * {@link SecurityPolicySchema}. Absent → resolves fail-safe to `lockdown`.
    * The first-run migration writes `free` for a configured legacy install

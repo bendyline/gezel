@@ -55,6 +55,8 @@ test.beforeAll(async () => {
       GEZEL_HOME: gezelHome,
       GEZEL_EMBEDDED: '1',
       GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+      // This is the true first run, first-use hold and all.
+      GEZEL_DISABLE_FIRST_USE_GRACE: '',
     }),
   });
   page = await app.firstWindow();

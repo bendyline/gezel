@@ -49,6 +49,7 @@ import type {
   ListInstalledVideoModelsResponse,
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
+  MediaModelFitResponse,
   ModelContextOverridesResponse,
   OpenAppToolRelayRequest,
   OpenAppToolRelayResponse,
@@ -3443,6 +3444,14 @@ export class GezelClient {
   }
 
   /**
+   * Whether this machine can run each catalog image model on the local
+   * engine. Same contract as {@link getVideoModelFit}.
+   */
+  getImageModelFit(): Promise<MediaModelFitResponse> {
+    return this.request('GET', '/api/image-gen/models/fit');
+  }
+
+  /**
    * Combined engine-readiness probe + installed model count. Used by
    * Settings → Image generation to render an honest "Ready" pill (engine
    * is reachable AND ≥1 model installed) instead of declaring readiness
@@ -3546,6 +3555,15 @@ export class GezelClient {
 
   listInstalledVideoModels(): Promise<ListInstalledVideoModelsResponse> {
     return this.request('GET', '/api/video-gen/models');
+  }
+
+  /**
+   * Whether this machine can run each catalog video model, priced from its
+   * weight files against the capacity the launch path admits. `wont-run`
+   * entries are ones the pull route refuses. See docs/media-model-memory.md.
+   */
+  getVideoModelFit(): Promise<MediaModelFitResponse> {
+    return this.request('GET', '/api/video-gen/models/fit');
   }
 
   /**

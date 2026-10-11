@@ -75,6 +75,7 @@ import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
 import { deferBootWork } from './boot-work.js';
+import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
@@ -165,6 +166,7 @@ import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
 import { MediaSearchManager, backgroundDownloadsAllowed } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
+import { resolveCopilotAvailability } from './providers/copilot-availability.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
 import { ensureLlamaEngineStatus } from './providers/llama-cpp/build-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
@@ -866,13 +868,28 @@ export async function startProductService(
   // ancestors prune queued/running child turns, while a resumed ancestor
   // rehydrates only descendants whose own stored status is still active.
   tasks.setTaskStatusChangedHook(({ task }) => taskRunner.reconcileStatusChange(task));
+  // A new install's first half hour belongs to meeting the Meester, not to a
+  // title bar reporting "scanning Default". See first-run/indexing-hold.ts.
+  const indexingHold = new FirstUseIndexingHold({
+    readConfig: () => store.readConfig(),
+    writeConfig: (patch) => store.writeConfig(patch),
+    chatModelReady: async () =>
+      defaultProviderCanAnswer({
+        config: await store.readConfig(),
+        listInstalledModels: (provider) => chat.listModelsForProvider(provider),
+        hasCredential: async (name) =>
+          (await secrets.get({ kind: 'providerCredential', name })) !== null,
+        copilotAvailable: async () => (await resolveCopilotAvailability(home)).available,
+      }),
+  });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
     // so the runner's night dispatch holds until static + AI indexing is
     // current across projects, then the queued shift work proceeds. Not
     // awaited — a manual start must respond immediately, and a full drain
-    // can take a while on a big repo.
-    void indexEnrichmentRef?.catchUpAll();
+    // can take a while on a big repo. The hold is read before the sweep
+    // starts so that ordering survives it.
+    if (!(await indexingHold.isActive())) void indexEnrichmentRef?.catchUpAll();
     await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
     await taskRunner.wake();
   });
@@ -1584,6 +1601,7 @@ export async function startProductService(
     catalog,
     contentIndex,
     events: chatEvents,
+    holdsBackgroundScan: (project) => indexingHold.holds(project),
   });
   // Same post-construction injection as the content index above: the
   // indexer takes `chat` as a dependency, so the reference parser can only
@@ -1821,11 +1839,13 @@ export async function startProductService(
     if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
     libraryRefreshTimer = setTimeout(() => {
       libraryRefreshTimer = null;
-      void workspaceIndex
-        .refresh(sharedProject!.id)
-        .catch((err) =>
-          log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
-        );
+      void (async () => {
+        // The library is never one of the person's own folders.
+        if (await indexingHold.isActive()) return;
+        await workspaceIndex.refresh(sharedProject!.id);
+      })().catch((err) =>
+        log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
+      );
     }, LIBRARY_REFRESH_DEBOUNCE_MS);
     libraryRefreshTimer.unref?.();
   };
@@ -1898,6 +1918,7 @@ export async function startProductService(
     idle: systemIdle,
     isNightShiftActive: () => nightShift.isActive(),
     isPaused: () => indexingJob.isPaused(),
+    isBackgroundHeld: () => indexingHold.isActive(),
     events: chatEvents,
     history,
     refreshStatic: (projectId) => workspaceIndex.refreshAndWait(projectId),
@@ -2072,7 +2093,11 @@ export async function startProductService(
   // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
   // search real minutes after a fresh install points gezel at a folder.
   workspaceIndex.setOnScanComplete((projectId) => {
-    indexEnrichment.drainEmbedOnly(projectId);
+    // During the first-use hold a scan still lists the files (the person's
+    // own folders get their first look); embedding them waits for the release.
+    void indexingHold.isActive().then((held) => {
+      if (!held) indexEnrichment.drainEmbedOnly(projectId);
+    });
   });
   // `gezel.index.*` for sandboxed scripts: the readiness surface craftbook
   // hooks use to make "this review depends on a current index" real. Wired
@@ -2110,6 +2135,8 @@ export async function startProductService(
     // watcher slot — yet it is the one workspace that routinely changes from
     // outside the app (a sync client landing a file from another device).
     pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
+    holdsRefresh: async (projectId) =>
+      indexingHold.holds(await store.getProject(projectId).catch(() => null)),
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,

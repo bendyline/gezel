@@ -3,10 +3,11 @@ import type {
   ModelDownloadPreflightResponse,
   RecoDevice,
 } from '@bendyline/gezel';
-import { isRecommendedModel, mediaModelFits } from '@bendyline/gezel';
+import { isRecommendedModel } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import { type MediaFitState, mediaFitState } from './media-model-fit.js';
 
 /**
  * First-run "on-device media" section: ONE quiet, desaturated link that opens
@@ -22,10 +23,10 @@ import { AlertDialog } from '../primitives/index.js';
  * hierarchy is inverted"). Per-modality choice lives inside the plan dialog.
  *
  * "Recommended" = the highest-`recoScore`, fully-open catalog entry of that
- * kind (the same gate as the chat picker + ★ badge). Non-fitting modalities
- * are hidden entirely (e.g. the 24 GB-VRAM video model on a small GPU). Fit is
- * `mediaModelFits` from core: image gates on system RAM, video on VRAM, audio
- * always fits.
+ * kind (the same gate as the chat picker + ★ badge) that the daemon says fits
+ * this machine outright (`/models/fit`, docs/media-model-memory.md) — not
+ * merely one that might. Modalities with no such model are hidden entirely,
+ * and so are image and video when the daemon cannot answer. Audio always fits.
  *
  * Progress comes from each pull's SSE events (unlike the chat banner, which
  * polls). Image and video pulls are service-owned: on mount we seed their
@@ -89,8 +90,6 @@ interface MediaManifest {
   recoScore?: number;
   licenseClass?: string;
   approxSizeBytes?: number;
-  minRamGB?: number;
-  minVramGB?: number;
   auxiliaryFiles?: Array<{ sizeBytes?: number }>;
 }
 
@@ -117,17 +116,12 @@ function fmtBytes(bytes: number): string {
 }
 
 /** The recommended (highest-score, open, fitting) media manifest of a kind. */
-function pickMedia(
-  items: CatalogItemSummary[],
-  device: RecoDevice,
-  kind: 'image' | 'video',
-): MediaManifest | null {
+function pickMedia(items: CatalogItemSummary[], fit: MediaFitState): MediaManifest | null {
   let best: MediaManifest | null = null;
   for (const it of items) {
     const m = it.manifest as unknown as MediaManifest;
     if (!isRecommendedModel(m)) continue;
-    const req = kind === 'image' ? { minRamGB: m.minRamGB } : { minVramGB: m.minVramGB };
-    if (!mediaModelFits(device, req)) continue;
+    if (fit.byId?.get(m.id)?.verdict !== 'fits') continue;
     if (best == null || (m.recoScore ?? 0) > (best.recoScore ?? 0)) best = m;
   }
   return best;
@@ -236,6 +230,8 @@ export function RecommendedMediaDownloads() {
           vidPulls,
           recogCat,
           recogInst,
+          imageFit,
+          videoFit,
         ] = await Promise.all([
           api.getMemoryProfile(),
           api.listCatalogItems('image-model'),
@@ -249,6 +245,8 @@ export function RecommendedMediaDownloads() {
           api.listActiveVideoPulls().catch(() => ({ pulls: [] })),
           api.listRecognitionCatalog().catch(() => ({ models: [] })),
           api.listInstalledRecognitionModels().catch(() => empty),
+          api.getImageModelFit().catch(() => null),
+          api.getVideoModelFit().catch(() => null),
         ]);
         if (cancelled) return;
         const device: RecoDevice = {
@@ -260,7 +258,7 @@ export function RecommendedMediaDownloads() {
         };
         const out: Reco[] = [];
 
-        const img = pickMedia(imageCat.items, device, 'image');
+        const img = pickMedia(imageCat.items, mediaFitState(imageFit));
         if (img) {
           const active = imgPulls.pulls.find((pull) => pull.id === img.id && !pull.finished);
           out.push({
@@ -323,7 +321,7 @@ export function RecommendedMediaDownloads() {
             start: (cb, sig) => api.pullAudioModel('tts', tts.id, cb, sig),
           });
         }
-        const vid = pickMedia(videoCat.items, device, 'video');
+        const vid = pickMedia(videoCat.items, mediaFitState(videoFit));
         if (vid) {
           const active = vidPulls.pulls.find((pull) => pull.id === vid.id && !pull.finished);
           out.push({

@@ -2075,10 +2075,9 @@ export const ImageModelCategorySchema = z.enum(['general', 'artistic', 'photogra
 export type ImageModelCategory = z.infer<typeof ImageModelCategorySchema>;
 
 /**
- * Coarse hardware tier for the model. Drives a "Runs on … memory" pill in
- * the catalog UI and (later) RAM-budget filtering analogous to
- * `LlamaCppModelManager`. The numeric `minRamGB` carried alongside is the
- * actual machine-readable signal; the tier is the human-friendly bucket.
+ * Coarse hardware tier the catalog used to hand-author for media models.
+ * Deprecated with `minRamGB` / `minVramGB`: what a model needs is computed
+ * from its weight files (core `media-memory.ts`).
  */
 export const ImageModelHardwareTierSchema = z.enum(['low', 'mid', 'high', 'workstation']);
 export type ImageModelHardwareTier = z.infer<typeof ImageModelHardwareTierSchema>;
@@ -2107,11 +2106,27 @@ export const ImageModelAuxiliaryRoleSchema = z.enum([
 ]);
 export type ImageModelAuxiliaryRole = z.infer<typeof ImageModelAuxiliaryRoleSchema>;
 
+/**
+ * What a safetensors weight file holds, read from its header: the element
+ * count at every stored float precision, plus the bytes of everything that
+ * is not a float. A fact about the pinned file, like its sha256 — gilde's
+ * `pin-weight-tensors` tool writes it when a model is authored, so the app
+ * can price the model's memory (core `media-memory.ts`) without touching the
+ * network. Absent on GGUF files, which load at their size.
+ */
+export const WeightTensorsSchema = z.object({
+  floatElements: z.record(z.string(), z.number().int().nonnegative()),
+  otherBytes: z.number().int().nonnegative(),
+});
+export type WeightTensors = z.infer<typeof WeightTensorsSchema>;
+
 export const ImageModelAuxiliaryFileSchema = z.object({
   role: ImageModelAuxiliaryRoleSchema,
   downloadUrl: z.string().url(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  /** Present on a safetensors file. See {@link WeightTensorsSchema}. */
+  tensors: WeightTensorsSchema.optional(),
 });
 export type ImageModelAuxiliaryFile = z.infer<typeof ImageModelAuxiliaryFileSchema>;
 
@@ -2143,10 +2158,14 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * See `resolveImg2ImgSupport` in the service's image provider layer.
    */
   supportsImg2Img: z.boolean().optional(),
-  /** Coarse hardware tier — drives the "runs on …" pill. */
-  hardwareTier: ImageModelHardwareTierSchema,
-  /** Minimum recommended unified-memory / VRAM in gigabytes. */
-  minRamGB: z.number().positive(),
+  /**
+   * @deprecated Hand-authored, and no longer read: the daemon prices every
+   * media model from its weight files (core `media-memory.ts`). Optional so
+   * the catalog can drop it; remove it at the next gilde minor line.
+   */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minRamGB: z.number().positive().optional(),
   /**
    * Whether the upstream license permits commercial use. When false, the
    * UI shows a prominent "Non-commercial" badge so the user makes an
@@ -2166,6 +2185,8 @@ export const ImageModelVersionManifestSchema = z.object({
   /** SHA-256 of the weights file; verified after download. */
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  /** Present when the weights file is safetensors. See {@link WeightTensorsSchema}. */
+  tensors: WeightTensorsSchema.optional(),
   /** e.g. 'Q4_K_M', 'Q8_0', 'F16'. Informational. */
   quantization: z.string().optional(),
   /**
@@ -2199,6 +2220,7 @@ export const ImageModelManifestSchema = z.object({
   downloadUrl: z.string().url(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  tensors: WeightTensorsSchema.optional(),
   quantization: z.string().optional(),
   recommendedSteps: z.number().int().positive().default(20),
   widthRange: z
@@ -2213,8 +2235,10 @@ export const ImageModelManifestSchema = z.object({
   /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
   supportsImg2Img: z.boolean().optional(),
   auxiliaryFiles: z.array(ImageModelAuxiliaryFileSchema).default([]),
-  hardwareTier: ImageModelHardwareTierSchema,
-  minRamGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minRamGB: z.number().positive().optional(),
   commercialUse: z.boolean(),
   notes: z.string().optional(),
   availableVersions: z.array(z.string()).default([]),
@@ -2324,6 +2348,8 @@ export const VideoModelSourceSchema = z.object({
         name: z.string(),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         sizeBytes: z.number().int().positive(),
+        /** Present on a safetensors file. See {@link WeightTensorsSchema}. */
+        tensors: WeightTensorsSchema.optional(),
         /**
          * Override the source-level `huggingfaceRepo`/`revision` for this
          * one file. Lets a single install assemble files from more than one
@@ -2389,10 +2415,10 @@ export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
   /** Whether this model accepts an input image for image-to-video. */
   supportsImageToVideo: z.boolean().default(false),
   upstream: z.string().url().optional(),
-  /** Reuses the image-model tier vocabulary for the "runs on …" pill. */
-  hardwareTier: ImageModelHardwareTierSchema,
-  /** Minimum recommended unified-memory / VRAM in gigabytes. */
-  minVramGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minVramGB: z.number().positive().optional(),
   /** Whether the upstream license permits commercial use. */
   commercialUse: z.boolean(),
 });
@@ -2445,8 +2471,10 @@ export const VideoModelManifestSchema = z.object({
   defaultHeight: z.number().int().positive().optional(),
   supportsImageToVideo: z.boolean().default(false),
   upstream: z.string().url().optional(),
-  hardwareTier: ImageModelHardwareTierSchema,
-  minVramGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minVramGB: z.number().positive().optional(),
   commercialUse: z.boolean(),
   notes: z.string().optional(),
   availableVersions: z.array(z.string()).default([]),

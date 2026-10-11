@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
+import { imageCatalogFits, imageModelFit, wontRunRefusal } from '../../models/media-fit.js';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
@@ -11,6 +12,7 @@ import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js'
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { EngineContext } from '../engine-context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
+import { mediaFitContext } from './media-fit-context.js';
 
 export function imageModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
@@ -77,8 +79,20 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
    * a second `POST` for the same id while one is in flight returns the
    * same in-flight pull rather than starting a parallel one.
    */
+  /**
+   * Whether this machine can run each catalog image model on the local
+   * engine, priced from the models' weight files against the capacity the
+   * launch path admits. The download page hides `wont-run` entries; see
+   * docs/media-model-memory.md.
+   */
+  app.get('/models/fit', proxy, async (c) => {
+    return c.json(await imageCatalogFits(mediaFitContext(ctx)));
+  });
+
   app.post('/models/:id/pull', proxy, async (c) => {
     const id = c.req.param('id');
+    const refusal = await wontRunRefusal(() => imageModelFit(mediaFitContext(ctx), id));
+    if (refusal) return c.json(refusal, 409);
     try {
       await ctx.imagePulls.start(id);
     } catch (err) {

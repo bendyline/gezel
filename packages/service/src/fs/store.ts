@@ -617,6 +617,12 @@ export class Store {
     } catch {
       /* best-effort */
     }
+    // Read before the mkdirs below, which make every home look started.
+    const [existingGezels, existingProjects] = await Promise.all([
+      safeReaddir(p.gezels),
+      safeReaddir(p.projects),
+    ]);
+    const emptyHome = existingGezels.length === 0 && existingProjects.length === 0;
     await Promise.all([
       mkdir(local.runtime.dir, { recursive: true }),
       mkdir(local.gezels, { recursive: true }),
@@ -629,6 +635,7 @@ export class Store {
       mkdir(p.projects, { recursive: true }),
       mkdir(p.documents, { recursive: true }),
     ]);
+    if (emptyHome) await this.stampFirstUse();
     await this.adoptMachineSharedGezelPrivateState();
     await this.ensureMachineSharedProjectPrivateState();
     await this.backfillRoleBasedNames();
@@ -956,6 +963,24 @@ export class Store {
     }
     if (backfilled > 0) {
       log.info(`[store] backfilled voice on ${backfilled} gezels`);
+    }
+  }
+
+  /**
+   * Stamp `firstUseAt` on a home booting for the first time. Never
+   * backfilled: an install without the stamp is established, and the
+   * first-use grace periods leave it alone. `GEZEL_DISABLE_FIRST_USE_GRACE=1`
+   * makes a harness's fresh home established from its first boot, so tests
+   * and evals see indexing and night reports at once.
+   */
+  private async stampFirstUse(): Promise<void> {
+    if (process.env.GEZEL_DISABLE_FIRST_USE_GRACE === '1') return;
+    try {
+      const config = await this.readConfig();
+      if (config.firstUseAt) return;
+      await this.writeConfig({ firstUseAt: nowIso() });
+    } catch (err) {
+      log.warn(`[store] could not stamp first use: ${String(err)}`);
     }
   }
 
