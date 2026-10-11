@@ -17,6 +17,14 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  MXC_EXECUTOR_SHA256,
+  MXC_LICENSE_SHA256,
+  MXC_TARBALL_INTEGRITY,
+  MXC_TARBALL_SHA256,
+  MXC_TARBALL_URL,
+  MXC_VERSION,
+} from '../../packages/core/src/native/mxc-pin';
+import {
   NATIVE_ENGINE_RELEASE,
   SHA256SUMS_DIGEST,
   isPlaceholderDigest,
@@ -226,5 +234,27 @@ describe('native engine release pin', () => {
     expect(NATIVE_ENGINE_RELEASE).not.toBe('0.0.0');
     expect(NATIVE_ENGINE_RELEASE).toMatch(/^\d+\.\d+\.\d+/);
     expect(SHA256SUMS_DIGEST).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('MXC launcher pin', () => {
+  it('is a real pin, not a placeholder', () => {
+    // An npm install downloads the launcher against these values, and a
+    // Windows installer stages it against them; a placeholder disables MXC
+    // containment for both without failing anything else.
+    expect(MXC_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+    expect(MXC_TARBALL_URL).toBe(
+      `https://registry.npmjs.org/@microsoft/mxc-sdk/-/mxc-sdk-${MXC_VERSION}.tgz`,
+    );
+    expect(MXC_TARBALL_INTEGRITY).toMatch(/^sha512-[A-Za-z0-9+/]{86}==$/);
+    for (const sha of [
+      MXC_TARBALL_SHA256,
+      MXC_LICENSE_SHA256,
+      MXC_EXECUTOR_SHA256.x64,
+      MXC_EXECUTOR_SHA256.arm64,
+    ]) {
+      expect(sha).toMatch(/^[0-9a-f]{64}$/);
+      expect(isPlaceholderDigest(sha)).toBe(false);
+    }
   });
 });

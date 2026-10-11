@@ -165,5 +165,22 @@ export default defineConfig({
         throw new Error('[tsup] fetch-duckdb failed — see output above');
       }
     }
+
+    // Microsoft's MXC launcher, into dist/mxc-bundle/ on Windows targets only.
+    // Vendored unmodified for the same reason as DuckDB: Microsoft signs it,
+    // and that signature is the attestation the release gate checks. The
+    // supervisor's extract-mxc step installs it to
+    // `~/.gezel/engines/mxc/<version>/`, the directory the service's engine
+    // resolver downloads into for npm / CLI installs.
+    const mxcRes = spawnSync(process.execPath, ['scripts/fetch-mxc.mjs'], {
+      stdio: 'inherit',
+    });
+    if (mxcRes.status !== 0) {
+      if (process.env.GEZEL_MXC_SKIP === '1') {
+        console.warn('[tsup] fetch-mxc skipped (GEZEL_MXC_SKIP=1)');
+      } else {
+        throw new Error('[tsup] fetch-mxc failed — see output above');
+      }
+    }
   },
 });

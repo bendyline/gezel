@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
+import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
@@ -34,7 +35,7 @@ async function openMeesterChat() {
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });
-  await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
+  await openGreetingTab(page);
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');

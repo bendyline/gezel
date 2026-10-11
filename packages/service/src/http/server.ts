@@ -497,6 +497,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       // told us. `null` (non-Windows) is omitted, not sent as a value —
       // there is nothing to report where the condition cannot occur.
       ...(ctx.childProcessSpawn ? { childProcessSpawn: ctx.childProcessSpawn } : {}),
+      ...(ctx.scriptSandbox ? { scriptSandbox: ctx.scriptSandbox() } : {}),
     });
   });
 

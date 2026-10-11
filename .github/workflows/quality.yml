@@ -189,6 +189,25 @@ jobs:
           src/http/mutation-authority.test.ts
           src/chat/manager-machine-shared-mcp.test.ts
           src/machine-engine/bridge.integration.test.ts
+      - name: Stage the Windows sandbox launcher
+        working-directory: packages/app
+        run: node scripts/fetch-mxc.mjs
+      - name: Record what the Windows sandbox probe sees on this runner
+        shell: pwsh
+        run: |
+          $launcher = (Resolve-Path packages/app/dist/mxc-bundle/wxc-exec.exe).Path
+          "GEZEL_MXC_EXEC=$launcher" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $probe = & $launcher --probe 2>&1 | Out-String
+          @('### Windows sandbox probe', '```json', $probe.Trim(), '```') |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      # Full assertions where the probe passes; where it does not (Windows
+      # Server images may lack the container), the suite proves fail-closed.
+      - name: Exercise the Windows sandbox
+        run: >-
+          pnpm --filter @bendyline/gezel-service test
+          src/sandbox/sandbox-mxc.integration.test.ts
+          src/sandbox/windows-mxc.test.ts
+          src/sandbox/stdio-rpc.test.ts
 
   stability:
     name: Test stability pass ${{ matrix.pass }} of 3 (UI, service, and CLI TUI)

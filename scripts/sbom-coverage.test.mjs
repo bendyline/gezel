@@ -764,6 +764,29 @@ test('every bundled runtime carries pinned digests for every installer target', 
     property(file, 'gezel:platforms').startsWith('win32-x64'),
   );
   assert.deepEqual(nodeExe.hashes, [{ alg: 'SHA-256', content: nodePins['win-x64'] }]);
+
+  // The MXC launcher ships only in Windows installers, one per Windows arch,
+  // and its tarball keeps npm's own sha512 beside the sha256.
+  const mxc = artifacts['MXC launcher'];
+  const windowsTargets = [...targets].filter((target) => target.startsWith('win32-'));
+  assert.ok(mxc.platforms.length > 0);
+  assert.ok(mxc.platforms.every((key) => key.startsWith('win32-')));
+  const mxcPins = parseStringRecord(
+    await readFile(join(root, 'packages', 'core', 'src', 'native', 'mxc-pin.ts'), 'utf8'),
+    'MXC_EXECUTOR_SHA256',
+  );
+  assert.equal(mxc.components.length, windowsTargets.length);
+  for (const target of windowsTargets) {
+    const file = mxc.components.find((component) =>
+      property(component, 'gezel:platforms').startsWith(target),
+    );
+    assert.equal(file.name, 'wxc-exec.exe');
+    assert.deepEqual(file.hashes, [{ alg: 'SHA-256', content: mxcPins[target.split('-')[1]] }]);
+  }
+  assert.deepEqual(
+    mxc.externalReferences[0].hashes.map((hash) => hash.alg),
+    ['SHA-256', 'SHA-512'],
+  );
 });
 
 // pnpm-workspace.yaml publicly hoists *onnxruntime*, so those resolve at the

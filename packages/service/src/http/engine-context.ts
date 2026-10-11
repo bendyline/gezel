@@ -1,4 +1,4 @@
-import type { ResolvedDistributionPolicy, ServiceRole } from '@bendyline/gezel';
+import type { HealthResponse, ResolvedDistributionPolicy, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { DebugFlag } from '../debug/flag.js';
 import type { EngineBinaryRegistry } from '../engines/registry.js';
@@ -85,4 +85,6 @@ export interface EngineContext {
   ensureModel: EnsureModelOrchestrator;
   startedAt: string;
   childProcessSpawn?: SpawnCapability;
+  /** Windows product daemon only: the script container's current state, for health. */
+  scriptSandbox?: () => NonNullable<HealthResponse['scriptSandbox']>;
 }

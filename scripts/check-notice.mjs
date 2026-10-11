@@ -603,6 +603,12 @@ async function checkBundledRuntimes(notice) {
       join(repoRoot, 'packages', 'core', 'src', 'native', 'duckdb-pin.ts'),
       'DUCKDB_VERSION',
     ),
+    // Same arrangement as DuckDB: Microsoft's signed launcher, pinned in core
+    // because the service's engine resolver downloads the same tarball.
+    'MXC launcher': await parsePinnedConstant(
+      join(repoRoot, 'packages', 'core', 'src', 'native', 'mxc-pin.ts'),
+      'MXC_VERSION',
+    ),
   };
   const runtimeSection = markdownSection(notice, 'Bundled application runtimes').split('\n### ')[0];
   const rows = parseMarkdownTable(runtimeSection).filter(

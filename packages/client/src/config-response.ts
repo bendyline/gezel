@@ -481,6 +481,8 @@ export interface ConfigResponse {
   channels?: ChannelsConfig;
   /** Copilot SDK built-ins are denied by default; explicit false opts out. */
   sandboxCopilot?: boolean;
+  /** `windowsContainer` is on unless explicitly turned off; see `GezelConfig.scriptSandbox`. */
+  scriptSandbox?: { windowsContainer: boolean };
   /** Allow/deny globs for the `fetch_url` MCP tool. */
   fetchUrl?: {
     allow?: string[];

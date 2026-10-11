@@ -9,6 +9,7 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { canApplyWindowsMxcSandbox } from '../sandbox/windows-mxc.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner, extractScriptFailureFromStderr } from './runner.js';
 
@@ -90,6 +91,7 @@ describe('extractScriptFailureFromStderr', () => {
 it.runIf(process.platform !== 'darwin')(
   'fails closed with an actionable error when denyNet has no OS boundary',
   async () => {
+    if (await canApplyWindowsMxcSandbox(process.execPath)) return;
     await writeScript(
       'no-boundary',
       `
@@ -147,6 +149,7 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
   it.runIf(process.platform !== 'darwin')(
     'a tampered copy of the shipped script fails closed again',
     async () => {
+      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
       const catalog = new CatalogService();
       const trustedRunner = new ScriptRunner({ store, chat: manager, catalog });
       await installShippedScript(catalog, true);
@@ -165,6 +168,7 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
   it.runIf(process.platform !== 'darwin')(
     'without a catalog the same bytes stay fail-closed',
     async () => {
+      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
       const catalog = new CatalogService();
       await installShippedScript(catalog);
       const run = await runner.run({

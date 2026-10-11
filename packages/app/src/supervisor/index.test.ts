@@ -101,6 +101,10 @@ vi.mock('./extract-node.js', () => ({
   defaultNodeBundleDir: () => '/fake/node-bundle',
   installNodeIfNeeded: vi.fn().mockResolvedValue({ binaryPath: null, verified: false }),
 }));
+vi.mock('./extract-mxc.js', () => ({
+  defaultMxcBundleDir: () => '/fake/mxc-bundle',
+  provisionMxcExecutor: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('./extract-bundle.js', () => ({
   // `defaultBundlePaths` returns paths to a non-existent tarball + meta so:
   //   - existsSync(tarballPath) returns false → embedded loader uses the
@@ -271,6 +275,7 @@ const {
 const { extractBundleIfNeeded, readBundleMeta } = await import('./extract-bundle.js');
 const { installNodeIfNeeded } = await import('./extract-node.js');
 const { installPnpmIfNeeded } = await import('./extract-pnpm.js');
+const { provisionMxcExecutor } = await import('./extract-mxc.js');
 const { startService } = await import('@bendyline/gezel-service');
 
 // Env keys the supervisor's prelude mutates. We snapshot at the start
@@ -407,6 +412,7 @@ describe('bundled runtime prelude', () => {
 
     expect(installNodeIfNeeded).not.toHaveBeenCalled();
     expect(installPnpmIfNeeded).not.toHaveBeenCalled();
+    expect(provisionMxcExecutor).not.toHaveBeenCalled();
     expect(process.env.GEZEL_NODE_PATH).toBe('/development/node');
     expect(logger.info).toHaveBeenCalledWith(
       '[supervisor] skipping bundled runtime install in development',
@@ -427,6 +433,11 @@ describe('bundled runtime prelude', () => {
 
     expect(installNodeIfNeeded).toHaveBeenCalledOnce();
     expect(installPnpmIfNeeded).toHaveBeenCalledOnce();
+    // The MXC launcher follows the packaged rule too: inherited values are
+    // dropped and only the verified bundle may set GEZEL_MXC_EXEC.
+    expect(provisionMxcExecutor).toHaveBeenCalledWith(
+      expect.objectContaining({ packaged: true, bundleDir: '/fake/mxc-bundle' }),
+    );
     await svc.shutdown();
   });
 

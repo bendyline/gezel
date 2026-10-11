@@ -25,6 +25,7 @@ import {
   projectAllowsAmbientWork,
   projectLeadGezelId,
   projectNightWorkEnabled,
+  resolveSecurityPolicy,
   resolveSocialMode,
   resolveTaskExecutionMode,
   startSuspendMonitor,
@@ -73,6 +74,7 @@ import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
+import { resolveVendoredMxc } from './engines/resolver.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
@@ -187,6 +189,13 @@ import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { writeRuntime } from './runtime-discovery.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
+import {
+  resolveMxcExecutor,
+  resolveWindowsMxcState,
+  setWindowsMxcEnabled,
+  setWindowsMxcHome,
+  windowsMxcState,
+} from './sandbox/windows-mxc.js';
 import { ScriptRunner } from './scripts/runner.js';
 import {
   CATALOG_RELEVANT_HISTORY_KINDS,
@@ -2351,6 +2360,21 @@ export async function startProductService(
   // all three at once, each at a different call site. See spawn-capability.ts.
   const childProcessSpawn = await probeChildProcessSpawn();
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
+  // Start the Windows container probe now, off the request path, so the
+  // first session's tool list already knows whether scripts can run.
+  else if (process.platform === 'win32') {
+    const sandboxConfig = await store.readConfig().catch(() => ({}) as GezelConfig);
+    setWindowsMxcEnabled(sandboxConfig.scriptSandbox?.windowsContainer !== false);
+    setWindowsMxcHome(home);
+    void resolveWindowsMxcState().then(async (state) => {
+      if (state.state !== 'unavailable' || resolveMxcExecutor()) return;
+      // npm and CLI installs have no supervisor to lay the launcher down.
+      const launcher = await resolveVendoredMxc(home, {
+        allowDownload: resolveSecurityPolicy(sandboxConfig).allowAppNetwork,
+      });
+      if (launcher) await resolveWindowsMxcState();
+    });
+  }
 
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
@@ -2451,6 +2475,9 @@ export async function startProductService(
     ensureModel,
     startedAt: nowIso(),
     childProcessSpawn,
+    ...(process.platform === 'win32'
+      ? { scriptSandbox: () => ({ boundary: 'windows-mxc' as const, ...windowsMxcState() }) }
+      : {}),
     uiDir: opts.uiDir,
     folderJobs,
     storageJobs,

@@ -96,8 +96,9 @@ The **enforcement layers** a model-driven action passes through, outermost first
    to a project / gezel / non-team route set.
 4. **Sink checks** — the handler that actually performs the action re-checks the security
    policy (egress, file edits, etc.) so a non-model caller can't bypass layers 1–2.
-5. **OS sandbox or refusal** — `denyNet` script execution runs under macOS Seatbelt or fails
-   closed; Windows/Linux do not substitute a JavaScript shim for an OS boundary.
+5. **OS sandbox or refusal** — `denyNet` script execution runs under macOS Seatbelt, the
+   Windows MXC process container, or a probed Linux systemd boundary, or fails closed; no
+   platform substitutes a JavaScript shim for an OS boundary.
 
 > **The load-bearing principle (see §13):** layers 1–2 protect against *the model*; layers
 > 3–5 protect against *every other principal that can reach the same capability*. A control
@@ -344,19 +345,47 @@ binary wrapped in:
 1. **`node --permission`** with `--allow-fs-read` / `--allow-fs-write` scoped to the script's
    scratch + workspace dirs. `--allow-child-process`, `--allow-worker`, `--allow-addons` are
    all **OFF** (so no `child_process` escape, no fork bombs, no native addons).
-2. **macOS Seatbelt** (`sandbox-exec`) with a `deny default` profile (defense-in-depth).
-3. **Network egress block** (`denyNet`, **fail closed**): macOS Seatbelt `(deny network*)` is
-   the current enforceable boundary. The JS `--import` preload also blocks fetch/WebSocket,
+2. **The platform's OS sandbox** around every run: macOS Seatbelt (`sandbox-exec`) with a
+   `deny default` profile, or on Windows the MXC process container (below).
+3. **Network egress block** (`denyNet`, **fail closed**): Seatbelt `(deny network*)`, the
+   container's denied egress, or (Linux, scripts without RPC) a systemd user service
+   restricted to `AF_UNIX`. The JS `--import` preload also blocks fetch/WebSocket,
    net/dgram, callback + promise DNS, named built-in exports, and Resolver instances, but is
-   defense-in-depth rather than a malicious-code boundary. Windows/Linux refuse `denyNet`
-   execution with exit 126 until an OS sandbox exists; macOS also refuses when Seatbelt is
-   unavailable and never retries a failed denyNet launch unsandboxed. fd-3 RPC remains usable
-   because it wraps an inherited descriptor and never calls `.connect()`.
+   defense-in-depth rather than a malicious-code boundary. Where no boundary applies the run
+   exits 126; no platform retries a failed denyNet launch unsandboxed. Script RPC uses fd 3,
+   or stdio inside the Windows container, and never opens a socket.
 4. **Resource cap** — `--max-old-space-size` bounds heap so a runaway allocation can't OOM the
    host; wall-clock timeout + SIGKILL.
 5. **Env scrub** — `sandboxEnv` allowlists only `PATH`/`HOME`/`NODE_*`/locale; strips
    `GEZEL_TOKEN`, `OPENAI_API_KEY`, etc. → a script **cannot read host secrets from
    `process.env`**.
+
+**Windows: the MXC process container** (`sandbox/windows-mxc.ts`, `stdio-rpc.ts`;
+[ADR 0022](decisions/0022-windows-mxc-sandbox.md)). Microsoft's signed launcher
+`wxc-exec.exe` wraps the Node command line, one base64 policy argument per run:
+
+- **Grants** are the permission model's allowlist: read-write for the workspace and scratch,
+  read-only for the other read paths and the Node binary file. A grant on a drive or share
+  root, on anything containing the home folder or `GEZEL_HOME`, or (for writes) on the
+  launcher or Node binary is refused before launch, because a root grant cascades to the
+  whole volume.
+- **Network**: denyNet runs get no egress; other runs get egress. Host loopback and inbound
+  are always denied, so a script cannot reach the daemon.
+- **UI**: Win32k stays enabled (node.exe fails DLL init without it); clipboard and input
+  injection are denied. The fallback tier that rewrites host DACLs is refused.
+- **Module resolution**: every ancestor of a grant is unreadable inside the container, so
+  Node runs with `--preserve-symlinks(-main)` and a preloaded resolve hook that computes real
+  paths by following links inside the grants. pnpm's junction layout resolves normally.
+- **RPC** moves to stdio: init is the first stdin line, replies follow on stdin, and frames
+  reach stdout behind a per-run nonce marker, so printed text is never read as a call. Each
+  frame is capped at 64 MB on both transports.
+- **Availability** is an executable probe at boot (write inside a grant, read-only grant,
+  denied sibling, refused raw socket), cached, re-run when the launcher changes on disk. A
+  Settings switch (`scriptSandbox.windowsContainer`) and `GEZEL_MXC=off` turn it off. A
+  caller in Session 0 (a service or SSH logon) cannot host Node in a container: its window
+  station grants nothing to app containers, so the probe reports the host unavailable and
+  denyNet work fails closed. The product daemon runs in the signed-in session, so this does
+  not affect shipped installs.
 
 **Capabilities.** A script declares `meta.requires` (e.g. `network`, `credential:github.token`).
 The dispatcher (`scripts/dispatcher.ts`) enforces per call; the runner strips capabilities
@@ -623,7 +652,7 @@ privileged service identity or putting the daemon root token on disk.
 | Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
-| `denyNet` execution on Windows/Linux | FAIL CLOSED | Model/gate scripts return exit 126 because no supported OS network boundary exists yet. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
+| `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs scripts without RPC under systemd. Elsewhere (Windows with the container off or unavailable, Linux RPC scripts) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
 | URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |
 | Package-command input closure | PARTIAL | Persistent approvals bind identifiable project-local files, but outside-project paths, directory/glob contents, dynamically selected files, implicit config conventions, PATH-resolved programs, bare package imports, oversized files, input graphs beyond the bounded scan, and network responses cannot always be inferred safely before execution. Treat an approved package command as trusted code, not a sandbox. |
@@ -647,6 +676,11 @@ app):
 | `GEZEL_SECRETS_BACKEND` | (auto) / file | Force the plaintext-keyed file secret store (used by evals; see secrets-security.md). |
 | `GEZEL_WEB` | unset *(default)* / 1 | Mint a dedicated browser web-UI token (`--web`). |
 | `GEZEL_MCP_EXCLUDE` | (per-provider) | Strip named tools from the MCP surface at registration time. |
+| `GEZEL_MXC_EXEC` | unset *(use the verified install)* / path | The Windows sandbox launcher `wxc-exec.exe`. The packaged supervisor sets it to its verified copy. |
+| `GEZEL_MXC` | on *(default)* / off | Turn the Windows script container off for this process, whatever Settings says. |
+| `GEZEL_MXC_MAX_CONCURRENT` | max(8, cores) | Cap on containers running at once; further runs queue. |
+| `GEZEL_MXC_SKIP` | unset / 1 | Build time: leave the launcher out of the Windows installer. |
+| `GEZEL_SCRIPT_DENY_NET_BOUNDARY` | set by the service | Tells a gezel-mcp child the container is active, so it offers `run_nodejs_script` / `derive_file` on Windows. |
 
 ---
 
@@ -666,6 +700,8 @@ app):
 
 **Sandbox / scripts**
 - `packages/service/src/sandbox/runner.ts`, `macos.ts` — OS sandbox, net-block, resource caps.
+- `packages/service/src/sandbox/windows-mxc.ts`, `stdio-rpc.ts` — Windows container policy, probe, resolve hook, stdio RPC.
+- `packages/core/src/native/mxc-pin.ts` — the pinned, Microsoft-signed launcher.
 - `packages/service/src/scripts/runner.ts`, `dispatcher.ts` — capability gating, credential resolution.
 
 **fs / secrets / ssrf**

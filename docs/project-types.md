@@ -401,10 +401,12 @@ first-party parent:
   gezel; deferring to the character block is what makes it follow the gezel.
 
 Platform note: sandboxed scripts deny network egress by design, and untrusted
-scripts require an enforceable OS boundary for that deny (macOS Seatbelt; a
-Linux systemd unit, which cannot carry the fd-3 RPC channel and so never
-applies to script runs). Where no boundary exists — Windows, and Linux script
-runs — the sandbox fails closed **except for provenance-trusted scripts**: a
+scripts require an enforceable OS boundary for that deny (macOS Seatbelt; the
+Windows MXC process container, which carries script RPC over stdio — see
+[ADR 0022](decisions/0022-windows-mxc-sandbox.md); a Linux systemd unit, which
+cannot carry the fd-3 RPC channel and so never applies to script runs). Where
+no boundary exists — Linux script runs, and Windows hosts where the container
+is off or unavailable — the sandbox fails closed **except for provenance-trusted scripts**: a
 project script whose bytes exactly equal the provenance header plus the
 catalog-shipped project-type script body (verified per run against the
 version the header names, `ScriptRunner.isProvenanceTrusted`), or the stdlib.
@@ -530,7 +532,8 @@ Importing a shared type is arbitrary-code-adjacent. The defenses reuse what exis
   Execution happens only after adoption, inside the existing sandbox and consent gates.
 - **Schedules are opt-in.** Created disabled or consent-prompted; never silently armed.
 - Caveat to keep in mind when reviewing script capabilities: the sandbox is weakest on
-  Windows/Linux (no OS-level wrapper; `node --permission` plus the JS net neutralizer).
+  Linux and on Windows hosts without the MXC container (no OS-level wrapper;
+  `node --permission` plus the JS net neutralizer).
 
 ## The `.gezapp` package
 
@@ -651,8 +654,8 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
    See "On phones" above.
 10. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
    download/upload affordance for `.gezapp` files (the flow is fully available to the
-   Meester via MCP today), and a Windows denyNet boundary so scripts (and therefore
-   interactive pages) run there.
+   Meester via MCP today). The Windows denyNet boundary has landed (ADR 0022); Linux
+   script runs still need one.
 
 ### Exemplars (the forcing functions)
 

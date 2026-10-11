@@ -14,8 +14,8 @@
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@bendyline/gezel';
 import { guardZipArchive } from '../safety/archive-guard.js';
@@ -37,14 +37,24 @@ export interface SandboxConvertResult {
   blocked?: string;
 }
 
-/** Walk up from `start` to the topmost ancestor that contains a node_modules. */
-function findRepoRoot(start: string): string | null {
+/**
+ * Walk up from `start` to the topmost ancestor that contains a node_modules,
+ * stopping below the home folder. A stray `~/node_modules` (or one at a drive
+ * root) would otherwise make the whole profile the worker's read root.
+ */
+export function findRepoRoot(start: string, ceiling: string = homedir()): string | null {
+  const norm = (p: string) =>
+    process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p);
+  const stop = norm(ceiling);
   let dir = start;
   let highest: string | null = null;
   for (;;) {
-    if (existsSync(join(dir, 'node_modules'))) highest = dir;
     const parent = dirname(dir);
-    if (parent === dir) break;
+    const here = norm(dir);
+    const atOrAboveCeiling =
+      stop === here || stop.startsWith(here.endsWith(sep) ? here : here + sep);
+    if (parent === dir || atOrAboveCeiling) break;
+    if (existsSync(join(dir, 'node_modules'))) highest = dir;
     dir = parent;
   }
   return highest;

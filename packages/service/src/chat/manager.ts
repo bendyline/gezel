@@ -108,7 +108,7 @@ import {
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
+import { SCRIPT_DENY_NET_BOUNDARY_ENV, SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
 import { SessionSendQueue } from '@bendyline/gezel/runtime';
@@ -244,6 +244,7 @@ import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
+import { windowsMxcState } from '../sandbox/windows-mxc.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
 import {
   resolveSessionRetrievalPolicy,
@@ -15655,6 +15656,10 @@ export class ChatManager extends LocalEngineRuntime {
         // A host with no deny-net boundary withholds run_nodejs_script and
         // derive_file unless the policy already lets gezellen reach the network.
         ...(securityPolicy.allowExternalServices ? { [SCRIPT_NETWORK_ALLOWED_ENV]: '1' } : {}),
+        // The same container snapshot session-tool-surface lists tools from.
+        ...(windowsMxcState().state === 'active'
+          ? { [SCRIPT_DENY_NET_BOUNDARY_ENV]: 'windows-mxc' }
+          : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
         // Same pattern again for the observation-table tools. A project with

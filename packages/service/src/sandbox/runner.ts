@@ -5,6 +5,27 @@ import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { runUnderMacSandbox } from './macos.js';
+import {
+  MAX_RPC_FRAME_CHARS,
+  STDIO_RPC_ENV,
+  STDIO_RPC_NONCE_ENV,
+  StdioRpcDemuxer,
+  StdioRpcOverflowError,
+  newStdioRpcNonce,
+  stdioRpcInitLine,
+} from './stdio-rpc.js';
+import {
+  MXC_NODE_PATH_FLAGS,
+  MXC_RESOLVE_HOOK,
+  MxcPolicyError,
+  acquireWindowsMxcSlot,
+  canApplyWindowsMxcSandbox,
+  containerEnvironment,
+  describeMxcLaunchFailure,
+  invalidateWindowsMxcProbe,
+  windowsMxcLauncherForRun,
+  wrapForWindowsMxc,
+} from './windows-mxc.js';
 
 export interface SandboxRunOptions {
   entry: string;
@@ -136,6 +157,8 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
   const macSandboxAvailable = process.platform === 'darwin' && (await canApplyMacSandbox());
   const linuxSystemdSandboxAvailable =
     process.platform === 'linux' && !opts.rpcChannel && (await canApplyLinuxSystemdSandbox());
+  const mxcLauncher = process.platform === 'win32' ? await windowsMxcLauncherForRun(nodeBin) : null;
+  const windowsMxcSandboxAvailable = mxcLauncher !== null;
   if (
     opts.denyNet &&
     !opts.allowMissingNetBoundary &&
@@ -143,6 +166,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
       platform: process.platform,
       macSandboxAvailable,
       linuxSystemdSandboxAvailable,
+      windowsMxcSandboxAvailable,
     }) === 'unavailable'
   ) {
     const result = networkSandboxUnavailableResult();
@@ -177,9 +201,19 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
       await writeFile(preloadPath, NET_BLOCK_PRELOAD, 'utf8');
       netBlockArgs.push(`--import=${pathToFileURL(preloadPath).href}`);
     }
+    // Inside the container, resolution goes through the contained-realpath
+    // hook; it must be registered before any other module loads.
+    const resolveHookArgs: string[] = [];
+    if (windowsMxcSandboxAvailable) {
+      const hookPath = join(workdir, '__resolve_hook.mjs');
+      await writeFile(hookPath, MXC_RESOLVE_HOOK, 'utf8');
+      resolveHookArgs.push(`--import=${pathToFileURL(hookPath).href}`);
+    }
 
     const nodeArgs: string[] = [
+      ...(windowsMxcSandboxAvailable ? MXC_NODE_PATH_FLAGS : []),
       permissionFlag,
+      ...resolveHookArgs,
       ...netBlockArgs,
       ...(opts.maxOldSpaceMb ? [`--max-old-space-size=${opts.maxOldSpaceMb}`] : []),
       ...readPaths.map((p) => `--allow-fs-read=${p}`),
@@ -189,25 +223,40 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
       ...(opts.scriptArgs ?? []),
     ];
 
+    // The process container hands the script only the standard pipes.
+    const stdioRpcNonce =
+      windowsMxcSandboxAvailable && opts.rpcChannel ? newStdioRpcNonce() : undefined;
     const childEnv = {
       ...sandboxEnv(process.env),
       GEZEL_SANDBOX: '1',
       ...(opts.extraEnv ?? {}),
+      ...(stdioRpcNonce ? { [STDIO_RPC_ENV]: 'stdio', [STDIO_RPC_NONCE_ENV]: stdioRpcNonce } : {}),
     };
 
-    const { command, args } = await wrapForPlatform(nodeBin, nodeArgs, {
-      workdir: cwd,
-      scratch: workdir,
-      relaxReads: opts.relaxReads,
-      denyNet: opts.denyNet,
-      macSandboxAvailable,
-      linuxSystemdSandboxAvailable,
-      timeoutMs: opts.timeoutMs,
-      childEnv,
-    });
+    let wrapped: { command: string; args: string[] };
+    try {
+      wrapped = await wrapForPlatform(nodeBin, nodeArgs, {
+        workdir: cwd,
+        scratch: workdir,
+        readPaths,
+        writePaths,
+        relaxReads: opts.relaxReads,
+        denyNet: opts.denyNet,
+        macSandboxAvailable,
+        linuxSystemdSandboxAvailable,
+        mxcLauncher,
+        timeoutMs: opts.timeoutMs,
+        childEnv,
+      });
+    } catch (err) {
+      if (!(err instanceof MxcPolicyError)) throw err;
+      return refusedResult(`[sandbox error] ${err.message}`, opts);
+    }
+    const { command, args } = wrapped;
 
     const childOpts = cwd === opts.cwd ? opts : { ...opts, cwd };
-    const first = await runSandboxChild(command, args, childOpts);
+    if (mxcLauncher) return await runInWindowsMxc(command, args, childOpts, stdioRpcNonce);
+    const first = await runSandboxChild(command, args, childOpts, stdioRpcNonce);
     const allowTrustedMacFallback =
       opts.allowMacSandboxStartupFallback === true && opts.allowMissingNetBoundary === true;
     const macSandboxStartupFailed =
@@ -237,6 +286,50 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
   } finally {
     await rm(workdir, { recursive: true, force: true });
   }
+}
+
+/**
+ * A container run never falls back to running bare: a launcher failure is
+ * reported as such, and the next run probes the host again.
+ */
+async function runInWindowsMxc(
+  command: string,
+  args: string[],
+  opts: SandboxRunOptions,
+  stdioRpcNonce: string | undefined,
+): Promise<SandboxRunResult> {
+  const release = await acquireWindowsMxcSlot(opts.signal);
+  if (!release) return refusedResult('Error: script execution cancelled', opts, 1);
+  let result: SandboxRunResult;
+  try {
+    result = await runSandboxChild(command, args, opts, stdioRpcNonce);
+  } finally {
+    release();
+  }
+  if (result.exitCode === 0 || result.timedOut) return result;
+  const launch = describeMxcLaunchFailure(result.exitCode, result.stderr);
+  if (!launch) return result;
+  invalidateWindowsMxcProbe(launch);
+  return withStderrLine(result, `[sandbox error] ${launch}`, opts);
+}
+
+function withStderrLine(
+  result: SandboxRunResult,
+  line: string,
+  opts: SandboxRunOptions,
+): SandboxRunResult {
+  opts.onStderr?.(line);
+  return { ...result, stderr: `${result.stderr}${line}\n` };
+}
+
+function refusedResult(message: string, opts: SandboxRunOptions, exitCode = 126) {
+  opts.onStderr?.(message);
+  return {
+    exitCode,
+    stdout: '',
+    stderr: `${message}\n`,
+    timedOut: false,
+  } satisfies SandboxRunResult;
 }
 
 const nodePermissionFlagCache = new Map<
@@ -313,11 +406,13 @@ async function runSandboxChild(
   command: string,
   args: string[],
   opts: SandboxRunOptions,
+  stdioRpcNonce?: string,
 ): Promise<SandboxRunResult> {
   return await new Promise<SandboxRunResult>((resolve) => {
+    const rpcOnFd3 = opts.rpcChannel && !stdioRpcNonce;
     const child = spawn(command, args, {
       cwd: opts.cwd,
-      stdio: opts.rpcChannel ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+      stdio: rpcOnFd3 ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
       // A separate process group is useful on POSIX for group termination.
       // Windows tree cleanup follows parent PIDs instead, so detaching there
       // only creates a new console window; keep it owned and hidden.
@@ -370,10 +465,34 @@ async function runSandboxChild(
     opts.signal?.addEventListener('abort', onAbort, { once: true });
     if (opts.signal?.aborted) onAbort();
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf8');
+    const appendStdout = (text: string) => {
+      if (!text) return;
       stdout += text;
       for (const line of splitLines(text)) opts.onStdout?.(line);
+    };
+    // The daemon buffers a frame until its newline; a script must not be able
+    // to make that buffer unbounded.
+    let rpcOverflow = false;
+    const stopForOverflow = () => {
+      if (rpcOverflow) return;
+      rpcOverflow = true;
+      killSandboxProcess(child);
+    };
+    const demuxer = stdioRpcNonce ? new StdioRpcDemuxer(stdioRpcNonce) : null;
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (text: string) => {
+      if (!demuxer) {
+        appendStdout(text);
+        return;
+      }
+      try {
+        const { text: output, frames } = demuxer.push(text);
+        appendStdout(output);
+        for (const frame of frames) if (frame.length > 0) opts.rpcChannel?.onLine(frame);
+      } catch (err) {
+        if (!(err instanceof StdioRpcOverflowError)) throw err;
+        stopForOverflow();
+      }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
@@ -381,7 +500,14 @@ async function runSandboxChild(
       for (const line of splitLines(text)) opts.onStderr?.(line);
     });
 
-    if (opts.rpcChannel) {
+    if (opts.rpcChannel && stdioRpcNonce) {
+      child.stdin?.on('error', () => {
+        /* the script may exit with replies still in flight — not fatal */
+      });
+      opts.rpcChannel.onOpen((line: string) => {
+        if (child.stdin && !child.stdin.destroyed) child.stdin.write(line);
+      });
+    } else if (opts.rpcChannel) {
       const rpcStream = child.stdio[3] as (NodeJS.ReadableStream & NodeJS.WritableStream) | null;
       if (rpcStream) {
         let rpcBuffer = '';
@@ -393,6 +519,10 @@ async function runSandboxChild(
             rpcBuffer = rpcBuffer.slice(nl + 1);
             if (line.length > 0) opts.rpcChannel?.onLine(line);
             nl = rpcBuffer.indexOf('\n');
+          }
+          if (rpcBuffer.length > MAX_RPC_FRAME_CHARS) {
+            rpcBuffer = '';
+            stopForOverflow();
           }
         });
         rpcStream.on('error', () => {
@@ -415,19 +545,27 @@ async function runSandboxChild(
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onAbort);
+      if (demuxer && !rpcOverflow) appendStdout(demuxer.flush());
+      child.stdin?.destroy();
       const signalSuffix = code === null && signal ? `[process closed by signal ${signal}]\n` : '';
       const cancelled = aborted ? 'Error: script execution cancelled\n' : '';
+      const overflow = rpcOverflow ? `${RPC_FRAME_OVERFLOW}\n` : '';
+      if (rpcOverflow) opts.onStderr?.(RPC_FRAME_OVERFLOW);
       resolve({
-        exitCode: aborted ? 1 : (code ?? -1),
+        exitCode: aborted || rpcOverflow ? 1 : (code ?? -1),
         signal,
         stdout,
-        stderr: `${stderr}${signalSuffix}${cancelled}`,
+        stderr: `${stderr}${signalSuffix}${cancelled}${overflow}`,
         timedOut,
       });
     });
 
-    child.stdin?.write(opts.input);
-    child.stdin?.end();
+    if (stdioRpcNonce) {
+      child.stdin?.write(stdioRpcInitLine(opts.input));
+    } else {
+      child.stdin?.write(opts.input);
+      child.stdin?.end();
+    }
   });
 }
 
@@ -588,7 +726,7 @@ export function browserScriptEnv(src: NodeJS.ProcessEnv): Record<string, string>
   return out;
 }
 
-export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'unavailable';
+export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'windows-mxc' | 'unavailable';
 
 /** Whether this host can enforce `denyNet` for ordinary (non-RPC) script work. */
 export async function denyNetBoundaryAvailable(): Promise<boolean> {
@@ -597,6 +735,9 @@ export async function denyNetBoundaryAvailable(): Promise<boolean> {
       platform: process.platform,
       macSandboxAvailable: process.platform === 'darwin' && (await canApplyMacSandbox()),
       linuxSystemdSandboxAvailable: await canApplyLinuxSystemdSandbox(),
+      windowsMxcSandboxAvailable: await canApplyWindowsMxcSandbox(
+        process.env.GEZEL_NODE_PATH || process.execPath,
+      ),
     }) !== 'unavailable'
   );
 }
@@ -606,16 +747,19 @@ export function selectDenyNetBoundary(input: {
   platform: NodeJS.Platform;
   macSandboxAvailable: boolean;
   linuxSystemdSandboxAvailable?: boolean;
+  windowsMxcSandboxAvailable?: boolean;
 }): DenyNetBoundary {
   if (input.platform === 'darwin' && input.macSandboxAvailable) return 'macos-seatbelt';
   if (input.platform === 'linux' && input.linuxSystemdSandboxAvailable) {
     return 'linux-systemd';
   }
+  if (input.platform === 'win32' && input.windowsMxcSandboxAvailable) return 'windows-mxc';
   return 'unavailable';
 }
 
 const NETWORK_SANDBOX_UNAVAILABLE =
   '[sandbox error] denyNet requires an enforceable OS network boundary. This platform has no supported boundary, so the script was not started.';
+const RPC_FRAME_OVERFLOW = `[sandbox error] a script RPC message exceeded ${MAX_RPC_FRAME_CHARS / (1024 * 1024)} MB; the run was stopped.`;
 const NETWORK_SANDBOX_RETRY_REFUSED =
   '[sandbox error] macOS Seatbelt failed to start and retrying without it would remove the denyNet boundary; the script was not retried.';
 
@@ -634,14 +778,33 @@ async function wrapForPlatform(
   ctx: {
     workdir: string;
     scratch: string;
+    readPaths: string[];
+    writePaths: string[];
     relaxReads?: boolean;
     denyNet?: boolean;
     macSandboxAvailable: boolean;
     linuxSystemdSandboxAvailable: boolean;
+    mxcLauncher: string | null;
     timeoutMs?: number;
     childEnv: Record<string, string>;
   },
 ): Promise<{ command: string; args: string[] }> {
+  if (process.platform === 'win32' && ctx.mxcLauncher) {
+    // Every run, not only denyNet: the container also confines the file
+    // system to the same allowlist the permission model enforces. Unlike
+    // Seatbelt's open reads, `relaxReads` widens nothing here; Node and the
+    // vendored SDK are reachable through readPaths already.
+    return wrapForWindowsMxc(ctx.mxcLauncher, {
+      command,
+      args,
+      cwd: ctx.workdir,
+      readwritePaths: ctx.writePaths,
+      readonlyPaths: [...ctx.readPaths, command],
+      env: containerEnvironment(ctx.childEnv, ctx.scratch),
+      denyNet: ctx.denyNet === true,
+      timeoutMs: ctx.timeoutMs,
+    });
+  }
   if (process.platform === 'darwin' && ctx.macSandboxAvailable) {
     return runUnderMacSandbox(command, args, ctx, {
       relaxReads: ctx.relaxReads,

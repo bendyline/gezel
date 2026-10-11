@@ -12,6 +12,7 @@ import {
   runInSandbox,
   selectDenyNetBoundary,
 } from './runner.js';
+import { canApplyWindowsMxcSandbox } from './windows-mxc.js';
 
 let scratch = '';
 let preloadPath = '';
@@ -72,6 +73,7 @@ describe('denyNet boundary selection', () => {
   it('does not start user code when this runtime has no strong boundary', async () => {
     if (process.platform === 'darwin') return;
     if (process.platform === 'linux' && (await canApplyLinuxSystemdSandbox())) return;
+    if (await canApplyWindowsMxcSandbox(process.execPath)) return;
 
     const marker = join(scratch, 'should-not-exist.txt');
     const entry = join(scratch, 'untrusted.mjs');

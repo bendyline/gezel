@@ -692,6 +692,19 @@ jobs:
               $checked += 1
               continue
             }
+            # The MXC launcher is Microsoft's containment boundary for
+            # sandboxed scripts; ship it only with Microsoft's own signature.
+            if ($executable.Name -ieq 'wxc-exec.exe') {
+              $signature = Get-AuthenticodeSignature $executable.FullName
+              if ($signature.Status -ne 'Valid') {
+                throw "Invalid upstream Authenticode signature for $($executable.FullName): $($signature.Status)"
+              }
+              if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') {
+                throw "Unexpected wxc-exec.exe signer for $($executable.FullName): $($signature.SignerCertificate.Subject)"
+              }
+              $checked += 1
+              continue
+            }
             if (Test-ThirdParty $executable.FullName) {
               $skipped += $executable.Name
               continue
