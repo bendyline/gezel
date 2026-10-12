@@ -211,6 +211,7 @@ import { mlxToolGrammarActive } from '../providers/mlx/request-shape.js';
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
 import { AppleFoundationModelsProvider } from '../providers/apple-foundation-models/provider.js';
+import { normalizeCliToolEvent } from '../providers/cli-tool-event.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -15362,7 +15363,12 @@ export class ChatManager extends LocalEngineRuntime {
     const events = this.events;
     const currentTurnTools = this.currentTurnTools;
     const telemetry = this.telemetry;
-    opts.onToolCall = async (info) => {
+    opts.onToolCall = async (providerInfo) => {
+      const info = normalizeCliToolEvent(
+        providerInfo,
+        record.providerName,
+        opts.claudeCliContext?.cwd ?? opts.codexCliContext?.cwd,
+      );
       // Push tool activity out over the chat event stream so the UI can show
       // what the assistant is doing during "thinking" time. Extract the
       // file path from well-known file tools so the References panel can
@@ -15497,6 +15503,7 @@ export class ChatManager extends LocalEngineRuntime {
       const startedAtMs = info.startedAtMs ?? Date.now() - info.durationMs;
       const at = new Date(startedAtMs).toISOString();
       const call: ChatMessageToolCall = {
+        ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
         ...buildToolReceipt({
           name: info.name,
           args: info.args,
@@ -15537,6 +15544,7 @@ export class ChatManager extends LocalEngineRuntime {
         {
           type: 'tool',
           name: info.name,
+          ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
           at,
           durationMs: info.durationMs,
           success: info.success,
@@ -15569,6 +15577,7 @@ export class ChatManager extends LocalEngineRuntime {
             : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
           details: {
             name: info.name,
+            ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
             sessionId: record.id,
             ...(record.taskRef ? { taskRef: record.taskRef } : {}),
             ...(record.stepId ? { stepId: record.stepId } : {}),

@@ -9,6 +9,7 @@
  * invoker-idle.test.ts.
  */
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
+import { stripVTControlCharacters } from 'node:util';
 import {
   AwakeBudget,
   type CodexPermissionModeCompat,
@@ -468,6 +469,20 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       }
       if (settled) return;
       const stderr = stderrChunks.join('');
+      // Optional MCP startup failures must survive an otherwise successful turn.
+      // Keep only diagnostic lines, bounded and scrubbed, rather than dumping stderr.
+      const mcpFailures = stripVTControlCharacters(stderr)
+        .split(/\r?\n/)
+        .filter(
+          (line) => /\bmcp\b|rmcp|MCP server/i.test(line) && /fail|error|unavailable/i.test(line),
+        );
+      if (mcpFailures.length) {
+        const message = redactKnownSecrets(mcpFailures.join('\n'), opts.hooks.knownSecretValues)!
+          .replace(/(https?:\/\/)[^\s/]+@/g, '$1[REDACTED]@')
+          .replace(/([?&](?:token|key|api_key|access_token)=)[^&\s)]+/gi, '$1[REDACTED]')
+          .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+/gi, '$1 [REDACTED]');
+        opts.hooks.emitWarning(`MCP connection failed: ${message.slice(0, 3000)}`);
+      }
       // Successful turn: `turn.completed` event already arrived. Emit
       // usage now (we know the model + duration only post-exit so the
       // turn-stats payload is complete) and resolve with the assembled
@@ -663,7 +678,35 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
             if (errorMessage) {
               toolEvent.errorMessage = errorMessage;
             }
-            opts.hooks.onToolCall?.(toolEvent);
+            const changes = event.itemType === 'file_change' ? nativeFileChanges(event.raw) : [];
+            if (changes.length > 0) {
+              // One evidence receipt per changed file. A bare completed status
+              // does not identify which file changed, and is never guessed.
+              for (const change of changes) {
+                const safeChange = {
+                  ...change,
+                  ...(change.diff === undefined
+                    ? {}
+                    : {
+                        diff: redactKnownSecrets(change.diff, opts.hooks.knownSecretValues)!,
+                      }),
+                };
+                opts.hooks.onToolCall?.({
+                  ...toolEvent,
+                  success: toolEvent.success && event.raw.status === 'completed',
+                  name: change.kind === 'delete' ? 'delete_file' : 'apply_patch',
+                  providerToolName: 'file_change',
+                  args: safeChange,
+                  argKeys: Object.keys(safeChange),
+                  structuredContent: {
+                    ...structuredContent,
+                    ...(safeChange.diff === undefined ? {} : { diff: safeChange.diff }),
+                  },
+                });
+              }
+            } else {
+              opts.hooks.onToolCall?.(toolEvent);
+            }
             state.currentPhase = 'thinking';
             opts.hooks.emitHeartbeat(undefined);
           }
@@ -830,6 +873,26 @@ function extractToolArgs(
     return out;
   }
   return {};
+}
+
+// Codex exec's FileChangeItem reports path + kind per change; a diff is
+// optional enrichment, not required evidence that the patch completed.
+// https://github.com/openai/codex/blob/main/sdk/typescript/src/items.ts
+function nativeFileChanges(
+  raw: Record<string, unknown>,
+): Array<{ path: string; kind: string; diff?: string }> {
+  const changes = Array.isArray(raw.changes) ? raw.changes : [raw];
+  return changes.flatMap((change) => {
+    if (!change || typeof change !== 'object') return [];
+    const { path, kind, diff } = change as Record<string, unknown>;
+    if (
+      typeof path !== 'string' ||
+      !path.trim() ||
+      !['add', 'delete', 'update'].includes(kind as string)
+    )
+      return [];
+    return [{ path, kind: kind as string, ...(typeof diff === 'string' ? { diff } : {}) }];
+  });
 }
 
 function extractToolStructuredContent(

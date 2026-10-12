@@ -75,6 +75,7 @@ export interface DeliverableGateResult {
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'write_file',
   'replace_in_file',
+  'replace_lines',
   'append_to_file',
   'apply_patch',
   'insert_at_marker',

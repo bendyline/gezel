@@ -2,7 +2,7 @@ import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createLogger, stripMcpPrefix, toolActivityLabel } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import { isStdioSpec } from '../mcp-bridge.js';
+import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import { SessionResumeError } from '../types.js';
 import type { SessionOpts, ToolArgsDeltaMeta, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
@@ -749,12 +749,15 @@ export class ClaudeWorker {
       };
     }
     for (const extra of this.opts.extraMcpServers ?? []) {
-      // Claude's `.mcp.json` only carries stdio MCPs in this writer;
-      // http-mcp entries are silently skipped — supporting them here
-      // would mean an http-shaped entry alongside the stdio ones, plus
-      // header/auth plumbing the CLI handles differently. An in-memory
-      // relay bridge is skipped for a stronger reason: it carries a live
-      // function and could not cross the worker boundary at all.
+      if (isHttpSpec(extra)) {
+        servers[extra.id] = {
+          type: extra.transport === 'sse' ? 'sse' : 'http',
+          url: extra.url,
+          headers: extra.headers,
+        };
+        continue;
+      }
+      // In-memory relays carry a live function and cannot cross this boundary.
       if (!isStdioSpec(extra)) continue;
       servers[extra.id] = {
         command: extra.command,
@@ -903,6 +906,16 @@ export class ClaudeWorker {
       // `ChatSession.providerState` for next-process `--resume`.
       if (!this.capturedSessionId) {
         this.capturedSessionId = event.sessionId;
+      }
+      for (const server of event.mcpServers ?? []) {
+        if (/^(failed|error|needs-auth)$/i.test(server.status)) {
+          this.pending?.hooks.emitWarning(
+            this.redact(
+              `MCP server ${server.name} is unavailable (${server.status}).`,
+              this.pending?.hooks.knownSecretValues,
+            ),
+          );
+        }
       }
       return;
     }

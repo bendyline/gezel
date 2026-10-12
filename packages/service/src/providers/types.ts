@@ -539,6 +539,8 @@ export interface SessionOpts {
 
 export interface ToolCallEvent {
   name: string;
+  /** Original CLI operation when normalized into Gezel's semantic tool names. */
+  providerToolName?: string;
   argKeys: string[];
   /**
    * Shallow copy of the args the tool was called with. Kept optional because
