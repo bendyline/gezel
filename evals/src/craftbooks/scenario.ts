@@ -2537,9 +2537,14 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
               : null,
         },
       );
+      // While the craftbook task is active its own steps and gates own the
+      // repair, and the no-progress watchdog catches a genuine hang. Armed
+      // here, this stopped spec-authoring 62s into its `repair` step, while
+      // the new step session was still rewriting a 28 KB spec (2026-10-12).
       if (
         repairDeliverable &&
         repairText !== null &&
+        taskGraph?.workflowRunning !== true &&
         staleNoWriteTargetIsFailing(failures, repairDeliverable.path)
       ) {
         // The task's walk position is part of the key: a file an earlier step

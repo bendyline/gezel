@@ -592,12 +592,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add JSON-path checks for exact script names and dependency buckets.'],
   },
-  'comprehensive-codebase-review': {
-    // Recipe mode: as artifact-task it never exercised the book's onEnter
-    // path (2026-10-10 coverage run).
-    mode: 'workflow',
-    timeoutMs: 60 * 60_000,
-  },
   'content-accuracy-review': {
     // Recipe mode: as artifact-task it never exercised the book's input
     // feature path (2026-10-10 coverage run).
