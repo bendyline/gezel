@@ -1,10 +1,25 @@
-import type { ChatModelManifest, RecoModelInput } from '@bendyline/gezel';
+import type {
+  ChatModelManifest,
+  MachineMemoryShape,
+  RecoDevice,
+  RecoModelInput,
+} from '@bendyline/gezel';
 import {
   estimateLlamaCppResidentBytes,
+  estimateManifestKvBytes,
   estimateMlxResidentBytes,
+  localContextFloorTokens,
   pickRecommendedModel,
 } from '@bendyline/gezel';
 import { detectMemoryProfile } from '../../system/memory.js';
+import {
+  computeHeadroomFor,
+  estimatePerSlotKvBytes,
+  kvQuantScale,
+  liveLaunchCapBytes,
+} from '../native/capacity-broker.js';
+import { measureAvailableGpuBytes } from '../native/device-capacity.js';
+import { resolveLlamaCppKvCacheType } from './kv-cache-type.js';
 
 /**
  * Pick the on-device model to install on first run.
@@ -45,6 +60,8 @@ export interface TierDecision {
     gpuVramBytes?: number;
     gpuMemoryKind?: 'discrete' | 'integrated' | 'unified' | 'none' | 'unknown';
     usableBytes: number;
+    /** What a launch could hold with the memory free at the time of the pick. */
+    launchCapBytes?: number;
   };
 }
 
@@ -58,7 +75,11 @@ export interface TierDecision {
  * candidate with llama.cpp's multiplier over-reserved every first-run pick on
  * Apple Silicon. Pure — unit-tested.
  */
-export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoModelInput | null {
+export function toRecoCandidate(
+  m: ChatModelManifest,
+  platform: string,
+  machine?: MachineMemoryShape,
+): RecoModelInput | null {
   const block = platform === 'darwin' ? m.mlx : m.llamaCpp;
   if (!block) return null;
   const approx = block.approxSizeBytes ?? m.approxSizeBytes;
@@ -69,6 +90,20 @@ export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoMod
       ? estimateMlxResidentBytes(approx)
       : estimateLlamaCppResidentBytes(approx, { mmprojBytes: m.llamaCpp?.mmproj?.sizeBytes ?? 0 });
   const residentBytes = block.residentBytes ?? estimated;
+  // What the launch-time context check charges: the weights, plus the KV at
+  // the window this host launches with, inside the engine's compute headroom.
+  // Gemma keeps an f16 cache and MLX runs f16; a manifest without KV geometry
+  // gets the engine's own weights-scaled estimate, never zero (a 26B suggested
+  // without its 1.3 GB of KV was refused at launch).
+  const mlx = platform === 'darwin';
+  const kvCacheType = mlx ? 'f16' : resolveLlamaCppKvCacheType({ modelId: m.id });
+  const ctxTokens = machine ? localContextFloorTokens(machine) : 0;
+  const kvBytes = !machine
+    ? 0
+    : m.kvBytesPerTokenF16
+      ? estimateManifestKvBytes(m, { ctxTokens, cacheScale: kvQuantScale(kvCacheType) })
+      : estimatePerSlotKvBytes({ perTurnCtxTokens: ctxTokens, weightsBytes: approx, kvCacheType });
+  const headroom = computeHeadroomFor(mlx ? 'mlx' : 'llama-cpp');
   return {
     id: m.id,
     ...(m.recoScore != null ? { recoScore: m.recoScore } : {}),
@@ -76,6 +111,63 @@ export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoMod
     supportsTools: m.supportsTools,
     tags: m.tags,
     residentBytes,
+    ...(block.quantization ? { quantization: block.quantization } : {}),
+    ...(machine ? { launchBytes: residentBytes + kvBytes / (1 - headroom) } : {}),
+  };
+}
+
+/** The machine's memory as a launch would find it now, in the picker's terms. */
+export interface LiveLaunchView {
+  platform: string;
+  machine: MachineMemoryShape;
+  device: RecoDevice;
+  inputs: TierDecision['inputs'];
+}
+
+/**
+ * Read the host the way the launch path will: its size, plus what is free
+ * now. The first-run pick and the failed-turn card both decide from this, so
+ * neither can promise a model the first chat turn then refuses.
+ */
+export async function liveLaunchView(): Promise<LiveLaunchView> {
+  const mem = await detectMemoryProfile();
+  const discrete = mem.gpuMemoryKind === 'discrete';
+  const machine: MachineMemoryShape = {
+    totalRamBytes: mem.totalRamBytes,
+    gpuVramBytes: discrete ? mem.gpuVramBytes : null,
+  };
+  const freeGpuBytes = discrete
+    ? await measureAvailableGpuBytes().catch(() => undefined)
+    : undefined;
+  // Only the free part of the card: admission checks graphics memory other
+  // programs hold, and so must the prediction.
+  const launchCapBytes = liveLaunchCapBytes({
+    budgetBytes: mem.budgetBytes,
+    vramBytes: discrete ? Math.min(mem.usableBytes, freeGpuBytes ?? mem.usableBytes) : 0,
+  });
+  return {
+    platform: mem.platform,
+    machine,
+    device: {
+      platform: mem.platform,
+      gpuVramBytes: mem.gpuVramBytes,
+      gpuMemoryKind: mem.gpuMemoryKind,
+      totalRamBytes: mem.totalRamBytes,
+      usableBytes: mem.usableBytes,
+      // The broker's ceiling, so first run never installs a model the very
+      // next chat turn refuses to load.
+      budgetBytes: mem.budgetBytes,
+      launchCapBytes,
+      ...(freeGpuBytes !== undefined ? { freeGpuBytes } : {}),
+    },
+    inputs: {
+      platform: mem.platform,
+      totalRamBytes: mem.totalRamBytes,
+      ...(mem.gpuVramBytes != null ? { gpuVramBytes: mem.gpuVramBytes } : {}),
+      gpuMemoryKind: mem.gpuMemoryKind,
+      usableBytes: mem.usableBytes,
+      launchCapBytes,
+    },
   };
 }
 
@@ -85,36 +177,17 @@ export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoMod
  * memory + GPU and returns the picked catalog id with a rationale.
  */
 export async function detectModelTier(models: readonly ChatModelManifest[]): Promise<TierDecision> {
-  const mem = await detectMemoryProfile();
-  const inputs: TierDecision['inputs'] = {
-    platform: mem.platform,
-    totalRamBytes: mem.totalRamBytes,
-    ...(mem.gpuVramBytes != null ? { gpuVramBytes: mem.gpuVramBytes } : {}),
-    gpuMemoryKind: mem.gpuMemoryKind,
-    usableBytes: mem.usableBytes,
-  };
-
+  const view = await liveLaunchView();
   const candidates = models
-    .map((m) => toRecoCandidate(m, mem.platform))
+    .map((m) => toRecoCandidate(m, view.platform, view.machine))
     .filter((c): c is RecoModelInput => c !== null);
-
-  const pick = pickRecommendedModel(candidates, {
-    platform: mem.platform,
-    gpuVramBytes: mem.gpuVramBytes,
-    gpuMemoryKind: mem.gpuMemoryKind,
-    totalRamBytes: mem.totalRamBytes,
-    usableBytes: mem.usableBytes,
-    // The broker's ceiling, so first run never installs a model the very
-    // next chat turn refuses to load.
-    budgetBytes: mem.budgetBytes,
-  });
-
+  const pick = pickRecommendedModel(candidates, view.device);
   if (!pick) {
     return {
       tier: FALLBACK_TIER,
       reason: `no recommended candidate matched — falling back to ${FALLBACK_TIER}`,
-      inputs,
+      inputs: view.inputs,
     };
   }
-  return { tier: pick.id, reason: pick.reason, inputs };
+  return { tier: pick.id, reason: pick.reason, inputs: view.inputs };
 }

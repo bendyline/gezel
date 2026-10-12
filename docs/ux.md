@@ -380,7 +380,11 @@ span that full width without a second indent. Home's greeting band
 steps aside for the visit, without saving that, while the meester's
 introduction fills the empty conversation, just as it does once the person
 sends. During first run there is no band at all (see [The welcome](#the-welcome)). A tab the person chose, including the one already open, holds it open
-through that. Collapsed, its tab bar stays visible; selecting any tab reopens its
+through that. The band greets once per launch: shown expanded once, it stays
+rolled up on every return to Home in that run. It also steps aside whenever
+the meester's thread holds a failed turn or a reply that arrived while the
+person was away, because the conversation, with its Retry, is what they came
+back to, not the tip of the day. Collapsed, its tab bar stays visible; selecting any tab reopens its
 content. Labels wrap on narrow screens so every destination remains visible.
 The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
@@ -546,6 +550,17 @@ and the meester's lines in the chat register (serif body). Rules:
   shows "Setting up my workbench · N%" until the engine is in place, and
   only then says it is ready. Tapping **Fetch my tools** fetches the engine
   beside the model.
+- **The model offered is one that will start.** First run picks against the
+  memory free when it runs, as the launch check will, not against the
+  machine's size alone: a 21 GB model offered to a 12 GB laptop with 8 GB of
+  RAM free was refused on the first chat turn. A 1-bit quant ranks at half
+  its curated score and a 2-bit one at four fifths, so a newcomer is not
+  handed a model that only fits because most of its precision is gone.
+- **Nothing scheduled runs on a new install.** The night shift waits under
+  the same hold as background indexing (first half hour, and until a model
+  can answer), and Home's conversation leaves out scheduled runs' sessions
+  altogether, so an install after 22:00 still opens on the welcome rather
+  than a failed overnight review.
 - **First projects, not openers.** Three stacked keys (`gz-key--stacked`,
   title over a one-line hint) offer goals a project type carries end to end
   with one lead and a board: a trip, a celebration, a language tutor
@@ -581,6 +596,27 @@ What the meester's thread shows after the person asks for something:
   the maker. When the deliverable is the data a project type's Output page
   reads (`view: 'output-page'`), the card names the project and opens it:
   the board is the thing to look at, never the JSON behind it.
+- **The finished card owns the screen when it lands.** A fresh wrap-up
+  scrolls to the top of the view (the thread stops following the bottom),
+  so the folder question beneath it is read second, not first. While the
+  thread shows a task's finished card, the chat rail leaves the deliverable
+  off that task's card, so the board does not appear twice side by side.
+- **Open opens the board, full window.** Opening a project-type deliverable
+  takes the project's Output page to full window (`requestOutputPaneFullWindow`),
+  not a half pane beside the chat. A project with one page shows no page
+  picker: a select with one choice is a label pretending to be a control.
+- **The board reads like the plan, not like the tool.** A type page labels
+  what the person would: "Day 1" when there is no date yet (and the date
+  beneath once there is one), each day as plain lines with no
+  "Anchor: / Options: / Slack:" scaffolding, counts in words ("1 day", "7
+  days", never "day(s)"), and who is going when the person said ("4
+  travellers"). The trip planner (gilde `trip-planner` 1.0.3) is the
+  reference.
+- **The task says what the person asked, and no more.** A typed kickoff's
+  description is the person's own request, not the meester's expanded brief,
+  so a lead running in the default posture is not handed hotels, dining and
+  a budget it cannot research. The lead makes what was asked and offers the
+  extras in its reply.
 - **Then, once, the folder question.** After the first wrap-up the meester
   asks at the foot of the thread whether to look after a folder
   (`FolderOnboardingStep`). Nothing is ticked and neither overnight key is
@@ -1302,6 +1338,25 @@ warning tray with the missing detail named, never in red. They are a
 reason to check, not an error. A marker whose number is not a source stays
 plain text, because a link to nothing is worse than no link.
 
+**A reply's machinery waits behind Details.** Outside debug mode, the step
+count, step timings, thinking and attempted-call expanders do not head a
+reply: the reply's action row carries a **Details** key that shows them, and
+**Hide details** puts them back. What the person needs stays in view without
+the key: media, cards, and a failure the turn never recovered from. Debug
+mode shows everything, as before. A task's id (`lisbon-trip-planning/1`) is
+debug-mode text too: the hand-off card's key reads **Open task**, the chat
+rail's task card leads with its title, and a wrap-up carries no "Tasks:"
+row because its finished card already opens the work. Status chips that remain (a task's
+**Complete**, **Draft**) take their colour from `--success` / `--warning`
+mixed into the surface, never a pale grey that reads as disabled.
+
+**A thread is titled from the sentence.** A thread's title is the person's
+first sentence with its lead-in ("Can you", "Please", "I'd like you to")
+dropped, cut at a clause or a word boundary with an ellipsis: "Plan a trip
+to Lisbon next spring for the four of us", never "Lisbon spring four trip".
+A page reaction keeps its page's name as a prefix ("Checkers: Your opponent
+played c3-d4"). See [thread-title.ts](../packages/core/src/thread-title.ts).
+
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
 salvage layer fails to promote a call it is literal tool-call markup.
@@ -1615,6 +1670,16 @@ the compact four-state `Plan / Edit / Reviewed / Full` control: this is an
 ambient project posture, so changing it belongs here rather than in the chat
 composer or a modal.
 
+**A project's settings fold into one menu; only an exception shows.** The
+project status bar does not show the project's status ("Stable") or its
+write grant ("Can edit") as standing selects: a person who has not asked
+about either should not have to read them. Both live in the bar's **…** menu
+(`ProjectControlsOverflow`), with their explanations as tooltips, and the
+write grant is a plain toggle there ("Stop workspace edits" / "Allow
+workspace edits"). The one exception stays inline: a read-only project keeps
+its writes control in the bar, because "gezels cannot edit here" is the
+state that explains why nothing changed.
+
 **Save state is ambient, so it lives in the status bar.** An editor's
 saved/unsaved indicator goes in the shell's status bar
 ([AutosaveStatus](../packages/ui/src/components/AutosaveStatus.tsx) into
@@ -1665,6 +1730,27 @@ retry” conditions do not get it. Keep both actions in a distinct row beneath
 the explanation, disable them while one is running, and surface a failed
 action inline instead of swallowing it. The failed-turn banner and its live
 streaming twin are the reference.
+
+**"Not enough memory" offers the model that would start.** A capacity denial
+asks the daemon (`GET /api/sessions/:id/model-fit`) whether the session's
+model would start with the memory free now. Retry appears only when the
+answer is yes, because the person closed something or chose another model;
+until then it could only fail the same way. When a model already on this
+computer would start and the session follows the install default, the
+primary key switches to it and runs the turn again: "Use Gemma 4 12B instead
+· already on this computer". The name drops the quant ("Gemma 4 (12B, Q4)"
+reads "Gemma 4 12B"), and the note in the key says why this one will work.
+The card asks again when the window regains focus or the config changes.
+[CapacityDeniedActions](../packages/ui/src/components/CapacityDeniedActions.tsx)
+is the reference.
+
+**A model's label agrees with whether it will start.** Settings' model rows
+judge a model with the same arithmetic the launch check uses, against the
+memory free now (`GET /api/system/models-fit-now`, `launchFitsNow` in
+[recommendation.ts](../packages/core/src/recommendation.ts)). A model the
+launch would refuse reads "won't start right now" with what to do, never
+"good match for this machine"; a dense model that fits on the graphics card
+gets no "may respond slowly" caution, because nothing about it is slow.
 
 **A failed tool says why, in the thread.** A red ✗ on a tool row is a
 status, not an explanation, and burying the reason in a tooltip or behind

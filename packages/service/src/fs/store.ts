@@ -103,6 +103,7 @@ import {
   encodeProjectGezelId,
   inferGenderForName,
   isSafeEntityId,
+  isScheduledRunSession,
   isSharedLibraryProject,
   isValidKokoroVoice,
   legacyDensityToGeneralistMode,
@@ -5819,6 +5820,11 @@ export class Store {
     before?: string;
     includeArchived?: boolean;
     /**
+     * Leave out scheduled runs' sessions (`isScheduledRunSession`) and every
+     * session opened beneath one. Home's conversation passes this.
+     */
+    excludeScheduledRuns?: boolean;
+    /**
      * Indexed workspace paths for a project, used to recognize workspace
      * files an assistant reply named in prose. Supplied by the caller
      * because the listing's owner (`WorkspaceIndexManager`) is built on top
@@ -5867,6 +5873,7 @@ export class Store {
         sessions.push(session);
       }
     }
+    if (opts.excludeScheduledRuns) dropScheduledRunSessions(sessions);
 
     // Older task entry sessions predate `task.launchSessionId`, but their
     // launcher often still carries the durable `craftbook-start` tool card.
@@ -7250,4 +7257,30 @@ You are a helpful agent. Describe how you should behave here.
 
 (Describe the expected output format here.)
 `;
+}
+
+/**
+ * Remove scheduled runs' sessions, and sessions opened beneath them, in place.
+ * A parent chain can be loaded in any order, so walk it rather than trusting
+ * that a parent was seen first.
+ */
+function dropScheduledRunSessions(sessions: ChatSession[]): void {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const hidden = new Map<string, boolean>();
+  const isHidden = (session: ChatSession, seen: Set<string>): boolean => {
+    const known = hidden.get(session.id);
+    if (known !== undefined) return known;
+    let result = isScheduledRunSession(session);
+    const parentId = session.parentSession?.sessionId;
+    if (!result && parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      result = parent ? isHidden(parent, seen) : false;
+    }
+    hidden.set(session.id, result);
+    return result;
+  };
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    if (isHidden(sessions[i]!, new Set([sessions[i]!.id]))) sessions.splice(i, 1);
+  }
 }

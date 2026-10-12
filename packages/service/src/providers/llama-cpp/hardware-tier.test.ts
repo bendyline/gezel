@@ -84,6 +84,45 @@ describe('toRecoCandidate', () => {
     expect(c?.supportsTools).toBe(false);
   });
 
+  it('prices the launch at the host context floor, inside the compute headroom', () => {
+    const model = chatModel({
+      recoScore: 20,
+      licenseClass: 'open',
+      kvBytesPerTokenF16: 100_000,
+      llamaCpp: {
+        huggingfaceRepo: 'r',
+        filename: 'f',
+        approxSizeBytes: 10 * GB,
+        residentBytes: 12 * GB,
+      },
+    });
+    const roomy = toRecoCandidate(model, 'win32', {
+      totalRamBytes: 32 * GB,
+      gpuVramBytes: 12 * GB,
+    });
+    // 64K window at q8_0 (0.55 of f16), with llama.cpp's 20% compute headroom.
+    expect(roomy?.launchBytes).toBeCloseTo(12 * GB + (100_000 * 65_536 * 0.55) / 0.8, -3);
+    const tight = toRecoCandidate(model, 'win32', { totalRamBytes: 32 * GB, gpuVramBytes: 8 * GB });
+    // An 8 GB card launches at the 32K floor.
+    expect(tight?.launchBytes).toBeCloseTo(12 * GB + (100_000 * 32_768 * 0.55) / 0.8, -3);
+    expect(toRecoCandidate(model, 'win32')?.launchBytes).toBeUndefined();
+  });
+
+  // A 26B Gemma whose manifest carries no KV geometry was priced without its
+  // f16 cache, suggested as a model that would start, and refused (2026-10-12).
+  it('prices a model without KV geometry with the engine estimate, at f16 for Gemma', () => {
+    const machine = { totalRamBytes: 32 * GB, gpuVramBytes: 12 * GB };
+    const llamaCpp = { huggingfaceRepo: 'r', filename: 'f', approxSizeBytes: 15.6 * GB };
+    const gemma = toRecoCandidate(chatModel({ id: 'gemma4-26b-q4', llamaCpp }), 'win32', machine);
+    const other = toRecoCandidate(chatModel({ id: 'qwen-moe', llamaCpp }), 'win32', machine);
+    const resident = estimateLlamaCppResidentBytes(15.6 * GB);
+    const gemmaKv = gemma!.launchBytes! - resident;
+    const otherKv = other!.launchBytes! - resident;
+    expect(gemmaKv).toBeGreaterThan(GB);
+    // q8_0 carries 0.55 of the f16 cache.
+    expect(otherKv / gemmaKv).toBeCloseTo(0.55, 2);
+  });
+
   it('returns null when the model ships no block for that platform', () => {
     const noMlx = chatModel({
       llamaCpp: { huggingfaceRepo: 'r', filename: 'f', approxSizeBytes: 10 * GB },

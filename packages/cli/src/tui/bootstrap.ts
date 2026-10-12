@@ -11,6 +11,7 @@ import {
   formatModelAttribution,
   isMoEFromTags,
   isRecommendedModel,
+  lowBitScoreFactor,
   pickRecommendedModel,
 } from '@bendyline/gezel';
 
@@ -23,6 +24,8 @@ export interface BootstrapChatModel {
   approxSizeBytes: number;
   residentBytes: number;
   recoScore: number;
+  /** The engine block's quantization tag; a 1- or 2-bit quant ranks lower. */
+  quantization?: string;
   fit: 'fits' | 'fits-offload' | 'tight' | 'too-big';
   attribution: string;
 }
@@ -126,6 +129,7 @@ export function rankChatModels(
       // Effective score: a model the shared gate rejects (restricted license,
       // no tool support) sorts as unscored rather than leading the list.
       recoScore: isRecommendedModel(manifest) ? (manifest.recoScore ?? 0) : 0,
+      ...(source.quantization ? { quantization: source.quantization } : {}),
       fit,
       attribution: formatModelAttribution(manifest),
     });
@@ -143,6 +147,7 @@ export function rankChatModels(
             ?.manifest as ChatModelManifest | undefined
         )?.tags ?? [],
       residentBytes: model.residentBytes,
+      ...(model.quantization ? { quantization: model.quantization } : {}),
     })),
     device,
   );
@@ -150,9 +155,11 @@ export function rankChatModels(
     (model) => model.fit === 'fits' || model.fit === 'fits-offload',
   );
   const pool = comfortable.length > 0 ? comfortable : candidates;
+  const ranked = (model: BootstrapChatModel) =>
+    model.recoScore * lowBitScoreFactor(model.quantization);
   pool.sort(
     (a, b) =>
-      b.recoScore - a.recoScore ||
+      ranked(b) - ranked(a) ||
       fitOrder(a.fit) - fitOrder(b.fit) ||
       b.residentBytes - a.residentBytes ||
       a.name.localeCompare(b.name),

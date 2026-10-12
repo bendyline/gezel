@@ -83,6 +83,8 @@ import {
   isLocalProvider,
   isOutsideInInternalPath,
   isProactiveAllowed,
+  isScheduledRunSession,
+  isScheduledTaskRun,
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
@@ -211,6 +213,7 @@ import { mlxToolGrammarActive } from '../providers/mlx/request-shape.js';
 import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 
 import { AppleFoundationModelsProvider } from '../providers/apple-foundation-models/provider.js';
+import { normalizeCliToolEvent } from '../providers/cli-tool-event.js';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
@@ -3259,6 +3262,8 @@ export class ChatManager extends LocalEngineRuntime {
     handoffFrom?: SessionLink;
     /** Resolve provider/model defaults from `config.nightShift.modelOverride`. */
     nightShift?: boolean;
+    /** The session works a scheduled task; see `ChatSession.scheduledRun`. */
+    scheduledRun?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
     craftbookRef?: string;
     /**
@@ -3321,6 +3326,13 @@ export class ChatManager extends LocalEngineRuntime {
         ? config.nightShift.modelOverride.model
         : undefined;
     const now = nowIso();
+    // A consultation or delegation opened by a scheduled run belongs to it.
+    const parentRecord = args.parentSession
+      ? (this.states.get(args.parentSession.sessionId)?.record ??
+        (await this.store.findSessionById(args.parentSession.sessionId).catch(() => null)))
+      : null;
+    const scheduledRun =
+      args.scheduledRun === true || (parentRecord ? isScheduledRunSession(parentRecord) : false);
     const numCtx = providerName === 'ollama' ? (fm.numCtx ?? config.ollamaNumCtx) : undefined;
     const frontmatterModel = evalProviderLocked ? undefined : fm.model;
     const routedModel =
@@ -3351,6 +3363,7 @@ export class ChatManager extends LocalEngineRuntime {
       providerState: {},
       aboutSnapshot: gezel.about,
       ...(args.nightShift ? { nightShift: true } : {}),
+      ...(scheduledRun ? { scheduledRun: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
       ...(args.stepId && args.stepActivationId ? { stepActivationId: args.stepActivationId } : {}),
@@ -3400,6 +3413,7 @@ export class ChatManager extends LocalEngineRuntime {
       );
     }
     await this.store.writeSession(record);
+    if (isScheduledRunSession(record)) this.events.markScheduledRun(record.id);
     // Membership: opening a session for (gezel, project) implicitly pulls
     // the gezel onto the project's roster. Idempotent for repeat sessions
     // and fire-and-forget so a slow project.json write never blocks the
@@ -3724,6 +3738,16 @@ export class ChatManager extends LocalEngineRuntime {
    * workspace files, project about/mission). The seed just tells the gezel
    * "you've got it, start work."
    */
+  /** Whether a task (or the cron host that spawned it) runs on a schedule. */
+  private async isScheduledTaskRecord(task: Task | null): Promise<boolean> {
+    if (!task) return false;
+    if (isScheduledTaskRun(task)) return true;
+    const host = task.parentTaskRef ? parseTaskRef(task.parentTaskRef) : null;
+    if (!host) return false;
+    const hostTask = await this.store.readTask(host.projectId, host.num).catch(() => null);
+    return hostTask ? isScheduledTaskRun(task, hostTask) : false;
+  }
+
   async startHandoffSession(args: {
     gezelId: string;
     projectId: string;
@@ -4047,6 +4071,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(parentSession ? { parentSession } : {}),
       ...(handoffFrom ? { handoffFrom } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
+      ...((await this.isScheduledTaskRecord(taskRecord)) ? { scheduledRun: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
             routedModel: {
@@ -13510,6 +13535,7 @@ export class ChatManager extends LocalEngineRuntime {
         : {}),
     };
     this.states.set(sessionId, state);
+    if (isScheduledRunSession(state.record)) this.events.markScheduledRun(sessionId);
     return state;
   }
 
@@ -15362,7 +15388,12 @@ export class ChatManager extends LocalEngineRuntime {
     const events = this.events;
     const currentTurnTools = this.currentTurnTools;
     const telemetry = this.telemetry;
-    opts.onToolCall = async (info) => {
+    opts.onToolCall = async (providerInfo) => {
+      const info = normalizeCliToolEvent(
+        providerInfo,
+        record.providerName,
+        opts.claudeCliContext?.cwd ?? opts.codexCliContext?.cwd,
+      );
       // Push tool activity out over the chat event stream so the UI can show
       // what the assistant is doing during "thinking" time. Extract the
       // file path from well-known file tools so the References panel can
@@ -15497,6 +15528,7 @@ export class ChatManager extends LocalEngineRuntime {
       const startedAtMs = info.startedAtMs ?? Date.now() - info.durationMs;
       const at = new Date(startedAtMs).toISOString();
       const call: ChatMessageToolCall = {
+        ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
         ...buildToolReceipt({
           name: info.name,
           args: info.args,
@@ -15537,6 +15569,7 @@ export class ChatManager extends LocalEngineRuntime {
         {
           type: 'tool',
           name: info.name,
+          ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
           at,
           durationMs: info.durationMs,
           success: info.success,
@@ -15569,6 +15602,7 @@ export class ChatManager extends LocalEngineRuntime {
             : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
           details: {
             name: info.name,
+            ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
             sessionId: record.id,
             ...(record.taskRef ? { taskRef: record.taskRef } : {}),
             ...(record.stepId ? { stepId: record.stepId } : {}),

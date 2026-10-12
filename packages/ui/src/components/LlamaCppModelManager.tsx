@@ -1,11 +1,19 @@
-import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyline/gezel';
+import type {
+  CatalogItemSummary,
+  ChatModelManifest,
+  HardwareHint,
+  ModelsFitNowResponse,
+  RecoDevice,
+} from '@bendyline/gezel';
 import {
+  LLAMA_CPP_COMPUTE_HEADROOM,
   computeModelFit,
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
   isRetiredModel,
+  launchFitsNow,
   localContextFloorTokens,
 } from '@bendyline/gezel';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
@@ -111,6 +119,13 @@ function recoDeviceFromMemory(memory: MemoryProfile): RecoDevice {
     usableBytes: memory.usableBytes,
     ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
   };
+}
+
+/** A good match reads green, a model that will not start reads as a warning. */
+function hintPillTone(kind: HardwareHint['kind']): string {
+  if (kind === 'moe-good-match') return ' gz-status-pill--ok';
+  if (kind === 'wont-start-now') return ' gz-status-pill--warn';
+  return '';
 }
 
 function formatApprox(bytes: number): string {
@@ -220,10 +235,18 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     [refresh],
   );
 
+  // What a launch could hold right now. Labels read it so they agree with
+  // the launch check: Settings called a model that had just been refused a
+  // "good match for this machine" (2026-10-11).
+  const [fitNow, setFitNow] = useState<ModelsFitNowResponse | null>(null);
   useEffect(() => {
     void api
       .getMemoryProfile()
       .then((m) => setMemory(m as MemoryProfile))
+      .catch(() => {});
+    void api
+      .getModelsFitNow('llama-cpp')
+      .then((r) => setFitNow(Array.isArray(r?.models) ? r : null))
       .catch(() => {});
     void api
       .getModelContextOverrides('llama-cpp')
@@ -387,12 +410,14 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           ...fitMachine(memory),
                         })
                       : undefined;
+                    const startsNow = fitNow?.models.find((x) => x.id === m.id)?.startsNow;
                     const hint =
                       memory && catalogManifest
                         ? hardwareHint(recoDeviceFromMemory(memory), {
                             isMoE: isMoEFromTags(catalogManifest.tags),
                             fitTier: ramFit?.tier ?? 'fits',
                             residentBytes: installedResidentBytes,
+                            ...(startsNow !== undefined ? { startsNow } : {}),
                           })
                         : null;
                     return (
@@ -404,7 +429,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               <div className="model-name-meta model-name-meta--stacked">
                                 {hint && (
                                   <span
-                                    className={`gz-status-pill${hint.kind === 'moe-good-match' ? ' gz-status-pill--ok' : ''}`}
+                                    className={`gz-status-pill${hintPillTone(hint.kind)}`}
                                     title={hint.detail}
                                   >
                                     {hint.label}
@@ -620,20 +645,41 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       </span>
                     )}
                     {(() => {
+                      const residentBytes = estimateLlamaCppResidentBytes(
+                        m.llamaCpp.approxSizeBytes,
+                      );
+                      const startsNow =
+                        memory && fitNow
+                          ? launchFitsNow(
+                              {
+                                residentBytes,
+                                launchBytes:
+                                  residentBytes +
+                                  fitKvBytes(m, memory) / (1 - LLAMA_CPP_COMPUTE_HEADROOM),
+                                tags: item.manifest.tags,
+                              },
+                              {
+                                launchCapBytes: fitNow.launchCapBytes,
+                                usableBytes: memory.usableBytes,
+                                ...(fitNow.freeGpuBytes !== undefined
+                                  ? { freeGpuBytes: fitNow.freeGpuBytes }
+                                  : {}),
+                              },
+                            )
+                          : undefined;
                       const hint =
                         memory && fit
                           ? hardwareHint(recoDeviceFromMemory(memory), {
                               isMoE: isMoEFromTags(item.manifest.tags),
                               fitTier: fit.tier,
-                              residentBytes:
-                                estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
-                                fitKvBytes(m, memory),
+                              residentBytes: residentBytes + fitKvBytes(m, memory),
+                              ...(startsNow !== undefined ? { startsNow } : {}),
                             })
                           : null;
                       if (!hint) return null;
                       return (
                         <span
-                          className={`gz-status-pill${hint.kind === 'moe-good-match' ? ' gz-status-pill--ok' : ''}`}
+                          className={`gz-status-pill${hintPillTone(hint.kind)}`}
                           title={hint.detail}
                         >
                           {hint.label}

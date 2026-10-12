@@ -517,10 +517,18 @@ export class ProviderPool {
         }),
       );
     }
-    const measured = await this.measuredVramDenial(modelId, residentBytes, evictedOwnEngine);
-    if (measured) {
-      log.error(capacityDenialLogLine(key, measured.reason));
-      throw new CapacityDeniedError(measured.message);
+    // A model larger than the card streams part of itself from system RAM,
+    // and how much stays on the card is the build's plan. Checked against
+    // the whole card instead, it was refused whenever anything else used the
+    // GPU, so it is checked after the build, against the plan.
+    const pools = this.broker.committed().pools;
+    const largerThanCard = pools.kind === 'discrete-gpu' && residentBytes > pools.fastBytes;
+    if (!largerThanCard) {
+      const measured = await this.measuredVramDenial(modelId, residentBytes, evictedOwnEngine);
+      if (measured) {
+        log.error(capacityDenialLogLine(key, measured.reason));
+        throw new CapacityDeniedError(measured.message);
+      }
     }
     let built: Awaited<ReturnType<ProviderBuilder>>;
     try {
@@ -544,6 +552,17 @@ export class ProviderPool {
         `reclaimed ${gb(reclaimed)} of released model reservations for ${key}; retrying admission`,
       );
       built = await this.withGpuLoadSlot(() => builder({ modelId, replicaIdx }));
+    }
+    if (largerThanCard) {
+      const gpuNeed = built.provider.plannedGpuBytes?.() ?? residentBytes;
+      const measured = await this.measuredVramDenial(modelId, gpuNeed, evictedOwnEngine);
+      if (measured) {
+        await built.provider.shutdown().catch((err) => {
+          log.warn(`shutdown after a graphics-memory denial for ${key}: ${err}`);
+        });
+        log.error(capacityDenialLogLine(key, measured.reason));
+        throw new CapacityDeniedError(measured.message);
+      }
     }
     // The builder's actual residentBytes wins if it differs from the
     // pre-flight estimate (e.g. catalog override). Reserve the truth.

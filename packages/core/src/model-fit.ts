@@ -417,3 +417,11 @@ export function isMoEFromTags(tags: readonly string[] | undefined): boolean {
     return l === 'moe' || l.includes('expert');
   });
 }
+
+/**
+ * Share of the post-weights budget a launch holds back for compute buffers
+ * before KV: llama.cpp's and MLX's. The launch-time context check divides
+ * KV by (1 - this), so every "would it start" estimate must too.
+ */
+export const LLAMA_CPP_COMPUTE_HEADROOM = 0.2;
+export const MLX_COMPUTE_HEADROOM = 0.35;

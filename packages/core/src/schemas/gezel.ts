@@ -614,6 +614,8 @@ export type MessageGrounding = z.infer<typeof MessageGroundingSchema>;
 
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
+  /** Original provider operation; `name` is the canonical runtime operation. */
+  providerToolName: z.string().optional(),
   /**
    * ISO timestamp of the call's START. Optional: absent on every message
    * persisted before this field existed, so readers must not assume it.
@@ -1148,6 +1150,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool'),
     name: z.string(),
+    providerToolName: z.string().optional(),
     /** ISO start-of-call timestamp; see ChatMessageToolCallSchema.at. */
     at: z.string().optional(),
     durationMs: z.number(),
@@ -1797,6 +1800,8 @@ export const ChatEventEnvelopeSchema = z.object({
   handoffFrom: SessionLinkSchema.optional(),
   /** Present for externally-owned read-only threads, including live turns. */
   sessionSource: ChatSessionSourceSchema.optional(),
+  /** Present when the session works a scheduled task; Home's conversation drops these. */
+  scheduledRun: z.literal(true).optional(),
   event: ChatEventSchema,
 });
 export type ChatEventEnvelope = z.infer<typeof ChatEventEnvelopeSchema>;

@@ -268,7 +268,7 @@ function ProjectControlsOverflow({
     !onStatusChange &&
     !onCodexModeChange &&
     !onClaudeModeChange &&
-    (!onManagedWorkspaceWritesChange || managedWritesOn)
+    !onManagedWorkspaceWritesChange
   ) {
     return null;
   }
@@ -291,7 +291,9 @@ function ProjectControlsOverflow({
             <legend className="sr-only">Project controls overflow</legend>
             {onStatusChange && (
               <section className="project-controls-overflow-section">
-                <span className="project-controls-overflow-label">Project status</span>
+                <span className="project-controls-overflow-label" title={STATUS_TOOLTIP}>
+                  Project status
+                </span>
                 <div className="project-controls-overflow-options">
                   {PROJECT_STATUS_OPTIONS.map((option) => (
                     <button
@@ -312,21 +314,23 @@ function ProjectControlsOverflow({
                 </div>
               </section>
             )}
-            {onManagedWorkspaceWritesChange && !managedWritesOn && (
+            {onManagedWorkspaceWritesChange && (
               <section className="project-controls-overflow-section">
-                <span className="project-controls-overflow-label">Built-in tools</span>
+                <span className="project-controls-overflow-label" title={WRITES_TOOLTIP}>
+                  Built-in tools
+                </span>
                 <button
                   type="button"
                   className="project-controls-overflow-item"
                   onClick={() => {
-                    onManagedWorkspaceWritesChange(true);
+                    onManagedWorkspaceWritesChange(!managedWritesOn);
                     setOpen(false);
                   }}
                 >
                   <span className="project-writes-select-icon" aria-hidden>
-                    <EditsLockIcon unlocked />
+                    <EditsLockIcon unlocked={!managedWritesOn} />
                   </span>
-                  <span>Allow workspace edits</span>
+                  <span>{managedWritesOn ? 'Stop workspace edits' : 'Allow workspace edits'}</span>
                 </button>
               </section>
             )}
@@ -1277,34 +1281,11 @@ export function ProjectGitStatusBar({
           </Popover.Content>
         </Popover.Root>
         <div className="project-controls-inline">
-          {onStatusChange && (
-            <Select.Root
-              value={projectStatus ?? 'active'}
-              disabled={statusLocked}
-              onValueChange={(v) => onStatusChange(v as ProjectStatus)}
-            >
-              <Select.Trigger
-                className={`project-status-select project-status-select-${projectStatus ?? 'active'}`}
-                title={
-                  statusLocked
-                    ? 'Archived projects are inactive. Restore this project to change its status.'
-                    : STATUS_TOOLTIP
-                }
-                aria-label="Project status"
-              >
-                <span className="project-status-select-dot" aria-hidden />
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {PROJECT_STATUS_OPTIONS.map((option) => (
-                  <Select.Item key={option.value} value={option.value}>
-                    {option.label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          )}
-          {onManagedWorkspaceWritesChange && (!compact || !managedWritesOn) && (
+          {/* Status and the default "Can edit" live in the overflow menu; a
+              board opened from a finished card sat over "Stable" and "Can
+              edit" dropdowns its owner never needed (2026-10-11). Read-only
+              stays in view: it is a state the person should notice. */}
+          {onManagedWorkspaceWritesChange && !managedWritesOn && (
             <Select.Root
               value={managedWritesOn ? 'on' : 'off'}
               onValueChange={(v) => onManagedWorkspaceWritesChange(v === 'on')}
@@ -1383,19 +1364,17 @@ export function ProjectGitStatusBar({
             </Select.Root>
           )}
         </div>
-        {compact && (
-          <ProjectControlsOverflow
-            projectStatus={projectStatus ?? 'active'}
-            statusLocked={statusLocked}
-            onStatusChange={onStatusChange}
-            managedWritesOn={managedWritesOn}
-            onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
-            codexMode={codexMode}
-            onCodexModeChange={onCodexModeChange}
-            claudeMode={claudeMode}
-            onClaudeModeChange={onClaudeModeChange}
-          />
-        )}
+        <ProjectControlsOverflow
+          projectStatus={projectStatus ?? 'active'}
+          statusLocked={statusLocked}
+          onStatusChange={onStatusChange}
+          managedWritesOn={managedWritesOn}
+          onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
+          codexMode={codexMode}
+          onCodexModeChange={onCodexModeChange}
+          claudeMode={claudeMode}
+          onClaudeModeChange={onClaudeModeChange}
+        />
         {!onManagedWorkspaceWritesChange && !managedWritesOn && (
           <span
             className="project-lockdown-chip"

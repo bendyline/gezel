@@ -4131,14 +4131,19 @@ button.timeline-session-divider-child::before {
   font-weight: 600;
 }
 
+/* Mixed from the theme's own status colours toward the text colour, so the
+   chip reads in both themes. The fixed pale blue and gold were tuned for a
+   dark rail and all but vanished on the light one. */
 .chat-rail-task-status-draft {
-  background: rgba(255, 199, 100, 0.12);
-  color: #d7b86b;
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: color-mix(in srgb, var(--warning) 45%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
 }
 
 .chat-rail-task-status-complete {
-  background: rgba(79, 125, 255, 0.15);
-  color: #a8bcff;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: color-mix(in srgb, var(--success) 40%, var(--text));
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
 }
 
 .chat-rail-task-status-paused,

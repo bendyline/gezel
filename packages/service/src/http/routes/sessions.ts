@@ -18,6 +18,7 @@ import {
   stringifyCraftbookParamValues,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { sessionModelFitNow } from '../../chat/model-fit-now.js';
 import { chatLaunchInvocationKey } from '../../tasks/chat-launch-key.js';
 import { launchErrorResponse } from '../../tasks/launcher.js';
 import { pauseTaskStoppedByUser } from '../../tasks/step-pause.js';
@@ -457,6 +458,16 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       reused: false,
     };
     return c.json(out, 201);
+  });
+
+  // Read by the failed-turn card after a capacity denial: whether Retry can
+  // help yet, and which model already on this computer would start instead.
+  app.get('/:id/model-fit', async (c) => {
+    const fit = await sessionModelFitNow(
+      { store: ctx.store, chat: ctx.chat, catalog: ctx.catalog },
+      c.req.param('id'),
+    );
+    return fit ? c.json(fit) : c.json({ error: 'not found' }, 404);
   });
 
   app.post('/:id/retry', async (c) => {

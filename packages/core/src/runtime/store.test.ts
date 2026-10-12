@@ -146,7 +146,7 @@ describe('PortableStore ordinary product files', () => {
       providerId: 'android-mlkit',
     });
     expect((await reopened.listSessions({ projectId: project.id }))[0]?.title).toBe(
-      'Create planting plan',
+      'Create a planting plan',
     );
     expect(
       (await reopened.listFiles('workspace', project.id, '', true)).entries.map(

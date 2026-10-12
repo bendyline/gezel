@@ -20,6 +20,7 @@ import { attachableDeliverable, describeSendFailure } from './handoff.ts';
 import { summarizeKeurmeesterCases } from './keurmeester-metrics.ts';
 import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
+import { writeMockTrustBundle } from './mock/trust.ts';
 import {
   assertMlxSourceComplete,
   cloneModelDirIntoTrial,
@@ -913,7 +914,13 @@ export async function runTrial(
     const seedPath = join(runDir, 'mock-seed.json');
     await writeFile(caPath, mockRuntime.caPem, 'utf8');
     await writeFile(seedPath, JSON.stringify(mockRuntime.seedEntries()), 'utf8');
-    mergedExtraEnv.NODE_EXTRA_CA_CERTS = caPath;
+    Object.assign(
+      mergedExtraEnv,
+      await writeMockTrustBundle(runDir, mockRuntime.caPem, {
+        ...process.env,
+        ...mergedExtraEnv,
+      }),
+    );
     mergedExtraEnv.GEZEL_SEED_SECRETS_FILE = seedPath;
     // Fake-MCP toolsets: catalog-valid ids go into the trial home's local
     // catalog and install through the ordinary rail. Runtime-managed scoped

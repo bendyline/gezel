@@ -34,6 +34,7 @@ import { gezelChatTheme } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
+import { useDebugMode } from './useDebugMode.js';
 import { useTaskEvents, useTaskResult } from './useTaskResult.js';
 
 /**
@@ -228,7 +229,10 @@ export interface ChatReferencesApi {
    * pill row's task click); the passive timeline feeds must not yank the
    * rail off whatever the user is reading.
    */
-  onTaskReference: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
+  onTaskReference: (
+    ref: string,
+    opts?: { scoped?: boolean; focus?: boolean; wrappedUp?: boolean },
+  ) => void;
 }
 
 interface TaskRef {
@@ -236,6 +240,8 @@ interface TaskRef {
   /** The session's own task (vs. a ref merely mentioned in a reply). */
   scoped: boolean;
   firstSeenAt: number;
+  /** The thread carries this task's wrap-up, finished card and all. */
+  wrappedUp?: boolean;
 }
 
 export function ChatReferences({
@@ -377,19 +383,27 @@ export function ChatReferences({
   }, [skillsProjectId]);
 
   const handleTaskReference = useCallback(
-    (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => {
+    (ref: string, opts?: { scoped?: boolean; focus?: boolean; wrappedUp?: boolean }) => {
       const scoped = opts?.scoped ?? false;
+      const wrappedUp = opts?.wrappedUp === true;
       setTaskRefs((prev) => {
         const hit = prev.find((t) => t.ref === ref);
         if (hit) {
           // A ref first seen as a mention can later be confirmed as the
           // session's scoped task — promote it so it pins to the top.
-          if (scoped && !hit.scoped) {
-            return prev.map((t) => (t.ref === ref ? { ...t, scoped: true } : t));
+          if ((scoped && !hit.scoped) || (wrappedUp && !hit.wrappedUp)) {
+            return prev.map((t) =>
+              t.ref === ref
+                ? { ...t, scoped: t.scoped || scoped, wrappedUp: t.wrappedUp || wrappedUp }
+                : t,
+            );
           }
           return prev;
         }
-        return [...prev, { ref, scoped, firstSeenAt: Date.now() }];
+        return [
+          ...prev,
+          { ref, scoped, firstSeenAt: Date.now(), ...(wrappedUp ? { wrappedUp } : {}) },
+        ];
       });
       // A deliberate click wins over the rising-edge effects below, which
       // deliberately hold back when a reference is already open.
@@ -559,6 +573,11 @@ export function ChatReferences({
     [taskRefs],
   );
   const hasTasks = orderedTasks.length > 0;
+  // The thread already shows these tasks' finished cards.
+  const wrappedUpRefs = useMemo(
+    () => new Set(taskRefs.filter((t) => t.wrappedUp).map((t) => t.ref)),
+    [taskRefs],
+  );
   const effectiveTaskRef =
     (activeTaskRef && orderedTasks.find((t) => t.ref === activeTaskRef)?.ref) ||
     orderedTasks[0]?.ref ||
@@ -747,6 +766,7 @@ export function ChatReferences({
               <TaskRailCard
                 key={effectiveTaskRef}
                 taskRef={effectiveTaskRef}
+                hideDeliverable={wrappedUpRefs.has(effectiveTaskRef)}
                 onTaskChanged={onTaskChanged}
                 onOpenFile={openTaskFile}
                 onOpenTask={(ref) =>
@@ -899,6 +919,7 @@ export function ChatReferences({
                   <TaskRailCard
                     key={effectiveTaskRef}
                     taskRef={effectiveTaskRef}
+                    hideDeliverable={wrappedUpRefs.has(effectiveTaskRef)}
                     onTaskChanged={onTaskChanged}
                     onOpenFile={openTaskFile}
                     onOpenTask={(ref) =>
@@ -950,8 +971,11 @@ function TaskRailCard({
   onOpenTask,
   onTaskChanged,
   onOpenFile,
+  hideDeliverable = false,
 }: {
   taskRef: string;
+  /** The thread beside the rail shows this deliverable already. */
+  hideDeliverable?: boolean;
   onOpenTask?: (ref: string) => void;
   onTaskChanged?: (task: Task) => void;
   /** Open a file the task made (its deliverable, a path in a note) in the viewer. */
@@ -960,6 +984,7 @@ function TaskRailCard({
   const [task, setTask] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [notes, setNotes] = useState<TaskNote[]>([]);
+  const debugMode = useDebugMode();
   const [notesState, setNotesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -1112,7 +1137,7 @@ function TaskRailCard({
       )}
       <div className="chat-rail-task-topbar">
         <header className="chat-rail-task-header">
-          <code className="chat-rail-task-ref">{task.ref}</code>
+          {debugMode && <code className="chat-rail-task-ref">{task.ref}</code>}
           {task.parentTaskRef ? (
             <span
               className={`chat-rail-task-status chat-rail-task-status-${effectiveStatus}`}
@@ -1187,7 +1212,7 @@ function TaskRailCard({
           <span className="muted small">From craftbook</span> {cb.name}
         </div>
       )}
-      {result?.deliverable && (
+      {result?.deliverable && !hideDeliverable && (
         <div className="chat-rail-task-deliverable">
           <DeliverableCard
             deliverable={result.deliverable}

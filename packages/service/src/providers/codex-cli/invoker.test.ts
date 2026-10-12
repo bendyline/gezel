@@ -115,6 +115,121 @@ describe('permissionModeToCodexArgs', () => {
   });
 });
 
+describe('native tool evidence and MCP diagnostics', () => {
+  async function invoke(items: Record<string, unknown>[], stderr = '') {
+    const calls: ToolCallEvent[] = [];
+    const warnings: string[] = [];
+    const binaryPath = await makeFakeCodex(
+      [
+        ...items.map((item) => JSON.stringify({ type: 'item.completed', item })),
+        JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }),
+        '',
+      ].join('\n'),
+      0,
+      stderr,
+    );
+    await runCodexTurn({
+      binaryPath,
+      cwd: dir,
+      codexHome: join(dir, 'codex-home'),
+      baseEnv: {},
+      model: 'test',
+      permissionMode: 'acceptEdits',
+      prompt: 'test',
+      hooks: {
+        emitDelta: () => {},
+        emitIntent: () => {},
+        emitHeartbeat: () => {},
+        emitUsage: () => {},
+        emitWarning: (warning) => {
+          warnings.push(warning);
+        },
+        onToolCall: (call) => {
+          calls.push(call);
+        },
+        knownSecretValues: new Set(['synthetic-secret']),
+      },
+    });
+    return { calls, warnings };
+  }
+
+  it('preserves each native changed path and diff, including deletes and failures', async () => {
+    const { calls } = await invoke([
+      {
+        id: 'a',
+        type: 'file_change',
+        status: 'completed',
+        changes: [
+          { path: join(dir, 'report.md'), kind: 'update', diff: '-old\n+synthetic-secret' },
+          { path: join(dir, 'old.md'), kind: 'delete', diff: '-old' },
+        ],
+      },
+      {
+        id: 'b',
+        type: 'file_change',
+        status: 'failed',
+        changes: [{ path: join(dir, 'failed.md'), kind: 'add', diff: '+no write' }],
+      },
+      { id: 'c', type: 'file_change', status: 'completed' },
+    ]);
+    expect(calls).toHaveLength(4);
+    expect(calls[0]).toMatchObject({
+      name: 'apply_patch',
+      providerToolName: 'file_change',
+      success: true,
+      args: { path: join(dir, 'report.md'), diff: '-old\n+[REDACTED]' },
+      structuredContent: { diff: '-old\n+[REDACTED]' },
+    });
+    expect(calls[1]).toMatchObject({ name: 'delete_file', success: true });
+    expect(calls[2]).toMatchObject({ name: 'apply_patch', success: false });
+    expect(calls[3]?.args?.path).toBeUndefined();
+    expect(calls[3]?.providerToolName).toBeUndefined();
+  });
+
+  it('reports MCP connection errors even when the model turn succeeded, without secrets', async () => {
+    const { warnings } = await invoke(
+      [],
+      [
+        'ordinary stderr is not a warning',
+        'ERROR rmcp: failed https://user:password@localhost/mcp?token=unknown-secret Bearer another-secret synthetic-secret',
+      ].join('\n'),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('MCP connection failed');
+    expect(warnings[0]).not.toMatch(
+      /password|unknown-secret|another-secret|synthetic-secret|ordinary stderr/,
+    );
+  });
+
+  it('accepts the exec wire shape without diffs, requiring a known operation and completed status', async () => {
+    const { calls } = await invoke([
+      {
+        id: 'a',
+        type: 'file_change',
+        status: 'completed',
+        changes: [
+          { path: 'runlog.md', kind: 'update' },
+          { path: 'halt-report.md', kind: 'add' },
+        ],
+      },
+      { id: 'b', type: 'file_change', changes: [{ path: 'unknown.md', kind: 'update' }] },
+      {
+        id: 'c',
+        type: 'file_change',
+        status: 'completed',
+        changes: [{ path: 'unknown.md', kind: 'unknown' }],
+      },
+    ]);
+    expect(calls.slice(0, 2)).toMatchObject([
+      { name: 'apply_patch', args: { path: 'runlog.md' }, success: true },
+      { name: 'apply_patch', args: { path: 'halt-report.md' }, success: true },
+    ]);
+    expect(calls[0]?.args?.diff).toBeUndefined();
+    expect(calls[2]?.success).toBe(false);
+    expect(calls[3]?.name).toBe('file_change');
+  });
+});
+
 describe('buildCodexArgs', () => {
   it('builds the canonical first-turn argv', () => {
     const args = buildCodexArgs({

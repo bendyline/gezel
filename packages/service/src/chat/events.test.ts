@@ -320,6 +320,35 @@ describe('ChatEventBus — session-scoped replay (existing behavior)', () => {
     expect(bus.activeSessionCount()).toBe(0);
   });
 
+  it('tags a scheduled run on live and replayed envelopes, and only that session', () => {
+    const bus = new ChatEventBus();
+    const live: ChatEventEnvelope[] = [];
+    bus.subscribeAll((env) => live.push(env));
+    bus.markScheduledRun('night');
+    bus.publish(
+      { sessionId: 'night', gezelId: 'meester', projectId: 'default' },
+      {
+        type: 'delta',
+        content: 'reviewing',
+      },
+    );
+    bus.publish(
+      { sessionId: 'front', gezelId: 'meester', projectId: 'default' },
+      {
+        type: 'delta',
+        content: 'hello',
+      },
+    );
+    expect(live.map((e) => [e.sessionId, e.scheduledRun])).toEqual([
+      ['night', true],
+      ['front', undefined],
+    ]);
+
+    const replayed: ChatEventEnvelope[] = [];
+    bus.subscribeAll((env) => replayed.push(env));
+    expect(replayed.find((e) => e.sessionId === 'night')?.scheduledRun).toBe(true);
+  });
+
   it('isolates a throwing listener from other listeners', () => {
     const bus = new ChatEventBus();
     const seen: ChatEvent[] = [];

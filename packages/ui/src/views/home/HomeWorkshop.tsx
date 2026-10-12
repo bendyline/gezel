@@ -29,6 +29,19 @@ import {
 } from './utils.js';
 
 /**
+ * Home greets once per launch. Coming back from Settings reopened the band
+ * over a conversation whose last turn had failed, and its Retry could not be
+ * reached (2026-10-11). Module state, so it lasts as long as the window does.
+ */
+const homeVisit: { greeted: boolean; leftAt: string | null } = { greeted: false, leftAt: null };
+
+/** Test seam: a fresh launch. */
+export function resetHomeVisit(): void {
+  homeVisit.greeted = false;
+  homeVisit.leftAt = null;
+}
+
+/**
  * The onboarded "workshop" home: a full-width greeting band over the meester
  * conversation. Owns its Home data fetching and the greeting's local UI state.
  */
@@ -73,8 +86,11 @@ export function HomeWorkshop({
   // Collapsed state is a persisted preference (server config, so it
   // survives Electron's per-launch port shuffle). Seed from config, then
   // reconcile once when it first arrives; toggles write through.
-  const [collapsed, setCollapsed] = useState(config?.homeGreetingCollapsed ?? false);
-  const reconciledCollapse = useRef(false);
+  const [collapsed, setCollapsed] = useState(
+    homeVisit.greeted || (config?.homeGreetingCollapsed ?? false),
+  );
+  // Once this launch has greeted, the saved preference no longer reopens it.
+  const reconciledCollapse = useRef(homeVisit.greeted);
   // A manual toggle is authoritative: if the user collapses/expands before
   // config has loaded, the late-arriving reconcile must not clobber their
   // choice back to the persisted value. Latch on first toggle and bail.
@@ -107,10 +123,30 @@ export function HomeWorkshop({
   // message beats the reconcile effect, that effect would reopen the band as
   // soon as it flushed.
   const collapseForConversation = useCallback(() => {
+    homeVisit.greeted = true;
     if (userToggledCollapse.current) return;
     reconciledCollapse.current = true;
     setCollapsed(true);
   }, []);
+  // A failed turn, or a reply that arrived since the person was last here,
+  // is what Home should open on.
+  const onAttentionChange = useCallback(
+    ({ failedTurn, latestReplyAt }: { failedTurn: boolean; latestReplyAt: string | null }) => {
+      const unread =
+        latestReplyAt !== null && homeVisit.leftAt !== null && latestReplyAt > homeVisit.leftAt;
+      if (failedTurn || unread) collapseForConversation();
+    },
+    [collapseForConversation],
+  );
+  useEffect(() => {
+    if (!collapsed && !welcoming) homeVisit.greeted = true;
+  }, [collapsed, welcoming]);
+  useEffect(
+    () => () => {
+      homeVisit.leftAt = new Date().toISOString();
+    },
+    [],
+  );
   // Which folders the crew looks after: asked at the foot of the meester's
   // conversation once the crew has finished something, never during the
   // welcome. Hidden as soon as the person answers; the config stamp keeps it
@@ -428,6 +464,7 @@ export function HomeWorkshop({
                   : {})}
                 onTurnStarted={collapseForConversation}
                 onIntroductionShown={collapseForConversation}
+                onAttentionChange={onAttentionChange}
               />
             ) : (
               <section className="home-workshop-conversation">

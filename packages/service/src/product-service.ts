@@ -779,10 +779,26 @@ export async function startProductService(
   // The desktop app's OS-idle and power reports; read by enrichment and the
   // night shift.
   const systemIdle = new SystemIdleState();
+  // A new install's first half hour belongs to meeting the Meester, not to a
+  // title bar reporting "scanning Default" or a night shift failing on an
+  // engine that is still downloading. See first-run/indexing-hold.ts.
+  const indexingHold = new FirstUseIndexingHold({
+    readConfig: () => store.readConfig(),
+    writeConfig: (patch) => store.writeConfig(patch),
+    chatModelReady: async () =>
+      defaultProviderCanAnswer({
+        config: await store.readConfig(),
+        listInstalledModels: (provider) => chat.listModelsForProvider(provider),
+        hasCredential: async (name) =>
+          (await secrets.get({ kind: 'providerCredential', name })) !== null,
+        copilotAvailable: async () => (await resolveCopilotAvailability(home)).available,
+      }),
+  });
   const nightShift = new NightShiftManager({
     store,
     manager: tasks,
     events: chatEvents,
+    firstUseHold: indexingHold,
     ...(opts.nightShiftNow ? { now: opts.nightShiftNow } : {}),
     quotaGate: nightQuotaGate,
     resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
@@ -868,20 +884,6 @@ export async function startProductService(
   // ancestors prune queued/running child turns, while a resumed ancestor
   // rehydrates only descendants whose own stored status is still active.
   tasks.setTaskStatusChangedHook(({ task }) => taskRunner.reconcileStatusChange(task));
-  // A new install's first half hour belongs to meeting the Meester, not to a
-  // title bar reporting "scanning Default". See first-run/indexing-hold.ts.
-  const indexingHold = new FirstUseIndexingHold({
-    readConfig: () => store.readConfig(),
-    writeConfig: (patch) => store.writeConfig(patch),
-    chatModelReady: async () =>
-      defaultProviderCanAnswer({
-        config: await store.readConfig(),
-        listInstalledModels: (provider) => chat.listModelsForProvider(provider),
-        hasCredential: async (name) =>
-          (await secrets.get({ kind: 'providerCredential', name })) !== null,
-        copilotAvailable: async () => (await resolveCopilotAvailability(home)).available,
-      }),
-  });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
     // so the runner's night dispatch holds until static + AI indexing is

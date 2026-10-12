@@ -539,6 +539,8 @@ export interface SessionOpts {
 
 export interface ToolCallEvent {
   name: string;
+  /** Original CLI operation when normalized into Gezel's semantic tool names. */
+  providerToolName?: string;
   argKeys: string[];
   /**
    * Shallow copy of the args the tool was called with. Kept optional because
@@ -791,6 +793,12 @@ export interface LLMProvider {
    * not price its launch (external base URL, unreadable weights).
    */
   plannedReservationBytes?(): number | undefined;
+  /**
+   * Graphics memory the launch plan puts on a discrete card, when it puts
+   * less than the whole model there (a MoE whose experts stream from system
+   * RAM). Undefined means the old charge: as much of the model as fits.
+   */
+  plannedGpuBytes?(): number | undefined;
   /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by

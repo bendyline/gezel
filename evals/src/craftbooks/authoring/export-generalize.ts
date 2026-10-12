@@ -3,9 +3,11 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
+  type AuthoredCraftbookMatch,
+  type AuthoringPollArgs,
   ensureAuthoringProject,
   ensureAuthoringWorker,
-  findAuthoredCraftbook,
+  findAuthoredCraftbooks,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
   noDeliverableWritten,
@@ -284,12 +286,40 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   const projectId = await findProjectIdByName(ctx.client, PROJECT_NAME);
   if (!projectId) return { done: false };
 
-  const craftbookFailures: string[] = [];
-  const book = await findAuthoredCraftbook(ctx.client, {
+  const books = await findAuthoredCraftbooks(ctx.client, {
     projectId,
     minSteps: 2,
     nameHint: BOOK_NAME_HINT,
   });
+  const candidates = await Promise.all(
+    books.map(async (book) => ({
+      book,
+      found: await findTaskForCraftbookAnywhere(ctx.client, projectId, book.craftbook.id),
+    })),
+  );
+  const executed = candidates.filter((candidate) => candidate.found);
+  const pool = executed.length
+    ? executed
+    : candidates.length
+      ? candidates
+      : [{ book: null, found: null }];
+  let best: AuthoringPollArgs | undefined;
+  for (const { book, found } of pool) {
+    const assessment = await assessRecipe(ctx, projectId, book, found);
+    if (!best || assessment.failures.length < best.failures.length) best = assessment;
+    if (assessment.failures.length === 0) break;
+  }
+  return finishAuthoringPoll(ctx, best!);
+}
+
+async function assessRecipe(
+  ctx: EvalContext,
+  projectId: string,
+  book: AuthoredCraftbookMatch | null,
+  found: Awaited<ReturnType<typeof findTaskForCraftbookAnywhere>>,
+): Promise<AuthoringPollArgs> {
+  const craftbookFailures: string[] = [];
+  let needsCoordinator = !book;
   // Grade the workspace where the recipe's task actually ran — the prompt
   // pins the seeded project, but a detour must not zero out real work.
   let gradeProjectId = projectId;
@@ -298,8 +328,8 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       'no reusable authored craftbook with at least 2 steps exists yet — generalize the Q1 pass into a saved reusable recipe (export the finished task with export_task_craftbook, or author it with craftbook_write)',
     );
   } else {
-    const found = await findTaskForCraftbookAnywhere(ctx.client, projectId, book.craftbook.id);
     if (!found) {
+      needsCoordinator = true;
       craftbookFailures.push(
         `no task has been created from craftbook "${book.craftbook.id}" yet — invoke it on this project so the Q2 pass is produced BY the recipe`,
       );
@@ -378,7 +408,8 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   // while the Q1 pass it is supposed to generalize is still unfinished.
   const failures = [...q1Failures, ...craftbookFailures, ...q2Failures, ...copyFailures];
 
-  return finishAuthoringPoll(ctx, {
+  return {
+    ...(needsCoordinator ? { targetGezelId: ctx.meesterId } : {}),
     scenarioId: exportGeneralizeScenario.id,
     projectId,
     totalChecks: TOTAL_CHECKS,
@@ -402,7 +433,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     ].join(' '),
     successReason:
       'did the Q1 pass, generalized it into a saved reusable craftbook, ran that craftbook to completion, and the Q2 outputs are genuinely derived from the Q2 list',
-  });
+  };
 }
 
 export const exportGeneralizeScenario: EvalScenario = {

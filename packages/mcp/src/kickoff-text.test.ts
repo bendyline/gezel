@@ -193,4 +193,43 @@ describe('buildTypedKickoffStep', () => {
     expect(step.description).toContain('"Departure date"');
     expect(step.description).not.toContain('index.html');
   });
+
+  // The meester's own brief for a Lisbon trip added hotels, dining and a
+  // budget the default posture could not research (2026-10-11).
+  it('states the goal in the person’s words, and leaves extras for the lead to offer', () => {
+    const step = buildTypedKickoffStep({
+      typeName: 'Trip Planner',
+      brief: {
+        name: 'Lisbon Trip Planning',
+        about: 'Plan a week in Lisbon. Include hotels, dining recommendations and a budget.',
+      },
+      request: 'Plan a trip to Lisbon next spring for the four of us, about a week.',
+      unsaid: [],
+    });
+    expect(step.description).toContain(
+      'Their goal: Plan a trip to Lisbon next spring for the four of us, about a week.',
+    );
+    expect(step.description).not.toContain('budget');
+    expect(step.description).toContain('offer it in your reply instead of adding it');
+  });
+
+  // A Reisleider re-recorded Lisbon and four people, made up a date for
+  // "next spring", and planned no days (2026-10-12).
+  it('names what the request already recorded so the lead starts on the plan', () => {
+    const step = buildTypedKickoffStep({
+      typeName: 'Trip Planner',
+      brief: { name: 'Lisbon', about: 'A week in Lisbon.' },
+      dataFile: 'trip.json',
+      unsaid: [],
+      known: [
+        { title: 'Where to?', value: 'Lisbon' },
+        { title: 'Departure date', value: 'next spring' },
+        { title: "Who's going?", value: '4' },
+      ],
+    });
+    expect(step.description).toContain(
+      'Already recorded from their words: "Where to?" Lisbon, "Departure date" next spring, "Who\'s going?" 4.',
+    );
+    expect(step.description).toContain('Start on the plan itself');
+  });
 });

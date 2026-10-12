@@ -142,12 +142,13 @@ export function matchProjectTypeForBrief(
   };
 }
 
-type ParamKind = 'place' | 'when' | 'occasion' | 'language';
+type ParamKind = 'place' | 'when' | 'occasion' | 'language' | 'party';
 
 function paramKind(key: string, param: BriefRoutableParam): ParamKind | null {
   const label = `${key} ${param.title ?? ''}`.toLowerCase();
   if (/\b(?:destination|where|city|country|place|location)\b/.test(label)) return 'place';
   if (/\b(?:date|start|when|departure|departing)\b/.test(label)) return 'when';
+  if (/\b(?:travell?ers?|who'?s\s+going|party\s+size|headcount)\b/.test(label)) return 'party';
   if (/\b(?:occasion|celebrat\w*)\b/.test(label)) return 'occasion';
   if (/\blanguage\b/.test(label)) return 'language';
   return null;
@@ -194,6 +195,8 @@ function readParam(kind: ParamKind, brief: string): string | null {
       return readOccasion(brief);
     case 'language':
       return readLanguage(brief);
+    case 'party':
+      return readParty(brief);
   }
 }
 
@@ -386,4 +389,56 @@ function readLanguage(brief: string): string | null {
   const match = brief.match(new RegExp(`\\b(${LANGUAGES.join('|')})\\b`, 'i'));
   if (!match) return null;
   return LANGUAGES.find((l) => l.toLowerCase() === match[1]!.toLowerCase()) ?? null;
+}
+
+const COUNT_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
+const COUNT = `(\\d{1,2}|${Object.keys(COUNT_WORDS).join('|')})`;
+
+function count(word: string): number {
+  return COUNT_WORDS[word.toLowerCase()] ?? Number(word);
+}
+
+/**
+ * How many are going, as a number. Only phrasings that state the whole
+ * party count: "with 3 friends" is four people or three, so it reads as
+ * nothing rather than a guess.
+ */
+function readParty(brief: string): string | null {
+  const split = brief.match(
+    new RegExp(
+      `\\b${COUNT}\\s+adults?\\s+(?:and|&|\\+)\\s+${COUNT}\\s+(?:kids?|children|child|teens?|teenagers?|toddlers?|bab(?:y|ies))\\b`,
+      'i',
+    ),
+  );
+  if (split) return String(count(split[1]!) + count(split[2]!));
+  const whole = brief.match(
+    new RegExp(
+      `\\b(?:the|all)\\s+${COUNT}\\s+of\\s+us\\b|\\bfamily\\s+of\\s+${COUNT}\\b|\\bfor\\s+${COUNT}\\s+(?:people|persons|adults|travell?ers)\\b`,
+      'i',
+    ),
+  );
+  const n = whole?.slice(1).find((g) => g !== undefined);
+  if (n) return String(count(n));
+  if (
+    /\b(?:my\s+(?:wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?)\s+and\s+(?:i|me)|me\s+and\s+my\s+(?:wife|husband|partner|girlfriend|boyfriend|fianc[eé]e?)|honeymoon)\b/i.test(
+      brief,
+    )
+  ) {
+    return '2';
+  }
+  if (/\b(?:just\s+me|solo\s+trip|by\s+myself|on\s+my\s+own)\b/i.test(brief)) return '1';
+  return null;
 }

@@ -1724,6 +1724,17 @@ button.danger {
   color: white;
 }
 
+/* "Use Gemma 4 12B instead · already on this computer": the note says why
+   this key will work where Retry would not, without a second sentence. */
+.timeline-session-error-action-note {
+  margin-left: 0.4rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+.timeline-session-error-action-note::before {
+  content: "· ";
+}
+
 .timeline-session-error-action:disabled {
   /* macOS renders `wait` as the system beachball, which makes this small
      network action look like the whole app has frozen. The changing label is

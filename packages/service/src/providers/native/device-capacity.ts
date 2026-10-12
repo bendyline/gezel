@@ -229,14 +229,19 @@ export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacit
   // that counted neither inactive nor speculative pages, which made admission
   // roughly 5 GiB stricter than planning on a 16 GiB Mac and refused launches
   // the host could serve.
-  const availableBytes =
-    Math.max(0, availableSystemRamBytes() - liveRamOsReserveBytes(ram)) + budget.vramBytes;
-  const availableGpuBytes =
-    budget.kind === 'discrete-gpu' ? await measureAvailableGpuBytes() : undefined;
+  const availableRamBytes = Math.max(0, availableSystemRamBytes() - liveRamOsReserveBytes(ram));
+  const availableBytes = availableRamBytes + budget.vramBytes;
+  const discrete = budget.kind === 'discrete-gpu';
+  const availableGpuBytes = discrete ? await measureAvailableGpuBytes() : undefined;
   return {
     ...ceilings,
     availableBytes,
     ...(availableGpuBytes !== undefined ? { availableGpuBytes } : {}),
+    // A discrete card's claims say how much of them lives on the card, so
+    // their RAM need is the rest. Against RAM plus the whole card, a MoE
+    // that keeps only its residue on the GPU would be credited with graphics
+    // memory it never uses.
+    ...(discrete ? { availableRamBytes } : {}),
     serializeLoads: process.platform === 'darwin',
   };
 }

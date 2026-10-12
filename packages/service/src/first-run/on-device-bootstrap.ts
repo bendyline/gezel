@@ -305,9 +305,13 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   const gpuGb = decision.inputs.gpuVramBytes
     ? `, gpuVram=${Math.round(decision.inputs.gpuVramBytes / 1024 ** 3)}GB`
     : '';
+  const capGb =
+    decision.inputs.launchCapBytes !== undefined
+      ? `, startsNowUpTo=${(decision.inputs.launchCapBytes / 1024 ** 3).toFixed(1)}GB`
+      : '';
   const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
   log.info(
-    `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb})`,
+    `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb}${capGb})`,
   );
 
   // Publish the recommendation before shared-model verification. A first

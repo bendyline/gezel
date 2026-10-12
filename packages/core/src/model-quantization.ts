@@ -73,3 +73,19 @@ function formatBitDepths(values: number[]): string {
   if (values.length === 1) return `~${values[0]}`;
   return `~${values[0]}–${values[values.length - 1]}`;
 }
+
+/**
+ * How much of its curated score a very low-bit quant keeps when ranked
+ * against other models: half at one bit, four fifths at two. A 1-bit 27B
+ * scored level with a 4-bit 35B and became the first-run pick on a 12 GB
+ * laptop; that far down a model loses more quality than its score says.
+ * Reads the lowest depth the tag names; an unreadable tag keeps its score.
+ */
+export function lowBitScoreFactor(quantization: string | undefined): number {
+  const depths = quantizationBitDepths(quantization).filter((bits) => bits >= 1);
+  if (depths.length === 0) return 1;
+  const bits = depths[0] as number;
+  if (bits < 2) return 0.5;
+  if (bits < 3) return 0.8;
+  return 1;
+}

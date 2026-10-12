@@ -261,16 +261,29 @@ export function documentProducerRole(briefText: string): 'researcher' | 'planner
 export function buildTypedKickoffStep(input: {
   typeName: string;
   brief: { name: string; about: string; taskDescription?: string };
+  /** The person's own request, when it names this goal. Preferred over the meester's wording. */
+  request?: string;
   dataFile?: string;
   /** Titles of parameters the brief left unsaid, filled with "soon". */
   unsaid: string[];
+  /** Parameters read from the brief, already on the page. */
+  known?: ReadonlyArray<{ title: string; value: string }>;
   /** The type's model-facing tools (its page-only tools excluded). */
   tools?: ReadonlyArray<{ name: string; description?: string }>;
 }): { name: string; description: string } {
-  const goal = input.brief.taskDescription ?? input.brief.about;
+  const goal = input.request ?? input.brief.taskDescription ?? input.brief.about;
   const unsaid =
     input.unsaid.length > 0
       ? ` They have not said ${input.unsaid.map((t) => `"${t}"`).join(' or ')} yet; plan around it and ask for it in your reply.`
+      : '';
+  // A Reisleider handed a "record the trip's details" tool spent its first
+  // turn re-recording Lisbon, four people and a date it made up for "next
+  // spring", then asked a question; the board had no days (2026-10-12).
+  const known =
+    input.known && input.known.length > 0
+      ? ` Already recorded from their words: ${input.known
+          .map((k) => `"${k.title}" ${k.value}`)
+          .join(', ')}. Start on the plan itself, not on recording those again.`
       : '';
   const where = input.dataFile
     ? ` The project's Output page shows \`${input.dataFile}\`, so make the first version there with this project's own tools; this step finishes when it has something in it.`
@@ -287,7 +300,7 @@ export function buildTypedKickoffStep(input: {
       : '';
   return {
     name: 'First draft',
-    description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${unsaid} Do the real work this turn rather than describing it. Then reply in two or three sentences: what you made, and the one thing you need from them next.`,
+    description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${known}${unsaid} Make what they asked for; if something more would help, offer it in your reply instead of adding it. Do the real work this turn rather than describing it. Then reply in two or three sentences: what you made, and the one thing you need from them next.`,
   };
 }
 

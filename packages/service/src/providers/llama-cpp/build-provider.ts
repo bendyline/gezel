@@ -783,6 +783,9 @@ export async function buildLlamaCppProvider(opts: {
   // mode. Undefined when the GGUF is unreadable — the pool builder then
   // falls back to the legacy weights-multiplier reservation.
   let plannedReservationBytes: number | undefined;
+  // Graphics memory the MoE offload plan puts on the card. Device admission
+  // charges this rather than the whole card; undefined keeps the old charge.
+  let plannedGpuBytes: number | undefined;
   // Whether the model's GGUF ships MTP (`nextn`) layers — a safety
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
@@ -1210,10 +1213,15 @@ export async function buildLlamaCppProvider(opts: {
         plannedReservationBytes = residentBytes + kvReserveBytes;
       }
       if (isMoE) {
-        offloadDecision = planMoeOffload({
+        // Plan against the card as it is now. Sized to the whole card, the
+        // plan counted memory other programs held, and admission then had
+        // to charge the model the whole card and refuse it (2026-10-11).
+        const freeGpuBytes =
+          vramBytes > 0 ? await measureAvailableGpuBytes().catch(() => undefined) : undefined;
+        const moePlan = planMoeOffload({
           isMoE,
           residentBytes,
-          vramBytes,
+          vramBytes: freeGpuBytes !== undefined ? Math.min(vramBytes, freeGpuBytes) : vramBytes,
           ...(split
             ? {
                 split,
@@ -1222,6 +1230,14 @@ export async function buildLlamaCppProvider(opts: {
               }
             : {}),
         });
+        offloadDecision = moePlan;
+        // An explicit offload setting shadows the planner's flags, so its
+        // footprint would describe a launch that is not the one made.
+        const plannerPlacesExperts =
+          (config.llamaCppCpuMoe ?? resolvedManifestEngineConfig?.cpuMoe) === undefined &&
+          (config.llamaCppNCpuMoe ?? resolvedManifestEngineConfig?.nCpuMoe) === undefined &&
+          (config.llamaCppNGpuLayers ?? resolvedManifestEngineConfig?.nGpuLayers) === undefined;
+        if (plannerPlacesExperts) plannedGpuBytes = moePlan.gpuBytes;
       } else {
         const explicitNCpuFfn = config.llamaCppNCpuFfn ?? resolvedManifestEngineConfig?.nCpuFfn;
         const explicitNGpuLayers =
@@ -1317,7 +1333,14 @@ export async function buildLlamaCppProvider(opts: {
           ? 'interactive'
           : 'background',
       requirement: () =>
-        plannedReservationBytes !== undefined ? { bytes: plannedReservationBytes } : undefined,
+        plannedReservationBytes !== undefined
+          ? {
+              bytes: plannedReservationBytes,
+              ...(plannedGpuBytes !== undefined
+                ? { gpuBytes: Math.min(plannedGpuBytes, plannedReservationBytes) }
+                : {}),
+            }
+          : undefined,
     },
     logPrefix: '[llama-server]',
     startupTimeoutMs: llamaStartupTimeoutMs,
@@ -1640,6 +1663,9 @@ export async function buildLlamaCppProvider(opts: {
     // Weights + KV at the granted window/cache mode — the broker-ledger
     // reservation the pool should hold for this replica (M1).
     ...(plannedReservationBytes !== undefined ? { plannedReservationBytes } : {}),
+    ...(plannedReservationBytes !== undefined && plannedGpuBytes !== undefined
+      ? { plannedGpuBytes: Math.min(plannedGpuBytes, plannedReservationBytes) }
+      : {}),
     // Same value that decides `--mmproj` above, so the wire shape and the
     // launch flag can never disagree: typed image parts are only emitted for
     // a server that was actually started with a projector.

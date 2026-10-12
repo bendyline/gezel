@@ -2089,10 +2089,11 @@
   font-weight: 700;
 }
 
-/* The ellipsis is dormant until the status bar's own container—not the
-   viewport—becomes too narrow for the secondary controls. */
+/* The ellipsis is always there: it holds the project's status and write
+   grant, which no longer stand in the bar. When the bar's own container is
+   too narrow, the inline exceptions fold into it too. */
 .project-controls-overflow {
-  display: none;
+  display: inline-flex;
   flex: 0 0 auto;
 }
 
@@ -2181,10 +2182,6 @@
 @container project-status-bar (max-width: 430px) {
   .project-git-status-bar.is-compact .project-controls-inline {
     display: none;
-  }
-
-  .project-git-status-bar.is-compact .project-controls-overflow {
-    display: inline-flex;
   }
 }
 

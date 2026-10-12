@@ -100,12 +100,27 @@ vi.mock('../components/GezelIcon.js', () => ({
 }));
 // Most tests want a conversation that is not empty, so the meester's
 // introduction stays out of them unless a test asks for it.
-const timeline = vi.hoisted(() => ({ empty: false }));
-vi.mock('../components/GlobalTimeline.js', () => ({
-  GlobalTimeline: ({ emptyContent }: { emptyContent?: import('react').ReactNode }) => (
-    <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>
-  ),
+const timeline = vi.hoisted(() => ({
+  empty: false,
+  attention: null as { failedTurn: boolean; latestReplyAt: string | null } | null,
 }));
+vi.mock('../components/GlobalTimeline.js', async () => {
+  const { useEffect } = await import('react');
+  return {
+    GlobalTimeline: ({
+      emptyContent,
+      onAttentionChange,
+    }: {
+      emptyContent?: import('react').ReactNode;
+      onAttentionChange?: (a: { failedTurn: boolean; latestReplyAt: string | null }) => void;
+    }) => {
+      useEffect(() => {
+        if (timeline.attention) onAttentionChange?.(timeline.attention);
+      }, [onAttentionChange]);
+      return <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>;
+    },
+  };
+});
 vi.mock('../components/HealthStrip.js', () => ({
   HealthStrip: () => null,
 }));
@@ -131,7 +146,7 @@ vi.mock('./home/IntroHandboekArticle.js', () => ({
 // don't need to mock the Poppetje engine.
 
 const { HomeView } = await import('./HomeView.js');
-const { HomeWorkshop } = await import('./home/HomeWorkshop.js');
+const { HomeWorkshop, resetHomeVisit } = await import('./home/HomeWorkshop.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 
@@ -160,6 +175,8 @@ function onboard() {
 
 describe('HomeView', () => {
   beforeEach(() => {
+    resetHomeVisit();
+    timeline.attention = null;
     onboard();
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [{ id: 'default', name: 'default' }],
@@ -963,6 +980,26 @@ describe('HomeView', () => {
     } finally {
       timeline.empty = false;
     }
+  });
+
+  // Coming back from Settings reopened the band over a conversation whose last
+  // turn had failed, and its Retry could not be reached (2026-10-11).
+  it('greets once per launch: coming back to Home opens on the conversation', async () => {
+    const first = render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    first.unmount();
+
+    render(<HomeView />);
+    await screen.findByRole('button', { name: 'Expand the greeting' });
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
+  });
+
+  it('keeps the band out of the way of a failed turn', async () => {
+    timeline.attention = { failedTurn: true, latestReplyAt: null };
+    render(<HomeView />);
+    await screen.findByRole('button', { name: 'Expand the greeting' });
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
+    expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
   });
 
   it('starts collapsed when the saved preference says so', async () => {
