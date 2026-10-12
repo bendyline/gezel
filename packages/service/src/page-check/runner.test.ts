@@ -71,6 +71,26 @@ describe('runPageCheck (spawn seam)', () => {
     expect(outcome).toEqual({ ran: true, ok: true, errors: [] });
   });
 
+  it('runs pnpm exec with the managed-tree config, so pnpm never reinstalls the tree', async () => {
+    // On Windows the args reach spawn quoted and joined for cmd.exe, so check
+    // the order on the whole command line rather than array positions.
+    let commandLine = '';
+    await runPageCheck({
+      ...BASE,
+      spawnImpl: ((command: string, args: string[]) => {
+        commandLine = [command, ...args].join(' ');
+        return fakeChild({
+          stdout: `GEZEL_PAGE_CHECK_RESULT:${JSON.stringify({ ok: true, errors: [] })}\n`,
+        });
+      }) as never,
+    });
+    const execAt = commandLine.search(/\bexec\b/);
+    expect(execAt, commandLine).toBeGreaterThan(0);
+    const before = commandLine.slice(0, execAt);
+    expect(before).toContain('--config.node-linker=hoisted');
+    expect(before).toContain('--config.verify-deps-before-run=false');
+  });
+
   it('treats a sentinel-less exit as no-signal, never a pass', async () => {
     const outcome = await runPageCheck({
       ...BASE,

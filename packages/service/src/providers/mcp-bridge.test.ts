@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 /**
  * End-to-end test for McpBridge: spawns the real @bendyline/gezel-mcp server
  * as a subprocess and drives it through the bridge. Verifies that the SDK
@@ -828,6 +828,62 @@ describe('McpBridge', () => {
       new RegExp(`You've been assigned task ${task!.ref}`),
     );
     expect(entryText).toContain('advance_task_step');
+  });
+
+  // The UX review's first request: a trip became a Developer building
+  // index.html while the catalog shipped a Trip Planner.
+  it('start_project sends a trip to the Trip Planner type, filled from the brief', async () => {
+    const create = await bridge.callTool('start_project', {
+      name: 'Family trip to Portugal',
+      about:
+        'Plan a family trip to Portugal next spring: two adults and two kids, about ten days, Lisbon and the Algarve.',
+      missionObjectives: '- A day-by-day plan the family can follow\n- A packing list',
+    });
+    expect(create).toContain('as a Trip Planner project');
+    const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
+    const project = await svc.context.store.getProject(projectId);
+    expect(project?.projectType?.id).toBe('trip-planner');
+    const trip = JSON.parse(
+      await readFile(
+        join(await svc.context.store.projectWorkspaceDir(projectId), 'trip.json'),
+        'utf8',
+      ),
+    ) as { destination: string; startDate: string };
+    // Read from the brief, never the schema placeholders.
+    expect(trip).toMatchObject({ destination: 'Portugal', startDate: 'next spring' });
+
+    const [task] = await svc.context.tasks.list({ projectId });
+    expect(task!.craftbook.steps).toHaveLength(1);
+    const step = task!.craftbook.steps[0]!;
+    // Grows past its seed: the type's script tools write it, which the edit
+    // gate would never count.
+    expect(step.advanceWhen).toMatchObject({ file: 'trip.json', requireChange: false });
+    expect(step.advanceWhen!.minBytes).toBeGreaterThan(50);
+    // The board reads the shape the trip tools write. A lead given the file
+    // tools wrote trip.json by hand and the board showed "0 days planned".
+    expect(step.toolPolicy?.disallowBuiltinToolsets).toContain('workspace-fs-write');
+    expect(step.description).toContain('`plan_day`');
+    // A page-only tool is never offered to the model.
+    expect(step.description).not.toContain('mark_packed');
+    expect(JSON.stringify(task)).not.toContain('index.html');
+  });
+
+  it('start_project writes up a goal that asks for no building, by the role that writes it', async () => {
+    const create = await bridge.callTool('start_project', {
+      name: 'Kitchen renovation timeline',
+      about:
+        'Organize the kitchen renovation: what happens in which order, who to call, and a rough schedule for the next three months.',
+      missionObjectives: '- A clear schedule\n- A list of who to call and when',
+    });
+    const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
+    const [task] = await svc.context.tasks.list({ projectId });
+    expect(task!.title).toBe('Kitchen renovation timeline');
+    const entry = task!.craftbook.steps.find((s) => s.id === task!.craftbook.entryStepId)!;
+    expect(entry.advanceWhen?.file).toBe('kitchen-renovation-timeline.md');
+    expect(entry.prompt).toContain('a written document');
+    // Nobody on the crew is a Developer building a page.
+    expect(task!.craftbook.steps.map((s) => s.suggestedRole)).not.toContain('developer');
+    expect(JSON.stringify(task!.craftbook)).not.toMatch(/"file":"index\.html"/);
   });
 
   it('start_project appends the standard build guard to custom kickoff text', async () => {

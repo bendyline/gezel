@@ -138,7 +138,7 @@ describe('RecommendedMediaDownloads', () => {
     });
     render(<RecommendedMediaDownloads />);
     const link = await screen.findByRole('button', {
-      name: /Also download the optional media models/,
+      name: /Download the optional media models/,
     });
     expect(link).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Download image model/ })).not.toBeInTheDocument();
@@ -167,7 +167,7 @@ describe('RecommendedMediaDownloads', () => {
     render(<RecommendedMediaDownloads />);
     // Image + both audio still appear in the plan dialog…
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
     expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
@@ -186,7 +186,7 @@ describe('RecommendedMediaDownloads', () => {
     vi.mocked(api.getVideoModelFit).mockRejectedValue(new Error('404'));
     render(<RecommendedMediaDownloads />);
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
     expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /FLUX\.2 Klein/ })).not.toBeInTheDocument();
@@ -240,7 +240,7 @@ describe('RecommendedMediaDownloads', () => {
     expect(screen.getByText('17.0 GB of 34.0 GB · 50%')).toBeInTheDocument();
     // The plan link stays for the still-pending modalities (audio + reading).
     expect(
-      screen.getByRole('button', { name: /Also download the optional media models/ }),
+      screen.getByRole('button', { name: /Download the optional media models/ }),
     ).toBeInTheDocument();
     expect(api.subscribeImagePull).toHaveBeenCalledWith(
       'flux-2-klein-4b-q4',
@@ -269,7 +269,7 @@ describe('RecommendedMediaDownloads', () => {
     render(<RecommendedMediaDownloads />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
 
     expect(screen.getByRole('alertdialog', { name: 'Review model downloads' })).toBeInTheDocument();
@@ -308,7 +308,7 @@ describe('RecommendedMediaDownloads', () => {
     render(<RecommendedMediaDownloads />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
     // Video arrives unchecked and flagged; the only start path is checking it
     // explicitly inside the plan.
@@ -345,7 +345,7 @@ describe('RecommendedMediaDownloads', () => {
     render(<RecommendedMediaDownloads />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
     expect(await screen.findByText(/Not enough free space/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download 4 models' })).toBeDisabled();
@@ -363,7 +363,7 @@ describe('RecommendedMediaDownloads', () => {
     render(<RecommendedMediaDownloads />);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     );
     // Narrow the default plan down to just the image model.
     for (const name of [/Qwen3-VL/, /Whisper Base/, /Kokoro/]) {
@@ -380,7 +380,7 @@ describe('RecommendedMediaDownloads', () => {
     await waitFor(() => expect(api.cancelImagePull).toHaveBeenCalledWith('flux-2-klein-4b-q4'));
     // Back to idle: the quiet plan link is the way to try again.
     expect(
-      await screen.findByRole('button', { name: /Also download the optional media models/ }),
+      await screen.findByRole('button', { name: /Download the optional media models/ }),
     ).toBeInTheDocument();
   });
 });

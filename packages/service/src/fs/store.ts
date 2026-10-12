@@ -6131,6 +6131,8 @@ export class Store {
             : {}),
           ...(m.synthetic ? { synthetic: m.synthetic } : {}),
           ...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {}),
+          ...(m.crewIntroduction ? { crewIntroduction: m.crewIntroduction } : {}),
+          ...(m.makerGezelId ? { makerGezelId: m.makerGezelId } : {}),
         });
       }
     }

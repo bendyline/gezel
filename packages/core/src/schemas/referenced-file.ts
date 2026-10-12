@@ -32,5 +32,16 @@ export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
 export const TaskDeliverableSchema = ReferencedFileSchema.extend({
   bytes: z.number().int().nonnegative().optional(),
   modifiedAt: z.string().optional(),
+  /**
+   * The project the file is in, when the message showing it lives in another
+   * thread's project: a kickoff from the meester's Default thread builds in
+   * a project of its own, and its wrap-up opened the file against Default.
+   */
+  projectId: z.string().optional(),
+  /**
+   * `output-page`: the file is data a project type's Output page reads (a
+   * trip's `trip.json`). The thing to open is the page, not the JSON.
+   */
+  view: z.enum(['output-page']).optional(),
 });
 export type TaskDeliverable = z.infer<typeof TaskDeliverableSchema>;

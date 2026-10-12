@@ -44,7 +44,7 @@ import {
   unresolvedQualifiedPaths,
 } from '../../references/file-references.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
-import { loadTaskResult } from '../../tasks/completion-wrapup.js';
+import { loadTaskResult, placeTaskDeliverable } from '../../tasks/completion-wrapup.js';
 import { type TaskLaunchResult, launchErrorResponse } from '../../tasks/launcher.js';
 import {
   type CompleteStepOutcome,
@@ -585,7 +585,13 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const task = await ctx.tasks.get(projectId, num);
     if (!task) return c.json({ error: 'not found' }, 404);
-    return c.json(await loadTaskResult(ctx.store, task));
+    const result = await loadTaskResult(ctx.store, task);
+    return c.json({
+      ...result,
+      deliverable: result.deliverable
+        ? await placeTaskDeliverable(ctx.store, ctx.catalog, task, result.deliverable)
+        : null,
+    });
   });
 
   app.post('/:projectId/tasks/:num/notes', async (c) => {

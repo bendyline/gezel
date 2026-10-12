@@ -144,8 +144,14 @@ describe('POST /api/sessions/:id/launch-task', () => {
       craftbookName: 'Topic Deck',
     });
 
-    const stored = (await (await authed(`/api/sessions/${session.id}`)).json()) as ChatSession;
-    expect(stored.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    // The ask and its receipt come first; the crew card follows them, never
+    // above the request it answers.
+    await expect
+      .poll(async () => {
+        const stored = (await (await authed(`/api/sessions/${session.id}`)).json()) as ChatSession;
+        return stored.messages.map((m) => m.synthetic ?? m.role);
+      })
+      .toEqual(['user', 'craftbook-launch', 'crew-introduction']);
 
     const sentDraft = (await (
       await authed(`/api/projects/${projectId}/prompt-drafts/${draft.id}`)
@@ -169,7 +175,7 @@ describe('POST /api/sessions/:id/launch-task', () => {
     expect(second.task.ref).toBe(first.task.ref);
     expect(second.receipt.at).toBe(first.receipt.at);
     const stored = (await (await authed(`/api/sessions/${session.id}`)).json()) as ChatSession;
-    expect(stored.messages).toHaveLength(2);
+    expect(stored.messages.filter((m) => m.synthetic !== 'crew-introduction')).toHaveLength(2);
     expect(await svc.context.tasks.list({ projectId })).toHaveLength(2);
   });
 

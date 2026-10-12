@@ -322,6 +322,9 @@ async function bootstrap(opts: SystemBootstrapOptions, signal: AbortSignal): Pro
     });
     if (res.cancelled) return;
     if (!res.ok) {
+      logger?.error?.(
+        `[system-toolsets] Chromium install for ${entry.toolsetId} failed: ${res.error ?? 'unknown error'}`,
+      );
       statusBus.publish({
         phase: 'error',
         error: res.error ?? 'Chromium install failed',

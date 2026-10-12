@@ -755,12 +755,18 @@ function FullApp() {
             reserved window-control padding) as draggable titlebar. */}
           <div className="app-header-right" ref={headerClusterRef}>
             <NarrationStopButton />
-            {(runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
-              <ActivityControl />
-            )}
-            {runtimeCapabilities().daemonSettings && <BoekwachterPill />}
-            {runtimeCapabilities().engineStatus && <EngineStatusPill />}
-            {runtimeCapabilities().daemonSettings && (
+            {/* First run is a conversation with the meester, and the welcome
+              already shows the one download in flight. Activity, engine,
+              quota, indexing and tempo controls describe a running workshop
+              (on a fresh install Activity counted the scheduled Night Shift
+              oversight as "1 waiting"), so they join once there is one. */}
+            {!firstRun &&
+              (runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
+                <ActivityControl />
+              )}
+            {!firstRun && runtimeCapabilities().daemonSettings && <BoekwachterPill />}
+            {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
+            {!firstRun && runtimeCapabilities().daemonSettings && (
               <>
                 <ClaudeCliPoolPill />
                 <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
@@ -768,7 +774,6 @@ function FullApp() {
                   mode={engagementMode}
                   nightShift={nightShift}
                   onNightShiftChange={setNightShift}
-                  noChatModel={firstRun}
                 />
               </>
             )}
@@ -993,13 +998,10 @@ function TaskSpeedMenu({
   mode,
   nightShift: state,
   onNightShiftChange: onChange,
-  noChatModel = false,
 }: {
   mode: EngagementMode;
   nightShift: NightShiftState;
   onNightShiftChange: (s: NightShiftState) => void;
-  /** First run: nothing can run until a chat model is installed. */
-  noChatModel?: boolean;
 }) {
   const current = ENGAGEMENT_OPTIONS.find((o) => o.mode === mode) ?? ENGAGEMENT_OPTIONS[0]!;
   const title = state.active
@@ -1244,23 +1246,16 @@ function TaskSpeedMenu({
                   ))}
                 </div>
               )}
-              {tasks.upcoming.length > 0 &&
-                (noChatModel ? (
-                  // A fresh install listed oversight work "queued for
-                  // tonight" that nothing could run.
-                  <p className="app-nightshift-task-group muted small">
-                    Night Shift starts once a chat model is installed.
-                  </p>
-                ) : (
-                  <div className="app-nightshift-task-group">
-                    <div className="app-nightshift-task-heading">
-                      {state.active ? 'Up next' : 'Queued for tonight'}
-                    </div>
-                    {tasks.upcoming.map((t) => (
-                      <NightShiftTaskRow key={t.ref} task={t} />
-                    ))}
+              {tasks.upcoming.length > 0 && (
+                <div className="app-nightshift-task-group">
+                  <div className="app-nightshift-task-heading">
+                    {state.active ? 'Up next' : 'Queued for tonight'}
                   </div>
-                ))}
+                  {tasks.upcoming.map((t) => (
+                    <NightShiftTaskRow key={t.ref} task={t} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {state.active && tasks !== null && !hasWork && (

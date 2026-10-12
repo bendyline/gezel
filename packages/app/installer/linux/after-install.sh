@@ -573,15 +573,26 @@ refresh_desktop_caches
 # destination were both validated before any existing service was stopped.
 install -o root -g root -m 0644 "$UNIT_SRC" "$UNIT_DST"
 
-# 5. Enable + start. Tolerate systems without systemctl (e.g. running
-# inside a chroot during package builds) — the install still succeeds
-# and the service starts on first reboot under systemd.
-if command -v systemctl >/dev/null 2>&1; then
+# 5. Enable + start. Only a running systemd can reload units and start the
+# service. `systemctl` is installed but systemd is not PID 1 in WSL without
+# systemd, in most containers, and in a chroot during image builds; there
+# daemon-reload and restart exit non-zero, and under `set -eu` that left the
+# package half-configured. /run/systemd/system is the standard sd_booted()
+# test. Without it, enable the unit offline (a filesystem-only operation) so
+# the service starts on the next boot under systemd, and never fail the
+# install over it.
+if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
   systemctl enable gezeld.service
   systemctl restart gezeld.service
+elif command -v systemctl >/dev/null 2>&1; then
+  if systemctl enable gezeld.service >/dev/null 2>&1; then
+    echo "[gezel after-install] systemd is not running; gezeld will start on the next boot under systemd"
+  else
+    echo "[gezel after-install] systemd is not running and gezeld.service could not be enabled; run 'systemctl enable --now gezeld.service' once the system boots with systemd" >&2
+  fi
 else
-  echo "[gezel after-install] systemctl not found; service will start on next boot"
+  echo "[gezel after-install] systemctl not found; gezeld.service is installed but not enabled"
 fi
 
 echo "[gezel after-install] done"

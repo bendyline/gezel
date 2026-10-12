@@ -22,7 +22,7 @@
 import type { Behavior } from '../types.js';
 
 /**
- * Verbs that imply a new substantive build in user prose. Narrow on
+ * Verbs that imply a new substantive goal in user prose. Narrow on
  * verbs and rely on the noun list for real disambiguation: "create"
  * can mean many things; "create a game" is a build request, "create
  * a memory" is not.
@@ -40,6 +40,11 @@ const BUILD_VERBS = [
   'whip\\s+up',
   'prototype',
   'scaffold',
+  // A goal to organize is a kickoff too: "plan a family trip to Portugal"
+  // went unrouted, so the meester improvised a crew in chat.
+  'plan',
+  'organi[sz]e',
+  'arrange',
 ];
 
 /**
@@ -76,6 +81,15 @@ const BUILD_NOUNS = [
   'crew',
   'team',
   'workspace',
+  'trip',
+  'vacation',
+  'holiday',
+  'itinerary',
+  'getaway',
+  'event',
+  'party',
+  'wedding',
+  'reunion',
 ];
 
 const BUILD_REQUEST_RE = new RegExp(
@@ -136,9 +150,9 @@ export function explicitlyRequestsSeparateProject(text: string): boolean {
 }
 
 const MEESTER_BUILD_PRELUDE =
-  '(System note for this turn: the user is asking for a new substantive build. Make ONE tool call:\n' +
-  ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the effective execution mode, creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every "build me a website / game / app / dashboard" request, from a single-file prototype through multimodal work. `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`).\n' +
-  'After the macro returns, your turn is done — tell the user the lead is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
+  '(System note for this turn: the user is asking to start something new. Make ONE tool call:\n' +
+  " • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the goal (a trip gets a trip planner, a website a developer), creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every new goal — a website, game or app, a trip or an event, a plan to write up — from a single-file prototype through multimodal work. `taskDescription` must ask for the actual result, not a plan to make one, and keep the user's specifics (places, dates, names, numbers). Only for a browser game or site, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`); for anything else name no file.\n" +
+  'After the macro returns, your turn is done — tell the user in a sentence who is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
 
 export const PromptMeesterBuildPrelude: Behavior = {
   id: 'prompt.meester-build-prelude',

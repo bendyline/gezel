@@ -121,7 +121,7 @@ public final class MobileUiSmokeTest {
 
     @Test public void missingChatModelOpensSettingsAndPreservesDraft() throws Exception {
         run("""
-            await until(()=>Array.from(document.querySelectorAll('h1')).some(item=>visible(item)&&item.textContent==='First run setup'),'first run visible on launch');
+            await until(()=>visible(document.querySelector('[data-testid="meester-welcome"][data-welcome-state="choose-model"]')),'first run visible on launch');
             check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Navigation must not hide model setup');
             const picker=document.querySelector('[aria-label="On-device models"] [role="combobox"]');
             check(visible(picker),'First run must show the model list');
@@ -129,7 +129,7 @@ public final class MobileUiSmokeTest {
             await until(()=>document.querySelector('.mobile-model-menu [data-model-choice^="catalog:"]'),'First run must show the model download choices in the model list');
             document.querySelector('.mobile-model-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
             await until(()=>!document.querySelector('.mobile-model-menu'),'model list closed');
-            check(!document.querySelector('[data-testid="chat-composer"]'),'First run must not offer chat before a model is ready');
+            check(button('Send')?.disabled!==false,'First run must hold Send until a model is ready');
             const inventory=await plugin.listModels();
             check(inventory.models.length===0,'This test must start without a chat model');
             const config=await api('/api/config');
@@ -141,7 +141,7 @@ public final class MobileUiSmokeTest {
         snapshot("00-first-run-model-setup");
         reload();
         run("""
-            await until(()=>Array.from(document.querySelectorAll('h1')).some(item=>visible(item)&&item.textContent==='First run setup')&&!visible(document.querySelector('[data-testid="app-sidebar"]')),'first run after restart');
+            await until(()=>visible(document.querySelector('[data-testid="meester-welcome"][data-welcome-state="choose-model"]'))&&!visible(document.querySelector('[data-testid="app-sidebar"]')),'first run after restart');
             await openNavigation();
             await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
             const editor=await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]'),'shared composer');
@@ -185,16 +185,16 @@ public final class MobileUiSmokeTest {
             await clickButton('Model setup workshop',document.querySelector('[data-testid="app-sidebar"]'));
             await until(()=>document.querySelector('[data-testid="chat-composer"] [contenteditable="true"]')?.textContent.includes('Hello from an empty model library.'),'draft after returning from model settings');
             window.dispatchEvent(new CustomEvent('gezel:navigate',{detail:{view:'home'}}));
-            await until(()=>document.body.innerText.includes('First run setup'),'return to first run');
+            await until(()=>visible(document.querySelector('[data-testid="meester-welcome"][data-welcome-state="choose-model"]')),'return to first run');
             return true;
             """);
         importChatFixture();
         run("""
             document.querySelector('[aria-label="On-device models"] [role="combobox"]').click();
             const choice=await until(()=>document.querySelector('.mobile-model-menu [data-model-choice='+JSON.stringify(%s)+']'),'visible added model in shared first-run controls');
-            check(document.body.innerText.includes('First run setup'),'An unselected download must not complete setup');
+            check(visible(document.querySelector('[data-testid="meester-welcome"][data-welcome-state="choose-model"]')),'An unselected download must not complete setup');
             choice.closest('[role="option"]').click();
-            await until(()=>visible(document.querySelector('[data-testid="home-workshop"]')),'model selection completes first run without reload');
+            await until(()=>visible(document.querySelector('[data-testid="meester-welcome"][data-welcome-state="just-ready"]')),'model selection completes first run without reload');
             check((await plugin.listModels()).selectedModelId===%s,'The native model choice must persist');
             return true;
             """.formatted(JSONObject.quote("model:"+fixtureId),JSONObject.quote(fixtureId)));

@@ -28,10 +28,15 @@ const CLOUD_NAMES: Record<string, string> = {
 };
 
 /**
- * First-run: which folders should the crew look after, and may it work at
- * night. Offered on Home until the person finishes or skips it. Every folder
- * is added read-only with its crew and its night work, which is why the
- * card says what will happen before anything is added.
+ * Which folders should the crew look after, and may it work at night. The
+ * meester asks once the person's first piece of work is finished, at the
+ * foot of their conversation, until they answer or skip it. Every folder is
+ * added read-only with its crew and its night work, which is why the card
+ * says what will happen before anything is added.
+ *
+ * Nothing is chosen for the person: no folder starts ticked and neither
+ * overnight key starts latched. Pre-ticking Pictures and Documents made a
+ * single "Continue" hand over two folders and every night.
  */
 export function FolderOnboardingStep({
   config,
@@ -41,7 +46,7 @@ export function FolderOnboardingStep({
   onDone: () => void;
 }) {
   const [choices, setChoices] = useState<FolderChoice[] | null>(null);
-  const [overnight, setOvernight] = useState(true);
+  const [overnight, setOvernight] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +86,9 @@ export function FolderOnboardingStep({
   const markDone = async () => {
     const now = new Date().toISOString();
     await api
-      .updateConfig({ onboarding: { foldersStepDoneAt: now, overnightStepDoneAt: now } })
+      .updateConfig({
+        onboarding: { ...config?.onboarding, foldersStepDoneAt: now, overnightStepDoneAt: now },
+      })
       .catch(() => {});
   };
 
@@ -97,13 +104,13 @@ export function FolderOnboardingStep({
           source: 'first-run',
           create: true,
           recruitCrew: true,
-          nightWork: overnight,
+          nightWork: overnight === true,
         });
       } catch {
         failed.push(choice.label);
       }
     }
-    if (overnight) {
+    if (overnight === true) {
       await window.__GEZEL__?.startAtLogin?.set(true).catch(() => {});
       await api
         .updateConfig({
@@ -188,8 +195,8 @@ export function FolderOnboardingStep({
           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
           type="button"
           role="radio"
-          aria-checked={overnight}
-          className={`gz-key${overnight ? ' gz-key-active' : ''}`}
+          aria-checked={overnight === true}
+          className={`gz-key${overnight === true ? ' gz-key-active' : ''}`}
           onClick={() => setOvernight(true)}
           disabled={busy}
         >
@@ -199,8 +206,8 @@ export function FolderOnboardingStep({
           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
           type="button"
           role="radio"
-          aria-checked={!overnight}
-          className={`gz-key${!overnight ? ' gz-key-active' : ''}`}
+          aria-checked={overnight === false}
+          className={`gz-key${overnight === false ? ' gz-key-active' : ''}`}
           onClick={() => setOvernight(false)}
           disabled={busy}
         >
@@ -225,7 +232,7 @@ export function FolderOnboardingStep({
   );
 }
 
-/** Pictures and Documents preselected; the shared library and existing projects left out. */
+/** Nothing preselected; the shared library and existing projects left out. */
 export function choicesFrom(res: WellKnownFoldersResponse): FolderChoice[] {
   const out: FolderChoice[] = [];
   for (const folder of res.folders) {
@@ -240,7 +247,7 @@ export function choicesFrom(res: WellKnownFoldersResponse): FolderChoice[] {
       kind: folder.kind,
       ...(folder.census ? { census: folder.census } : {}),
       ...(folder.cloud ? { cloud: folder.cloud } : {}),
-      selected: folder.kind === 'pictures' || folder.kind === 'documents',
+      selected: false,
     });
   }
   for (const code of (res.codeFolders ?? []).slice(0, 4)) {

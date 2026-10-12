@@ -917,6 +917,10 @@ export const TimelineMessageSchema = z.object({
     .optional(),
   /** Mirrors `ChatMessage.contextCompaction` for durable inline status UI. */
   contextCompaction: ChatMessageSchema.shape.contextCompaction,
+  /** Mirrors `ChatMessage.crewIntroduction`: the crew cards. */
+  crewIntroduction: ChatMessageSchema.shape.crewIntroduction,
+  /** Mirrors `ChatMessage.makerGezelId`. */
+  makerGezelId: ChatMessageSchema.shape.makerGezelId,
 });
 export type TimelineMessage = z.infer<typeof TimelineMessageSchema>;
 

@@ -5,6 +5,9 @@
  * every injected chunk, and the untrusted-evidence header extension.
  */
 
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   type ChatSession,
   type GezelConfig,
@@ -14,6 +17,7 @@ import {
 } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
+import { bootstrapWorkspace } from '../workspace/template.js';
 import { resolveRetrievalPolicy, retrieveProjectContext } from './project-retrieval.js';
 import type { SearchService } from './search-service.js';
 import { MERGE_WEIGHTS, scoreResult } from './search-service.js';
@@ -798,5 +802,66 @@ describe('weights invariant', () => {
     for (const kind of ['content', 'document', 'file', 'symbol', 'session'] as const) {
       expect(MERGE_WEIGHTS.knowledge).toBeLessThan(MERGE_WEIGHTS[kind]);
     }
+  });
+});
+
+describe("Gezel's own starter files are not the person's sources", () => {
+  async function scaffoldContent(name: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-scaffold-'));
+    try {
+      await bootstrapWorkspace({ workspaceDir: dir, projectId: 'p1', projectName: 'p1' });
+      return await readFile(join(dir, name), 'utf8');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  function gitignoreHit(): UnifiedSearchResult {
+    return {
+      kind: 'content',
+      id: 'content:p1:.gitignore:1',
+      title: '.gitignore',
+      snippet: 'node_modules/ dist/ build/',
+      projectId: 'p1',
+      path: '.gitignore',
+      source: 'workspace',
+      retrievalSource: 'workspace',
+      line: 1,
+      ...scoreResult('content', 0.9),
+    };
+  }
+
+  async function runWith(content: string, project: { workingDir?: string }) {
+    const store = {
+      ...STORE,
+      getProject: async () => ({ id: 'p1', ...project }),
+      readProjectWorkspaceFile: async () => content,
+    } as unknown as Store;
+    const search = {
+      searchProject: async () => ({ results: [gitignoreHit()], truncated: false }),
+    } as unknown as SearchService;
+    return retrieveProjectContext({
+      store,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'what should the build ignore in dist?',
+      messageOrigin: 'direct-user',
+    });
+  }
+
+  it('drops the untouched workspace scaffold', async () => {
+    expect(await runWith(await scaffoldContent('.gitignore'), {})).toBeNull();
+  });
+
+  it('keeps a scaffold file the person or a gezel has edited', async () => {
+    const edited = `${await scaffoldContent('.gitignore')}secrets/\n`;
+    expect((await runWith(edited, {}))?.hits).toHaveLength(1);
+  });
+
+  it("keeps a person's own folder's files, whatever they hold", async () => {
+    const result = await runWith(await scaffoldContent('.gitignore'), { workingDir: '/repo' });
+    expect(result?.hits).toHaveLength(1);
   });
 });

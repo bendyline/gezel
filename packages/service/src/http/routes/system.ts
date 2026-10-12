@@ -16,7 +16,7 @@ import {
   type GitHubReposResponse,
   ModelDownloadPreflightRequestSchema,
   ModelDownloadPreflightResponseSchema,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_EXEC_CONFIG,
   PerfSnapshotSchema,
   SystemDiagnosticsSchema,
   type SystemHomeInfo,
@@ -313,7 +313,12 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       const extendedPath = nodeDir
         ? `${nodeDir}${delimiter}${process.env.PATH ?? ''}`
         : (process.env.PATH ?? '');
-      const pnpm = resolvePnpmCommand([PNPM_HOISTED_NODE_LINKER, 'exec', 'copilot', 'login']);
+      const pnpm = resolvePnpmCommand([
+        ...PNPM_MANAGED_TREE_EXEC_CONFIG,
+        'exec',
+        'copilot',
+        'login',
+      ]);
       const child = spawnPnpm(pnpm, {
         cwd: installDir,
         env: { ...process.env, PATH: extendedPath, FORCE_COLOR: '0' },

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MODEL_INVENTORY_CHANGED_EVENT } from '../model-inventory.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { llamaEngineNeed } from './first-run-engine.js';
 
 /**
  * Whether the app is still in first-run onboarding — no working AI provider
@@ -44,7 +45,9 @@ async function estimateFirstRun(): Promise<boolean> {
     }
     if (p === 'llama-cpp' || p == null) {
       const { models } = await api.listLlamaCppModels().catch(() => ({ models: [] }));
-      return models.length === 0;
+      if (models.length === 0) return true;
+      // Its engine is fetched lazily; a turn before it lands only fails.
+      return p === 'llama-cpp' && (await llamaEngineNeed(cfg)) !== null;
     }
     // Ollama / CLI providers configure elsewhere — don't claim first-run for
     // them; HomeView's probe broadcast will correct it if needed.

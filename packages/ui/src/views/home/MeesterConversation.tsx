@@ -12,7 +12,12 @@ import {
   writeChatThreadSelection,
 } from '../../components/chat-thread-memory.js';
 import { useRoleBasedNameOnlyMode } from '../../components/useRoleBasedNameOnlyMode.js';
-import { MeesterGreeting } from './MeesterGreeting.js';
+import {
+  MeesterSetupNote,
+  MeesterWelcome,
+  type WelcomeHelper,
+  type WelcomeSetup,
+} from './MeesterWelcome.js';
 
 /**
  * The meester conversation in the workshop's main column. Reuses the
@@ -28,6 +33,10 @@ export function MeesterConversation({
   meesterPoppetje,
   meesterIconOverride,
   emptyPlaceholder,
+  setup = null,
+  justReady = false,
+  helperGezelIds = [],
+  invite,
   onTurnStarted,
   onIntroductionShown,
 }: {
@@ -37,6 +46,14 @@ export function MeesterConversation({
   meesterPoppetje: PoppetjeStruct | null;
   meesterIconOverride: boolean;
   emptyPlaceholder?: string;
+  /** First run: what the meester still needs before they can start. */
+  setup?: WelcomeSetup | null;
+  /** First run ended during this visit. */
+  justReady?: boolean;
+  /** The install-wide helpers (Klerk, Boekwachter) the welcome introduces. */
+  helperGezelIds?: ReadonlyArray<string | undefined>;
+  /** Asked at the foot of the conversation once the crew has finished something. */
+  invite?: import('react').ReactNode;
   /** The person sent a message from here. */
   onTurnStarted?: () => void;
   /** The meester's introduction fills the empty conversation. */
@@ -114,6 +131,27 @@ export function MeesterConversation({
       ? meesterIconOverride
       : false;
 
+  const helpers = useMemo<WelcomeHelper[]>(() => {
+    const does = ['handles the paperwork — titles and summaries', 'keeps track of your files'];
+    return helperGezelIds.flatMap((id, index) => {
+      const gezel = id ? gezels.find((g) => g.id === id) : undefined;
+      if (!gezel) return [];
+      return [
+        {
+          gezel: {
+            ...gezel,
+            name: displayName(
+              { name: gezel.name, roleBasedName: gezel.roleBasedName },
+              roleBasedNameOnlyMode,
+            ),
+          },
+          does: does[index] ?? '',
+        },
+      ];
+    });
+  }, [helperGezelIds, gezels, roleBasedNameOnlyMode]);
+  const onMeesterThread = !selectedGezelId || selectedGezelId === meesterGezelId;
+
   const composerPlaceholder = useMemo(
     () =>
       pickChatPlaceholder({
@@ -164,22 +202,42 @@ export function MeesterConversation({
               onOpenReference={onOpenReference}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}
+              // The person reads the ask, the crew and the result here; the
+              // workers' transcripts fold into one Working notes line.
+              foldWorkingNotes
               emptyContent={
                 // Only the meester's own thread gets the introduction; a
                 // handoff thread with another gezel keeps the plain state.
                 // Falsy selection means "not chosen yet" — the same fallback
                 // activeGezelId above makes.
-                !selectedGezelId || selectedGezelId === meesterGezelId ? (
-                  <MeesterGreeting
+                onMeesterThread ? (
+                  <MeesterWelcome
                     meesterName={meesterName}
                     meesterIcon={meesterIcon}
                     meesterPoppetje={meesterPoppetje}
                     meesterIconOverride={meesterIconOverride}
                     projectId={projectId}
+                    setup={setup}
+                    justReady={justReady}
+                    helpers={helpers}
                     onShown={onIntroductionShown}
                   />
                 ) : undefined
               }
+              trailingContent={
+                setup ? (
+                  <MeesterSetupNote
+                    meesterName={meesterName}
+                    meesterIcon={meesterIcon}
+                    meesterPoppetje={meesterPoppetje}
+                    meesterIconOverride={meesterIconOverride}
+                    setup={setup}
+                  />
+                ) : (
+                  invite
+                )
+              }
+              {...(!setup && invite ? { trailingContentAfterWrapUp: true } : {})}
             />
             <ChatComposer
               gezelId={activeGezelId}
@@ -201,6 +259,9 @@ export function MeesterConversation({
                 setSessionId(sid);
                 setSessionRefreshKey((k) => k + 1);
               }}
+              // The welcome already says the meester is waiting for tools;
+              // a second notice above the composer would say it twice.
+              hideWaitingNotice={Boolean(setup) && activeGezelId === meesterGezelId}
               onTurnStateChange={(state) => {
                 if (state === 'streaming') onTurnStarted?.();
               }}

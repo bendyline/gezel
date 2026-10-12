@@ -79,9 +79,90 @@ describe('ChatManager — crew introduction', () => {
     // The thread's own gezel needs no introduction.
     await expect(manager.postCrewIntroduction(task, 'ada', step)).resolves.toBeNull();
   });
+
+  // The UX review: the composer addressed a voorman nobody had introduced,
+  // and a typed project's lead arrived without a word.
+  it('introduces whoever starts and the lead at kickoff, as cards, once per thread', async () => {
+    const thread = await manager.createSession({ gezelId: 'ada' });
+    const guide = await store.createGezel({ name: 'Mira', role: 'Reisleider' });
+    const lead = await store.createGezel({ name: 'Anastasia', role: 'Voorman' });
+    const task = {
+      projectId: 'default',
+      num: 9,
+      ref: 'default/9',
+      title: 'Trip: Portugal',
+      status: 'active',
+      launchSessionId: thread.id,
+      assignee: { kind: 'gezel', gezelId: lead.id },
+    } as Task;
+    const step = { id: 'draft', name: 'First draft' } as TaskCraftbookStep;
+
+    await manager.postCrewIntroduction(task, guide.id, step, 'kickoff');
+    const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
+    expect(intro?.crewIntroduction).toEqual({
+      taskRef: 'default/9',
+      moment: 'kickoff',
+      members: [
+        {
+          gezelId: guide.id,
+          name: 'Mira',
+          role: 'Reisleider',
+          gloss: 'trip planner',
+          stepName: 'First draft',
+        },
+        { gezelId: lead.id, name: 'Anastasia', role: 'Voorman', gloss: 'crew lead' },
+      ],
+    });
+    expect(intro?.content).toBe(
+      'Your crew for **Trip: Portugal**: **Mira** (Reisleider — trip planner) starts with "First draft", and **Anastasia** (Voorman — crew lead) leads it.',
+    );
+    // Introduced once: a later step does not introduce Mira again.
+    await expect(manager.postCrewIntroduction(task, guide.id, step, 'joined')).resolves.toBeNull();
+    const timeline = await store.listTimeline({ limit: 50 });
+    expect(timeline.messages.some((m) => m.crewIntroduction?.moment === 'kickoff')).toBe(true);
+  });
 });
 
 describe('ChatManager — task wrap-up', () => {
+  // A kickoff from the meester's Default thread builds in a project of its
+  // own; its wrap-up opened the file against Default and credited no one.
+  it('says which project holds the deliverable and who made it', async () => {
+    const thread = await manager.createSession({ gezelId: 'ada' });
+    const maker = await store.createGezel({ name: 'Mira', role: 'Planner' });
+    const trip = await store.createProject({ name: 'Family trip' });
+    await store.writeProjectWorkspaceFile(trip.id, 'family-trip.md', '# Ten days\n');
+    const task = {
+      projectId: trip.id,
+      num: 1,
+      ref: `${trip.id}/1`,
+      title: 'Family trip',
+      status: 'complete',
+      launchSessionId: thread.id,
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        steps: [
+          {
+            id: 'build',
+            name: 'Write it',
+            advanceWhen: { file: 'family-trip.md' },
+            assignee: { kind: 'gezel', gezelId: maker.id },
+          },
+        ],
+      },
+    } as unknown as Task;
+    await manager.postTaskWrapUp(task, 'complete');
+    const reply = (await store.getSession('ada', thread.id))?.messages.at(-1);
+    expect(reply?.deliverable).toMatchObject({
+      kind: 'workspace',
+      path: 'family-trip.md',
+      projectId: trip.id,
+    });
+    expect(reply?.deliverable?.view).toBeUndefined();
+    expect(reply?.makerGezelId).toBe(maker.id);
+    // File chips resolve against the thread's project, where this file is not.
+    expect(reply?.referencedFiles).toBeUndefined();
+  });
+
   // The owner used to learn a task was done from the worker's tool receipt
   // ("Active step is now "(none)". Task is now complete (terminal step).").
   it('tells the launching thread what the task made and raises task_settled', async () => {

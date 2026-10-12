@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePnpmInvocation } from './pnpm-invocation.js';
+import {
+  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_EXEC_CONFIG,
+  PNPM_SKIP_DEPS_CHECK,
+  resolvePnpmInvocation,
+} from './pnpm-invocation.js';
+
+describe('PNPM_MANAGED_TREE_EXEC_CONFIG', () => {
+  it('keeps the hoisted linker and stops pnpm reinstalling the tree before exec', () => {
+    // pnpm 11's pre-exec dependency check runs a nested install that drops
+    // command-line config and aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY.
+    expect(PNPM_SKIP_DEPS_CHECK).toBe('--config.verify-deps-before-run=false');
+    expect(PNPM_MANAGED_TREE_EXEC_CONFIG).toEqual([PNPM_HOISTED_NODE_LINKER, PNPM_SKIP_DEPS_CHECK]);
+  });
+});
 
 describe('resolvePnpmInvocation', () => {
   for (const platform of ['win32', 'darwin', 'linux'] as const) {

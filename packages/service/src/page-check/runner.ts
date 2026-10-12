@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PNPM_HOISTED_NODE_LINKER, createLogger } from '@bendyline/gezel';
+import { PNPM_MANAGED_TREE_EXEC_CONFIG, createLogger } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
@@ -175,7 +175,7 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
   await writeFile(runnerPath, RUNNER_SOURCE, 'utf8');
 
   const args = [
-    PNPM_HOISTED_NODE_LINKER,
+    ...PNPM_MANAGED_TREE_EXEC_CONFIG,
     '--dir',
     opts.installPath,
     'exec',

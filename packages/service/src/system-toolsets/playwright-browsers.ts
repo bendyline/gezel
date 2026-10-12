@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PNPM_HOISTED_NODE_LINKER, type PnpmInvocation } from '@bendyline/gezel';
+import { PNPM_MANAGED_TREE_EXEC_CONFIG, type PnpmInvocation } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
 import { killProcessTree } from '../utils/kill-process-tree.js';
@@ -59,12 +59,12 @@ export async function ensureChromiumInstalled(args: {
 
   // `pnpm exec playwright install chromium` resolves Playwright from the
   // MCP toolset's own node_modules, so there's no global Playwright dep.
-  // The linker flag must match the install-time config or pnpm rebuilds
-  // the tree before exec'ing (see PNPM_HOISTED_NODE_LINKER).
+  // The managed-tree config keeps pnpm from reinstalling the tree before
+  // exec'ing (see PNPM_MANAGED_TREE_EXEC_CONFIG).
   const pnpm =
     args.invocation ??
     resolvePnpmCommand([
-      PNPM_HOISTED_NODE_LINKER,
+      ...PNPM_MANAGED_TREE_EXEC_CONFIG,
       '--dir',
       args.playwrightInstallPath,
       'exec',

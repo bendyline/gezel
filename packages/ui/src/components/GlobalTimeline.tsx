@@ -23,6 +23,9 @@ export function GlobalTimeline({
   onTaskReference,
   emptyPlaceholder,
   emptyContent,
+  trailingContent,
+  trailingContentAfterWrapUp,
+  foldWorkingNotes,
 }: {
   activeSessionId: string | undefined;
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
@@ -36,6 +39,12 @@ export function GlobalTimeline({
   emptyPlaceholder?: string;
   /** Rich empty state; see ChatTimelineView. */
   emptyContent?: import('react').ReactNode;
+  /** After the last message; see ChatTimelineView. */
+  trailingContent?: import('react').ReactNode;
+  /** Hold trailingContent until a task has finished; see ChatTimelineView. */
+  trailingContentAfterWrapUp?: boolean;
+  /** Fold launched sessions into one Working notes line; see ChatTimelineView. */
+  foldWorkingNotes?: boolean;
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) => api.listGlobalTimeline(opts),
@@ -57,6 +66,9 @@ export function GlobalTimeline({
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
       emptyContent={emptyContent}
+      trailingContent={trailingContent}
+      {...(foldWorkingNotes ? { foldWorkingNotes } : {})}
+      {...(trailingContentAfterWrapUp ? { trailingContentAfterWrapUp } : {})}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
       showProjectName

@@ -52,10 +52,15 @@ const { FolderOnboardingStep, shouldOfferFolderStep } = await import('./FolderOn
 const { api } = await import('../../api.js');
 
 describe('FolderOnboardingStep', () => {
-  it('offers Pictures preselected with what it holds, and leaves the library out', async () => {
+  // Pre-ticked Pictures and Documents made one Continue hand over two folders
+  // and every night.
+  it('offers Pictures with what it holds, ticks nothing, and leaves the library out', async () => {
     render(<FolderOnboardingStep config={null} onDone={() => {}} />);
     const pictures = await screen.findByRole('checkbox', { name: /Pictures/ });
-    expect(pictures).toBeChecked();
+    expect(pictures).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Yes' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: 'Not now' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
     expect(screen.getByText('12,480 photos · 1,204 only in iCloud')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Desktop/ })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: /app/ })).not.toBeChecked();
@@ -66,7 +71,7 @@ describe('FolderOnboardingStep', () => {
   it('adds the chosen folders with their crew and night work, then records the step', async () => {
     const onDone = vi.fn();
     render(<FolderOnboardingStep config={null} onDone={onDone} />);
-    await screen.findByRole('checkbox', { name: /Pictures/ });
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Pictures/ }));
     fireEvent.click(screen.getByRole('radio', { name: 'Not now' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add this folder' }));
 

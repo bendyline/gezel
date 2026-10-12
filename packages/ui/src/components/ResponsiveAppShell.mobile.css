@@ -86,10 +86,10 @@
   width: 100%;
 }
 
-/* The meester's introduction gives its words the full width: beside the
-   figure they had 178px, and each opener wrapped to three lines. The figure
-   sits beside the title only. */
-.app.app-compact .meester-greeting {
+/* The meester's welcome gives its words the full width: beside the figure
+   they had 178px, and each opener wrapped to three lines. The figure sits
+   beside the title only. */
+.app.app-compact .meester-welcome {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.6rem 12px;
@@ -97,11 +97,11 @@
   padding: 0.75rem 0.25rem 1rem;
 }
 
-.app.app-compact .meester-greeting-body {
+.app.app-compact .meester-welcome > .meester-welcome-body {
   display: contents;
 }
 
-.app.app-compact .meester-greeting-body > :not(.meester-greeting-title) {
+.app.app-compact .meester-welcome > .meester-welcome-body > :not(.meester-welcome-title) {
   grid-column: 1 / -1;
 }
 
@@ -149,10 +149,10 @@
   padding-bottom: 0.5rem;
 }
 
-/* Folder setup and chat banners yield to the draft on short touchscreens.
-   The intro's tabs stay reachable, including when the keyboard is open. */
+/* Chat banners yield to the draft on short touchscreens. The intro's tabs
+   stay reachable, including when the keyboard is open. */
 @media (max-height: 500px) and (pointer: coarse) {
-  .app.app-compact :is(.home-workshop-actions, .chat-rail-banner) {
+  .app.app-compact .chat-rail-banner {
     display: none;
   }
 }
@@ -729,30 +729,6 @@ html[data-layout="mobile"] {
    views cancel it with the same token, so they stay flush. */
 .app.app-compact .app-main {
   --app-main-pad-inline: 0.75rem;
-}
-
-/* First run nests the steps under their headings with stacked indents. At
-   phone width those indents, the home view's own padding, and the pane
-   gutter left the setup a narrow column in the middle of the screen. */
-.app.app-compact .home-view {
-  padding-inline: 0;
-}
-
-.app.app-compact .home-firstrun-heading {
-  font-size: 1.35rem;
-}
-
-.app.app-compact
-  :is(.home-firstrun-lede, .home-firstrun-body, .home-firstrun-body .setup-section:has(> h3)) {
-  padding-left: 0;
-}
-
-.app.app-compact .home-firstrun-body .setup-section:has(> h3) > h3 {
-  margin-left: 0;
-}
-
-.app.app-compact :is(.home-firstrun-body .home-ondevice-link, .home-media-section) {
-  padding-left: 0;
 }
 
 /* Compact navigation fills the screen with nothing beside it, so the selected

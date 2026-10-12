@@ -508,14 +508,6 @@
   min-height: 0;
 }
 
-/* Folder setup leaves the rest of Home for the conversation. */
-.home-workshop-actions {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 40%;
-  overflow-y: auto;
-}
-
 /* Bound the reused chat surface so the timeline scrolls internally and the
    composer stays pinned at the bottom — a long conversation never pushes the
    compose box below the fold. The existing
@@ -707,134 +699,17 @@
   margin-inline: auto;
 }
 
-/* First-run setup: the "First run setup" heading + its slightly-indented
-   body, so the setup steps (chat model, media, experience, security) read as
-   one grouped block nested under the heading. */
-.home-firstrun-heading {
-  font-size: 1.6rem;
-  margin: 1.25rem 0 0.5rem;
-}
-
-/* First run is two columns when the window affords it: setup on the left,
-   the "What is gezel?" tutorial (player + article, stacked) riding beside
-   it. The tutorial column is sticky with its own natural scrollbar so a
-   long article never pushes setup around; on narrower windows it stacks
-   beneath setup instead. */
-.home-firstrun-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1.5rem 2.5rem;
-  align-items: start;
-}
-.home-firstrun-main > .home-firstrun-heading {
-  margin-top: 0;
-}
-.home-firstrun-tutorial {
-  min-width: 0;
-}
-@media (min-width: 78rem) {
-  .home-firstrun-columns {
-    grid-template-columns: minmax(0, 1fr) minmax(24rem, 32rem);
-    column-gap: 1.75rem;
-  }
-  .home-firstrun-tutorial {
-    position: sticky;
-    top: 0;
-    max-height: calc(100vh - 4.5rem);
-    overflow-y: auto;
-    /* A gentle dashed seam between setup and the tutorial, spaced evenly
-       on both sides (column-gap left of the line, padding right of it). */
-    border-left: 1px dashed var(--border);
-    padding-left: 1.75rem;
-  }
-}
-/* Inside the tutorial column the aside's own scrollbar is the only one —
-   the article page must not open a second, nested scroll region — and the
-   player sits above the article with a small gap at a height that suits
-   the narrower column. */
-.home-firstrun-tutorial .home-intro-doc {
-  max-height: none;
-  overflow-y: visible;
-}
-/* The video directly above opens on the same "What is gezel?" title card
-   and bench artwork, so the article repeating both a few lines later reads
-   as a stutter. Hide the article's title (its one h1 — sections are h2s)
-   and the bench-mark figure in the tutorial column only; the Handboek and
-   the tour tab's Read view keep them. */
-.home-firstrun-tutorial .home-intro-doc h1,
-.home-firstrun-tutorial .home-intro-doc img[alt="gezel-mark"],
-.home-firstrun-tutorial
-  .home-intro-doc
-  :is(figure, .squisq-page-media, .squisq-page-media-frame):has(img[alt="gezel-mark"]) {
-  display: none;
-}
-.home-firstrun-tutorial .home-intro-page-player {
-  margin-bottom: 0.75rem;
-}
-.home-firstrun-tutorial .home-intro-player {
-  height: 18rem;
-}
-.home-firstrun-lede {
-  margin: 0 0 0.5rem;
-  padding-left: 1.25rem;
-  font-size: 0.9rem;
-}
-.home-firstrun-body {
-  padding-left: 1.25rem;
-}
-/* The lede hands straight into the download banner — the banner's default
-   0.75rem top margin (file-browser.css) collapsed with the lede's bottom
-   margin into a gap that separated the instruction from the thing it
-   points at. The lede's own 0.5rem is the whole gap here. */
-.home-firstrun-body > .first-run-banner {
-  margin-top: 0;
-}
-/* Indent the content under each first-run section's <h3>: pad the section, then
-   pull the heading back to the section's left edge — so the heading stays put
-   and its body reads as nested beneath it. Sections without a heading (e.g. the
-   "Manage AI models in Settings" link) are left flush with the headings. */
-.home-firstrun-body .setup-section:has(> h3) {
-  padding-left: 1rem;
-}
-.home-firstrun-body .setup-section:has(> h3) > h3 {
-  margin-left: -1rem;
-}
-/* Reserve height for the tallest posture description (Super Lockdown) so
-   switching security modes in first run doesn't reflow the page or shift the
-   scrollbar. Scoped to first run so the Settings security tab is untouched. */
-.home-firstrun-body .engagement-mode-description {
-  min-height: 6rem;
-}
-/* Tuck the posture tray up under its question. The default paragraph +
-   tray margins left the keys floating between the two text blocks, reading
-   as attached to neither; with the intro's bottom margin at 0.5rem the
-   collapsed gap lands at 0.5rem on both sides of the tray. */
-.home-firstrun-body .engagement-mode-switch {
-  margin-top: 0.4rem;
-}
-
-/* Line the "Manage AI models in Settings" link (and its blurb) up with the
-   install banner's text above it, which is inset by the banner's border +
-   padding. */
-.home-firstrun-body .home-ondevice-link {
-  padding-left: 1rem;
-}
-
-/* Extra breathing room above the media section so it reads as separate from
-   the more important chat-model setup above it; same 1rem inset as the
-   Settings link so the two quiet links line up. */
+/* The optional media models (RecommendedMediaDownloads), in Settings →
+   Artificial Intelligence. */
 .home-media-section {
   --home-media-control-width: 30rem;
-  padding-top: 10px;
-  padding-left: 1rem;
 }
 
-/* First-run "on-device media" section (RecommendedMediaDownloads).
-   Deliberately quiet: one desaturated link opens the plan dialog, and this
-   list carries only live install status (progress / done / error) —
-   never idle download buttons, which out-shouted the required chat-model
-   CTA above. Indented slightly so status rows read as children of the
-   plan link. */
+/* Deliberately quiet: one desaturated link opens the plan dialog, and this
+   list carries only live install status (progress / done / error) — never
+   idle download buttons, which out-shouted the chat model when this sat on
+   first run. Indented slightly so status rows read as children of the plan
+   link. */
 .home-media-downloads {
   display: flex;
   flex-direction: column;
@@ -862,8 +737,8 @@
   color: var(--text);
 }
 
-/* Per-modality install progress — same green bar as the chat model banner
-   (reuses `.first-run-banner-bar*`), constrained so it doesn't span full width. */
+/* Per-modality install progress — the shared download bar
+   (`.first-run-banner-bar*`), constrained so it doesn't span full width. */
 .home-media-progress {
   display: flex;
   flex-direction: column;

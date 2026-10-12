@@ -123,6 +123,37 @@ const NO_FILES: readonly ReferencedFile[] = [];
  * shape on read, so this fallback is for live SSE rows written by an older
  * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
  */
+/**
+ * Where a turn that failed before it began is already told, so its salvage
+ * record need not tell it again. A first message said the engine was
+ * downloading three times over: a placeholder bubble, an amber warning, and
+ * the live slot's red "Turn stopped" card with Retry.
+ *
+ * - `'live'`: the session's live slot is showing the failure; the record
+ *   adds nothing, so it is not drawn until the slot retires.
+ * - `'card'`: the session's "Last turn failed" card is showing it; the
+ *   record keeps only its placeholder line.
+ * - `null`: nowhere else; the record is where the reason stays readable.
+ */
+export function turnFailureShownElsewhere(
+  message: Pick<
+    TimelineMessage,
+    'synthetic' | 'content' | 'warnings' | 'sessionLastTurnError' | 'projectId'
+  >,
+  opts: { liveError?: string; cardAcknowledged: boolean },
+): 'live' | 'card' | null {
+  if (message.synthetic !== 'turn-aborted') return null;
+  const warnings = message.warnings ?? [];
+  const same = (a: string, b: string) => a.slice(0, 500) === b.slice(0, 500);
+  if (opts.liveError !== undefined) {
+    const liveError = opts.liveError;
+    return !message.content.trim() && warnings.every((w) => same(w, liveError)) ? 'live' : null;
+  }
+  const card = message.sessionLastTurnError;
+  if (!card || opts.cardAcknowledged) return null;
+  return warnings.every((w) => same(w, card)) ? 'card' : null;
+}
+
 export function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
   if (message.referencedFiles?.length) return message.referencedFiles;
   if (!message.referencedArtifacts?.length) return NO_FILES;

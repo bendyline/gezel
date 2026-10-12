@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
+  type CrewMember,
   MINIMAL_FOOTPRINT_MAX_WINDOW,
   PROMPT_FOOTPRINT_POLICY,
+  type TaskDeliverable,
   buildToolReceipt,
   estimateTokens,
   findAskCycleOrDepth,
@@ -16,8 +18,11 @@ import {
   resolveFactualWriting,
   resolvePromptFootprint,
   resolveSocialMode,
+  roleGloss,
   selectPersonNotes,
   stateAnswerTool,
+  stepDeliverableTarget,
+  stepOwnerGezelId,
   taskTranscriptCompatible,
   todayIso,
   turnStateWanted,
@@ -258,6 +263,7 @@ import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
   loadTaskResult,
+  placeTaskDeliverable,
   taskFinishedQuestion,
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
@@ -11437,8 +11443,14 @@ export class ChatManager extends LocalEngineRuntime {
     thread: ChatSession,
     message: ChatMessage,
   ): Promise<{ record: ChatSession; scope: PublishScope }> {
-    // The live record, when the thread is open, so unsaved turn state survives.
-    const record = this.states.get(thread.id)?.record ?? thread;
+    // The live record, when the thread is open, so unsaved turn state survives;
+    // otherwise the stored one as it is now. Callers read `thread` before
+    // awaiting other work, and writing that copy back dropped whatever the
+    // thread gained meanwhile (a composer launch's message and receipt).
+    const record =
+      this.states.get(thread.id)?.record ??
+      (await this.store.findSessionById(thread.id).catch(() => null)) ??
+      thread;
     record.messages.push(message);
     record.lastActivityAt = message.at;
     await this.store.writeSession(record);
@@ -11452,31 +11464,100 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * Introduce a gezel hired for a task in the thread the owner reads, before
-   * they start. The crew used to be recruited silently: a copywriter and an
-   * omroeper joined the roster mid-task without a word to the owner.
+   * Introduce a task's crew in the thread the owner reads. The crew used to
+   * be recruited silently: a copywriter and an omroeper joined the roster
+   * mid-task without a word, and the composer addressed a voorman nobody had
+   * introduced.
+   *
+   * `kickoff` introduces whoever starts the work and, when someone else
+   * leads the task, the lead too; `joined` introduces a gezel hired for a
+   * later step as they start. Each gezel is introduced once per thread, and
+   * never the thread's own gezel.
    */
   async postCrewIntroduction(
     task: Task,
     gezelId: string,
     step: TaskCraftbookStep,
+    moment: 'kickoff' | 'joined' = 'joined',
   ): Promise<string | null> {
     const thread = await findOwnerThread(this.store, task);
-    if (!thread || thread.gezelId === gezelId) return null;
-    const gezel = await this.store.getGezel(gezelId).catch(() => null);
-    if (!gezel) return null;
-    const role = gezel.role?.trim();
+    if (!thread) return null;
+    if (moment === 'kickoff') await this.settleBeforeKickoff(thread.id, task);
+    // Read the thread again: the record above predates the wait, and
+    // appending to it would write the launch's own messages out of the file.
+    const current = async () =>
+      this.states.get(thread.id)?.record ??
+      (await this.store.findSessionById(thread.id).catch(() => null)) ??
+      thread;
+    const introducedIn = (record: ChatSession) =>
+      new Set(
+        record.messages.flatMap((m) => m.crewIntroduction?.members.map((x) => x.gezelId) ?? []),
+      );
+    const introduced = introducedIn(await current());
+    const lead = task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined;
+    const ids = moment === 'kickoff' && lead && lead !== gezelId ? [gezelId, lead] : [gezelId];
+    const members: CrewMember[] = [];
+    for (const id of ids) {
+      if (id === thread.gezelId || introduced.has(id)) continue;
+      const gezel = await this.store.getGezel(id).catch(() => null);
+      if (!gezel) continue;
+      const role = gezel.role?.trim();
+      const gloss = roleGloss(role);
+      const purpose = firstSentence(gezel.description);
+      members.push({
+        gezelId: id,
+        name: gezel.name,
+        ...(role ? { role } : {}),
+        ...(gloss ? { gloss } : {}),
+        ...(purpose ? { purpose } : {}),
+        ...(id === gezelId ? { stepName: step.name } : {}),
+      });
+    }
+    // The gezel lookups awaited; take the thread as it is now, and drop anyone
+    // a concurrent post introduced meanwhile.
+    const target = await current();
+    const already = introducedIn(target);
+    const fresh = members.filter((m) => !already.has(m.gezelId));
+    if (fresh.length === 0) return null;
     const message: ChatMessage = {
       role: 'assistant',
-      content:
-        `I've brought **${gezel.name}** onto the crew${role ? ` as your ${role}` : ''} ` +
-        `for **${task.title}**. ${gezel.name} starts with "${step.name}".`,
+      content: crewIntroductionText(task, fresh, moment),
       at: nowIso(),
       synthetic: 'crew-introduction',
       referencedTasks: [task.ref],
+      crewIntroduction: { taskRef: task.ref, moment, members: fresh },
     };
-    const { record } = await this.appendToThread(thread, message);
+    const { record } = await this.appendToThread(target, message);
     return record.id;
+  }
+
+  /**
+   * Hold a kickoff introduction until the thread has said what it asked
+   * for. The task exists before the launch is written down: a composer
+   * launch appends the person's message and its receipt after creating the
+   * task, and a meester turn that called start_project is still running.
+   * Posted at once, the crew card sat above the request it answered, and
+   * the model read an introduction before the message that caused it.
+   * Bounded: a thread that never settles gets its card anyway.
+   */
+  private async settleBeforeKickoff(threadId: string, task: Task): Promise<void> {
+    const started = Date.now();
+    const byPerson = task.createdBy?.kind === 'user';
+    while (Date.now() - started < KICKOFF_SETTLE_MAX_MS) {
+      if (!this.isSessionTurnPending(threadId)) {
+        if (!byPerson || Date.now() - started > KICKOFF_RECEIPT_WAIT_MS) return;
+        const record =
+          this.states.get(threadId)?.record ??
+          (await this.store.findSessionById(threadId).catch(() => null));
+        const written = record?.messages.some(
+          (m) =>
+            m.synthetic === 'craftbook-launch' &&
+            m.toolCalls?.some((call) => call.card?.taskRef === task.ref),
+        );
+        if (written) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, KICKOFF_SETTLE_POLL_MS));
+    }
   }
 
   async postTaskWrapUp(task: Task, outcome: 'complete' | 'canceled'): Promise<string | null> {
@@ -11484,8 +11565,18 @@ export class ChatManager extends LocalEngineRuntime {
     const thread = await findOwnerThread(this.store, task);
     if (!thread) return null;
 
-    const { deliverable, outputs } = await loadTaskResult(this.store, task);
+    const result = await loadTaskResult(this.store, task);
+    const { outputs } = result;
+    const deliverable = result.deliverable
+      ? await placeTaskDeliverable(this.store, this.catalog, task, result.deliverable)
+      : null;
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
+    const maker = deliverable ? deliverableMaker(task, deliverable) : undefined;
+    // File references resolve against the thread's project. A kickoff from
+    // the meester's Default thread builds in a project of its own, and its
+    // file chips opened "trip.json was not found" there; the deliverable
+    // card carries its own project, so it is the way in.
+    const sameProject = thread.projectId === task.projectId;
 
     const message: ChatMessage = {
       role: 'assistant',
@@ -11493,10 +11584,13 @@ export class ChatManager extends LocalEngineRuntime {
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
-      ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+      ...(sameProject && outputs.length > 0
+        ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) }
+        : {}),
       ...(deliverable ? { deliverable } : {}),
+      ...(maker ? { makerGezelId: maker } : {}),
     };
-    const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
+    const artifacts = sameProject ? artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES)) : [];
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
 
     const { record, scope } = await this.appendToThread(thread, message);
@@ -17146,3 +17240,64 @@ export function growthSignature(gezel: GezelDetail, social = false): string {
     character: social ? (fm.character ?? null) : null,
   });
 }
+
+/** "Reisleider — trip planner", "Planner", or nothing. */
+function crewRoleLabel(member: CrewMember): string {
+  if (!member.role) return '';
+  return member.gloss ? `${member.role} — ${member.gloss}` : member.role;
+}
+
+/**
+ * The words a crew introduction says, for the model and for any surface
+ * that shows text rather than cards.
+ */
+export function crewIntroductionText(
+  task: Pick<Task, 'title'>,
+  members: readonly CrewMember[],
+  moment: 'kickoff' | 'joined',
+): string {
+  const describe = (m: CrewMember) => {
+    const label = crewRoleLabel(m);
+    return `**${m.name}**${label ? ` (${label})` : ''}`;
+  };
+  if (moment === 'joined') {
+    const m = members[0]!;
+    const label = crewRoleLabel(m);
+    return (
+      `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} ` +
+      `for **${task.title}**.${m.stepName ? ` ${m.name} starts with "${m.stepName}".` : ''}`
+    );
+  }
+  const parts = members.map((m) =>
+    m.stepName ? `${describe(m)} starts with "${m.stepName}"` : `${describe(m)} leads it`,
+  );
+  return `Your crew for **${task.title}**: ${parts.join(', and ')}.`;
+}
+
+/** The first sentence of a description, short enough for a card. */
+function firstSentence(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  const sentence = trimmed.split(/(?<=[.!?])\s/)[0] ?? trimmed;
+  return sentence.length > 160 ? `${sentence.slice(0, 157).trimEnd()}…` : sentence;
+}
+
+/**
+ * Who made a task's deliverable: the owner of the step that targets it,
+ * else the task's assignee. The finished-work card credits them by face.
+ */
+function deliverableMaker(task: Task, deliverable: TaskDeliverable): string | undefined {
+  const target = deliverable.path.toLowerCase();
+  const step = [...(task.craftbook?.steps ?? [])]
+    .reverse()
+    .find((s) => stepDeliverableTarget(s)?.path.toLowerCase() === target);
+  const owner = step ? stepOwnerGezelId(task, step) : undefined;
+  if (owner) return owner;
+  return task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined;
+}
+
+/** How long a kickoff introduction waits for its thread to settle. */
+const KICKOFF_SETTLE_MAX_MS = 120_000;
+/** How long it waits for a composer launch to write its receipt. */
+const KICKOFF_RECEIPT_WAIT_MS = 10_000;
+const KICKOFF_SETTLE_POLL_MS = 200;

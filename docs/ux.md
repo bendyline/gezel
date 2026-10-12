@@ -206,7 +206,7 @@ Rules:
   `<strong>{label}</strong> — description`. The description is a readout of
   the tray, so it sits directly beneath with the recipe's 0.5rem gap; don't
   wedge other content between them. The Security & Compliance posture
-  switch (first run + Settings) is the reference implementation.
+  switch in Settings is the reference implementation.
   label on top, a smaller muted hint beneath, left-aligned, wrapping
   allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
   recipe styles both, so a new surface never needs its own pair (the
@@ -375,11 +375,11 @@ through `--app-main-pad-inline` on `.app-main` (0.75rem instead of 1.25rem).
 Full-bleed views cancel that gutter with the same `--app-main-pad-block` /
 `--app-main-pad-inline` tokens, never with literal negative margins. A view
 that adds its own inset on top of the gutter drops it in compact, so every
-compact view's content edge lines up. Page-level panes, such as first-run
-setup, span that full width without a second indent. Home's greeting band
+compact view's content edge lines up. Page-level panes, such as Settings,
+span that full width without a second indent. Home's greeting band
 steps aside for the visit, without saving that, while the meester's
 introduction fills the empty conversation, just as it does once the person
-sends. A tab the person chose, including the one already open, holds it open
+sends. During first run there is no band at all (see [The welcome](#the-welcome)). A tab the person chose, including the one already open, holds it open
 through that. Collapsed, its tab bar stays visible; selecting any tab reopens its
 content. Labels wrap on narrow screens so every destination remains visible.
 The introduction reads from its
@@ -497,6 +497,95 @@ What lives where:
 
 ## Patterns
 
+### The welcome
+
+The first thing a new person meets is the meester, not a setup page. Home
+renders the workshop from the first settled frame; the meester's empty
+conversation opens on `MeesterWelcome`: the meester full-figure on the
+plank (`MeesterFigure`, the same figure the greeting band stages), a serif
+time-of-day line ("Good afternoon. I'm Florian — I run this workshop."),
+and the meester's lines in the chat register (serif body). Rules:
+
+- **Setup is the meester asking for tools.** The one thing the app cannot
+  run without, an AI model, is asked for in the meester's voice ("Before we
+  start, I need my tools…") with one accent key, **Fetch my tools · 3.9 GB ·
+  about 5 minutes**. Nothing downloads before that tap. Quiet muted links sit
+  beneath it: "Use one already on this computer" (opens a small tray of the
+  models on disk) and "Connect a cloud account instead". A cloud provider
+  that is not connected gets one key, **Connect an AI**, into Settings. A
+  phone draws its own model list in the same place.
+- **Everything else is a default, with one muted line.** No posture tray,
+  no preference switches, no media downloads. The security posture, names
+  and poppetjes, the relevance check and social mode keep their first-run
+  defaults; one `--text-xs` line says what that means and links to Settings
+  → Security & Compliance ("Change what I'm allowed to do"). Optional media
+  models live in Settings → Artificial Intelligence.
+- **One surface per message.** While the tools arrive, progress is one
+  quiet line under the meester (a thin bar, then "Fetching my tools · 42% ·
+  about 3 min left"), not a banner. The composer is open for a draft with
+  Send held, and its own "can start talking once a model is downloaded"
+  notice is suppressed in the meester's thread, because the welcome already
+  says so. A failure is one plain sentence with **Try again** and quiet
+  escape links; a report link only for real failures.
+- **No page swap.** When the model lands the same surface says "I'm ready.
+  What shall we make?" The greeting band and the folder step stay away for
+  the rest of that visit; they arrive on the next.
+- **The title bar is quiet during first run.** Brand and search only;
+  Activity, the engine, indexing, quota and tempo controls describe a
+  running workshop and join once there is one.
+- **Static, never a model turn.** The welcome is written copy, so it is on
+  screen before anything can answer and never puts words in the meester's
+  mouth. The helpers made at boot (the Klerk, the Boekwachter) are
+  introduced by name in one small line, so no name in the sidebar is a
+  stranger. The tour ("Take the 1-minute tour") opens in place.
+- A conversation that already has history when the model goes missing keeps
+  it, and the meester's ask for tools sits at its foot as a bordered note
+  (`MeesterSetupNote`), above the composer.
+- **First run lasts until the work can run.** On llama.cpp the engine is
+  fetched lazily, so a model already on disk is not enough: the welcome
+  shows "Setting up my workbench · N%" until the engine is in place, and
+  only then says it is ready. Tapping **Fetch my tools** fetches the engine
+  beside the model.
+- **First projects, not openers.** Three stacked keys (`gz-key--stacked`,
+  title over a one-line hint) offer goals a project type carries end to end
+  with one lead and a board: a trip, a celebration, a language tutor
+  (`FIRST_PROJECTS` in core). A key prefills an editable sentence into the
+  composer and never sends it. "Or tell me in your own words" sits beneath.
+  A first project is added only when it routes to its type against the
+  pinned catalog (the catalog package's `first-projects` test) and has been
+  seen to finish on an on-device model.
+
+### The first request: crew, working notes, the finished thing
+
+What the meester's thread shows after the person asks for something:
+
+- **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
+  message carrying `crewIntroduction`): a headshot, the name in the serif,
+  the guild role beside its plain words from `roleWithGloss` ("Reisleider —
+  trip planner", "Voorman — crew lead"; a plain role carries no gloss), what
+  they start with, and **Say hello**, which opens their chat. The lead and
+  whoever starts the work are introduced as the task begins; a gezel hired
+  for a later step is introduced when they start. Each gezel is introduced
+  once per thread.
+- **The crew's work folds into one line** (`WorkingNotes`) in the meester's
+  Home conversation: "Mira is working…" with a breathing dot, then "Mira's
+  working notes". The worker's transcript, thinking, tool calls and any
+  failure banners are inside; a stopped worker shows "Mira stopped: …" on
+  the line in the warning tone, never as a red banner in the person's
+  conversation. Debug mode shows the full session tree instead.
+- **The finished thing is last.** The wrap-up renders after the fold, not
+  above the work that made it, and closes on the finished-work card
+  (`DeliverableCard` with `maker`): "Mira made this for you" with a small
+  portrait, a cover of a written document's first lines in the serif, then
+  **Open · Make changes · Show in folder**. Make changes opens a chat with
+  the maker. When the deliverable is the data a project type's Output page
+  reads (`view: 'output-page'`), the card names the project and opens it:
+  the board is the thing to look at, never the JSON behind it.
+- **Then, once, the folder question.** After the first wrap-up the meester
+  asks at the foot of the thread whether to look after a folder
+  (`FolderOnboardingStep`). Nothing is ticked and neither overnight key is
+  latched: the person chooses, or skips.
+
 ### Pick a plan from Home
 
 Home's intro starts with the greeting tab, named for the time of day like the
@@ -526,9 +615,10 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
-The starters live only inside the intro tab. First-run folder setup keeps its
-own bounded area above the conversation and yields to the draft on short
-touchscreens. The intro tabs remain reachable while the native keyboard is open.
+The starters live inside the intro tab. The folder step waits until the
+welcome is over: on a later visit it keeps its own bounded area above the
+conversation and yields to the draft on short touchscreens. The intro tabs
+remain reachable while the native keyboard is open.
 
 A Home key opens a compact launch sheet with the main field focused.
 The person adds a topic, then chooses **Start now** or **Tonight**. Use the
@@ -1718,7 +1808,8 @@ resolves itself, an engagement switch set to Off does not.
 
 **Adding a folder says what will happen before anything does.** A folder a
 person hands the crew is the product's main promise, so every door to it —
-first-run onboarding (`FolderOnboardingStep`), the add-folder sheet
+the meester's folder question after the first finished task
+(`FolderOnboardingStep`), the add-folder sheet
 (`AddFolderSheet`, opened by `openAddFolder()` from the New Project dialog's
 Existing Folder card, the File menu and the Home tip) — shows the same three
 things first: what the folder holds ("12,480 photos · 1,204 only in iCloud",
@@ -1726,9 +1817,10 @@ counted without reading a file), the read-only promise in plain words, and
 the night work from `describeFolderNightWork`. In the add-folder sheet, a native
 checkbox sits to the left of "Work on this folder during the night shift",
 above the work preview. Show "During the nightshift, Gezel will" and the work
-list only while that checkbox is checked. First-run folder choices are
-checkbox cards, not keys, because several may be picked at once; its
-overnight question is a two-key tray. A folder gezel refuses (a home folder,
+list only while that checkbox is checked. The folder question's choices are
+checkbox cards, not keys, because several may be picked at once, and none
+starts ticked; its overnight question is a two-key tray with neither key
+latched until the person answers. A folder gezel refuses (a home folder,
 a drive root) is explained with `forbiddenFolderPlainName`, never an error
 code, and the add key stays disabled.
 
@@ -1783,8 +1875,8 @@ header that says they apply after the edits and never replace a file. Past a
 dozen, the rows group by destination folder, each a disclosure row with its
 count, so a tidy-up of a thousand photos reads as a handful of folders.
 
-**Social mode is one switch, and off means today.** Settings → General (and
-the phone's first-run Preferences) carry a single *Social mode* checkbox,
+**Social mode is one switch, and off means today.** Settings → General
+carries a single *Social mode* checkbox,
 beside — never merged with — *Show gezel names and poppetjes*. On, gezels
 speak with their character, growth (the Growth tab and level badges) is on
 display, and opening a chat shows what is waiting. Off reproduces the plain

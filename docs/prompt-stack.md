@@ -309,8 +309,12 @@ while they stream.
   This changes with the turn without rebuilding the system prompt; see
   [Project retrieval and indexed context](project-retrieval.md).
 - **Preludes** (`resolveUserPromptPrelude` — first non-null wins, prepended to the user's
-  text): `prompt.meester-build-prelude` (meester + build-shaped request → one
-  `start_project` kickoff; staffing is runtime-selected) and
+  text): `prompt.meester-build-prelude` (meester + a request to start something —
+  a build, or a goal to organize such as a trip or an event → one `start_project`
+  kickoff; `index.html` is named only for a browser game or site, and staffing is
+  runtime-selected: `start_project` routes a goal that names a project type's
+  distinctive tag to that type, a goal with nothing to build to a written
+  document and the role that writes it, and everything else to the build loop) and
   `prompt.meester-craftbook-prelude` (meester + procedure/recurrence-shaped
   request → suggest-then-invoke or craftbook_write authoring steer).
 - **Nudges** (synthetic continuation turns after stall detection): `CONTINUATION_NUDGE`

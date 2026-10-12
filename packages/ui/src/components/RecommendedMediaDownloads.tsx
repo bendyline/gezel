@@ -8,19 +8,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
 import { type MediaFitState, mediaFitState } from './media-model-fit.js';
+import '../styles/home-view.css';
 
 /**
- * First-run "on-device media" section: ONE quiet, desaturated link that opens
- * the size-aware plan dialog for the recommended media sidecars (image /
- * image reading / speech-to-text / text-to-speech) that fit this device. The
+ * The "on-device media" section of Settings → Artificial Intelligence (it
+ * was on first-run setup until first run shrank to the one chat-model
+ * download): ONE quiet, desaturated link that opens the size-aware plan
+ * dialog for the recommended media sidecars (image / image reading /
+ * speech-to-text / text-to-speech) that fit this device. The
  * dialog is the only start path: it defaults to the modest media set, leaves
  * video opt-in, checks the model-store filesystem, and never starts the
  * separately-managed chat model as a hidden side effect.
  *
- * Deliberately a single link, not a button per modality: the required chat
- * model download above is the page's one primary action, and a stack of
- * terracotta media buttons out-shouted it (2026-09-02 UX review, "the visual
- * hierarchy is inverted"). Per-modality choice lives inside the plan dialog.
+ * Deliberately a single link, not a button per modality: a stack of
+ * terracotta media buttons out-shouted the chat model on first run
+ * (2026-09-02 UX review, "the visual hierarchy is inverted"). Per-modality
+ * choice lives inside the plan dialog.
  *
  * "Recommended" = the highest-`recoScore`, fully-open catalog entry of that
  * kind (the same gate as the chat picker + ★ badge) that the daemon says fits
@@ -505,7 +508,7 @@ export function RecommendedMediaDownloads() {
       {anyPending && (
         <>
           <button type="button" className="gz-link-button home-media-plan-link" onClick={openPlan}>
-            Also download the optional media models (image + speech)
+            Download the optional media models (image + speech)
             {defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
           </button>
           <p className="muted small home-media-plan-hint">

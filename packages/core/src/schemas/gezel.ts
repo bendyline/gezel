@@ -3,6 +3,7 @@ import { PoppetjeSchema } from '../poppetje/schema.js';
 import { GezelCharacterSchema } from './character.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
+import { CrewIntroductionSchema } from './crew-introduction.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GezelGrowthSummarySchema } from './growth.js';
@@ -929,6 +930,18 @@ export const ChatMessageSchema = z.object({
    * an ordinary assistant reply.
    */
   contextCompaction: ContextCompactionSchema.optional(),
+  /**
+   * Present on a synthetic `crew-introduction` message: the gezels it
+   * introduces, so the UI can show each as a card with their portrait. The
+   * message text carries the same facts for the model.
+   */
+  crewIntroduction: CrewIntroductionSchema.optional(),
+  /**
+   * On a `task-wrapup`: the gezel who made the deliverable (the owner of the
+   * step that produced it, else the task assignee), so the card can credit
+   * them by face.
+   */
+  makerGezelId: z.string().optional(),
   /**
    * Display flag: the model sees this message as normal history, but the
    * chat transcript UI never renders a bubble for it. Set on

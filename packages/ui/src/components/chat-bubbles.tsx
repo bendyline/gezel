@@ -58,6 +58,7 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
+import { CrewIntroCard } from './CrewIntroCard.js';
 import { DeliverableCard } from './DeliverableCard.js';
 import { DraftPlanCard } from './DraftPlanCard.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -482,6 +483,20 @@ export interface MessageBubbleProps {
   synthetic?: import('@bendyline/gezel').ChatMessage['synthetic'];
   /** Facts displayed by the dedicated automatic-compaction timeline marker. */
   contextCompaction?: ContextCompaction;
+  /** The crew a `crew-introduction` message introduces, drawn as cards. */
+  crewIntroduction?: import('@bendyline/gezel').CrewIntroduction;
+  /** Portraits for the crew cards. */
+  crewGezels?: ReadonlyMap<string, import('@bendyline/gezel').GezelSummary>;
+  /** On a task wrap-up: the gezel who made the deliverable, credited on its card. */
+  makerGezel?: {
+    id: string;
+    name: string;
+    icon?: string | null;
+    poppetje?: import('@bendyline/gezel').Poppetje | null;
+    iconOverride?: boolean;
+  };
+  /** The name of the project the deliverable lives in. */
+  deliverableProjectName?: string;
   /**
    * Warnings persisted on the message — on a `turn-aborted` record the
    * first entry is the abort reason itself (`[llama-cpp] timed out
@@ -668,6 +683,10 @@ export function MessageBubble({
   timestampLabel,
   synthetic,
   contextCompaction,
+  crewIntroduction,
+  crewGezels,
+  makerGezel,
+  deliverableProjectName,
   warnings,
   grounding,
 }: MessageBubbleProps) {
@@ -1001,6 +1020,18 @@ export function MessageBubble({
     );
   }
 
+  if (synthetic === 'crew-introduction' && crewIntroduction) {
+    return (
+      <CrewIntroCard
+        intro={crewIntroduction}
+        {...(crewGezels ? { gezels: crewGezels } : {})}
+        {...(dataMsgId ? { dataMsgId } : {})}
+        {...(dataSessionId ? { dataSessionId } : {})}
+        {...(extraClass ? { extraClass } : {})}
+      />
+    );
+  }
+
   if (synthetic === 'compaction-summary') {
     const contextLabel = formatContextWindow(contextCompaction?.contextWindow);
     const triggerPercent = contextCompaction
@@ -1217,11 +1248,41 @@ export function MessageBubble({
       {!isUser && question && (
         <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />
       )}
-      {!isUser && deliverable && projectId && (
+      {!isUser && deliverable && (deliverable.projectId ?? projectId) && (
         <DeliverableCard
           deliverable={deliverable}
-          projectId={projectId}
-          {...(onFileReference ? { onOpen: onFileReference } : {})}
+          projectId={deliverable.projectId ?? projectId!}
+          {...(() => {
+            // A board opens its project; a file in another project's
+            // drawer opens there, not in this thread's project.
+            const home = deliverable.projectId ?? projectId!;
+            if (deliverable.view === 'output-page') {
+              return {
+                onOpen: () => runNavActions([openTabAction({ kind: 'project', id: home })]),
+              };
+            }
+            if (home !== projectId) {
+              return {
+                onOpen: (file: ReferencedFile) =>
+                  runNavActions(
+                    openProjectFileActions({
+                      projectId: home,
+                      path: file.path,
+                      source: file.kind === 'artifact' ? 'artifacts' : 'workspace',
+                    }),
+                  ),
+              };
+            }
+            return onFileReference ? { onOpen: onFileReference } : {};
+          })()}
+          {...(synthetic === 'task-wrapup' && makerGezel
+            ? {
+                maker: makerGezel,
+                onMakeChanges: () =>
+                  runNavActions([openTabAction({ kind: 'gezel', id: makerGezel.id })]),
+              }
+            : {})}
+          {...(deliverableProjectName ? { projectName: deliverableProjectName } : {})}
         />
       )}
       {chips}

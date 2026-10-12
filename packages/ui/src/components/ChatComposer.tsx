@@ -276,6 +276,12 @@ export interface ChatComposerProps {
    * there. Surfaces that cannot create project tasks leave it undefined.
    */
   taskLaunch?: ComposerTaskLaunchProps;
+  /**
+   * Leave out the "can start talking once a model is downloaded" notice. For
+   * a surface that already says so in its own words (the meester's welcome).
+   * Send stays held either way.
+   */
+  hideWaitingNotice?: boolean;
 }
 
 interface ComposerNarrateButtonProps {
@@ -367,6 +373,7 @@ export function ChatComposer({
   draftId: selectedDraftId,
   onDraftIdChange,
   taskLaunch: taskLaunchProps,
+  hideWaitingNotice = false,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   // Hysteresis because a split grip can drag the width across the line, and
@@ -1633,7 +1640,7 @@ export function ChatComposer({
           </button>
         </div>
       )}
-      {waitingForModel && !engagementOff && (
+      {waitingForModel && !engagementOff && !hideWaitingNotice && (
         <div
           className="chat-composer-waiting"
           aria-live="polite"

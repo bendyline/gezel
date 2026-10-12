@@ -15,7 +15,7 @@ import {
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
   NpmInstallRequestSchema,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_EXEC_CONFIG,
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
   ProjectFolderPreviewRequestSchema,
@@ -1691,7 +1691,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         const configPath = join(testConfigDir, 'playwright.config.mjs');
         await writeFileAtomic(configPath, playwrightTestConfigSource(scriptAbs));
         args = [
-          PNPM_HOISTED_NODE_LINKER,
+          ...PNPM_MANAGED_TREE_EXEC_CONFIG,
           '--dir',
           playwright.installPath,
           'exec',
@@ -1702,7 +1702,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         ];
       } else {
         args = [
-          PNPM_HOISTED_NODE_LINKER,
+          ...PNPM_MANAGED_TREE_EXEC_CONFIG,
           '--dir',
           playwright.installPath,
           'exec',

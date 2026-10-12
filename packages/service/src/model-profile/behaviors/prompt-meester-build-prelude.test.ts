@@ -63,6 +63,21 @@ describe('PromptMeesterBuildPrelude', () => {
     expect(out).toContain('do not prefix `workspace/`');
   });
 
+  // The UX review's first request went unrouted: the meester improvised a
+  // crew in chat and the work started as a web page.
+  it('treats a trip or an event as a kickoff, and names index.html only for the web', () => {
+    for (const userText of [
+      'Plan a family trip to Portugal next spring. Can you set up a crew?',
+      'Help me organize our wedding',
+    ]) {
+      const out = PromptMeesterBuildPrelude.userPromptPrelude!(turnCtx({ userText }), undefined);
+      expect(out).toContain('`start_project({');
+      expect(out).toContain('Only for a browser game or site, name `index.html`');
+      expect(out).toContain('for anything else name no file');
+    }
+    expect(looksLikeNewBuildRequest('Can you plan a meeting for Tuesday?')).toBe(false);
+  });
+
   it('matches its effective tool surface', () => {
     const out = PromptMeesterBuildPrelude.userPromptPrelude!(
       turnCtx({ userText: 'Can you create a Frogger-style browser game?' }),

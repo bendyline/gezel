@@ -1,7 +1,10 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PROJECT_TYPES, type ProjectType, isUserCreatedProject } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
-import { scanFolderProfile } from './scan-folder.js';
+import { isUnmodifiedWorkspaceBootstrap } from '../workspace/template.js';
+import { profileFromFiles, scanFolderProfile } from './scan-folder.js';
 
 /**
  * Project-type auto-detection. Scores the bundled taxonomy against a
@@ -118,10 +121,66 @@ export async function detectProjectType(
   projectId: string,
 ): Promise<ProjectTypeScore[]> {
   const indexed = (await deps.contentIndex?.languageProfile(projectId).catch(() => null)) ?? null;
-  const profile =
+  const found =
     indexed && indexed.fileCount > 0 ? indexed : await scanProjectWorkspace(deps.store, projectId);
+  const profile = found
+    ? withoutFiles(found, await untouchedScaffold(deps.store, projectId))
+    : null;
   const aboutText = await readAboutText(deps.store, projectId);
   return scoreProjectTypes({ profile, aboutText });
+}
+
+/** The workspace scaffold every internal project starts with. */
+const SCAFFOLD_FILES = ['package.json', 'tsconfig.json', '.gitignore'] as const;
+
+/**
+ * The scaffold files still exactly as the bootstrap wrote them. A fresh
+ * project holds nothing else, so its profile was two JSON files out of two
+ * and a family trip came back labelled Social Media, the taxonomy's one
+ * JSON-shaped type. Only internal workspaces: a person's own folder keeps
+ * its own semantics, even when a file happens to match the template.
+ */
+async function untouchedScaffold(
+  store: Store,
+  projectId: string,
+): Promise<Array<{ path: string; size: number }>> {
+  try {
+    const project = await store.getProject(projectId);
+    if (!project || project.workingDir) return [];
+    const dir = await store.projectWorkspaceDir(projectId);
+    const files: Array<{ path: string; size: number }> = [];
+    for (const name of SCAFFOLD_FILES) {
+      const content = await readFile(join(dir, name), 'utf8').catch(() => null);
+      if (content !== null && isUnmodifiedWorkspaceBootstrap(name, content)) {
+        files.push({ path: name, size: Buffer.byteLength(content) });
+      }
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+/** The profile without these files' counts. Pure. */
+export function withoutFiles(
+  profile: LanguageProfile,
+  files: ReadonlyArray<{ path: string; size: number }>,
+): LanguageProfile {
+  if (files.length === 0) return profile;
+  const drop = profileFromFiles(files);
+  const minus = (hist: Record<string, number>, less: Record<string, number>) => {
+    const next: Record<string, number> = {};
+    for (const [key, count] of Object.entries(hist)) {
+      const left = count - (less[key] ?? 0);
+      if (left > 0) next[key] = left;
+    }
+    return next;
+  };
+  return {
+    fileCount: Math.max(0, profile.fileCount - drop.fileCount),
+    extensions: minus(profile.extensions, drop.extensions),
+    modalities: minus(profile.modalities, drop.modalities),
+  };
 }
 
 /** Bounded walk of the project's workspace dir; null on any failure. */
@@ -166,7 +225,14 @@ export async function detectAndPersistProjectType(
     }
     const ranked = await detectProjectType(deps, projectId);
     const top = ranked[0];
-    if (!top || top.score < PROJECT_TYPE_MIN_SCORE) return null;
+    if (!top || top.score < PROJECT_TYPE_MIN_SCORE) {
+      // A label nothing supports any more (one read off the untouched
+      // scaffold, say) would keep titling the project's shelves.
+      if (project.detectedProjectType) {
+        await deps.store.updateProject(projectId, { detectedProjectType: null });
+      }
+      return null;
+    }
     await deps.store.updateProject(projectId, {
       detectedProjectType: { id: top.id, score: top.score, scannedAt: new Date().toISOString() },
     });

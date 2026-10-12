@@ -81,10 +81,12 @@ test('Home renders the workshop once configured', async () => {
 });
 
 test('the greeting collapses and the tour tab swaps content', async () => {
-  // A fresh home shows the meester's introduction, which steps the greeting
+  // A fresh home shows the meester's welcome, which steps the greeting
   // aside for this visit. Wait for it, so a late introduction cannot collapse
   // the band under the clicks below; reopening it by hand is authoritative.
-  await expect(page.getByText(/your meester\./)).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByTestId('meester-welcome').getByRole('heading', { name: /I run this workshop/ }),
+  ).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Expand the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
 

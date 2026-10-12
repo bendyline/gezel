@@ -6,7 +6,9 @@ import {
 } from '@bendyline/gezel';
 import { useState } from 'react';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { DeliverableCover, hasTextCover } from './DeliverableCover.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
+import { GezelIcon } from './GezelIcon.js';
 import { formatFileSize } from './file-view-modes.js';
 
 /**
@@ -28,6 +30,21 @@ export interface DeliverableCardProps {
   compact?: boolean;
   /** Open the file in the app. Absent → the card offers no Open key. */
   onOpen?: (file: ReferencedFile) => void;
+  /**
+   * The finished-work card closing a task's wrap-up: the gezel who made it,
+   * credited by face, a cover of the document's first page, and a way to ask
+   * for changes. The end of a first request used to be a file tile.
+   */
+  maker?: {
+    name: string;
+    icon?: string | null;
+    poppetje?: import('@bendyline/gezel').Poppetje | null;
+    iconOverride?: boolean;
+  };
+  /** Talk to the maker about changes. */
+  onMakeChanges?: () => void;
+  /** The project's name, for a deliverable that is its Output page. */
+  projectName?: string;
 }
 
 /** The desktop shell's reveal / save-a-copy bridges share this shape. */
@@ -43,19 +60,31 @@ export function DeliverableCard({
   state = 'final',
   compact = false,
   onOpen,
+  maker,
+  onMakeChanges,
+  projectName,
 }: DeliverableCardProps) {
+  const board = deliverable.view === 'output-page';
   const [error, setError] = useState<string | null>(null);
   const name = deliverable.path.slice(deliverable.path.lastIndexOf('/') + 1) || deliverable.path;
   const folder = deliverable.path.includes('/')
     ? deliverable.path.slice(0, deliverable.path.lastIndexOf('/'))
     : '';
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toUpperCase() : '';
-  const eyebrow =
-    state === 'final'
+  const eyebrow = board
+    ? state === 'final'
+      ? 'Ready to look at'
+      : 'Board · in progress'
+    : state === 'final'
       ? `Your ${deliverableFormatNoun(deliverable.path)}`
       : `${deliverableFormatLabel(deliverable.path)} · in progress`;
-  const where =
-    deliverable.kind === 'workspace' ? 'In the project folder' : 'In the artifacts drawer';
+  const where = board
+    ? "The project's Output page"
+    : deliverable.kind === 'workspace'
+      ? 'In the project folder'
+      : 'In the artifacts drawer';
+  const shownName = board ? (projectName ?? 'The project board') : name;
+  const covered = !board && state === 'final' && Boolean(maker) && hasTextCover(deliverable.path);
   const bridge = typeof window === 'undefined' ? undefined : window.__GEZEL__;
   const file: ReferencedFile = { kind: deliverable.kind, path: deliverable.path };
   const open = onOpen ? () => onOpen(file) : undefined;
@@ -88,30 +117,61 @@ export function DeliverableCard({
   }
 
   return (
-    <section className={`deliverable-card deliverable-card--${state}`} aria-label={eyebrow}>
+    <section
+      className={`deliverable-card deliverable-card--${state}${maker ? ' deliverable-card--completion' : ''}`}
+      aria-label={eyebrow}
+      data-testid="deliverable-card"
+    >
+      {maker && (
+        <p className="deliverable-card-maker">
+          <GezelIcon
+            svg={maker.icon ?? null}
+            poppetje={maker.poppetje ?? null}
+            iconOverride={maker.iconOverride === true}
+            name={maker.name}
+            size={24}
+          />
+          <span>
+            <strong>{maker.name}</strong> made this for you
+          </span>
+        </p>
+      )}
+      {covered && (
+        <button
+          type="button"
+          className="deliverable-card-cover-button"
+          onClick={open}
+          disabled={!open}
+          title={open ? `Open ${deliverable.path}` : deliverable.path}
+        >
+          <DeliverableCover deliverable={deliverable} projectId={projectId} />
+        </button>
+      )}
       <button
         type="button"
         className="deliverable-card-face"
         onClick={open}
         disabled={!open}
-        title={open ? `Open ${deliverable.path}` : deliverable.path}
+        title={open ? `Open ${board ? shownName : deliverable.path}` : deliverable.path}
       >
         <span className="deliverable-card-tile" aria-hidden="true">
-          <FileTypeIcon name={name} className="deliverable-card-tile-icon" />
-          {ext && ext.length <= 5 && <span className="deliverable-card-tile-ext">{ext}</span>}
+          <FileTypeIcon name={board ? 'board.html' : name} className="deliverable-card-tile-icon" />
+          {!board && ext && ext.length <= 5 && (
+            <span className="deliverable-card-tile-ext">{ext}</span>
+          )}
         </span>
         <span className="deliverable-card-text">
           <span className="deliverable-card-eyebrow">{eyebrow}</span>
-          <span className="deliverable-card-name">{name}</span>
+          <span className="deliverable-card-name">{shownName}</span>
           <span className="deliverable-card-meta">
             {where}
-            {folder && (
+            {!board && folder && (
               <>
                 {' · '}
                 <span className="deliverable-card-folder">{folder}</span>
               </>
             )}
-            {deliverable.bytes !== undefined && ` · ${formatFileSize(deliverable.bytes)}`}
+            {!board && deliverable.bytes !== undefined && ` · ${formatFileSize(deliverable.bytes)}`}
             {deliverable.modifiedAt && (
               <>
                 {' · '}
@@ -126,14 +186,23 @@ export function DeliverableCard({
           </span>
         </span>
       </button>
-      {(open || bridge?.showReferenceInFolder || bridge?.saveReferenceCopy) && (
+      {(open || onMakeChanges || bridge?.showReferenceInFolder || bridge?.saveReferenceCopy) && (
         <div className="deliverable-card-actions" role="toolbar" aria-label={`Actions for ${name}`}>
           {open && (
             <button type="button" className="deliverable-card-open" onClick={open}>
               Open
             </button>
           )}
-          {bridge?.showReferenceInFolder && (
+          {onMakeChanges && (
+            <button
+              type="button"
+              className="secondary deliverable-card-action"
+              onClick={onMakeChanges}
+            >
+              <span className="deliverable-card-action-label">Make changes</span>
+            </button>
+          )}
+          {!board && bridge?.showReferenceInFolder && (
             <button
               type="button"
               className="secondary deliverable-card-action"
@@ -148,7 +217,7 @@ export function DeliverableCard({
               <span className="deliverable-card-action-label">Show in folder</span>
             </button>
           )}
-          {bridge?.saveReferenceCopy && (
+          {!board && bridge?.saveReferenceCopy && (
             <button
               type="button"
               className="secondary deliverable-card-action"

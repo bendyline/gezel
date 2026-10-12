@@ -3,6 +3,8 @@ import {
   AdvanceTaskStepInputSchema,
   AppendToFileInputSchema,
   AskUserQuestionInputSchema,
+  type BriefRoutableType,
+  type BriefTypeMatch,
   CreateTaskInputSchema,
   type DiffpackDraftOperation,
   EmptyInputSchema,
@@ -42,8 +44,10 @@ import {
   formatMediaClock,
   gezelNotFoundMessage,
   gezelRosterHint,
+  matchProjectTypeForBrief,
   normalizeArtifactPath,
   projectNotFoundMessage,
+  roleWithGloss,
 } from '@bendyline/gezel';
 /**
  * Gezel MCP Server
@@ -207,9 +211,14 @@ import {
   scriptFileCandidates,
 } from './installed-script-miss.js';
 import {
+  briefIsWrittenWork,
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
+  buildTypedKickoffStep,
+  defaultDeliverableForBrief,
+  documentProducerRole,
   inferSourceDeliverablePath,
+  kickoffTaskTitle,
   shouldPromoteStartJobToProject,
 } from './kickoff-text.js';
 import {
@@ -4879,18 +4888,13 @@ server.tool(
       };
     }
     try {
-      // The type's own about/mission templates (if any) overwrite these
-      // during apply; the placeholders exist only to satisfy the create
-      // request's minimum-length validation.
-      const project = await api.createProject({
+      // One atomic create: a create-then-apply left a half-made project (and
+      // an extra generic voorman) behind whenever the apply failed.
+      const { project, applied } = await api.createTypedProject({
         name,
-        about: `${manifestDesc} This project is set up with the "${manifestName}" project type, which tailors the workspace, gezel, and tools for this kind of work.`,
-        missionObjectives: `Make steady progress using the "${manifestName}" project type. See the project's about for scope and the dashboard for status.`,
+        projectType: { typeId, ...(params ? { params } : {}) },
       });
-      const applied = await api.applyProjectType(project.id, {
-        typeId,
-        ...(params ? { params } : {}),
-      });
+      void manifestDesc;
       const voorman = applied.gezelsCreated.find((g) => g.voorman) ?? applied.gezelsCreated[0];
       let voormanNote = '';
       if (voorman) {
@@ -7385,7 +7389,7 @@ function resolveMacroBrief(input: {
   const about = usefulMacroText(input.about);
   const mission = usefulMacroText(input.missionObjectives);
   const task = usefulMacroText(input.taskDescription);
-  const fallbackScope = task ?? about ?? `Build "${input.name}" as requested.`;
+  const fallbackScope = task ?? about ?? `Work on "${input.name}" as requested.`;
   const resolvedAbout =
     about ??
     `A focused local-first project for "${input.name}". Scope: ${fallbackScope} Keep the work concrete, inspectable, and contained to this project workspace.`;
@@ -7565,7 +7569,15 @@ async function pickCraftbookForBrief(
 async function buildRetargetedBuildLoop(
   deliverablePath: string,
   briefText: string,
-  opts: { collapseToGezelId?: string } = {},
+  opts: {
+    collapseToGezelId?: string;
+    /**
+     * The deliverable is a written document the brief did not name (a trip
+     * plan, a summary): the role that writes it replaces the loop's
+     * Developer on every step, and the entry step is told it is a document.
+     */
+    documentRole?: string;
+  } = {},
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
   try {
     const { craftbook } = await api.getCraftbook('build-loop');
@@ -7612,6 +7624,9 @@ async function buildRetargetedBuildLoop(
         if (suggestedProducerRole && step.id === craftbook.entryStepId) {
           step.suggestedRole = suggestedProducerRole;
         }
+        if (opts.documentRole && step.suggestedRole === 'developer') {
+          step.suggestedRole = opts.documentRole;
+        }
       }
       // Crafting half of the arcade fix: the gate enforces `html-game`, but a
       // weak model needs to be told HOW to clear it. Steer the build step to a
@@ -7627,6 +7642,9 @@ async function buildRetargetedBuildLoop(
       }
       if (policy.isData && step.id === craftbook.entryStepId && step.prompt) {
         step.prompt = `${step.prompt}\n\n**This deliverable is derived data — produce it by executing a script.** Use derive_file({ script, outputPath: "${deliverablePath}" }) with a Node script that reads the inputs via fs.readFileSync and writes the output via fs.writeFileSync (or write scripts/derive.mjs and run it with run_nodejs_script). Do not hand-type rows into ${deliverablePath} — hand-typed derived data loses records. The gate holds this step until ${deliverablePath} parses as a real data table.`;
+      }
+      if (opts.documentRole && step.id === craftbook.entryStepId && step.prompt) {
+        step.prompt = `${step.prompt}\n\n**This deliverable is a written document, \`${deliverablePath}\` — not a web page.** Write it with \`write_file\` as Markdown: a short opening line, then headed sections with the concrete specifics the brief gives (names, dates, places, numbers). The workflow moves you on when you write \`${deliverablePath}\`.`;
       }
       if (isRasterImage && step.id === craftbook.entryStepId && step.prompt) {
         step.prompt = `${step.prompt}\n\n**This deliverable is a raster image — render it with the image tool.** Call \`generate_image({ prompt, saveAs: "${deliverablePath}" })\` with a prompt faithful to the task brief. Do not call \`write_file\` for this path, encode image bytes as text/base64, install an image package, or substitute SVG/canvas code. The gate holds this step until a real image exists at \`${deliverablePath}\`.`;
@@ -7679,9 +7697,11 @@ function buildSoloLoopSteps(
   specialistId: string,
   deliverablePath: string,
   briefText: string,
+  documentRole?: string,
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
   return buildRetargetedBuildLoop(deliverablePath, briefText, {
     collapseToGezelId: specialistId,
+    ...(documentRole ? { documentRole } : {}),
   });
 }
 
@@ -7695,8 +7715,11 @@ function buildSoloLoopSteps(
 function buildCrewLoopSteps(
   deliverablePath: string,
   briefText: string,
+  documentRole?: string,
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
-  return buildRetargetedBuildLoop(deliverablePath, briefText);
+  return buildRetargetedBuildLoop(deliverablePath, briefText, {
+    ...(documentRole ? { documentRole } : {}),
+  });
 }
 
 /**
@@ -7898,14 +7921,14 @@ async function runPromotedStartJobAsProject(input: {
     // petshop promotes here and got no gate). Same crew
     // treatment as start_project: roles intact, gate on the real
     // deliverable. Best-effort: no match → ad-hoc task, as before.
-    const sourceDeliverablePath = inferSourceDeliverablePath({
+    const deliverable = defaultDeliverableForBrief({
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
     const craftbookPick = await pickCraftbookForBrief(project.id, brief);
     const crewLoop = craftbookPick
       ? await buildCrewLoopSteps(
-          sourceDeliverablePath ?? 'index.html',
+          deliverable.path,
           `${brief.name} ${brief.about ?? ''} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
         )
       : null;
@@ -7915,7 +7938,7 @@ async function runPromotedStartJobAsProject(input: {
     const task = crewLoop
       ? await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: input.taskTitle ?? `Build ${brief.name}`,
+          title: input.taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
           steps: crewLoop.steps,
@@ -7924,7 +7947,7 @@ async function runPromotedStartJobAsProject(input: {
         })
       : await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: input.taskTitle ?? `Build ${brief.name}`,
+          title: input.taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
           steps: [
@@ -7954,6 +7977,145 @@ async function runPromotedStartJobAsProject(input: {
   }
 }
 
+interface RoutableProjectType extends BriefRoutableType {
+  description?: string;
+  tools?: ReadonlyArray<{ name: string; description?: string }>;
+  pages?: {
+    reads?: ReadonlyArray<{ source: string; path: string }>;
+    /** Tools only the page calls; a session never has them. */
+    tools?: readonly string[];
+  };
+}
+
+/**
+ * The catalog's project types, listed at most once a minute: every kickoff
+ * routes against them and they do not change between kickoffs.
+ */
+let routableTypesCache: { at: number; types: RoutableProjectType[] } | null = null;
+
+async function listRoutableProjectTypes(): Promise<RoutableProjectType[]> {
+  if (routableTypesCache && Date.now() - routableTypesCache.at < 60_000) {
+    return routableTypesCache.types;
+  }
+  const res = await api.listCatalogItems('project-type');
+  const types = res.items
+    .filter((item) => !item.unavailableReason)
+    .map((item) => item.manifest as unknown as RoutableProjectType);
+  routableTypesCache = { at: Date.now(), types };
+  return types;
+}
+
+/**
+ * The project type this goal belongs to, when its words name one clearly
+ * (see matchProjectTypeForBrief). Null for everything else, and on any
+ * failure: the ordinary kickoff is always there to fall back to.
+ */
+async function routeBriefToProjectType(brief: {
+  name: string;
+  about: string;
+  taskDescription?: string;
+}): Promise<{ match: BriefTypeMatch; type: RoutableProjectType } | null> {
+  if (process.env.GEZEL_DISABLE_TYPE_ROUTING === '1') return null;
+  const text = [brief.name, brief.taskDescription, brief.about]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join('\n');
+  try {
+    const types = await listRoutableProjectTypes();
+    const match = matchProjectTypeForBrief(text, types);
+    const type = match ? types.find((t) => t.id === match.typeId) : undefined;
+    return match && type ? { match, type } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Kick off a goal as a typed project: the type brings its lead, tools and
+ * Output page in one atomic create, and the lead gets one step — make the
+ * first draft with those tools. The step finishes when the page's data
+ * file grows past its seed: the type's script tools write it, which the
+ * edit gate (`requireChange`) does not count as an edit, so growth is the
+ * honest signal that something was made.
+ *
+ * Returns null when the create fails, so the caller falls back to the
+ * ordinary kickoff rather than leaving the person with nothing.
+ */
+async function runTypedKickoff(
+  brief: { name: string; about: string; missionObjectives: string; taskDescription?: string },
+  routed: { match: BriefTypeMatch; type: RoutableProjectType },
+  opts: { cacheTool: 'start_project' | 'start_job'; taskTitle?: string; kickoffMessage?: string },
+): Promise<{ content: { type: 'text'; text: string }[] } | null> {
+  const idempotent = lookupMacroIdempotent(brief.name);
+  if (idempotent) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the lead from the original call is already on it.\n\n${idempotent.resultText}`,
+        },
+      ],
+    };
+  }
+  const existing = await findActiveMacroProject(brief.name);
+  if (existing) return duplicateMacroProjectNotice(opts.cacheTool, existing);
+  const { match, type } = routed;
+  try {
+    const created = await api.createTypedProject({
+      name: brief.name,
+      projectType: { typeId: type.id, params: match.params },
+    });
+    const project = created.project;
+    const crew = created.applied.gezelsCreated;
+    const lead = crew.find((g) => g.voorman) ?? crew[0];
+    if (!lead) return null;
+    let advanceWhen: { file: string; minBytes: number; requireChange: false } | undefined;
+    if (match.dataFile) {
+      const seed = await api.readProjectWorkspaceFile(project.id, match.dataFile).catch(() => null);
+      advanceWhen = {
+        file: match.dataFile,
+        minBytes: (seed?.content.length ?? 0) + 1,
+        requireChange: false,
+      };
+    }
+    const step = buildTypedKickoffStep({
+      typeName: type.name,
+      brief,
+      ...(match.dataFile ? { dataFile: match.dataFile } : {}),
+      unsaid: match.assumed.map((key) => type.params?.properties?.[key]?.title ?? key),
+      tools: (type.tools ?? []).filter((t) => !(type.pages?.tools ?? []).includes(t.name)),
+    });
+    const note = opts.kickoffMessage?.trim()
+      ? `\n\nNote from the meester: ${opts.kickoffMessage.trim()}`
+      : '';
+    const task = await api.createTask(project.id, {
+      ...sessionTaskNamingMode,
+      title: opts.taskTitle ?? brief.name,
+      description: `${brief.taskDescription ?? brief.about}${note}`,
+      assignee: { kind: 'gezel', gezelId: lead.id },
+      steps: [
+        {
+          ...step,
+          assignee: { kind: 'gezel', gezelId: lead.id },
+          ...(advanceWhen ? { advanceWhen } : {}),
+          // The page's data is written through the type's tools, in the shape
+          // the page reads; the file tools would let the lead invent one.
+          toolPolicy: { outputMedium: 'none', disallowBuiltinToolsets: ['workspace-fs-write'] },
+        },
+      ],
+      dispatchEntry: true,
+    });
+    const role = (await api.getGezel(lead.id).catch(() => null))?.role;
+    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it.`;
+    recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
+    return { content: [{ type: 'text' as const, text: resultText }] };
+  } catch (err) {
+    process.stderr.write(
+      `gezel-mcp: typed kickoff for ${type.id} fell back: ${unwrapApiError(err)}\n`,
+    );
+    return null;
+  }
+}
+
 server.tool(
   'start_project',
   GEZEL_TOOL_DESCRIPTIONS.start_project,
@@ -7967,6 +8129,15 @@ server.tool(
         binaryRequest,
         'start_project',
       );
+    }
+    const routed = await routeBriefToProjectType(brief);
+    if (routed) {
+      const typed = await runTypedKickoff(brief, routed, {
+        cacheTool: 'start_project',
+        ...(taskTitle ? { taskTitle } : {}),
+        ...(kickoffMessage ? { kickoffMessage } : {}),
+      });
+      if (typed) return typed;
     }
     if (process.env.GEZEL_GENERALIST_KICKOFF === 'on') {
       return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
@@ -8034,24 +8205,31 @@ server.tool(
       // deliverables (wild-caught: interface-contract / tool-routing
       // pinned but auto-advanced 0×). Best-effort: no match (or build-loop
       // unavailable) → an ad-hoc plan-and-execute task, exactly as before.
-      const sourceDeliverablePath = inferSourceDeliverablePath({
+      const deliverable = defaultDeliverableForBrief({
         ...brief,
         taskDescription: effectiveTaskDescription,
       });
-      const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-      const crewLoop = craftbookPick
-        ? await buildCrewLoopSteps(
-            sourceDeliverablePath ?? 'index.html',
-            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-          )
-        : null;
+      const briefText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`;
+      // A document nobody named still gets the loop's gates and one writer:
+      // without a pin the voorman plans freely and hires a crew in silence.
+      const craftbookPick = deliverable.document
+        ? null
+        : await pickCraftbookForBrief(project.id, brief);
+      const crewLoop =
+        craftbookPick || deliverable.document
+          ? await buildCrewLoopSteps(
+              deliverable.path,
+              briefText,
+              deliverable.document ? documentProducerRole(briefText) : undefined,
+            )
+          : null;
       // Single-channel kickoff: `dispatchEntry` hands the entry step to its
       // resolved gezel as a task-scoped handoff (step prompt + gate contract
       // in-prompt from turn 1) — there is no separate chat notification.
       const task = crewLoop
         ? await api.createTask(project.id, {
             ...sessionTaskNamingMode,
-            title: taskTitle ?? `Build ${brief.name}`,
+            title: taskTitle ?? kickoffTaskTitle(brief),
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
             steps: crewLoop.steps,
@@ -8060,7 +8238,7 @@ server.tool(
           })
         : await api.createTask(project.id, {
             ...sessionTaskNamingMode,
-            title: taskTitle ?? `Build ${brief.name}`,
+            title: taskTitle ?? kickoffTaskTitle(brief),
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
             steps: [
@@ -8121,15 +8299,28 @@ async function runFlatProject(
       cacheTool,
     );
   }
+  const routed = await routeBriefToProjectType(brief);
+  if (routed) {
+    const typed = await runTypedKickoff(brief, routed, {
+      cacheTool,
+      ...(taskTitle ? { taskTitle } : {}),
+      ...(kickoffMessage ? { kickoffMessage } : {}),
+    });
+    if (typed) return typed;
+  }
   const primaryDeliverablePath = inferSourceDeliverablePath(brief);
+  const briefSummaryText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`;
   const inferredProducerRole =
     !specialistRole && primaryDeliverablePath
-      ? policyForDeliverable(
-          primaryDeliverablePath,
-          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`,
-        ).suggestedProducerRole
+      ? policyForDeliverable(primaryDeliverablePath, briefSummaryText).suggestedProducerRole
       : undefined;
-  const effectiveSpecialistRole = inferredProducerRole ?? normalizeSpecialistRole(specialistRole);
+  // A goal with no file to build is written up, by the role that writes it.
+  const documentRole =
+    !specialistRole && !primaryDeliverablePath && briefIsWrittenWork(brief)
+      ? documentProducerRole(briefSummaryText)
+      : undefined;
+  const effectiveSpecialistRole =
+    inferredProducerRole ?? documentRole ?? normalizeSpecialistRole(specialistRole);
   const repoRedirect = repoFetchRedirectForMacro({
     tool: cacheTool,
     ...brief,
@@ -8198,18 +8389,23 @@ async function runFlatProject(
     // book would try to recruit (step-role resolution is server-side),
     // which contradicts solo; collapsing keeps phase + gate discipline for
     // one worker. No confident match (or build-loop unavailable) → ad-hoc.
-    const sourceDeliverablePath = inferSourceDeliverablePath({
+    const deliverable = defaultDeliverableForBrief({
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
-    const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-    const soloLoop = craftbookPick
-      ? await buildSoloLoopSteps(
-          builder.id,
-          sourceDeliverablePath ?? 'index.html',
-          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-        )
-      : null;
+    const sourceDeliverablePath = deliverable.document ? undefined : deliverable.path;
+    const craftbookPick = deliverable.document
+      ? null
+      : await pickCraftbookForBrief(project.id, brief);
+    const soloLoop =
+      craftbookPick || deliverable.document
+        ? await buildSoloLoopSteps(
+            builder.id,
+            deliverable.path,
+            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
+            deliverable.document ? effectiveSpecialistRole : undefined,
+          )
+        : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to the
     // Builder as a task-scoped handoff — no separate chat notify. The
     // old notify's advisory expectedDeliverable becomes an ENFORCED step
@@ -8217,7 +8413,7 @@ async function runFlatProject(
     const task = soloLoop
       ? await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: taskTitle ?? `Build ${brief.name}`,
+          title: taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: builder.id },
           steps: soloLoop.steps,
@@ -8226,7 +8422,7 @@ async function runFlatProject(
         })
       : await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: taskTitle ?? `Build ${brief.name}`,
+          title: taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: builder.id },
           steps: [

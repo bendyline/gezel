@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  briefIsWrittenWork,
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
+  buildTypedKickoffStep,
+  defaultDeliverableForBrief,
+  documentDeliverablePath,
+  documentProducerRole,
   inferSourceDeliverablePath,
+  kickoffTaskTitle,
   macroLooksLikeBuildMission,
   shouldPromoteStartJobToProject,
 } from './kickoff-text.js';
@@ -133,5 +139,58 @@ describe('promotion + mission predicates', () => {
     ).toBe(true);
     expect(shouldPromoteStartJobToProject(BUILD_BRIEF)).toBe(false);
     expect(macroLooksLikeBuildMission('Notes', 'Organize notes', 'Tidy list')).toBe(false);
+  });
+});
+
+// Every goal used to default to index.html: a family trip was handed to a
+// Developer as a web page.
+describe('a goal with nothing to build', () => {
+  const TRIP = {
+    name: 'Family trip to Portugal',
+    about: 'Ten days in Lisbon and the Algarve with two kids.',
+    missionObjectives: '- A day-by-day plan\n- A packing list',
+  };
+
+  it('is written up as a document named after it, by the role that writes it', () => {
+    expect(briefIsWrittenWork(TRIP)).toBe(true);
+    expect(defaultDeliverableForBrief(TRIP)).toEqual({
+      path: 'family-trip-to-portugal.md',
+      document: true,
+    });
+    expect(documentProducerRole(`${TRIP.name} ${TRIP.about}`)).toBe('planner');
+    expect(documentProducerRole('Research which heat pumps suit an old house')).toBe('researcher');
+    expect(documentProducerRole('A thank-you note for our neighbours')).toBe('copywriter');
+    expect(kickoffTaskTitle(TRIP)).toBe('Family trip to Portugal');
+  });
+
+  it('keeps the build kickoff for a build, or for a brief with a making verb', () => {
+    expect(defaultDeliverableForBrief(BUILD_BRIEF)).toEqual({
+      path: 'index.html',
+      document: false,
+    });
+    expect(kickoffTaskTitle(BUILD_BRIEF)).toBe('Build Snake Game');
+    const verb = { ...TRIP, about: 'Build the requested small deliverable.' };
+    expect(briefIsWrittenWork(verb)).toBe(false);
+  });
+
+  it('names the document plainly, whatever the characters', () => {
+    expect(documentDeliverablePath('Café Crème: Menu Ideas!')).toBe('cafe-creme-menu-ideas.md');
+    expect(documentDeliverablePath('—')).toBe('plan.md');
+  });
+});
+
+describe('buildTypedKickoffStep', () => {
+  it('points the lead at the Output page and asks for what the brief left unsaid', () => {
+    const step = buildTypedKickoffStep({
+      typeName: 'Trip Planner',
+      brief: { name: 'Kyoto', about: 'A week in Kyoto in the spring.' },
+      dataFile: 'trip.json',
+      unsaid: ['Departure date'],
+    });
+    expect(step.name).toBe('First draft');
+    expect(step.description).toContain('You lead this Trip Planner project');
+    expect(step.description).toContain('`trip.json`');
+    expect(step.description).toContain('"Departure date"');
+    expect(step.description).not.toContain('index.html');
   });
 });

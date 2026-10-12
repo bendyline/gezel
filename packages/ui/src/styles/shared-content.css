@@ -937,6 +937,59 @@
   font-family: var(--font-ui);
 }
 
+/* The finished-work card closing a task's wrap-up: the maker, credited by
+   face, then a cover of the document's first page. */
+.deliverable-card-maker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.deliverable-card-maker strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.deliverable-card-cover-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.deliverable-card-cover-button:disabled {
+  cursor: default;
+}
+.deliverable-cover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 11rem;
+  overflow: hidden;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(60, 30, 10, 0.08);
+  font-family: var(--font-display);
+  color: var(--text);
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
+}
+.deliverable-cover-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.deliverable-cover-line {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .deliverable-card--draft {
   border-style: dashed;
   background: var(--panel);

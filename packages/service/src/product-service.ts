@@ -1055,7 +1055,22 @@ export async function startProductService(
     const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
     if (!step || !gezelId || !freshHires.delete(gezelId)) return;
     void chat
-      .postCrewIntroduction(task, gezelId, step)
+      .postCrewIntroduction(task, gezelId, step, 'joined')
+      .catch((err) =>
+        log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
+      );
+  };
+  // A task launched from a chat introduces its crew there as it starts:
+  // whoever takes the entry step, and the lead when that is someone else.
+  // A typed project's lead and a kickoff's voorman are not resolver hires,
+  // so before this they arrived without a word.
+  const introduceAtKickoff = (task: Task, step: TaskCraftbookStep | undefined): void => {
+    const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
+    if (!step || !gezelId) return;
+    const fresh = freshHires.delete(gezelId);
+    if (!fresh && !task.launchSessionId) return;
+    void chat
+      .postCrewIntroduction(task, gezelId, step, 'kickoff')
       .catch((err) =>
         log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
       );
@@ -1208,7 +1223,7 @@ export async function startProductService(
         log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
       );
     }
-    if (task.status === 'active') introduceFreshHire(task, entry);
+    if (task.status === 'active') introduceAtKickoff(task, entry);
     // A book that verifies its work by running project commands
     // (`commandEvidence` gates) declares them as `commands` needs; raise
     // their first-use approval questions NOW so the user answers at
@@ -2635,7 +2650,19 @@ export async function startProductService(
   if (skipBootstrap) {
     systemStatus.publish({ phase: 'ready' });
   } else {
-    void runSystemBootstrap({ home, store, statusBus: systemStatus, debug }).catch((err) => {
+    // Without a logger every line the bootstrap writes is dropped, so a failed
+    // Chromium download showed in Settings and nowhere in the service log.
+    void runSystemBootstrap({
+      home,
+      store,
+      statusBus: systemStatus,
+      debug,
+      logger: {
+        info: (m) => log.info(m),
+        warn: (m) => log.warn(m),
+        error: (m) => log.error(m),
+      },
+    }).catch((err) => {
       log.error('[system-toolsets] bootstrap crashed:', err);
       systemStatus.publish({
         phase: 'error',

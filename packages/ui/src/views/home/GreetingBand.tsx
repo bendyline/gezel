@@ -5,11 +5,10 @@ import type {
   Question,
 } from '@bendyline/gezel';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
-import { Poppetje } from '../../poppetje/index.js';
 import * as Tabs from '../../primitives/Tabs.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
+import { MeesterFigure } from './MeesterFigure.js';
 import { MorningPanel } from './MorningPanel.js';
 import { NightReviewPanel } from './NightReviewPanel.js';
 import { StatusReportPanel } from './StatusReportPanel.js';
@@ -314,29 +313,12 @@ export function GreetingBand({
             than fall back to a letter tile on a shelf. */}
             {showPoppetjes && activeTab !== 'make' && (
               <div className="home-workshop-greeting-right">
-                <div className="home-workshop-figure">
-                  {meesterPoppetje ? (
-                    <Poppetje
-                      poppetje={meesterPoppetje}
-                      variant="full"
-                      size={64}
-                      title={`${meesterName} poppetje`}
-                    />
-                  ) : (
-                    <GezelIcon
-                      poppetje={null}
-                      svg={meesterIcon}
-                      iconOverride={meesterIconOverride}
-                      name={meesterName}
-                      size={64}
-                      variant="full"
-                    />
-                  )}
-                  <div className="home-workshop-shelf" />
-                  <div className="home-workshop-figure-label">
-                    {meesterName} <em>- Meester</em>
-                  </div>
-                </div>
+                <MeesterFigure
+                  meesterName={meesterName}
+                  meesterPoppetje={meesterPoppetje}
+                  meesterIcon={meesterIcon}
+                  meesterIconOverride={meesterIconOverride}
+                />
               </div>
             )}
           </Tabs.Content>

@@ -27,6 +27,7 @@ import {
   useReasoningSupport,
 } from '../components/ModelPicker.js';
 import { NotificationsSetting } from '../components/NotificationsSetting.js';
+import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { StartAtLoginToggle } from '../components/StartAtLoginToggle.js';
@@ -3131,6 +3132,18 @@ function DaemonSettingsView() {
                     </div>
                   )}
                 </div>
+              </section>
+
+              {/* The optional media models (images, image reading, speech) used to
+                  sit on first-run setup. First run now asks only for the chat
+                  model, so the recommended set that fits this device lives here. */}
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Media models</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Optional models that let gezellen make images, read them, and speak and listen —
+                  the ones that fit this device.
+                </p>
+                <RecommendedMediaDownloads />
               </section>
 
               <GeneralistModeSection

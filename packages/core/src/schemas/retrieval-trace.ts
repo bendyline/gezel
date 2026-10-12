@@ -30,6 +30,12 @@ export const RETRIEVAL_DECISION_REASONS = [
   'other-task',
   /** Already on the task's launch reference list. */
   'reference-list',
+  /**
+   * Gezel's own starter files, untouched: the workspace scaffold and the
+   * library's welcome document. A first reply cited them as "2 sources from
+   * your files" to someone who had shared none.
+   */
+  'scaffold',
   /** A corpus the resolved policy does not include, or no citation handle. */
   'source-policy',
   /** Past the per-mode cap on knowledge-catalog chunks. */

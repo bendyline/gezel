@@ -51,8 +51,12 @@ export type CraftbookSetupClient = Pick<
 export interface SetupPrompter {
   /** True only for an explicit yes. */
   confirm(question: string): Promise<boolean>;
-  /** A value typed without echo; empty when the person just presses Enter. */
-  secret(question: string): Promise<string>;
+  /**
+   * A value typed without echo; empty when the person just presses Enter.
+   * Once something has been typed or pasted, `filled` replaces the question,
+   * so a hidden paste still shows that it arrived.
+   */
+  secret(question: string, filled?: (length: number) => string): Promise<string>;
 }
 
 export interface CraftbookSetupOptions {
@@ -142,9 +146,14 @@ export async function ensureCraftbookSetup(
           `Web search needs a Brave Search API key. Get one at ${BRAVE_KEY_URL} — Gezel keeps it in this computer's secret store.\n`,
         );
         const key = (
-          await prompter.secret('Paste the key (hidden), or press Enter to stop: ')
+          await prompter.secret(
+            'Paste the key, then press Enter (Enter on its own stops here): ',
+            (length) =>
+              `Key received (${length} characters, hidden). Press Enter to continue with this key. `,
+          )
         ).trim();
         if (!key) stop(gap);
+        options.write('Checking the key with one Brave search…\n');
         await saveBraveKey(client, config, key, options.projectId);
         options.write('Web search: Brave (test search passed)\n');
       } else {
@@ -198,51 +207,107 @@ export async function ensureCraftbookSetup(
   options.write('\n');
 }
 
+/** The streams a terminal prompter reads keys from and draws on. */
+export interface PromptTerminal {
+  input: NodeJS.ReadableStream & { isTTY?: boolean };
+  output: NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+}
+
 /** The prompter for the CLI's own terminal, or null when stdin/stderr is not one. */
-export function terminalPrompter(): SetupPrompter | null {
-  if (!process.stdin.isTTY || !process.stderr.isTTY) return null;
+export function terminalPrompter(
+  terminal: PromptTerminal = { input: process.stdin, output: process.stderr },
+): SetupPrompter | null {
+  if (!terminal.input.isTTY || !terminal.output.isTTY) return null;
   return {
-    confirm: async (question) => /^(y|yes)$/i.test((await ask(question, false)).trim()),
-    secret: (question) => ask(question, true),
+    confirm: async (question) => {
+      for (;;) {
+        const answer = (await ask(terminal, question)).trim().toLowerCase();
+        if (answer === 'y' || answer === 'yes') return true;
+        if (answer === '' || answer === 'n' || answer === 'no') return false;
+        // Anything else used to count as no and end the run on the spot,
+        // which is how a doubled "yy" refused a setup the person agreed to.
+        terminal.output.write('Please answer y or n.\n');
+      }
+    },
+    secret: (question, filled) => ask(terminal, question, { filled }),
   };
 }
 
-function ask(question: string, hidden: boolean): Promise<string> {
-  // A muted output stream is how readline reads without echo: it still
-  // drives the line editor, it just never draws the typed characters.
-  let muted = false;
-  const output = new Writable({
-    write(chunk, encoding, callback) {
-      if (!muted) process.stderr.write(chunk, encoding);
-      callback();
-    },
-  });
+function ask(
+  terminal: PromptTerminal,
+  question: string,
+  secret?: { filled?: ((length: number) => string) | undefined },
+): Promise<string> {
+  const { input, output } = terminal;
   return import('node:readline').then(
-    ({ createInterface }) =>
+    ({ clearScreenDown, createInterface, cursorTo, moveCursor }) =>
       new Promise<string>((resolve, reject) => {
-        const rl = createInterface({ input: process.stdin, output, terminal: true });
+        // A plain question draws on the real terminal, because readline needs
+        // its width: given a stream without one, it parked the cursor of a
+        // wrapped question at the far right edge, the "y" echoed there, and
+        // a person who typed it again answered "yy". A secret's line editor
+        // draws nowhere, and `draw` shows only whether anything has arrived.
+        const rl = createInterface({
+          input,
+          output: secret ? new Writable({ write: (_chunk, _encoding, done) => done() }) : output,
+          terminal: true,
+          ...(secret ? { historySize: 0 } : {}),
+        });
         let settled = false;
-        rl.on('SIGINT', () => {
+        const settle = () => {
           settled = true;
+          input.removeListener('keypress', onKeypress);
+        };
+
+        let drawn = '';
+        let shownLength = -1;
+        let pending = false;
+        const draw = () => {
+          pending = false;
+          if (settled || !secret) return;
+          const length = rl.line.length;
+          if (length === shownLength) return;
+          shownLength = length;
+          const text = length > 0 && secret.filled ? secret.filled(length) : question;
+          if (drawn) {
+            // The cursor sits on the last row the previous text reached.
+            const rows = Math.floor((drawn.length - 1) / (output.columns || 80));
+            if (rows > 0) moveCursor(output, 0, -rows);
+            cursorTo(output, 0);
+            clearScreenDown(output);
+          }
+          output.write(text);
+          drawn = text;
+        };
+        // A paste arrives as one keypress per character; draw once per chunk.
+        function onKeypress() {
+          if (pending) return;
+          pending = true;
+          queueMicrotask(draw);
+        }
+        if (secret) input.on('keypress', onKeypress);
+
+        rl.on('SIGINT', () => {
+          settle();
           rl.close();
-          process.stderr.write('\n');
+          output.write('\n');
           reject(new CliError('Cancelled.'));
         });
         // Ctrl+D or a closed stdin ends the interface without an answer; left
         // pending, the promise held nothing and the CLI exited mid-question.
         rl.on('close', () => {
           if (settled) return;
-          settled = true;
-          process.stderr.write('\n');
+          settle();
+          output.write('\n');
           resolve('');
         });
         rl.question(question, (answer) => {
-          settled = true;
+          settle();
           rl.close();
-          if (hidden) process.stderr.write('\n');
+          if (secret) output.write('\n');
           resolve(answer);
         });
-        muted = hidden;
+        draw();
       }),
   );
 }

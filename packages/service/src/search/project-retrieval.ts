@@ -23,6 +23,10 @@ import {
   taskDeclaredFolders,
 } from '@bendyline/gezel';
 import { looksBinaryText } from '../fs/binary-text.js';
+import {
+  SHARED_LIBRARY_STARTER_DOC,
+  SHARED_LIBRARY_STARTER_MD,
+} from '../fs/default-project-docs.js';
 import type { Store } from '../fs/store.js';
 import { hasDerivedIndexText } from '../index-store/classify.js';
 import {
@@ -30,6 +34,7 @@ import {
   queryTerms,
   textMatchesAnyTerm,
 } from '../index-store/query-terms.js';
+import { isUnmodifiedWorkspaceBootstrap } from '../workspace/template.js';
 import { RELEVANCE_WINDOW, relevanceSummary } from './relevance-stage.js';
 import { RetrievalTraceBuilder } from './retrieval-trace.js';
 import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
@@ -407,6 +412,7 @@ export async function retrieveProjectContext(args: {
       : [];
   const diversified = diversify(inDepth);
   const survivors = new Set(diversified.map((result) => result.id));
+  const scaffold = await untouchedStarterFiles(args.store, args.record.projectId, diversified);
   for (const result of inDepth) {
     if (survivors.has(result.id)) continue;
     trace.reject(result, result.retrievalSource ? 'duplicate-path' : 'source-policy');
@@ -424,6 +430,10 @@ export async function retrieveProjectContext(args: {
     }
     if (onReferenceList(result, taskContext?.task.references)) {
       trace.reject(result, 'reference-list');
+      return false;
+    }
+    if (scaffold.has(result.id)) {
+      trace.reject(result, 'scaffold');
       return false;
     }
     return true;
@@ -695,6 +705,64 @@ function diversify(results: readonly UnifiedSearchResult[]): UnifiedSearchResult
     }
   }
   return out;
+}
+
+/** The files every internal workspace starts with. */
+const WORKSPACE_SCAFFOLD = new Set(['package.json', 'tsconfig.json', '.gitignore']);
+
+function withoutFrontmatter(text: string): string {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim();
+}
+
+/**
+ * Results that are Gezel's own starter files, exactly as Gezel wrote them:
+ * the workspace scaffold (in an internal workspace only — a person's own
+ * `package.json` is theirs) and the library's welcome document. A first
+ * reply grounded on `.gitignore` and "About this library" told someone who
+ * had shared nothing that it "used 2 sources from your files".
+ */
+async function untouchedStarterFiles(
+  store: Store,
+  activeProjectId: string,
+  results: readonly UnifiedSearchResult[],
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const internal = new Map<string, boolean>();
+  const isInternal = async (projectId: string): Promise<boolean> => {
+    const known = internal.get(projectId);
+    if (known !== undefined) return known;
+    const project = await store.getProject(projectId).catch(() => null);
+    const value = Boolean(project && !project.workingDir && !project.github?.url);
+    internal.set(projectId, value);
+    return value;
+  };
+  for (const result of results) {
+    if (!result.path) continue;
+    try {
+      if (result.retrievalSource === 'workspace' && WORKSPACE_SCAFFOLD.has(result.path)) {
+        const projectId = result.projectId ?? activeProjectId;
+        if (!(await isInternal(projectId))) continue;
+        const content = await store.readProjectWorkspaceFile(projectId, result.path);
+        if (content !== null && isUnmodifiedWorkspaceBootstrap(result.path, content)) {
+          ids.add(result.id);
+        }
+      } else if (
+        result.retrievalSource === 'shared' &&
+        result.path === SHARED_LIBRARY_STARTER_DOC
+      ) {
+        const content = await store.readDocument(result.path);
+        if (
+          content !== null &&
+          withoutFrontmatter(content) === withoutFrontmatter(SHARED_LIBRARY_STARTER_MD)
+        ) {
+          ids.add(result.id);
+        }
+      }
+    } catch {
+      // Unreadable: leave the hit to the ordinary checks.
+    }
+  }
+  return ids;
 }
 
 /**

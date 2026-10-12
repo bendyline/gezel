@@ -183,6 +183,125 @@ export function inferSourceDeliverablePath(input: {
   return 'index.html';
 }
 
+/**
+ * Where a kickoff's work lands when the brief names no file: `index.html`
+ * for a recognizable browser build, otherwise a written document named
+ * after the project. Every goal used to default to `index.html`, so a
+ * family trip was handed to a Developer as a web page.
+ */
+export function defaultDeliverableForBrief(input: {
+  name: string;
+  about: string;
+  missionObjectives: string;
+  taskDescription?: string;
+}): { path: string; document: boolean } {
+  const inferred = inferSourceDeliverablePath(input);
+  if (inferred) return { path: inferred, document: false };
+  if (!briefIsWrittenWork(input)) return { path: 'index.html', document: false };
+  return { path: documentDeliverablePath(input.name), document: true };
+}
+
+/**
+ * A goal that names no file and asks for nothing to be built — "plan a
+ * family trip", "summarize what I should know about heat pumps". A brief
+ * with a making verb ("build the deliverable", "fix the script") keeps the
+ * build kickoff even when it names no artifact.
+ */
+export function briefIsWrittenWork(input: {
+  name: string;
+  about: string;
+  missionObjectives: string;
+  taskDescription?: string;
+}): boolean {
+  if (macroLooksLikeBuildMission(input.name, input.about, input.missionObjectives)) return false;
+  const text = `${input.name}\n${input.about}\n${input.taskDescription ?? ''}`;
+  return !/\b(?:build|code|implement|develop|program|script|deploy|refactor|fix|debug|compile)\b/i.test(
+    text,
+  );
+}
+
+/** `family-trip-to-portugal.md` for "Family Trip to Portugal". */
+export function documentDeliverablePath(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/, '');
+  return `${slug || 'plan'}.md`;
+}
+
+/**
+ * Who writes a document deliverable: a researcher for a question to look
+ * into, a planner for something to organize, else a copywriter. A Developer
+ * "building" a trip plan was the wrong person on the wrong verb.
+ */
+export function documentProducerRole(briefText: string): 'researcher' | 'planner' | 'copywriter' {
+  if (/\b(?:research|investigate|look\s+into|find\s+out|compare|sources?)\b/i.test(briefText)) {
+    return 'researcher';
+  }
+  if (
+    /\b(?:plan|planning|itinerary|schedule|organi[sz]e|checklist|agenda|budget|timeline|trip|event)\b/i.test(
+      briefText,
+    )
+  ) {
+    return 'planner';
+  }
+  return 'copywriter';
+}
+
+/**
+ * The one step a typed project's kickoff hands its lead. The type already
+ * brought the lead's tools and an Output page, so the first draft is made
+ * with those tools; the step finishes when the page's data file grows past
+ * its seed, which is what the person will see.
+ */
+export function buildTypedKickoffStep(input: {
+  typeName: string;
+  brief: { name: string; about: string; taskDescription?: string };
+  dataFile?: string;
+  /** Titles of parameters the brief left unsaid, filled with "soon". */
+  unsaid: string[];
+  /** The type's model-facing tools (its page-only tools excluded). */
+  tools?: ReadonlyArray<{ name: string; description?: string }>;
+}): { name: string; description: string } {
+  const goal = input.brief.taskDescription ?? input.brief.about;
+  const unsaid =
+    input.unsaid.length > 0
+      ? ` They have not said ${input.unsaid.map((t) => `"${t}"`).join(' or ')} yet; plan around it and ask for it in your reply.`
+      : '';
+  const where = input.dataFile
+    ? ` The project's Output page shows \`${input.dataFile}\`, so make the first version there with this project's own tools; this step finishes when it has something in it.`
+    : " Make the first version with this project's own tools.";
+  // The page reads its data in the shape these tools write. A lead that wrote
+  // trip.json by hand in a shape of its own left the trip board at "0 days".
+  const tools =
+    input.tools && input.tools.length > 0
+      ? ` Your tools for it: ${input.tools
+          .map((t) =>
+            t.description ? `\`${t.name}\` (${t.description.replace(/\.$/, '')})` : `\`${t.name}\``,
+          )
+          .join(', ')}. Call one for each piece rather than writing the file yourself.`
+      : '';
+  return {
+    name: 'First draft',
+    description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${unsaid} Do the real work this turn rather than describing it. Then reply in two or three sentences: what you made, and the one thing you need from them next.`,
+  };
+}
+
+/** "Build X" for a build, the goal's own name for everything else. */
+export function kickoffTaskTitle(input: {
+  name: string;
+  about: string;
+  missionObjectives: string;
+}): string {
+  return macroLooksLikeBuildMission(input.name, input.about, input.missionObjectives)
+    ? `Build ${input.name}`
+    : input.name;
+}
+
 export function shouldPromoteStartJobToProject(input: {
   name: string;
   about: string;

@@ -19,6 +19,7 @@ import { FolderOnboardingStep, shouldOfferFolderStep } from './FolderOnboardingS
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { MakeSomething } from './MakeSomething.js';
 import { MeesterConversation } from './MeesterConversation.js';
+import type { WelcomeSetup } from './MeesterWelcome.js';
 import {
   type HomeChip,
   type HomeNavView,
@@ -40,6 +41,8 @@ export function HomeWorkshop({
   meesterPoppetje,
   meesterIconOverride,
   banner,
+  setup = null,
+  justReady = false,
   onNavigate,
 }: {
   config: ConfigResponse | null;
@@ -57,8 +60,16 @@ export function HomeWorkshop({
    * service notice was invisible to everyone past first-run setup.
    */
   banner?: ReactNode;
+  /** First run: what the meester still needs, asked for in their welcome. */
+  setup?: WelcomeSetup | null;
+  /** First run ended during this visit. */
+  justReady?: boolean;
   onNavigate?: (view: HomeNavView) => void;
 }) {
+  // While the meester is welcoming someone new, the welcome is the whole
+  // front door: the greeting band would greet them a second time, and the
+  // folder question waits until there is something finished to show for it.
+  const welcoming = setup !== null || justReady;
   // Collapsed state is a persisted preference (server config, so it
   // survives Electron's per-launch port shuffle). Seed from config, then
   // reconcile once when it first arrives; toggles write through.
@@ -100,10 +111,16 @@ export function HomeWorkshop({
     reconciledCollapse.current = true;
     setCollapsed(true);
   }, []);
-  // First run: which folders the crew looks after. Hidden as soon as the
-  // person answers; the config stamp keeps it hidden across launches.
+  // Which folders the crew looks after: asked at the foot of the meester's
+  // conversation once the crew has finished something, never during the
+  // welcome. Hidden as soon as the person answers; the config stamp keeps it
+  // hidden across launches.
   const [folderStepDone, setFolderStepDone] = useState(false);
-  const offerFolderStep = !folderStepDone && shouldOfferFolderStep(config, projects);
+  // Not while the welcome still asks for tools; the invitation itself waits
+  // in the thread for the first wrap-up, so the visit that ends first run
+  // can still end on it.
+  const offerFolderStep =
+    setup === null && !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
   const selectTab = (next: HomeGreetingTab) => {
     setTab(next);
@@ -335,6 +352,7 @@ export function HomeWorkshop({
         onKeyDown={(event) => {
           if (
             event.key === 'Escape' &&
+            !welcoming &&
             !collapsed &&
             !event.defaultPrevented &&
             event.currentTarget.contains(event.target as Node)
@@ -344,48 +362,45 @@ export function HomeWorkshop({
           }
         }}
       >
-        <GreetingBand
-          chips={chips}
-          meesterName={meesterName}
-          meesterPoppetje={meesterPoppetje}
-          meesterIcon={meesterIcon}
-          meesterIconOverride={meesterIconOverride}
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-          tab={tab}
-          onTabChange={selectTab}
-          statusReport={statusReport}
-          statusRunning={statusRunning}
-          onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
-          nightReview={nightReview}
-          morning={
-            morningQuestion
-              ? { question: morningQuestion, review: morningReview, onAnswered: refreshQuestions }
-              : null
-          }
-          makeSomething={
-            runtimeCapabilities().tasks ? (
-              <MakeSomething
-                projectId={deriveLaunchProjectId(config, projects)}
-                projects={projects}
-              />
-            ) : undefined
-          }
-          onNavigate={onNavigate}
-        />
+        {!welcoming && (
+          <GreetingBand
+            chips={chips}
+            meesterName={meesterName}
+            meesterPoppetje={meesterPoppetje}
+            meesterIcon={meesterIcon}
+            meesterIconOverride={meesterIconOverride}
+            collapsed={collapsed}
+            onToggleCollapse={toggleCollapse}
+            tab={tab}
+            onTabChange={selectTab}
+            statusReport={statusReport}
+            statusRunning={statusRunning}
+            onRunStatusReport={runtimeCapabilities().background ? runStatusReport : undefined}
+            nightReview={nightReview}
+            morning={
+              morningQuestion
+                ? { question: morningQuestion, review: morningReview, onAnswered: refreshQuestions }
+                : null
+            }
+            makeSomething={
+              runtimeCapabilities().tasks ? (
+                <MakeSomething
+                  projectId={deriveLaunchProjectId(config, projects)}
+                  projects={projects}
+                />
+              ) : undefined
+            }
+            onNavigate={onNavigate}
+          />
+        )}
         <section
           className="home-workshop-body"
           ref={conversationRef}
           aria-label="Meester chat"
           tabIndex={-1}
-          inert={!collapsed}
+          inert={!welcoming && !collapsed}
         >
           <div className="home-workshop-main">
-            {offerFolderStep && (
-              <div className="home-workshop-actions">
-                <FolderOnboardingStep config={config} onDone={() => setFolderStepDone(true)} />
-              </div>
-            )}
             {meesterGezelId ? (
               <MeesterConversation
                 meesterGezelId={meesterGezelId}
@@ -393,6 +408,24 @@ export function HomeWorkshop({
                 meesterIcon={meesterIcon}
                 meesterPoppetje={meesterPoppetje}
                 meesterIconOverride={meesterIconOverride}
+                setup={setup}
+                justReady={justReady}
+                helperGezelIds={[config?.klerkGezelId, config?.boekwachterGezelId]}
+                {...(offerFolderStep
+                  ? {
+                      invite: (
+                        <div className="meester-folder-invite" data-testid="folder-invite">
+                          <p className="meester-welcome-line">
+                            Want me to look after a folder of yours too? I'll only read it.
+                          </p>
+                          <FolderOnboardingStep
+                            config={config}
+                            onDone={() => setFolderStepDone(true)}
+                          />
+                        </div>
+                      ),
+                    }
+                  : {})}
                 onTurnStarted={collapseForConversation}
                 onIntroductionShown={collapseForConversation}
               />
@@ -416,7 +449,7 @@ export function HomeWorkshop({
             )}
           </div>
         </section>
-        {!collapsed && (
+        {!welcoming && !collapsed && (
           <button
             type="button"
             className="home-workshop-chat-shade"

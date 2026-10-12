@@ -4,6 +4,7 @@ import {
   isExpectedAvailabilityError,
   isRetryableFailedTurn,
   mergeTimelineMessages,
+  turnFailureShownElsewhere,
 } from './chat-timeline-helpers.js';
 
 describe('a turn waiting on its first download', () => {
@@ -59,5 +60,39 @@ describe('mergeTimelineMessages', () => {
     const newest = message();
 
     expect(mergeTimelineMessages([older], [newest])).toEqual([older, newest]);
+  });
+});
+
+describe('turnFailureShownElsewhere', () => {
+  const engine =
+    "On-device engine (llama-server, cuda) is downloading. It'll be ready shortly — try again in a moment.";
+  const aborted = {
+    synthetic: 'turn-aborted' as const,
+    content: '',
+    warnings: [engine],
+    projectId: 'p1',
+  };
+
+  // A first message said the engine was downloading three times over.
+  it('leaves the failure to the live slot while it shows it', () => {
+    expect(turnFailureShownElsewhere(aborted, { liveError: engine, cardAcknowledged: false })).toBe(
+      'live',
+    );
+    // A record with words of its own is still drawn.
+    expect(
+      turnFailureShownElsewhere(
+        { ...aborted, content: 'Half a reply' },
+        { liveError: engine, cardAcknowledged: false },
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps only the placeholder while the session card tells it, until acknowledged', () => {
+    const record = { ...aborted, sessionLastTurnError: engine };
+    expect(turnFailureShownElsewhere(record, { cardAcknowledged: false })).toBe('card');
+    expect(turnFailureShownElsewhere(record, { cardAcknowledged: true })).toBeNull();
+    expect(
+      turnFailureShownElsewhere({ ...record, synthetic: undefined }, { cardAcknowledged: false }),
+    ).toBeNull();
   });
 });

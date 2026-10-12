@@ -278,9 +278,9 @@ export async function bootstrapOnDeviceFirstRun(opts: {
             defaultModel: { ...config.defaultModel, [provider]: target.modelId },
             firstRunInstallError: null as unknown as undefined,
           });
-          // Note: no auto-install fire here — the Home banner's limbo
-          // recovery (FirstRunInstallBanner.tsx) detects the new pin
-          // + missing install and kicks off the install via SSE. That
+          // Note: no auto-install fire here — the meester's welcome on Home
+          // (useFirstRunModel.ts) sees the new pin + missing install and
+          // offers the download; the person's tap starts it via SSE. That
           // path also reflects progress in the catalog UI.
         }
       }
