@@ -272,7 +272,7 @@ export const SUITES: Record<string, EvalSuite> = {
   productivity: {
     id: 'productivity',
     description:
-      'Knowledge-work scorecard (13 scenarios, <=6h05m at --count 1): constrained communications, ' +
+      'Knowledge-work scorecard (13 scenarios, <=7h20m at --count 1): constrained communications, ' +
       'meeting follow-up, records, planning, calendar synthesis, experiment analysis, ' +
       'local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks ' +
       'document production (PPTX, DOCX, theme round-trip). Fully hermetic. Judge post-hoc with eval:judge-sweep — ' +
@@ -280,20 +280,22 @@ export const SUITES: Record<string, EvalSuite> = {
       'brief-compliance; the judge axes are what differentiate models.',
     // Cheap and broad first, so a run that gets cut short still says
     // something. Roughly ascending by authored timeoutMs.
+    // The four recipe-mode craftbooks moved to the end when they stopped
+    // running freehand (2026-10): a recipe run takes 10-30 minutes, not 2.
     scenarios: [
       'constrained-comms',
-      'craftbook-week-plan',
-      'craftbook-ab-test-readout',
-      'craftbook-annotated-bibliography',
       'records-intake',
       'plan-and-estimate',
       'meeting-followup',
       'craftbook-spreadsheet-model',
       'conflict-synthesis',
       'docblocks-theme-roundtrip',
-      'craftbook-research-to-document',
       'craftbook-powerpoint-deck',
       'wikipedia-research-brief',
+      'craftbook-week-plan',
+      'craftbook-ab-test-readout',
+      'craftbook-annotated-bibliography',
+      'craftbook-research-to-document',
     ],
   },
 

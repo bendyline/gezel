@@ -53,7 +53,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'ab-test-readout': {
-    timeoutMs: 25 * 60_000,
+    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
+    // pass measured freehand output (2026-10-06 eval review). Switched before
+    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
@@ -105,7 +109,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'annotated-bibliography': {
-    timeoutMs: 25 * 60_000,
+    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
+    // pass measured freehand output (2026-10-06 eval review). Switched before
+    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
@@ -584,7 +592,17 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add JSON-path checks for exact script names and dependency buckets.'],
   },
+  'comprehensive-codebase-review': {
+    // Recipe mode: as artifact-task it never exercised the book's onEnter
+    // path (2026-10-10 coverage run).
+    mode: 'workflow',
+    timeoutMs: 60 * 60_000,
+  },
   'content-accuracy-review': {
+    // Recipe mode: as artifact-task it never exercised the book's input
+    // feature path (2026-10-10 coverage run).
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
@@ -787,8 +805,12 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'deep-security-review': {
+    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
+    // pass measured freehand output (2026-10-06 eval review). Switched before
+    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
+    mode: 'workflow',
     // Bounded for the `developer` suite.
-    timeoutMs: 40 * 60_000,
+    timeoutMs: 45 * 60_000,
     progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'validated',
@@ -925,6 +947,10 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add citation-resolution and word-band gates for this prose class.'],
   },
   'ebook-compile': {
+    // Recipe mode: as artifact-task it never exercised the book's input
+    // feature path (2026-10-10 coverage run).
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q4'],
@@ -1951,7 +1977,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Measure the full workflow on both reference local models.'],
   },
   'research-to-document': {
-    timeoutMs: 30 * 60_000,
+    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
+    // pass measured freehand output (2026-10-06 eval review). Switched before
+    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
@@ -2448,7 +2478,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'week-plan': {
-    timeoutMs: 25 * 60_000,
+    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
+    // pass measured freehand output (2026-10-06 eval review). Switched before
+    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
+    mode: 'workflow',
+    timeoutMs: 45 * 60_000,
   },
   'weekly-review': {
     coverage: {

@@ -11,7 +11,7 @@ import {
 describe('large-pr-review fixture', () => {
   it('is larger than the old bridge cap and contains 120 per-file records', () => {
     const artifacts = buildLargePrArtifacts();
-    const records = artifacts.filter((artifact) => artifact.path.includes('/files/'));
+    const records = artifacts.filter((artifact) => /\/files\/[^/]+\.md$/.test(artifact.path));
     expect(records).toHaveLength(120);
     expect(artifacts.reduce((sum, artifact) => sum + artifact.content.length, 0)).toBeGreaterThan(
       80_000,
@@ -19,7 +19,9 @@ describe('large-pr-review fixture', () => {
   });
 
   it('places API use early, its definition late, and the real defect last', () => {
-    const records = buildLargePrArtifacts().filter((artifact) => artifact.path.includes('/files/'));
+    const records = buildLargePrArtifacts().filter((artifact) =>
+      /\/files\/[^/]+\.md$/.test(artifact.path),
+    );
     expect(records[0]?.content).toContain(`path: ${API_USE_PATH}`);
     expect(records.at(-2)?.content).toContain(`path: ${API_DEFINITION_PATH}`);
     expect(records.at(-1)?.content).toContain(`path: ${LATE_DEFECT_PATH}`);

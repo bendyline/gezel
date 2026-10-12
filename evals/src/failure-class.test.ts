@@ -174,6 +174,18 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'sandbox-unavailable' });
   });
 
+  it('an onEnter script that rejected its fixture before any turn → infra onenter-script-failed', () => {
+    const log =
+      '2026-10-09T20:40:54Z WARN [tasks] step onEnter script failed for pr/1 (publishCorpusBatches): files[0] has no eight-character lowercase recordHash';
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'success-check-false',
+      reason: 'attributed craftbook task ended paused at scope',
+      daemonLog: log,
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'onenter-script-failed' });
+  });
+
   it('a gate the runtime could not evaluate → infra gate-unevaluable', () => {
     const log =
       '2026-09-23T03:00:00Z WARN [gate] p/4 step "verify" could not be evaluated — pausing without consuming an attempt: unresolved {{reviewId}}';

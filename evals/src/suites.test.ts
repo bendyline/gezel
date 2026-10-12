@@ -25,18 +25,18 @@ const CORE_SCENARIO_IDS = [
 
 const PRODUCTIVITY_SCENARIO_IDS = [
   'constrained-comms',
-  'craftbook-week-plan',
-  'craftbook-ab-test-readout',
-  'craftbook-annotated-bibliography',
   'records-intake',
   'plan-and-estimate',
   'meeting-followup',
   'craftbook-spreadsheet-model',
   'conflict-synthesis',
   'docblocks-theme-roundtrip',
-  'craftbook-research-to-document',
   'craftbook-powerpoint-deck',
   'wikipedia-research-brief',
+  'craftbook-week-plan',
+  'craftbook-ab-test-readout',
+  'craftbook-annotated-bibliography',
+  'craftbook-research-to-document',
 ] as const;
 
 const DEVELOPER_SCENARIO_IDS = [

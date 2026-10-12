@@ -872,7 +872,11 @@ export async function runTrial(
   let mockRuntime: Awaited<ReturnType<typeof startMockServices>> = null;
   if (
     scenario.mockServices?.some(
-      (mock) => mock.kind === 'http' || mock.kind === 'webhook' || mock.kind === 'mcp',
+      (mock) =>
+        mock.kind === 'http' ||
+        mock.kind === 'webhook' ||
+        mock.kind === 'mcp' ||
+        mock.kind === 'cli',
     )
   ) {
     try {

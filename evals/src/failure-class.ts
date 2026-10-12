@@ -190,6 +190,13 @@ const PRE_PROVIDER_STALL_REASON = /pre-provider stall/i;
 const SANDBOX_UNAVAILABLE = /denyNet requires an enforceable OS network boundary/;
 /** A gate the runtime could not evaluate at all (unfilled placeholders, missing inputs). */
 const GATE_UNEVALUABLE = /could not be evaluated — pausing without consuming an attempt/;
+/**
+ * A step's onEnter script rejected its inputs before any model turn ran.
+ * Those scripts prepare runtime-owned data (a connector corpus, batches), so
+ * the cause is the fixture: pull-request-review-workflow paused 0.2s after
+ * creation on a stale corpus format and booked as `model-default` (2026-10-10).
+ */
+const ONENTER_SCRIPT_FAILED = /step onEnter script failed[^\n]*/;
 /** The task paused for help and nothing brought it back. */
 const TASK_PAUSED_FOR_HELP = /\[tasks\] \S+ paused for help \(/;
 
@@ -334,6 +341,11 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
   if (input.failureMode === 'engine-hung' || ENGINE_HUNG_REASON.test(reason)) {
     return { failureClass: 'infra', rule: 'engine-hung', evidence: reason.slice(0, 140) };
+  }
+
+  const onEnterFailed = input.daemonLog ? findInReasonOrLog(input, ONENTER_SCRIPT_FAILED) : null;
+  if (onEnterFailed && /\bpaused\b/.test(reason)) {
+    return { failureClass: 'infra', rule: 'onenter-script-failed', evidence: onEnterFailed };
   }
 
   if (isStallish(input) && input.daemonLog) {

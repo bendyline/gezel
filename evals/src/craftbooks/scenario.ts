@@ -2542,13 +2542,18 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         repairText !== null &&
         staleNoWriteTargetIsFailing(failures, repairDeliverable.path)
       ) {
-        const key = noWriteRepairKey({
+        // The task's walk position is part of the key: a file an earlier step
+        // owns stays unchanged while later steps work, and that is progress,
+        // not a stuck repair. Without it design-system-consultation was
+        // stopped mid-`evaluate`, and spec-authoring seconds after its gate
+        // approved (2026-10-10 coverage run).
+        const key = `${noWriteRepairKey({
           projectId,
           filePath: repairDeliverable.path,
           failures: repairFeedbackFailures,
           passed,
           total: checks.length,
-        });
+        })}|${taskGraph?.progress ?? ''}`;
         const textDigest = stableDigest(repairText);
         const now = Date.now();
         if (!noWriteRepairState || noWriteRepairState.key !== key) {
