@@ -4,6 +4,7 @@ import {
   briefAsksForBuild,
   fillProjectTypeParams,
   matchProjectTypeForBrief,
+  projectTypeNamedByBrief,
 } from './brief-route.js';
 
 const lead = (templateId: string) => [{ templateId, voorman: true }];
@@ -204,6 +205,15 @@ describe('fillProjectTypeParams', () => {
   });
 });
 
+describe('projectTypeNamedByBrief', () => {
+  it('names the type a brief is about even when it lacks the details', () => {
+    expect(matchProjectTypeForBrief('A trip somewhere nice', TYPES)).toBeNull();
+    expect(projectTypeNamedByBrief('A trip somewhere nice', TYPES)).toBe('trip-planner');
+    expect(projectTypeNamedByBrief('Bakery website', TYPES)).toBeNull();
+    expect(projectTypeNamedByBrief('Lunch with Sam', TYPES)).toBeNull();
+  });
+});
+
 describe('briefAsksForBuild', () => {
   it('reads making verbs before an app or game, and web words anywhere', () => {
     expect(briefAsksForBuild('Create a game where frogs cross roads')).toBe(true);
@@ -211,5 +221,71 @@ describe('briefAsksForBuild', () => {
     expect(briefAsksForBuild('Put it in index.html')).toBe(true);
     expect(briefAsksForBuild('Play a game of chess with me')).toBe(false);
     expect(briefAsksForBuild('Plan a trip to Portugal')).toBe(false);
+  });
+});
+
+describe('fillProjectTypeParams — first-project readers', () => {
+  const one = (key: string, title: string, brief: string, extra: Record<string, unknown> = {}) =>
+    fillProjectTypeParams(
+      { properties: { [key]: { type: 'string', title, ...extra } }, required: [key] },
+      brief,
+    )?.params[key];
+
+  it('reads who a household is in the words used', () => {
+    expect(
+      one('household', 'Who eats here?', 'Plan a week of meals for two adults and a toddler.'),
+    ).toBe('two adults and a toddler');
+  });
+
+  it('reads what is being learned', () => {
+    expect(
+      one(
+        'subject',
+        'What are you learning?',
+        'Make me flashcards to learn the capitals of Europe.',
+      ),
+    ).toBe('the capitals of Europe');
+  });
+
+  it('reads the role only when the brief is about a job', () => {
+    expect(
+      one(
+        'role',
+        'What role are you hunting for?',
+        'Get me ready for a job interview as a product designer next month.',
+      ),
+    ).toBe('product designer');
+    expect(
+      one('role', 'What role are you hunting for?', 'Dress up as a pirate for the party.'),
+    ).toBeUndefined();
+  });
+
+  it('reads what someone does, and who a feed speaks for', () => {
+    expect(
+      one(
+        'business',
+        'What do you do?',
+        "I'm a freelance illustrator and I need to send invoices.",
+      ),
+    ).toBe('freelance illustrator');
+    expect(
+      one(
+        'brand',
+        'Who does this feed speak for?',
+        'Plan a week of LinkedIn posts for my pottery studio.',
+      ),
+    ).toBe('pottery studio');
+  });
+
+  it('starts a required style choice from its default, never a free-text placeholder', () => {
+    expect(
+      one('personality', 'Table-talk style', 'Play chess with me.', {
+        enum: ['in-character', 'peppy'],
+        default: 'in-character',
+      }),
+    ).toBe('in-character');
+    expect(
+      one('personality', 'Table-talk style', 'Play chess with me.', { default: 'somebody' }),
+    ).toBeUndefined();
   });
 });

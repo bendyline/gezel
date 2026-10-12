@@ -49,6 +49,8 @@ export const TaskInputSourceSchema = z.discriminatedUnion('from', [
   z.object({ from: z.literal('workspace'), path: z.string() }),
   z.object({ from: z.literal('artifacts'), path: z.string().min(1) }),
   z.object({ from: z.literal('upload'), stagingId: InputStagingIdSchema }),
+  /** A sample the craftbook carries, copied into the task's inputs folder at launch. */
+  z.object({ from: z.literal('sample'), sampleId: z.string().min(1) }),
 ]);
 export type TaskInputSource = z.infer<typeof TaskInputSourceSchema>;
 export type TaskInputOrigin = TaskInputSource['from'];
@@ -63,7 +65,7 @@ export const TaskInputRecordSchema = z.object({
    * prompt's first-action guard.
    */
   path: z.string(),
-  from: z.enum(['workspace', 'artifacts', 'upload']),
+  from: z.enum(['workspace', 'artifacts', 'upload', 'sample']),
   /** Display name only — a folder or file name, never an absolute host path. */
   label: z.string(),
   /** Artifacts-relative path of the manifest listing every accepted file. */
@@ -97,7 +99,7 @@ export const TaskInputManifestSchema = z.object({
   kind: CraftbookInputKindSchema,
   drawer: TaskInputDrawerSchema,
   path: z.string(),
-  from: z.enum(['workspace', 'artifacts', 'upload']),
+  from: z.enum(['workspace', 'artifacts', 'upload', 'sample']),
   label: z.string(),
   createdAt: z.string(),
   totalBytes: z.number().int().nonnegative(),

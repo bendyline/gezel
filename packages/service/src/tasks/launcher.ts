@@ -1,6 +1,7 @@
 import {
   CraftbookParamsError,
   type CreateTaskRequest,
+  LIVE_CRAFTBOOK_LAUNCH_STATUSES,
   type Task,
   type TaskReferences,
   craftbookCategoryFamily,
@@ -69,8 +70,6 @@ export type TaskLaunchRequest = Omit<
 > & {
   description?: string;
 };
-
-const LIVE_STATUSES = new Set<Task['status']>(['draft', 'active', 'paused']);
 
 export class TaskLauncher {
   private readonly inflight = new Map<string, Promise<Task>>();
@@ -175,7 +174,7 @@ export class TaskLauncher {
       (candidate) =>
         candidate.origin?.kind === 'craftbook-invocation' &&
         candidate.origin.key === craftbookInvocationKey &&
-        LIVE_STATUSES.has(candidate.status),
+        LIVE_CRAFTBOOK_LAUNCH_STATUSES.has(candidate.status),
     );
   }
 

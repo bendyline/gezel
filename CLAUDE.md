@@ -281,6 +281,39 @@ A notification must be earned by something durable that happened. The sources ar
 
 **Reminders** are the only time-based source, and the time must come from the project's own state. A script with the `reminders` capability calls `gezel.reminder.set({ at, title, body })` / `clear()`; `parseReminderRequest` enforces a future time at most 30 days out. The host stores one per project (`projects/{id}/reminder.json` through `Store` / `PortableStore`), announces `reminders_updated`, and `GET /api/reminders` lists them. `planReminders` schedules the week ahead, at most the cap per day. The desktop arms one timer and re-checks on resume; the phone hands them to the OS. Flashcards 1.1.2 is the reference content.
 
+### Interest areas
+
+What the person said they want help with: `config.interests.areas`, ids from
+`InterestAreaIdSchema` in [core interests/](packages/core/src/interests/)
+(software, data, work, business, content, home, learning, play; health and
+legal are held, with ids but no key). The welcome asks only a new install
+(`shouldAskInterests`: a `firstUseAt` within the week, not yet answered or
+skipped); Settings → General holds the same tray. The answer **orders** what
+is offered (the welcome's `firstProjectsFor`, Make something's `pickWithRange`,
+New Task's For you shelf, New Project's rail, Knowledge's suggestions through
+`orderByInterests`) and **never hides** anything or enters a prompt. An item's
+areas come from its gilde `category` through one map, unless its identity
+declares `interests` (`interestAreasForCraftbook` / `interestAreasForProjectType`;
+knowledge catalogs by id family). Read config through `resolveInterestAreas`:
+it keeps raw ids a newer build wrote and drops held or unknown ones. Contract
+in [docs/ux.md](docs/ux.md) ("Interests order; they never hide").
+
+### Craftbooks on the phone
+
+The phone runs a craftbook when it has every tool, script and gate check the
+book uses. That verdict has one owner, `craftbookHostGap`
+([core runtime/craftbook-host-gap.ts](packages/core/src/runtime/craftbook-host-gap.ts)):
+the phone build bundles runnable books whole and the rest as summaries with a
+plain `unavailableReason`, which every launcher shows on a disabled card
+rather than hiding the book. The parts both hosts must agree on live once in
+core: the step's turn steering (`stepTurnSteering` — the step the loop's
+correctives name, an exact-action step's terminal tool and request shape),
+the mid-turn deliverable check (`completionGateWorkspaceFiles`), the chat
+launch's dedupe key (`chatLaunchInvocationKeyAsync`, pinned equal to the
+desktop's by `chat-launch-key.test.ts`), and the start card
+(`craftbookStartCardForTask`). Fanout, `branches`, `requireChange` and
+desktop-only gates are still gaps there, reported by the same function.
+
 ### Project
 
 A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase. Each task gets its own working folder inside the drawer — `artifacts/tasks/<num>/`, auto-created at task creation, stamped on the task as `artifactDir`, and inherited by fanout children so batch shards share the host's namespace. Craftbooks reach it through the reserved `{{task.dir}}` interpolation token (conventionally via a `workPath` param defaulting to `{{task.dir}}`), and ad-hoc task sessions are told the folder in their injected task context. It joins `notes/`/`reviews/`/`reports/` in `ACCESSORY_ARTIFACT_PREFIXES` ([packages/catalog/src/artifact-surface.ts](packages/catalog/src/artifact-surface.ts)).

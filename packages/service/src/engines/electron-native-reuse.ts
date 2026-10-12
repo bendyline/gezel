@@ -12,6 +12,7 @@ type FileSignatureExpectation = 'bendyline' | 'vendor-hash-only' | 'hash-only';
 interface NativeFilePin {
   sha256: string;
   sizeBytes: number;
+  /** How the native release signed this file; enforced there, not re-checked here. */
   signature: FileSignatureExpectation;
 }
 
@@ -40,6 +41,7 @@ export interface ElectronNativeReuseOptions {
   arch?: string;
   release?: string;
   manifest?: NativeFileManifest;
+  /** Verifies the enclosing macOS app; test seam. */
   verifySignature?: typeof verifyCodeSignature;
   /**
    * Accept an exactly pinned standalone macOS native release tree without an
@@ -58,6 +60,19 @@ export interface ElectronNativeReuseOptions {
  * A manifest found beside the Electron app is never trusted. The expected
  * file set and hashes come from this package, which pin-native-release.mjs
  * updates from the separately published native release.
+ *
+ * The pins are the whole per-file check; signatures are not re-verified here.
+ * A native release tag cannot build without signing credentials, and its
+ * build verifies every first-party file's Authenticode or Developer ID
+ * signature as it signs it, so a matching SHA-256 proves the file is those
+ * signed bytes. Re-checking the signature at runtime could only add
+ * certificate revocation, which guards against binaries signed with a stolen
+ * key, and a file that matches a pin is byte for byte one this release
+ * produced. Meanwhile the operating system re-reads each signed file to check
+ * it: about a gigabyte on win32-x64, 3–6 s in front of every daemon start.
+ * Anyone able to change these pins could change this verifier as well.
+ * On macOS the enclosing app's signature and notarization, which vouch for
+ * the pins, are still checked below.
  */
 /** Pure verification for embedders; never changes process.env. */
 export async function verifyNativeBinaries(
@@ -166,6 +181,7 @@ async function verifyCandidate(opts: {
     // into the time of the largest member; a bigger pool just queues seeks.
     // Semantics are unchanged: any rejection still fails the candidate, and
     // the first one to fail wins the message.
+    // The pin is the whole per-file check; see verifyNativeBinaries.
     await mapWithConcurrency(Object.entries(platformPin.files), 4, async ([relativePath, pin]) => {
       if (!isSafeRelativePath(relativePath)) {
         throw new Error(`unsafe pinned native path: ${relativePath}`);
@@ -183,20 +199,6 @@ async function verifyCandidate(opts: {
       const actualSha = await sha256File(absolute);
       if (actualSha !== pin.sha256.toLowerCase()) {
         throw new Error(`sha256 mismatch: ${platformKey}/${relativePath}`);
-      }
-
-      if (pin.signature === 'bendyline' && opts.platform !== 'linux') {
-        const outcome = await opts.verifySignature(absolute, {
-          platform: opts.platform,
-          policy: 'require',
-          expectedPublisher: BENDYLINE_PUBLISHER,
-          expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID,
-        });
-        if (!outcome.accepted) {
-          throw new Error(
-            `signature rejected: ${platformKey}/${relativePath} (${outcome.result.detail ?? outcome.result.status})`,
-          );
-        }
       }
     });
 

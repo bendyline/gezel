@@ -22,6 +22,7 @@ import { fanoutStoriesScenario } from './fanout-stories.ts';
 import { fanoutTallyScenario } from './fanout-tally.ts';
 import { fantasyFictionScenario } from './fantasy-fiction.ts';
 import { fictionalSdkScenario } from './fictional-sdk.ts';
+import { firstProjectScenarios } from './first-projects.ts';
 import { fixSquisqBugsScenario } from './fix-squisq-bugs.ts';
 import { historicalFictionScenario } from './historical-fiction.ts';
 import { incidentPostmortemScenario } from './incident-postmortem.ts';
@@ -92,6 +93,7 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   [toolRoutingImageScenario.id]: toolRoutingImageScenario,
   ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
+  ...Object.fromEntries(firstProjectScenarios().map((s) => [s.id, s])),
   // Browser primitive probe: no craftbook or real Chromium. A small worker
   // must use the hermetic @playwright/mcp replacement, with successful MCP
   // calls and the real History rail both required by the gate.

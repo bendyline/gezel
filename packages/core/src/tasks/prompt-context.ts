@@ -40,7 +40,12 @@ export function renderTaskInputLine(
         ? 'the workspace root folder'
         : `the folder \`${input.path}/\``
       : `the file \`${input.path}\``;
-  const origin = input.from === 'upload' ? `, copied from "${input.label}",` : '';
+  const origin =
+    input.from === 'upload'
+      ? `, copied from "${input.label}",`
+      : input.from === 'sample'
+        ? `, the craftbook's sample "${input.label}" (made-up example data, not the person's own),`
+        : '';
   const listTool = artifacts ? 'list_artifacts' : 'list_dir';
   const readTool = artifacts ? 'read_artifact' : 'read_file';
   const how: string[] = [];

@@ -36,6 +36,7 @@ export interface BriefRoutableParam {
   title?: string;
   description?: string;
   default?: unknown;
+  enum?: readonly unknown[];
 }
 
 export interface BriefTypeMatch {
@@ -105,6 +106,38 @@ export function matchProjectTypeForBrief(
   brief: string,
   types: readonly BriefRoutableType[],
 ): BriefTypeMatch | null {
+  const named = namedProjectType(brief, types);
+  if (!named) return null;
+  const { type, hits } = named;
+  const filled = fillProjectTypeParams(type.params, brief);
+  if (!filled) return null;
+  const dataFile = type.pages?.reads?.find((read) => read.source === 'workspace')?.path;
+  return {
+    typeId: type.id,
+    hits,
+    params: filled.params,
+    assumed: filled.assumed,
+    ...(dataFile ? { dataFile } : {}),
+  };
+}
+
+/**
+ * The project type a brief's words name, whether or not they also carry
+ * its required details. A kickoff reads the person's own sentence for those
+ * details only when the brief names the same type, so a message with two
+ * goals in it never lends one goal's type to the other's brief.
+ */
+export function projectTypeNamedByBrief(
+  brief: string,
+  types: readonly BriefRoutableType[],
+): string | null {
+  return namedProjectType(brief, types)?.type.id ?? null;
+}
+
+function namedProjectType(
+  brief: string,
+  types: readonly BriefRoutableType[],
+): { type: BriefRoutableType; hits: string[] } | null {
   if (!brief.trim() || briefAsksForBuild(brief)) return null;
   // Distinctive across the whole catalog: "writing" is shared with a chat
   // type even though only one of the two has a lead to route to.
@@ -129,20 +162,20 @@ export function matchProjectTypeForBrief(
   }
   if (!best || tied) return null;
   const type = candidates.find((t) => t.id === best.id);
-  if (!type) return null;
-  const filled = fillProjectTypeParams(type.params, brief);
-  if (!filled) return null;
-  const dataFile = type.pages?.reads?.find((read) => read.source === 'workspace')?.path;
-  return {
-    typeId: type.id,
-    hits: best.hits.sort(),
-    params: filled.params,
-    assumed: filled.assumed,
-    ...(dataFile ? { dataFile } : {}),
-  };
+  return type ? { type, hits: best.hits.sort() } : null;
 }
 
-type ParamKind = 'place' | 'when' | 'occasion' | 'language' | 'party';
+type ParamKind =
+  | 'place'
+  | 'when'
+  | 'occasion'
+  | 'language'
+  | 'party'
+  | 'household'
+  | 'subject'
+  | 'role'
+  | 'business'
+  | 'brand';
 
 function paramKind(key: string, param: BriefRoutableParam): ParamKind | null {
   const label = `${key} ${param.title ?? ''}`.toLowerCase();
@@ -151,6 +184,13 @@ function paramKind(key: string, param: BriefRoutableParam): ParamKind | null {
   if (/\b(?:travell?ers?|who'?s\s+going|party\s+size|headcount)\b/.test(label)) return 'party';
   if (/\b(?:occasion|celebrat\w*)\b/.test(label)) return 'occasion';
   if (/\blanguage\b/.test(label)) return 'language';
+  if (/\b(?:household|who eats)\b/.test(label)) return 'household';
+  if (/\b(?:subject|topic|learning|studying)\b/.test(label)) return 'subject';
+  if (/\brole\b/.test(label)) return 'role';
+  if (key === 'business' || /\b(?:what do you do|occupation|profession)\b/.test(label)) {
+    return 'business';
+  }
+  if (/\b(?:brand|speak for)\b/.test(label)) return 'brand';
   return null;
 }
 
@@ -180,6 +220,17 @@ export function fillProjectTypeParams(
       assumed.push(key);
       continue;
     }
+    // A required choice from a fixed list (a chess opponent's table talk) is
+    // a style, not a fact the person left out: its default is a fair start.
+    if (
+      required.has(key) &&
+      Array.isArray(param.enum) &&
+      typeof param.default === 'string' &&
+      param.enum.includes(param.default)
+    ) {
+      params[key] = param.default;
+      continue;
+    }
     if (required.has(key)) return null;
   }
   return { params, assumed };
@@ -197,6 +248,16 @@ function readParam(kind: ParamKind, brief: string): string | null {
       return readLanguage(brief);
     case 'party':
       return readParty(brief);
+    case 'household':
+      return readHousehold(brief);
+    case 'subject':
+      return readSubject(brief);
+    case 'role':
+      return readRole(brief);
+    case 'business':
+      return readBusiness(brief);
+    case 'brand':
+      return readBrand(brief);
   }
 }
 
@@ -441,4 +502,69 @@ function readParty(brief: string): string | null {
   }
   if (/\b(?:just\s+me|solo\s+trip|by\s+myself|on\s+my\s+own)\b/i.test(brief)) return '1';
   return null;
+}
+
+const MEMBER =
+  '(?:adults?|people|grown-ups|kids?|children|child|toddlers?|teens?|teenagers?|bab(?:y|ies))';
+
+/** Who a household is, in the person's own words: "two adults and a toddler". */
+function readHousehold(brief: string): string | null {
+  const counted = brief.match(
+    new RegExp(
+      `\\b${COUNT}\\s+${MEMBER}(?:\\s*(?:,|and|&|\\+)\\s*(?:a|an|${COUNT})\\s+${MEMBER})*`,
+      'i',
+    ),
+  );
+  if (counted) return counted[0].trim();
+  const us = brief.match(
+    new RegExp(`\\bthe\\s+${COUNT}\\s+of\\s+us\\b|\\bfamily\\s+of\\s+${COUNT}\\b`, 'i'),
+  );
+  return us ? us[0].trim() : null;
+}
+
+/** What is being learned: "flashcards for the capitals of Europe", "learn Italian verbs". */
+function readSubject(brief: string): string | null {
+  const patterns = [
+    /\bflash\s?cards?\s+(?:for|on|about|of)\s+([^.,;!?\n]{3,60})/i,
+    /\b(?:learn|learning|study|studying|revise|revising|memori[sz]e)\s+([^.,;!?\n]{3,60})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = brief.match(pattern);
+    if (!match) continue;
+    const words = match[1]!
+      .replace(/\s+(?:with|using|by|before|so|because)\b.*$/i, '')
+      .replace(/^(?:about|how to)\s+/i, '')
+      .trim();
+    if (words.length >= 3) return words;
+  }
+  return null;
+}
+
+/** The job being hunted: "an interview as a product designer" → "product designer". */
+function readRole(brief: string): string | null {
+  if (!/\b(?:job|role|position|interview|hiring|career)\b/i.test(brief)) return null;
+  const match = brief.match(
+    /\bas\s+(?:a|an)\s+((?:[\p{L}-]+\s+){0,3}?[\p{L}-]+?)(?=\s+(?:role|job|position|next|this|at|in|for|with)\b|[.,;!?\n]|$)/iu,
+  );
+  return match ? match[1]!.trim() : null;
+}
+
+/** What someone does for a living: "I'm a freelance logo designer". */
+function readBusiness(brief: string): string | null {
+  const match = brief.match(
+    /\bI(?:'|’)?m\s+(?:a|an)\s+((?:[\p{L}-]+\s+){0,3}?[\p{L}-]+?)(?=\s+(?:and|who|based|from|in|for|with)\b|[.,;!?\n]|$)/iu,
+  );
+  if (match) return match[1]!.trim();
+  const own = brief.match(BUSINESS_RE);
+  return own ? own[1]!.trim() : null;
+}
+
+const VENTURE =
+  '(?:studio|shop|bakery|business|brand|company|caf[eé]|band|podcast|channel|restaurant|store|agency|practice|club|school|salon|gallery)';
+const BUSINESS_RE = new RegExp(`\\b(?:my|our)\\s+((?:[\\p{L}'’-]+\\s+){0,3}${VENTURE})\\b`, 'iu');
+
+/** Who a feed speaks for: "posts for my pottery studio" → "pottery studio". */
+function readBrand(brief: string): string | null {
+  const match = brief.match(BUSINESS_RE);
+  return match ? match[1]!.trim() : null;
 }

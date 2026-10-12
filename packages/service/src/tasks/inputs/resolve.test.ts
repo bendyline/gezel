@@ -321,3 +321,80 @@ describe('previewTaskInput', () => {
     expect(bad.error).toMatch(/does not exist/);
   });
 });
+
+describe('planTaskInputs — sample sources', () => {
+  const sample = {
+    id: 'team-sync',
+    title: "a team meeting's notes",
+    param: 'source',
+    files: ['samples/team-sync/notes.md', 'samples/team-sync/agenda.md'],
+  };
+  const reader = {
+    read: async () => [
+      { rel: 'notes.md', bytes: new TextEncoder().encode('# Notes') },
+      { rel: 'agenda.md', bytes: new TextEncoder().encode('# Agenda') },
+    ],
+  };
+
+  it('copies the sample into the task inputs folder on commit, and removes it on rollback', async () => {
+    const result = await planTaskInputs(
+      { store, staging, samples: reader },
+      {
+        projectId: 'p',
+        craftbookId: 'ebook-compile',
+        paramSchema: schema,
+        samples: [sample],
+        params: {},
+        sources: { source: { from: 'sample', sampleId: 'team-sync' } },
+        taskDir: 'tasks/7',
+        recurring: true,
+      },
+    );
+    expect(result?.records.source).toMatchObject({
+      from: 'sample',
+      drawer: 'artifacts',
+      path: 'tasks/7/inputs/source',
+      label: "a team meeting's notes",
+      fileCount: 2,
+    });
+    await result!.commit();
+    expect(await readFile(join(artifacts, 'tasks/7/inputs/source/notes.md'), 'utf8')).toBe(
+      '# Notes',
+    );
+    await result!.rollback();
+    await expect(stat(join(artifacts, 'tasks/7/inputs/source'))).rejects.toThrow();
+  });
+
+  it('refuses a sample the book does not carry for that input', async () => {
+    await expect(
+      planTaskInputs(
+        { store, staging, samples: reader },
+        {
+          projectId: 'p',
+          craftbookId: 'ebook-compile',
+          paramSchema: schema,
+          samples: [{ ...sample, param: 'other' }],
+          params: {},
+          sources: { source: { from: 'sample', sampleId: 'team-sync' } },
+          taskDir: 'tasks/7',
+          recurring: false,
+        },
+      ),
+    ).rejects.toBeInstanceOf(TaskInputError);
+  });
+
+  it('previews a sample as its launch would read it', async () => {
+    const preview = await previewTaskInput(
+      { store, staging, samples: reader },
+      {
+        projectId: 'p',
+        craftbookId: 'ebook-compile',
+        paramSchema: schema,
+        param: 'source',
+        source: { from: 'sample', sampleId: 'team-sync' },
+        samples: [sample],
+      },
+    );
+    expect(preview).toMatchObject({ fileCount: 2, label: "a team meeting's notes" });
+  });
+});

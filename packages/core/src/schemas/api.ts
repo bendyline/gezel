@@ -2536,6 +2536,20 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * What the person said they want help with, as interest-area ids in the
+   * order they were picked. It orders what the welcome, Make something and
+   * the galleries offer; it never hides anything and never enters a prompt.
+   * Raw strings so a build that does not know an id keeps it on the next
+   * save; read it through `resolveInterestAreas`. `askedAt` is stamped on an
+   * answer or a skip, so the question is never asked twice.
+   */
+  interests: z
+    .object({
+      areas: z.array(z.string()).default([]),
+      askedAt: z.string().optional(),
+    })
+    .optional(),
+  /**
    * Workshop tempo — how frenetic the meester/voorman's proactive
    * behavior feels. Only has any effect when `aiEngagementMode` is
    * `proactive`; gated behaviors read intervals + prompt text from

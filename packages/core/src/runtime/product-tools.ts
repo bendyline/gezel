@@ -8,6 +8,7 @@ import {
   workspaceDrawerPrefix,
 } from '../path-rules.js';
 import { LEAN_PROFILE_BUILTIN_TOOLS, leanSession } from '../project-types/composition.js';
+import { promptMandatedTools } from '../prompt/prompt-tool-contract.js';
 import {
   type AskQuestionRequest,
   AskQuestionRequestSchema,
@@ -69,7 +70,7 @@ import {
   sliceWorkspaceText,
   workspaceReadRangeError,
 } from '../tools/results.js';
-import { unionStepKit } from '../tools/step-kit.js';
+import { stepToolKit, unionStepKit } from '../tools/step-kit.js';
 import { applyStepToolPolicy } from '../tools/step-policy.js';
 import { WorkspaceEditError } from '../workspace-edit-error.js';
 import { computeReplaceInFile, computeReplaceLines } from '../workspace-edits.js';
@@ -239,14 +240,20 @@ export async function portableToolSurface(
   // Missing/deleted context fails closed instead of restoring the whole role.
   if (session.taskRef && (!task || task.projectId !== session.projectId || !step)) return [];
   const roleGrants = roleToolNames(gezel.role, project.mode);
-  if (task?.executionMode === 'generalist' && step) {
-    const kit = unionStepKit(step, task.craftbook.steps);
+  if (task && step) {
+    // A step works from its deliverable's kit, as on the desktop; generalist
+    // continuity carries the union of every step's. Role grants and the
+    // step's own policy remain ceilings, and whatever the procedure itself
+    // tells the model to call stays callable.
+    const kit =
+      task.executionMode === 'generalist'
+        ? unionStepKit(step, task.craftbook.steps)
+        : stepToolKit(step);
     if (kit) {
-      // Generalist continuity carries the union of deterministic step kits.
-      // Existing role grants and the current step's policy remain ceilings.
       const keep = new Set([
         ...kit.tools,
         ...(step.toolPolicy?.allowTools ?? []),
+        ...promptMandatedTools(step.prompt ?? ''),
         'advance_task_step',
         'ask_user_question',
         'get_task',

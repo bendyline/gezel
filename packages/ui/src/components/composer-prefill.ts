@@ -6,7 +6,12 @@
  * navigation chunks.
  */
 
+import type { PromptDraftTaskLaunch } from '@bendyline/gezel';
+
 const pendingPrefills = new Map<string, string>();
+/** A queued launch, or null: detach whatever task the draft has attached. */
+const pendingLaunches = new Map<string, PromptDraftTaskLaunch | null>();
+const replacing = new Set<string>();
 
 /**
  * Fired right after a prefill is queued so a composer that is already mounted
@@ -15,8 +20,25 @@ const pendingPrefills = new Map<string, string>();
  */
 export const COMPOSER_PREFILL_EVENT = 'gezel:composer-prefill';
 
-export function queueComposerPrefill(projectId: string, markdown: string): void {
+/**
+ * Queue a sentence for the composer, and optionally the task it launches: a
+ * welcome first project that runs a craftbook arrives with the book attached,
+ * so Send starts it with no meester turn. `replace` makes the sentence the
+ * whole draft and its launch (or none) the only attached task, so picking a
+ * second first project never sends the first one's book with both sentences.
+ */
+export function queueComposerPrefill(
+  projectId: string,
+  markdown: string,
+  launch?: PromptDraftTaskLaunch,
+  options: { replace?: boolean } = {},
+): void {
   pendingPrefills.set(projectId, markdown);
+  if (launch) pendingLaunches.set(projectId, launch);
+  else if (options.replace) pendingLaunches.set(projectId, null);
+  else pendingLaunches.delete(projectId);
+  if (options.replace) replacing.add(projectId);
+  else replacing.delete(projectId);
   window.dispatchEvent(
     new CustomEvent(COMPOSER_PREFILL_EVENT, {
       detail: { projectId },
@@ -24,10 +46,22 @@ export function queueComposerPrefill(projectId: string, markdown: string): void 
   );
 }
 
-export function takeComposerPrefill(projectId: string): string | undefined {
+/** The queued launch; null means detach the attached one; undefined means leave it. */
+export function takeComposerTaskLaunch(
+  projectId: string,
+): PromptDraftTaskLaunch | null | undefined {
+  const queued = pendingLaunches.get(projectId);
+  pendingLaunches.delete(projectId);
+  return queued;
+}
+
+export function takeComposerPrefill(
+  projectId: string,
+): { markdown: string; replace: boolean } | undefined {
   const queued = pendingPrefills.get(projectId);
   pendingPrefills.delete(projectId);
-  return queued;
+  const replace = replacing.delete(projectId);
+  return queued === undefined ? undefined : { markdown: queued, replace };
 }
 
 /**

@@ -68,6 +68,10 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     sidebarSide: config.sidebarSide,
     homeGreetingCollapsed: config.homeGreetingCollapsed === true,
     onboarding: config.onboarding,
+    // The welcome asks a new install what it wants help with; it reads the
+    // install's age to know it is new, and every gallery reads the answer.
+    interests: config.interests,
+    firstUseAt: config.firstUseAt,
     workshopTempo: config.workshopTempo ?? 'bedrijvig',
     nightShift: config.nightShift,
     toolFilterMode: config.toolFilterMode ?? 'always',
@@ -169,7 +173,6 @@ export const CONFIG_RESPONSE_OMITTED: Readonly<Record<string, string>> = {
   externalFolders: 'owned by /api/folders (moves go through the move worker)',
   sharedProjectId: 'internal id of the shared-library project, resolved by the Store',
   executionDensity: 'legacy field migrated to generalistMode by Store.ensureLayout',
-  firstUseAt: 'install-age stamp written by Store.ensureLayout; read by the first-use graces',
   firstUseIndexingReleasedAt: 'latch written by the first-use indexing hold',
   recognitionProvider: 'served by the /api/recognition routes',
   defaultRecognitionModel: 'served by the /api/recognition routes',

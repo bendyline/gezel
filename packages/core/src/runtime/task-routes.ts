@@ -6,6 +6,7 @@ import {
 } from '../generalist-mode.js';
 import type { Craftbook } from '../schemas/craftbook.js';
 import { type ScriptRef, type ScriptRun, normalizeScriptRefs } from '../schemas/script.js';
+import { TaskInputPreviewRequestSchema } from '../schemas/task-inputs.js';
 import {
   AppendTaskNoteRequestSchema,
   CompleteStepRequestSchema,
@@ -21,6 +22,7 @@ import { scriptShouldAutoAdvance } from '../scripts/predicates.js';
 import { type AwakeBudget, acquireSuspendMonitor, createAwakeTimeout } from '../suspend-clock.js';
 import { json } from './http/json.js';
 import type { PortableStore } from './store.js';
+import type { PortableSampleSource } from './task-inputs.js';
 import { taskActiveAssignee } from './tasks.js';
 import type { PortableTaskGateResult } from './tasks.js';
 
@@ -69,6 +71,8 @@ export interface PortableTaskRunnerOptions {
     projectId?: string,
   ): Promise<Craftbook | undefined>;
   onChange?(task: Task): void;
+  /** A book's bundled samples, for `{ from: 'sample' }` inputs. */
+  samples?: PortableSampleSource;
   resolveStepRole?(projectId: string, role: string): Promise<string>;
   resolveAssignee?(
     projectId: string,
@@ -459,7 +463,12 @@ export class PortableTaskRunner {
         gezelId: await this.options.resolveAssignee(projectId, book, mode),
       };
     await beforeSave?.();
-    let task = await this.options.store.createTask(projectId, request, book);
+    let task = await this.options.store.createTask(
+      projectId,
+      request,
+      book,
+      this.options.samples ? { samples: this.options.samples } : {},
+    );
     task = await this.resolveActiveRole(task);
     this.options.onChange?.(task);
     return task;
@@ -494,6 +503,30 @@ export class PortableTaskRunner {
     const projectId = decodeURIComponent(match[1]!);
     const num = match[2];
     const action = match[3];
+    if (!num && action) {
+      // Named collection actions. Without this branch the create below took
+      // `/tasks/input-preview` and `/tasks/workflow` as task creations.
+      if (action === 'input-preview' && method === 'POST') {
+        const request = TaskInputPreviewRequestSchema.parse(body);
+        const book = await this.options.resolveCraftbook?.(
+          request.craftbookId,
+          undefined,
+          request.craftbookVersion,
+          projectId,
+        );
+        if (!book) return json({ error: 'This craftbook is not on this device' }, 404);
+        return json(
+          await store.previewTaskInput({
+            projectId,
+            book,
+            param: request.param,
+            source: request.source,
+            ...(this.options.samples ? { samples: this.options.samples } : {}),
+          }),
+        );
+      }
+      return json({ error: 'This task operation is not available on this host' }, 501);
+    }
     if (!num) {
       if (method === 'GET')
         return json({

@@ -48,6 +48,7 @@ import {
   matchProjectTypeForBrief,
   normalizeArtifactPath,
   projectNotFoundMessage,
+  projectTypeNamedByBrief,
   roleWithGloss,
 } from '@bendyline/gezel';
 /**
@@ -8022,7 +8023,18 @@ async function routeBriefToProjectType(brief: {
     .join('\n');
   try {
     const types = await listRoutableProjectTypes();
-    const match = matchProjectTypeForBrief(text, types);
+    // The person's own sentence fills the details when the brief names the
+    // same type: they are theirs, and a meester brief for "a week of meals
+    // for two adults and a toddler" dropped the household, so it no longer
+    // routed and a build crew got the job (2026-10-12). Only the same type:
+    // "a trip to Lisbon, and a website for my bakery" briefs two goals, and
+    // the bakery's must not become a trip.
+    const said = await personsLatestRequest();
+    const fromSaid = said ? matchProjectTypeForBrief(said, types) : null;
+    const match =
+      fromSaid && fromSaid.typeId === projectTypeNamedByBrief(text, types)
+        ? fromSaid
+        : matchProjectTypeForBrief(text, types);
     const type = match ? types.find((t) => t.id === match.typeId) : undefined;
     return match && type ? { match, type } : null;
   } catch {
@@ -8030,13 +8042,8 @@ async function routeBriefToProjectType(brief: {
   }
 }
 
-/**
- * The person's latest message in this session, when it alone names the goal
- * the brief was routed to. The meester's own brief for "Plan a trip to Lisbon
- * next spring" added hotels, dining and a budget, which the default posture
- * cannot research and the board then never showed.
- */
-async function personsRequestFor(typeId: string): Promise<string | undefined> {
+/** The person's latest message in this session, when it is a plain request. */
+async function personsLatestRequest(): Promise<string | undefined> {
   if (!sessionId) return undefined;
   try {
     const session = await api.getChatSession(sessionId);
@@ -8051,7 +8058,22 @@ async function personsRequestFor(typeId: string): Promise<string | undefined> {
           m.content.trim().length > 0,
       )
       ?.content.trim();
-    if (!said || said.length > 2000) return undefined;
+    return said && said.length <= 2000 ? said : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The person's latest message in this session, when it alone names the goal
+ * the brief was routed to. The meester's own brief for "Plan a trip to Lisbon
+ * next spring" added hotels, dining and a budget, which the default posture
+ * cannot research and the board then never showed.
+ */
+async function personsRequestFor(typeId: string): Promise<string | undefined> {
+  const said = await personsLatestRequest();
+  if (!said) return undefined;
+  try {
     return matchProjectTypeForBrief(said, await listRoutableProjectTypes())?.typeId === typeId
       ? said
       : undefined;

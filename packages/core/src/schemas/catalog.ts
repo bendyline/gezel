@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CraftbookCategorySchema } from '../craftbook-categories.js';
+import { InterestAreaIdSchema } from '../interests/areas.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import { IdRegex } from './catalog-id.js';
@@ -12,6 +13,7 @@ import {
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
+  CraftbookSampleSchema,
   CraftbookScriptsSchema,
   CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
@@ -662,6 +664,12 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
    */
   category: CraftbookCategorySchema.optional(),
   /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
+  /**
    * Optional workflow tag for filtering / Gilde browser facets
    * (e.g. "review-loop", "publish-pipeline"). Free-form.
    */
@@ -697,6 +705,8 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
   spawn: CraftbookSpawnSchema.optional(),
   /** User-speech phrases that route to this craftbook from chat. */
   triggers: z.array(z.string()).optional(),
+  /** Samples for the book's inputs, under `samples/` in this version folder. */
+  samples: z.array(CraftbookSampleSchema).optional(),
   /** Pre/PostToolUse hooks installed while this craftbook is active. */
   hooks: z.array(HookSpecSchema).optional(),
   /**
@@ -770,6 +780,12 @@ export const CraftbookTemplateManifestSchema = z.object({
   role: CraftbookRoleSchema.default('general'),
   /** Mirrored from the identity — see CraftbookTemplateIdentitySchema. */
   category: CraftbookCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   workflow: z.string().optional(),
   about: z.string(),
   steps: z.array(CraftbookStepSchema).min(1),
@@ -784,6 +800,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   availableVersions: z.array(z.string()).default([]),
   /** User-speech triggers (mirrored from the version manifest). */
   triggers: z.array(z.string()).optional(),
+  /** Samples (mirrored from the version manifest). */
+  samples: z.array(CraftbookSampleSchema).optional(),
   /** Hooks installed while active (mirrored from the version manifest). */
   hooks: z.array(HookSpecSchema).optional(),
   /**
@@ -1165,6 +1183,12 @@ const ProjectTypeCompositionShape = {
 export const ProjectTypeIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('project-type'),
   category: ProjectTypeCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   /** Small monochrome maker's mark inherited by project instances. */
   icon: ProjectIconIdSchema.optional(),
 });
@@ -1190,6 +1214,12 @@ export const ProjectTypeManifestSchema = z.object({
   description: z.string(),
   tags: z.array(z.string()).default([]),
   category: ProjectTypeCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   /** Small monochrome maker's mark inherited by project instances. */
   icon: ProjectIconIdSchema.optional(),
   maintainer: z.object({

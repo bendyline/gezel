@@ -1,4 +1,4 @@
-import type { CatalogItemDetail, Craftbook } from '../schemas/index.js';
+import type { CatalogItemDetail, CatalogItemSummary, Craftbook } from '../schemas/index.js';
 import type { MobileModelSourceIdentity } from '../schemas/mobile-provider.js';
 import type { BehaviorEntry, ModelStyle } from '../schemas/model-profile.js';
 import type { ChatModelTuning } from '../schemas/model-tuning.js';
@@ -24,4 +24,17 @@ export interface PortableContent {
   models?: PortableCatalogModel[];
   templates: CatalogItemDetail[];
   craftbooks: Array<{ item: CatalogItemDetail; book: Craftbook }>;
+  /**
+   * Each bundled book's sample files, base64 by version-folder path
+   * (`samples/shop-sales/sales.csv`), so a first project can run on its sample
+   * with no network. Keyed by craftbook id.
+   */
+  sampleFiles?: Record<string, Record<string, string>>;
+  /**
+   * Catalog books this device cannot run, as summaries with the reason
+   * (`unavailableReason`), so New Task can show them disabled and say why
+   * instead of the catalog silently looking smaller. Step prompts are
+   * stripped; nothing here is ever executed.
+   */
+  unavailableCraftbooks?: CatalogItemSummary[];
 }

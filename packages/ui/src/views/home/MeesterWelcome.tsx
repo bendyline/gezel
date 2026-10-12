@@ -1,10 +1,12 @@
 import {
-  FIRST_PROJECTS,
+  type FirstProject,
   type GezelSummary,
   type Poppetje as PoppetjeStruct,
+  firstProjectsFor,
 } from '@bendyline/gezel';
 import { type ReactNode, useEffect, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
+import { InterestTray } from '../../components/InterestTray.js';
 import { ReportErrorLink } from '../../components/ReportErrorLink.js';
 import { queueComposerPrefill } from '../../components/composer-prefill.js';
 import {
@@ -15,7 +17,10 @@ import {
 } from '../../components/first-run-model-text.js';
 import { formatTimeLeft, installQuiet } from '../../components/install-rate.js';
 import type { FirstRunModel } from '../../components/useFirstRunModel.js';
+import { useInterests } from '../../components/useInterests.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
+import { socialHost } from '../../components/useSocialMode.js';
+import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { requestSettingsSection } from '../../settings-nav.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { MeesterFigure } from './MeesterFigure.js';
@@ -110,6 +115,19 @@ export function MeesterWelcome({
   const modelState = setup?.model.state.kind;
   const fetching = modelState === 'installing' || modelState === 'engine';
   const waitingForTools = Boolean(setup);
+  const interests = useInterests();
+  // Latched for the visit: the first key pressed stamps the answer, and the
+  // tray must not vanish under the person's finger.
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (interests.ask) setAsking(true);
+  }, [interests.ask]);
+  const capabilities = runtimeCapabilities();
+  const firsts = firstProjectsFor({
+    interests: interests.areas,
+    canRunCraftbooks: capabilities.tasks && capabilities.chatTaskLaunch !== false,
+    host: socialHost(),
+  });
 
   return (
     <div
@@ -141,7 +159,30 @@ export function MeesterWelcome({
           </p>
         )}
 
-        {fetching ? (
+        {asking ? (
+          <div className="meester-welcome-interests">
+            <p className="meester-welcome-line">
+              {fetching
+                ? 'While I fetch my tools: what would you like help with? Pick any.'
+                : 'What would you like help with? Pick any, and I will suggest a start.'}
+            </p>
+            <InterestTray
+              label="What you would like help with"
+              selected={interests.areas}
+              onChange={(next) => void interests.save(next)}
+            />
+            <button
+              type="button"
+              className="gz-link-button meester-welcome-quiet-link"
+              onClick={() => {
+                if (interests.areas.length === 0) void interests.save([]);
+                setAsking(false);
+              }}
+            >
+              {interests.areas.length > 0 ? 'Done' : 'Not now'}
+            </button>
+          </div>
+        ) : fetching ? (
           <p className="meester-welcome-line">
             While I wait — what would you like to get done? Write it below and I'll start as soon as
             I'm ready.
@@ -168,15 +209,16 @@ export function MeesterWelcome({
         )}
 
         {/* First projects prefill the composer rather than sending, so the
-            person makes the sentence theirs before the meester reads it.
-            Each ends on a board the crew fills in (see FIRST_PROJECTS). */}
+            person makes the sentence theirs first. A typed one ends on a board
+            the crew fills in; a craftbook one arrives with its book (and its
+            sample) attached. See FIRST_PROJECTS and firstProjectsFor. */}
         <fieldset className="meester-welcome-openers gz-tray" aria-label="Something to start with">
-          {FIRST_PROJECTS.map((first) => (
+          {firsts.map((first) => (
             <button
               key={first.id}
               type="button"
               className="gz-key gz-key--stacked meester-welcome-opener"
-              onClick={() => queueComposerPrefill(projectId, first.prompt)}
+              onClick={() => startFirstProject(projectId, first)}
             >
               <span className="gz-key-label">{first.title}</span>
               <span className="gz-key-hint">{first.hint}</span>
@@ -203,6 +245,31 @@ export function MeesterWelcome({
         )}
       </div>
     </div>
+  );
+}
+
+/** Put a first project's sentence in the composer, with its craftbook attached when it has one. */
+function startFirstProject(projectId: string, first: FirstProject): void {
+  if (first.kind === 'type') {
+    queueComposerPrefill(projectId, first.prompt, undefined, { replace: true });
+    return;
+  }
+  queueComposerPrefill(
+    projectId,
+    first.prompt,
+    {
+      origin: 'user',
+      craftbookId: first.craftbookId,
+      craftbookName: first.title,
+      params: {},
+      ...(first.sample
+        ? {
+            inputs: { [first.sample.param]: { from: 'sample', sampleId: first.sample.sampleId } },
+            inputLabels: { [first.sample.param]: { label: 'the sample' } },
+          }
+        : {}),
+    },
+    { replace: true },
   );
 }
 

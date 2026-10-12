@@ -1861,3 +1861,29 @@ a.license-button:hover {
     transform: translateX(285%);
   }
 }
+
+/* Suggested-for-you knowledge offers: one row per catalog, name · size · key.
+   Offers only; the key starts the same install the full list does. */
+.knowledge-suggested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-suggested-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.knowledge-suggested-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

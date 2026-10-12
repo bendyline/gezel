@@ -561,14 +561,27 @@ and the meester's lines in the chat register (serif body). Rules:
   can answer), and Home's conversation leaves out scheduled runs' sessions
   altogether, so an install after 22:00 still opens on the welcome rather
   than a failed overnight review.
-- **First projects, not openers.** Three stacked keys (`gz-key--stacked`,
-  title over a one-line hint) offer goals a project type carries end to end
-  with one lead and a board: a trip, a celebration, a language tutor
-  (`FIRST_PROJECTS` in core). A key prefills an editable sentence into the
-  composer and never sends it. "Or tell me in your own words" sits beneath.
-  A first project is added only when it routes to its type against the
-  pinned catalog (the catalog package's `first-projects` test) and has been
-  seen to finish on an on-device model.
+- **First projects, not openers.** Up to four stacked keys (`gz-key--stacked`,
+  title over a one-line hint), chosen by `firstProjectsFor` from
+  `FIRST_PROJECTS` in core. A typed one is a goal a project type carries end
+  to end with one lead and a board (a trip, a celebration); a craftbook one
+  arrives in the composer with its book attached, and with the book's
+  bundled sample when it has one, so Send starts it with no meester turn
+  and nothing of the person's own. A key prefills an editable sentence and
+  never sends it. "Or tell me in your own words" sits beneath. A first
+  project joins the pool only after it passes its evals (`first-project-*`
+  scenarios: 2 of 3 on Gemma 4 E4B, 3 of 3 on Gemma 4 12B, Lockdown); a
+  phone offers only the ones that also passed on the phone (`phone: true`).
+- **The welcome asks what the person wants help with.** A new install (a
+  `firstUseAt` within the week) that has not answered sees the interest
+  tray under the meester's question, "While I fetch my tools: what would
+  you like help with? Pick any." (`InterestTray`, plain keys, several can be
+  latched, none required). When the model is already on the machine the same
+  tray sits inline above the first projects. Each press saves at once and the
+  first projects re-order under it; the tray stays for the visit rather than
+  vanishing on the first press, and "Not now" (or "Done") puts it away. An
+  established install is never interrupted to ask; Settings → General → What
+  you use gezel for holds the same tray, with each area's hint.
 
 ### The first request: crew, working notes, the finished thing
 
@@ -1058,6 +1071,34 @@ eyebrow (`.gz-npd-rail-group`) between groups; a shelf with no matching book
 is not drawn, so the same rail reads as a codebase's rail on a codebase and a
 household rail on a household project. The eyebrow is suppressed where the
 rail turns into a horizontal scroller — a stacked heading has no row to head.
+
+**Interests order; they never hide.** The person's interest areas
+(`config.interests`, read through `useInterests`, mapped by
+`interestAreasForCraftbook` / `interestAreasForProjectType`) put their work
+first wherever work is offered, and every item stays reachable:
+
+- New Task leads its rail with **For you** (the books serving the person's
+  areas, in the order the areas were picked) and opens on it, except inside a
+  project whose type recommends its own shelf. All plans stays one click away.
+- New Project orders its category rail and its sections by area, orders the
+  types inside each section, and lands on the first category that serves the
+  person. **All** is the first key of the rail.
+- Home's Make something draws its cards from the starters and the
+  `first-project` books, the person's areas first, with one place kept for
+  another area (`pickWithRange`) so a single pick never makes gezel look like
+  it does one thing.
+- Knowledge offers **Suggested for you**: up to two catalogs per area, smallest
+  first, each with its size and an **Add** key. Nothing downloads before the
+  tap, catalogs about one place (a region's travel guide, one state's case
+  law) are left to the full list, and the row is absent while the security
+  policy keeps the app offline.
+
+**A plan this host cannot run is shown with its reason.** New Task lists a
+craftbook the phone cannot run as a disabled card whose description is the
+reason (`craftbookHostGap`: "Splits into many smaller tasks, which needs the
+desktop."), the way New Project already treats a type. It never becomes a
+launch that fails, and it is never one of Home's suggestions or the For you
+shelf.
 
 **Questions with an attached document.** When a pending question carries a
 document — a night-shift report, a draft plan — the document is not a

@@ -37,3 +37,37 @@ export function invocationSignature(invocation: Readonly<Record<string, unknown>
 
 /** Every durable invocation key carries this prefix; `CreateTaskRequest` checks it. */
 export const CRAFTBOOK_INVOCATION_KEY_PREFIX = 'craftbook-root-v1:';
+
+/**
+ * A task with one of these statuses answers a retried launch with its key.
+ * A finished or canceled one does not, so sending the same words again
+ * starts a new run.
+ */
+export const LIVE_CRAFTBOOK_LAUNCH_STATUSES: ReadonlySet<string> = new Set([
+  'draft',
+  'active',
+  'paused',
+]);
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The composer launch's invocation key, with WebCrypto for hosts without
+ * `node:crypto` (the phone). The same digest layout as the desktop's
+ * `chatLaunchInvocationKey`, so a launch has one key on either host.
+ */
+export async function chatLaunchInvocationKeyAsync(args: {
+  sessionId: string;
+  draftId?: string;
+  message: string;
+  launch: Readonly<Record<string, unknown>>;
+}): Promise<string> {
+  const messageIdentity = args.draftId ?? (await sha256Hex(args.message));
+  const digest = await sha256Hex(
+    ['chat-launch', args.sessionId, messageIdentity, invocationSignature(args.launch)].join('\n'),
+  );
+  return `${CRAFTBOOK_INVOCATION_KEY_PREFIX}${digest}`;
+}

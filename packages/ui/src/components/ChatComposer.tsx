@@ -47,6 +47,7 @@ import {
   COMPOSER_PREFILL_EVENT,
   mergeComposerPrefill,
   takeComposerPrefill,
+  takeComposerTaskLaunch,
 } from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
 import { ComposerToolbarContext } from './composer-toolbar-context.js';
@@ -513,7 +514,9 @@ export function ChatComposer({
     // behavior: when the composer already has text, append the payload
     // below it (blank-line separated); when it's empty, the payload
     // becomes the whole draft.
-    const merged = mergeComposerPrefill(draftRef.current, queued);
+    const merged = queued.replace
+      ? queued.markdown
+      : mergeComposerPrefill(draftRef.current, queued.markdown);
     if (merged === null) return;
     draftRef.current = merged;
     draftUpdateRef.current(merged);
@@ -572,8 +575,13 @@ export function ChatComposer({
   draftFreshThreadRef.current = draft.isFreshThread;
   // The attached task: what Send starts instead of a chat turn. Off inside a
   // task thread or a craftbook-editing thread, where a launch makes no sense.
+  const capabilities = runtimeCapabilities();
   const taskLaunchEnabled =
-    Boolean(taskLaunchProps) && runtimeCapabilities().tasks && !taskRef && !craftbookRef;
+    Boolean(taskLaunchProps) &&
+    capabilities.tasks &&
+    capabilities.chatTaskLaunch !== false &&
+    !taskRef &&
+    !craftbookRef;
   const taskLaunch = useComposerTaskLaunch({
     enabled: taskLaunchEnabled,
     projectId,
@@ -583,6 +591,27 @@ export function ChatComposer({
     planText: intentPreviewText,
   });
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  // A prefill can arrive with its task attached (a welcome first project that
+  // runs a craftbook); attach it beside the sentence it came with.
+  const attachTaskRef = useRef(taskLaunch.attach);
+  attachTaskRef.current = taskLaunch.attach;
+  const dismissTaskRef = useRef(taskLaunch.dismiss);
+  dismissTaskRef.current = taskLaunch.dismiss;
+  useEffect(() => {
+    if (!taskLaunchEnabled) return;
+    const drain = () => {
+      const launch = takeComposerTaskLaunch(projectId);
+      if (launch) void attachTaskRef.current(launch);
+      else if (launch === null) void dismissTaskRef.current();
+    };
+    drain();
+    const onPrefill = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { projectId?: string } | undefined;
+      if (detail?.projectId === projectId) drain();
+    };
+    window.addEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+  }, [projectId, taskLaunchEnabled]);
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.

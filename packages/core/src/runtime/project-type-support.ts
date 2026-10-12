@@ -2,7 +2,7 @@ import { craftbookTemplateManifestFromRuntime } from '../craftbook-doc.js';
 import type { PortableInference } from '../mobile/inference.js';
 import { classifyModelTier } from '../model-profile/local-model-tier.js';
 import { type ProjectTypeHost, renderTurnStatePrelude } from '../project-types/composition.js';
-import type { CatalogItemDetail, ProjectTypeTool } from '../schemas/catalog.js';
+import type { CatalogItemDetail, CatalogItemSummary, ProjectTypeTool } from '../schemas/catalog.js';
 import type { Craftbook } from '../schemas/craftbook.js';
 import { type MobileModelInventory, MobileProviderIdSchema } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
@@ -22,6 +22,8 @@ export interface PortableProjectTypeSupportHost {
   inference: PortableInference;
   scripts(): PortableScripts | undefined;
   craftbooks(): readonly { item: CatalogItemDetail; book: Craftbook }[];
+  /** Books this device cannot run, each with its `unavailableReason`. */
+  unavailableCraftbooks?(): readonly CatalogItemSummary[];
   /** The catalog entry of a downloaded model; an imported file has none. */
   catalogModelFor(
     inventory: MobileModelInventory | undefined,
@@ -64,7 +66,10 @@ export async function portableTurnState(
  * definition, under the type's name.
  */
 export async function portableProjectCraftbookOffer(
-  host: Pick<PortableProjectTypeSupportHost, 'store' | 'types' | 'craftbooks'>,
+  host: Pick<
+    PortableProjectTypeSupportHost,
+    'store' | 'types' | 'craftbooks' | 'unavailableCraftbooks'
+  >,
   projectId: string,
 ) {
   const project = await host.store.getProject(projectId).catch(() => null);
@@ -74,14 +79,18 @@ export async function portableProjectCraftbookOffer(
     return manifest ? [{ sourceId: 'project', kind: 'craftbook-template' as const, manifest }] : [];
   });
   const carriedIds = new Set(carried.map((item) => item.manifest.id));
-  const items = [
+  const runnable = [
     ...carried,
     ...host
       .craftbooks()
       .map((book) => book.item)
       .filter((item) => !carriedIds.has(item.manifest.id)),
   ];
-  const offered = new Set(items.map((item) => item.manifest.id));
+  const offered = new Set(runnable.map((item) => item.manifest.id));
+  const items = [
+    ...runnable,
+    ...(host.unavailableCraftbooks?.() ?? []).filter((item) => !offered.has(item.manifest.id)),
+  ];
   const manifest = entry?.item.manifest;
   return {
     items,

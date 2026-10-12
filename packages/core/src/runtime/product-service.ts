@@ -4,6 +4,12 @@ import {
   resolveSocialMode,
   withCharacterChatCap,
 } from '../character/index.js';
+import {
+  LIVE_CRAFTBOOK_LAUNCH_STATUSES,
+  chatLaunchInvocationKeyAsync,
+} from '../craftbook-invocation-key.js';
+import { composeCraftbookLaunch, stringifyCraftbookParamValues } from '../craftbook-launch.js';
+import { sampleCommonDir } from '../craftbook-samples.js';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { displayName } from '../gezel-display.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
@@ -11,7 +17,7 @@ import { type XpRefresher, createXpRefresher } from '../growth/xp-refresher.js';
 import { stepCreditedGezelId } from '../growth/xp.js';
 import { checkHandoffChain } from '../handoff-limits.js';
 import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
-import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import type { ActiveCraftbookStep, TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { createLogger } from '../log.js';
 import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
@@ -46,6 +52,7 @@ import {
   UpdateConfigRequestSchema,
 } from '../schemas/api.js';
 import type { ProjectTypeTool } from '../schemas/catalog.js';
+import type { Craftbook, CraftbookSample } from '../schemas/craftbook.js';
 import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
   type MobileModelInventory,
@@ -62,6 +69,7 @@ import type { ChatSession, ExpectedDeliverable, TurnMessageOrigin } from '../sch
 import {
   CreateChatSessionRequestSchema,
   InterruptSessionRequestSchema,
+  LaunchTaskFromSessionRequestSchema,
   SendToSessionRequestSchema,
 } from '../schemas/session.js';
 import type { Task } from '../schemas/task.js';
@@ -69,7 +77,9 @@ import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
-import { deriveThreadTitleFromMessages } from '../thread-title.js';
+import { stepTurnSteering, tuningForStepAction } from '../tasks/step-turn-steering.js';
+import { NEW_THREAD_TITLE, deriveThreadTitleFromMessages } from '../thread-title.js';
+import { craftbookStartCardForTask } from '../tool-cards.js';
 import { roleHasTeamScope } from '../tools/access.js';
 import type { NativeToolBinding } from '../tools/native-tools.js';
 import { ChatEventBus } from './chat-events.js';
@@ -135,7 +145,8 @@ import { PortableSpeechRoutes } from './speech-routes.js';
 import type { PortableSpeech } from './speech.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
-import { evaluatePortableTaskGate } from './task-gates.js';
+import { evaluatePortableTaskGate, portableDeliverableReady } from './task-gates.js';
+import { PortableTaskInputError } from './task-inputs.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
@@ -268,6 +279,30 @@ export class PortableProductService {
   setNetworkCancellation(cancel: () => Promise<void>): void {
     this.cancelNetworkActivity = cancel;
   }
+  /**
+   * A bundled book's sample, from the content the build compiled: its files
+   * relative to the sample's own folder, so it lands as its contents.
+   */
+  private readBundledSample(
+    craftbookId: string,
+    sample: CraftbookSample,
+  ): Array<{ rel: string; bytes: Uint8Array }> | null {
+    const files = this.content.sampleFiles?.[craftbookId];
+    if (!files) return null;
+    const prefix = sampleCommonDir(sample.files);
+    const out: Array<{ rel: string; bytes: Uint8Array }> = [];
+    for (const path of sample.files) {
+      const base64 = files[path];
+      if (base64 === undefined) return null;
+      const binary = atob(base64);
+      out.push({
+        rel: path.slice(prefix.length),
+        bytes: Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+      });
+    }
+    return out;
+  }
+
   setContent(content: PortableContent): void {
     this.content = content;
   }
@@ -404,6 +439,9 @@ export class PortableProductService {
     this.projectTypes = new PortableProjectTypes(host.projectTypes ?? (async () => []));
     this.tasks = new PortableTaskRunner({
       store,
+      samples: {
+        read: async (craftbookId, sample) => this.readBundledSample(craftbookId, sample),
+      },
       runStep: (task, activationId, control) => this.runTaskStep(task, activationId, control),
       cancelStep: () => this.cancelTaskTurns(),
       canRun: () => this.assertNoConflict(),
@@ -417,13 +455,8 @@ export class PortableProductService {
           )
         ).id,
       resolveStepRole: async (_project, role) => (await this.recruit(role)).id,
-      resolveCraftbook: async (id, source, version, projectId) =>
-        this.content.craftbooks.find(
-          (entry) =>
-            entry.book.id === id &&
-            (!source || entry.item.sourceId === source) &&
-            (!version || entry.item.manifest.version === version),
-        )?.book ?? (await portableProjectTypeCraftbook(this.projectTypeSupport(), projectId, id)),
+      resolveCraftbook: (id, source, version, projectId) =>
+        this.resolveBundledCraftbook(id, source, version, projectId),
       shouldContinue: async (task) =>
         !(await store.listQuestions({ projectId: task.projectId, pending: true })).some(
           (q) => q.taskRef === task.ref,
@@ -900,6 +933,7 @@ export class PortableProductService {
       inference: this.inference,
       scripts: () => this.scripts,
       craftbooks: () => this.content.craftbooks,
+      unavailableCraftbooks: () => this.content.unavailableCraftbooks ?? [],
       catalogModelFor: (inventory, modelId) => this.catalogModelFor(inventory, modelId),
     };
   }
@@ -1139,6 +1173,7 @@ export class PortableProductService {
             profile: ResolvedModelProfile;
             isMeester: boolean;
             prompt?: BuiltInstructions;
+            craftbookStep?: ActiveCraftbookStep;
           })
         | undefined =
         providerId === 'llama-cpp' && provider.capabilities.structuredChat && this.inference.chat
@@ -1174,6 +1209,28 @@ export class PortableProductService {
       session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
+      // The desktop's per-step steering: the step the loop's correctives
+      // name, and an exact-action step's terminal tool and request shape.
+      const stepSteering =
+        activeTask && activeStep ? stepTurnSteering(activeTask, activeStep) : undefined;
+      if (structuredChat && stepSteering) {
+        structuredChat.craftbookStep = {
+          ...stepSteering.activeStep,
+          ...(stepSteering.workspaceDeliverable
+            ? {
+                deliverableReady: () =>
+                  portableDeliverableReady(
+                    this.store,
+                    activeTask!.ref,
+                    activeStep!.id,
+                    session.gezelId,
+                  ),
+              }
+            : {}),
+        };
+        if (stepSteering.action && structuredChat.tuning)
+          structuredChat.tuning = tuningForStepAction(structuredChat.tuning, stepSteering.action);
+      }
       const projectTools = await portableProjectScriptTools(this.projectTypes, context.project);
       // What the type's tools declare: a turn call ends the turn, and a
       // person's message is answered from the state as it stands.
@@ -1443,7 +1500,8 @@ export class PortableProductService {
         },
         inventoryTools,
         projectTools,
-        turnRules?.terminal && withCharacterChatCap(turnRules.terminal, socialCharacter),
+        stepSteering?.terminalToolPolicy ??
+          (turnRules?.terminal && withCharacterChatCap(turnRules.terminal, socialCharacter)),
         placement.requiredTool ??
           (gameState
             ? stateAnswerTool(projectTools, gameState.output, context.project)
@@ -1494,6 +1552,167 @@ export class PortableProductService {
    * checks a person can act on right away (size, engagement, the draft), and
    * runs when the current turn ends. A nudge that never queued is a plain send.
    */
+  private async resolveBundledCraftbook(
+    id: string,
+    source?: string,
+    version?: string,
+    projectId?: string,
+  ): Promise<Craftbook | undefined> {
+    return (
+      this.content.craftbooks.find(
+        (entry) =>
+          entry.book.id === id &&
+          (!source || entry.item.sourceId === source) &&
+          (!version || entry.item.manifest.version === version),
+      )?.book ?? (await portableProjectTypeCraftbook(this.projectTypeSupport(), projectId, id))
+    );
+  }
+
+  /**
+   * The composer's attached task (`POST /api/sessions/:id/launch-task`): the
+   * craftbook task starts from this message with no model turn, and the
+   * thread gets the message and a launch receipt, exactly as on the desktop.
+   */
+  private async launchTaskFromSession(session: ChatSession, body: unknown): Promise<Response> {
+    const request = LaunchTaskFromSessionRequestSchema.parse(body);
+    const { launch } = request;
+    this.assertNoConflict();
+    // A running turn holds its own copy of the session and rewrites it.
+    if (this.sessionBusy(session.id))
+      throw new ProductError(
+        'Wait for the current response in this conversation to finish, or stop it first.',
+        409,
+      );
+    if (!isEngagementAllowed(await this.store.readConfig()))
+      throw new ProductError('AI engagement is off. Turn it on in Settings to start work.', 403);
+    if (launch.tonight)
+      throw new ProductError('Running a task tonight needs the desktop app.', 501);
+    const text = request.draftId
+      ? rewritePromptDraftFileRefs(request.message, request.draftId)
+      : request.message;
+    const book = await this.resolveBundledCraftbook(
+      launch.craftbookId,
+      launch.craftbookSourceId,
+      undefined,
+      session.projectId,
+    );
+    if (!book) {
+      return json({ error: `craftbook "${launch.craftbookId}" is not on this device` }, 404);
+    }
+    const composed = composeCraftbookLaunch({
+      message: text,
+      craftbookName: book.name,
+      paramSchema: book.paramSchema,
+      params: stringifyCraftbookParamValues(launch.params),
+    });
+    const key = await chatLaunchInvocationKeyAsync({
+      sessionId: session.id,
+      ...(request.draftId ? { draftId: request.draftId } : {}),
+      message: request.message,
+      launch: launch as unknown as Record<string, unknown>,
+    });
+    // A retried POST finds the live task it made. With its receipt in the
+    // thread nothing is written twice; without one (a write that failed after
+    // the task existed) the receipt is written now instead of a second task.
+    const prior = (await this.store.listTasks({ projectId: session.projectId })).find(
+      (t) =>
+        t.origin?.kind === 'craftbook-invocation' &&
+        t.origin.key === key &&
+        LIVE_CRAFTBOOK_LAUNCH_STATUSES.has(t.status),
+    );
+    if (prior) {
+      let at = -1;
+      for (let i = session.messages.length - 1; i >= 0 && at < 0; i--) {
+        const m = session.messages[i]!;
+        if (
+          m.synthetic === 'craftbook-launch' &&
+          m.toolCalls?.some((call) => call.card?.taskRef === prior.ref)
+        )
+          at = i;
+      }
+      const userMessage = at > 0 ? session.messages[at - 1] : undefined;
+      if (at >= 0 && userMessage?.role === 'user') {
+        return json({ task: prior, userMessage, receipt: session.messages[at], reused: true });
+      }
+    }
+    if (request.draftId) {
+      const draft = await this.store.getPromptDraft(session.projectId, request.draftId);
+      if (!draft) throw new ProductError('Draft not found', 404);
+      if (draft.status !== 'draft' || !draftMatchesSession(draft, session))
+        throw new ProductError('This draft is not available to send in this conversation', 409);
+    }
+    let task: Task;
+    if (prior) task = prior;
+    else {
+      try {
+        task = await this.tasks.create(session.projectId, {
+          title: launch.title?.trim() || book.name,
+          description: composed.description,
+          craftbookId: launch.craftbookId,
+          ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
+          ...(Object.keys(composed.params).length > 0 ? { craftbookParams: composed.params } : {}),
+          ...(launch.inputs && Object.keys(launch.inputs).length > 0
+            ? { inputs: launch.inputs }
+            : {}),
+          ...(launch.assignee ? { assignee: launch.assignee } : {}),
+          createdBy: { kind: 'user' },
+          launchSessionId: session.id,
+          craftbookInvocationKey: key,
+        });
+      } catch (error) {
+        if (error instanceof PortableTaskInputError) {
+          return json({ error: error.message, code: 'task-input', param: error.param }, 422);
+        }
+        throw error;
+      }
+    }
+    const at = new Date().toISOString();
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: text,
+      at,
+      ...(request.draftId ? { draftId: request.draftId } : {}),
+    };
+    const card = craftbookStartCardForTask(task);
+    const receipt: ChatMessage = {
+      role: 'assistant',
+      synthetic: 'craftbook-launch',
+      content: `Started the "${task.craftbook.name}" craftbook — task ${task.ref}.`,
+      at: new Date().toISOString(),
+      toolCalls: [
+        {
+          name: 'invoke_craftbook',
+          at,
+          durationMs: 0,
+          success: true,
+          argsSummary: `${task.craftbook.name} · ${task.ref}`,
+          ...(card ? { card } : {}),
+        },
+      ],
+    };
+    session.messages.push(userMessage, receipt);
+    if (!session.title || session.title === NEW_THREAD_TITLE)
+      session.title = deriveThreadTitleFromMessages([userMessage]) ?? book.name;
+    try {
+      await this.store.writeSession(
+        session,
+        request.draftId ? { sentDraftId: request.draftId } : {},
+      );
+    } catch (error) {
+      session.messages.splice(-2, 2);
+      throw error;
+    }
+    if (request.draftId) {
+      const draft = await this.store.getPromptDraft(session.projectId, request.draftId);
+      if (draft) this.draftChanged(draft);
+    }
+    this.emit(session, { type: 'user_message', message: userMessage });
+    this.emit(session, { type: 'complete', message: receipt });
+    this.emit(session, { type: 'done' });
+    void this.tasks.run(task.ref).catch(() => {});
+    return json({ task, userMessage, receipt, reused: false }, 201);
+  }
+
   private async submit(
     id: string,
     body: Record<string, unknown>,
@@ -1684,6 +1903,7 @@ export class PortableProductService {
         isMeester: boolean;
         /** The desktop builder's system prompt for this turn. */
         prompt?: BuiltInstructions;
+        craftbookStep?: ActiveCraftbookStep;
       };
     },
     inventory: readonly PortableToolSpec[],
@@ -1911,6 +2131,7 @@ export class PortableProductService {
             history: shared.history,
             prompt: messages.at(-1)?.content ?? '',
             ...(terminalToolPolicy ? { terminalToolPolicy } : {}),
+            ...(shared.craftbookStep ? { activeCraftbookStep: shared.craftbookStep } : {}),
             ...(requiredTool ? { requiredTool } : {}),
             tools: inventory,
             actions: loopOptions.actions,
@@ -2747,6 +2968,8 @@ export class PortableProductService {
           });
         }
         if (action === 'send' && method === 'POST') return json(await this.submit(id, body));
+        if (action === 'launch-task' && method === 'POST')
+          return this.launchTaskFromSession(session, body);
         if (action === 'interrupt' && method === 'POST')
           return json(await this.interrupt(id, body));
         if (action === 'archive' && method === 'POST') {

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CompleteStepResponseSchema, type CreateTaskRequest } from '../schemas/task.js';
 import { PortableStore } from './store.js';
-import { type PortableGateScript, evaluatePortableTaskGate } from './task-gates.js';
+import {
+  type PortableGateScript,
+  evaluatePortableTaskGate,
+  portableDeliverableReady,
+} from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { portableFixture } from './test-files.js';
 
@@ -351,5 +355,42 @@ describe('portable shared gate-script contract', () => {
     expect(resolveStepRole).toHaveBeenCalledWith('default', 'Reviewer');
     expect(completed.task.craftbook.steps[1]?.suggestedGezelId).toBe(reviewer.id);
     expect(completed.gate?.decision).toBe('reject');
+  });
+});
+
+describe('portableDeliverableReady', () => {
+  it('waits for the advance file and every workspace file the gate reads, for the owner only', async () => {
+    const { store } = portableFixture();
+    await store.ensureLayout();
+    const mira = await store.createGezel({ name: 'Mira', role: 'Builder' });
+    const task = await store.createTask('default', {
+      title: 'Offline page',
+      description: 'Build an offline-capable page with its service worker beside it.',
+      steps: [
+        {
+          id: 'build',
+          name: 'Build',
+          assignee: { kind: 'gezel', gezelId: mira.id },
+          advanceWhen: { file: 'index.html', minBytes: 10 },
+          gate: { at: 'completion', checks: [{ kind: 'minBytes', file: 'sw.js', bytes: 1 }] },
+        },
+        { id: 'finish', name: 'Finish', terminal: true },
+      ],
+    });
+    const ready = (gezelId = mira.id) =>
+      portableDeliverableReady(store, task.ref, 'build', gezelId);
+    expect(await ready()).toBe(false);
+    await store.writeFile('workspace', 'default', 'index.html', 'short');
+    expect(await ready()).toBe(false);
+    await store.writeFile('workspace', 'default', 'index.html', '<!doctype html><p>Hi</p>');
+    expect(await ready()).toBe(false);
+    await store.writeFile(
+      'workspace',
+      'default',
+      'sw.js',
+      'self.addEventListener("fetch", () => {});',
+    );
+    expect(await ready()).toBe(true);
+    expect(await ready('someone-else')).toBe(false);
   });
 });

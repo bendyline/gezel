@@ -27,6 +27,14 @@ const FULL: CraftbookTemplateManifest = CraftbookTemplateManifestSchema.parse({
   hooks: [{ phase: 'PreToolUse', decision: 'allow' }],
   toolsets: [{ toolsetId: 'github', optional: true }],
   connectors: [{ typeId: 'github-pulls', reason: 'mirror the pull request' }],
+  samples: [
+    {
+      id: 'team-sync',
+      title: 'a team sync',
+      param: 'topic',
+      files: ['samples/team-sync/notes.md'],
+    },
+  ],
   paramSchema: { type: 'object', properties: { focus: { type: 'string' } } },
   command: 'everything',
   requirements: [{ kind: 'github' }],

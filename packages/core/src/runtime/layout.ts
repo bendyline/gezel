@@ -35,6 +35,10 @@ export async function ensureLayout(repo: PortableRepository): Promise<void> {
   if (!gezels.some((gezel) => gezel.id === config.meesterGezelId)) {
     if (gezels.length) config.meesterGezelId = gezels[0]!.id;
     else {
+      // No gezel at all is a home booting for the first time. Stamp it like
+      // the desktop's Store does, so the welcome may ask what the person wants
+      // help with; an established phone carries no stamp and is never asked.
+      config.firstUseAt ??= at;
       const name = randomMeesterName();
       const id = await repo.uniqueId('gezels', slugifyEntityName(name));
       for (const [path, bytes] of gezelWrites(repo, {

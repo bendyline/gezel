@@ -19,6 +19,12 @@ export interface RuntimeCapabilities {
    * deliverable and every file). False where it cannot; omitted means it can.
    */
   taskOutputs?: boolean;
+  /**
+   * A chat composer can launch a craftbook straight from a message
+   * (`POST /api/sessions/:id/launch-task`), samples included. Omitted means it
+   * follows `tasks`; false hides the attached-task chip and craftbook first projects.
+   */
+  chatTaskLaunch?: boolean;
   structuredQuestions: boolean;
   terminal: boolean;
   git: boolean;
@@ -132,6 +138,7 @@ export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   taskNoteEditing: true,
   taskGateOverride: false,
   taskOutputs: false,
+  chatTaskLaunch: true,
   structuredQuestions: true,
   terminal: false,
   git: false,

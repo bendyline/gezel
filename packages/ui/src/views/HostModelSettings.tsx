@@ -12,6 +12,7 @@ import {
 } from '../settings-nav.js';
 import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsInterests } from './SettingsInterests.js';
 import { SettingsLegalSection } from './SettingsLegal.js';
 import { SettingsSectionPicker } from './SettingsSectionPicker.js';
 
@@ -106,6 +107,7 @@ export function HostModelSettings() {
           </section>
         ) : (
           <>
+            <SettingsInterests />
             <section>
               <h3>Appearance</h3>
               <ThemePicker />

@@ -232,6 +232,55 @@ describe('NewTaskDialog', () => {
     expect(screen.queryByRole('radio', { name: 'Research report' })).not.toBeInTheDocument();
   });
 
+  it('opens on For you, built from the person’s interest areas', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      interests: { areas: ['data'], askedAt: '2026-10-12T10:00:00Z' },
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('spreadsheet-findings', 'Spreadsheet Findings', {
+          category: 'research',
+          interests: ['data'],
+        }),
+        bookItem('code-review', 'Code Review', { category: 'code-review' }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    renderDialog();
+    expect(await screen.findByRole('button', { name: /For you/ })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /Spreadsheet/ })).toBeInTheDocument(),
+    );
+    // For you is a shelf, not a filter: the rest stays a click away.
+    expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /All plans/ }));
+    expect(screen.getByRole('radio', { name: 'Code Review' })).toBeInTheDocument();
+  });
+
+  it('shows a plan this host cannot run as a disabled card with its reason', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        {
+          ...bookItem('pr-review', 'PR Review', { category: 'code-review' }),
+          unavailableReason: 'Splits into many smaller tasks, which needs the desktop.',
+        },
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /All plans/ }));
+    const card = screen.getByRole('radio', { name: /PR Review/ });
+    expect(card).toBeDisabled();
+    expect(card).toHaveTextContent('needs the desktop');
+  });
+
   it('falls back to tag inference for a craftbook with no authored category', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [bookItem('legacy-book', 'Legacy Book', { tags: ['tests', 'coverage'] })],

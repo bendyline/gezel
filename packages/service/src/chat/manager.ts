@@ -88,8 +88,6 @@ import {
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
-  normalizeScriptRefs,
-  normalizeStepGate,
   nowIso,
   oneShotSystemMessage,
   parseGezelMentionId,
@@ -105,9 +103,10 @@ import {
   resolveSecurityPolicy,
   roleDeliverableScripts,
   stepDeliverablePath,
-  stepOnEnterProducesAdvanceFile,
+  stepTurnSteering,
   taskEffectiveStatus,
   tierAtLeast,
+  tuningForStepAction,
   turnCancelledMessage,
   validateScriptInput,
   withEffectiveTaskStatuses,
@@ -15034,109 +15033,28 @@ export class ChatManager extends LocalEngineRuntime {
     // guard and get pointed at `write_file` (wrong for a review step)
     // and either fabricate or stall again.
     if (taskContext?.step) {
-      const step = withInferredConsumes(taskContext.task, taskContext.step);
-      // Lists run in order; the LAST onExit ref's output drives branch
-      // routing, so that's the one the anti-spin corrective names.
-      const exitRefs = normalizeScriptRefs(step.onExit);
-      const lastExit = exitRefs[exitRefs.length - 1];
-      // Workspace deliverables only: an artifact checkpoint already ends
-      // the turn on its write (terminalToolPolicy below), and a file the
-      // step's onEnter hook wrote proves nothing about the model's work.
+      const steering = stepTurnSteering(taskContext.task, taskContext.step);
       const readyTask = taskContext.task;
-      const deliverableReady =
-        step.advanceWhen?.file &&
-        !step.advanceWhen.artifact &&
-        !stepOnEnterProducesAdvanceFile(step)
-          ? ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
-              workspaceDeliverableReady(
-                this.deliverableGateDeps(),
-                readyTask.projectId,
-                readyTask.num,
-                step.id,
-                record,
-                writtenThisTurn,
-              )
-          : undefined;
+      const readyStepId = taskContext.step.id;
       opts.activeCraftbookStep = {
-        name: step.name,
-        ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
-        ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
-        ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
-        ...(step.consumes?.length
+        ...steering.activeStep,
+        ...(steering.workspaceDeliverable
           ? {
-              requiredInputs: step.consumes.map((input) => ({
-                path: input.file,
-                artifact: input.artifact === true,
-              })),
+              deliverableReady: ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
+                workspaceDeliverableReady(
+                  this.deliverableGateDeps(),
+                  readyTask.projectId,
+                  readyTask.num,
+                  readyStepId,
+                  record,
+                  writtenThisTurn,
+                ),
             }
           : {}),
-        ...(deliverableReady ? { deliverableReady } : {}),
       };
-      const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
-      const fixedEvidenceAction =
-        step.toolPolicy?.outputMedium === 'none' &&
-        (step.toolPolicy.allowTools?.length ?? 0) > 0 &&
-        normalizedGate?.at === 'completion' &&
-        normalizedGate.checks.length > 0 &&
-        normalizedGate.checks.every(
-          (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
-        ) &&
-        normalizedGate.scripts.length === 0;
-      const artifactCheckpointAction =
-        step.toolPolicy?.outputMedium === 'artifact' &&
-        step.advanceWhen?.artifact === true &&
-        normalizedGate?.at === 'completion';
-      if (fixedEvidenceAction || artifactCheckpointAction) {
-        // The completion gate, not another generation, decides whether the
-        // action was sufficient. Ending the provider's internal tool loop on
-        // its first successful exact action avoids five identical reads (and
-        // five full prefills) before ChatManager gets a chance to evaluate
-        // the durable History evidence.
-        opts.terminalToolPolicy = {
-          toolNames: fixedEvidenceAction ? [...step.toolPolicy!.allowTools!] : ['write_artifact'],
-          fallbackText: fixedEvidenceAction
-            ? 'Assigned records opened.'
-            : 'Checkpoint written for validation.',
-          maxClosingChars: 120,
-          ...(artifactCheckpointAction && step.advanceWhen?.file
-            ? { onlyWhenArgEquals: { arg: 'path', value: step.advanceWhen.file } }
-            : {}),
-        };
-        if (fixedEvidenceAction) {
-          // This is a mechanical capability invocation, not a reasoning
-          // task. Dual-mode local models otherwise occasionally spend their
-          // entire thinking budget explaining the required read and finish
-          // without calling it, leaving a large fanout stalled for the
-          // scheduler's retry window. Keep the model's ordinary reasoning
-          // profile for the review step; only the evidence action gets the
-          // compact instruct-shaped request.
-          opts.tuning = {
-            ...resolvedTuning,
-            sampling: {
-              ...resolvedTuning.sampling,
-              maxTokens: Math.min(resolvedTuning.sampling.maxTokens ?? 512, 512),
-            },
-            reasoning: {
-              ...resolvedTuning.reasoning,
-              enableThinking: false,
-              thinkingBudget: undefined,
-            },
-            toolChoice: 'required',
-          };
-        } else {
-          // A checkpoint step may need substantial private reasoning, but its
-          // public/durable outcome is the artifact write. Requiring at least
-          // one tool call prevents a local model from spending the whole
-          // generation budget narrating that analysis and returning at
-          // `finish_reason=length` without ever publishing the checkpoint.
-          // Unlike the evidence-only branch above, preserve the model's
-          // ordinary reasoning and token budget; only constrain the outcome
-          // shape.
-          opts.tuning = {
-            ...resolvedTuning,
-            toolChoice: 'required',
-          };
-        }
+      if (steering.action && steering.terminalToolPolicy) {
+        opts.terminalToolPolicy = steering.terminalToolPolicy;
+        opts.tuning = tuningForStepAction(resolvedTuning, steering.action);
       }
     }
     // Craftbook hooks: when this session's active task carries a

@@ -1,15 +1,18 @@
 import {
   type GezelSummary,
   type Project,
+  interestAreasForCraftbook,
+  pickWithRange,
   planDisplayName,
   planOutputSummary,
   starterCraftbookIds,
   visibleCatalogItems,
 } from '@bendyline/gezel';
-import { Suspense, lazy, useEffect, useReducer, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useReducer, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { navigateToTab } from '../../components/nav-actions.js';
+import { useInterests } from '../../components/useInterests.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { ProjectGlyph } from '../projects/new-project-meta.js';
 import { type BookItem, craftbookGlyph, toBookItems } from '../tasks/new-task-meta.js';
@@ -21,29 +24,44 @@ const NewTaskDialog = lazy(() =>
 
 /** A first request uses the same project offer and launch form as Tasks. */
 export function MakeSomething({ projectId, projects }: { projectId: string; projects: Project[] }) {
-  const [books, setBooks] = useState<BookItem[]>([]);
+  const [pool, setPool] = useState<BookItem[]>([]);
   const [failed, setFailed] = useState(false);
   const [retry, retryLoad] = useReducer((value: number) => value + 1, 0);
   const [selection, setSelection] = useState<string | null | undefined>(undefined);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
+  const interests = useInterests();
+  // The person's areas first, and one place kept for another area so a
+  // single pick never makes gezel look like it does one thing.
+  const books = useMemo(
+    () =>
+      pickWithRange(pool, (book) => interestAreasForCraftbook(book.manifest), interests.areas, 8),
+    [pool, interests.areas],
+  );
   useEffect(() => {
     // A retry remounts the request lifecycle, including its cancellation guard.
     void retry;
     let canceled = false;
-    setBooks([]);
+    setPool([]);
     setFailed(false);
     void api
       .listProjectCraftbooks(projectId)
       .then((result) => {
         if (canceled) return;
+        // A plan this host cannot run is listed in New Task with its reason;
+        // it is never one of Home's suggestions.
         const items = toBookItems(
           visibleCatalogItems(result.items ?? [], showWorkInProgressFeatures),
-        );
+        ).filter((book) => !book.item.unavailableReason);
         const ids = result.starterIds ?? starterCraftbookIds(items.map((book) => book.manifest));
-        setBooks(
-          ids.flatMap((id) => items.find((book) => book.manifest.id === id) ?? []).slice(0, 8),
+        const starters = ids.flatMap((id) => items.find((book) => book.manifest.id === id) ?? []);
+        // First-project books join the pool so a chosen area has something
+        // of its own to offer; the starters keep their order ahead of them.
+        const firstProjects = items.filter(
+          (book) =>
+            (book.manifest.tags ?? []).includes('first-project') && !starters.includes(book),
         );
+        setPool([...starters, ...firstProjects]);
       })
       .catch(() => {
         if (!canceled) setFailed(true);

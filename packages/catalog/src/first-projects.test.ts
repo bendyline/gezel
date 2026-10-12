@@ -20,6 +20,7 @@ describe('first projects against the pinned catalog', () => {
     const items = await new CatalogService().list('project-type');
     const types = items.map((item) => item.manifest as unknown as BriefRoutableType);
     for (const first of FIRST_PROJECTS) {
+      if (first.kind !== 'type') continue;
       expect(briefAsksForBuild(first.prompt), first.id).toBe(false);
       const match = matchProjectTypeForBrief(first.prompt, types);
       expect(match?.typeId, first.id).toBe(first.typeId);
@@ -32,6 +33,30 @@ describe('first projects against the pinned catalog', () => {
         expect(first.prompt.toLowerCase(), `${first.id}.${key}`).toContain(
           String(value).toLowerCase(),
         );
+      }
+    }
+  });
+});
+
+describe('craftbook first projects against the pinned catalog', () => {
+  it('names books the catalog carries, with the sample each one launches on', async () => {
+    const catalog = new CatalogService();
+    for (const first of FIRST_PROJECTS) {
+      if (first.kind !== 'craftbook') continue;
+      const detail = await catalog.get('craftbook-template', first.craftbookId);
+      expect(detail?.manifest.kind, first.id).toBe('craftbook-template');
+      if (!first.sample || detail?.manifest.kind !== 'craftbook-template') continue;
+      const sample = detail.manifest.samples?.find((s) => s.id === first.sample!.sampleId);
+      expect(sample?.param, `${first.id} sample`).toBe(first.sample.param);
+      for (const path of sample?.files ?? []) {
+        const bytes = await catalog.readItemFile(
+          'craftbook-template',
+          first.craftbookId,
+          path,
+          undefined,
+          detail.manifest.version,
+        );
+        expect(bytes?.length ?? 0, `${first.id} ${path}`).toBeGreaterThan(0);
       }
     }
   });

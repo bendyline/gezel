@@ -155,7 +155,11 @@ Keep Gezel's already-signed executables out of any blanket re-signing hook;
 sign the enclosing application normally. Unsupported targets fail unless the
 build explicitly passes `allowUnavailable` and disables hosted AI.
 
-At runtime, `verifyNativeBinaries` is the side-effect-free service verifier.
+At runtime, `verifyNativeBinaries` is the side-effect-free service verifier. It
+matches the payload's file set, sizes, and SHA-256 hashes against the service's
+pins, and on macOS checks the enclosing app's signature and notarization. It
+does not re-check each file's code signature: the native release verified those
+when it signed them, and the pins bind those signed bytes.
 In-process hosting invokes it before starting a service whenever a native
 payload is configured, including explicit development payloads. Store mode clears ambient developer engine overrides
 for the host lifetime and refuses executable downloads. The desktop factory

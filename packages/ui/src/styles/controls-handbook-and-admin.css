@@ -697,6 +697,33 @@
   white-space: normal;
 }
 
+/* Interest keys are short labels, so unlike the openers they wrap in a row.
+   Several can be latched at once (aria-pressed); none is required. */
+.meester-welcome-interests {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.interest-tray {
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.interest-tray-key {
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.interest-tray-key.gz-key--stacked {
+  flex: 1 1 14rem;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+}
+
 .meester-welcome-helpers {
   display: flex;
   flex-direction: column;

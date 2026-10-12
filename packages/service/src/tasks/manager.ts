@@ -24,6 +24,8 @@ import {
   type TaskCraftbookStep,
   type TaskExecutionMode,
   type TaskFanout,
+  type TaskInputPreviewResponse,
+  type TaskInputSource,
   type TaskNote,
   type TaskNoteAuthor,
   type TaskReferences,
@@ -112,7 +114,13 @@ import {
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
 import { type StepGatedEvent, gateHistoryEvidence, recordStepGateOutcome } from './gate-history.js';
-import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './inputs/resolve.js';
+import {
+  type CraftbookSampleReader,
+  inputsHistoryDetails,
+  planLaunchInputs,
+  previewTaskInput,
+  writeTaskWithInputs,
+} from './inputs/resolve.js';
 import type { InputStagingManager } from './inputs/staging.js';
 import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import type {
@@ -392,6 +400,7 @@ export class TaskManager {
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
   private inputStaging?: InputStagingManager;
+  private sampleReader?: CraftbookSampleReader;
   private readonly autoPreparedConnectorTypes = new Set<string>();
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
@@ -633,9 +642,43 @@ export class TaskManager {
     };
   }
 
+  /**
+   * A dry run of one input source, read with the same store, staging and
+   * samples a launch uses. Null when the book does not resolve here.
+   */
+  async previewInput(
+    projectId: string,
+    args: { craftbookId: string; param: string; source: TaskInputSource; version?: string },
+  ): Promise<TaskInputPreviewResponse | null> {
+    const resolved = await this.craftbookResolver?.resolve(args.craftbookId, {
+      ...(args.version ? { version: args.version } : {}),
+      projectId,
+    });
+    if (!resolved) return null;
+    const book = resolved.craftbook;
+    return previewTaskInput(
+      { store: this.store, staging: this.inputStaging, samples: this.sampleReader },
+      {
+        projectId,
+        craftbookId: args.craftbookId,
+        paramSchema: book.paramSchema ?? {},
+        param: args.param,
+        source: args.source,
+        ...(book.samples ? { samples: book.samples } : {}),
+        ...(book.version ? { version: book.version } : {}),
+        ...(resolved.sourceId ? { sourceId: resolved.sourceId } : {}),
+      },
+    );
+  }
+
   /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
   setInputStaging(staging: InputStagingManager): void {
     this.inputStaging = staging;
+  }
+
+  /** Where a book's samples are read from; unset → sample sources are refused. */
+  setSampleReader(reader: CraftbookSampleReader): void {
+    this.sampleReader = reader;
   }
 
   /**
@@ -858,6 +901,7 @@ export class TaskManager {
 
     // ── resolve main craftbook ──────────────────────────────────────
     let mainBook: Craftbook;
+    let mainBookSourceId: string | undefined;
     const sources: TaskCraftbookSource[] = [];
     if (input.craftbookId) {
       if (!this.craftbookResolver) {
@@ -874,6 +918,7 @@ export class TaskManager {
         throw new Error(`task ${projectId}/${num}: craftbook "${input.craftbookId}" not found`);
       }
       mainBook = resolved.craftbook;
+      mainBookSourceId = resolved.sourceId;
       const missingToolsets = unmetToolsets(
         mainBook.toolsets,
         await installedToolsetIds(this.store, projectId),
@@ -1093,8 +1138,15 @@ export class TaskManager {
     // number is known and interpolation is just below. Nothing is written
     // until the task write commits the plan.
     const inputsPlan = await planLaunchInputs(
-      { store: this.store, staging: this.inputStaging },
-      { projectId, num, book: mainBook, request: input, params: effectiveCraftbookParams },
+      { store: this.store, staging: this.inputStaging, samples: this.sampleReader },
+      {
+        projectId,
+        num,
+        book: mainBook,
+        ...(mainBookSourceId ? { bookSourceId: mainBookSourceId } : {}),
+        request: input,
+        params: effectiveCraftbookParams,
+      },
     );
     if (inputsPlan) Object.assign(craftbookParamOverrides, inputsPlan.params);
     Object.assign(

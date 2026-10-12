@@ -159,6 +159,7 @@ import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
+import { catalogSampleReader } from './tasks/inputs/samples.js';
 import { InputStagingManager } from './tasks/inputs/staging.js';
 
 import { ImageProviderManager } from './providers/image/manager.js';
@@ -1679,6 +1680,7 @@ export async function startProductService(
   chat.setPromptDrafts(promptDrafts);
   const inputStaging = new InputStagingManager(store);
   tasks.setInputStaging(inputStaging);
+  tasks.setSampleReader(catalogSampleReader(catalog));
   // The nightly oversight task is ensured at boot; ensure it again as each
   // window opens, so a task deleted, renamed or stuck on an old prompt since
   // boot is repaired in time to run tonight.

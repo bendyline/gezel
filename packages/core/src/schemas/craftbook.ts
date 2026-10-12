@@ -901,6 +901,31 @@ export type CraftbookScripts = z.infer<typeof CraftbookScriptsSchema>;
  * while `basedOn` points readers to the original project or procedure that
  * inspired it.
  */
+/**
+ * A sample a craftbook carries for one of its inputs, so a person can try the
+ * book with nothing of their own (the welcome's "Try it on a sample") and an
+ * eval has a fixed input. The files live in the book's version folder under
+ * `samples/`, listed explicitly so nothing outside them is ever read, and are
+ * copied into the task's inputs folder at launch.
+ */
+export const CraftbookSampleSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  /** What the sample is, in a few words: "a team meeting's notes". */
+  title: z.string().min(1),
+  /** The input param it fills. */
+  param: z.string().min(1),
+  files: z
+    .array(
+      z
+        .string()
+        .regex(/^samples\/[A-Za-z0-9._\-/ ]+$/)
+        .refine((p) => !p.split('/').includes('..'), 'a sample path never leaves samples/'),
+    )
+    .min(1)
+    .max(50),
+});
+export type CraftbookSample = z.infer<typeof CraftbookSampleSchema>;
+
 export const CraftbookBasedOnSchema = z.object({
   name: z.string().min(1),
   url: z
@@ -969,6 +994,8 @@ export const CraftbookSchema = z
     defaultAssignee: TaskAssigneeSchema.optional(),
     steps: z.array(CraftbookStepSchema).min(1),
     entryStepId: z.string().min(1),
+    /** Samples for its inputs, from the catalog — see {@link CraftbookSampleSchema}. */
+    samples: z.array(CraftbookSampleSchema).optional(),
     /**
      * User-speech phrases that route to this craftbook. Matched
      * case-insensitively as substrings against the user's chat input

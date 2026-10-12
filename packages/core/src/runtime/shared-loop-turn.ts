@@ -4,7 +4,7 @@ import {
   LlamaCppSession,
   constrainedToolNoSignalMsForModel,
 } from '../local-loop/llama-cpp-session.js';
-import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import type { ActiveCraftbookStep, TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import {
   buildToolEvidenceReplay,
   toolEvidenceBudgetChars,
@@ -60,6 +60,8 @@ export interface SharedLoopTurnOptions {
   prompt: string;
   /** Tools whose success ends the turn, as the desktop sets them (a game's move). */
   terminalToolPolicy?: TerminalToolPolicy;
+  /** The craftbook step a task turn serves, which the loop's steering names. */
+  activeCraftbookStep?: ActiveCraftbookStep;
   /** The turn's first request must call this tool (a reaction's `turn`). */
   requiredTool?: string;
   tools: readonly PortableToolSpec[];
@@ -200,6 +202,7 @@ export async function runSharedLoopTurn(
     priorMessages: replay.entries,
     bridges: executor,
     ...(options.terminalToolPolicy ? { terminalToolPolicy: options.terminalToolPolicy } : {}),
+    ...(options.activeCraftbookStep ? { activeCraftbookStep: options.activeCraftbookStep } : {}),
     queue: options.host.queue,
     provider: options.host,
     streamingIdleMs: STREAMING_IDLE_MS,

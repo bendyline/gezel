@@ -95,7 +95,52 @@ describe('MeesterWelcome', () => {
       expect(screen.getByRole('button', { name: /Practise a language/ })).toBeInTheDocument();
       fireEvent.click(trip);
       // Prefill, not send — the person makes the sentence theirs first.
-      expect(prefill).toHaveBeenCalledWith('alpha', expect.stringContaining('Plan a trip to'));
+      // A pick replaces the draft, so a second pick never sends both sentences.
+      expect(prefill).toHaveBeenCalledWith(
+        'alpha',
+        expect.stringContaining('Plan a trip to'),
+        undefined,
+        { replace: true },
+      );
+    });
+
+    it('asks a new install what it wants help with, and saves each key pressed', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
+      );
+      vi.mocked(api.updateConfig).mockResolvedValue({} as never);
+      render(<MeesterWelcome {...figure} />);
+      const data = await screen.findByRole('button', { name: 'Data and spreadsheets' });
+      fireEvent.click(data);
+      await waitFor(() =>
+        expect(api.updateConfig).toHaveBeenCalledWith({
+          interests: { areas: ['data'], askedAt: expect.any(String) },
+        }),
+      );
+      // The tray stays for the visit, latched, rather than vanishing on the first press.
+      expect(screen.getByRole('button', { name: 'Data and spreadsheets' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it('never asks an established install', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(config());
+      render(<MeesterWelcome {...figure} />);
+      await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+      expect(screen.queryByRole('group', { name: 'What you would like help with' })).toBeNull();
+    });
+
+    it('puts the chosen area first among the first projects', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ interests: { areas: ['learning'], askedAt: 'x' } } as Partial<ConfigResponse>),
+      );
+      render(<MeesterWelcome {...figure} />);
+      await waitFor(() =>
+        expect(screen.getAllByRole('button', { name: /Plan a|Practise/ })[0]).toHaveTextContent(
+          'Practise a language',
+        ),
+      );
     });
 
     it('says it is ready when the model landed during this visit', () => {
