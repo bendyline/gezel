@@ -20,6 +20,7 @@ const TYPES: BriefRoutableType[] = [
       properties: {
         destination: { type: 'string', title: 'Where to?', default: 'somewhere wonderful' },
         start: { type: 'string', title: 'Departure date', default: '2026-12-01' },
+        travellers: { type: 'string', title: "Who's going?", default: '' },
       },
       required: ['destination', 'start'],
     },
@@ -101,7 +102,7 @@ describe('matchProjectTypeForBrief', () => {
     expect(match).toEqual({
       typeId: 'trip-planner',
       hits: ['trip'],
-      params: { destination: 'Portugal', start: 'next spring' },
+      params: { destination: 'Portugal', start: 'next spring', travellers: '4' },
       assumed: [],
       dataFile: 'trip.json',
     });
@@ -111,6 +112,17 @@ describe('matchProjectTypeForBrief', () => {
     const match = matchProjectTypeForBrief('A trip to Kyoto with my sister', TYPES);
     expect(match?.params).toEqual({ destination: 'Kyoto', start: 'soon' });
     expect(match?.assumed).toEqual(['start']);
+  });
+
+  it('reads how many are going only when the brief says the whole count', () => {
+    const party = (brief: string) => matchProjectTypeForBrief(brief, TYPES)?.params.travellers;
+    expect(party('Plan a trip to Lisbon next spring for the four of us')).toBe('4');
+    expect(party('A trip to Rome for a family of five')).toBe('5');
+    expect(party('Trip to Oslo for 3 people in March')).toBe('3');
+    expect(party('Honeymoon trip to Bali')).toBe('2');
+    expect(party('A solo trip to Tokyo')).toBe('1');
+    // Three friends and the writer, or three in all: not a guess to make.
+    expect(party('A trip to Berlin with 3 friends')).toBeUndefined();
   });
 
   it('keeps a place on its own line', () => {

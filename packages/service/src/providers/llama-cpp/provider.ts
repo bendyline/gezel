@@ -139,6 +139,7 @@ export class LlamaCppProvider implements LLMProvider {
   private disposed = false;
   private readonly numCtx: number;
   private readonly plannedReservation?: number;
+  private readonly plannedGpu?: number;
   /**
    * When true, append `stream_options:{include_usage:true}` to chat requests so
    * the engine emits a final usage chunk. Off for llama-server (it surfaces its
@@ -316,6 +317,8 @@ export class LlamaCppProvider implements LLMProvider {
      * co-residency admission can see KV (M1).
      */
     plannedReservationBytes?: number;
+    /** Graphics memory the MoE offload plan puts on the card. See `LLMProvider.plannedGpuBytes`. */
+    plannedGpuBytes?: number;
     /** See {@link LlamaCppProvider.includeUsageInStream}. Default false. */
     includeUsageInStream?: boolean;
     /** See {@link LlamaCppProvider.replayReasoningContent}. Default false. */
@@ -429,6 +432,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.modelManager) this.modelManager = opts.modelManager;
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
     this.plannedReservation = opts.plannedReservationBytes;
+    this.plannedGpu = opts.plannedGpuBytes;
     this.includeUsageInStream = opts.includeUsageInStream ?? false;
     this.replayReasoningContent = opts.replayReasoningContent ?? false;
     this.visionEnabled = opts.visionEnabled ?? false;
@@ -849,6 +853,11 @@ export class LlamaCppProvider implements LLMProvider {
    */
   plannedReservationBytes(): number | undefined {
     return this.plannedReservation;
+  }
+
+  /** See `LLMProvider.plannedGpuBytes`. */
+  plannedGpuBytes(): number | undefined {
+    return this.plannedGpu;
   }
 
   /**

@@ -22,8 +22,10 @@ import { readFileSync } from 'node:fs';
 import { freemem, totalmem } from 'node:os';
 import {
   CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS,
+  LLAMA_CPP_COMPUTE_HEADROOM,
   LOCAL_CONTEXT_FLOOR_TOKENS,
   type LlamaCppContextSizing,
+  MLX_COMPUTE_HEADROOM,
   createLogger,
   estimateLlamaCppResidentBytes,
   estimateMlxResidentBytes,
@@ -760,10 +762,9 @@ export function estimatePerSlotKvBytes(opts: {
  * buffers plus the framework's retained free-buffer pool, which is unbounded,
  * invisible to `get_active_memory`, and tracked by nothing else.
  */
-const LOCAL_ENGINE_COMPUTE_HEADROOM = 0.2;
-const MLX_COMPUTE_HEADROOM = 0.35;
+const LOCAL_ENGINE_COMPUTE_HEADROOM = LLAMA_CPP_COMPUTE_HEADROOM;
 
-function computeHeadroomFor(engine: LocalProviderName): number {
+export function computeHeadroomFor(engine: LocalProviderName): number {
   return engine === 'mlx' ? MLX_COMPUTE_HEADROOM : LOCAL_ENGINE_COMPUTE_HEADROOM;
 }
 
@@ -890,6 +891,31 @@ export function liveRamOsReserveBytes(totalRamBytes: number = totalmem()): numbe
  * whatever allocated in between.
  */
 const CTX_PLANNING_MARGIN_BYTES = 512 * 1024 ** 2;
+
+/**
+ * The most a launch could hold right now, as {@link clampCtxTokensForMemory}
+ * reckons it with nothing else resident: the fast pool plus the system RAM
+ * free now, less the OS reserve and the planning margin, capped by the
+ * budget. First run picks against this so it never chooses a model the
+ * first chat turn refuses, and the failed-turn card names a model that will
+ * start.
+ *
+ * It holds back {@link FIT_NOW_DRIFT_BYTES} more: free RAM moves by hundreds
+ * of megabytes between this check and the launch, and a model priced inside
+ * that drift was suggested and then refused (2026-10-12).
+ */
+export function liveLaunchCapBytes(input: { budgetBytes: number; vramBytes: number }): number {
+  const freeRam = Math.max(
+    0,
+    availableSystemRamBytes() -
+      liveRamOsReserveBytes() -
+      CTX_PLANNING_MARGIN_BYTES -
+      FIT_NOW_DRIFT_BYTES,
+  );
+  return Math.min(input.budgetBytes, Math.max(0, input.vramBytes) + freeRam);
+}
+
+const FIT_NOW_DRIFT_BYTES = GIB;
 
 /**
  * Minimum useful per-turn context for Gezel's standing prompt + tool surface

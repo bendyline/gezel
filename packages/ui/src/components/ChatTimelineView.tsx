@@ -35,6 +35,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
+import { CapacityDeniedActions } from './CapacityDeniedActions.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
 import {
@@ -83,6 +84,7 @@ import {
   isExpectedAvailabilityError,
   isModelUnavailableError,
   isRetryableFailedTurn,
+  latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
   referencedFilesOf,
@@ -218,7 +220,10 @@ export interface ChatTimelineViewProps {
    * pinned) and any `referencedTasks` the parser recognized in a reply
    * body (`scoped: false`). Dedupe + ordering live in the rail.
    */
-  onTaskReference?: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
+  onTaskReference?: (
+    ref: string,
+    opts?: { scoped?: boolean; focus?: boolean; wrappedUp?: boolean },
+  ) => void;
   /**
    * Tasks the TaskRunner is holding, paired with the queue state that
    * explains the hold. Rendered as receipt cards in the final lane —
@@ -255,6 +260,18 @@ export interface ChatTimelineViewProps {
    * than the crew's transcript. Debug mode shows the full tree.
    */
   foldWorkingNotes?: boolean;
+  /**
+   * Drop live events from scheduled runs (`ChatEventEnvelope.scheduledRun`).
+   * Home's loader already leaves those sessions out; this keeps a run that
+   * starts while Home is open from streaming in.
+   */
+  hideScheduledRuns?: boolean;
+  /**
+   * What in this conversation is waiting on the person: a failed turn whose
+   * card is showing, and when the latest reply arrived. Home keeps its
+   * greeting band out of the way while either needs them.
+   */
+  onAttentionChange?: (attention: { failedTurn: boolean; latestReplyAt: string | null }) => void;
   /**
    * Backend fetcher — `ProjectTimeline` calls `listProjectTimeline`,
    * `GlobalTimeline` calls `listGlobalTimeline`.
@@ -397,6 +414,8 @@ export function ChatTimelineView({
   trailingContent,
   trailingContentAfterWrapUp = false,
   foldWorkingNotes = false,
+  hideScheduledRuns = false,
+  onAttentionChange,
   loadTimeline,
   streamUrl,
   terminalStreamUrl,
@@ -420,6 +439,8 @@ export function ChatTimelineView({
   scopedSessionIdsRef.current = scopedSessionIds;
   const onUnknownSessionRef = useRef(onUnknownSession);
   onUnknownSessionRef.current = onUnknownSession;
+  const hideScheduledRunsRef = useRef(hideScheduledRuns);
+  hideScheduledRunsRef.current = hideScheduledRuns;
   const narrationMode = useChatNarrationMode();
   // Live ref so the envelope handler reads the current mode without the
   // streaming `useEffect` re-subscribing whenever the setting flips.
@@ -450,6 +471,13 @@ export function ChatTimelineView({
     if (previous !== 'off' && narrationMode === 'off') chatNarrationQueue.stop();
   }, [narrationMode]);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
+  const onAttentionChangeRef = useRef(onAttentionChange);
+  onAttentionChangeRef.current = onAttentionChange;
+  const failedTurn = messages.some((m) => Boolean(m.sessionLastTurnError));
+  const latestReplyAt = [...messages].reverse().find((m) => m.role === 'assistant')?.at ?? null;
+  useEffect(() => {
+    onAttentionChangeRef.current?.({ failedTurn, latestReplyAt });
+  }, [failedTurn, latestReplyAt]);
   const messagesRef = useRef<TimelineMessage[]>([]);
   // Timeline snapshots are reconciled often while any thread starts, streams,
   // or completes. Remember which persisted file sightings have already been
@@ -480,7 +508,11 @@ export function ChatTimelineView({
         onTaskReference(m.taskRef, { scoped });
       }
       if (m.referencedTasks) {
-        for (const ref of m.referencedTasks) onTaskReference(ref);
+        // A wrap-up shows the finished thing in the thread itself.
+        const wrappedUp = m.synthetic === 'task-wrapup';
+        for (const ref of m.referencedTasks) {
+          onTaskReference(ref, wrappedUp ? { wrappedUp } : undefined);
+        }
       }
     }
   }, [messages, activeSessionId, onTaskReference]);
@@ -768,6 +800,11 @@ export function ChatTimelineView({
    * response gets taller than the viewport.
    */
   const lastScrollHeightRef = useRef(0);
+  /**
+   * The newest task wrap-up already on screen; undefined until the first
+   * load, so only one that arrives afterwards is scrolled to.
+   */
+  const wrapUpSeenRef = useRef<string | null | undefined>(undefined);
   /** Coalesces growth from multiple independently streaming bubbles. */
   const liveFollowRafRef = useRef<number | null>(null);
 
@@ -815,6 +852,7 @@ export function ChatTimelineView({
     setAlignedSubmissionKey(null);
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
+    wrapUpSeenRef.current = undefined;
     void (async () => {
       try {
         const res = await loadTimeline({ limit: PAGE_SIZE });
@@ -1575,6 +1613,7 @@ export function ChatTimelineView({
       // live, and any future delivery path.
       if (inflightProjectId !== undefined && projectId !== inflightProjectId) return;
       if (inflightGezelId !== undefined && gezelId !== inflightGezelId) return;
+      if (hideScheduledRunsRef.current && env.scheduledRun) return;
       // Session allowlist (task-scoped surfaces). An unknown session is
       // reported up so the owner can refetch — a handoff session created
       // mid-turn is legitimately in scope and just isn't in the set yet.
@@ -2556,9 +2595,27 @@ export function ChatTimelineView({
     // from the top: pinned, a phone opened on the meester's openers with the
     // greeting that explains them scrolled away.
     if (rows.length === 0) return;
+    // A task that just finished lands its wrap-up, and on Home an invitation
+    // follows it. Pinned to the bottom, the thread scrolled past the finished
+    // card to the invitation (2026-10-11), so the card comes to the top.
+    const wrapUp = latestWrapUpKey(messages);
+    const freshWrapUp =
+      wrapUpSeenRef.current !== undefined && wrapUp !== null && wrapUp !== wrapUpSeenRef.current;
+    wrapUpSeenRef.current = wrapUp;
     if (!pinnedToBottom) return;
+    if (freshWrapUp && wrapUp) {
+      const card = el.querySelector<HTMLElement>(`[data-msg-id="${cssAttrValue(wrapUp)}"]`);
+      if (card) {
+        const top =
+          el.scrollTop + card.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        pinnedToBottomRef.current = false;
+        setPinnedToBottom(false);
+        el.scrollTo({ top: Math.max(0, top - 12), behavior: 'instant' as ScrollBehavior });
+        return;
+      }
+    }
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
-  }, [rows, pinnedToBottom]);
+  }, [rows, pinnedToBottom, messages]);
 
   /**
    * Live item subscribers render independently of this component. Follow
@@ -3289,15 +3346,24 @@ export function ChatTimelineView({
     return (
       <>
         <div className="timeline-session-error-actions" aria-label="Failed turn actions">
-          {retryable && (
-            <button
-              type="button"
-              className="timeline-session-error-action timeline-session-error-action-primary"
-              disabled={busy !== undefined}
-              onClick={() => void retryFailedTurn(sessionId)}
-            >
-              {busy === 'retry' ? 'Retrying…' : 'Retry'}
-            </button>
+          {errorDetail?.code === 'capacity-denied' ? (
+            <CapacityDeniedActions
+              sessionId={sessionId}
+              busy={busy !== undefined}
+              onRetry={() => void retryFailedTurn(sessionId)}
+              onError={(message) => setSessionAction(sessionId, { error: message })}
+            />
+          ) : (
+            retryable && (
+              <button
+                type="button"
+                className="timeline-session-error-action timeline-session-error-action-primary"
+                disabled={busy !== undefined}
+                onClick={() => void retryFailedTurn(sessionId)}
+              >
+                {busy === 'retry' ? 'Retrying…' : 'Retry'}
+              </button>
+            )
           )}
           {setup && (
             <button

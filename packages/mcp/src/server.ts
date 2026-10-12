@@ -22,6 +22,7 @@ import {
   ListProjectGezelsInputSchema,
   ListScriptsInputSchema,
   ListTasksInputSchema,
+  MIN_TASK_DESCRIPTION_LENGTH,
   ManageTaskInputSchema,
   MessageGezelInputSchema,
   ReadDocumentInputSchema,
@@ -8030,6 +8031,45 @@ async function routeBriefToProjectType(brief: {
 }
 
 /**
+ * The person's latest message in this session, when it alone names the goal
+ * the brief was routed to. The meester's own brief for "Plan a trip to Lisbon
+ * next spring" added hotels, dining and a budget, which the default posture
+ * cannot research and the board then never showed.
+ */
+async function personsRequestFor(typeId: string): Promise<string | undefined> {
+  if (!sessionId) return undefined;
+  try {
+    const session = await api.getChatSession(sessionId);
+    const said = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'user' &&
+          !m.hidden &&
+          !m.from &&
+          m.origin !== 'system' &&
+          m.content.trim().length > 0,
+      )
+      ?.content.trim();
+    if (!said || said.length > 2000) return undefined;
+    return matchProjectTypeForBrief(said, await listRoutableProjectTypes())?.typeId === typeId
+      ? said
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * How far the page's data must grow past its seed before the kickoff step
+ * counts as a first draft. One byte let a details edit pass: a Reisleider
+ * that only recorded "4 people" and a date finished the task with no days on
+ * the board (2026-10-12). A day, a guest or a card is longer than this; a
+ * date or a head count is not.
+ */
+const TYPED_KICKOFF_MIN_GROWTH_BYTES = 64;
+
+/**
  * Kick off a goal as a typed project: the type brings its lead, tools and
  * Output page in one atomic create, and the lead gets one step — make the
  * first draft with those tools. The step finishes when the page's data
@@ -8073,15 +8113,21 @@ async function runTypedKickoff(
       const seed = await api.readProjectWorkspaceFile(project.id, match.dataFile).catch(() => null);
       advanceWhen = {
         file: match.dataFile,
-        minBytes: (seed?.content.length ?? 0) + 1,
+        minBytes: (seed?.content.length ?? 0) + TYPED_KICKOFF_MIN_GROWTH_BYTES,
         requireChange: false,
       };
     }
+    const known = Object.entries(match.params)
+      .filter(([key, value]) => !match.assumed.includes(key) && value.trim().length > 0)
+      .map(([key, value]) => ({ title: type.params?.properties?.[key]?.title ?? key, value }));
+    const request = await personsRequestFor(type.id);
     const step = buildTypedKickoffStep({
       typeName: type.name,
       brief,
+      ...(request ? { request } : {}),
       ...(match.dataFile ? { dataFile: match.dataFile } : {}),
       unsaid: match.assumed.map((key) => type.params?.properties?.[key]?.title ?? key),
+      known,
       tools: (type.tools ?? []).filter((t) => !(type.pages?.tools ?? []).includes(t.name)),
     });
     const note = opts.kickoffMessage?.trim()
@@ -8090,7 +8136,15 @@ async function runTypedKickoff(
     const task = await api.createTask(project.id, {
       ...sessionTaskNamingMode,
       title: opts.taskTitle ?? brief.name,
-      description: `${brief.taskDescription ?? brief.about}${note}`,
+      // The person's words, padded with one plain sentence only when they
+      // are too short for the task minimum.
+      description: `${
+        request
+          ? request.length >= MIN_TASK_DESCRIPTION_LENGTH
+            ? request
+            : `${request}\n\nMake the first version of this ${type.name} project.`
+          : (brief.taskDescription ?? brief.about)
+      }${note}`,
       assignee: { kind: 'gezel', gezelId: lead.id },
       steps: [
         {

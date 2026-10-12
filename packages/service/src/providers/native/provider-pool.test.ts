@@ -1278,6 +1278,43 @@ describe('measured accelerator headroom', () => {
     });
     await expect(pool.ensure('mlx', 'moe', 0, 40 * GB)).resolves.toBeDefined();
   });
+
+  // A desktop and a browser holding 2 GB of a 12 GB card refused every
+  // offloaded MoE, though the plan kept only 6 GB on the card (2026-10-11).
+  it('checks an offloaded model against the graphics memory its plan uses', async () => {
+    const plannedOnCard =
+      (gpuBytes: number): ProviderBuilder =>
+      async ({ modelId }) => {
+        const provider = Object.assign(new FakeProvider(modelId), {
+          plannedGpuBytes: () => gpuBytes,
+        });
+        return { provider, residentBytes: 24 * GB };
+      };
+    const fits = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: plannedOnCard(6 * GB) },
+      vramHeadroom: async () => ({ freeBytes: 9 * GB, totalBytes: 12 * GB }),
+    });
+    await expect(fits.ensure('mlx', 'qwen-moe', 0, 24 * GB)).resolves.toBeDefined();
+
+    const shutdown = vi.fn(async () => {});
+    const tooBig: ProviderBuilder = async ({ modelId }) => {
+      const provider = Object.assign(new FakeProvider(modelId), {
+        plannedGpuBytes: () => 10 * GB,
+        shutdown,
+      });
+      return { provider, residentBytes: 24 * GB };
+    };
+    const refused = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: tooBig },
+      vramHeadroom: async () => ({ freeBytes: 4 * GB, totalBytes: 12 * GB }),
+    });
+    await expect(refused.ensure('mlx', 'qwen-moe', 0, 24 * GB)).rejects.toThrow(
+      /about 10\.0 GB on the card/,
+    );
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
 });
 
 /** Reports a lifecycle the way every supervised native provider does. */

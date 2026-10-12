@@ -1800,6 +1800,8 @@ export const ChatEventEnvelopeSchema = z.object({
   handoffFrom: SessionLinkSchema.optional(),
   /** Present for externally-owned read-only threads, including live turns. */
   sessionSource: ChatSessionSourceSchema.optional(),
+  /** Present when the session works a scheduled task; Home's conversation drops these. */
+  scheduledRun: z.literal(true).optional(),
   event: ChatEventSchema,
 });
 export type ChatEventEnvelope = z.infer<typeof ChatEventEnvelopeSchema>;

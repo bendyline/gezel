@@ -18,6 +18,13 @@ export interface DeviceCapacitySample {
   gpuBudgetBytes: number;
   availableBytes?: number;
   availableGpuBytes?: number;
+  /**
+   * System RAM free now, less the OS reserve, on a discrete-GPU host. When
+   * present, a claim's RAM need is what it does not put on the card
+   * (`bytes - gpuBytes`), so a MoE that keeps only its residue on the GPU is
+   * checked against the RAM its experts really need.
+   */
+  availableRamBytes?: number;
   serializeLoads: boolean;
 }
 
@@ -152,9 +159,13 @@ export class DeviceCapacityLedger {
     let shortfall: { requiredBytes: number; availableBytes: number } | undefined;
     if (own === first && fits(own)) {
       const loading = active.filter((c) => c.phase === 'loading');
+      const ramNeed = (c: Claim) => Math.max(0, c.bytes - c.gpuBytes);
       const memoryAvailable =
-        sample.availableBytes === undefined ||
-        own.bytes + loading.reduce((sum, c) => sum + c.bytes, 0) <= sample.availableBytes;
+        sample.availableRamBytes !== undefined
+          ? ramNeed(own) + loading.reduce((sum, c) => sum + ramNeed(c), 0) <=
+            sample.availableRamBytes
+          : sample.availableBytes === undefined ||
+            own.bytes + loading.reduce((sum, c) => sum + c.bytes, 0) <= sample.availableBytes;
       const gpuAvailable =
         sample.availableGpuBytes === undefined ||
         own.gpuBytes + loading.reduce((sum, c) => sum + c.gpuBytes, 0) <= sample.availableGpuBytes;
@@ -169,7 +180,9 @@ export class DeviceCapacityLedger {
       } else if (active.length === 0) {
         // `loadSlot` can only be false behind a loading claim, so reaching
         // here with no active claims means the host itself is short.
-        if (!memoryAvailable && sample.availableBytes !== undefined)
+        if (!memoryAvailable && sample.availableRamBytes !== undefined)
+          shortfall = { requiredBytes: ramNeed(own), availableBytes: sample.availableRamBytes };
+        else if (!memoryAvailable && sample.availableBytes !== undefined)
           shortfall = { requiredBytes: own.bytes, availableBytes: sample.availableBytes };
         else if (!gpuAvailable && sample.availableGpuBytes !== undefined)
           shortfall = { requiredBytes: own.gpuBytes, availableBytes: sample.availableGpuBytes };

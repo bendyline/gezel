@@ -198,3 +198,14 @@ export function formatProviderLabel(p: ProviderName): string {
       return 'Remote';
   }
 }
+
+/** The row id of the newest task wrap-up in a timeline, or null. */
+export function latestWrapUpKey(
+  messages: readonly Pick<TimelineMessage, 'sessionId' | 'at' | 'role' | 'synthetic'>[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.synthetic === 'task-wrapup') return `msg:${m.sessionId}:${m.at}:${m.role}`;
+  }
+  return null;
+}

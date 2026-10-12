@@ -83,6 +83,7 @@ import {
   openTabAction,
   runNavActions,
 } from './nav-actions.js';
+import { requestOutputPaneFullWindow } from './output-pane-maximize.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -589,6 +590,7 @@ function HandoffNoteCard({
   dataMsgId,
   dataSessionId,
   onTaskReference,
+  debugMode = false,
 }: {
   note: TaskHandoffNote;
   receiver: string;
@@ -599,6 +601,8 @@ function HandoffNoteCard({
   dataMsgId?: string;
   dataSessionId?: string;
   onTaskReference?: (ref: string) => void;
+  /** The task's id ("trip/1") is for debugging; everyone else gets "Open task". */
+  debugMode?: boolean;
 }) {
   const context = handoffContextLine(note);
   return (
@@ -621,12 +625,12 @@ function HandoffNoteCard({
               type="button"
               className="msg-ref-chip"
               onClick={() => onTaskReference(note.taskRef)}
-              title="Open this task"
+              title={`Open task ${note.taskRef}`}
             >
-              Task {note.taskRef}
+              {debugMode ? `Task ${note.taskRef}` : 'Open task'}
             </button>
           ) : (
-            <span className="msg-handoff-note-ref">Task {note.taskRef}</span>
+            debugMode && <span className="msg-handoff-note-ref">Task {note.taskRef}</span>
           )}
           <details className="msg-handoff-note-details">
             <summary>Full note</summary>
@@ -715,6 +719,7 @@ export function MessageBubble({
   }, [content, referencedFiles, grounding]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [focusedCitation, setFocusedCitation] = useState<number | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   // Walk `displayContent` and splice intent dividers at their offsets.
   // Produces an ordered list of `text` slices + `intent` markers. A
@@ -800,7 +805,9 @@ export function MessageBubble({
   );
 
   const hasFiles = referencedFiles && referencedFiles.length > 0;
-  const hasTasks = referencedTasks && referencedTasks.length > 0;
+  // A wrap-up's finished card opens the work; its task id would be a second,
+  // rawer way to say the same thing.
+  const hasTasks = referencedTasks && referencedTasks.length > 0 && synthetic !== 'task-wrapup';
   const chips =
     hasFiles || hasTasks ? (
       <div className="msg-refs">
@@ -1016,6 +1023,7 @@ export function MessageBubble({
         {...(timestampLabel ? { timestampLabel } : {})}
         {...(extraClass ? { extraClass } : {})}
         {...(onTaskReference ? { onTaskReference } : {})}
+        debugMode={debugMode}
       />
     );
   }
@@ -1105,6 +1113,15 @@ export function MessageBubble({
     );
   }
   const isUser = role === 'user';
+  // Step timings and the reasoning trace are the machine room. Outside debug
+  // mode they wait behind the reply's Details key, so "1 step · 785ms total"
+  // and "Thinking · 129 words" no longer head every reply.
+  const foldDetails = !isUser && !debugMode;
+  const hasDetails =
+    (toolCalls?.length ?? 0) > 0 ||
+    Boolean(reasoning?.trim()) ||
+    (attemptedToolCalls?.length ?? 0) > 0;
+  const detailsShown = !foldDetails || detailsOpen;
   // A machine-authored user turn (task dispatch, step handoff) keeps the
   // user role the provider needs but is never presented as the person's
   // own words — see `ChatMessage.origin`.
@@ -1158,16 +1175,17 @@ export function MessageBubble({
           projectId={projectId}
           onOpenReference={onOpenReference}
           onFocusTask={onFocusTask}
+          showSteps={detailsShown}
         />
       )}
-      {!isUser && reasoning && reasoning.trim().length > 0 && (
+      {!isUser && detailsShown && reasoning && reasoning.trim().length > 0 && (
         <ReasoningExpando
           reasoning={reasoning}
           durationMs={reasoningDurationMs}
           {...(toolCalls ? { toolCalls } : {})}
         />
       )}
-      {!isUser && attemptedToolCalls && attemptedToolCalls.length > 0 && (
+      {!isUser && detailsShown && attemptedToolCalls && attemptedToolCalls.length > 0 && (
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
       )}
       {!isUser && content.trim().length === 0 ? (
@@ -1258,7 +1276,11 @@ export function MessageBubble({
             const home = deliverable.projectId ?? projectId!;
             if (deliverable.view === 'output-page') {
               return {
-                onOpen: () => runNavActions([openTabAction({ kind: 'project', id: home })]),
+                onOpen: () => {
+                  // The board, full window, not a half pane beside the chat.
+                  requestOutputPaneFullWindow(home);
+                  runNavActions([openTabAction({ kind: 'project', id: home })]);
+                },
               };
             }
             if (home !== projectId) {
@@ -1296,6 +1318,9 @@ export function MessageBubble({
         {...(debugMode && sessionId && !isUser
           ? { debug: { sessionId, ...(messageAt ? { messageAt } : {}) } }
           : {})}
+        {...(foldDetails && hasDetails
+          ? { details: { shown: detailsShown, onToggle: () => setDetailsOpen((open) => !open) } }
+          : {})}
       />
     </div>
   );
@@ -1320,10 +1345,13 @@ function MessageActions({
   side,
   debug,
   saveProjectId,
+  details,
 }: {
   markdown: string;
   side: 'left' | 'right';
   saveProjectId?: string;
+  /** The reply's steps and thinking, folded away outside debug mode. */
+  details?: { shown: boolean; onToggle: () => void };
   /**
    * When set, renders a second debug-only button below the regular
    * copy button. The button fetches the session's freshly-computed
@@ -1408,6 +1436,17 @@ function MessageActions({
         >
           {copied ? '✓' : '⧉'}
         </button>
+        {details && (
+          <button
+            type="button"
+            className="msg-action-button"
+            onClick={details.onToggle}
+            aria-expanded={details.shown}
+            title={details.shown ? 'Hide the steps and thinking' : 'Show the steps and thinking'}
+          >
+            {details.shown ? 'Hide details' : 'Details'}
+          </button>
+        )}
         {debug && (
           <button
             type="button"
@@ -3224,9 +3263,16 @@ export function ToolHistoryExpando({
   projectId,
   onOpenReference,
   onFocusTask,
+  showSteps = true,
 }: {
   tools: ChatMessageToolCall[];
   projectId?: string;
+  /**
+   * Whether the "N steps · 1.2s total" list renders. Outside debug mode it
+   * waits behind the reply's Details key; media, cards and unresolved
+   * failures show either way.
+   */
+  showSteps?: boolean;
   onOpenReference?: (reference: OpenChatReference) => void;
   /** Opens a task beside the chat (rail Task pane) from a promoted inline card. */
   onFocusTask?: (ref: string) => void;
@@ -3287,21 +3333,25 @@ export function ToolHistoryExpando({
           </span>
         </div>
       ))}
-      <details className="msg-tool-history">
-        <summary>
-          <span className="msg-tool-history-count">
-            {tools.length} {tools.length === 1 ? 'step' : 'steps'}
-          </span>
-          <span className="msg-tool-history-total muted">· {formatDurationShort(total)} total</span>
-          {failed > 0 && <span className="msg-tool-history-failed">· {failed} failed</span>}
-        </summary>
-        <ToolActivityList
-          tools={activities}
-          suppressMedia
-          suppressCards
-          onOpenReference={onOpenReference}
-        />
-      </details>
+      {showSteps && (
+        <details className="msg-tool-history">
+          <summary>
+            <span className="msg-tool-history-count">
+              {tools.length} {tools.length === 1 ? 'step' : 'steps'}
+            </span>
+            <span className="msg-tool-history-total muted">
+              · {formatDurationShort(total)} total
+            </span>
+            {failed > 0 && <span className="msg-tool-history-failed">· {failed} failed</span>}
+          </summary>
+          <ToolActivityList
+            tools={activities}
+            suppressMedia
+            suppressCards
+            onOpenReference={onOpenReference}
+          />
+        </details>
+      )}
     </>
   );
 }

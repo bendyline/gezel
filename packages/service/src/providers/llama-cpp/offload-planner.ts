@@ -127,6 +127,14 @@ export interface MoeOffloadDecision {
    * may then put layers on the CPU, where every thread counts.
    */
   fullGpuResidency?: true;
+  /**
+   * Graphics memory this plan puts on the card: the always-active residue,
+   * the expert layers kept there, the KV cache and the reserves. Set only on
+   * an exact MoE offload plan. Device admission charges it instead of the
+   * whole card, which refused an offloaded model whenever anything else was
+   * using the GPU.
+   */
+  gpuBytes?: number;
   /** Human-readable rationale for the decision log (never emitted as a flag). */
   reason?: string;
 }
@@ -302,6 +310,7 @@ function planFromSplit(
     return {
       nGpuLayers: -1,
       cpuMoe: true,
+      gpuBytes: split.nonExpertBytes + reserves,
       reason: `expert budget ${gib(expertBudget)} fits no expert layer (~${gib(layers[layers.length - 1] ?? 0)} each) — --cpu-moe: all experts to system RAM`,
     };
   }
@@ -315,6 +324,7 @@ function planFromSplit(
   return {
     nGpuLayers: -1,
     nCpuMoe,
+    gpuBytes: split.nonExpertBytes + gpuExpertBytes + reserves,
     reason:
       `experts of ${gpuLayers}/${blockCount} layers fit VRAM (${gib(gpuExpertBytes)} of ${gib(expertTotal)}, ` +
       `residue ${gib(split.nonExpertBytes)}, reserves ${gib(reserves)}) — --n-cpu-moe ${nCpuMoe}`,

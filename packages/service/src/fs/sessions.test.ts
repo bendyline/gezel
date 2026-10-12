@@ -297,6 +297,48 @@ describe('Store session CRUD', () => {
     expect(unscoped.messages).toHaveLength(3);
   });
 
+  // On a new install a failed overnight review filled Home's conversation,
+  // and the Meester's welcome never showed.
+  it('listTimeline can leave out scheduled runs and the sessions opened beneath them', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-front-door',
+        messages: [{ role: 'user', content: 'plan a trip', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-night',
+        taskRef: 'default/1',
+        nightShift: true,
+        messages: [{ role: 'user', content: 'review active projects', at: '2026-04-14T10:00:01Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-cron',
+        taskRef: 'default/2',
+        scheduledRun: true,
+        messages: [{ role: 'user', content: 'weekly digest', at: '2026-04-14T10:00:02Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-night-consult',
+        parentSession: { sessionId: 'sess-night', gezelId: 'ada', kind: 'consultation' },
+        messages: [
+          { role: 'user', content: 'a question from the night', at: '2026-04-14T10:00:03Z' },
+        ],
+      }),
+    );
+
+    const home = await store.listTimeline({ limit: 50, excludeScheduledRuns: true });
+    expect(home.messages.map((m) => m.content)).toEqual(['plan a trip']);
+
+    const everything = await store.listTimeline({ limit: 50 });
+    expect(everything.messages).toHaveLength(4);
+  });
+
   it('listTimeline scoped to a taskRef keeps handoff sessions from other gezels', async () => {
     await store.createGezel({ name: 'Boz', role: 'Writer' });
     await store.writeSession(
@@ -502,7 +544,7 @@ describe('Store session CRUD', () => {
     );
 
     const sessions = await store.listSessions({ gezelId: 'ada' });
-    expect(sessions[0]?.title).toBe('Checkers opponent played c3-d4');
+    expect(sessions[0]?.title).toBe('Checkers: Your opponent played c3-d4');
     expect((await store.getSession('ada', 'legacy-reaction'))?.title).toBe('New session');
   });
 

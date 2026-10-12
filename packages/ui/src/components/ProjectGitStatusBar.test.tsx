@@ -518,6 +518,35 @@ describe('ProjectGitStatusBar', () => {
     expect(onManagedWorkspaceWritesChange).toHaveBeenCalledWith(true);
   });
 
+  // A board opened from a finished card sat over "Stable" and "Can edit"
+  // dropdowns its owner never needed (2026-10-11).
+  it('keeps project status and the default edit access in the overflow menu', async () => {
+    const onStatusChange = vi.fn();
+    const onManagedWorkspaceWritesChange = vi.fn();
+    render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        status="stable"
+        onStatusChange={onStatusChange}
+        managedWorkspaceWritable
+        onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
+      />,
+    );
+    expect(screen.queryByRole('combobox', { name: 'Project status' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Built-in tool workspace access for this project' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
+    expect(within(overflow).getByRole('button', { name: 'Stable' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await userEvent.click(within(overflow).getByRole('button', { name: 'Stop workspace edits' }));
+    expect(onManagedWorkspaceWritesChange).toHaveBeenCalledWith(false);
+  });
+
   it('shows both access scopes in the compact overflow for mixed-provider projects', async () => {
     render(
       <ProjectGitStatusBar

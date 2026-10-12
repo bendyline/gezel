@@ -1,5 +1,5 @@
 import type { ChatMessageToolCall } from '@bendyline/gezel';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MessageBubble, spliceReasoningMarks } from './chat-bubbles.js';
 
@@ -14,6 +14,7 @@ describe('MessageBubble reasoning summary', () => {
         content="Done."
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         reasoning="First I inspect, then I answer."
         reasoningDurationMs={1_250}
       />,
@@ -34,11 +35,52 @@ describe('MessageBubble reasoning summary', () => {
         content="Done."
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         reasoning="One careful thought."
       />,
     );
 
     expect(screen.getByText('· 3 words')).toBeInTheDocument();
+  });
+});
+
+describe('MessageBubble details outside debug mode', () => {
+  // "1 step · 785ms total" and "Thinking · 129 words · 19.7s" headed every
+  // reply a newcomer read (2026-10-11).
+  it('keeps steps and thinking behind the reply’s Details key', () => {
+    render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        content="Done."
+        authorLabel="Ada"
+        authorIcon={null}
+        reasoning="First I inspect, then I answer."
+        toolCalls={[{ name: 'read_file', durationMs: 785, success: true }]}
+      />,
+    );
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText(/785ms total/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText(/1 step/)).toBeInTheDocument();
+  });
+
+  it('still shows a failure the turn never recovered from', () => {
+    render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        content="Done."
+        authorLabel="Ada"
+        authorIcon={null}
+        toolCalls={[
+          { name: 'write_file', durationMs: 12, success: false, errorMessage: 'disk is read-only' },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/disk is read-only/)).toBeInTheDocument();
   });
 });
 
@@ -93,6 +135,7 @@ describe('MessageBubble reasoning marks', () => {
         content="Done."
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         reasoning="I should look at the file. Now I know."
         toolCalls={[
           {
@@ -121,6 +164,7 @@ describe('MessageBubble reasoning marks', () => {
         content="Done."
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         reasoning="Try the craftbook."
         toolCalls={[
           {

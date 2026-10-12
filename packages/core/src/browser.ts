@@ -17,6 +17,7 @@ export * from './path-rules.js';
 export * from './night-shift.js';
 export * from './first-use.js';
 export * from './first-projects.js';
+export * from './scheduled-run.js';
 export * from './project-properties.js';
 export * from './project-icons.js';
 export * from './search-ranking.js';

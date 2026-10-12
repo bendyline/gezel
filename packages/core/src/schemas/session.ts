@@ -143,6 +143,12 @@ export const ChatSessionSchema = z.object({
   /** True only when this session was dispatched as deferred Night Shift work. */
   nightShift: z.boolean().optional(),
   /**
+   * True when this session works a scheduled task (a Night Shift task or a
+   * cron run) that nobody launched from a conversation. Home's conversation
+   * leaves these out; see `isScheduledRunSession`.
+   */
+  scheduledRun: z.boolean().optional(),
+  /**
    * Pool key the session is sticky-bound to. Format
    * `${provider}:${modelId}:${replicaIdx}`. Set on the first turn for
    * local-engine sessions (llama-cpp / mlx) by the EngineRouter's

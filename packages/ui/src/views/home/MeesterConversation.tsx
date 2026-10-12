@@ -39,6 +39,7 @@ export function MeesterConversation({
   invite,
   onTurnStarted,
   onIntroductionShown,
+  onAttentionChange,
 }: {
   meesterGezelId: string;
   meesterName: string;
@@ -58,6 +59,8 @@ export function MeesterConversation({
   onTurnStarted?: () => void;
   /** The meester's introduction fills the empty conversation. */
   onIntroductionShown?: () => void;
+  /** What in the conversation is waiting on the person; see ChatTimelineView. */
+  onAttentionChange?: (attention: { failedTurn: boolean; latestReplyAt: string | null }) => void;
 }) {
   // Home is swapped out wholesale when the user opens any other area, so this
   // component's local state cannot be the whole record of where they were.
@@ -205,6 +208,7 @@ export function MeesterConversation({
               // The person reads the ask, the crew and the result here; the
               // workers' transcripts fold into one Working notes line.
               foldWorkingNotes
+              {...(onAttentionChange ? { onAttentionChange } : {})}
               emptyContent={
                 // Only the meester's own thread gets the introduction; a
                 // handoff thread with another gezel keeps the plain state.

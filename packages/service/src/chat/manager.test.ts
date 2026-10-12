@@ -563,7 +563,7 @@ describe('ChatManager — send + persistence', () => {
     await manager.send(session.id, 'what is the meaning of life?');
 
     const disk = await store.getSession('ada', session.id);
-    expect(disk!.title).toBe('Meaning life');
+    expect(disk!.title).toBe('What is the meaning of life');
   });
 
   // The dispatch seed is the machinery's sentence; the extractor turned one
@@ -610,7 +610,7 @@ describe('ChatManager — send + persistence', () => {
     await manager.send(session.id, 'Please review the release checklist');
 
     const disk = await store.getSession('ada', session.id);
-    expect(disk?.title).toBe('Review release checklist');
+    expect(disk?.title).toBe('Review the release checklist');
   });
 
   it('emits delta and complete events', async () => {

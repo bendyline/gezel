@@ -7040,3 +7040,43 @@ export const ListGithubWorkflowRunsResponseSchema = ListGitHubWorkflowRunsRespon
 export type ListGithubWorkflowRunsResponse = ListGitHubWorkflowRunsResponse;
 /** @deprecated Use {@link GitHubCredentialSource}. */
 export type GithubCredentialSource = GitHubCredentialSource;
+
+/**
+ * Whether a session's model would start with the memory free now, and one
+ * model already on this computer that would. The failed-turn card reads it
+ * after a capacity denial: it offers Retry only when the answer is yes, and
+ * otherwise one key to the alternative.
+ */
+export const SessionModelFitSchema = z.object({
+  provider: ProviderNameSchema,
+  model: z.string().optional(),
+  /** Null when the provider is not on-device or the catalog does not know the model. */
+  startsNow: z.boolean().nullable(),
+  /** The session follows the install's default model, so changing that default changes it. */
+  followsDefault: z.boolean(),
+  /** The best installed model that would start now, when the current one would not. */
+  alternative: z.object({ model: z.string(), name: z.string() }).optional(),
+});
+export type SessionModelFit = z.infer<typeof SessionModelFitSchema>;
+
+/**
+ * Whether each installed on-device model would start with the memory free
+ * now, by the arithmetic the launch check uses. Settings reads it so its
+ * labels agree with what a chat turn will meet.
+ */
+export const ModelsFitNowResponseSchema = z.object({
+  provider: ProviderNameSchema,
+  /** What a launch could hold right now; see `RecoDevice.launchCapBytes`. */
+  launchCapBytes: z.number().nonnegative(),
+  /** A discrete card's free memory now; see `RecoDevice.freeGpuBytes`. */
+  freeGpuBytes: z.number().nonnegative().optional(),
+  models: z.array(
+    z.object({
+      id: z.string(),
+      startsNow: z.boolean(),
+      /** Weights plus the context-floor KV cache, inside the compute headroom. */
+      launchBytes: z.number().nonnegative(),
+    }),
+  ),
+});
+export type ModelsFitNowResponse = z.infer<typeof ModelsFitNowResponseSchema>;

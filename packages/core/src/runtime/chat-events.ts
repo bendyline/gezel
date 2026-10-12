@@ -58,19 +58,13 @@ export class ChatEventBus {
   private readonly projectListeners = new Map<string, Set<EnvelopeListener>>();
   private readonly gezelListeners = new Map<string, Set<EnvelopeListener>>();
   private readonly globalListeners = new Set<EnvelopeListener>();
+  /** A few ids a night, so it is never pruned. */
+  private readonly scheduledRunSessions = new Set<string>();
 
   publish(scope: PublishScope, event: ChatEvent): void {
     this.pruneIdleSessions();
     this.deliverToSession(scope.sessionId, event, scope);
-    const envelope: ChatEventEnvelope = {
-      sessionId: scope.sessionId,
-      gezelId: scope.gezelId,
-      projectId: scope.projectId,
-      ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
-      ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
-      ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
-      event,
-    };
+    const envelope = this.envelopeFor(scope.sessionId, scope, event);
     const projectSet = this.projectListeners.get(scope.projectId);
     if (projectSet) {
       for (const listener of projectSet) this.safeDeliver(listener, envelope);
@@ -149,15 +143,7 @@ export class ChatEventBus {
       if (entry.history.length === 0) continue;
       const scope = entry.lastScope;
       for (const event of entry.history) {
-        this.safeDeliver(listener, {
-          sessionId,
-          gezelId: scope.gezelId,
-          projectId: scope.projectId,
-          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
-          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
-          ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
-          event,
-        });
+        this.safeDeliver(listener, this.envelopeFor(sessionId, scope, event));
       }
     }
     let set = this.projectListeners.get(projectId);
@@ -183,15 +169,7 @@ export class ChatEventBus {
       if (entry.history.length === 0) continue;
       const scope = entry.lastScope;
       for (const event of entry.history) {
-        this.safeDeliver(listener, {
-          sessionId,
-          gezelId: scope.gezelId,
-          projectId: scope.projectId,
-          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
-          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
-          ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
-          event,
-        });
+        this.safeDeliver(listener, this.envelopeFor(sessionId, scope, event));
       }
     }
     let set = this.gezelListeners.get(gezelId);
@@ -215,20 +193,34 @@ export class ChatEventBus {
       if (entry.history.length === 0) continue;
       const scope = entry.lastScope;
       for (const event of entry.history) {
-        this.safeDeliver(listener, {
-          sessionId,
-          gezelId: scope.gezelId,
-          projectId: scope.projectId,
-          ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
-          ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
-          ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
-          event,
-        });
+        this.safeDeliver(listener, this.envelopeFor(sessionId, scope, event));
       }
     }
     this.globalListeners.add(listener);
     return () => {
       this.globalListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Tag a session as a scheduled run's working session. Every envelope it
+   * publishes, live or replayed, then carries `scheduledRun`, so Home's
+   * conversation can leave it out without a lookup per event.
+   */
+  markScheduledRun(sessionId: string): void {
+    this.scheduledRunSessions.add(sessionId);
+  }
+
+  private envelopeFor(sessionId: string, scope: PublishScope, event: ChatEvent): ChatEventEnvelope {
+    return {
+      sessionId,
+      gezelId: scope.gezelId,
+      projectId: scope.projectId,
+      ...(scope.parentSession ? { parentSession: scope.parentSession } : {}),
+      ...(scope.handoffFrom ? { handoffFrom: scope.handoffFrom } : {}),
+      ...(scope.sessionSource ? { sessionSource: scope.sessionSource } : {}),
+      ...(this.scheduledRunSessions.has(sessionId) ? { scheduledRun: true as const } : {}),
+      event,
     };
   }
 

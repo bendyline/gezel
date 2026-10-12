@@ -51,10 +51,12 @@ import type {
   LlamaCppContextSizingResponse,
   MediaModelFitResponse,
   ModelContextOverridesResponse,
+  ModelsFitNowResponse,
   OpenAppToolRelayRequest,
   OpenAppToolRelayResponse,
   RegisterAppToolsRequest,
   RegisterAppToolsResponse,
+  SessionModelFit,
   VideoEngineStatusResponse,
   VideoGenerationRequest,
   VideoGenerationResponse,
@@ -2733,6 +2735,19 @@ export class GezelClient {
     return this.request('GET', '/api/system/memory');
   }
 
+  /**
+   * Whether each installed on-device model would start with the memory free
+   * now, by the launch check's own arithmetic.
+   */
+  getModelsFitNow(
+    provider: 'llama-cpp' | 'mlx' | 'ds4' = 'llama-cpp',
+  ): Promise<ModelsFitNowResponse> {
+    return this.request(
+      'GET',
+      `/api/system/models-fit-now?provider=${encodeURIComponent(provider)}`,
+    );
+  }
+
   getMachineMemoryUsage(): Promise<MachineMemoryUsage> {
     return this.request('GET', '/api/system/memory/usage');
   }
@@ -4359,6 +4374,14 @@ export class GezelClient {
    */
   retryChatSessionTurn(sessionId: string): Promise<{ accepted: true; sessionId: string }> {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/retry`);
+  }
+
+  /**
+   * Whether a session's model would start with the memory free now, and a
+   * model already on this computer that would. Read after a capacity denial.
+   */
+  getSessionModelFit(sessionId: string): Promise<SessionModelFit> {
+    return this.request('GET', `/api/sessions/${encodeURIComponent(sessionId)}/model-fit`);
   }
 
   /**

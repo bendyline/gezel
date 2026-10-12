@@ -51,8 +51,9 @@ describe('MessageBubble hand-off note', () => {
     const onTaskReference = vi.fn();
     renderHandoff({ onTaskReference });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Task default/11' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open task' }));
     expect(onTaskReference).toHaveBeenCalledWith('default/11');
+    expect(screen.queryByText('Task default/11')).not.toBeInTheDocument();
   });
 
   it('leaves other machine-authored turns as plain System bubbles', () => {

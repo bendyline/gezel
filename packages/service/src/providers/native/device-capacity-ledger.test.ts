@@ -178,6 +178,49 @@ describe('device memory admission', () => {
   });
 });
 
+describe('a model larger than a discrete card', () => {
+  // qwen3.6-35b-a3b-q4 on a 12 GB laptop: 24.2 GB planned, of which the
+  // offload plan keeps about 6 GB on the card and streams the experts.
+  const offloaded = (gpuGib: number) => ({ ...request(24.2), gpuBytes: gpuGib * GIB });
+
+  it('starts on a card other programs share when the RAM its experts need is free', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 19 * GIB + 11.34 * GIB,
+      availableGpuBytes: 7 * GIB,
+      availableRamBytes: 19 * GIB,
+    });
+    expect((await ledger.execute(offloaded(6))).state).toBe('granted');
+  });
+
+  it('waits on RAM, naming the RAM it needs, when the experts would not fit', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 7.7 * GIB + 11.34 * GIB,
+      availableGpuBytes: 11 * GIB,
+      availableRamBytes: 7.7 * GIB,
+    });
+    const reply = await ledger.execute(offloaded(6));
+    expect(reply.state).toBe('waiting');
+    expect(reply.externalShortfall).toBe(true);
+    expect(reply.requiredBytes).toBeCloseTo(18.2 * GIB, -6);
+    expect(reply.availableBytes).toBe(7.7 * GIB);
+  });
+
+  it('charges a model that fits the card nothing against RAM, as before', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 1 * GIB + 11.34 * GIB,
+      availableGpuBytes: 11 * GIB,
+      availableRamBytes: 1 * GIB,
+    });
+    expect((await ledger.execute(request(10))).state).toBe('granted');
+  });
+});
+
 describe('external memory shortfall', () => {
   it('reports a shortfall no engine is responsible for, with both numbers', async () => {
     // The gemma4-e4b case: 9.7 GB wanted, budget has room, nothing else is

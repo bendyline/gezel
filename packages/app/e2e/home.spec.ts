@@ -55,8 +55,11 @@ test('Home renders the workshop once configured', async () => {
   // resolves ok (mock provider) and the meester is auto-provisioned.
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20000 });
 
-  // Greeting band (time-of-day headline, no stored user name).
-  await expect(page.getByText(/Good (morning|afternoon|evening)\./)).toBeVisible();
+  // Greeting band (time-of-day headline, no stored user name). The welcome
+  // opens on the same words, so look inside the band.
+  await expect(
+    page.getByTestId('greeting-band').getByText(/Good (morning|afternoon|evening)\./),
+  ).toBeVisible();
 
   // The meester conversation fills the workshop body; there is no side rail.
   await expect(page.locator('.home-workshop-conversation')).toBeVisible();
