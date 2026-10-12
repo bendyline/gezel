@@ -38,7 +38,7 @@ const log = createLogger('anthropic');
  * blocks stay in the wire history separately from the visible reply.
  */
 
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
+const DEFAULT_MODEL = 'claude-opus-5-5';
 
 function isReasoningModel(id: string): boolean {
   return anthropicReasoningEfforts(id) !== undefined;

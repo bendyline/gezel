@@ -36,7 +36,7 @@ The three guidance profiles and the product-recovery switch are proposed experim
 
 Keep schema transformations and tool-surface changes separate from prose-only experiments. For example, `tools.gezels-as-roles` changes the delegation interface; removing it is not merely shortening a prompt. Likewise, forcing a small-model cookbook may be inert because a behavior self-gates on tier. Verify that each treatment actually reaches the API request.
 
-Essential controls are never experimental “help”: authorization, project isolation, cancellation, truthful tool results, protocol-correct histories, signed-thinking handling, and bounded execution remain enabled. Model reasoning effort is a separate axis; hold it fixed within each model during this campaign. The OpenAI GPT-6 reasoning-family detection gap should be corrected before testing explicit effort overrides.
+Essential controls are never experimental “help”: authorization, project isolation, cancellation, truthful tool results, protocol-correct histories, signed-thinking handling, and bounded execution remain enabled. Model reasoning effort is a separate axis; hold it fixed within each model during this campaign. The OpenAI provider recognizes GPT-6 models as reasoning models and clamps an effort override into each model's documented range ([openai-options.ts](../packages/service/src/providers/openai-options.ts)), so explicit effort overrides can be tested.
 
 ## Where repair belongs
 

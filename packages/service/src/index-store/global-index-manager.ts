@@ -11,6 +11,7 @@ import { beginPerfWork } from '../perf/responsiveness.js';
 import { HISTORY_BACKFILL_META_KEY, openGlobalCollection } from './global-index.js';
 import type { ChunkInput } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';
+import { isTransientIndexError } from './sqlite-driver.js';
 
 /**
  * Single writer for `~/.gezel/index/global.db`. Change hooks (Store session/
@@ -18,6 +19,8 @@ import type { IndexStore } from './index-store.js';
  * in-memory dirty queues; a short debounce collapses a streaming turn's many
  * writeSession calls into one re-index, and each flush opens, writes, and
  * closes per collection so no long-lived handle contends with readers.
+ * A busy database requeues the batch for a later debounce, keeping the API
+ * thread responsive without losing session or history updates.
  *
  * The db is a rebuildable cache over plain-file sources of truth. Reconcile
  * (startup-delayed, then every few hours) compares watermarks against the
@@ -136,12 +139,32 @@ export class GlobalIndexManager {
       if (this.dirtySessions.size > 0) {
         const batch = [...this.dirtySessions.values()];
         this.dirtySessions.clear();
-        if (gates.sessions) await this.flushSessions(batch);
+        if (gates.sessions) {
+          try {
+            await this.flushSessions(batch);
+          } catch (error) {
+            if (!isTransientIndexError(error)) throw error;
+            for (const ev of batch) {
+              const key = `${ev.gezelId}/${ev.sessionId}`;
+              // A newer event received during the flush takes precedence.
+              if (!this.dirtySessions.has(key)) this.dirtySessions.set(key, ev);
+            }
+            this.flushQueued = true;
+          }
+        }
       }
       if (this.pendingHistory.length > 0) {
         const batch = this.pendingHistory;
         this.pendingHistory = [];
-        if (gates.history) await this.flushHistory(batch);
+        if (gates.history) {
+          try {
+            await this.flushHistory(batch);
+          } catch (error) {
+            if (!isTransientIndexError(error)) throw error;
+            this.pendingHistory = [...batch, ...this.pendingHistory];
+            this.flushQueued = true;
+          }
+        }
       }
     } finally {
       endPerfWork();
@@ -191,7 +214,9 @@ export class GlobalIndexManager {
   // ── sessions ───────────────────────────────────────────────────────────
 
   private async flushSessions(batch: SessionChangeEvent[]): Promise<void> {
-    const index = await openGlobalCollection(this.store.homePath, 'sessions');
+    const index = await openGlobalCollection(this.store.homePath, 'sessions', {
+      throwOnBusy: true,
+    });
     if (!index) return;
     try {
       for (const ev of batch) {
@@ -270,7 +295,7 @@ export class GlobalIndexManager {
   // ── history ────────────────────────────────────────────────────────────
 
   private async flushHistory(batch: HistoryEvent[]): Promise<void> {
-    const index = await openGlobalCollection(this.store.homePath, 'history');
+    const index = await openGlobalCollection(this.store.homePath, 'history', { throwOnBusy: true });
     if (!index) return;
     try {
       index.putHistoryEvents(batch);

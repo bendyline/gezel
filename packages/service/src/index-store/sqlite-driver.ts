@@ -1,6 +1,7 @@
 import { mkdir, rename } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
+import { isMainThread } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
 
 // Load native/builtin modules through the real Node `require`, not a bundler's
@@ -11,6 +12,12 @@ import { createLogger } from '@bendyline/gezel';
 // `getLoadablePath()` still resolves.
 const nodeRequire = createRequire(import.meta.url);
 const log = createLogger('sqlite');
+
+// A synchronous SQLite busy handler sleeps on its caller's thread. The daemon
+// must return to its API loop promptly; only background workers may wait for
+// a writer. Callers already treat contention as a temporarily unavailable
+// derived index. Two former 5-second waits exceeded the API connect deadline.
+const BUSY_TIMEOUT_MS = isMainThread ? 25 : 5_000;
 
 /**
  * Thin abstraction over a synchronous SQLite driver. The default
@@ -100,10 +107,8 @@ export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | 
   let db: NodeDb | undefined;
   try {
     db = new DatabaseSync(dbPath, { allowExtension: true });
-    // Arm the busy timeout BEFORE the first file-touching statement: the
-    // header probe below otherwise fails instantly with SQLITE_BUSY whenever
-    // the static worker holds a momentary write lock, and that spurious
-    // failure used to cascade into the home-dir fallback path.
+    // Apply the thread's bounded contention allowance before touching the
+    // file header. Busy remains a transient error, never a placement failure.
     setBusyTimeout(db);
     assertReadableHeader(db);
   } catch (error) {
@@ -151,9 +156,7 @@ export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | 
   // Pragmas: WAL for concurrent readers while the indexer writes; NORMAL sync
   // is the right durability/throughput tradeoff for a regenerable cache.
   try {
-    db.exec(
-      'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;',
-    );
+    db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;');
   } catch {
     /* memory dbs / locked dbs — non-fatal */
   }
@@ -189,7 +192,7 @@ function assertReadableHeader(db: NodeDb): void {
 
 function setBusyTimeout(db: NodeDb): void {
   try {
-    db.exec('PRAGMA busy_timeout=5000;');
+    db.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS};`);
   } catch {
     /* pragma refusal is not fatal — the open proceeds without the grace */
   }
@@ -221,7 +224,16 @@ export function isUnavailableIndexError(error: unknown): boolean {
  */
 export function isTransientIndexError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /SQLITE_BUSY|SQLITE_LOCKED/i.test(message);
+  // node:sqlite reports ERR_SQLITE_ERROR with numeric errcode 5/6 rather
+  // than naming SQLITE_BUSY/LOCKED in its message. Extended codes retain the
+  // primary code in their low byte (e.g. SQLITE_BUSY_SNAPSHOT = 517).
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  const primary = typeof code === 'number' ? code & 0xff : null;
+  return (
+    primary === 5 ||
+    primary === 6 ||
+    /SQLITE_BUSY|SQLITE_LOCKED|database(?: table| schema)? is locked/i.test(message)
+  );
 }
 
 async function quarantineCorruptDatabase(dbPath: string): Promise<void> {

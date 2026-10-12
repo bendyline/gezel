@@ -1127,11 +1127,11 @@ describe('SettingsView', () => {
           defaultReasoningEffort: 'low',
         },
         {
-          id: 'gpt-5.5',
-          name: 'gpt-5.5 — GPT-5.5',
+          id: 'gpt-6.1-sol',
+          name: 'gpt-6.1-sol — GPT-6.1 Sol',
           supportsReasoning: true,
-          reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-          defaultReasoningEffort: 'medium',
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+          defaultReasoningEffort: 'low',
         },
       ],
     } as never);
@@ -1170,11 +1170,11 @@ describe('SettingsView', () => {
     vi.mocked(api.listProviderModels).mockResolvedValue({
       models: [
         {
-          id: 'gpt-5.5',
-          name: 'gpt-5.5 — GPT-5.5',
+          id: 'gpt-6.1-sol',
+          name: 'gpt-6.1-sol — GPT-6.1 Sol',
           supportsReasoning: true,
-          reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-          defaultReasoningEffort: 'medium',
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+          defaultReasoningEffort: 'low',
         },
       ],
     } as never);
@@ -1183,7 +1183,7 @@ describe('SettingsView', () => {
     fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
 
     const effortTray = await screen.findByRole('radiogroup', { name: 'Reasoning effort' });
-    expect(within(effortTray).getByRole('radio', { name: 'Model default (Medium)' })).toBeChecked();
+    expect(within(effortTray).getByRole('radio', { name: 'Model default (Low)' })).toBeChecked();
     expect(within(effortTray).getByRole('radio', { name: 'Low' })).toBeInTheDocument();
     expect(within(effortTray).getByRole('radio', { name: 'Extra high' })).toBeInTheDocument();
   });

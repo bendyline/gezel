@@ -1,7 +1,7 @@
 /**
  * Reasoning values accepted by current Codex CLI builds. Individual models
  * expose a subset of these through their model metadata (for example,
- * GPT-5.6 Luna stops at `max`, while Sol and Terra also expose `ultra`).
+ * the Luna models stop at `max`, while Astra, Sol and Terra also expose `ultra`).
  */
 export const CODEX_REASONING_EFFORTS = [
   'minimal',

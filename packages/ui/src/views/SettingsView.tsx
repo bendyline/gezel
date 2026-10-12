@@ -1314,7 +1314,7 @@ function DaemonSettingsView() {
   const codexCliReasoningSupported = useReasoningSupport(
     'codex-cli',
     config?.defaultModel?.['codex-cli'],
-    'gpt-5.5',
+    'gpt-6.1-sol',
     codexCliControlsShown && codexCliProbe.kind === 'ok',
   );
 
@@ -1491,7 +1491,7 @@ function DaemonSettingsView() {
   // installed-model listing — the generic /api/models route reaches out to the
   // provider (and can auto-start Ollama), which is too much to spend on a nav
   // label. Cloud providers show the configured id, which is already the name
-  // people use for those models ("gpt-5.5").
+  // people use for those models ("gpt-6.1-sol").
   const configuredDefaultModel = config?.defaultModel?.[provider];
   const [defaultModelName, setDefaultModelName] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -2867,7 +2867,7 @@ function DaemonSettingsView() {
                             <EffortTray
                               provider="codex-cli"
                               model={config?.defaultModel?.['codex-cli']}
-                              defaultModel="gpt-5.5"
+                              defaultModel="gpt-6.1-sol"
                               value={config?.codexCli?.defaultReasoningEffort ?? ''}
                               onChange={(value) =>
                                 void saveCodexCli({
@@ -3630,7 +3630,7 @@ function DaemonSettingsView() {
                       <EffortTray
                         provider="codex-cli"
                         model={config?.defaultModel?.['codex-cli']}
-                        defaultModel="gpt-5.5"
+                        defaultModel="gpt-6.1-sol"
                         value={config?.codexCli?.defaultReasoningEffort ?? ''}
                         onChange={(value) =>
                           void saveCodexCli({

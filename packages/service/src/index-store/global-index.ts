@@ -43,6 +43,7 @@ export interface GlobalIndexStatus {
 export async function openGlobalCollection(
   home: string,
   collection: GlobalCollectionId,
+  opts: { throwOnBusy?: boolean } = {},
 ): Promise<IndexStore | null> {
   try {
     return await IndexStore.open(globalIndexDbFile(home), {
@@ -56,7 +57,7 @@ export async function openGlobalCollection(
   } catch (error) {
     // The global db has one fixed home — a transient lock just means "no
     // search this call", same graceful degrade as an unavailable driver.
-    if (isTransientIndexError(error)) return null;
+    if (isTransientIndexError(error) && !opts.throwOnBusy) return null;
     throw error;
   }
 }
